@@ -312,13 +312,16 @@ public static class PlayerOwnership {
   // Per unit: needs dlcw_isundercommander, takenOver, ai_feudstance, permanentlydetached captured by the builder into raw bits.
   public static UnitFlags Compute(in PlayerOwnershipInput input, int alliance, bool dlcwUnderCommander, bool takenOver, int aiFeudStance);
   public static void ApplyChainFlags(BattleSnapshot s, in PlayerOwnershipInput input); // AncestorOfPlayerCommand, PlayerCommandDetached, PlayerCommand
+  public static bool NeedsChainFanOut(BattleSnapshot s, int groupIndex);  // a group order would reach an exposed PlayerOwned descendant
+  public static bool IsExposedOwned(UnitFlags descendant, bool detachedNodeBetween);
+  public static bool DirectWriteProtected(UnitFlags flags, bool exposedOwnedDescendant, out SkipReason reason); // Regiment-overload decision
 }
 public static class TacticalWriteGuard { // thin reader; same file path
   public static bool ModeAllowsWrites();
   public static bool IsFeudInstance(AIBattle battle);
   public static bool CanWrite(in UnitRecord unit, out SkipReason reason);   // mode, PlayerOwned, Feud, NotAiControlled
-  public static bool CanWrite(Regiment unit);                               // fallback for deployment (#60) and inline paths: builds flags via PlayerOwnership.Compute
-  public static bool IsPlayerProtected(Regiment unit);                      // PlayerOwned only — ancestors are NOT protected
+  public static bool CanWrite(Regiment unit);                               // writers that cannot fan out (#61 until BC5a, deployment #60, inline paths): mode, PlayerOwned, Feud, exposed owned descendant
+  public static bool IsPlayerProtected(Regiment unit);                      // PlayerOwned, or a group with an exposed owned descendant; an ancestor of a DETACHED player command is not protected
 }
 public struct ChainResolution { public int Count; public int[] TargetIndices; public bool FannedOut; public bool PlayerShareNeedsDispatch; }
 public static class TacticalChainOrderPlanner {
@@ -335,11 +338,13 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
 }
 ```
 **Rules:**
-- `PlayerOwned` = `dlcw_isundercommander` OR (`WlActive && takenOver`) OR (`alliance == PlayerAlliance && !AiVsAi && !DebugAllArmiesAi`).
+- `PlayerOwned` = (`WlActive` && (`dlcw_isundercommander` OR `takenOver` OR (`PlayerIsCic` && own alliance))) OR (!`WlActive` && `alliance == PlayerAlliance && !AiVsAi && !DebugAllArmiesAi`). The cached dlcw flag is gated on the career because vanilla also sets it outside one, to "alliance == player alliance" (Regiment initialize 113065 → 91170-91176).
 - `Feud` = `aiFeudStance >= 0`.
 - Ancestors are never `PlayerOwned`.
-- When the W&L player is CIC, every own-side unit has `dlcw_isundercommander` (91187), so it is owned. No special case is needed.
-- **Chain rule:** if `AncestorOfPlayerCommand` and `PlayerCommandDetached`, the target is the group itself. If `AncestorOfPlayerCommand` and not detached, the order fans out to the group's direct children, excluding the child that is (or contains) the player command. That repeats down the chain until reaching the player's direct parent, whose other children are ordered.
+- When the W&L player is CIC, every own-side unit is owned (91187); `PlayerIsCic` covers the lag before the cached flag refreshes.
+- **Exposure:** a `PlayerOwned` descendant is *exposed* to a group order when neither it nor any node between it and the group is `permanentlydetached`. Vanilla `SetGroupFormation` builds every level with `GetAttachedUnitsReg(excludedechainedunits)` (91988-92030, 119865), so a detached node and its whole subtree are skipped, and there is no dlcw filter. This covers the player's attached command and attached take-overs (`TakeOverUnitBattle` detaches, 164455; the player can re-attach).
+- **Chain rule:** a group with no exposed owned descendant is its own target (for the player's ancestors this is the detached case). Otherwise it is not ordered as a group: its direct children are ordered, skipping `PlayerOwned` children, and every child that itself has an exposed owned descendant fans out again. `PlayerShareNeedsDispatch` is set only on ancestors of the player's command.
+- **Regiment overloads:** until BC5a routes #61 through the executor, both `IsPlayerProtected(Regiment)` and `CanWrite(Regiment)` refuse a group with an exposed owned descendant, because those writers cannot fan out.
 - **Dispatch mapping table (spec §C):**
 
   | Task | Vanilla order type |

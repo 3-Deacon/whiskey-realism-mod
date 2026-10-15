@@ -42,13 +42,16 @@ internal static class PlayerOwnershipTests
             ("battle-core ownership non-wl player side owned unless ai_vs_ai", OwnershipNonWlPlayerSideOwnedUnlessAiVsAi),
             ("battle-core ownership ancestors not protected", AncestorsNotProtected),
             ("battle-core ownership chain flags cleared when the player command changes", ChainFlagsResetWhenPlayerCommandChanges),
-            ("battle-core ownership direct writes refused on an undetached ancestor", DirectWriteRefusedOnUndetachedAncestor),
+            ("battle-core ownership group with an attached player-owned descendant needs fan-out", GroupWithAttachedOwnedDescendantNeedsFanOut),
+            ("battle-core ownership detached node shields its owned subtree", DetachedNodeShieldsOwnedSubtree),
+            ("battle-core ownership direct-write decision for regiment overloads", DirectWriteDecisionForRegimentOverloads),
             ("battle-core chain detached orders group", ChainDetachedOrdersGroup),
             ("battle-core chain not detached fans out skipping player child", ChainNotDetachedFansOutSkippingPlayerChild),
             ("battle-core chain player at root fans out nothing", ChainPlayerAtRootFansOutNothing),
             ("battle-core chain player two levels down fans out at each level", ChainPlayerTwoLevelsDownFansOutAtEachLevel),
             ("battle-core chain non-ancestor targets itself", ChainNonAncestorTargetsItself),
             ("battle-core chain fan-out skips player-owned children", ChainFanOutSkipsPlayerOwnedChildren),
+            ("battle-core chain take-over parent fans out around the attached take-over", ChainTakeoverParentFansOut),
             ("battle-core dispatch mapper table", DispatchMapperTable),
             ("battle-core dispatch mapper never emits 13 14 15", DispatchMapperNeverEmits13_14_15),
             ("battle-core dispatch dedupe same type within 110m", DispatchDedupeSameTypeWithin110m),
@@ -242,15 +245,47 @@ internal static class PlayerOwnershipTests
             AssertEqual(UnitFlags.None, t[i].Flags & Chain, "no command clears chain flags " + i);
     }
 
-    private static void DirectWriteRefusedOnUndetachedAncestor()
+    private static void GroupWithAttachedOwnedDescendantNeedsFanOut()
     {
-        var undetached = BrigadePlayerChained(detached: false);
-        AssertTrue(PlayerOwnership.NeedsChainFanOut(undetached[3].Flags), "undetached parent needs fan-out");
-        AssertTrue(PlayerOwnership.NeedsChainFanOut(undetached[0].Flags), "undetached root ancestor needs fan-out");
-        AssertFalse(PlayerOwnership.NeedsChainFanOut(undetached[6].Flags), "peer brigade orderable as a group");
+        var t = BrigadePlayerChained(detached: false);
+        foreach (int g in new[] { 0, 1, 3 })
+            AssertTrue(PlayerOwnership.NeedsChainFanOut(t, t.Length, g), "attached player below " + g);
+        foreach (int g in new[] { 2, 4, 6, 9 })
+            AssertFalse(PlayerOwnership.NeedsChainFanOut(t, t.Length, g), "no owned descendant below " + g);
+        AssertFalse(PlayerOwnership.NeedsChainFanOut(t, t.Length, 7), "a leaf has no descendants");
+        AssertFalse(PlayerOwnership.NeedsChainFanOut(t, t.Length, -1), "invalid index");
+    }
 
-        var detached = BrigadePlayerChained(detached: true);
-        AssertFalse(PlayerOwnership.NeedsChainFanOut(detached[3].Flags), "detached: vanilla skips the player's subtree");
+    private static void DetachedNodeShieldsOwnedSubtree()
+    {
+        // Vanilla group orders build each level's hierarchy tree with
+        // excludedechainedunits (SetGroupFormation 91988-92030 -> 119865), so a
+        // detached node and everything below it are skipped.
+        var detachedPlayer = BrigadePlayerChained(detached: true);
+        foreach (int g in new[] { 0, 1, 3 })
+            AssertFalse(PlayerOwnership.NeedsChainFanOut(detachedPlayer, detachedPlayer.Length, g), "detached player shields " + g);
+
+        // Player brigade attached, but its AI division detached: the division
+        // itself must fan out, the corps and army above it need not.
+        var detachedDivision = Records(Anc, Anc, 0, Anc | PD, 0, PO | Cmd, 0, PO, PO, 0);
+        AssertTrue(PlayerOwnership.NeedsChainFanOut(detachedDivision, detachedDivision.Length, 3), "division orders reach the player");
+        AssertFalse(PlayerOwnership.NeedsChainFanOut(detachedDivision, detachedDivision.Length, 1), "corps order skips the detached division");
+        AssertFalse(PlayerOwnership.NeedsChainFanOut(detachedDivision, detachedDivision.Length, 0), "army order skips the detached division");
+    }
+
+    private static void DirectWriteDecisionForRegimentOverloads()
+    {
+        AssertTrue(PlayerOwnership.IsExposedOwned(PO, detachedNodeBetween: false), "attached owned descendant exposed");
+        AssertFalse(PlayerOwnership.IsExposedOwned(PO | PD, false), "detached owned descendant shielded");
+        AssertFalse(PlayerOwnership.IsExposedOwned(PO, detachedNodeBetween: true), "detached node between shields");
+        AssertFalse(PlayerOwnership.IsExposedOwned(UnitFlags.None, false), "AI descendant never exposes");
+
+        AssertTrue(PlayerOwnership.DirectWriteProtected(PO, false, out SkipReason owned), "owned unit protected");
+        AssertEqual(SkipReason.PlayerOwned, owned, "owned reason");
+        AssertTrue(PlayerOwnership.DirectWriteProtected(Anc, exposedOwnedDescendant: true, out SkipReason exposed), "attached ancestor protected");
+        AssertEqual(SkipReason.PlayerOwned, exposed, "exposed reason");
+        AssertFalse(PlayerOwnership.DirectWriteProtected(Anc | CD, exposedOwnedDescendant: false, out SkipReason none), "detached ancestor writable");
+        AssertEqual(SkipReason.None, none, "writable reason");
     }
 
     // ---- chain resolution (chain-of-command spec §B) ---------------------
@@ -312,6 +347,23 @@ internal static class PlayerOwnershipTests
         var result = Resolve(t, 3);
         AssertEqual(0, result.Count, "taken-over peer is not ordered");
         AssertTrue(result.FannedOut, "still a fan-out");
+    }
+
+    private static void ChainTakeoverParentFansOut()
+    {
+        // Player commands corps B (2, detached). Brigade A1b (6) and its regiment
+        // were taken over (45827); the player has re-attached it.
+        var attached = Records(Anc | CD, 0, PO | Cmd | CD | PD, 0, 0, 0, PO, 0, 0, PO);
+        var corps = Resolve(attached, 1);
+        AssertTargets(corps, new[] { 4, 5 }, "corps A: division A2, then brigade A1a");
+        AssertTrue(corps.FannedOut, "fanned out around the take-over");
+        AssertFalse(corps.PlayerShareNeedsDispatch, "not the player's chain: no dispatch");
+
+        // TakeOverUnitBattle detaches the unit (164455): the group order is safe.
+        attached[6].Flags |= PD;
+        var detached = Resolve(attached, 1);
+        AssertTargets(detached, new[] { 1 }, "detached take-over");
+        AssertFalse(detached.FannedOut, "group order");
     }
 
     // ---- dispatch (chain-of-command spec §C) -----------------------------

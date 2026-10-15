@@ -19,19 +19,23 @@ namespace WhiskeyRealism.Tactical
     //     CIC/army-group cases. That is the W&L ownership set; ancestors are not in it.
     //   AIBattle.PerformAIActionDLCWL (5101): vanilla's own micro-AI gate refuses
     //     dlcw_isundercommander units and nothing else.
-    //   Deployment 85321-85336 detaches the player's command; ChangeStance(…, 0)
-    //     (90786-90793) clears that; group orders skip detached children (119865).
+    //   Deployment 85321-85336 detaches the player's command, TakeOverUnitBattle
+    //     164455 a taken-over unit; ChangeStance(…, 0) (90786-90793) clears it.
+    //     SetGroupFormation (91988-92030) skips a detached subtree (119865) and has
+    //     no dlcw filter.
     //
     // Contract:
     //   - Tactical Commander Mode must be Active (MonitorOnly/Off write nothing).
     //   - PlayerOwned units (W&L player's command + descendants, take-overs, CIC;
     //     outside W&L the player alliance unless ai_vs_ai/debug_allarmiesai) and
     //     feuding units (ai_feudstance >= 0) are never written.
-    //   - Ancestors of the player's command are AI and are not protected. The
+    //   - Ancestors of the player's command are AI and are not PlayerOwned. The
     //     battle-core executor resolves orders on them through
-    //     TacticalChainOrderPlanner. Direct writers without chain resolution
-    //     (CanWrite(Regiment)) are refused on an ancestor whose player command is
-    //     not detached, since a group write there would reach the player's units.
+    //     TacticalChainOrderPlanner. The Regiment overloads serve writers that
+    //     cannot fan out (#61 until BC5a, deployment #60, inline paths): both
+    //     refuse a group with an exposed player-owned descendant — the player's
+    //     attached command or an attached take-over — because a group write there
+    //     would reach player-owned units.
     //   - Fail closed: any exception means "do not write".
     public static class TacticalWriteGuard
     {
@@ -74,7 +78,7 @@ namespace WhiskeyRealism.Tactical
                 PlayerOwnershipInput input = ReadOwnershipInput();
                 UnitFlags flags = OwnershipFlags(unit, input);
                 return PlayerOwnership.CanWrite(flags, modeAllowsWrites: true, out _) &&
-                    !PlayerOwnership.NeedsChainFanOut(flags | ChainFlags(unit));
+                    !PlayerOwnership.DirectWriteProtected(flags, HasExposedOwnedDescendant(unit, input), out _);
             }
             catch
             {
@@ -87,7 +91,9 @@ namespace WhiskeyRealism.Tactical
             return IsPlayerProtected(unit, out _);
         }
 
-        // PlayerOwned only; ancestors of the player's command are NOT protected.
+        // PlayerOwned units, and groups whose order would reach an exposed
+        // player-owned descendant. An ancestor of a detached player command is not
+        // protected.
         public static bool IsPlayerProtected(Regiment unit, out string reason)
         {
             reason = null;
@@ -95,8 +101,11 @@ namespace WhiskeyRealism.Tactical
             {
                 if ((Object)unit == null) { reason = "null"; return true; }
                 PlayerOwnershipInput input = ReadOwnershipInput();
-                if ((OwnershipFlags(unit, input) & UnitFlags.PlayerOwned) == 0) return false;
-                if (!input.WlActive) reason = "player-side";
+                UnitFlags flags = OwnershipFlags(unit, input);
+                bool exposed = (flags & UnitFlags.PlayerOwned) == 0 && HasExposedOwnedDescendant(unit, input);
+                if (!PlayerOwnership.DirectWriteProtected(flags, exposed, out _)) return false;
+                if (exposed) reason = "owned-descendant-attached";
+                else if (!input.WlActive) reason = "player-side";
                 else if (unit.dlcw_isundercommander) reason = "wl-under-commander";
                 else if (input.PlayerIsCic) reason = "wl-cic";
                 else reason = "dlc-taken-over";
@@ -133,25 +142,41 @@ namespace WhiskeyRealism.Tactical
             return PlayerOwnership.Compute(input, unit.alliance, unit.dlcw_isundercommander, takenOver, unit.ai_feudstance);
         }
 
-        // Chain bits for one group without a snapshot. Ancestry comes from the
-        // group's allattachedunits (all descendants, the D5 command-tree source),
-        // never transform.parent.
-        private static UnitFlags ChainFlags(Regiment unit)
+        // Whether a group order on `group` would reach a player-owned descendant
+        // (PlayerOwnership.IsExposedOwned). Descendants come from allattachedunits
+        // (all descendants, the D5 command-tree source), never transform.parent; a
+        // detached node shields a descendant when that descendant is in the node's
+        // own allattachedunits. Outside a career ownership is alliance-wide, so a
+        // descendant is never owned unless the group is.
+        private static bool HasExposedOwnedDescendant(Regiment group, in PlayerOwnershipInput input)
         {
-            if (!DLC_WL.dlc_scenarioactive) return UnitFlags.None;
-            Regiment current = PlayerCurrentCommand();
-            if ((Object)current == null || (Object)current == (Object)unit) return UnitFlags.None;
-
-            Regiment[] attached = unit.allattachedunits;
-            if (attached == null) return UnitFlags.None;
+            if (!input.WlActive) return false;
+            Regiment[] attached = group.allattachedunits;
+            if (attached == null) return false;
             for (int i = 0; i < attached.Length; i++)
             {
-                if ((Object)attached[i] != (Object)current) continue;
-                return current.permanentlydetached
-                    ? UnitFlags.AncestorOfPlayerCommand | UnitFlags.PlayerCommandDetached
-                    : UnitFlags.AncestorOfPlayerCommand;
+                Regiment d = attached[i];
+                if ((Object)d == null || (Object)d == (Object)group) continue;
+                UnitFlags flags = OwnershipFlags(d, input) & UnitFlags.PlayerOwned;
+                if (flags == UnitFlags.None) continue;
+                if (d.permanentlydetached) flags |= UnitFlags.PermanentlyDetached;
+                if (PlayerOwnership.IsExposedOwned(flags, DetachedNodeBetween(attached, d))) return true;
             }
-            return UnitFlags.None;
+            return false;
+        }
+
+        private static bool DetachedNodeBetween(Regiment[] groupDescendants, Regiment descendant)
+        {
+            for (int i = 0; i < groupDescendants.Length; i++)
+            {
+                Regiment node = groupDescendants[i];
+                if ((Object)node == null || (Object)node == (Object)descendant || !node.permanentlydetached) continue;
+                Regiment[] below = node.allattachedunits;
+                if (below == null) continue;
+                for (int j = 0; j < below.Length; j++)
+                    if ((Object)below[j] == (Object)descendant) return true;
+            }
+            return false;
         }
 
         private static Regiment PlayerCurrentCommand()
