@@ -26,6 +26,12 @@ namespace WhiskeyRealism.Patches
                     StrategicCoordinator.Instance?.ResetAll("new-campaign-scene");
                 }
 
+                if (!ReviewCadenceCatchUp.CampaignIsLive(SceneManagement.currentoperation))
+                {
+                    OnceLog.Info("strategic-cadence:not-live", "[MonthlyTickHookPatch] waiting for SceneManagement.currentoperation == 2 (campaign live)");
+                    return;
+                }
+
                 int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();

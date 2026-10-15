@@ -82,6 +82,8 @@ internal static class CampaignLifecycleFixTests
         Check("c1 cadence skipped weekly gate across month rollover", CadenceSkippedWeeklyGateAcrossMonth);
         Check("c1 cadence consecutive days skip nothing", CadenceConsecutiveDaysSkipNothing);
         Check("c1 cadence skipped alternating day forces both alliances", CadenceSkippedAlternatingDayForcesBothAlliances);
+        Check("c1 cadence review only runs once vanilla marks the campaign live", CadenceReviewOnlyWhenCampaignLive);
+        Check("c1 per stale sidecar plan off the current catalog is replanned", PerStaleSidecarPlanIsReplanned);
     }
 
     private static void Check(string name, Action test)
@@ -861,6 +863,26 @@ internal static class CampaignLifecycleFixTests
     private static void CadenceSkippedAlternatingDayForcesBothAlliances()
     {
         TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedAlternatingGate(Serial(6, 6, 1862), Serial(8, 6, 1862)), "a whole day skipped");
+    }
+
+    private static void CadenceReviewOnlyWhenCampaignLive()
+    {
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.CampaignIsLive(2), "currentoperation 2 = campaign running");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.CampaignIsLive(5), "returning from battle, save not applied yet");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.CampaignIsLive(6), "loading a save");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.CampaignIsLive(0), "new campaign before frame 30");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.CampaignIsLive(4), "launching a battle");
+    }
+
+    private static void PerStaleSidecarPlanIsReplanned()
+    {
+        var stale = new OperationalPlanDto { OperationId = "csa-capital-defense", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        stale.Phases.Add(new PhaseDto { PhaseId = "screen-and-delay", TargetObjectiveId = 4, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
+        TestHarness.AssertTrue(SidecarDtoCodec.PlanFromDto(stale, 1).IsDirty, "plan targeting objective 4 under the old catalog must replan");
+
+        var current = new OperationalPlanDto { OperationId = "csa-capital-defense", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        current.Phases.Add(new PhaseDto { PhaseId = "screen-and-delay", TargetObjectiveId = 32, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
+        TestHarness.AssertFalse(SidecarDtoCodec.PlanFromDto(current, 1).IsDirty, "plan matching the catalog is kept");
     }
 
     // ------------------------------------------------------------------

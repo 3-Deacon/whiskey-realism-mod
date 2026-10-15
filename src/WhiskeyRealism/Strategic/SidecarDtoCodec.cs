@@ -350,7 +350,29 @@ namespace WhiskeyRealism.Strategic
             }
             // A plan whose phase index no longer fits its phases is unusable: replan.
             if (p.CurrentPhase == null) p.IsDirty = true;
+            // A historical plan saved under an older catalog (e.g. CSA defense ops aimed at
+            // objective 4 before R5) is replanned instead of steering an outdated target.
+            if (!string.IsNullOrEmpty(p.OperationId) && !MatchesCatalog(p)) p.IsDirty = true;
             return p;
+        }
+
+        private static bool MatchesCatalog(OperationalPlan plan)
+        {
+            if (!HistoricalOperationCatalog.TryGetById(plan.OperationId, out var profile) || profile.Phases == null)
+                return false;
+            foreach (var phase in plan.Phases)
+            {
+                bool found = false;
+                foreach (var template in profile.Phases)
+                {
+                    if (template == null || !string.Equals(template.PhaseId, phase.PhaseId, StringComparison.Ordinal)) continue;
+                    if (template.TargetObjectiveId != phase.TargetObjectiveId) return false;
+                    found = true;
+                    break;
+                }
+                if (!found) return false;
+            }
+            return true;
         }
 
         internal static BattleHistoryDto BattleToDto(BattleHistoryRecord record)

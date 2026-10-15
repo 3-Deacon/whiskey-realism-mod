@@ -53,6 +53,13 @@ namespace WhiskeyRealism.Strategic
             return false;
         }
 
+        // Vanilla's "campaign is running" state: CampaignController sets
+        // SceneManagement.currentoperation = 2 at frame 30 (decompile 30081-30085), after the
+        // save is loaded (frame 25, AICampaign.Load) and initial ownerships exist (frame 30);
+        // PrepareLaunchingBattleFromCampaign also requires 2. Reviewing earlier would plan on
+        // empty/stale state before the sidecar is applied.
+        public static bool CampaignIsLive(int currentOperation) => currentOperation == 2;
+
         public static bool SkippedAlternatingGate(int lastReviewSerial, int currentSerial)
         {
             return lastReviewSerial >= 0 && currentSerial - lastReviewSerial >= 2;
