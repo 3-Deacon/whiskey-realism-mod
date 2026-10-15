@@ -53,6 +53,45 @@ namespace WhiskeyRealism.Tactical.Battle
     }
 
     /// <summary>
+    /// Vanilla's unbearable-losses rule inputs that are the same for every unit of a battle
+    /// (GetUnbearableLossesTrigger 113359-113404; unitprefs 53594-53604, 53927-53929;
+    /// GameVars.aicheat_shiftedbonusmoralelosstrigger, ai_vs_ai, usedcampaignbonusrunning;
+    /// campaignprefs aibonus_restoringmorale 56359).
+    /// </summary>
+    public struct BreakToleranceRules
+    {
+        public float Trigger0, Trigger100;                                    // unbearablelossesmoraletrigger0 / 100
+        public float InfluenceExperience, InfluenceTraining, InfluenceLeadership; // influence…unbearablelossestrigger
+        public float SkirmisherFactor;                                        // unbearablelossestriggerskirmishers
+        public float AiBonusRestoringMorale, AiShiftedBonus, UsedCampaignBonusRunning;
+        public bool AiVsAi;
+        public float PerDayExperience0, PerDayExperience100;                  // unbearablelosstriggerincreaseperdayfactorexp0 / 100
+    }
+
+    /// <summary>One regiment's inputs to its unbearable-losses trigger.</summary>
+    public struct BreakToleranceInput
+    {
+        public float MilitaryExperience; // GameVars.alliance[alliance].militaryexperience
+        public float Experience;         // Experience()
+        public float Training;           // raw training (vanilla calls GetTraining(), which mutates; equal for AI units)
+        public float Leadership;         // GameVars.commander[commander].GetCommanderLeadership()
+        public int UnitTyp;
+        public bool PlayerAlliance;      // alliance == GameVars.playeralliance: no AI bonus
+        public int BattlePassedDays;
+    }
+
+    /// <summary>
+    /// Vanilla's micro-charge odds weights and trigger (UpdateChargeTarget 122229-122259;
+    /// battleprefs microaitriggerforcharge 54776, weightingfactorsformicroaicharge 54777-54781).
+    /// A Trigger of 0 or less means no pre-filter.
+    /// </summary>
+    public struct ChargeOddsRules
+    {
+        public float Trigger;
+        public float WeightStrength, WeightExperience, WeightMorale, WeightFatigue;
+    }
+
+    /// <summary>
     /// Vanilla prefs the quality rules read, captured once per battle by TroopQualityRuntime.
     /// With <see cref="Enabled"/> off (Enable Experience And Drill AI Weighting = false) every
     /// accessor is neutral, which is the BC7 headcount behaviour.
@@ -62,6 +101,14 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool Enabled;
         public float ExpInfluenceOnAiDecisions;   // GamePrefs.expinfluenceonaidecisions (54714; battleprefs 0.25)
         public float InitiativeTriggerInfluence;  // influenceofcommanderinitiativeonattackdefendtrigger (54680; 0.7)
+        public BreakToleranceRules Break;
+        public ChargeOddsRules ChargeOdds;
+
+        /// <summary>The snapshot carries each regiment's break point only when on.</summary>
+        public bool BreakToleranceOn => Enabled;
+
+        /// <summary>The charge pre-filter's rules; default (no pre-filter) when off.</summary>
+        public ChargeOddsRules ChargeOddsRulesIfEnabled => Enabled ? ChargeOdds : default;
 
         public float ExpInfluence => Enabled ? Clamp01(ExpInfluenceOnAiDecisions) : 0f;
         public float InitiativeInfluence => Enabled ? NonNegative(InitiativeTriggerInfluence) : 0f;
@@ -159,6 +206,69 @@ namespace WhiskeyRealism.Tactical.Battle
             else return;
             ownBlend = AiDecisionBlend(s.Own[ownIndex].Experience, expInfluence);
             enemyBlend = AiDecisionBlend(enemyExperience, expInfluence);
+        }
+
+        /// <summary>
+        /// A regiment's loss fraction as vanilla's rout-on-losses test reads it
+        /// (LossesAreUnbearable 139831): (Σ losses − losses[3]) / max(1, that + strength);
+        /// losses[3] (the missing) does not count. No allocation.
+        /// </summary>
+        public static float LossFraction(int[] losses, int strength)
+        {
+            if (losses == null) return 0f;
+            float sum = 0f;
+            for (int i = 0; i < losses.Length; i++)
+                if (i != 3) sum += losses[i];
+            if (!(sum > 0f)) return 0f;
+            return sum / Math.Max(1f, sum + Math.Max(0, strength));
+        }
+
+        /// <summary>
+        /// Vanilla's unbearable-losses trigger, the loss fraction at which the regiment routs
+        /// (GetUnbearableLossesTrigger 113363-113400): a base retained fraction interpolated on
+        /// the alliance's military experience, reduced by experience, drill and leadership,
+        /// then (1 − that) × the skirmisher and AI bonus factors × the per-day factor, capped
+        /// at 1. Tools.Interpolate over {0, 1} is an unclamped lerp.
+        /// </summary>
+        public static float BreakLossFraction(in BreakToleranceRules rules, in BreakToleranceInput unit)
+        {
+            float num = Lerp(rules.Trigger0, rules.Trigger100, unit.MilitaryExperience);
+            num *= 1f - unit.Experience * (1f - rules.InfluenceExperience);
+            num *= 1f - unit.Training * (1f - rules.InfluenceTraining);
+            num *= 1f - unit.Leadership * (1f - rules.InfluenceLeadership);
+            float factor = unit.UnitTyp == 3 || unit.UnitTyp == 4 ? rules.SkirmisherFactor : 1f;
+            if (!unit.PlayerAlliance)
+                factor *= 1f + ((rules.AiVsAi ? rules.AiShiftedBonus : 0f) + rules.UsedCampaignBonusRunning) * rules.AiBonusRestoringMorale;
+            float perDay = (Lerp(rules.PerDayExperience0, rules.PerDayExperience100, unit.Experience) - 1f) * unit.BattlePassedDays + 1f;
+            float trigger = Math.Min(1f, (1f - num) * factor * perDay);
+            return float.IsNaN(trigger) || float.IsInfinity(trigger) ? 0f : trigger;
+        }
+
+        /// <summary>
+        /// One side of vanilla's micro-charge odds (122229-122230): strength × (1 + w0) ×
+        /// (1 + experience × w1) × (1 + morale × w2) × (1 + (1 − fatigue) × w3).
+        /// </summary>
+        public static float VanillaChargeStrength(float strength, float experience, float morale, float fatigue, in ChargeOddsRules w)
+        {
+            return strength * (1f + w.WeightStrength) * (1f + experience * w.WeightExperience)
+                * (1f + morale * w.WeightMorale) * (1f + (1f - fatigue) * w.WeightFatigue);
+        }
+
+        /// <summary>
+        /// Vanilla's charge odds own / max(1, enemy) (122231; infantry, so no meleemounted
+        /// factor, 122232-122235). Vanilla charges when this exceeds microaitriggerforcharge.
+        /// </summary>
+        public static float VanillaChargeOdds(float ownStrength, float ownExperience, float ownMorale, float ownFatigue,
+            float targetStrength, float targetExperience, float targetMorale, float targetFatigue, in ChargeOddsRules w)
+        {
+            float own = VanillaChargeStrength(ownStrength, ownExperience, ownMorale, ownFatigue, w);
+            float target = VanillaChargeStrength(targetStrength, targetExperience, targetMorale, targetFatigue, w);
+            return own / Math.Max(1f, target);
+        }
+
+        private static float Lerp(float at0, float at1, float t)
+        {
+            return at0 + (at1 - at0) * t;
         }
 
         /// <summary>

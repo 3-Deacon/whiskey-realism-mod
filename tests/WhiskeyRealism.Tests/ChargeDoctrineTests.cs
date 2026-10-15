@@ -62,6 +62,7 @@ internal static class ChargeDoctrineTests
             ("charge producer lane ignores routed and inactive friendlies", ProducerLaneIgnoresRoutedAndInactive),
             ("charge producer applies vanilla's unit filter (detached, routed, marked for rout, feud)", ProducerVanillaUnitFilter),
             ("charge producer honours vanilla's no-charge-if-outflanked pref", ProducerHonoursNoChargeIfOutflanked),
+            ("charge producer arms only when vanilla's experience-weighted odds pass", ProducerArmsOnlyWhenVanillaOddsPass),
             ("charge producer excludes regiments of a feuding brigade", ProducerExcludesFeudingBrigadeRegiments),
             ("charge producer reads target state only from a visible target's record", ProducerTargetStateFromVisibleRecord),
             ("charge producer never touches player-owned regiments", ProducerNeverTouchesPlayerOwned),
@@ -1047,6 +1048,41 @@ internal static class ChargeDoctrineTests
         h = new Harness();
         h.Plan(cancel, On());
         AssertEqual(0, h.Sink.Count, "nor cancelled: the feud instance owns them");
+    }
+
+    // BC8: the producer computes vanilla's own odds (122229-122231) from its regiment and the
+    // visible target (strength / morale / fatigue from the record, experience as the stars of
+    // the observation) and arms only above microaitriggerforcharge (122259).
+    private static void ProducerArmsOnlyWhenVanillaOddsPass()
+    {
+        var odds = new ChargeOddsRules { Trigger = 3f, WeightStrength = 1f, WeightExperience = 0.7f, WeightMorale = 1.5f, WeightFatigue = 0.6f };
+        var settings = new ChargeIntentProducer.Settings(true, Radius, 0f, chargeOdds: odds);
+
+        BattleSnapshot strongTarget = Line(1.0);
+        foreach (int id in new[] { RegA, RegB, RegC })
+        {
+            Own(strongTarget, id).Strength = 400;
+            Own(strongTarget, id).Experience = 0.8f;
+        }
+        var h = new Harness();
+        h.Plan(strongTarget, settings);
+        AssertEqual(0, h.Sink.Count, "500 men at the target: odds ~1.6, vanilla would refuse, nothing armed");
+
+        BattleSnapshot weakTarget = Line(1.0);
+        foreach (int id in new[] { RegA, RegB, RegC })
+        {
+            Own(weakTarget, id).Strength = 400;
+            Own(weakTarget, id).Experience = 0.8f;
+        }
+        weakTarget.Observations[0].Strength = 150f;
+        weakTarget.Observations[0].Experience = 0.1f;
+        h = new Harness();
+        h.Plan(weakTarget, settings);
+        AssertEqual(2, h.Sink.Count, "150 green men at the target: odds ~5.3, the two leaders arm");
+
+        h = new Harness();
+        h.Plan(strongTarget, new ChargeIntentProducer.Settings(true, Radius, 0f));
+        AssertEqual(2, h.Sink.Count, "no odds rules (weighting off): no pre-filter");
     }
 
     private static BattleSnapshot LineWith(int id, float x, float z)

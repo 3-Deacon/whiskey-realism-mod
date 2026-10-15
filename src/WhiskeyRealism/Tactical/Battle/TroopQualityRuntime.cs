@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle
@@ -12,11 +13,24 @@ namespace WhiskeyRealism.Tactical.Battle
     //   expinfluenceonaidecisions (54714, shipped 0.25): the experience blend of
     //     GetGroupStrength (6057), 1 - ei + groupexperience × ei;
     //   influenceofcommanderinitiativeonattackdefendtrigger (54680, shipped 0.7): the
-    //     macro triggers are divided by 1 + initiative × this (6396-6430).
+    //     macro triggers are divided by 1 + initiative × this (6396-6430);
+    //   unbearable-losses rule (GetUnbearableLossesTrigger 113363-113400): unitprefs
+    //     triggers / influences / skirmisher / per-day factors (53594-53604, 53927-53929),
+    //     campaignprefs aibonus_restoringmorale (56359), GameVars ai_vs_ai,
+    //     aicheat_shiftedbonusmoralelosstrigger, usedcampaignbonusrunning;
+    //   micro-charge odds: microaitriggerforcharge and weightingfactorsformicroaicharge[0..3]
+    //     (54776-54781).
+    // Commander leadership for the break rule (GetCommanderLeadership 61134: parent commander
+    // influence walks the command transform) is cached per commander for
+    // LeadershipRefreshHours of doctrine time.
     internal static class TroopQualityRuntime
     {
+        internal const double LeadershipRefreshHours = 0.25;
+
         private static bool _read;
         private static TroopQualityPrefs _prefs;
+        private static readonly Dictionary<int, float> _leadership = new Dictionary<int, float>(256);
+        private static readonly Dictionary<int, double> _leadershipAt = new Dictionary<int, double>(256);
 
         static TroopQualityRuntime()
         {
@@ -41,6 +55,33 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 prefs.ExpInfluenceOnAiDecisions = GamePrefs.expinfluenceonaidecisions;
                 prefs.InitiativeTriggerInfluence = GamePrefs.influenceofcommanderinitiativeonattackdefendtrigger;
+                prefs.Break = new BreakToleranceRules
+                {
+                    Trigger0 = GamePrefs.unbearablelossesmoraletrigger0,
+                    Trigger100 = GamePrefs.unbearablelossesmoraletrigger100,
+                    InfluenceExperience = GamePrefs.influenceexpunbearablelossestrigger,
+                    InfluenceTraining = GamePrefs.influencetrainingunbearablelossestrigger,
+                    InfluenceLeadership = GamePrefs.influenceleadershipunbearablelossestrigger,
+                    SkirmisherFactor = GamePrefs.unbearablelossestriggerskirmishers,
+                    AiBonusRestoringMorale = GamePrefs.aibonus_restoringmorale,
+                    AiShiftedBonus = GameVars.aicheat_shiftedbonusmoralelosstrigger,
+                    AiVsAi = GameVars.ai_vs_ai,
+                    UsedCampaignBonusRunning = GameVars.usedcampaignbonusrunning,
+                    PerDayExperience0 = GamePrefs.unbearablelosstriggerincreaseperdayfactorexp0,
+                    PerDayExperience100 = GamePrefs.unbearablelosstriggerincreaseperdayfactorexp100,
+                };
+                float[] weights = GamePrefs.weightingfactorsformicroaicharge;
+                if (weights != null && weights.Length >= 4)
+                {
+                    prefs.ChargeOdds = new ChargeOddsRules
+                    {
+                        Trigger = GamePrefs.microaitriggerforcharge,
+                        WeightStrength = weights[0],
+                        WeightExperience = weights[1],
+                        WeightMorale = weights[2],
+                        WeightFatigue = weights[3],
+                    };
+                }
             }
             catch (Exception ex)
             {
@@ -49,6 +90,33 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[TroopQuality] GamePrefs unreadable; AI decisions use headcount only: " + ex.GetType().Name + " " + ex.Message);
             }
             _prefs = prefs;
+        }
+
+        /// <summary>
+        /// The commander's vanilla leadership (GetCommanderLeadership 61134, with its parent
+        /// commander influence), cached per commander for LeadershipRefreshHours of doctrine
+        /// time. 0 for an unknown commander. Never throws.
+        /// </summary>
+        internal static float Leadership(int commander, double nowHours)
+        {
+            if (_leadershipAt.TryGetValue(commander, out double at) && nowHours - at < LeadershipRefreshHours && nowHours >= at)
+                return _leadership[commander];
+            float value = 0f;
+            try
+            {
+                var commanders = GameVars.commander;
+                if (commanders != null && commander >= 0 && commander < commanders.Count && commanders[commander] != null)
+                    value = commanders[commander].GetCommanderLeadership();
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:troop-quality-leadership",
+                    "[TroopQuality] commander leadership unreadable; read as 0: " + ex.GetType().Name + " " + ex.Message);
+            }
+            if (float.IsNaN(value) || float.IsInfinity(value)) value = 0f;
+            _leadership[commander] = value;
+            _leadershipAt[commander] = nowHours;
+            return value;
         }
 
         private static bool FlagOn()
@@ -69,6 +137,8 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             _read = false;
             _prefs = default;
+            _leadership.Clear();
+            _leadershipAt.Clear();
         }
     }
 }

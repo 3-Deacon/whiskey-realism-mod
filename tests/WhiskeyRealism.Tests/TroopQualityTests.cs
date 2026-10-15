@@ -33,6 +33,14 @@ internal static class TroopQualityTests
             ("troop-quality SectorBlendsUseClosestVisibleEnemy", SectorBlendsUseClosestVisibleEnemy),
             ("troop-quality SideBlendsNeutralWhenUnknown", SideBlendsNeutralWhenUnknown),
             ("troop-quality OddsUseExperienceBlends", OddsUseExperienceBlends),
+            ("troop-quality LossFractionMatchesVanilla", LossFractionMatchesVanilla),
+            ("troop-quality BreakLossFractionMatchesVanilla", BreakLossFractionMatchesVanilla),
+            ("troop-quality NearBreakUnderFireWithdraws", NearBreakUnderFireWithdraws),
+            ("troop-quality VeteranHoldsAtSameLosses", VeteranHoldsAtSameLosses),
+            ("troop-quality ChargeOddsMatchVanilla", ChargeOddsMatchVanilla),
+            ("troop-quality ChargeRefusedBelowVanillaOdds", ChargeRefusedBelowVanillaOdds),
+            ("troop-quality ArmedChargeNotRevertedByOdds", ArmedChargeNotRevertedByOdds),
+            ("troop-quality FlagOffDisablesBreakAndChargeOdds", FlagOffDisablesBreakAndChargeOdds),
         });
     }
 
@@ -447,5 +455,171 @@ internal static class TroopQualityTests
         AssertNear(6000f / 5000f, plain.CurrentGlobalOdds, 1e-4f, "neutral blends keep the headcount odds");
         AssertNear(6000f * 0.8f / (5000f * 0.9f), weighted.CurrentGlobalOdds, 1e-4f, "current odds weighted");
         AssertNear(7000f * 0.8f / (5000f * 0.9f), weighted.ProjectedGlobalOdds, 1e-4f, "projected odds weighted");
+    }
+
+    // ---------------------------------------------------------------- E: withdrawal and charge
+
+    // LossesAreUnbearable 139831: (Σ losses - losses[3]) / max(1, that + strength).
+    private static void LossFractionMatchesVanilla()
+    {
+        AssertNear(200f / 600f, TroopQuality.LossFraction(new[] { 100, 60, 40, 999 }, 400), 1e-6f, "missing (losses[3]) excluded");
+        AssertNear(0f, TroopQuality.LossFraction(new[] { 0, 0, 0, 0 }, 400), 1e-6f, "no losses");
+        AssertNear(0f, TroopQuality.LossFraction(null, 400), 1e-6f, "no array");
+        AssertNear(30f / 30f, TroopQuality.LossFraction(new[] { 30 }, 0), 1e-6f, "short array, destroyed unit");
+    }
+
+    // Shipped unitprefs: trigger0 0.8, trigger100 0.55, influences 0.91 / 0.9 / 0.75,
+    // skirmishers 0.5, per-day factors 1.1 / 1.3; campaignprefs AI bonus 0.3.
+    private static BreakToleranceRules ShippedBreakRules(bool aiVsAi = false, float campaignBonus = 0.5f)
+    {
+        return new BreakToleranceRules
+        {
+            Trigger0 = 0.8f, Trigger100 = 0.55f,
+            InfluenceExperience = 0.91f, InfluenceTraining = 0.9f, InfluenceLeadership = 0.75f,
+            SkirmisherFactor = 0.5f,
+            AiBonusRestoringMorale = 0.3f, AiShiftedBonus = 1.45f, AiVsAi = aiVsAi, UsedCampaignBonusRunning = campaignBonus,
+            PerDayExperience0 = 1.1f, PerDayExperience100 = 1.3f,
+        };
+    }
+
+    // GetUnbearableLossesTrigger 113363-113400, worked by hand.
+    private static void BreakLossFractionMatchesVanilla()
+    {
+        var rules = ShippedBreakRules();
+        var green = new BreakToleranceInput
+        {
+            MilitaryExperience = 0.3f, Experience = 0.2f, Training = 0.5f, Leadership = 0.5f,
+            UnitTyp = 0, PlayerAlliance = false, BattlePassedDays = 0,
+        };
+        float num = 0.8f + (0.55f - 0.8f) * 0.3f;
+        num *= 1f - 0.2f * (1f - 0.91f);
+        num *= 1f - 0.5f * (1f - 0.9f);
+        num *= 1f - 0.5f * (1f - 0.75f);
+        float aiBonus = 1f + (0f + 0.5f) * 0.3f;
+        AssertNear((1f - num) * aiBonus, TroopQuality.BreakLossFraction(rules, green), 1e-5f, "AI regiment, day 0");
+
+        var player = green;
+        player.PlayerAlliance = true;
+        AssertNear(1f - num, TroopQuality.BreakLossFraction(rules, player), 1e-5f, "player alliance: no AI bonus");
+
+        var aiVsAi = ShippedBreakRules(aiVsAi: true);
+        AssertNear((1f - num) * (1f + (1.45f + 0.5f) * 0.3f), TroopQuality.BreakLossFraction(aiVsAi, green), 1e-5f, "ai_vs_ai adds the shifted bonus");
+
+        var skirmisher = player;
+        skirmisher.UnitTyp = 3;
+        AssertNear((1f - num) * 0.5f, TroopQuality.BreakLossFraction(rules, skirmisher), 1e-5f, "skirmishers x 0.5");
+
+        var dayTwo = player;
+        dayTwo.BattlePassedDays = 2;
+        float perDay = (1.1f + (1.3f - 1.1f) * 0.2f - 1f) * 2f + 1f;
+        AssertNear((1f - num) * perDay, TroopQuality.BreakLossFraction(rules, dayTwo), 1e-5f, "day factor");
+
+        var veteran = player;
+        veteran.MilitaryExperience = 0.8f; veteran.Experience = 0.9f; veteran.Training = 0.9f; veteran.Leadership = 0.8f;
+        AssertTrue(TroopQuality.BreakLossFraction(rules, veteran) > TroopQuality.BreakLossFraction(rules, player) + 0.15f,
+            "veteran, drilled, well led: a much higher break point");
+
+        var cap = ShippedBreakRules(aiVsAi: true, campaignBonus: 5f);
+        AssertNear(1f, TroopQuality.BreakLossFraction(cap, green), 1e-6f, "capped at 1");
+    }
+
+    private static TacticalMoralePressure.Input UnderFire(float lossFraction, float breakLossFraction)
+    {
+        return new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.95f,
+            BattleStartMorale = 1f,
+            BattleStartMoraleInitialized = true,
+            FallbackThreshold = 0.4f,
+            ReceivedFireFromClosestFar = true,
+            CoverValue = 0.5f,
+            AiFeudStance = -1,
+            LossFraction = lossFraction,
+            BreakLossFraction = breakLossFraction,
+        };
+    }
+
+    private static void NearBreakUnderFireWithdraws()
+    {
+        AssertEqual(TacticalMoralePressure.Result.WithdrawalCandidate,
+            TacticalMoralePressure.Score(UnderFire(0.33f, 0.40f)), "0.33 >= 0.8 x 0.40: pull back before breaking");
+        AssertEqual(TacticalMoralePressure.Result.Stable,
+            TacticalMoralePressure.Score(UnderFire(0.30f, 0.40f)), "0.30 < 0.32: holds");
+        var notUnderFire = UnderFire(0.39f, 0.40f);
+        notUnderFire.ReceivedFireFromClosestFar = false;
+        AssertEqual(TacticalMoralePressure.Result.Stable, TacticalMoralePressure.Score(notUnderFire), "not under fire: no near-break pull back");
+        AssertEqual(TacticalMoralePressure.Result.Stable,
+            TacticalMoralePressure.Score(UnderFire(0.9f, 0f)), "no break point known: unchanged ladder");
+        var collapse = UnderFire(0.39f, 0.40f);
+        collapse.CurrentMorale = 0.3f;
+        AssertEqual(TacticalMoralePressure.Result.CollapseCandidate, TacticalMoralePressure.Score(collapse), "collapse still wins");
+    }
+
+    private static void VeteranHoldsAtSameLosses()
+    {
+        var rules = ShippedBreakRules();
+        var green = new BreakToleranceInput { MilitaryExperience = 0.3f, Experience = 0.2f, Training = 0.5f, Leadership = 0.5f, PlayerAlliance = true };
+        var veteran = new BreakToleranceInput { MilitaryExperience = 0.8f, Experience = 0.9f, Training = 0.9f, Leadership = 0.8f, PlayerAlliance = true };
+        const float losses = 0.36f;
+        AssertEqual(TacticalMoralePressure.Result.WithdrawalCandidate,
+            TacticalMoralePressure.Score(UnderFire(losses, TroopQuality.BreakLossFraction(rules, green))), "green pulls back at 36% losses");
+        AssertEqual(TacticalMoralePressure.Result.Stable,
+            TacticalMoralePressure.Score(UnderFire(losses, TroopQuality.BreakLossFraction(rules, veteran))), "veteran holds at 36% losses");
+    }
+
+    private static ChargeOddsRules ShippedChargeOdds()
+    {
+        return new ChargeOddsRules { Trigger = 3f, WeightStrength = 1f, WeightExperience = 0.7f, WeightMorale = 1.5f, WeightFatigue = 0.6f };
+    }
+
+    // UpdateChargeTarget 122229-122231 (infantry: no meleemounted factor).
+    private static void ChargeOddsMatchVanilla()
+    {
+        var w = ShippedChargeOdds();
+        float own = 400f * 2f * (1f + 0.5f * 0.7f) * (1f + 0.8f * 1.5f) * (1f + 0.8f * 0.6f);
+        float target = 300f * 2f * (1f + 0.1f * 0.7f) * (1f + 0.5f * 1.5f) * (1f + 0.5f * 0.6f);
+        AssertNear(own, TroopQuality.VanillaChargeStrength(400f, 0.5f, 0.8f, 0.2f, w), 1e-2f, "own weighted strength");
+        AssertNear(own / target, TroopQuality.VanillaChargeOdds(400f, 0.5f, 0.8f, 0.2f, 300f, 0.1f, 0.5f, 0.5f, w), 1e-4f, "odds");
+        AssertNear(own, TroopQuality.VanillaChargeOdds(400f, 0.5f, 0.8f, 0.2f, 0f, 0f, 0f, 1f, w), 1e-2f, "max(1, enemy)");
+    }
+
+    private static ChargeInput ReadyCharge(float odds, float trigger)
+    {
+        return new ChargeInput
+        {
+            ConfigOn = true, IsInfantryRegiment = true, GroupAiStance = ChargeDoctrine.AssaultStance,
+            TargetVisible = true, TargetIsFirstInRange = true, DistanceToTarget = 30f, VanillaMaxChargeRadius = 50f,
+            OwnMorale = 0.8f, TargetMorale = 0.5f, OwnFatigue = 0.2f, Moving = true,
+            MovementMode = ChargeDoctrine.NormalMovementMode, IsLeading = true,
+            SecondsSinceLastAiChargeRefusal = double.PositiveInfinity,
+            VanillaChargeOdds = odds, VanillaChargeTrigger = trigger,
+        };
+    }
+
+    private static void ChargeRefusedBelowVanillaOdds()
+    {
+        AssertEqual(ChargeAction.Charge, ChargeDoctrine.Decide(ReadyCharge(3.5f, 3f)), "vanilla's odds pass: arm");
+        AssertEqual(ChargeAction.None, ChargeDoctrine.Decide(ReadyCharge(2.4f, 3f)), "vanilla would refuse: do not arm");
+        AssertEqual(ChargeAction.None, ChargeDoctrine.Decide(ReadyCharge(3f, 3f)), "strictly above the trigger, as 122259");
+        AssertEqual(ChargeAction.Charge, ChargeDoctrine.Decide(ReadyCharge(0f, 0f)), "no trigger: no pre-filter");
+    }
+
+    private static void ArmedChargeNotRevertedByOdds()
+    {
+        var armed = ReadyCharge(1f, 3f);
+        armed.WhiskeyArmed = true;
+        armed.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        AssertEqual(ChargeAction.None, ChargeDoctrine.Decide(armed), "armed: vanilla's own check decides, the doctrine holds");
+    }
+
+    private static void FlagOffDisablesBreakAndChargeOdds()
+    {
+        var on = new TroopQualityPrefs { Enabled = true, Break = ShippedBreakRules(), ChargeOdds = ShippedChargeOdds() };
+        AssertTrue(on.BreakToleranceOn, "on: break tolerance read");
+        AssertNear(3f, on.ChargeOddsRulesIfEnabled.Trigger, 1e-6f, "on: vanilla charge trigger");
+        var off = on;
+        off.Enabled = false;
+        AssertFalse(off.BreakToleranceOn, "off: no break input");
+        AssertNear(0f, off.ChargeOddsRulesIfEnabled.Trigger, 1e-6f, "off: no charge pre-filter");
     }
 }

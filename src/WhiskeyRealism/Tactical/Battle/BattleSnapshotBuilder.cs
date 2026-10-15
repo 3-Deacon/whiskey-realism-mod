@@ -44,8 +44,13 @@ namespace WhiskeyRealism.Tactical.Battle
     //     player-alliance unit). PlayerOwnership.Compute turns them into PlayerOwned /
     //     Feud per unit, and ApplyChainFlags marks the player's command and its
     //     ancestors once the parent map is assembled.
-    //   - Troop quality (BC8): Experience() (140114, pure) for a regiment, groupexperience
-    //     for a group (UpdateGroupStrength 120508).
+    //   - Troop quality (BC8): Experience() (140114, pure) and the raw training field for a
+    //     regiment, groupexperience / grouptraining for a group (UpdateGroupStrength
+    //     120473 / 120508). Never GetTraining(): it adds the W&L drill effect to training on
+    //     every call (140537-140549). Own infantry/cavalry regiments also get their loss
+    //     fraction (losses, LossesAreUnbearable 139831) and break point
+    //     (TroopQuality.BreakLossFraction over alliance militaryexperience 62122,
+    //     GetCommanderLeadership 61134 cached per commander, bunits.battlepasseddays).
     //   - Leaf-slot inputs (BC5a): lastsetwaypointrotation (stored with the group's
     //     waypoint, SetGroupFormation 92067-92068), groupposition.groupwidth /
     //     groupdepth and each group's layout entries attachedunitid[k] /
@@ -162,6 +167,10 @@ namespace WhiskeyRealism.Tactical.Battle
             var ownUnits = _ownUnits[alliance];
             var enemyUnits = _enemyUnits[alliance];
             int attachedLengthSum = 0;
+            TroopQualityPrefs quality = TroopQualityRuntime.Prefs;
+            bool breakOn = quality.BreakToleranceOn;
+            float militaryExperience = MilitaryExperience(alliance);
+            int battleDays = bunits.battlepasseddays;
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i];
@@ -171,6 +180,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 var record = Capture(reg, go, in ownership);
                 if (reg.alliance == alliance)
                 {
+                    if (breakOn) FillBreakTolerance(reg, ref record, in quality.Break, militaryExperience, battleDays, doctrineHours);
                     if (snapshot.OwnCount == ownUnits.Length) _ownUnits[alliance] = ownUnits = Grow(ownUnits);
                     ownUnits[snapshot.OwnCount] = reg;
                     snapshot.AddOwn(in record);
@@ -253,8 +263,10 @@ namespace WhiskeyRealism.Tactical.Battle
             record.Ammo01 = ArmyEvidenceBuilder.NormalizeAmmo01(reg.ammo, reg.unittyp, 0.9f);
             record.Fatigue = reg.fatigue;
             bool group = reg.unittyp > TacticalUnitType.MaxCombat;
-            // BC8: Experience() is a pure getter (140114).
+            // BC8: Experience() is a pure getter (140114); GetTraining() writes training under
+            // W&L (140537-140549), so drill is the raw field, as vanilla's own calls leave it.
             record.Experience = group ? reg.groupexperience : reg.Experience();
+            record.Training = group ? reg.grouptraining : reg.training;
             record.RegimentPaths = reg.regimentpaths;
             record.QueuedOrders = QueuedOrders(reg);
             record.MovementMode = reg.movementmode;
@@ -305,6 +317,36 @@ namespace WhiskeyRealism.Tactical.Battle
             flags |= TacticalWriteGuard.OwnershipFlags(reg, in ownership);
             record.Flags = flags;
             return record;
+        }
+
+        // BC8 break tolerance for an own infantry/cavalry regiment (the units the withdrawal
+        // doctrine can pull back, CheckLineFallbacks 5137): vanilla's loss fraction and the
+        // fraction at which it routs. Field reads plus the cached commander leadership.
+        private static void FillBreakTolerance(Regiment reg, ref UnitRecord record, in BreakToleranceRules rules,
+            float militaryExperience, int battleDays, double doctrineHours)
+        {
+            if (record.UnitTyp != TacticalUnitType.Infantry && record.UnitTyp != TacticalUnitType.Cavalry) return;
+            record.LossFraction = TroopQuality.LossFraction(reg.losses, reg.strength);
+            var input = new BreakToleranceInput
+            {
+                MilitaryExperience = militaryExperience,
+                Experience = record.Experience,
+                Training = record.Training,
+                Leadership = TroopQualityRuntime.Leadership(reg.commander, doctrineHours),
+                UnitTyp = record.UnitTyp,
+                PlayerAlliance = reg.alliance == GameVars.playeralliance,
+                BattlePassedDays = battleDays,
+            };
+            record.BreakLossFraction = TroopQuality.BreakLossFraction(in rules, in input);
+        }
+
+        // GameVars.alliance[alliance].militaryexperience (62122): campaign-public, the
+        // base of vanilla's unbearable-losses trigger (113363).
+        private static float MilitaryExperience(int alliance)
+        {
+            var alliances = GameVars.alliance;
+            if (alliances == null || alliance < 0 || alliance >= alliances.Length || alliances[alliance] == null) return 0f;
+            return alliances[alliance].militaryexperience;
         }
 
         // Each own group's formation layout entries, after the command tree is assembled

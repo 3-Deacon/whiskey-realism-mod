@@ -47,8 +47,15 @@ namespace WhiskeyRealism.Tactical.Battle
         public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
         public float Morale, BattleStartMorale, Ammo01, Fatigue;
         // BC8 troop quality: a regiment's Experience() (140114, W&L player-unit effects
-        // applied), a group's groupexperience (UpdateGroupStrength 120508, divided 120674).
-        public float Experience;
+        // applied) and raw training (never GetTraining(), which writes training under W&L,
+        // 140537-140549); a group's groupexperience / grouptraining (UpdateGroupStrength
+        // 120473 / 120508, divided 120671 / 120674).
+        public float Experience, Training;
+        // BC8 break tolerance, own infantry/cavalry regiments only (0 otherwise or with the
+        // weighting off): the loss fraction vanilla's rout test reads (LossesAreUnbearable
+        // 139831) and the fraction at which it routs (GetUnbearableLossesTrigger 113363-113400,
+        // TroopQuality.BreakLossFraction).
+        public float LossFraction, BreakLossFraction;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
         // BC5a, additive (the leaf slot, shipped #61 TryFormationSlot): a group's

@@ -600,7 +600,8 @@ namespace WhiskeyRealism
                 "the two moving regiments closest to their target get combat behavior 3 when their own first range-list enemy is visible, within " +
                 "vanilla's charge radius of the brigade HQ (maxchargeradius, 50 m shipped, so charges are rare), and weaker in morale by 0.15, " +
                 "disordered or flanked; own morale at least 0.5, fatigue at most 0.6, no friendly in the lane, and (vanilla's unread pref No Micro " +
-                "AI Charge If Outflanked) not while outflanked or under flanking fire. Vanilla's own odds check still decides the charge. Reverts " +
+                "AI Charge If Outflanked) not while outflanked or under flanking fire; with Enable Experience And Drill AI Weighting on, only when " +
+                "vanilla's own experience-weighted charge odds would pass. Vanilla's own odds check still decides the charge. Reverts " +
                 "to behavior 2 when the charge resolves, the conditions fail or the brigade leaves assault, waits out vanilla's renew interval " +
                 "(at least 120 battle seconds) after a refused charge, and restores vanilla's intended cancel: an AI infantry regiment left in " +
                 "charge mode whose brigade is out of assault is taken out of it. Never on W&L player-owned or feud units; orders go through the " +
@@ -615,8 +616,11 @@ namespace WhiskeyRealism
                 "(1 + own - enemy mean experience), with the attack threshold divided by 1 + commander initiative x vanilla's initiative " +
                 "influence (0.7 shipped). Group stance sectors and #44's odds: own and enemy strength x vanilla's experience blend " +
                 "1 - ei + experience x ei (ei = expinfluenceonaidecisions, 0.25 shipped), a group's own experience against the closest visible " +
-                "enemy's. Enemy experience is what the player sees: the experience stars of enemy regiments while they are visible, " +
-                "remembered after they drop out of sight. Reads only. Off: headcount ratios and sectors, undivided thresholds.");
+                "enemy's. Withdrawal: an AI regiment under fire whose losses reach 80% of its own rout point (vanilla's unbearable-losses " +
+                "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
+                "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
+                "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
+                "Off: headcount ratios and sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
