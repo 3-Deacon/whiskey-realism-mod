@@ -3,9 +3,14 @@ using Newtonsoft.Json;
 
 namespace WhiskeyRealism.Strategic
 {
+    // Version history: 1 = v0.2.x; 2 = adds lastSeenMonth/Year, per-faction probe state and
+    // fiscal memory, nullable director posture. Readers accept 1..CurrentVersion.
     internal class SidecarDto
     {
-        [JsonProperty("version")] public int Version = 1;
+        internal const int CurrentVersion = 2;
+        [JsonProperty("version")] public int Version = CurrentVersion;
+        [JsonProperty("lastSeenMonth")] public int? LastSeenMonth;
+        [JsonProperty("lastSeenYear")] public int? LastSeenYear;
         [JsonProperty("factions")] public List<FactionDto> Factions = new List<FactionDto>();
         [JsonProperty("minorOfficerProfiles")] public List<MinorOfficerDto> MinorOfficerProfiles = new List<MinorOfficerDto>();
         [JsonProperty("succession")] public SuccessionDto Succession = new SuccessionDto();
@@ -19,6 +24,26 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("currentEra")]  public string CurrentEra;
         [JsonProperty("cic")]         public CICDto Cic;
         [JsonProperty("directorMemory")] public DirectorMemoryDto DirectorMemory;
+        [JsonProperty("probeState")] public OperationalProbeStateDto ProbeState;
+        [JsonProperty("fiscalMemory")] public FiscalMemoryDto FiscalMemory;
+    }
+
+    internal class OperationalProbeStateDto
+    {
+        [JsonProperty("probeId")] public string ProbeId;
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("targetAreaKey")] public string TargetAreaKey;
+        [JsonProperty("sourceSectorKey")] public string SourceSectorKey;
+        [JsonProperty("startedDaySerial")] public int StartedDaySerial;
+        [JsonProperty("lastEnemy")] public float LastObservedEnemyStrength;
+        [JsonProperty("lastFriendly")] public float LastObservedFriendlyStrength;
+    }
+
+    internal class FiscalMemoryDto
+    {
+        [JsonProperty("previousPosture")] public string PreviousPosture;
+        [JsonProperty("stableTicksAboveEmergency")] public int StableTicksAboveEmergency;
+        [JsonProperty("emergencyResidue")] public bool EmergencyResidue;
     }
 
     internal class CICDto
@@ -118,10 +143,11 @@ namespace WhiskeyRealism.Strategic
 
     internal class DirectorMemoryDto
     {
-        [JsonProperty("pace")]            public int Pace;
-        [JsonProperty("intent")]          public int Intent;
-        [JsonProperty("risk")]            public int Risk;
-        [JsonProperty("theaterPriority")] public int TheaterPriority;
+        // Nullable: a sidecar without a published posture must not decode to an all-zero one.
+        [JsonProperty("pace")]            public int? Pace;
+        [JsonProperty("intent")]          public int? Intent;
+        [JsonProperty("risk")]            public int? Risk;
+        [JsonProperty("theaterPriority")] public int? TheaterPriority;
         [JsonProperty("lastFullRefresh")] public int LastFullRefreshDay = -1;
         [JsonProperty("capitalStreak")]   public int CapitalDangerStreakDays;
         [JsonProperty("daysSinceBattle")] public int DaysSinceLastBattle;

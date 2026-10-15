@@ -48,6 +48,14 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r5 no profile falls back to generic plan with a resolvable target", R5NoProfileFallsBackToGenericPlan);
         Check("c1 r5 no resolvable candidate leaves plan empty for vanilla", R5NoResolvableCandidateLeavesPlanEmpty);
         Check("c1 r5 objective steering lets vanilla pick without a plan", R5ObjectiveSteeringLetsVanillaPickWithoutPlan);
+
+        // PER — sidecar persistence
+        Check("c1 per sidecar round trip preserves plan history and new state", PerSidecarRoundTripPreservesState);
+        Check("c1 per missing fields decode without throwing or fabricating posture", PerMissingFieldsDecodeSafely);
+        Check("c1 per corrupt json is rejected", PerCorruptJsonIsRejected);
+        Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
+        Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
+        Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
     }
 
     private static void Check(string name, Action test)
@@ -525,6 +533,117 @@ internal static class CampaignLifecycleFixTests
         var vanillaOwned = CampaignObjectiveSteering.Decide(hasPlanTarget: false, planTargetObjectiveId: -1, currentFollowed: 12, lastWrittenByMod: 32);
         TestHarness.AssertTrue(vanillaOwned.RunVanilla, "vanilla runs");
         TestHarness.AssertEqual(CampaignObjectiveSteering.NoWrite, vanillaOwned.WriteFollowed, "vanilla's own pick is left alone");
+    }
+
+    // ------------------------------------------------------------------
+    // PER
+    // ------------------------------------------------------------------
+
+    private static SidecarSnapshot SampleSnapshot()
+    {
+        var snap = SidecarSnapshot.Empty();
+        var plan = TwoPhasePlan(0.6f);
+        plan.OperationId = "union-east-pressure";
+        plan.CurrentPhaseIndex = 1;
+        plan.Phases[1].PhaseStartedDaySerial = Serial(4, 2, 1862);
+        snap.Cics[0] = new CIC { AllianceId = 0, OfficerName = "Lincoln", OfficerPersonality = new PersonalityVector(0.3f, 0.1f, 0.1f, 0.4f, 0.7f), ActivePlan = plan };
+        snap.Eras[0] = EraStage.Operational1862;
+        snap.Eras[1] = EraStage.Operational1862;
+        snap.DirectorMemories[0] = new DirectorMemory
+        {
+            LastPosture = new DirectorPosture { Pace = CampaignPace.TooQuiet, Intent = StrategicIntent.Probe, Risk = CollapseRisk.Elevated, TheaterPriority = Theater.East },
+            CapitalDangerStreakDays = 3
+        };
+        snap.RecentReplans[0] = new[] { Serial(1, 1, 1862), Serial(1, 2, 1862) };
+        snap.ProbeStates[1] = new OperationalProbeState { ProbeId = "p-1", UnitKey = "Army of X:12", TargetAreaKey = "a-3", SourceSectorKey = "East", StartedDaySerial = Serial(2, 3, 1862), LastObservedEnemyStrength = 9000f, LastObservedFriendlyStrength = 4000f };
+        snap.FiscalMemories[1] = new WhiskeyRealism.Strategic.Fiscal.FiscalStateMemory { PreviousPosture = WhiskeyRealism.Strategic.Fiscal.FiscalPosture.CreditDefense, StableTicksAboveEmergency = 4, EmergencyResidue = true };
+        snap.MinorOfficers[17] = new PersonalityVector(0.1f, 0.2f, 0.3f, 0.4f, 0.5f);
+        snap.FiredEvents.Add(1);
+        snap.AppliedEvents.Add(1);
+        snap.Battles.Add(Battle(1, 760f, 60f));
+        snap.LastSeenMonth = 3;
+        snap.LastSeenYear = 1862;
+        return snap;
+    }
+
+    private static void PerSidecarRoundTripPreservesState()
+    {
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(SampleSnapshot()));
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out var reason), "deserialize: " + reason);
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out reason), "decode: " + reason);
+
+        TestHarness.AssertEqual("union-east-pressure", back.Cics[0].ActivePlan.OperationId, "operation id");
+        TestHarness.AssertEqual(1, back.Cics[0].ActivePlan.CurrentPhaseIndex, "phase index");
+        TestHarness.AssertEqual(Serial(4, 2, 1862), back.Cics[0].ActivePlan.Phases[1].PhaseStartedDaySerial, "phase start");
+        TestHarness.AssertTrue(back.Cics[1] == null, "alliance without CIC stays null");
+        TestHarness.AssertEqual(EraStage.Operational1862, back.Eras[1].Value, "era kept for alliance without CIC");
+        TestHarness.AssertEqual(CampaignPace.TooQuiet, back.DirectorMemories[0].LastPosture.Pace, "posture pace");
+        TestHarness.AssertEqual(3, back.DirectorMemories[0].CapitalDangerStreakDays, "capital streak");
+        TestHarness.AssertEqual(2, back.RecentReplans[0].Length, "replans");
+        TestHarness.AssertEqual("Army of X:12", back.ProbeStates[1].UnitKey, "probe unit");
+        TestHarness.AssertEqual(Serial(2, 3, 1862), back.ProbeStates[1].StartedDaySerial, "probe start");
+        TestHarness.AssertEqual(4, back.FiscalMemories[1].StableTicksAboveEmergency, "fiscal stable ticks");
+        TestHarness.AssertTrue(back.FiscalMemories[1].EmergencyResidue, "fiscal residue");
+        TestHarness.AssertTrue(back.MinorOfficers.ContainsKey(17), "minor officer");
+        TestHarness.AssertTrue(back.FiredEvents.Contains(1) && back.AppliedEvents.Contains(1), "succession");
+        TestHarness.AssertEqual(1, back.Battles.Count, "battle history");
+        TestHarness.AssertEqual(3, back.LastSeenMonth, "last seen month restored");
+        TestHarness.AssertEqual(1862, back.LastSeenYear, "last seen year restored");
+    }
+
+    private static void PerMissingFieldsDecodeSafely()
+    {
+        const string json = "{\"version\":1,\"factions\":[{\"factionId\":0,\"currentEra\":\"Operational1862\",\"cic\":{\"officerName\":\"Lincoln\"},\"directorMemory\":{\"lastFullRefresh\":5}}],\"succession\":null,\"minorOfficerProfiles\":[{\"commanderId\":5}],\"battleHistory\":null}";
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out var reason), "deserialize: " + reason);
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDecode(dto, out var snap, out reason), "decode: " + reason);
+        TestHarness.AssertEqual("Lincoln", snap.Cics[0].OfficerName, "cic restored");
+        TestHarness.AssertTrue(snap.Cics[0].ActivePlan == null, "no plan");
+        TestHarness.AssertTrue(snap.DirectorMemories[0].LastPosture == null, "missing pace/intent/risk must not fabricate an all-zero posture");
+        TestHarness.AssertEqual(0, snap.FiredEvents.Count, "null succession tolerated");
+        TestHarness.AssertEqual(0, snap.MinorOfficers.Count, "minor officer without personality skipped");
+        TestHarness.AssertEqual(-1, snap.LastSeenMonth, "v1 sidecar has no last-seen month");
+    }
+
+    private static void PerCorruptJsonIsRejected()
+    {
+        TestHarness.AssertFalse(SidecarDtoCodec.TryDeserialize("{\"version\":1,\"factions\":[{", out _, out _), "truncated json");
+        TestHarness.AssertFalse(SidecarDtoCodec.TryDeserialize("", out _, out _), "empty file");
+    }
+
+    private static void PerNewerVersionIsRejected()
+    {
+        TestHarness.AssertFalse(SidecarDtoCodec.TryDeserialize("{\"version\":99}", out _, out var reason), "future version");
+        TestHarness.AssertTrue(reason.Contains("version"), "reason names the version: " + reason);
+    }
+
+    private static void PerForcedSuccessionIdsAreNotPersisted()
+    {
+        var snap = SampleSnapshot();
+        snap.FiredEvents.Add(5);
+        snap.ForcedEvents.Add(5);
+        var dto = SidecarDtoCodec.Encode(snap);
+        TestHarness.AssertTrue(dto.Succession.FiredEvents.Contains(1), "naturally fired id persisted");
+        TestHarness.AssertFalse(dto.Succession.FiredEvents.Contains(5), "test-mode forced id not persisted");
+    }
+
+    private static void PerAtomicWriteKeepsBakAndNoTemp()
+    {
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wr-c1-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            string path = System.IO.Path.Combine(dir, "whiskeyrealism.json");
+            SidecarDtoCodec.WriteAtomic(path, "first");
+            TestHarness.AssertEqual("first", System.IO.File.ReadAllText(path), "first write");
+            SidecarDtoCodec.WriteAtomic(path, "second");
+            TestHarness.AssertEqual("second", System.IO.File.ReadAllText(path), "second write");
+            TestHarness.AssertEqual("first", System.IO.File.ReadAllText(path + ".bak"), "previous kept as .bak");
+            TestHarness.AssertFalse(System.IO.File.Exists(path + ".tmp"), "no temp left behind");
+        }
+        finally
+        {
+            System.IO.Directory.Delete(dir, true);
+        }
     }
 
     // ------------------------------------------------------------------

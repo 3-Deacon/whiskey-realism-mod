@@ -70,9 +70,17 @@ namespace WhiskeyRealism.Strategic
         // Diagnostic: bypass gates and mark all events as fired. Used by the
         // ForceAllSuccessionEvents config flag so smoke-testers can exercise
         // the apply mechanic without waiting for in-game dates.
+        // Ids added only by ForceAllFired; excluded from the sidecar (PER-force) so a test-mode
+        // session doesn't permanently mark every historical event as fired.
+        internal HashSet<int> ForcedEventIds = new HashSet<int>();
+
         internal void ForceAllFired()
         {
-            foreach (var e in _events) FiredEventIds.Add(e.Id);
+            foreach (var e in _events)
+            {
+                if (FiredEventIds.Add(e.Id))
+                    ForcedEventIds.Add(e.Id);
+            }
         }
 
         internal SuccessionScheduler()

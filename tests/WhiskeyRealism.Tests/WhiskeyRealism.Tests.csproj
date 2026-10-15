@@ -81,6 +81,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CIC.cs" Link="CIC.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStageManager.cs" Link="EraStageManager.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\SuccessionScheduler.cs" Link="SuccessionScheduler.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\SidecarDtoCodec.cs" Link="SidecarDtoCodec.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationContextBuilder.cs" Link="HistoricalOperationContextBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\RecruitmentIntentLedger.cs" Link="RecruitmentIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
