@@ -37,6 +37,7 @@ internal static class PostureMigrationTests
             ("bc5a MovingSubordinateIsAnActiveMove", MovingSubordinateIsAnActiveMove),
             ("bc5a FireControlNeverTargetsArtillery", FireControlNeverTargetsArtillery),
             ("bc5a RecentOrderCooldownIsPerChannelWithShippedValues", RecentOrderCooldownIsPerChannelWithShippedValues),
+            ("bc5a RecentOrderCooldownOverridesForSelfHoldingSources", RecentOrderCooldownOverridesForSelfHoldingSources),
             ("bc5a RefusedFlankTravelsOnTheIntentAndBypassesDedupe", RefusedFlankTravelsOnTheIntentAndBypassesDedupe),
             ("bc5a PostureRefusesTheThreatenedFlankInContact", PostureRefusesTheThreatenedFlankInContact),
             ("bc5a RotationWalkSkipsEveryUnitUnderADetachedNode", RotationWalkSkipsEveryUnitUnderADetachedNode),
@@ -591,15 +592,15 @@ internal static class PostureMigrationTests
     private static void RecentOrderCooldownIsPerChannelWithShippedValues()
     {
         // #61 RecentOrderHours = RealSecondsAtOneXToHours(30) = 0.05 h = 180 battle-s.
-        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Move), "move");
-        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Stance), "stance");
+        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Move, IntentSource.PostureExecutor), "move");
+        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Stance, IntentSource.PostureExecutor), "stance");
         // #61 RegimentFacingPulseCooldownHours = RealSecondsAtOneXToHours(5) = 5/600 h = 30 battle-s.
-        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(5f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing), 0.01f, "facing");
-        AssertNear(30f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing), 0.01f, "facing 30 s");
+        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(5f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing, IntentSource.FacingPulse), 0.01f, "facing");
+        AssertNear(30f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing, IntentSource.FacingPulse), 0.01f, "facing 30 s");
         // CommandFormationWritePolicy.CooldownHours 0.05 h (0.1 h under fire stays the policy's own rule).
-        AssertNear(CommandFormationWritePolicy.CooldownHours * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Formation), 0.01f, "formation");
+        AssertNear(CommandFormationWritePolicy.CooldownHours * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Formation, IntentSource.PostureExecutor), 0.01f, "formation");
         // #61 FireControlOrderCooldownHours = RealSecondsAtOneXToHours(45) = 0.075 h = 270 battle-s.
-        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(45f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior), 0.01f, "combat behavior");
+        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(45f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior, IntentSource.FireControl), 0.01f, "combat behavior");
 
         UnitRecord group = Group(1, 0f, -1000f, typ: 14);
         UnitRecord regiment = Regiment(1, 0f, -1000f);
@@ -701,5 +702,35 @@ internal static class PostureMigrationTests
         AssertEqual(2, perRegiment.Items[0].GroupId, "regiment 2 only");
         AssertEqual(OrderChannel.Facing, perRegiment.Items[0].Channel, "facing channel");
         AssertEqual(IntentPriority.Executor, perRegiment.Items[0].Priority, "the caller's priority");
+    }
+
+    private static void RecentOrderCooldownOverridesForSelfHoldingSources()
+    {
+        // The artillery doctrine holds each battery itself (Plugin.ArtilleryAuditMinHoldSeconds,
+        // doctrine clock): no executor window on its combat behavior, formation or facing.
+        foreach (IntentSource artillery in new[] { IntentSource.ArtilleryDoctrine, IntentSource.ArtilleryPointBlank })
+        {
+            AssertEqual(0f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior, artillery), artillery + " combat behavior");
+            AssertEqual(0f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Formation, artillery), artillery + " formation");
+            AssertEqual(0f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing, artillery), artillery + " facing");
+            AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Move, artillery), artillery + " move keeps the move window");
+        }
+        // Charge/revert is stateful (BC6a deferred disarm, refusal back-off): never wait 270 s to revert.
+        AssertEqual(0f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior, IntentSource.ChargeDoctrine), "charge doctrine");
+        AssertEqual(270f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior, IntentSource.FireControl), "fire control keeps 270 s");
+
+        UnitRecord regiment = Regiment(1, 0f, -1000f, TacticalUnitType.Artillery);
+        var battery = new BattleOrderIntent
+        {
+            GroupId = 1, Channel = OrderChannel.CombatBehavior, Value = 7, Heading = -1f, Flags = IntentFlags.PerRegiment,
+            Priority = IntentPriority.Executor, Source = IntentSource.ArtilleryDoctrine, Reason = "test",
+        };
+        AssertTrue(IssuesAfter(battery, regiment, 1f), "an artillery doctrine change one second later is not held by the executor");
+        BattleOrderIntent charge = battery;
+        charge.Source = IntentSource.ChargeDoctrine;
+        charge.Value = 3;
+        AssertTrue(IssuesAfter(charge, Regiment(1, 0f, -1000f), 1f), "a charge revert one second later is not held");
+        BattleOrderIntent fire = PostureIntentPlan.FireControl(1, TacticalFireControlDoctrine.InfantryShort);
+        AssertFalse(IssuesAfter(fire, Regiment(1, 0f, -1000f), 1f), "fire control is held");
     }
 }

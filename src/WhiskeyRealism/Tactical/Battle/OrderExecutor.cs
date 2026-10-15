@@ -372,8 +372,26 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float FormationRecentOrderBattleSeconds = CommandFormationWritePolicy.CooldownHours * TacticalBattleClock.BattleSecondsPerHour;
         public const float CombatBehaviorRecentOrderBattleSeconds = 270f;
 
-        public static float RecentOrderBattleSecondsFor(OrderChannel channel)
+        // Per-source overrides (0 = no executor window): the artillery doctrine
+        // holds each battery itself on the doctrine clock
+        // (Plugin.ArtilleryAuditMinHoldSeconds, BC5b), so its combat behavior,
+        // formation and facing carry no executor window; the charge doctrine's
+        // charge/revert is stateful (BC6a deferred disarm, refusal back-off) and
+        // must not wait the fire-control window to revert.
+        public static float RecentOrderBattleSecondsFor(OrderChannel channel, IntentSource source)
         {
+            switch (source)
+            {
+                case IntentSource.ArtilleryDoctrine:
+                case IntentSource.ArtilleryPointBlank:
+                    if (channel == OrderChannel.CombatBehavior || channel == OrderChannel.Formation || channel == OrderChannel.Facing)
+                        return 0f;
+                    break;
+                case IntentSource.ChargeDoctrine:
+                    if (channel == OrderChannel.CombatBehavior) return 0f;
+                    break;
+            }
+
             switch (channel)
             {
                 case OrderChannel.Facing: return FacingRecentOrderBattleSeconds;
@@ -755,7 +773,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (w.Priority != IntentPriority.Safety)
             {
                 if (_lastOrderAt.TryGetValue(Key(w.GroupId, w.Channel), out double last) &&
-                    Within(now, last, RecentOrderBattleSecondsFor(w.Channel) / TacticalBattleClock.BattleSecondsPerHour))
+                    Within(now, last, RecentOrderBattleSecondsFor(w.Channel, w.Source) / TacticalBattleClock.BattleSecondsPerHour))
                     return true;
                 if (move && TaskHoldHours > 0f && w.Task != CommandTaskType.None &&
                     _taskHold.TryGetValue(w.GroupId, out TaskStamp stamp) && stamp.Task == w.Task &&
