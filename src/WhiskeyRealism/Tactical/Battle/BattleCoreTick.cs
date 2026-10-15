@@ -180,31 +180,39 @@ namespace WhiskeyRealism.Tactical.Battle
             using (TelemetryPerf.Scope("tactical.arbiter.execute", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 OrderExecutorRuntime.BindForTick(executor);
-                executor.ObserveOutcomes(snapshot, now, _outcomes, out int outcomeCount);
-                for (int o = 0; o < outcomeCount; o++) stats.Tally(_outcomes[o]);
-
-                int retries = executor.TakeRetries(_retries);
-                for (int r = 0; r < retries; r++)
+                executor.BeginTickClaims(snapshot, _winners, winners);
+                try
                 {
-                    if (!OrderExecutor.RetryStillClaimed(arbiter, _retries[r]))
+                    executor.ObserveOutcomes(snapshot, now, _outcomes, out int outcomeCount);
+                    for (int o = 0; o < outcomeCount; o++) stats.Tally(_outcomes[o]);
+
+                    int retries = executor.TakeRetries(_retries);
+                    for (int r = 0; r < retries; r++)
                     {
-                        stats.Tally(executor.RecordSuperseded(_retries[r], now));
-                        continue;
+                        if (!OrderExecutor.RetryStillClaimed(arbiter, _retries[r]))
+                        {
+                            stats.Tally(executor.RecordSuperseded(_retries[r], now));
+                            continue;
+                        }
+                        ExecutionPlan retryPlan = executor.PlanRetry(snapshot, _retries[r], now);
+                        if (retryPlan.Execute) stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _retries[r], retryPlan, now));
+                        else stats.Skip(retryPlan.Skip);
                     }
-                    ExecutionPlan retryPlan = executor.PlanRetry(snapshot, _retries[r], now);
-                    if (retryPlan.Execute) stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _retries[r], retryPlan, now));
-                    else stats.Skip(retryPlan.Skip);
+
+                    for (int w = 0; w < winners; w++)
+                    {
+                        ExecutionPlan plan = executor.Plan(snapshot, _winners[w], now);
+                        if (!plan.Execute)
+                        {
+                            stats.Skip(plan.Skip);
+                            continue;
+                        }
+                        stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _winners[w], plan, now));
+                    }
                 }
-
-                for (int w = 0; w < winners; w++)
+                finally
                 {
-                    ExecutionPlan plan = executor.Plan(snapshot, _winners[w], now);
-                    if (!plan.Execute)
-                    {
-                        stats.Skip(plan.Skip);
-                        continue;
-                    }
-                    stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _winners[w], plan, now));
+                    executor.EndTickClaims();
                 }
             }
 

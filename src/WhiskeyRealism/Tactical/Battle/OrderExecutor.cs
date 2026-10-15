@@ -439,6 +439,14 @@ namespace WhiskeyRealism.Tactical.Battle
         private int _ticketCount;
         private int[] _targetBuffer = new int[64];
         private int[] _childBuffer = new int[64];
+        // This tick's Move claims by own index (0 = none, else the IntentPriority),
+        // set by BeginTickClaims for the arbiter tick only; and the scratch marks of
+        // one group's claimed subtree (BuildMoveShield).
+        private int[] _moveClaim = new int[64];
+        private int _moveClaimCount;
+        private int _moveClaimMax;
+        private bool[] _shielded = new bool[64];
+        private bool[] _shieldedBelow = new bool[64];
 
         /// <summary>
         /// Same-task re-issue hold for Move (was #61 _brigadeTaskHoldState). The runtime
@@ -485,6 +493,76 @@ namespace WhiskeyRealism.Tactical.Battle
             return PlanCore(s, retry, nowHours, retry: FindTicket(retry.GroupId, retry.TargetX, retry.TargetZ) >= 0);
         }
 
+        /// <summary>
+        /// Publishes this arbiter tick's Move winners to the planner. Claims are per
+        /// (unit, channel), so a regiment's Safety withdrawal and its brigade's
+        /// Executor move both win; vanilla SetGroupFormation then re-paths every
+        /// non-detached, non-routed child of the moved group (92076-92108,
+        /// RegimentSetPath 92108) and would undo the withdrawal. While these claims
+        /// are set, a group Move fans out around any descendant holding a
+        /// higher-priority Move claim (TacticalChainOrderPlanner), and yields
+        /// (ChainNoTargets) when nothing else is left. EndTickClaims clears them so
+        /// inline plans between ticks (#42, #56) see none.
+        /// </summary>
+        public void BeginTickClaims(IBattleUnitView s, BattleOrderIntent[] winners, int count)
+        {
+            EndTickClaims();
+            if (s == null || winners == null) return;
+            int own = s.OwnCount;
+            EnsureCapacity(own);
+            _moveClaimCount = own;
+            for (int i = 0; i < count && i < winners.Length; i++)
+            {
+                if (winners[i].Channel != OrderChannel.Move) continue;
+                int idx = s.IndexOfOwn(winners[i].GroupId);
+                if (idx < 0 || idx >= own) continue;
+                int priority = (int)winners[i].Priority;
+                if (priority > _moveClaim[idx]) _moveClaim[idx] = priority;
+                if (priority > _moveClaimMax) _moveClaimMax = priority;
+            }
+        }
+
+        public void EndTickClaims()
+        {
+            if (_moveClaimCount > 0) Array.Clear(_moveClaim, 0, _moveClaimCount);
+            _moveClaimCount = 0;
+            _moveClaimMax = 0;
+        }
+
+        // Marks the descendants of groupIndex that hold a Move claim above priority
+        // (shielded) and every unit on the path up from them (shieldedBelow).
+        // True when groupIndex has such a descendant.
+        private bool BuildMoveShield(UnitRecord[] own, int count, int groupIndex, int priority)
+        {
+            if (_moveClaimMax <= priority) return false;
+            int n = Math.Min(count, _moveClaimCount);
+            Array.Clear(_shielded, 0, n);
+            Array.Clear(_shieldedBelow, 0, n);
+            bool any = false;
+            for (int i = 0; i < n; i++)
+            {
+                if (i == groupIndex || _moveClaim[i] <= priority) continue;
+                bool descendant = false;
+                int p = own[i].ParentIndex;
+                for (int hops = 0; p >= 0 && p < n && hops < n; hops++)
+                {
+                    if (p == groupIndex) { descendant = true; break; }
+                    p = own[p].ParentIndex;
+                }
+                if (!descendant) continue;
+                any = true;
+                _shielded[i] = true;
+                p = own[i].ParentIndex;
+                for (int hops = 0; p >= 0 && p < n && hops < n; hops++)
+                {
+                    _shieldedBelow[p] = true;
+                    if (p == groupIndex) break;
+                    p = own[p].ParentIndex;
+                }
+            }
+            return any;
+        }
+
         private ExecutionPlan PlanCore(IBattleUnitView s, in BattleOrderIntent w, double nowHours, bool retry)
         {
             var plan = new ExecutionPlan { DispatchType = NoDispatch };
@@ -505,7 +583,9 @@ namespace WhiskeyRealism.Tactical.Battle
             // 2. Chain.
             EnsureCapacity(s.OwnCount);
             plan.Targets = new ChainResolution { TargetIndices = _targetBuffer };
-            TacticalChainOrderPlanner.ResolveTargets(own, s.OwnCount, idx, _childBuffer, ref plan.Targets);
+            bool shield = w.Channel == OrderChannel.Move && BuildMoveShield(own, s.OwnCount, idx, (int)w.Priority);
+            TacticalChainOrderPlanner.ResolveTargets(own, s.OwnCount, idx, _childBuffer, ref plan.Targets,
+                shield ? _shielded : null, shield ? _shieldedBelow : null);
             if (plan.Targets.Count <= 0) return Skip(plan, SkipReason.ChainNoTargets);
 
             // 3. Waypoint validation (Move, and Facing when it carries a point).
@@ -984,6 +1064,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 _targetBuffer = new int[size];
                 _childBuffer = new int[size];
             }
+            if (_moveClaim.Length < ownCount)
+            {
+                int size = Math.Max(ownCount, _moveClaim.Length * 2);
+                int[] claims = new int[size];
+                Array.Copy(_moveClaim, claims, Math.Min(_moveClaimCount, _moveClaim.Length));
+                _moveClaim = claims;
+                _shielded = new bool[size];
+                _shieldedBelow = new bool[size];
+            }
         }
 
         private void Reset()
@@ -996,6 +1085,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _refuseByGroup.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
+            EndTickClaims();
         }
 
         private static void ResetAll()

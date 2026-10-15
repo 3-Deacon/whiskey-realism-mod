@@ -49,6 +49,10 @@ internal static class OrderArbiterTests
             ("battle-core StanceCheapPathNeedsLiveVanillaStamp", StanceCheapPathNeedsLiveVanillaStamp),
             ("battle-core RetryRunsOnlyWhileItsSourceStillClaims", RetryRunsOnlyWhileItsSourceStillClaims),
             ("battle-core SupersededRetryIsReportedToTheSource", SupersededRetryIsReportedToTheSource),
+            ("battle-core SafetyRegimentMoveSurvivesAnExecutorBrigadeMove", SafetyRegimentMoveSurvivesAnExecutorBrigadeMove),
+            ("battle-core ClaimedBranchFansOutTheRestMovesWhole", ClaimedBranchFansOutTheRestMovesWhole),
+            ("battle-core EqualOrLowerDescendantClaimDoesNotFanOut", EqualOrLowerDescendantClaimDoesNotFanOut),
+            ("battle-core GroupMoveYieldsWhenEveryChildIsClaimed", GroupMoveYieldsWhenEveryChildIsClaimed),
         });
     }
 
@@ -867,6 +871,117 @@ internal static class OrderArbiterTests
     }
 
     // ------------------------------------------------------------------ helpers
+
+    // ------------------------------------------------------- cross-level claims
+
+    // Claims are per (unit, channel), so a regiment's Safety withdrawal and its
+    // brigade's Executor move both win. Vanilla SetGroupFormation re-paths every
+    // non-detached, non-routed child of the moved group (92076-92108,
+    // RegimentSetPath 92108), so the brigade's move must not reach the regiment:
+    // it fans out to the other children instead.
+    private static void SafetyRegimentMoveSurvivesAnExecutorBrigadeMove()
+    {
+        var view = new FixtureBattleView();
+        int brigade = view.AddGroup(10, 100f, -100f);
+        int withdrawing = view.AddGroup(11, 80f, -120f, parentIndex: brigade);
+        int left = view.AddGroup(12, 100f, -120f, parentIndex: brigade);
+        int right = view.AddGroup(13, 120f, -120f, parentIndex: brigade);
+        var executor = NewExecutor();
+        var winners = new[]
+        {
+            Move(11, 60f, -40f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None),
+            Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor),
+        };
+        executor.BeginTickClaims(view, winners, winners.Length);
+
+        var regiment = executor.Plan(view, winners[0], 1.0);
+        AssertTrue(regiment.Execute, "the withdrawal executes");
+        AssertEqual(1, regiment.Targets.Count, "on the regiment itself");
+        AssertEqual(withdrawing, regiment.Targets.TargetIndices[0], "the withdrawing regiment");
+
+        var group = executor.Plan(view, winners[1], 1.0);
+        AssertTrue(group.Execute, "the brigade still moves");
+        AssertTrue(group.Targets.FannedOut, "fanned out around the claimed regiment");
+        AssertEqual(2, group.Targets.Count, "the brigade's other children");
+        AssertTrue(Targets(group, left) && Targets(group, right), "both other children move");
+        AssertFalse(Targets(group, withdrawing), "the withdrawing regiment is not re-pathed");
+        AssertFalse(Targets(group, brigade), "the brigade is not ordered as a group");
+
+        executor.EndTickClaims();
+        var later = executor.Plan(view, winners[1], 1.0);
+        AssertFalse(later.Targets.FannedOut, "outside the tick no claim shields anything");
+        AssertEqual(brigade, later.Targets.TargetIndices[0], "the group orders itself");
+    }
+
+    private static void ClaimedBranchFansOutTheRestMovesWhole()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(1, 100f, -100f);
+        int claimedBrigade = view.AddGroup(2, 80f, -120f, parentIndex: division);
+        int otherBrigade = view.AddGroup(3, 120f, -120f, parentIndex: division);
+        view.AddGroup(4, 70f, -130f, parentIndex: claimedBrigade);
+        int sibling = view.AddGroup(5, 90f, -130f, parentIndex: claimedBrigade);
+        view.AddGroup(6, 120f, -130f, parentIndex: otherBrigade);
+        var executor = NewExecutor();
+        var winners = new[]
+        {
+            Move(4, 40f, -60f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None),
+            Move(1, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor),
+        };
+        executor.BeginTickClaims(view, winners, winners.Length);
+
+        var plan = executor.Plan(view, winners[1], 1.0);
+        AssertTrue(plan.Execute, "the division moves");
+        AssertEqual(2, plan.Targets.Count, "the unclaimed brigade and the claimed regiment's sibling");
+        AssertTrue(Targets(plan, otherBrigade), "the other brigade moves whole");
+        AssertTrue(Targets(plan, sibling), "the sibling regiment moves on its own");
+        AssertFalse(Targets(plan, claimedBrigade), "the claimed regiment's brigade is not ordered as a group");
+    }
+
+    private static void EqualOrLowerDescendantClaimDoesNotFanOut()
+    {
+        var view = new FixtureBattleView();
+        int brigade = view.AddGroup(10, 100f, -100f);
+        view.AddGroup(11, 80f, -120f, parentIndex: brigade);
+        view.AddGroup(12, 120f, -120f, parentIndex: brigade);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+
+        foreach (IntentPriority child in new[] { IntentPriority.Executor, IntentPriority.Play })
+        {
+            var executor = NewExecutor();
+            var winners = new[] { Move(11, 60f, -40f, child, IntentSource.DivisionPlay), groupMove };
+            executor.BeginTickClaims(view, winners, winners.Length);
+            var plan = executor.Plan(view, groupMove, 1.0);
+            AssertFalse(plan.Targets.FannedOut, child + " claim below does not outrank the group move");
+            AssertEqual(brigade, plan.Targets.TargetIndices[0], "the group orders itself");
+        }
+    }
+
+    private static void GroupMoveYieldsWhenEveryChildIsClaimed()
+    {
+        var view = new FixtureBattleView();
+        int brigade = view.AddGroup(10, 100f, -100f);
+        view.AddGroup(11, 80f, -120f, parentIndex: brigade);
+        view.AddGroup(12, 120f, -120f, parentIndex: brigade);
+        var executor = NewExecutor();
+        var winners = new[]
+        {
+            Move(11, 60f, -40f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None),
+            Move(12, 140f, -40f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None),
+            Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor),
+        };
+        executor.BeginTickClaims(view, winners, winners.Length);
+        var plan = executor.Plan(view, winners[2], 1.0);
+        AssertFalse(plan.Execute, "nothing left to move");
+        AssertEqual(SkipReason.ChainNoTargets, plan.Skip, "the group move yields");
+    }
+
+    private static bool Targets(in ExecutionPlan plan, int index)
+    {
+        for (int t = 0; t < plan.Targets.Count; t++)
+            if (plan.Targets.TargetIndices[t] == index) return true;
+        return false;
+    }
 
     private static OrderExecutor NewExecutor()
     {

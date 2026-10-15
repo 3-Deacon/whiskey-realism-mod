@@ -20,6 +20,12 @@
 // child that itself needs it. Player-owned units are never targets. An order that
 // touches an ancestor of the player's command needs the player's share delivered
 // as a dispatch (§C).
+//
+// Cross-level claims (OrderExecutor.BeginTickClaims): a group Move also fans out
+// around descendants that hold a higher-priority Move claim this tick (shielded:
+// skipped like player-owned children; shieldedBelow: the units above them, which
+// fan out again), because SetGroupFormation re-paths every non-detached,
+// non-routed child (92076-92108).
 
 namespace WhiskeyRealism.Tactical.Battle
 {
@@ -39,6 +45,13 @@ namespace WhiskeyRealism.Tactical.Battle
         // capacity is dropped.
         public static void ResolveTargets(UnitRecord[] own, int count, int groupIndex, int[] childBuffer, ref ChainResolution result)
         {
+            ResolveTargets(own, count, groupIndex, childBuffer, ref result, null, null);
+        }
+
+        // shielded / shieldedBelow: indexed like own, null = no cross-level claims.
+        public static void ResolveTargets(UnitRecord[] own, int count, int groupIndex, int[] childBuffer, ref ChainResolution result,
+            bool[] shielded, bool[] shieldedBelow)
+        {
             Reset(ref result, childBuffer, count);
             if (own == null) return;
             if (count > own.Length) count = own.Length;
@@ -48,7 +61,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((groupFlags & (UnitFlags.PlayerOwned | UnitFlags.PlayerCommand)) != 0) return;
 
             result.PlayerShareNeedsDispatch = (groupFlags & UnitFlags.AncestorOfPlayerCommand) != 0;
-            if (!PlayerOwnership.NeedsChainFanOut(own, count, groupIndex))
+            if (!NeedsFanOut(own, count, groupIndex, shieldedBelow))
             {
                 Add(ref result, groupIndex);
                 return;
@@ -67,7 +80,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if (child == parent || own[child].ParentIndex != parent) continue;
                     if ((own[child].Flags & UnitFlags.PlayerOwned) != 0) continue;
-                    if (PlayerOwnership.NeedsChainFanOut(own, count, child))
+                    if (shielded != null && child < shielded.Length && shielded[child]) continue;
+                    if (NeedsFanOut(own, count, child, shieldedBelow))
                     {
                         if (tail < childBuffer.Length) childBuffer[tail++] = child;
                         continue;
@@ -75,6 +89,12 @@ namespace WhiskeyRealism.Tactical.Battle
                     Add(ref result, child);
                 }
             }
+        }
+
+        private static bool NeedsFanOut(UnitRecord[] own, int count, int index, bool[] shieldedBelow)
+        {
+            return PlayerOwnership.NeedsChainFanOut(own, count, index)
+                || (shieldedBelow != null && index < shieldedBelow.Length && shieldedBelow[index]);
         }
 
         private static void Reset(ref ChainResolution result, int[] childBuffer, int count)
