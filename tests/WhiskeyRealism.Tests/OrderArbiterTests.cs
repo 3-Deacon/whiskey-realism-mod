@@ -660,112 +660,112 @@ internal static class OrderArbiterTests
     {
         return new BattleOrderIntent { GroupId = group, Channel = OrderChannel.Facing, Heading = heading, Priority = priority, Source = source, Reason = "test" };
     }
-}
 
-// Array-backed stand-in for BattleSnapshot (BC1) behind IBattleUnitView.
-internal sealed class FixtureBattleView : IBattleUnitView
-{
-    private readonly UnitRecord[] _own = new UnitRecord[64];
-    private readonly EnemyObservation[] _observations = new EnemyObservation[32];
-
-    public int Alliance => 0;
-    public int OwnCount { get; private set; }
-    public UnitRecord[] Own => _own;
-    public int ObservationCount { get; private set; }
-    public EnemyObservation[] Observations => _observations;
-
-    public int IndexOfOwn(int instanceId)
+    // Array-backed stand-in for BattleSnapshot (BC1) behind IBattleUnitView.
+    private sealed class FixtureBattleView : IBattleUnitView
     {
-        for (int i = 0; i < OwnCount; i++)
-            if (_own[i].InstanceId == instanceId) return i;
-        return -1;
-    }
+        private readonly UnitRecord[] _own = new UnitRecord[64];
+        private readonly EnemyObservation[] _observations = new EnemyObservation[32];
 
-    public bool IsAncestorOf(int ancestorIndex, int descendantIndex)
-    {
-        int p = descendantIndex >= 0 && descendantIndex < OwnCount ? _own[descendantIndex].ParentIndex : -1;
-        while (p >= 0)
+        public int Alliance => 0;
+        public int OwnCount { get; private set; }
+        public UnitRecord[] Own => _own;
+        public int ObservationCount { get; private set; }
+        public EnemyObservation[] Observations => _observations;
+
+        public int IndexOfOwn(int instanceId)
         {
-            if (p == ancestorIndex) return true;
-            p = _own[p].ParentIndex;
+            for (int i = 0; i < OwnCount; i++)
+                if (_own[i].InstanceId == instanceId) return i;
+            return -1;
         }
-        return false;
-    }
 
-    public int AddGroup(int id, float x, float z, int parentIndex = -1, UnitFlags flags = UnitFlags.None)
-    {
-        int i = OwnCount++;
-        _own[i] = new UnitRecord
+        public bool IsAncestorOf(int ancestorIndex, int descendantIndex)
         {
-            InstanceId = id, UnitTyp = 15, X = x, Z = z, ParentIndex = parentIndex, AiStanceOrdered = 0, Formation = 0,
-            CombatBehaviorOrdered = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | flags,
-        };
-        return i;
-    }
-
-    public int AddEnemy(int id, float x, float z, ObservationState state)
-    {
-        int i = ObservationCount++;
-        _observations[i] = new EnemyObservation { InstanceId = id, X = x, Z = z, State = state, Strength = 500f, Confidence01 = 1f };
-        return i;
-    }
-}
-
-internal sealed class FixtureGuard : IOrderGuard
-{
-    public SkipReason Refuse = SkipReason.None;
-
-    public bool CanWrite(in UnitRecord unit, out SkipReason reason)
-    {
-        reason = Refuse;
-        return Refuse == SkipReason.None;
-    }
-}
-
-// Ancestor of the player command, not detached: the order goes to the direct
-// children except the player's (plan BC3 chain rule).
-internal sealed class FixtureFanOutChain : IChainResolver
-{
-    public void ResolveTargets(IBattleUnitView s, int groupIndex, int[] childBuffer, ref ChainResolution result)
-    {
-        int n = 0;
-        for (int i = 0; i < s.OwnCount; i++)
-        {
-            if (s.Own[i].ParentIndex != groupIndex) continue;
-            if ((s.Own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
-            result.TargetIndices[n++] = i;
+            int p = descendantIndex >= 0 && descendantIndex < OwnCount ? _own[descendantIndex].ParentIndex : -1;
+            while (p >= 0)
+            {
+                if (p == ancestorIndex) return true;
+                p = _own[p].ParentIndex;
+            }
+            return false;
         }
-        result.Count = n;
-        result.FannedOut = true;
-        result.PlayerShareNeedsDispatch = true;
+
+        public int AddGroup(int id, float x, float z, int parentIndex = -1, UnitFlags flags = UnitFlags.None)
+        {
+            int i = OwnCount++;
+            _own[i] = new UnitRecord
+            {
+                InstanceId = id, UnitTyp = 15, X = x, Z = z, ParentIndex = parentIndex, AiStanceOrdered = 0, Formation = 0,
+                CombatBehaviorOrdered = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | flags,
+            };
+            return i;
+        }
+
+        public int AddEnemy(int id, float x, float z, ObservationState state)
+        {
+            int i = ObservationCount++;
+            _observations[i] = new EnemyObservation { InstanceId = id, X = x, Z = z, State = state, Strength = 500f, Confidence01 = 1f };
+            return i;
+        }
     }
-}
 
-internal sealed class FixtureDispatchMapper : IDispatchTypeMapper
-{
-    public int Type = OrderExecutor.NoDispatch;
-    public int Calls;
-
-    public int Map(CommandTaskType task, bool targetEnemyHeld, bool chargeSupported)
+    private sealed class FixtureGuard : IOrderGuard
     {
-        Calls++;
-        return Type;
+        public SkipReason Refuse = SkipReason.None;
+
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason)
+        {
+            reason = Refuse;
+            return Refuse == SkipReason.None;
+        }
     }
-}
 
-internal sealed class FixtureTerrain : ITerrainProbe
-{
-    public float WaterAboveX = float.MaxValue;
-    public bool LineCrossesWaterAlways;
-    public int StepBackCalls;
-
-    public bool IsWaterOrFence(float x, float z) => x > WaterAboveX;
-
-    public bool LineCrossesWater(float x0, float z0, float x1, float z1) => LineCrossesWaterAlways;
-
-    public bool StepBackFromRiver(float x0, float z0, ref float x1, ref float z1)
+    // Ancestor of the player command, not detached: the order goes to the direct
+    // children except the player's (plan BC3 chain rule).
+    private sealed class FixtureFanOutChain : IChainResolver
     {
-        StepBackCalls++;
-        return false;
+        public void ResolveTargets(IBattleUnitView s, int groupIndex, int[] childBuffer, ref ChainResolution result)
+        {
+            int n = 0;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if (s.Own[i].ParentIndex != groupIndex) continue;
+                if ((s.Own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
+                result.TargetIndices[n++] = i;
+            }
+            result.Count = n;
+            result.FannedOut = true;
+            result.PlayerShareNeedsDispatch = true;
+        }
+    }
+
+    private sealed class FixtureDispatchMapper : IDispatchTypeMapper
+    {
+        public int Type = OrderExecutor.NoDispatch;
+        public int Calls;
+
+        public int Map(CommandTaskType task, bool targetEnemyHeld, bool chargeSupported)
+        {
+            Calls++;
+            return Type;
+        }
+    }
+
+    private sealed class FixtureTerrain : ITerrainProbe
+    {
+        public float WaterAboveX = float.MaxValue;
+        public bool LineCrossesWaterAlways;
+        public int StepBackCalls;
+
+        public bool IsWaterOrFence(float x, float z) => x > WaterAboveX;
+
+        public bool LineCrossesWater(float x0, float z0, float x1, float z1) => LineCrossesWaterAlways;
+
+        public bool StepBackFromRiver(float x0, float z0, ref float x1, ref float z1)
+        {
+            StepBackCalls++;
+            return false;
+        }
     }
 }

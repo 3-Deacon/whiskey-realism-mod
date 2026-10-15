@@ -61,6 +61,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static FieldInfo _bunitsField;
         private static bool _bunitsFieldResolved;
+        // Session latch for the once-per-session producer line (built only once).
+        private static bool _producersLogged;
 
         static BattleCoreTick()
         {
@@ -144,7 +146,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 return;
             }
 
-            OnceLog.Info("battle-core:producers", "[BattleCore] producers count=" + _producerCount + " order=" + ProducerNames());
+            if (!_producersLogged)
+            {
+                _producersLogged = true;
+                OnceLog.Info("battle-core:producers", "[BattleCore] producers count=" + _producerCount + " order=" + ProducerNames());
+            }
             double now = TacticalDoctrineTime.NowBattleHours;
             ArbiterStats stats = _stats[alliance];
 

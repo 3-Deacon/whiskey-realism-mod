@@ -73,6 +73,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // BattleUnits.completeunitlist when the roster grows or a lookup misses
         // (at most once per tick).
         private static readonly Dictionary<int, Regiment> _regiments = new Dictionary<int, Regiment>(1024);
+        // Session latch for the first-fire line (built only once).
+        private static bool _firstFireLogged;
         private static int _lookupUnitCount = -1;
         private static int _lookupFrame = -1;
 
@@ -147,9 +149,12 @@ namespace WhiskeyRealism.Tactical.Battle
                 executor.RecordIssued(recorded, nowHours, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
             }
 
-            if (executed > 0)
+            if (executed > 0 && !_firstFireLogged)
+            {
+                _firstFireLogged = true;
                 OnceLog.Info("battle-core:arbiter-first-fire",
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
+            }
 
             if (OrderExecutor.ShouldDispatch(plan, executed) && DispatchEmitter != null &&
                 TryGetRegiment(winner.GroupId, out Regiment ancestor))
