@@ -362,18 +362,35 @@ namespace WhiskeyRealism.Strategic
             return !leadInOffensive && !leadInDefensive && !leadBuildingDepot;
         }
 
-        // Tempo roll (14336-14350), applied by vanilla when the target lies in an
-        // enemy state and enemy strength is present:
+        // Tempo roll (14316-14350), applied by vanilla when the objective position
+        // lies in a state of another alliance and num2 > 0:
         //   tval = aiagressiveness[chapter] * timediff * 10 * aiagressivenessoffensive
         //          operationfaction[alliance] * usedcampaignagressiveness * winter
         //        + clamp01(idleYears^3)        (idle = date - avg timeofnotmoving)
-        //   tval *= dlcwl_careerincreasedaggressiveness when a W&L scenario runs.
+        //   W&L scenario: tval *= dlcwl_careerincreasedaggressiveness (14344), and
+        //   again when the player's campaign group is in the moving list (14346).
         public static float TempoProbability(float chapterAggression, float timediff, float factionAggression,
-            float campaignAggression, float winterModifier, float idleYears, float wlMultiplier)
+            float campaignAggression, float winterModifier, float idleYears,
+            bool wlScenarioActive, float wlAggressiveness, bool playerGroupInPackage)
         {
             float tval = chapterAggression * timediff * 10f * factionAggression * campaignAggression * winterModifier;
             float idle = Math.Max(0f, Math.Min(1f, idleYears * idleYears * idleYears));
-            return (tval + idle) * wlMultiplier;
+            tval += idle;
+            if (wlScenarioActive)
+            {
+                tval *= wlAggressiveness;
+                if (playerGroupInPackage) tval *= wlAggressiveness;
+            }
+            return tval;
+        }
+
+        // Vanilla num2 for the TARGET area (14229-14230):
+        //   enemycampaignunitsstrengthclose * avgtroopmoraleinzone * aiimportanceenemyunits
+        //   * enemycampaignunitsstrengthcloseweapon / GetNationalMoraleFactor.
+        public static float TargetEnemyWeight(float enemyStrengthClose, float avgTroopMorale, float importanceEnemyUnits,
+            float enemyWeapon, float nationalMoraleFactor)
+        {
+            return enemyStrengthClose * avgTroopMorale * importanceEnemyUnits * enemyWeapon / Math.Max(0.01f, nationalMoraleFactor);
         }
 
         // Vanilla returns when roll > tval unless debug_permanentaimovement or the

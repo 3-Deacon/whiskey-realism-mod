@@ -28,8 +28,10 @@ namespace WhiskeyRealism.Patches
     //     the vanilla target (OffensiveAvailabilityWrapper), so packages are not
     //     built from units the commit preflight then rejects;
     //   - vanilla's tempo roll (chapter aggression, faction aggression, winter,
-    //     idle time, W&L multiplier, scripted forcing; 14316-14350) gates commits
-    //     into enemy-held states with enemy present;
+    //     idle time, W&L multipliers incl. the player-group one, scripted forcing;
+    //     14316-14350) gates commits whose objective lies in another alliance's
+    //     state while the target area's num2 (14230) > 0. One roll per call: a
+    //     failed roll empties ownunits for the call so vanilla does not roll again;
     //   - ownunits is emptied only when the package actually committed; a failed
     //     or deferred package leaves vanilla's own offensive logic untouched.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
@@ -57,7 +59,7 @@ namespace WhiskeyRealism.Patches
             internal Vector3 Target;
             internal string TargetName;
             internal string PackageSignature;
-            internal bool EnemyPresentAtTarget;
+            internal float TargetEnemyWeight;
         }
 
         private static readonly Dictionary<int, Snapshot> _snapshots = new Dictionary<int, Snapshot>();
@@ -108,10 +110,6 @@ namespace WhiskeyRealism.Patches
                 var decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit, faction);
                 if (!decision.PackageSelected) return;
 
-                // Fails most calls by design (vanilla's own roll does too); stay
-                // silent here - this runs per unit per AI job cycle.
-                if (!PassesVanillaTempoGate(allianceId, decision, ownUnits, timediff)) return;
-
                 var snapshot = new Snapshot
                 {
                     Signature = BuildSignature(allianceId, _aifaction, unit, faction),
@@ -119,6 +117,18 @@ namespace WhiskeyRealism.Patches
                 };
                 for (int i = 0; i < ownUnits.Count; i++)
                     snapshot.OwnUnits.Add(ownUnits[i]);
+
+                // One tempo roll per call, like vanilla. A failed roll ends this call:
+                // empty ownunits so vanilla early-returns (14200) instead of rolling
+                // again for the same target; the Finalizer restores the list. Silent -
+                // this fails most calls by design and runs per unit per job cycle.
+                if (!PassesVanillaTempoGate(allianceId, decision, ownUnits, timediff))
+                {
+                    _snapshots[_aifaction] = snapshot;
+                    snapshotRegistered = true;
+                    ownUnits.Clear();
+                    return;
+                }
 
                 bool committed = CoordinatedOperationRuntime.CommitPackage(
                     allianceId,
@@ -328,7 +338,7 @@ namespace WhiskeyRealism.Patches
             var defensive = GetList(faction, "unitsindefensiveoperations", _defensiveFields);
             var depots = GetList(faction, "unitsconstructingsupplydepots", _depotFields);
             var leadAssignment = ledger.GetAssignment(UnitKey(lead));
-            var vanillaTarget = ResolveVanillaOffensiveTarget(aifactionIndex, lead);
+            var vanillaTarget = ResolveVanillaOffensiveTarget(aifactionIndex, lead, out float targetEnemyWeight);
             if (!vanillaTarget.HasValue)
                 return decision;
             string targetName = CoordinatedOperationRuntime.ResolveTargetName(
@@ -391,7 +401,7 @@ namespace WhiskeyRealism.Patches
                 return decision;
 
             decision.PackageSelected = true;
-            decision.EnemyPresentAtTarget = (leadAssignment?.LocalEnemyStrength ?? 0f) > 0f;
+            decision.TargetEnemyWeight = targetEnemyWeight;
             decision.Output = output;
             decision.Target = vanillaTarget.Value;
             decision.TargetName = targetName;
@@ -471,8 +481,9 @@ namespace WhiskeyRealism.Patches
         // Mirrors vanilla's target choice (14204-14227): the lead's AIArea picks
         // mostvaluealbeaiareaclosedistanceonly with no enemy in the area,
         // otherwise mostvalueableaiareaclose; then GetClosestObjectivePosOfArea.
-        private static Vector3? ResolveVanillaOffensiveTarget(int aifactionIndex, Regiment lead)
+        private static Vector3? ResolveVanillaOffensiveTarget(int aifactionIndex, Regiment lead, out float targetEnemyWeight)
         {
+            targetEnemyWeight = 0f;
             try
             {
                 if (lead == null || AICampaign.aiareas == null) return null;
@@ -489,6 +500,17 @@ namespace WhiskeyRealism.Patches
                 if (picks == null || aifactionIndex < 0 || aifactionIndex >= picks.Length) return null;
                 var targetArea = picks[aifactionIndex];
                 if (targetArea == null) return null;
+                if (InRange(targetArea.enemycampaignunitsstrengthclose, aifactionIndex) &&
+                    InRange(targetArea.avgtroopmoraleinzone, aifactionIndex) &&
+                    InRange(targetArea.enemycampaignunitsstrengthcloseweapon, aifactionIndex))
+                {
+                    targetEnemyWeight = CoordinatedOffensiveVanillaGates.TargetEnemyWeight(
+                        targetArea.enemycampaignunitsstrengthclose[aifactionIndex],
+                        targetArea.avgtroopmoraleinzone[aifactionIndex],
+                        GamePrefs.aiimportanceenemyunits,
+                        targetArea.enemycampaignunitsstrengthcloseweapon[aifactionIndex],
+                        AICampaign.GetNationalMoraleFactor(aifactionIndex));
+                }
 
                 if (!_closestObjectivePosResolved)
                 {
@@ -557,13 +579,13 @@ namespace WhiskeyRealism.Patches
             catch { return false; }
         }
 
-        // Vanilla tempo roll (14316-14350), applied when the target lies in a state
-        // owned by another alliance and enemy strength is present at the target.
+        // Vanilla tempo roll (14316-14350): applied when the objective position lies
+        // in a state of another alliance and the target area's num2 (14230) > 0.
         private static bool PassesVanillaTempoGate(int allianceId, PackageFilterDecision decision, IList ownUnits, float timediff)
         {
             try
             {
-                if (!decision.EnemyPresentAtTarget) return true;
+                if (decision.TargetEnemyWeight <= 0f) return true;
                 int state = BattlefieldSetup.GetStateOfField(decision.Target, usecloseststate: true);
                 if (state < 0 || GameVars.nation == null || state >= GameVars.nation.Length) return true;
                 if (GameVars.nation[state].alliance == allianceId) return true;
@@ -579,7 +601,6 @@ namespace WhiskeyRealism.Patches
                 float factionAggression = GamePrefs.aiagressivenessoffensiveoperationfaction != null &&
                     allianceId < GamePrefs.aiagressivenessoffensiveoperationfaction.Length
                     ? GamePrefs.aiagressivenessoffensiveoperationfaction[allianceId] : 1f;
-                float wlMultiplier = DLC_WL.dlc_scenarioactive ? GamePrefs.dlcwl_careerincreasedaggressiveness : 1f;
 
                 float tval = CoordinatedOffensiveVanillaGates.TempoProbability(
                     chapterAggression,
@@ -588,7 +609,9 @@ namespace WhiskeyRealism.Patches
                     GameVars.usedcampaignagressiveness,
                     WinterModifier(),
                     date - AverageTimeOfNotMoving(decision.Output, ownUnits),
-                    wlMultiplier);
+                    DLC_WL.dlc_scenarioactive,
+                    GamePrefs.dlcwl_careerincreasedaggressiveness,
+                    PackageContainsPlayerGroup(decision.Output, ownUnits));
                 return CoordinatedOffensiveVanillaGates.TempoPasses(UnityEngine.Random.Range(0f, 1f), tval, forced);
             }
             catch (Exception ex)
@@ -597,6 +620,20 @@ namespace WhiskeyRealism.Patches
                     "Patch CoordinatedOps tempo gate failed (package held back): " + ex.Message);
                 return false;
             }
+        }
+
+        // Vanilla (14241-14244, 14346): the W&L player's campaign group is
+        // BattleUnits.GetCampaignGroup(commander[dlc_chosencommander].currentcommand).
+        private static bool PackageContainsPlayerGroup(CoordinatedOperationOutput output, IList ownUnits)
+        {
+            if (!DLC_WL.dlc_scenarioactive) return false;
+            int chosen = DLC_WL.dlc_chosencommander;
+            if (chosen < 0 || GameVars.commander == null || chosen >= GameVars.commander.Count) return false;
+            var playerGroup = BattleUnits.GetCampaignGroup(GameVars.commander[chosen].currentcommand);
+            if ((UnityEngine.Object)(object)playerGroup == (UnityEngine.Object)null) return false;
+            int playerId = ((UnityEngine.Object)playerGroup).GetInstanceID();
+            if (output.LeadStableUnitId == playerId) return true;
+            return output.SupportStableUnitIds.Contains(playerId);
         }
 
         private static float WinterModifier()

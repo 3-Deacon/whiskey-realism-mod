@@ -480,12 +480,20 @@ internal static class CampaignMilitaryFixTests
     // + clamp01(idleYears^3), times the W&L multiplier; go when roll <= tval.
     private static void CoordinatedOffensiveTempoGateMatchesVanilla()
     {
-        float tval = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, 1f);
+        float tval = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, false, 1.5f, false);
         TestHarness.AssertTrue(Math.Abs(0.1f - tval) < 1e-5f, "chapter x timediff x 10, got " + tval);
-        float winter = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 0.2f, 0f, 1f);
+        float winter = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 0.2f, 0f, false, 1.5f, false);
         TestHarness.AssertTrue(Math.Abs(0.02f - winter) < 1e-5f, "winter modifier scales the roll");
-        float idle = CoordinatedOffensiveVanillaGates.TempoProbability(0f, 0.02f, 1f, 1f, 1f, 0.5f, 1f);
+        float idle = CoordinatedOffensiveVanillaGates.TempoProbability(0f, 0.02f, 1f, 1f, 1f, 0.5f, false, 1.5f, false);
         TestHarness.AssertTrue(Math.Abs(0.125f - idle) < 1e-5f, "idle time adds clamp01(idle^3)");
+        float wl = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, true, 1.5f, false);
+        TestHarness.AssertTrue(Math.Abs(0.15f - wl) < 1e-5f, "W&L scenario multiplies once (14344)");
+        float wlPlayer = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, true, 1.5f, true);
+        TestHarness.AssertTrue(Math.Abs(0.225f - wlPlayer) < 1e-5f, "player's group in the package multiplies again (14346)");
+        // num2 at the TARGET area (14230): enemy strength * avgtroopmorale * importance * weapon / national morale factor
+        float num2 = CoordinatedOffensiveVanillaGates.TargetEnemyWeight(1000f, 0.8f, 2f, 0.5f, 2f);
+        TestHarness.AssertTrue(Math.Abs(400f - num2) < 1e-3f, "vanilla num2 (1000*0.8*2*0.5/2), got " + num2);
+        TestHarness.AssertEqual(0f, CoordinatedOffensiveVanillaGates.TargetEnemyWeight(0f, 0.8f, 2f, 0.5f, 2f), "no enemy -> no roll");
         TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.05f, 0.1f, false), "roll under tval goes");
         TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.TempoPasses(0.5f, 0.1f, false), "roll over tval waits");
         TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.99f, 0f, true), "scripted/debug forcing always goes");
