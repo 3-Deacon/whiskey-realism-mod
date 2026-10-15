@@ -64,7 +64,7 @@ namespace WhiskeyRealism.Patches
     }
 
     // BUG-BAT-002 diagnostic. Vanilla Autocalc.StartLandBattle (22118) builds an autoresolved
-    // land battle from both sides' top units. This Postfix counts, once per session, the
+    // land battle from both sides' top units. This Postfix counts, once per campaign, the
     // batteries on each side that carry weapon id 0, the ones vanilla's FightUnit leaves
     // without damage. Read-only; sizes the fix in smoke. Raids and skirmishes (StartRaiding
     // 20462, StartSkirmishing 20598) reach FightUnit too but are not counted here.
@@ -72,6 +72,11 @@ namespace WhiskeyRealism.Patches
     internal static class AutoresolveStandardGunCountPatch
     {
         private static bool _counted;
+
+        static AutoresolveStandardGunCountPatch()
+        {
+            CampaignScope.Register("autoresolve-standard-gun-count", () => _counted = false);
+        }
 
         [HarmonyPostfix]
         internal static void Postfix(List<Regiment> envolvedunitsside0, List<Regiment> envolvedunitsside1)

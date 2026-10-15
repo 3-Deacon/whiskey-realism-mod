@@ -23,7 +23,7 @@ Ids continue past the highest used on `main` (`BUG-AI-016`, `BUG-WL-015`, `BUG-B
 - **Fix.** A narrow fail-safe Transpiler, approved by the user on 2026-10-15 ("Approve (Recommended)" for the autoresolve 6-pounder fix). It matches `ldarg.1; ldfld Regiment::weapon; ldc.i4.0; ble(.s)` and requires exactly two sites. The `ldc.i4.0` becomes `call AutoresolveStandardGunPatch.WeaponFloor()`, which returns -1 with the flag on and 0 with it off. The flag is read on every call. On a count mismatch the IL stays vanilla and one warning is logged. The pattern helper is `Strategic/BugFixes/AutoresolveWeaponGateIl.cs`.
   - It composes with the perk-id Transpiler on the same method (`AutocalcPerkIdsPatch`, #74): the harness applies both in either order on the real IL and gets the same body.
   - ILVerify 8.0.0 replay: the combined edit (2 hook replacements + 4 perk remap inserts) on a Mono.Cecil copy of `Assembly-CSharp.dll`, calling the real hooks in `dist/WhiskeyRealism.dll`, verifies clean. A deliberately wrong hook (a `(Regiment, int) -> bool` method in place of `WeaponFloor`) fails with `StackUnderflow` at offset 0xDD. Tooling as in [`vanilla-perk-ids.md`](vanilla-perk-ids.md) and [`../findings.md`](../findings.md) § Perk id tables; include pattern `-i "Autocalc.FightUnit"`.
-- **Diagnostic.** `AutoresolveStandardGunCountPatch` (Postfix on `Autocalc.StartLandBattle`, 22118) logs once per session, at the first autoresolved land battle, each side's battery count and how many carry weapon 0. Raids and skirmishes are not counted.
+- **Diagnostic.** `AutoresolveStandardGunCountPatch` (Postfix on `Autocalc.StartLandBattle`, 22118) logs once per campaign (a `CampaignScope` reset), at the first autoresolved land battle, each side's battery count and how many carry weapon 0. Raids and skirmishes are not counted.
 - **Flag.** `Campaign Bug Fixes / Enable Autoresolve Standard Gun Fix`.
 
 ## BUG-BAT-003 — unit merges leak guns into stock and downgrade the target
@@ -42,6 +42,7 @@ Ids continue past the highest used on `main` (`BUG-AI-016`, `BUG-WL-015`, `BUG-B
     - the target keeps its model when the stock covers what it gains, when both units carry the same model, or when it already carries the standard weapon (new men get it free, as recruits do, 89508);
     - a real shortfall still re-arms it with the standard weapon (vanilla's rule, its own log text at 93239) and returns its guns, not its men.
   - Every early return of vanilla moves nothing and settles to the snapshot. A cross-alliance merge or an out-of-range id keeps vanilla's stock.
+- **Not handled: a negative stock cell.** On a merge that moves nothing, a negative stock cell would make `Settle` see the gain (0) as uncovered, downgrade the target and clamp the cell to 0. This cannot happen: vanilla never makes a stock cell negative (31556-31559, 93226, 227121-227125; the upgrade draw at 16188 sits behind `GetBestWeapon`'s stock check). Left as is.
 - **Flag.** `Campaign Bug Fixes / Enable Combine Weapon Stock Fix`. #34's gun sync keeps its own flag.
 
 ## BUG-WL-016 — every alliance's weapon orders spend the career player's budget
@@ -61,7 +62,7 @@ Ids continue past the highest used on `main` (`BUG-AI-016`, `BUG-WL-015`, `BUG-B
 ## BUG-AI-017 — AI orders models nobody produces (dead machine-gun exclusion)
 
 - **Failure.** `AICampaign.CheckPurchaseWeapons` (16259) takes as candidates every model that is researched OR imported with no open order (16296, 16313), then orders one at random (16328, 16338).
-- **The player's screen is stricter.** `AbleToOrder` (63938) → `GetAvailability` (63962) also needs a researched model to be produced (`productionmultiplier > 0`). Projects 10 and 11 research Gatling 37, Coffee Mill 38 and Williams 12 at pm 0 (`UpdateProjectEffects` 213113-213124). They hand those models out as one-shot stock (212945-212950; `machinegunprojectstock`).
+- **The player's screen is stricter.** `AbleToOrder` (63938) → `GetAvailability` (63962) also needs a researched model to be produced (`productionmultiplier > 0`). Projects 10 and 11 research Gatling 37, Coffee Mill 38 and Williams 12 at pm 0 (`UpdateProjectEffects` 213041: 37/38 at 213091-213092, case 10; 12 at 213096, case 11). They hand those models out as one-shot stock (212945-212950; `machinegunprojectstock`).
 - **Cost to the AI.** It orders them with availability floored at 0.01 (`GetDeliveryTime` 64000) and pays the whole order up front (227162) for up to two years of delivery. Gatling WSF 0.434 out-ranks the 3-inch rifle (0.348), so it is a frequent pick.
 - **Intent.** The discarded `_ = j == 37 || j == 38;` at 16289 is the remains of this exclusion.
 - **Fix.** The order screen's rule, computed for the ordering alliance (`Strategic/WeaponOrderability.cs`: researched and produced, or imported; vanilla's `GetAvailability` always reads the player alliance, 63965-63982, harmless for its callers).

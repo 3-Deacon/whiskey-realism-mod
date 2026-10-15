@@ -11,7 +11,7 @@ namespace WhiskeyRealism.Patches
     // orders one at random. The player's order screen also requires a researched model to be
     // produced (AbleToOrder 63938 -> GetAvailability 63962: productionmultiplier > 0), so the
     // AI alone can order the Gatling (37), Coffee Mill (38) and Williams Gun (12), which
-    // projects 10/11 research at pm 0 (UpdateProjectEffects 213113-213124) to hand out a
+    // projects 10/11 research at pm 0 (UpdateProjectEffects 213091-213092 and 213096) to hand out a
     // one-shot stock (212945-212950). With no production and no import their availability
     // floors at 0.01 (GetDeliveryTime 64000): the AI pays the whole order up front
     // (227162) for up to two years of delivery. The discarded `j == 37 || j == 38` at 16289
