@@ -683,4 +683,27 @@ internal static partial class BattleMovementHonestyTests
         AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(coordinator,
             @"DirectChildEvidenceBuilder\.BuildAll\([^;]*DeployedReserveFlags\(side\.AllianceId, childInstanceIds\)"), "and hands the flags to the builder");
     }
+
+    // A terrain correction of a reserve group is issued with source Deployment; its outcome would
+    // replace the reserve's. The placement carries DeploymentReserve instead, so the child stays a deployed reserve.
+    private static void TerrainCorrectedReserveKeepsItsReserveSource()
+    {
+        BattleSnapshot s = ArrivalFixture(out int[] ix);
+        var executor = new OrderExecutor();
+        AssertEqual(IntentSource.Deployment, DeploymentDoctrine.PlacementSource(executor, Mem2, IntentSource.Deployment), "no outcome: a plain placement");
+        OrderedFrom(executor, Mem2, IntentSource.DeploymentReserve);
+        IntentSource carried = DeploymentDoctrine.PlacementSource(executor, Mem2, IntentSource.Deployment);
+        AssertEqual(IntentSource.DeploymentReserve, carried, "the correction of a reserve group stays a reserve placement");
+        OrderedFrom(executor, Mem2, carried);   // the correction's own outcome
+        AssertTrue(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "the child is still a deployed reserve after the correction");
+
+        var other = new OrderExecutor();
+        OrderedFrom(other, Mem2, IntentSource.PostureExecutor);
+        AssertEqual(IntentSource.Deployment, DeploymentDoctrine.PlacementSource(other, Mem2, IntentSource.Deployment), "a group some other source moved is not a reserve");
+        AssertEqual(IntentSource.DeploymentReserve, DeploymentDoctrine.PlacementSource(null, Mem2, IntentSource.DeploymentReserve), "a requested reserve is never downgraded");
+        string plan = Code("src/WhiskeyRealism/Tactical/Battle/DeploymentPlanRuntime.cs");
+        AssertTrue(plan.Contains("DeploymentDoctrine.PlacementSource("), "every placement goes through the source rule");
+        AssertEqual(425f, DeploymentDoctrine.ReserveDepthMeters, "the ledger's reserve stand-off");
+        AssertEqual(90f, DeploymentDoctrine.ReserveLaneMeters, "and lane");
+    }
 }

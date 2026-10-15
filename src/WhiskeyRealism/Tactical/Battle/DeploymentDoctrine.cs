@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Battle
 {
@@ -108,9 +109,10 @@ namespace WhiskeyRealism.Tactical.Battle
     public static class DeploymentDoctrine
     {
         public const float FacingToleranceDegrees = 20f;
-        public const float ReserveDepthMeters = 425f;
+        // The ledger's reserve stand-off and lane (TacticalBattleLinePlanner), one place for both.
+        public const float ReserveDepthMeters = (float)TacticalBattleLinePlanner.ReserveDistance;
         public const float MinReserveDepthMeters = 150f;
-        public const float ReserveLaneMeters = 90f;
+        public const float ReserveLaneMeters = (float)TacticalBattleLinePlanner.ReserveLaneMeters;
         public const float ObjectiveDetectionMeters = 50f;
         public const float SpacingPerBrigadeMeters = 25f;
         public const int SpacingTries = 8;
@@ -422,6 +424,22 @@ namespace WhiskeyRealism.Tactical.Battle
                 current = own[current].ParentIndex;
             }
             return 0;
+        }
+
+        /// <summary>
+        /// The source a placement of <paramref name="groupId"/> carries. A terrain correction
+        /// (requested Deployment) of a group the executor placed as a reserve keeps
+        /// DeploymentReserve, or the correction's outcome would replace the reserve's and the
+        /// allocator would stop seeing the child as a deployed reserve.
+        /// </summary>
+        public static IntentSource PlacementSource(OrderExecutor executor, int groupId, IntentSource requested)
+        {
+            if (requested != IntentSource.Deployment || executor == null) return requested;
+            if (executor.TryGetLastOutcome(groupId, OrderChannel.Move, out OrderOutcome o) &&
+                o.Source == IntentSource.DeploymentReserve &&
+                (o.Kind == OrderOutcomeKind.Issued || o.Kind == OrderOutcomeKind.Moved))
+                return IntentSource.DeploymentReserve;
+            return requested;
         }
 
         // ------------------------------------------------------------------ helpers

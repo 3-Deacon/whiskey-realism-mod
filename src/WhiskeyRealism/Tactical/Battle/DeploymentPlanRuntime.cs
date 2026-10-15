@@ -383,7 +383,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 TargetZ = frontZ,
                 Heading = heading,
                 Priority = IntentPriority.Executor,
-                Source = source,
+                Source = DeploymentDoctrine.PlacementSource(OrderExecutor.ForAlliance(regiment.alliance), regiment.gameObject.GetInstanceID(), source),
                 Flags = IntentFlags.ImmediatePlacement,
                 Reason = "deployment",
             };

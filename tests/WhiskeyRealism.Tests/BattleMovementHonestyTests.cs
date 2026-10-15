@@ -98,6 +98,7 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 ReserveClampRevertsChildUnder150m", ReserveClampRevertsChildUnder150m),
             ("bc10 ReserveChildGroupsKeepRelativeSpacing", ReserveChildGroupsKeepRelativeSpacing),
             ("bc10 DeployedReserveFromExecutorOutcomeSource", DeployedReserveFromExecutorOutcomeSource),
+            ("bc10 TerrainCorrectedReserveKeepsItsReserveSource", TerrainCorrectedReserveKeepsItsReserveSource),
             ("bc10 DeployedReserveEvidenceGivesReserveRoleFirst", DeployedReserveEvidenceGivesReserveRoleFirst),
             ("bc10 DeployedReserveReleasedByCrisis", DeployedReserveReleasedByCrisis),
             ("bc10 DeployedReserveFlowsThroughTheEvidenceBuilder", DeployedReserveFlowsThroughTheEvidenceBuilder),
