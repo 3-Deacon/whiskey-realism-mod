@@ -149,9 +149,6 @@ namespace WhiskeyRealism
         internal TacticalCommanderMode TacticalCommanderModeValue =>
             _cachedTacticalCommanderMode ?? (_cachedTacticalCommanderMode = ResolveTacticalCommanderMode()).Value;
 
-        internal bool TacticalOperationsLedgerEnabled =>
-            TacticalCommanderModePolicy.RunsLedger(TacticalCommanderModeValue);
-
         internal bool TacticalOperationsLedgerAllowsWrites =>
             TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
 
@@ -276,7 +273,7 @@ namespace WhiskeyRealism
                 "Enable Tactical Observer",
                 true,
                 "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
-                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial; that producer only writes when Enable Tactical Orchestrator Army is off, so with the orchestrator on the observer changes no battle state.");
+                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
@@ -382,16 +379,17 @@ namespace WhiskeyRealism
                 "Enable Tactical Local Reaction Doctrine",
                 true,
                 "Default ON. Computes per-group local reactions from the commander intent and emits read-only [TacticalLocalReaction] telemetry; " +
-                "required by Enable Tactical Reserve Intent Telemetry. The reactions feed Enable Tactical Charge Denial only while Enable Tactical " +
-                "Orchestrator Army is off.");
+                "required by Enable Tactical Reserve Intent Telemetry. While Enable Tactical Orchestrator Army is off, a DenyCharge reaction is " +
+                "also a reason for Enable Tactical Charge Denial to demote a vanilla assault; with the army on it changes no battle state.");
             EnableTacticalChargeDenial = Config.Bind(
                 "Tactical",
                 "Enable Tactical Charge Denial",
                 true,
-                "Default ON. When the legacy local-reaction producer marks a group DenyCharge, demotes that group's vanilla charge stance " +
-                "(ai_stanceordered 4) to 3 with [TacticalChargeDeny] telemetry. Requires Tactical Observer, Commander Intent Doctrine and Local " +
-                "Reaction Doctrine, and has no effect while Enable Tactical Orchestrator Army is on (the producer only writes reactions when the " +
-                "orchestrator army is off).");
+                "Default ON. When vanilla escalates an AI group to the assault stance (ai_stance 4) that the command doctrine says must not " +
+                "attack (reserve held, or falling back to the line), demotes it to defend (2): no cover-skipping assault approach, skirmishers may " +
+                "deploy again, and its cavalry stops picking charge targets. Infantry melee from contact is not affected. With Enable Tactical " +
+                "Orchestrator Army off, a legacy local-reaction DenyCharge also demotes an assault, to attack (3). Logs [TacticalChargeDeny] / " +
+                "[TacticalChargePreserved]; writes need Tactical Commander Mode = Active; W&L/player groups are never touched.");
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Intent Telemetry",
@@ -507,11 +505,13 @@ namespace WhiskeyRealism
             EnableArtilleryAllStanceAudit = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Artillery All-Stance Audit",
-                false,
-                "Default OFF: known defect, do not enable. Its ammo ratio divides the summed per-slot ammo (each slot 0-1) by guns x 200, so every " +
-                "battery reads as out of ammo and the audit cancels every AI bombardment. When on, BattleGroupStancePatch walks the alliance's " +
-                "artillery each stance pass and applies TacticalArtilleryMicroDoctrine (limber/unlimber/retreat/wheel/conserve-ammo) through " +
-                "TacticalArtilleryApplier; AI batteries only, Tactical Commander Mode = Active.");
+                true,
+                "Default ON. Each BattleGroupStancePatch pass (at most every Battle Group Stance Min Interval Seconds per side) walks the side's " +
+                "AI batteries in every group stance (vanilla CheckAIBombardment only covers stances 3/4) and applies the artillery micro-doctrine " +
+                "through vanilla calls: limber or retreat when the enemy is within 60 m, or within 100 m with no interposed infantry/cavalry and group " +
+                "morale below 0.6 (idle batteries only); unlimber and face an enemy in fire range; turn toward a visible enemy beyond range (only when off by vanilla's " +
+                "turn trigger); cancel bombardment below 10% ammo (mean of the three ammo slots). A battery is left alone for Artillery Audit Min " +
+                "Hold Seconds after a write. AI batteries only (W&L/player units protected); writes need Tactical Commander Mode = Active.");
             ArtilleryAuditMinHoldSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Artillery Audit Min Hold Seconds",
@@ -647,7 +647,7 @@ namespace WhiskeyRealism
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", true,
                 "Default ON. AI factions only: when the construction intent updates (weekly), may start vanilla telegraph-station construction wishes that extend the faction's connected chain toward a large, uncovered, enemy-free field command, paid through vanilla. " +
-                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and an invalid final placement is removed (the paid cost is not refunded).");
+                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and a final placement that fails its connection/support/safe-rear checks is removed with the wish cost refunded (treasury, subsidy funding and spending stats as charged; the interest re-roll vanilla did when charging stays). A wish vanilla itself drops for lack of a site is not refunded, as in vanilla.");
             ConstructionTelemetryEnabled = Config.Bind(
                 "Construction",
                 "Construction Telemetry",

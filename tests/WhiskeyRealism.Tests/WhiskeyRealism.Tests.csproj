@@ -116,6 +116,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionProbabilitySanitizer.cs" Link="ConstructionProbabilitySanitizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\FortConstructionGovernor.cs" Link="FortConstructionGovernor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphIntent.cs" Link="TelegraphIntent.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphWishCharge.cs" Link="TelegraphWishCharge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FinancialAiLogGate.cs" Link="FinancialAiLogGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FastForwardAiScheduler.cs" Link="FastForwardAiScheduler.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionPanelLookup.cs" Link="WlStartSelectionPanelLookup.cs" />
@@ -224,6 +225,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalWithdrawalInputAdapter.cs" Link="TacticalWithdrawalInputAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalWithdrawalDoctrine.cs" Link="TacticalWithdrawalDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalChargeViability.cs" Link="TacticalChargeViability.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalChargeDenial.cs" Link="TacticalChargeDenial.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalRefuseFlankIntent.cs" Link="TacticalRefuseFlankIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalFatigueState.cs" Link="TacticalFatigueState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderContracts.cs" Link="PlayerOrders\PlayerOrderContracts.cs" />

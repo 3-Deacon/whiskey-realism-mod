@@ -101,6 +101,5 @@ internal static class TacticalResolvedGroupDecisionTests
         TestHarness.AssertEqual(0, (int)ChargeOverrideAction.None, "noneOrdinal");
         TestHarness.AssertEqual(1, (int)ChargeOverrideAction.PreserveVanilla, "preserveOrdinal");
         TestHarness.AssertEqual(2, (int)ChargeOverrideAction.DemoteToHold, "demoteOrdinal");
-        TestHarness.AssertEqual(3, (int)ChargeOverrideAction.DenyExplicit, "denyOrdinal");
     }
 }

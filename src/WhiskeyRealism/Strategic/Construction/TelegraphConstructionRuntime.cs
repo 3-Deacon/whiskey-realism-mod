@@ -51,12 +51,18 @@ namespace WhiskeyRealism.Strategic.Construction
                     return false;
                 }
 
+                AllianceSpendSnapshot spentBefore;
+                bool measured = TrySnapshotSpend(alliance, out spentBefore);
                 var building = CBuilding.AddConstructionWish(
                     CBuilding.id_telegraphstation,
                     candidate.Site,
                     candidate.Iip,
                     alliance,
                     overridealreadyconstructing: false);
+                AllianceSpendSnapshot spentAfter;
+                TelegraphWishCharge charge = measured && TrySnapshotSpend(alliance, out spentAfter)
+                    ? TelegraphWishCharge.Measure(spentBefore, spentAfter)
+                    : default(TelegraphWishCharge);
 
                 if (building == null)
                 {
@@ -97,7 +103,8 @@ namespace WhiskeyRealism.Strategic.Construction
                     AnchorToRequestedDistance = candidate.AnchorToSiteDistance,
                     SupportToRequestedDistance = candidate.UnitToSiteDistance,
                     EffectiveConnectionRange = candidate.EffectiveConnectionRange,
-                    EffectiveSupportRange = candidate.EffectiveSupportRange
+                    EffectiveSupportRange = candidate.EffectiveSupportRange,
+                    Charge = charge
                 };
 
                 EmitConstructionTelemetryOnce(
@@ -916,133 +923,169 @@ namespace WhiskeyRealism.Strategic.Construction
             return position.x.ToString("0") + "," + position.z.ToString("0");
         }
 
-        [HarmonyPatch(typeof(CBuilding), "Place")]
-        private static class PlacePatch
+        // Called by TelegraphPlacementPatch after vanilla CBuilding.Place made a
+        // new telegraph station without paying (WorkDownConstructionWishes 97562,
+        // the final placement of the head AI construction wish). A station
+        // Whiskey started is validated; a rejected one is removed and its wish
+        // charge refunded.
+        internal static void OnTelegraphPlaced(CBuilding placed, int type, int owner)
         {
-            [HarmonyPostfix]
-            private static void Postfix(
-                CBuilding __result,
-                int type,
-                int owner,
-                bool newlycreated,
-                bool pay)
+            CBuilding placeholder;
+            PendingTelegraph pending;
+            if (!TryCurrentPendingPlacement(out placeholder, out pending))
+                return;
+
+            PlacementDistances distances;
+            string reason;
+            if (!TryValidateFinalPlacement(placed, pending, type, owner, out reason, out distances))
             {
-                if (type != CBuilding.id_telegraphstation || !newlycreated || pay)
-                    return;
+                RejectPlacement(placed, placeholder, pending, reason);
+                return;
+            }
 
-                try
-                {
-                    CBuilding placeholder;
-                    PendingTelegraph pending;
-                    if (!TryCurrentPendingPlacement(out placeholder, out pending))
-                        return;
+            string reserveReason;
+            if (!TryCommitIipReservation(pending, placed, out reserveReason))
+            {
+                RejectPlacement(placed, placeholder, pending, reserveReason);
+                return;
+            }
 
-                    PlacementDistances distances;
-                    string reason;
-                    if (TryValidateFinalPlacement(__result, pending, type, owner, out reason, out distances))
-                    {
-                        string reserveReason;
-                        if (!TryCommitIipReservation(pending, __result, out reserveReason))
-                        {
-                            string reserveFinalPositionText = __result != null
-                                ? FormatPosition(((Component)__result).transform.position)
-                                : "<none>";
-                            RemoveBuilding(__result);
-                            ClearIipReservation(pending, __result);
-                            PendingTelegraphs.Remove(placeholder);
-                            OnceLog.Warning(
-                                "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reserveReason,
-                                "[TelegraphAI] alliance=" + pending.Alliance +
-                                " action=placed-rejected reason=" + reserveReason +
-                                " requested=" + FormatPosition(pending.RequestedSite) +
-                                " final=" + reserveFinalPositionText);
-                            return;
-                        }
+            UpdateTelegraphConnectionsIfAvailable(placed, pending.Alliance);
+            PendingTelegraphs.Remove(placeholder);
 
-                        UpdateTelegraphConnectionsIfAvailable(__result, pending.Alliance);
-                        PendingTelegraphs.Remove(placeholder);
+            Vector3 finalPosition = ((Component)placed).transform.position;
+            string message = "[ConstructionTelemetry] source=TelegraphAI alliance=" + pending.Alliance +
+                " action=placed requested=" + FormatPosition(pending.RequestedSite) +
+                " final=" + FormatPosition(finalPosition) +
+                " requestedFinalDist=" + distances.RequestedToFinal.ToString("F1") +
+                " anchorFinalDist=" + distances.AnchorToFinal.ToString("F1") +
+                " supportFinalDist=" + distances.SupportToFinal.ToString("F1");
+            if (ConstructionVerboseLoggingEnabled())
+            {
+                message +=
+                    " anchorRequestedDist=" + pending.AnchorToRequestedDistance.ToString("F1") +
+                    " supportRequestedDist=" + pending.SupportToRequestedDistance.ToString("F1") +
+                    " connectRange=" + pending.EffectiveConnectionRange.ToString("F1") +
+                    " supportRange=" + pending.EffectiveSupportRange.ToString("F1");
+            }
 
-                        Vector3 finalPosition = ((Component)__result).transform.position;
-                        string message = "[ConstructionTelemetry] source=TelegraphAI alliance=" + pending.Alliance +
-                            " action=placed requested=" + FormatPosition(pending.RequestedSite) +
-                            " final=" + FormatPosition(finalPosition) +
-                            " requestedFinalDist=" + distances.RequestedToFinal.ToString("F1") +
-                            " anchorFinalDist=" + distances.AnchorToFinal.ToString("F1") +
-                            " supportFinalDist=" + distances.SupportToFinal.ToString("F1");
-                        if (ConstructionVerboseLoggingEnabled())
-                        {
-                            message +=
-                                " anchorRequestedDist=" + pending.AnchorToRequestedDistance.ToString("F1") +
-                                " supportRequestedDist=" + pending.SupportToRequestedDistance.ToString("F1") +
-                                " connectRange=" + pending.EffectiveConnectionRange.ToString("F1") +
-                                " supportRange=" + pending.EffectiveSupportRange.ToString("F1");
-                        }
+            EmitConstructionTelemetryOnce("telegraph-ai:placed:" + pending.Alliance, message);
+        }
 
-                        EmitConstructionTelemetryOnce("telegraph-ai:placed:" + pending.Alliance, message);
-                        return;
-                    }
+        // Called by TelegraphPendingCleanupPatch after vanilla
+        // WorkDownConstructionWishes. A pending station whose AI placement is
+        // gone was dropped by vanilla (no site within buildingsitemaxradius,
+        // 97578-97585); vanilla refunds nothing there and neither does Whiskey.
+        internal static void OnConstructionWishesWorkedDown()
+        {
+            if (PendingTelegraphs.Count <= 0)
+                return;
 
-                    string finalPositionText = __result != null
-                        ? FormatPosition(((Component)__result).transform.position)
-                        : "<none>";
-                    RemoveBuilding(__result);
-                    ClearIipReservation(pending, __result);
-                    PendingTelegraphs.Remove(placeholder);
-                    OnceLog.Warning(
-                        "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reason,
-                        "[TelegraphAI] alliance=" + pending.Alliance +
-                        " action=placed-rejected reason=" + reason +
-                        " requested=" + FormatPosition(pending.RequestedSite) +
-                        " final=" + finalPositionText);
-                }
-                catch (Exception ex)
-                {
-                    OnceLog.Warning(
-                        "telegraph-ai:place-postfix",
-                        "[TelegraphAI] action=placed-warning reason=postfix-failed message=" + ex.Message);
-                }
+            var stale = new List<CBuilding>();
+            foreach (var pair in PendingTelegraphs)
+            {
+                if (pair.Key == null || !PlacementPresent(pair.Key))
+                    stale.Add(pair.Key);
+            }
+
+            for (int i = 0; i < stale.Count; i++)
+            {
+                CBuilding placeholder = stale[i];
+                PendingTelegraph pending;
+                if (!PendingTelegraphs.TryGetValue(placeholder, out pending))
+                    continue;
+
+                ClearIipReservation(pending, null);
+                PendingTelegraphs.Remove(placeholder);
+                OnceLog.Warning(
+                    "telegraph-ai:pending-cleanup:" + pending.Alliance,
+                    "[TelegraphAI] alliance=" + pending.Alliance +
+                    " action=pending-cleanup reason=placement-cancelled");
             }
         }
 
-        [HarmonyPatch(typeof(CBuilding), "WorkDownConstructionWishes")]
-        private static class WorkDownConstructionWishesPatch
+        private static void RejectPlacement(CBuilding placed, CBuilding placeholder, PendingTelegraph pending, string reason)
         {
-            [HarmonyPostfix]
-            private static void Postfix()
+            string finalPositionText = placed != null
+                ? FormatPosition(((Component)placed).transform.position)
+                : "<none>";
+            RemoveBuilding(placed);
+            ClearIipReservation(pending, placed);
+            PendingTelegraphs.Remove(placeholder);
+            bool refunded = RefundWishCharge(pending);
+            OnceLog.Warning(
+                "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reason,
+                "[TelegraphAI] alliance=" + pending.Alliance +
+                " action=placed-rejected reason=" + reason +
+                " requested=" + FormatPosition(pending.RequestedSite) +
+                " final=" + finalPositionText +
+                " refunded=" + (refunded ? "yes" : "no") +
+                " treasury=" + (-pending.Charge.TreasuryDelta).ToString("F0"));
+        }
+
+        // Reverses exactly what AddConstructionWish's Place(pay: true) moved for
+        // this wish. The treasury is restored by field write: AdjustTreasury
+        // (62571) rescales negative adjustments for AI alliances, so only a
+        // direct write is an exact inverse.
+        //
+        // The charge path also ran Economy.UpdateMacroEconomy (96235). It is not
+        // rerun here: it reads only the date, economy cycle, surplus, debt,
+        // ratingmodifier and projects (32541-32602), none of which the refund
+        // touches, and it re-rolls every alliance's interest with Random.Range
+        // (32594-32597), so a rerun would add a random interest change instead
+        // of undoing one. The charge's own interest re-roll is not reversed (it
+        // cannot be); that is the one accepted difference from an exact inverse.
+        private static bool RefundWishCharge(PendingTelegraph pending)
+        {
+            TelegraphWishCharge charge = pending.Charge;
+            if (!charge.HasCharge) return false;
+            try
             {
-                try
+                if (!ValidAlliance(pending.Alliance)) return false;
+                var alliance = GameVars.alliance[pending.Alliance];
+
+                float[] subsidyDelta = charge.SubsidyFundingDelta;
+                float[] subsidyFunding = alliance.subsidyfunding;
+                if (subsidyDelta != null && subsidyFunding != null)
                 {
-                    if (PendingTelegraphs.Count <= 0)
-                        return;
-
-                    var stale = new List<CBuilding>();
-                    foreach (var pair in PendingTelegraphs)
+                    for (int i = 0; i < subsidyDelta.Length && i < subsidyFunding.Length; i++)
                     {
-                        if (pair.Key == null || !PlacementPresent(pair.Key))
-                            stale.Add(pair.Key);
-                    }
-
-                    for (int i = 0; i < stale.Count; i++)
-                    {
-                        CBuilding placeholder = stale[i];
-                        PendingTelegraph pending;
-                        if (!PendingTelegraphs.TryGetValue(placeholder, out pending))
-                            continue;
-
-                        ClearIipReservation(pending, null);
-                        PendingTelegraphs.Remove(placeholder);
-                        OnceLog.Warning(
-                            "telegraph-ai:pending-cleanup:" + pending.Alliance,
-                            "[TelegraphAI] alliance=" + pending.Alliance +
-                            " action=pending-cleanup reason=placement-cancelled");
+                        if (subsidyDelta[i] != 0f)
+                            alliance.AdjustSubsidyFunding(i, -subsidyDelta[i]);
                     }
                 }
-                catch (Exception ex)
-                {
-                    OnceLog.Warning(
-                        "telegraph-ai:pending-cleanup-failed",
-                        "[TelegraphAI] action=pending-cleanup-warning reason=postfix-failed message=" + ex.Message);
-                }
+
+                alliance.cumulatedspending_construction -= charge.CumulatedSpendingConstructionDelta;
+                alliance.constructioncosts -= charge.ConstructionCostsDelta;
+                alliance.treasury -= charge.TreasuryDelta;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "telegraph-ai:refund-failed:" + pending.Alliance,
+                    "[TelegraphAI] alliance=" + pending.Alliance + " action=refund-failed message=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TrySnapshotSpend(int alliance, out AllianceSpendSnapshot snapshot)
+        {
+            snapshot = default(AllianceSpendSnapshot);
+            try
+            {
+                if (!ValidAlliance(alliance)) return false;
+                var a = GameVars.alliance[alliance];
+                snapshot = new AllianceSpendSnapshot(
+                    a.treasury,
+                    a.subsidyfunding,
+                    a.cumulatedspending_construction,
+                    a.constructioncosts);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -1206,6 +1249,7 @@ namespace WhiskeyRealism.Strategic.Construction
             public float SupportToRequestedDistance;
             public float EffectiveConnectionRange;
             public float EffectiveSupportRange;
+            public TelegraphWishCharge Charge;
         }
 
         private struct PlacementDistances

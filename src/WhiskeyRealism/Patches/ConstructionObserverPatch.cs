@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Patches
     // Observes vanilla construction starts after CBuilding.Place and
     // BattleUnits.Railroad.StartConstruction complete. This patch only records
     // successful starts; it does not alter vanilla placement, funding, or
-    // railroad construction decisions.
+    // railroad construction decisions. A building removed by an earlier Place
+    // postfix (Telegraph AI rejecting a station) is not counted.
     [HarmonyPatch]
     internal static class ConstructionObserverPatch
     {
@@ -27,9 +28,13 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.construction-observer.building", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-                if (!newlycreated || __result == null) return;
-                if (owner < 0 || owner >= 2) return;
-                if (IsConstructionWishPlaceholder(position)) return;
+                if (__result == null) return;
+                if (!ConstructionStartFilter.CountsBuildingStart(
+                        newlycreated,
+                        owner,
+                        IsConstructionWishPlaceholder(position),
+                        StillRegistered(__result)))
+                    return;
 
                 try
                 {
@@ -106,6 +111,20 @@ namespace WhiskeyRealism.Patches
             if (type == CBuilding.id_fort) return ConstructionCandidateKind.Fort;
             if (type == CBuilding.id_telegraphstation) return ConstructionCandidateKind.Telegraph;
             return ConstructionCandidateKind.PrivateBuilding;
+        }
+
+        // TelegraphPlacementPatch runs first (Priority.High) and may remove the
+        // building it was handed; RemoveBuilding drops it from cbuildings.
+        private static bool StillRegistered(CBuilding building)
+        {
+            try
+            {
+                return BattleUnits.cbuildings != null && BattleUnits.cbuildings.Contains(building);
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static bool IsConstructionWishPlaceholder(Vector3 position)

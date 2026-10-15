@@ -25,7 +25,10 @@ namespace WhiskeyRealism.Patches
     //                      unitrange.retreatangle, artilleryfallbackenemyclosedist),
     //                      skipcover, then SetMovementMode(4); limbered first.
     //   Face            -> RotateRegiment(Tools.GetAngle(own, enemy) + 180)
-    //                      (never transform.rotation).
+    //                      (never transform.rotation), only when the battery
+    //                      is off by >= angletriggerforturningtowardsenemy, as
+    //                      vanilla's micro facing rule (4599-4606, cover
+    //                      widens the trigger).
     //   CeaseBombard    -> ChangeCombatBehavior(7) + bombardstarttime = 0 (3904).
     // No stance is ever written: batteries are attached sub-units, and
     // ChangeStance (90772) would set permanentlydetached, after which vanilla
@@ -68,7 +71,7 @@ namespace WhiskeyRealism.Patches
                         return true;
                     case ArtilleryMicroWrite.UnlimberAndFace:
                         bunits.MountUnits(unit, 0);
-                        FaceToward(unit, enemyInFireRange);
+                        FaceToward(unit, enemyInFireRange, applyTurnTrigger: false);
                         OnceLog.Info("artillery-applier-unlimber",
                             "[TacticalArtilleryApplier] artillery unlimber applied + rotated to closest enemy in fire range.");
                         return true;
@@ -76,7 +79,7 @@ namespace WhiskeyRealism.Patches
                         return ApplyArtilleryRetreat(bunits, unit);
                     case ArtilleryMicroWrite.Face:
                         Regiment visibleEnemy = TacticalFogOfWarContact.ClosestVisibleEnemy(unit);
-                        return (UnityEngine.Object)visibleEnemy != null && FaceToward(unit, ((Component)visibleEnemy).gameObject);
+                        return (UnityEngine.Object)visibleEnemy != null && FaceToward(unit, ((Component)visibleEnemy).gameObject, applyTurnTrigger: true);
                     case ArtilleryMicroWrite.CeaseBombard:
                         bunits.ChangeCombatBehavior(((Component)unit).gameObject, 7);
                         unit.bombardstarttime = 0f;
@@ -116,11 +119,25 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static bool FaceToward(Regiment unit, GameObject enemy)
+        private static bool FaceToward(Regiment unit, GameObject enemy, bool applyTurnTrigger)
         {
             if ((UnityEngine.Object)enemy == null) return false;
             float rotation = Tools.GetAngle(((Component)unit).transform.position, enemy.transform.position) + 180f;
             if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
+            // A standing Face follows vanilla micro facing (4599-4606): turn
+            // only when off by at least angletriggerforturningtowardsenemy,
+            // widened by additionalanglewhenincovermicro in cover. Unlimber
+            // always faces, as UnlimberArtilleryAIMicro does.
+            if (applyTurnTrigger &&
+                !BattleWriterPolicy.ShouldRotateTowardTarget(
+                    ((Component)unit).transform.rotation.eulerAngles.y,
+                    rotation,
+                    GamePrefs.angletriggerforturningtowardsenemy,
+                    unit.covervalue,
+                    unit.coverobject,
+                    GamePrefs.maxcovervalueforgrouprotation,
+                    GamePrefs.additionalanglewhenincovermicro))
+                return false;
             unit.RotateRegiment(rotation);
             return true;
         }
