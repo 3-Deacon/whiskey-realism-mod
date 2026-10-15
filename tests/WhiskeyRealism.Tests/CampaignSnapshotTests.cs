@@ -60,6 +60,10 @@ internal static class CampaignSnapshotTests
             ("CoordinatorPauseGuardsOrderIssuingSteps", CoordinatorPauseGuardsOrderIssuingSteps),
             ("CoordinatorPauseGatesAreTheVanillaPredicates", CoordinatorPauseGatesAreTheVanillaPredicates),
             ("PlannerReviewGatesPinned", PlannerReviewGatesPinned),
+            ("StaticSourceKeyRebuildsOnNewListOrCount", StaticSourceKeyRebuildsOnNewListOrCount),
+            ("RailGeometryMatchesDirectScan", RailGeometryMatchesDirectScan),
+            ("RailGeometryMemoFollowsRadiusAndRebuild", RailGeometryMemoFollowsRadiusAndRebuild),
+            ("SnapshotStaticFactsReadOncePerCampaign", SnapshotStaticFactsReadOncePerCampaign),
         });
     }
 
@@ -872,5 +876,227 @@ internal static class CampaignSnapshotTests
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 2, X = 40f, Z = 0f });
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 3, X = 40f, Z = 1f, Accomplished = true });
         return s;
+    }
+
+    // ---- per-campaign static map facts (perf review P1): cached once, equal to the direct scan ----
+
+    private static void StaticSourceKeyRebuildsOnNewListOrCount()
+    {
+        var key = new StaticSourceKey();
+        var list = new List<int> { 1, 2, 3 };
+        AssertFalse(key.Matches(list, list.Count), "an unset key never matches");
+        key.Set(list, list.Count);
+        AssertTrue(key.Matches(list, list.Count), "same list and count");
+        AssertFalse(key.Matches(list, 4), "same list, another count (an element added)");
+        AssertFalse(key.Matches(new List<int> { 1, 2, 3 }, 3), "a new list of the same size (a reload)");
+        AssertFalse(key.Matches(null, 3), "a torn-down list");
+        key.Clear();
+        AssertFalse(key.Matches(list, list.Count), "cleared on campaign reset");
+    }
+
+    private static void RailGeometryMatchesDirectScan()
+    {
+        foreach (int seed in new[] { 1, 7, 42, 1861, 1865 })
+        {
+            var random = new Random(seed);
+            var lines = RandomLines(random, 40);
+            var rails = BuildRails(lines);
+
+            float radius = 5f + (float)random.NextDouble() * 40f;
+            for (int t = 0; t < 60; t++)
+            {
+                float x = (float)random.NextDouble() * 1000f, z = (float)random.NextDouble() * 1000f;
+                int expected = LinesNearDirect(lines, x, z, radius);
+                AssertEqual(expected, rails.LinesNearTown(1000 + t, x, z, radius), "town " + t + " lines near, seed " + seed);
+                AssertEqual(expected, rails.LinesNearTown(1000 + t, x, z, radius), "town " + t + " memo hit, seed " + seed);
+            }
+            for (int id = -1; id < 260; id++)
+                AssertEqual(LinesOfIipDirect(lines, id), rails.LinesOfIip(id), "lines of iip " + id + ", seed " + seed);
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var expected = new RailLineRecord { Index = i, AIipId = -1, BIipId = -1 };
+                EndpointsDirect(lines[i], ref expected);
+                var cached = new RailLineRecord { Index = i, AIipId = -1, BIipId = -1 };
+                rails.CopyEndpoints(i, ref cached);
+                AssertEqual(expected.AIipId, cached.AIipId, "line " + i + " A id, seed " + seed);
+                AssertEqual(expected.BIipId, cached.BIipId, "line " + i + " B id, seed " + seed);
+                AssertEqual(expected.AX, cached.AX, "line " + i + " AX");
+                AssertEqual(expected.AZ, cached.AZ, "line " + i + " AZ");
+                AssertEqual(expected.BX, cached.BX, "line " + i + " BX");
+                AssertEqual(expected.BZ, cached.BZ, "line " + i + " BZ");
+            }
+        }
+    }
+
+    private static void RailGeometryMemoFollowsRadiusAndRebuild()
+    {
+        // One line with an IIP 10 from the town: in at radius 12, out at radius 8.
+        var rails = new RailGeometry();
+        rails.BeginLine();
+        rails.AddIip(1, 10f, 0f);
+        rails.EndLine();
+        AssertEqual(1, rails.LinesNearTown(7, 0f, 0f, 12f), "inside the radius");
+        AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 8f), "a new radius is not served from the memo");
+        AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 0f), "no radius, no line");
+
+        // A reload: the same town id must not keep the old map's count.
+        rails.Clear();
+        AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 12f), "no lines after clear");
+        var gone = new RailLineRecord { AIipId = -1, BIipId = -1 };
+        rails.CopyEndpoints(0, ref gone);
+        AssertEqual(-1, gone.AIipId, "no line 0 after clear");
+        for (int i = 0; i < 2; i++)
+        {
+            rails.BeginLine();
+            rails.AddIip(10 + i, 0f, 5f);
+            rails.EndLine();
+        }
+        AssertEqual(2, rails.LinesNearTown(7, 0f, 0f, 12f), "rebuilt geometry, fresh count");
+        AssertEqual(1, rails.LinesOfIip(10), "rebuilt iip index");
+        AssertEqual(0, rails.LinesOfIip(1), "old iip index dropped");
+
+        // An empty line (vanilla line without IIPs) keeps its index and has no endpoints.
+        rails.BeginLine();
+        rails.EndLine();
+        var record = new RailLineRecord { AIipId = -1, BIipId = -1 };
+        rails.CopyEndpoints(2, ref record);
+        AssertEqual(-1, record.AIipId, "empty line, no A");
+        AssertEqual(-1, record.BIipId, "empty line, no B");
+    }
+
+    // The snapshot runtime reads the static map once per campaign and only the dynamic facts daily.
+    private static void SnapshotStaticFactsReadOncePerCampaign()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
+
+        string reset = MethodBody(src, "private static void ResetCaches(");
+        foreach (string clear in new[] { "Rails.Clear()", "RailSource.Clear()", "AreaShapes.Clear()", "AreaSource.Clear()",
+                                         "CrossingCache.Clear()", "CrossingSource.Clear()", "PositionCache.Clear()" })
+            AssertContains(reset, clear, "campaign reset clears " + clear);
+
+        string areas = MethodBody(src, "private static void ReadAreas(");
+        AssertContains(areas, "AreaSource.Matches(", "areas rebuild their shapes only on a new area list");
+        AssertFalse(areas.Contains("zoneedges"), "edges are not read daily");
+
+        string objectives = MethodBody(src, "private static void ReadObjectives(");
+        AssertContains(objectives, "Rails.LinesNearTown(", "town rail lines come from the cached geometry");
+        AssertContains(objectives, "Rails.LinesOfIip(", "iip rail lines come from the cached geometry");
+        AssertFalse(objectives.Contains("IIPsForTransportCapacityUpdate"), "no per-review walk of the rail lines");
+
+        string rails = MethodBody(src, "private static void ReadRails(");
+        AssertContains(rails, "EnsureRailGeometry()", "rails rebuild their geometry only on a new railroad list");
+        AssertContains(rails, "Rails.CopyEndpoints(", "endpoints come from the cache");
+        AssertFalse(rails.Contains("IIPsForTransportCapacityUpdate"), "no per-review endpoint search");
+
+        string ensure = MethodBody(src, "private static void EnsureRailGeometry(");
+        AssertContains(ensure, "RailSource.Matches(", "rail geometry keyed on the railroad list");
+
+        string crossings = MethodBody(src, "private static void ReadCrossings(");
+        AssertContains(crossings, "CrossingSource.Matches(", "crossings copied once per crossing list");
+
+        // Every transform read is the position cache's miss path or a moving unit's climate cell.
+        string position = MethodBody(src, "private static Vector3 PositionOf(");
+        AssertEqual(1, Count(position, "transform.position"), "one read on a cache miss");
+        int climate = 0;
+        foreach (string line in src.Split('\n'))
+            if (line.Contains("transform.position") && line.Contains("GetClimateData(")) climate++;
+        AssertEqual(1, climate, "the climate cell under a moving unit is read live");
+        AssertEqual(2, Count(src, "transform.position"), "no other transform read in the snapshot");
+    }
+
+    private static int Count(string text, string token)
+    {
+        int n = 0;
+        for (int at = text.IndexOf(token, StringComparison.Ordinal); at >= 0; at = text.IndexOf(token, at + token.Length, StringComparison.Ordinal))
+            n++;
+        return n;
+    }
+
+    // A railroad line as vanilla holds it: IIPsForTransportCapacityUpdate, nulls already dropped
+    // (ids and positions in array order). Lines share junction IIPs; some lines are empty.
+    private sealed class FixtureLine
+    {
+        internal int[] Ids;
+        internal float[] X, Z;
+    }
+
+    private static List<FixtureLine> RandomLines(Random random, int count)
+    {
+        var lines = new List<FixtureLine>();
+        for (int i = 0; i < count; i++)
+        {
+            int n = i % 9 == 0 ? 0 : 1 + random.Next(25);
+            var line = new FixtureLine { Ids = new int[n], X = new float[n], Z = new float[n] };
+            for (int k = 0; k < n; k++)
+            {
+                line.Ids[k] = random.Next(250);
+                line.X[k] = (float)Math.Round(random.NextDouble() * 1000.0, 1);
+                line.Z[k] = (float)Math.Round(random.NextDouble() * 1000.0, 1);
+            }
+            lines.Add(line);
+        }
+        return lines;
+    }
+
+    private static RailGeometry BuildRails(List<FixtureLine> lines)
+    {
+        var rails = new RailGeometry();
+        foreach (var line in lines)
+        {
+            rails.BeginLine();
+            for (int k = 0; k < line.Ids.Length; k++)
+                rails.AddIip(line.Ids[k], line.X[k], line.Z[k]);
+            rails.EndLine();
+        }
+        return rails;
+    }
+
+    // The G0 runtime's per-review scans, kept here as the uncached reference.
+    private static int LinesNearDirect(List<FixtureLine> lines, float x, float z, float radius)
+    {
+        if (radius <= 0f) return 0;
+        float radiusSq = radius * radius;
+        int count = 0;
+        foreach (var line in lines)
+        {
+            for (int k = 0; k < line.Ids.Length; k++)
+            {
+                float dx = line.X[k] - x, dz = line.Z[k] - z;
+                if (dx * dx + dz * dz > radiusSq) continue;
+                count++;
+                break;
+            }
+        }
+        return count;
+    }
+
+    private static int LinesOfIipDirect(List<FixtureLine> lines, int id)
+    {
+        int count = 0;
+        foreach (var line in lines)
+            for (int k = 0; k < line.Ids.Length; k++)
+                if (line.Ids[k] == id) count++;
+        return count;
+    }
+
+    private static void EndpointsDirect(FixtureLine line, ref RailLineRecord record)
+    {
+        float best = -1f;
+        for (int a = 0; a < line.Ids.Length; a++)
+        {
+            for (int b = a; b < line.Ids.Length; b++)
+            {
+                float dx = line.X[a] - line.X[b], dz = line.Z[a] - line.Z[b];
+                float d = dx * dx + dz * dz;
+                if (d <= best) continue;
+                best = d;
+                record.AX = line.X[a];
+                record.AZ = line.Z[a];
+                record.BX = line.X[b];
+                record.BZ = line.Z[b];
+                record.AIipId = line.Ids[a];
+                record.BIipId = line.Ids[b];
+            }
+        }
     }
 }

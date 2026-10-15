@@ -190,4 +190,157 @@ namespace WhiskeyRealism.Strategic.Planner
             return value >= 1f ? 1f : value;
         }
     }
+
+    // The identity of a vanilla list that is built once per load and only replaced by the next
+    // load: BattleUnits.railroad (ImportRailroads 82506-82516), AICampaign.aiarea
+    // (InitializeAIAreas 11272), BattlefieldSetup.rivercrossingpositions (26628-26638). A cache
+    // built from the list stays valid while the same list object holds the same count.
+    internal struct StaticSourceKey
+    {
+        private object _list;
+        private int _count;
+
+        internal bool Matches(object list, int count)
+        {
+            return list != null && ReferenceEquals(_list, list) && _count == count;
+        }
+
+        internal void Set(object list, int count)
+        {
+            _list = list;
+            _count = count;
+        }
+
+        internal void Clear()
+        {
+            _list = null;
+            _count = 0;
+        }
+    }
+
+    // The campaign map's railroad geometry, read once per load: each line's IIPs
+    // (ConstructionSymbol.IIPsForTransportCapacityUpdate, 188134, nulls dropped, array order kept)
+    // with their instance ids and positions. Nothing here depends on ownership or construction, so
+    // only a new railroad list invalidates it. Answers what the G0 snapshot scanned every review:
+    // how many lines list an IIP, a line's two farthest-apart IIPs, and how many lines pass within
+    // a radius of a town (memoized per town and radius).
+    internal sealed class RailGeometry
+    {
+        private readonly List<int> _lineStart = new List<int>();
+        private readonly List<int> _ids = new List<int>();
+        private readonly List<float> _x = new List<float>();
+        private readonly List<float> _z = new List<float>();
+        private readonly List<RailLineRecord> _ends = new List<RailLineRecord>();
+        private readonly Dictionary<int, int> _linesOfIip = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _linesNearTown = new Dictionary<int, int>();
+        private float _townRadius = float.NaN;
+        private int _open = -1;
+
+        internal void Clear()
+        {
+            _lineStart.Clear();
+            _ids.Clear();
+            _x.Clear();
+            _z.Clear();
+            _ends.Clear();
+            _linesOfIip.Clear();
+            _linesNearTown.Clear();
+            _townRadius = float.NaN;
+            _open = -1;
+        }
+
+        // One call per railroad index, null lines included (as an empty line), so line i here is
+        // BattleUnits.railroad[i].
+        internal void BeginLine()
+        {
+            _open = _ids.Count;
+            _lineStart.Add(_open);
+        }
+
+        internal void AddIip(int iipId, float x, float z)
+        {
+            _ids.Add(iipId);
+            _x.Add(x);
+            _z.Add(z);
+            _linesOfIip.TryGetValue(iipId, out int count);
+            _linesOfIip[iipId] = count + 1;
+        }
+
+        // The line's two farthest-apart IIPs (the array is not ordered along the track); the
+        // first pair found wins a tie, a one-IIP line has both ends on it, an empty line none.
+        internal void EndLine()
+        {
+            int start = _open, end = _ids.Count;
+            var ends = new RailLineRecord { AIipId = -1, BIipId = -1 };
+            float best = -1f;
+            for (int a = start; a < end; a++)
+            {
+                for (int b = a; b < end; b++)
+                {
+                    float dx = _x[a] - _x[b];
+                    float dz = _z[a] - _z[b];
+                    float d = dx * dx + dz * dz;
+                    if (d <= best) continue;
+                    best = d;
+                    ends.AX = _x[a];
+                    ends.AZ = _z[a];
+                    ends.BX = _x[b];
+                    ends.BZ = _z[b];
+                    ends.AIipId = _ids[a];
+                    ends.BIipId = _ids[b];
+                }
+            }
+            _ends.Add(ends);
+            _linesNearTown.Clear();
+            _open = -1;
+        }
+
+        internal void CopyEndpoints(int line, ref RailLineRecord record)
+        {
+            if (line < 0 || line >= _ends.Count) return;
+            var ends = _ends[line];
+            record.AX = ends.AX;
+            record.AZ = ends.AZ;
+            record.BX = ends.BX;
+            record.BZ = ends.BZ;
+            record.AIipId = ends.AIipId;
+            record.BIipId = ends.BIipId;
+        }
+
+        // How many lines list the IIP (once per listing, as vanilla's arrays hold it).
+        internal int LinesOfIip(int iipId)
+        {
+            return _linesOfIip.TryGetValue(iipId, out int count) ? count : 0;
+        }
+
+        // A town lies on a line when one of the line's IIPs is within the radius
+        // (GamePrefs.radiustowncentertocapture, the radius vanilla captures a town within).
+        internal int LinesNearTown(int townId, float x, float z, float radius)
+        {
+            if (radius <= 0f) return 0;
+            if (radius != _townRadius)
+            {
+                _linesNearTown.Clear();
+                _townRadius = radius;
+            }
+            if (_linesNearTown.TryGetValue(townId, out int memo)) return memo;
+
+            float radiusSq = radius * radius;
+            int count = 0;
+            for (int line = 0; line < _lineStart.Count; line++)
+            {
+                int end = line + 1 < _lineStart.Count ? _lineStart[line + 1] : _ids.Count;
+                for (int k = _lineStart[line]; k < end; k++)
+                {
+                    float dx = _x[k] - x;
+                    float dz = _z[k] - z;
+                    if (dx * dx + dz * dz > radiusSq) continue;
+                    count++;
+                    break;
+                }
+            }
+            _linesNearTown[townId] = count;
+            return count;
+        }
+    }
 }

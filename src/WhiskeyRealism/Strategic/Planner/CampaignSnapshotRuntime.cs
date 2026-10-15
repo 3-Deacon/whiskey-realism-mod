@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Planner
@@ -65,6 +66,13 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             _weather = null;
             _bfs = null;
+            Rails.Clear();
+            RailSource.Clear();
+            AreaShapes.Clear();
+            AreaSource.Clear();
+            CrossingCache.Clear();
+            CrossingSource.Clear();
+            PositionCache.Clear();
         }
 
         private static readonly HashSet<Regiment> OffensiveSet = new HashSet<Regiment>();
@@ -77,11 +85,31 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly HashSet<int> AvailableObjectives = new HashSet<int>();
         private static readonly HashSet<Town> IndustryTowns = new HashSet<Town>();
         private static readonly Dictionary<UnityEngine.Object, float> GarrisonAt = new Dictionary<UnityEngine.Object, float>();
-        private static readonly Dictionary<IIP, int> RailLinesOfIip = new Dictionary<IIP, int>();
         private static readonly List<float> RawImportance = new List<float>();
+
+        // Static map facts, read once per campaign (perf review P1) and shared by both alliances:
+        // area shapes (index, centre, zone edges; InitializeAIAreas 11251-11301), railroad geometry
+        // (ImportRailroads 82506-82516), crossings, and the positions of map objects that never move
+        // (towns, IIPs, depots). Each list-backed cache rebuilds when its vanilla list is replaced or
+        // changes size (StaticSourceKey); none of them holds ownership, construction or importance,
+        // which are read daily, so an ownership change invalidates nothing. Reset per campaign.
+        private static readonly RailGeometry Rails = new RailGeometry();
+        private static StaticSourceKey RailSource;
+        private static readonly List<AreaRecord> AreaShapes = new List<AreaRecord>();
+        private static StaticSourceKey AreaSource;
+        private static readonly List<CrossingRecord> CrossingCache = new List<CrossingRecord>();
+        private static StaticSourceKey CrossingSource;
+        private static readonly Dictionary<Component, Vector3> PositionCache = new Dictionary<Component, Vector3>();
 
         internal static CampaignSnapshot Build(int alliance, int factionIndex, int daySerial, PlayerCommandClass player,
                                                in WlChainContext chain, DirectorPosture tempo, CampaignSnapshot reuse)
+        {
+            using (TelemetryPerf.Scope("campaign.planner.snapshot", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                return BuildCore(alliance, factionIndex, daySerial, player, in chain, tempo, reuse);
+        }
+
+        private static CampaignSnapshot BuildCore(int alliance, int factionIndex, int daySerial, PlayerCommandClass player,
+                                                  in WlChainContext chain, DirectorPosture tempo, CampaignSnapshot reuse)
         {
             var s = reuse ?? new CampaignSnapshot();
             int playerCommand = (UnityEngine.Object)chain.Command != null ? chain.Command.GetInstanceID() : -1;
@@ -133,7 +161,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 if (alliance >= 0 && alliance < alliances.Length && (UnityEngine.Object)alliances[alliance].capital != null)
                 {
-                    Vector3 own = ((Component)alliances[alliance].capital).transform.position;
+                    Vector3 own = PositionOf(alliances[alliance].capital);
                     s.CapitalX = own.x;
                     s.CapitalZ = own.z;
                     s.HasCapital = true;
@@ -141,7 +169,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int enemy = 1 - alliance; // the planner runs for alliances 0 and 1 only
                 if (enemy >= 0 && enemy < alliances.Length && (UnityEngine.Object)alliances[enemy].capital != null)
                 {
-                    Vector3 other = ((Component)alliances[enemy].capital).transform.position;
+                    Vector3 other = PositionOf(alliances[enemy].capital);
                     s.EnemyCapitalX = other.x;
                     s.EnemyCapitalZ = other.z;
                     s.HasEnemyCapital = true;
@@ -155,14 +183,39 @@ namespace WhiskeyRealism.Strategic.Planner
             s.MinMoraleForMovement = GamePrefs.aiminimummoraleformovement;
         }
 
+        // Daily: the faction-indexed importancevalues and ownpoints and the supplycapacity. The shape
+        // (index, centre, edges) is static and comes from AreaShapes.
         private static void ReadAreas(CampaignSnapshot s, int f)
         {
             var areas = AICampaign.aiarea;
             if (areas == null) return;
+            if (!AreaSource.Matches(areas, areas.Count)) ReadAreaShapes(areas);
+            for (int i = 0; i < AreaShapes.Count; i++)
+            {
+                var record = AreaShapes[i];
+                var area = areas[i];
+                if (record.Index < 0 || area == null) continue;
+                record.Importance = At(area.importancevalues, f);
+                record.OwnPoints = At(area.ownpoints, f);
+                record.SupplyCapacity = area.supplycapacity;
+                s.Areas.Add(record);
+            }
+        }
+
+        // One entry per aiarea index (Index -1 for a null area). The edge arrays are shared by every
+        // snapshot until the next load; consumers only read them (SectorModel clones what it keeps).
+        private static void ReadAreaShapes(List<AICampaign.AIArea> areas)
+        {
+            AreaShapes.Clear();
+            AreaSource.Clear();
             for (int i = 0; i < areas.Count; i++)
             {
                 var area = areas[i];
-                if (area == null) continue;
+                if (area == null)
+                {
+                    AreaShapes.Add(new AreaRecord { Index = -1 });
+                    continue;
+                }
                 var edges = area.zoneedges;
                 int edgeCount = edges != null ? edges.Length : 0;
                 var record = new AreaRecord
@@ -171,18 +224,16 @@ namespace WhiskeyRealism.Strategic.Planner
                     X = area.averageposition.x,
                     Z = area.averageposition.z,
                     EdgeX = new float[edgeCount],
-                    EdgeZ = new float[edgeCount],
-                    Importance = At(area.importancevalues, f),
-                    OwnPoints = At(area.ownpoints, f),
-                    SupplyCapacity = area.supplycapacity
+                    EdgeZ = new float[edgeCount]
                 };
                 for (int e = 0; e < edgeCount; e++)
                 {
                     record.EdgeX[e] = edges[e].x;
                     record.EdgeZ[e] = edges[e].z;
                 }
-                s.Areas.Add(record);
+                AreaShapes.Add(record);
             }
+            AreaSource.Set(areas, areas.Count);
         }
 
         private static void ReadFormations(CampaignSnapshot s, int alliance, object faction, in WlChainContext chain)
@@ -358,7 +409,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     AddGarrison((UnityEngine.Object)fort.parentiip != null ? fort.parentiip : fort.closestiip, strength);
                 }
             }
-            CountRailLines();
+            EnsureRailGeometry();
 
             int followed = FollowedObjective(faction);
             int f = s.FactionIndex;
@@ -379,11 +430,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     float importance;
                     if (o.objectives[t] is Town town && (UnityEngine.Object)town != null)
                     {
-                        Vector3 p = ((Component)town).transform.position;
+                        Vector3 p = PositionOf(town);
                         record.X = p.x;
                         record.Z = p.z;
                         record.HolderAlliance = town.Owner;
-                        record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, RailLinesNear(p, townRadius), IndustryTowns.Contains(town));
+                        record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, Rails.LinesNearTown(town.GetInstanceID(), p.x, p.z, townRadius),
+                            IndustryTowns.Contains(town));
                         record.GarrisonStrength = GarrisonOf(town);
                         importance = SnapshotRules.TargetImportance(true, town.representingpopulation, 0f, AtWar(town.Owner, alliance),
                             CampaignObjective.IsPartOfObjective(followed, town), IsCapitalOfIndex(town, f),
@@ -392,12 +444,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     }
                     else if (o.objectives[t] is IIP iip && (UnityEngine.Object)iip != null)
                     {
-                        Vector3 p = ((Component)iip).transform.position;
+                        Vector3 p = PositionOf(iip);
                         record.X = p.x;
                         record.Z = p.z;
                         record.HolderAlliance = iip.allianceowner;
-                        record.Roles = SnapshotRules.ObjectiveRoles(false, iip.IIPType == IIP.id_harbor,
-                            RailLinesOfIip.TryGetValue(iip, out int lines) ? lines : 0, false);
+                        record.Roles = SnapshotRules.ObjectiveRoles(false, iip.IIPType == IIP.id_harbor, Rails.LinesOfIip(iip.GetInstanceID()), false);
                         record.GarrisonStrength = GarrisonOf(iip);
                         importance = SnapshotRules.TargetImportance(false, 0f, iip.GetTransportCapacity(), AtWar(iip.allianceowner, alliance),
                             CampaignObjective.IsPartOfObjective(followed, null, iip), false,
@@ -460,49 +511,41 @@ namespace WhiskeyRealism.Strategic.Planner
             return GarrisonAt.TryGetValue(at, out float strength) ? strength : 0f;
         }
 
-        // How many railroad lines list each IIP (ConstructionSymbol.IIPsForTransportCapacityUpdate).
-        private static void CountRailLines()
+        // Rebuilds the railroad geometry when BattleUnits.railroad is a new list or changed size.
+        // Line i of Rails is BattleUnits.railroad[i]; a null line or one without IIPs is empty.
+        private static void EnsureRailGeometry()
         {
-            RailLinesOfIip.Clear();
             var lines = BattleUnits.railroad;
+            int count = lines != null ? lines.Count : 0;
+            if (RailSource.Matches(lines, count)) return;
+            Rails.Clear();
+            RailSource.Clear();
             if (lines == null) return;
-            for (int i = 0; i < lines.Count; i++)
+            for (int i = 0; i < count; i++)
             {
+                Rails.BeginLine();
                 var iips = lines[i]?.scriptref != null ? lines[i].scriptref.IIPsForTransportCapacityUpdate : null;
-                if (iips == null) continue;
-                for (int k = 0; k < iips.Length; k++)
+                if (iips != null)
                 {
-                    if ((UnityEngine.Object)iips[k] == null) continue;
-                    RailLinesOfIip.TryGetValue(iips[k], out int count);
-                    RailLinesOfIip[iips[k]] = count + 1;
+                    for (int k = 0; k < iips.Length; k++)
+                    {
+                        if ((UnityEngine.Object)iips[k] == null) continue;
+                        Vector3 p = PositionOf(iips[k]);
+                        Rails.AddIip(iips[k].GetInstanceID(), p.x, p.z);
+                    }
                 }
+                Rails.EndLine();
             }
+            RailSource.Set(lines, count);
         }
 
-        // A town lies on a line when one of the line's IIPs is within the town-centre radius
-        // (GamePrefs.radiustowncentertocapture, the radius vanilla captures a town within).
-        private static int RailLinesNear(Vector3 town, float radius)
+        // Towns, IIPs, depots and capitals never move: one transform read per object per campaign.
+        private static Vector3 PositionOf(Component c)
         {
-            var lines = BattleUnits.railroad;
-            if (lines == null || radius <= 0f) return 0;
-            float radiusSq = radius * radius;
-            int count = 0;
-            for (int i = 0; i < lines.Count; i++)
-            {
-                var iips = lines[i]?.scriptref != null ? lines[i].scriptref.IIPsForTransportCapacityUpdate : null;
-                if (iips == null) continue;
-                for (int k = 0; k < iips.Length; k++)
-                {
-                    if ((UnityEngine.Object)iips[k] == null) continue;
-                    Vector3 p = ((Component)iips[k]).transform.position;
-                    float dx = p.x - town.x;
-                    float dz = p.z - town.z;
-                    if (dx * dx + dz * dz > radiusSq) continue;
-                    count++;
-                    break;
-                }
-            }
-            return count;
+            if (PositionCache.TryGetValue(c, out Vector3 p)) return p;
+            p = c.transform.position;
+            PositionCache[c] = p;
+            return p;
         }
 
         private static void ReadSupply(CampaignSnapshot s, int alliance)
@@ -514,7 +557,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     var iip = iips[i];
                     if ((UnityEngine.Object)iip == null) continue;
-                    Vector3 p = ((Component)iip).transform.position;
+                    Vector3 p = PositionOf(iip);
                     s.Supply.Add(new SupplySourceRecord
                     {
                         Id = iip.GetInstanceID(),
@@ -538,7 +581,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var depot = buildings[i];
                 if ((UnityEngine.Object)depot == null || depot.BuildingType != CBuilding.id_supplydepot) continue;
                 if (depot.Owner != alliance && !alliances[alliance].IsInAllianceWith(depot.Owner)) continue;
-                Vector3 p = ((Component)depot).transform.position;
+                Vector3 p = PositionOf(depot);
                 s.Supply.Add(new SupplySourceRecord
                 {
                     Id = depot.GetInstanceID(),
@@ -556,6 +599,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             var lines = BattleUnits.railroad;
             if (lines == null) return;
+            EnsureRailGeometry();
             for (int i = 0; i < lines.Count; i++)
             {
                 var line = lines[i];
@@ -569,36 +613,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     UnderConstruction = line.constructionprogress > 0f && line.constructionprogress < 1f,
                     Progress = line.constructionprogress
                 };
-                Endpoints(line.scriptref != null ? line.scriptref.IIPsForTransportCapacityUpdate : null, ref record);
+                Rails.CopyEndpoints(i, ref record);
                 s.Rails.Add(record);
-            }
-        }
-
-        // The line's two farthest-apart IIPs (the array is not ordered along the track).
-        private static void Endpoints(IIP[] iips, ref RailLineRecord record)
-        {
-            if (iips == null) return;
-            float best = -1f;
-            for (int a = 0; a < iips.Length; a++)
-            {
-                if ((UnityEngine.Object)iips[a] == null) continue;
-                Vector3 pa = ((Component)iips[a]).transform.position;
-                for (int b = a; b < iips.Length; b++)
-                {
-                    if ((UnityEngine.Object)iips[b] == null) continue;
-                    Vector3 pb = ((Component)iips[b]).transform.position;
-                    float dx = pa.x - pb.x;
-                    float dz = pa.z - pb.z;
-                    float d = dx * dx + dz * dz;
-                    if (d <= best) continue;
-                    best = d;
-                    record.AX = pa.x;
-                    record.AZ = pa.z;
-                    record.BX = pb.x;
-                    record.BZ = pb.z;
-                    record.AIipId = iips[a].GetInstanceID();
-                    record.BIipId = iips[b].GetInstanceID();
-                }
             }
         }
 
@@ -607,8 +623,14 @@ namespace WhiskeyRealism.Strategic.Planner
             var bfs = ResolveBattlefieldSetup();
             var cells = (UnityEngine.Object)bfs != null ? bfs.rivercrossingpositions : null;
             if (cells == null) return;
-            for (int i = 0; i < cells.Count; i++)
-                s.Crossings.Add(new CrossingRecord { X = cells[i].x, Z = cells[i].z });
+            if (!CrossingSource.Matches(cells, cells.Count))
+            {
+                CrossingCache.Clear();
+                for (int i = 0; i < cells.Count; i++)
+                    CrossingCache.Add(new CrossingRecord { X = cells[i].x, Z = cells[i].z });
+                CrossingSource.Set(cells, cells.Count);
+            }
+            s.Crossings.AddRange(CrossingCache);
         }
 
         // AICampaign's own lookup (11143).
