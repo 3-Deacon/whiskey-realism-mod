@@ -54,6 +54,7 @@ internal static class PostureStanceFixTests
         Pass("formation policy waits while moving or in cover", FormationPolicyWaitsWhileMovingOrInCover);
         Pass("formation policy cooldown is longer under fire", FormationPolicyCooldownLongerUnderFire);
         Pass("vanilla SetFormation index round-trips group formations", VanillaSetFormationIndexRoundTrips);
+        Pass("formation policy never wheels a group with enemies in range", FormationPolicyNeverWheelsWithEnemiesInRange);
 
         // R9
         Pass("regiment facing pulse leaves artillery to vanilla", RegimentFacingPulseLeavesArtilleryToVanilla);
@@ -383,9 +384,20 @@ internal static class PostureStanceFixTests
     private static FormationWriteInput Fw(
         bool needsFormation = false, bool needsFacing = false, bool needsRefuse = false,
         float combat = 0f, float moving = 0f, int paths = 0, float cover = 0f,
-        float now = 2f, float last = -1f)
+        float now = 2f, float last = -1f, float enemiesInRange = 0f)
     {
-        return new FormationWriteInput(needsFormation, needsFacing, needsRefuse, combat, moving, paths, cover, now, last);
+        return new FormationWriteInput(needsFormation, needsFacing, needsRefuse, combat, moving, paths, cover, now, last, enemiesInRange);
+    }
+
+    private static void FormationPolicyNeverWheelsWithEnemiesInRange()
+    {
+        AssertEqual(FormationWriteKind.WheelGroup, CommandFormationWritePolicy.Decide(Fw(needsFacing: true)).Kind, "clear ground wheels");
+        var facing = CommandFormationWritePolicy.Decide(Fw(needsFacing: true, enemiesInRange: 0.4f));
+        AssertEqual(FormationWriteKind.None, facing.Kind, "wheel re-paths every child (SetGroupFormation modifylastwaypoint)");
+        AssertEqual("enemies-in-range", facing.Reason, "reason");
+        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw(needsRefuse: true, enemiesInRange: 1f)).Kind, "refuse flank too");
+        AssertEqual(FormationWriteKind.VanillaFormation,
+            CommandFormationWritePolicy.Decide(Fw(needsFormation: true, enemiesInRange: 1f)).Kind, "courier formation change unaffected");
     }
 
     private static void FormationPolicyNeverRelaysInCombat()

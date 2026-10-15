@@ -823,7 +823,8 @@ namespace WhiskeyRealism.Patches
                     group.regimentpaths,
                     group.covervaluesubordinates,
                     now,
-                    last));
+                    last,
+                    group.groupenemiesinrange));
             }
             catch
             {

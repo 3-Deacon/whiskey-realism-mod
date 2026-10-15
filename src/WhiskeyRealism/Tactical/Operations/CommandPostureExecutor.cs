@@ -117,8 +117,9 @@ namespace WhiskeyRealism.Tactical.Operations
         // 130159): no target clearing, no slot re-lay.
         RotateInPlace,
         // SetGroupFormation(current formation, rotation, newpath:false,
-        // modifylastwaypoint:true): skips ClearTargets/ChangeRegimentFormation
-        // (91884) and wheels the group to rotated slots.
+        // modifylastwaypoint:true): skips ClearTargets (91960 runs it only for
+        // !modifylastwaypoint || newpath) but re-paths every child to its
+        // rotated slot — so only with no enemies in range.
         WheelGroup,
         // BattleUnits.SetFormation (90971): courier-delivered formation change,
         // the way AdjustGroupFormations does it (5927).
@@ -136,7 +137,8 @@ namespace WhiskeyRealism.Tactical.Operations
             int regimentPaths,
             float coverValueSubordinates,
             float nowHours,
-            float lastWriteHours)
+            float lastWriteHours,
+            float groupEnemiesInRange)
         {
             NeedsFormation = needsFormation;
             NeedsFacing = needsFacing;
@@ -147,6 +149,7 @@ namespace WhiskeyRealism.Tactical.Operations
             CoverValueSubordinates = coverValueSubordinates;
             NowHours = nowHours;
             LastWriteHours = lastWriteHours;
+            GroupEnemiesInRange = groupEnemiesInRange;
         }
 
         public bool NeedsFormation { get; }
@@ -158,6 +161,8 @@ namespace WhiskeyRealism.Tactical.Operations
         public float CoverValueSubordinates { get; }
         public float NowHours { get; }
         public float LastWriteHours { get; }
+        // Regiment.groupenemiesinrange.
+        public float GroupEnemiesInRange { get; }
     }
 
     public readonly struct FormationWriteDecision
@@ -215,7 +220,11 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new FormationWriteDecision(FormationWriteKind.VanillaFormation, "vanilla-set-formation");
 
             if (input.NeedsFacing || input.NeedsRefuse)
-                return new FormationWriteDecision(FormationWriteKind.WheelGroup, "wheel");
+            {
+                return input.GroupEnemiesInRange > 0f
+                    ? new FormationWriteDecision(FormationWriteKind.None, "enemies-in-range")
+                    : new FormationWriteDecision(FormationWriteKind.WheelGroup, "wheel");
+            }
 
             return new FormationWriteDecision(FormationWriteKind.None, "in-cover");
         }
