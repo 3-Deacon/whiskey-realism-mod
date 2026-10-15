@@ -29,7 +29,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> PlanTrace;
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
-        internal ConfigEntry<bool> FiscalTelemetryCsv;
         internal ConfigEntry<bool> DirectorVerboseTrace;
         internal ConfigEntry<string> TelemetryLoggingProfileRaw;
         internal ConfigEntry<int> TelemetryMaxTuningLogMb;
@@ -62,7 +61,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalLocalReactionDoctrine;
         internal ConfigEntry<bool> EnableTacticalChargeDenial;
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
-        internal ConfigEntry<bool> EnableTacticalReserveListMutation;
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
@@ -70,12 +68,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
         public static ConfigEntry<bool> EnableTacticalOrchestratorArmy;
         public static ConfigEntry<int> TacticalOrchestratorMinReplanSeconds;
-        public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
         public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
         internal ConfigEntry<string> TacticalCommanderModeRaw;
         internal ConfigEntry<bool> EnableTacticalOrchestratorReserveCommitGate;
-        internal ConfigEntry<bool> EnableTacticalOrchestratorChargeGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
@@ -86,43 +82,12 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
         public static ConfigEntry<bool> EnableVanillaMacroAiSync;
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
-        // Worker-migration (2026-05-21): when ON, BuildObjectiveRecordsFromAggregate is
-        // computed on the orchestrator worker thread instead of inline on main during
-        // TacticalBattleSnapshotBuilder.Build. Default OFF until parity is verified in
-        // smoke; flip to default-on after observation that worker records match the
-        // legacy on-main records for a few cycles.
-        public static ConfigEntry<bool> EnableWorkerObjectiveRecords;
         // Per-side cooldown for BattleGroupStancePatch.Apply. At high time compression
         // (20x/50x), vanilla calls AdjustGroupAIStance many times per wallclock-second;
         // the Postfix walks unitsused on each call even when no write happens. Cooldown
         // gates the walk so it runs at most once per N seconds wallclock per side.
         // Default 1.5s. 0 disables (preserves pre-2026-05-21 behavior).
         public static ConfigEntry<float> BattleGroupStanceMinIntervalSeconds;
-        // Regimental intelligence (2026-05-21). When the orchestrator worker
-        // detects a regiment is being flanked, pressed on multiple sides, or
-        // isolated from its brigade, the doctrine produces a recommended
-        // action (fall back, retreat, wheel). This flag controls whether main
-        // thread actually WRITES the order. Default OFF — telemetry-only mode
-        // emits TacticalRegimentalIntel decisions to tactical.jsonl without
-        // touching vanilla state. Flip to true once smoke verifies the
-        // decisions look sensible for known scenarios (flanked regiments,
-        // isolated battalions).
-        public static ConfigEntry<bool> EnableRegimentalIntelligenceWrites;
-        // Friendly-path blocking gate (2026-05-21, ported from Scourge of War's
-        // offcmds.cpp three-layer waypoint-issuance gate). When ON, every
-        // SetWaypoint call (brigade-posture + regimental-intelligence paths)
-        // first consults TacticalFriendlyPathBlockingGate. If the proposed
-        // waypoint would cross a friendly brigade's path or overlap its
-        // destination, the write is skipped. Default OFF until smoke verifies
-        // false-positive rate is acceptable; turning ON should eliminate
-        // remaining "H formation" crossings beyond what the opportunity-override
-        // fix achieves.
-        public static ConfigEntry<bool> EnableFriendlyPathBlockingGate;
-        // Friendly-fire detection (2026-05-21, ports Scourge unitai.cpp:1484
-        // StopOverlapTarget). Telemetry-only — emits TacticalFriendlyFireBlocked
-        // events when a friendly sits in the firing line between a regiment
-        // and its in-range enemy. Default OFF.
-        public static ConfigEntry<bool> EnableFriendlyFireDetection;
         // Opportunity-hysteresis minimum hold time (2026-05-21). Once
         // TacticalReinforcementOpportunityDoctrine commits to a category
         // (AttackNow / DefensiveHold / WithdrawalToFightLater / etc.),
@@ -140,15 +105,6 @@ namespace WhiskeyRealism
         // move it, set up again" churn observed when probe targets drift
         // across cycles. Default 12.0s wallclock.
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
-        // Artillery panic-retreat doctrine (2026-05-21, ports Scourge of War's
-        // artyai.cpp:180-225 panic logic). When ON, walks each brigade's
-        // attached artillery sub-units. If an artillery unit is within panic
-        // distance of an enemy AND has no friendly infantry/cavalry interposed
-        // AND the enemy is not routed/retreating, issues a retreat waypoint
-        // backward. Handles BOTH standalone artillery brigades AND artillery
-        // attached to infantry brigades — vanilla's CheckAIBombardment only
-        // runs for stance 3/4 so this fills the gap for all other stances.
-        // Default OFF.
         // Comprehensive artillery audit (2026-05-21, ports Scourge artyai.cpp
         // full lifecycle). Vanilla GT's CheckAIBombardment only runs for
         // ai_stance 3/4 — every other stance leaves artillery on pure vanilla
@@ -169,7 +125,6 @@ namespace WhiskeyRealism
         // writes.
         public static ConfigEntry<bool> EnableArtilleryWaypointVeto;
         public static ConfigEntry<float> ArtilleryAuditMinHoldSeconds;
-        public static ConfigEntry<bool> EnableTacticalOrchestratorWorker;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
@@ -183,15 +138,11 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
-        internal ConfigEntry<bool> EnableSupplyDepotSteering;
-        internal ConfigEntry<bool> EnableFortSteering;
         internal ConfigEntry<bool> FortConstructionGovernorEnabled;
         internal ConfigEntry<bool> EnableTelegraphAI;
-        internal ConfigEntry<bool> EnableRailroadSteering;
         internal ConfigEntry<bool> ConstructionTelemetryEnabled;
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
-        internal ConfigEntry<int> MaxRailroadStartsPerFactionPerMonth;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -287,9 +238,6 @@ namespace WhiskeyRealism
             FiscalTrace = Config.Bind(
                 "Diagnostics", "Fiscal Trace Logging", false,
                 "Emit fiscal posture, gate, supply, and finance override reasoning.");
-            FiscalTelemetryCsv = Config.Bind(
-                "Diagnostics", "Fiscal Telemetry Csv", false,
-                "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
             DirectorVerboseTrace = Config.Bind(
                 "Telemetry",
                 "Director Verbose Trace",
@@ -476,11 +424,6 @@ namespace WhiskeyRealism
                 "Enable Tactical Reserve Intent Telemetry",
                 true,
                 "Default ON for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
-            EnableTacticalReserveListMutation = Config.Bind(
-                "Tactical",
-                "Enable Tactical Reserve List Mutation",
-                true,
-                "Default ON for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
             EnableTacticalArtilleryDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Artillery Doctrine",
@@ -541,12 +484,6 @@ namespace WhiskeyRealism
                     "Minimum wall-clock seconds between army replan events. Triggers may detect " +
                     "earlier; orchestrator rate-limits actual plan re-pick to avoid thrash.",
                     new AcceptableValueRange<int>(10, 600)));
-            TacticalOrchestratorVerboseLogging = Config.Bind(
-                "Tactical Orchestrator",
-                "Verbose Logging",
-                false,
-                "Default ON. When true, emit per-tick [TacticalCascade] and per-trigger " +
-                "[TacticalReplan] lines instead of just first-fire and on-change markers.");
             EnableTacticalOrchestratorIntentInference = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Intent Inference",
@@ -573,15 +510,6 @@ namespace WhiskeyRealism
                 "the command-node intent for the calling command group and rolls back new " +
                 "vanilla reserve support paths when the group resolves to a Reserve role. " +
                 "Allowed vanilla reserve movement remains eligible for the separate order-delay guard.");
-            EnableTacticalOrchestratorChargeGate = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Tactical Orchestrator Charge Gate",
-                true,
-                "Default ON. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
-                "the command-node intent for the calling command group before allowing vanilla " +
-                "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
-                "SupportMain requires main-effort support evidence; Fix/Reserve/Fallback/Refuse/Screen " +
-                "roles deny charge initiation unless the Screen routed-target exception is proven.");
             EnableSinglePassObjectiveRecords = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Single-Pass Objective Records",
@@ -592,28 +520,6 @@ namespace WhiskeyRealism
                 "appears. Default-on per AGENTS.md tactical policy. Measured " +
                 "performance characteristics are documented in docs/telemetry.md " +
                 "once smoke-verified.");
-            EnableTacticalOrchestratorWorker = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Tactical Orchestrator Worker",
-                true,
-                "Background-thread orchestrator analysis. Main thread captures a "
-                + "snapshot and reads pre-computed decisions; analysis runs on a "
-                + "dedicated worker thread. Default ON per AGENTS.md tactical policy. "
-                + "Set false to roll back to synchronous on-main-thread analysis if "
-                + "a regression appears. Performance characteristics documented in "
-                + "docs/telemetry.md once smoke-verified.");
-            EnableWorkerObjectiveRecords = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Worker Objective Records",
-                false,
-                "Computes BuildObjectiveRecordsFromAggregate on the orchestrator worker "
-                + "thread instead of inline on main during snapshot build. Removes ~5ms "
-                + "per side per heavy-gate fire from the main-thread frame budget at the "
-                + "cost of one-cycle staleness on the observation→record path. Default "
-                + "OFF (2026-05-21) until smoke verifies worker records match the legacy "
-                + "on-main records. Main always falls back to the legacy on-main builder "
-                + "when the worker has not yet published records for a side (first cycle "
-                + "of a battle, suppressed side, or worker fault).");
             BattleGroupStanceMinIntervalSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Battle Group Stance Min Interval Seconds",
@@ -680,38 +586,6 @@ namespace WhiskeyRealism
                 + "for at least N wallclock seconds before allowing transition. Default "
                 + "6.0s. Escalations to WithdrawalToFightLater bypass the hold to keep "
                 + "reaction time on collapse scenarios. Set to 0 to disable.");
-            EnableFriendlyFireDetection = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Friendly Fire Detection",
-                false,
-                "Telemetry-only detector for friendly-fire risk. When ON, for "
-                + "each own regiment with an in-range enemy, checks whether a "
-                + "friendly sits in the fire corridor between the regiment and "
-                + "its target. Emits TacticalFriendlyFireBlocked events. No "
-                + "behavioral writes — purely diagnostic. Default OFF.");
-            EnableFriendlyPathBlockingGate = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Friendly Path Blocking Gate",
-                false,
-                "Ports Scourge of War's three-layer waypoint-issuance gate "
-                + "(angle cones, destination overlap, brigade cohesion) into "
-                + "every SetWaypoint call. When ON, refuses to write waypoints "
-                + "that would cross a friendly brigade's frontal cone or overlap "
-                + "a sibling regiment's destination. Default OFF until smoke "
-                + "verifies false-positive rate; enable to eliminate remaining "
-                + "H-formation crossings.");
-            EnableRegimentalIntelligenceWrites = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Regimental Intelligence Writes",
-                false,
-                "Master switch for the regimental-intelligence layer's vanilla writes. "
-                + "When ON, the worker's per-regiment decisions (fall back when flanked, "
-                + "retreat when pressed on multiple sides, wheel to face flank) issue "
-                + "actual SetWaypoint / SetGroupFormation orders. When OFF (default), "
-                + "the doctrine still runs and emits TacticalRegimentalIntel telemetry "
-                + "events for diagnostic verification, but no vanilla writes happen. "
-                + "Smoke decisions-only first; flip to true once tactical.jsonl confirms "
-                + "the right regiments are being flagged for the right reasons.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
@@ -816,21 +690,12 @@ namespace WhiskeyRealism
             EnableConstructionSiteSteering = Config.Bind(
                 "Construction", "Enable Construction Site Steering", false,
                 "Default ON. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
-            EnableSupplyDepotSteering = Config.Bind(
-                "Construction", "Enable Supply Depot Steering", false,
-                "Default ON. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
-            EnableFortSteering = Config.Bind(
-                "Construction", "Enable Fort Steering", false,
-                "Default ON. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
             FortConstructionGovernorEnabled = Config.Bind(
                 "Construction", "Fort Construction Governor Enabled", true,
                 "Default ON. Filters saturated vanilla fort construction sites before AICampaign.CheckFortConstruction so either side cannot stack excessive forts in one local area unless threat justifies more.");
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", false,
                 "Default ON. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
-            EnableRailroadSteering = Config.Bind(
-                "Construction", "Enable Railroad Steering", false,
-                "Default ON. Future valve for per-line railroad steering. Observation remains active through telemetry.");
             ConstructionTelemetryEnabled = Config.Bind(
                 "Construction", "Construction Telemetry", true,
                 "Emit no-spam construction intent and actual-start heartbeat lines.");
@@ -840,9 +705,6 @@ namespace WhiskeyRealism
             MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
                 "Construction", "Max Active Telegraph Constructions Per Faction", 1,
                 "Caps simultaneously active Whiskey telegraph constructions per faction when Telegraph AI is enabled.");
-            MaxRailroadStartsPerFactionPerMonth = Config.Bind(
-                "Construction", "Max Railroad Starts Per Faction Per Month", 1,
-                "Future railroad steering cap. Current slice observes vanilla railroad starts only.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
