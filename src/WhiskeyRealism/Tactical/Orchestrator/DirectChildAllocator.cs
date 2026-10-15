@@ -313,7 +313,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     supportPriority,
                     aggressionBias01,
                     perChildEnemyIntent[i],
-                    fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec));
+                    fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
+                    fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown);
             }
             return intents;
         }
@@ -483,7 +484,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.AggressionBias01, x.EnemyIntent, x.Maneuver);
+                role, axis, axisSector, support, x.AggressionBias01, x.EnemyIntent, x.Maneuver, x.ZoneRectKind);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)

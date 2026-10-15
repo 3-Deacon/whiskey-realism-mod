@@ -1265,6 +1265,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             if (t.NavFilterReady) return;
             t.NavFilterReady = true;
+            t.NavFilter = CreateNavFilter();
+        }
+
+        // The query filter itself, for the probe above and for the envelopment march-leg route (PlayExecutorRuntime).
+        internal static NavMeshQueryFilter CreateNavFilter()
+        {
             var filter = new NavMeshQueryFilter { areaMask = NavMesh.AllAreas, agentTypeID = 0 };
             try
             {
@@ -1287,7 +1293,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 OnceLog.Warning("tactical-producer-posture:nav-filter-failed",
                     "[PostureProducer] NavMesh query filter costs failed, the probe prices every area at 1: " + ex.GetType().Name + " " + ex.Message);
             }
-            t.NavFilter = filter;
+            return filter;
         }
 
         private const int NavAreaCount = 32; // NavMeshQueryFilter's cost table size
@@ -1454,6 +1460,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         private const float TelemetrySeconds = 30f;
         private static readonly Dictionary<string, float> _lastAt = new Dictionary<string, float>();
+        private static readonly RefuseRowThrottle _refuseRows = new RefuseRowThrottle();
 
         internal static string NameOf(BattleSnapshot s, int i)
         {
@@ -1562,10 +1569,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             try
             {
                 int id = s.Own[i].InstanceId;
+                // The repeat test is numeric: no string is built unless a row is due.
+                if (!_refuseRows.ShouldEmit(s.Alliance, id, side, rotated, skipped, Time.realtimeSinceStartup, TelemetrySeconds)) return;
                 string signature = s.Alliance + "|" + id + "|" + side + "|" + rotated + "|" + skipped;
-                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-refuse-in-place:" + s.Alliance + ":" + id, signature,
-                        Time.realtimeSinceStartup, TelemetrySeconds, false))
-                    return;
                 string unit = NameOf(s, i);
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalRefuseInPlace", TelemetrySeverity.Info,
                     ev => ev
@@ -1585,6 +1591,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static void Reset()
         {
             _lastAt.Clear();
+            _refuseRows.Clear();
         }
     }
 

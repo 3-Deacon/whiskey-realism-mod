@@ -84,6 +84,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static int[] _rotationQueue = new int[64];
         private static int[] _rotationTargets = new int[64];
         private static float[] _rotationHeadings = new float[64];
+        // The rotations the in-combat refuse ordered, to leave a regiment vanilla turned back alone for a while.
+        private static readonly RefuseTurnBackMemory _refuseTurnBacks = new RefuseTurnBackMemory();
 
         // Set by the vanilla calls that re-lay a group's children (SetGroupFormation
         // directly or via SetWaypoint / SetFormation) for the target being issued;
@@ -601,13 +603,18 @@ namespace WhiskeyRealism.Tactical.Battle
             MicroTurnRule rule = MicroTurnRule.From(GamePrefs.distancetoturntowardsenemy, GamePrefs.angletriggerforturningtowardsenemy,
                 GamePrefs.additionalanglewhenincovermicro, GamePrefs.maxcovervalueforgrouprotation);
             int count = FlankFacing.RefuseRotations(view, groupIndex, w.Refuse, group.GroupWidth, GamePrefs.refuseflankdepth,
-                GamePrefs.refuseflankskew, in rule, _rotationQueue, _rotationTargets, _rotationHeadings, out int skipped);
+                GamePrefs.refuseflankskew, in rule, _rotationQueue, _rotationTargets, _rotationHeadings, out int skipped,
+                _refuseTurnBacks, TacticalDoctrineTime.NowBattleHours);
             int rotated = 0;
             for (int k = 0; k < count; k++)
             {
                 Regiment child = BattleSnapshotBuilder.UnitAt(view, _rotationTargets[k], enemy: false);
                 if ((UnityEngine.Object)child == null || !TacticalWriteGuard.CanWrite(child, feudReplay)) continue;
-                if (RotateInPlace(child, _rotationHeadings[k])) rotated++;
+                if (RotateInPlace(child, _rotationHeadings[k]))
+                {
+                    rotated++;
+                    _refuseTurnBacks.NoteRotated(view.Own[_rotationTargets[k]].InstanceId, _rotationHeadings[k]);
+                }
             }
             if (rotated > 0 || skipped > 0) PostureTelemetry.RefuseInPlace(view, groupIndex, w.Refuse, rotated, skipped);
             if (rotated > 0) NoteRefuseFirstFire("InPlace", w.Refuse, rotated, skipped);
@@ -796,6 +803,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _firstFireLogged = false;
             _coveredLogged = false;
             _refuseLogged = false;
+            _refuseTurnBacks.Clear();
             for (int a = 0; a < _covered.Length; a++)
             {
                 _covered[a].Clear();

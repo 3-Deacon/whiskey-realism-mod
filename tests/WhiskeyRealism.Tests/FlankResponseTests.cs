@@ -16,7 +16,7 @@ internal static partial class FlankResponseTests
 {
     public static void Run()
     {
-        RunAll(Concat(Concat(FacingAndRefuseTests(), ManeuverTests()), TallyTests()));
+        RunAll(Concat(Concat(Concat(FacingAndRefuseTests(), ManeuverTests()), TallyTests()), ReviewTests()));
     }
 
     private static (string, Action)[] FacingAndRefuseTests()

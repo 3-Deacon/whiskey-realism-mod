@@ -1,0 +1,300 @@
+using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
+using static TestHarness;
+
+// BC11 verify round 1: the Center the wings wait on, the Hold ceiling, the in-combat refuse's back-off, the march leg judged on the
+// planned route, and the allocation-free refuse row.
+internal static partial class FlankResponseTests
+{
+    private static (string, Action)[] ReviewTests()
+    {
+        return new (string, Action)[]
+        {
+            ("bc11 DeployedReserveCenterChildDoesNotMakeWingsWait", DeployedReserveCenterChildDoesNotMakeWingsWait),
+            ("bc11 DeployedReserveIsKeptOutOfTheRectInput", DeployedReserveIsKeptOutOfTheRectInput),
+            ("bc11 HoldEndsAtTheCeiling", HoldEndsAtTheCeiling),
+            ("bc11 TurnBackMemoryBacksOffAndReleases", TurnBackMemoryBacksOffAndReleases),
+            ("bc11 TurnedBackRegimentIsLeftAloneByRefuseRotations", TurnedBackRegimentIsLeftAloneByRefuseRotations),
+            ("bc11 TurnBackMemoryIsBoundedAndAllocatesNothing", TurnBackMemoryIsBoundedAndAllocatesNothing),
+            ("bc11 RouteViaBridgeIsNotARiverCrossing", RouteViaBridgeIsNotARiverCrossing),
+            ("bc11 MarchLegRecheckIsBounded", MarchLegRecheckIsBounded),
+            ("bc11 MarchLegRouteIsWired", MarchLegRouteIsWired),
+            ("bc11 RefuseRowThrottleBuildsNoStringOnRepeat", RefuseRowThrottleBuildsNoStringOnRepeat),
+        };
+    }
+
+    // c0 on a wing rect, c1 assigned the Center rect (a deployed reserve or not), c2 on the other wing.
+    private static IReadOnlyList<DirectChildIntent> CenterAllocation(bool centerIsDeployedReserve, out CorpsAssignment[] zones)
+    {
+        zones = new[]
+        {
+            new CorpsAssignment("c0", PlayRectKind.LeftWing, 0, -600f, 300f, 0f, true),
+            new CorpsAssignment("c1", PlayRectKind.Center, 1, 0f, 300f, 0f),
+            new CorpsAssignment("c2", PlayRectKind.RightWing, 2, 600f, 300f, 0f, true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(3, 1, false, 0, 0, 0.8f),
+            new DirectChildEvidence(3, 0, false, 2, 0, 0.7f, deployedReserve: centerIsDeployedReserve),
+            new DirectChildEvidence(3, 1, false, 4, 0, 0.8f),
+        };
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
+        return DirectChildAllocator.AllocateWithZones(FlankPlan(), personality, Children(3), evidence, null, zones, new ReserveReleaseContext(0.5f));
+    }
+
+    // BC10 keeps a deployed reserve out of its zone role, so a Center rect given to one is no Center: the wings must not wait on it.
+    private static void DeployedReserveCenterChildDoesNotMakeWingsWait()
+    {
+        var acting = CenterAllocation(false, out CorpsAssignment[] zones);
+        AssertEqual(PlayRectKind.Center, acting[1].ZoneRectKind, "a child that acts takes the Center role from its zone");
+        AssertEqual(PlayRectKind.LeftWing, acting[0].ZoneRectKind, "the wing child's role came from its rect");
+        AssertTrue((EnvelopmentManeuver.CenterChildId(zones, acting) != null), "the wings wait on a Center child whose role is its zone's");
+        AssertEqual("c1", EnvelopmentManeuver.CenterChildId(zones, acting), "the waited-on child");
+
+        var reserve = CenterAllocation(true, out zones);
+        AssertEqual(DirectChildRole.Reserve, reserve[1].Role, "the deployed reserve keeps the Reserve role (BC10)");
+        AssertEqual(PlayRectKind.Unknown, reserve[1].ZoneRectKind, "...so its role is not from its zone");
+        AssertFalse((EnvelopmentManeuver.CenterChildId(zones, reserve) != null), "the wings do not wait on a Center that will never act");
+        AssertTrue(EnvelopmentManeuver.CenterChildId(zones, reserve) == null, "no Center child");
+
+        // A role from evidence (no zone) is no Center either.
+        var fromEvidence = new[] { ZoneIntent("c0", PlayRectKind.LeftWing), ZoneIntent("c1", PlayRectKind.Unknown), ZoneIntent("c2", PlayRectKind.RightWing) };
+        AssertFalse((EnvelopmentManeuver.CenterChildId(zones, fromEvidence) != null), "a Center child whose effective role did not come from its zone does not make the wings wait");
+    }
+
+    private static void DeployedReserveIsKeptOutOfTheRectInput()
+    {
+        string coordinator = SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
+        AssertPinned(coordinator, "childIds[c] = deployedReserve[c] ? string.Empty : side.Army.CurrentDirectChildIntents[c].ChildId;",
+            "a deployed reserve is not offered to the zone assignment");
+        // CollectOwn skips an empty id, so the reserve never reaches PlayCorpsAssignment and the Center goes to a child that acts.
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        UnitFlags live = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup;
+        for (int i = 0; i < 3; i++)
+            s.AddOwn(new UnitRecord { InstanceId = i + 1, UnitTyp = 15, X = i * 300f, Z = 0f, Flags = live });
+        s.IndexCommandTree(null);
+        var xs = new System.Collections.Generic.List<float>();
+        var zs = new System.Collections.Generic.List<float>();
+        var corps = new System.Collections.Generic.List<CorpsPosition>();
+        var ids = new System.Collections.Generic.HashSet<string> { "child-1", "child-3" };   // child-2 is the deployed reserve
+        PlayAnchor.CollectOwn(s, 1, xs, zs, corps, ids);
+        AssertEqual(2, corps.Count, "the reserve child is not a corps for the rects");
+        foreach (CorpsPosition c in corps) AssertTrue(c.ChildId != "child-2", "child-2 is never offered a rect");
+    }
+
+    private static void HoldEndsAtTheCeiling()
+    {
+        AssertEqual(1.0f, EnvelopmentManeuver.MaxManeuverHours, "the ceiling is MaxManeuverHours from the play's activation");
+        ManeuverInput input = Maneuver();
+        input.TemplateHasCenter = true;
+        input.CenterContactHours = -1.0;
+        input.PlayActivatedHours = 10.0;
+        var state = default(ManeuverState);
+        ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.99));
+        AssertEqual(ManeuverPhase.Hold, order.Phase, "still holding just under the ceiling");
+        AssertEqual("await-center-contact", order.Reason, "awaiting the Center child's contact");
+        order = EnvelopmentManeuver.Step(ref state, After(input, 11.0));
+        AssertEqual(ManeuverPhase.March, order.Phase, "the wings proceed at the ceiling although the Center never made contact");
+        AssertEqual("hold-ceiling", state.ProceedReason, "the reason is stated for the telemetry row");
+        // The march clock starts then: the timeout counts from the march, not from the activation.
+        order = EnvelopmentManeuver.Step(ref state, After(input, 11.2));
+        AssertEqual(ManeuverPhase.March, order.Phase, "marching, not timed out");
+
+        var contact = default(ManeuverState);
+        input.CenterContactHours = 10.5;
+        EnvelopmentManeuver.Step(ref contact, After(input, 10.75));
+        AssertEqual("center-contact", contact.ProceedReason, "a normal release names the contact");
+        string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        AssertPinned(runtime, ".WithField(\"proceed\", proceed)", "the proceed reason rides the TacticalEnvelopment row");
+    }
+
+    private static void TurnBackMemoryBacksOffAndReleases()
+    {
+        double h = RefuseTurnBackMemory.BackOffHours;
+        var m = new RefuseTurnBackMemory();
+        AssertFalse(m.IsBackedOff(7, 40f, 100f, 5.0), "a regiment never rotated is not backed off");
+        m.NoteRotated(7, 100f);
+        AssertFalse(m.IsBackedOff(7, 100f, 100f, 5.0), "still where it was put");
+        AssertFalse(m.IsBackedOff(7, 110f, 125f, 5.0), "within the tolerance of where it was put");
+        AssertTrue(m.IsBackedOff(7, 40f, 100f, 5.0), "settled elsewhere: vanilla (or the player) turned it back");
+        AssertTrue(m.IsBackedOff(7, 40f, 105f, 5.0 + h * 0.5), "still backed off inside the window while the threat bearing holds");
+        AssertFalse(m.IsBackedOff(7, 40f, 125f, 5.0 + h * 0.5), "the wanted rotation moved by more than the facing tolerance: the back-off ends");
+
+        m.NoteRotated(8, 100f);
+        AssertTrue(m.IsBackedOff(8, 40f, 100f, 5.0), "backed off");
+        AssertFalse(m.IsBackedOff(8, 40f, 100f, 5.0 + h), "the window passed");
+
+        m.NoteRotated(9, 100f);
+        AssertTrue(m.IsBackedOff(9, 40f, 100f, 5.0), "backed off");
+        m.NoteRotated(9, 90f);
+        AssertFalse(m.IsBackedOff(9, 90f, 90f, 5.01), "a new rotation ends the back-off");
+
+        m.NoteRotated(10, 100f);
+        AssertTrue(m.IsBackedOff(10, 40f, 100f, 5.0), "backed off");
+        AssertFalse(m.IsBackedOff(10, 40f, 100f, 1.0), "a clock that went back (reload) ends it");
+    }
+
+    // Through RefuseRotations: a regiment the executor rotated and vanilla turned back (the snapshot sees no enemy to explain it,
+    // as when the enemy is not perceived) is not offered again until the window passes.
+    private static void TurnedBackRegimentIsLeftAloneByRefuseRotations()
+    {
+        BattleSnapshot s = FixtureWith(20);
+        MicroTurnRule rule = ShippedRule;
+        var memory = new RefuseTurnBackMemory();
+        var queue = new int[16]; var regiments = new int[16]; var headings = new float[16];
+        int count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 4f, in rule, queue, regiments, headings, out int skipped, memory, 10.0);
+        AssertEqual(2, count, "the two left-wing regiments");
+        bool left1 = false;
+        for (int k = 0; k < count; k++)
+        {
+            if (s.Own[regiments[k]].InstanceId == Left1) left1 = true;
+            memory.NoteRotated(s.Own[regiments[k]].InstanceId, headings[k]);
+        }
+        AssertTrue(left1, "Left1 is rotated the first time");
+
+        // Both stand at 0 again: vanilla turned them back to their enemy.
+        count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 4f, in rule, queue, regiments, headings, out skipped, memory, 10.01);
+        AssertEqual(0, count, "turned-back regiments are not rotated again at once");
+        AssertEqual(2, skipped, "...and counted as skipped");
+
+        count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 4f, in rule, queue, regiments, headings, out skipped, memory,
+            10.01 + RefuseTurnBackMemory.BackOffHours + 0.001);
+        AssertEqual(2, count, "after the window they are offered again");
+
+        // Without a memory the behaviour is the shipped one.
+        count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 4f, in rule, queue, regiments, headings, out skipped);
+        AssertEqual(2, count, "no memory, no back-off");
+
+        string runtime = SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
+        AssertPinned(runtime, "_refuseTurnBacks.NoteRotated(view.Own[_rotationTargets[k]].InstanceId, _rotationHeadings[k]);", "the executor remembers what it rotated");
+        AssertPinned(runtime, "_refuseTurnBacks, TacticalDoctrineTime.NowBattleHours);", "the back-off runs on the doctrine clock");
+        AssertPinned(runtime, "_refuseTurnBacks.Clear();", "the memory is cleared with the battle");
+    }
+
+    private static void TurnBackMemoryIsBoundedAndAllocatesNothing()
+    {
+        var m = new RefuseTurnBackMemory();
+        for (int id = 1; id <= 200; id++) m.NoteRotated(id, 100f);
+        AssertEqual(RefuseTurnBackMemory.Capacity, m.Count, "the table never outgrows its capacity");
+        m.Clear();
+        AssertEqual(0, m.Count, "cleared");
+        int sink = 0;
+        AssertNoAllocation(() =>
+        {
+            m.NoteRotated(5, 100f);
+            sink += m.IsBackedOff(5, 40f, 100f, 5.0) ? 1 : 0;
+            sink += m.IsBackedOff(5, 40f, 100f, 5.2) ? 1 : 0;
+            sink += m.IsBackedOff(6, 40f, 100f, 5.0) ? 1 : 0;
+        }, 100, "the turn-back memory");
+        GC.KeepAlive(sink);
+    }
+
+    // A grid whose river (id 4) runs the full width at x 400-439 with a bridge (id 6) at iz 590-609. World z is iz - 1200.
+    private static BattleTerrainGrid RiverWithBridgeGrid()
+    {
+        var ids = new int[1201, 1201];
+        for (int iz = 0; iz < 1201; iz++)
+            for (int ix = 400; ix < 440; ix++)
+                ids[ix, iz] = (iz >= 590 && iz < 610) ? BattleTerrainGrid.BridgeId : BattleTerrainGrid.RiverId;
+        return new BattleTerrainGrid(ids, 1200f, 1200f, null, false, null, null, null, 0);
+    }
+
+    // The straight line from the child to its anchor crosses the river; the route the child will walk uses the bridge.
+    private static void RouteViaBridgeIsNotARiverCrossing()
+    {
+        BattleTerrainGrid grid = RiverWithBridgeGrid();
+        var scratch = new int[4096];
+        var straightX = new[] { 200f, 700f };
+        var straightZ = new[] { -1100f, -1100f };
+        AssertTrue(EnvelopmentManeuver.RouteHitsRiver(grid, straightX, straightZ, 2, EnvelopmentManeuver.MarchStepMeters, scratch),
+            "the straight line crosses the river");
+        var routeX = new[] { 200f, 390f, 450f, 700f };
+        var routeZ = new[] { -1100f, -600f, -600f, -1100f };
+        AssertFalse(EnvelopmentManeuver.RouteHitsRiver(grid, routeX, routeZ, 4, EnvelopmentManeuver.MarchStepMeters, scratch),
+            "the route crosses on the bridge: not a river crossing");
+        var fordless = new[] { 200f, 390f, 450f, 700f };
+        var fordlessZ = new[] { -1100f, -1000f, -1000f, -1100f };
+        AssertTrue(EnvelopmentManeuver.RouteHitsRiver(grid, fordless, fordlessZ, 4, EnvelopmentManeuver.MarchStepMeters, scratch),
+            "a route that crosses the river off the bridge still hits it");
+        AssertTrue(EnvelopmentManeuver.RouteHitsRiver(grid, new[] { 420f }, new[] { -1100f }, 1, 10f, scratch), "a single corner is read as a point");
+        AssertFalse(EnvelopmentManeuver.RouteHitsRiver(grid, routeX, routeZ, 0, 10f, scratch), "no corners, no crossing");
+        AssertFalse(EnvelopmentManeuver.RouteHitsRiver(null, routeX, routeZ, 4, 10f, scratch), "no grid, no verdict");
+
+        // The state machine: the straight-line verdict mirrors a lone flank, the route's verdict marches it.
+        ManeuverInput input = Maneuver();
+        input.CenterContactHours = 10.5;
+        input.CanMirror = true;
+        input.MirrorAnchorX = -1000f;
+        input.MirrorAnchorZ = 500f;
+        input.MarchLegHitsRiver = true;
+        var straightState = default(ManeuverState);
+        EnvelopmentManeuver.Step(ref straightState, After(input, 10.75));
+        AssertTrue(straightState.Mirrored, "the straight line's river mirrors the flank");
+        input.MarchLegHitsRiver = false;
+        var routeState = default(ManeuverState);
+        ManeuverOrder order = EnvelopmentManeuver.Step(ref routeState, After(input, 10.75));
+        AssertFalse(routeState.Mirrored, "a route over the bridge is not mirrored");
+        AssertEqual(ManeuverPhase.March, order.Phase, "it marches");
+        AssertEqual(1000f, order.TargetX, "to its own anchor");
+    }
+
+    private static void MarchLegRecheckIsBounded()
+    {
+        var none = default(EnvelopmentManeuver.MarchRouteCheck);
+        AssertTrue(EnvelopmentManeuver.NeedsRouteRecheck(in none, 10.0, 1000f, 500f), "no result yet: the leg's start");
+        var last = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = 10.0, AnchorX = 1000f, AnchorZ = 500f };
+        AssertFalse(EnvelopmentManeuver.NeedsRouteRecheck(in last, 10.01, 1000f, 500f), "same leg, a moment later: no new route query");
+        AssertFalse(EnvelopmentManeuver.NeedsRouteRecheck(in last, 10.04, 1040f, 500f), "an anchor drift of 40 m is the same leg");
+        AssertTrue(EnvelopmentManeuver.NeedsRouteRecheck(in last, 10.01, 1060f, 500f), "an anchor 60 m away is a new leg");
+        AssertTrue(EnvelopmentManeuver.NeedsRouteRecheck(in last, 10.0 + EnvelopmentManeuver.RouteRecheckHours, 1000f, 500f), "the bounded interval passed");
+        AssertTrue(EnvelopmentManeuver.NeedsRouteRecheck(in last, 9.0, 1000f, 500f), "the clock went back");
+        AssertTrue(EnvelopmentManeuver.NeedsRouteRecheck(in last, 10.01, -1000f, 500f), "the mirrored side is a new leg");
+    }
+
+    private static void MarchLegRouteIsWired()
+    {
+        string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        AssertPinned(runtime, "if (!grid.Frozen) input.MarchLegHitsRiver = MarchLegHitsRiver(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId);",
+            "the march leg is judged by the route check, and a frozen map skips it");
+        AssertPinned(runtime, "NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)", "the planned route");
+        AssertPinned(runtime, "WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter()", "priced like the posture probe");
+        AssertPinned(runtime, "EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples)", "sampled segment by segment on the grid");
+        AssertPinned(runtime, "if (!EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ)) return last.HitsRiver;", "re-checked only when it can have changed");
+        AssertPinned(runtime, "side.RoutePlansLeft = 1;", "one route plan per side and step");
+        string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        AssertPinned(producers, "t.NavFilter = CreateNavFilter();", "the posture probe shares the filter builder");
+    }
+
+    private static void RefuseRowThrottleBuildsNoStringOnRepeat()
+    {
+        var t = new RefuseRowThrottle();
+        AssertTrue(t.ShouldEmit(1, 77, RefuseFlank.Left, 2, 0, 100f, 10f), "the first row of a group");
+        AssertFalse(t.ShouldEmit(1, 77, RefuseFlank.Left, 2, 0, 105f, 10f), "the same tuple inside the window");
+        AssertTrue(t.ShouldEmit(1, 77, RefuseFlank.Left, 3, 0, 106f, 10f), "a changed tuple is a new row");
+        AssertTrue(t.ShouldEmit(1, 77, RefuseFlank.Right, 3, 0, 107f, 10f), "a changed flank is a new row");
+        AssertFalse(t.ShouldEmit(1, 77, RefuseFlank.Right, 3, 0, 108f, 10f), "repeat");
+        AssertTrue(t.ShouldEmit(1, 77, RefuseFlank.Right, 3, 0, 117f, 10f), "the window passed");
+        AssertTrue(t.ShouldEmit(1, 78, RefuseFlank.Right, 3, 0, 118f, 10f), "another group has its own row");
+        AssertTrue(t.ShouldEmit(0, 77, RefuseFlank.Right, 3, 0, 118f, 10f), "so does the same id on the other side");
+        int sink = 0;
+        AssertNoAllocation(() =>
+        {
+            sink += t.ShouldEmit(1, 77, RefuseFlank.Right, 3, 0, 118f, 10f) ? 1 : 0;
+            sink += t.ShouldEmit(1, 78, RefuseFlank.Right, 3, 0, 119f, 10f) ? 1 : 0;
+        }, 100, "the throttled repeat of the in-place refuse row");
+        GC.KeepAlive(sink);
+
+        string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        string method = Between(producers, "internal static void RefuseInPlace(", "private static void Reset()");
+        int throttle = method.IndexOf("_refuseRows.ShouldEmit(", StringComparison.Ordinal);
+        int signature = method.IndexOf("string signature", StringComparison.Ordinal);
+        AssertTrue(throttle >= 0 && signature > throttle, "the throttle is checked before the signature string is built");
+        AssertFalse(method.Contains("TacticalTelemetry.ShouldEmit"), "the string-keyed throttle is not on this path");
+    }
+}

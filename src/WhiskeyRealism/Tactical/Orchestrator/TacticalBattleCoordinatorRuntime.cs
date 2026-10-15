@@ -1554,8 +1554,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var ex = side.Army.CurrentDirectChildIntents[0];
                         shift = ex.RawUnitTyp - ex.EffectiveCommandLevel;
                     }
+                    // BC11: a deployed reserve keeps its role (BC10), so it is not offered a rect: the Center goes to a child that acts.
                     var childIds = new string[childCount];
-                    for (int c = 0; c < childCount; c++) childIds[c] = side.Army.CurrentDirectChildIntents[c].ChildId;
+                    for (int c = 0; c < childCount; c++)
+                        childIds[c] = deployedReserve[c] ? string.Empty : side.Army.CurrentDirectChildIntents[c].ChildId;
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
                         .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);
                 }

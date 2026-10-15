@@ -342,11 +342,15 @@ internal static partial class FlankResponseTests
         input.InwardLegHitsRiver = true;
         input.CanMirror = true;
         var state = default(ManeuverState);
+        input.MirrorAnchorX = -1000f;
+        input.MirrorAnchorZ = 500f;
         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.75));
-        AssertEqual(ManeuverPhase.Hold, order.Phase, "a failing single flank holds while the mirrored side is tried");
+        AssertEqual(ManeuverPhase.March, order.Phase, "a failing single flank marches to the mirrored side on the mirror tick");
         AssertEqual("mirror-flank", order.Reason, "reason");
+        AssertEqual(-1000f, order.TargetX, "the March is ordered to the mirrored anchor x");
+        AssertEqual(500f, order.TargetZ, "the March is ordered to the mirrored anchor z");
         AssertTrue(state.Mirrored, "the mirrored side is tried once");
-        // The runtime now supplies the mirrored side: clear inputs march.
+        // The runtime now supplies the mirrored side: clear inputs keep marching.
         input.InwardLegHitsRiver = false;
         AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref state, After(input, 10.76)).Phase, "the mirrored side is clear");
         // A second failure is final.
@@ -457,11 +461,12 @@ internal static partial class FlankResponseTests
         ManeuverOrder expired = EnvelopmentManeuver.Step(ref late, After(timeout, 10.75 + 1.0));
         AssertEqual(ManeuverPhase.Abandoned, expired.Phase, "MaxManeuverHours 1.0 doctrine-h after the march began");
         AssertEqual("timeout", expired.Reason, "reason");
-        // The hold before the march does not count: a long wait for contact is not a timeout.
+        // The hold before the march does not count towards the timeout: a wait for contact is not a timeout (the Hold has its own
+        // ceiling, HoldEndsAtTheCeiling).
         ManeuverInput waiting = Maneuver();
         var waitState = default(ManeuverState);
         EnvelopmentManeuver.Step(ref waitState, After(waiting, 10.0));
-        AssertEqual(ManeuverPhase.Hold, EnvelopmentManeuver.Step(ref waitState, After(waiting, 14.0)).Phase, "still waiting for the Center child's contact");
+        AssertEqual(ManeuverPhase.Hold, EnvelopmentManeuver.Step(ref waitState, After(waiting, 10.9)).Phase, "still waiting for the Center child's contact");
     }
 
     private static void DefenderNeverManeuvers()
@@ -573,6 +578,13 @@ internal static partial class FlankResponseTests
         AssertFalse(EnvelopmentManeuver.Arrived(1000f, 300f, 1000f, 500f, -50f), "a negative slack is ignored, not subtracted");
     }
 
+    // A DirectChildIntent standing for a child whose role came from the given play rect (Unknown: from evidence).
+    private static DirectChildIntent ZoneIntent(string childId, PlayRectKind zoneRect)
+    {
+        return new DirectChildIntent(childId, 15, 15, childId, 0, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 0.5f, 0.5f,
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), default(ManeuverSpec), zoneRect);
+    }
+
     private static void WingsDoNotWaitForACenterNobodyHolds()
     {
         PlayTemplate template = PlayTemplateCatalog.Lookup(BattlePlanId.DoubleEnvelopment);
@@ -582,14 +594,25 @@ internal static partial class FlankResponseTests
         bool hasCenterRect = false;
         foreach (PlayRect rect in template.Rects) if (rect.Kind == PlayRectKind.Center) hasCenterRect = true;
         AssertTrue(hasCenterRect, "the template has a Center rect");
+        var wingIntents = new[] { ZoneIntent("child-1", PlayRectKind.LeftWing), ZoneIntent("child-2", PlayRectKind.RightWing) };
         foreach (CorpsAssignment a in assignments) AssertTrue(a.RectKind != PlayRectKind.Center, "the wings outrank the Center: no corps holds it");
-        AssertFalse(EnvelopmentManeuver.WaitsForCenter(hasCenterRect, assignments), "with nobody on the Center the wings count from activation");
+        AssertFalse((EnvelopmentManeuver.CenterChildId(assignments, wingIntents) != null), "with nobody on the Center the wings count from activation");
 
         var threeCorps = new[] { new CorpsPosition("child-1", -600f, 300f), new CorpsPosition("child-2", 0f, 300f), new CorpsPosition("child-3", 600f, 300f) };
         var full = PlayCorpsAssignment.Assign(rects, threeCorps, Array.Empty<ObjectivePosition>());
-        AssertTrue(EnvelopmentManeuver.WaitsForCenter(hasCenterRect, full), "a third corps takes the Center: the wings wait for its contact");
-        AssertFalse(EnvelopmentManeuver.WaitsForCenter(false, full), "a template without a Center rect never waits");
-        AssertFalse(EnvelopmentManeuver.WaitsForCenter(true, null), "no assignment, no wait");
+        string centerChild = null;
+        foreach (CorpsAssignment a in full) if (a.RectKind == PlayRectKind.Center) centerChild = a.ChildId;
+        AssertTrue(centerChild != null, "a third corps takes the Center");
+        var actingIntents = new List<DirectChildIntent>();
+        foreach (CorpsAssignment a in full) actingIntents.Add(ZoneIntent(a.ChildId, a.RectKind));
+        AssertTrue((EnvelopmentManeuver.CenterChildId(full, actingIntents) != null), "the wings wait for the contact of a Center child that acts as it");
+        AssertEqual(centerChild, EnvelopmentManeuver.CenterChildId(full, actingIntents), "the Center child is the one that acts");
+        AssertFalse((EnvelopmentManeuver.CenterChildId(null, actingIntents) != null), "no assignment, no wait");
+        AssertFalse((EnvelopmentManeuver.CenterChildId(full, null) != null), "no intents, no wait");
+
+        string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        AssertPinned(runtime, "string centerChildId = templateHasCenterRect ? EnvelopmentManeuver.CenterChildId(_lastResult[allianceId], intents) : null;",
+            "a template without a Center rect, or without a child acting as it, makes the wings count from activation");
 
         // Without the Center, the offset runs from activation and the wing releases (Hold -> March).
         var state = default(ManeuverState);
@@ -599,6 +622,7 @@ internal static partial class FlankResponseTests
         input.PlayActivatedHours = 10.0;
         AssertEqual(ManeuverPhase.Hold, EnvelopmentManeuver.Step(ref state, After(input, 10.1)).Phase, "before the offset");
         AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref state, After(input, 10.3)).Phase, "after 900 s from activation");
+        AssertEqual("offset", state.ProceedReason, "proceeded on the offset");
     }
 
     private static void HoldTargetDriftStaysOutOfManeuverHash()

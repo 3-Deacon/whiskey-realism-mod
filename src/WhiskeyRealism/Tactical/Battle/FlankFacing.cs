@@ -40,6 +40,126 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
+    /// <summary>
+    /// Per-regiment memory of the in-combat refuse. The micro-turn check (<see cref="FlankFacing.VanillaTurnsBack"/>) judges the
+    /// snapshot, which holds only the perceived enemies, while vanilla's own micro turn (4539-4613) reads every enemy: a regiment
+    /// can be turned straight back by an enemy the side does not see, and re-rotating it every cooldown would be a tug of war.
+    /// This remembers the rotation each regiment was ordered to. A regiment later found settled away from it (vanilla or the
+    /// player turned it) is not rotated again for <see cref="BackOffHours"/> of doctrine time, or until the rotation wanted
+    /// changes by more than the executor's facing tolerance (the threat moved), whichever comes first. Fixed arrays, no allocation
+    /// after construction; an instance is owned by OrderExecutorRuntime and cleared with the battle.
+    /// </summary>
+    public sealed class RefuseTurnBackMemory
+    {
+        public const int Capacity = 64;
+        /// <summary>Six battle minutes on the doctrine clock.</summary>
+        public const double BackOffHours = 0.1;
+
+        private readonly int[] _id = new int[Capacity];
+        private readonly float[] _orderedTo = new float[Capacity];
+        private readonly float[] _wantedAtBackOff = new float[Capacity];
+        private readonly double[] _backOffUntil = new double[Capacity];
+        private int _count;
+        private int _next;
+
+        public int Count => _count;
+
+        /// <summary>The executor rotated the regiment to <paramref name="rotation"/>; any earlier back-off ends.</summary>
+        public void NoteRotated(int instanceId, float rotation)
+        {
+            int slot = Find(instanceId);
+            if (slot < 0)
+            {
+                if (_count < Capacity) slot = _count++;
+                else { slot = _next; _next = (_next + 1) % Capacity; }
+                _id[slot] = instanceId;
+            }
+            _orderedTo[slot] = rotation;
+            _backOffUntil[slot] = -1.0;
+        }
+
+        /// <summary>
+        /// True when the regiment must not be rotated now. A regiment settled away from the rotation it was ordered to has been
+        /// turned back: it enters a back-off (and is skipped) until <see cref="BackOffHours"/> pass or
+        /// <paramref name="wantedRotation"/> moves by more than the facing tolerance from the one it was turned back against.
+        /// </summary>
+        public bool IsBackedOff(int instanceId, float currentRotation, float wantedRotation, double nowHours)
+        {
+            int slot = Find(instanceId);
+            if (slot < 0) return false;
+            if (_backOffUntil[slot] >= 0.0)
+            {
+                if (nowHours >= _backOffUntil[slot] || nowHours < _backOffUntil[slot] - BackOffHours
+                    || FlankFacing.AngleBetween(wantedRotation, _wantedAtBackOff[slot]) > OrderExecutor.FacingToleranceDegrees)
+                {
+                    Remove(slot);
+                    return false;
+                }
+                return true;
+            }
+            if (FlankFacing.AngleBetween(currentRotation, _orderedTo[slot]) <= OrderExecutor.FacingToleranceDegrees) return false;
+            _backOffUntil[slot] = nowHours + BackOffHours;
+            _wantedAtBackOff[slot] = wantedRotation;
+            return true;
+        }
+
+        public void Clear()
+        {
+            _count = 0;
+            _next = 0;
+        }
+
+        private int Find(int instanceId)
+        {
+            for (int i = 0; i < _count; i++)
+                if (_id[i] == instanceId) return i;
+            return -1;
+        }
+
+        private void Remove(int slot)
+        {
+            _count--;
+            if (slot != _count)
+            {
+                _id[slot] = _id[_count];
+                _orderedTo[slot] = _orderedTo[_count];
+                _wantedAtBackOff[slot] = _wantedAtBackOff[_count];
+                _backOffUntil[slot] = _backOffUntil[_count];
+            }
+            if (_next >= _count) _next = 0;
+        }
+    }
+
+    /// <summary>
+    /// The throttle of the in-place refuse row. The row repeats every refuse cooldown for a group that stays in combat, so the
+    /// repeat test must not build a string: it compares the numeric tuple (flank, rotated, skipped) with the last row of the
+    /// same group and emits again only when the tuple changed or <c>minSeconds</c> passed. Allocation-free after the group's
+    /// first row (a dictionary lookup on a long key).
+    /// </summary>
+    public sealed class RefuseRowThrottle
+    {
+        private struct Row
+        {
+            public float At;
+            public RefuseFlank Side;
+            public int Rotated, Skipped;
+        }
+
+        private readonly System.Collections.Generic.Dictionary<long, Row> _rows = new System.Collections.Generic.Dictionary<long, Row>();
+
+        public bool ShouldEmit(int alliance, int instanceId, RefuseFlank side, int rotated, int skipped, float nowSeconds, float minSeconds)
+        {
+            long key = ((long)alliance << 32) | (uint)instanceId;
+            if (_rows.TryGetValue(key, out Row last) && last.Side == side && last.Rotated == rotated && last.Skipped == skipped
+                && nowSeconds - last.At < minSeconds && nowSeconds >= last.At)
+                return false;
+            _rows[key] = new Row { At = nowSeconds, Side = side, Rotated = rotated, Skipped = skipped };
+            return true;
+        }
+
+        public void Clear() => _rows.Clear();
+    }
+
     public static class FlankFacing
     {
         /// <summary>The window holding the unit's facing keeps it while it has at least this share of the best window (a turn needs 1.25 x).</summary>
@@ -183,13 +303,14 @@ namespace WhiskeyRealism.Tactical.Battle
         /// (PostureSense.CollectRotatableRegiments) whose setback is at least <see cref="RefuseWingShare"/>
         /// of the refuse depth and whose current facing differs from the skewed rotation by more than the
         /// executor's tolerance, minus those vanilla's micro turn would undo (<paramref name="skipped"/>),
-        /// at most <see cref="MaxRefuseRotationsPerTick"/> with the deepest setbacks first. Writes own
+        /// and those <paramref name="memory"/> holds backed off after vanilla turned them back, at most <see cref="MaxRefuseRotationsPerTick"/> with the deepest setbacks first. Writes own
         /// indices to <paramref name="regiments"/> and their rotations to <paramref name="headings"/>
         /// (parallel); <paramref name="queue"/> is the walk's scratch. Returns the count. Nothing here
         /// writes: OrderExecutorRuntime rotates each through TacticalWriteGuard.CanWrite.
         /// </summary>
         public static int RefuseRotations(BattleSnapshot s, int groupIndex, RefuseFlank side, float groupWidth, float depthFactor, float skew,
-            in MicroTurnRule turn, int[] queue, int[] regiments, float[] headings, out int skipped)
+            in MicroTurnRule turn, int[] queue, int[] regiments, float[] headings, out int skipped,
+            RefuseTurnBackMemory memory = null, double nowHours = 0.0)
         {
             skipped = 0;
             if (s == null || side == RefuseFlank.None || queue == null || regiments == null || headings == null) return 0;
@@ -210,6 +331,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 float rotation = SkewedRotation(groupRotation, offsetX, UnitWidthOf(s, groupIndex, index, groupWidth), groupWidth, refuseDepth, side, skew);
                 if (AngleDifference(rec.RotationY, rotation) <= OrderExecutor.FacingToleranceDegrees) continue;
                 if (VanillaTurnsBack(s, index, rotation, in turn))
+                {
+                    skipped++;
+                    continue;
+                }
+                // Vanilla's micro turn sees every enemy, the snapshot only the perceived ones: a regiment that was turned back
+                // since we rotated it is left alone for a back-off (see RefuseTurnBackMemory).
+                if (memory != null && memory.IsBackedOff(rec.InstanceId, rec.RotationY, rotation, nowHours))
                 {
                     skipped++;
                     continue;
@@ -353,6 +481,8 @@ namespace WhiskeyRealism.Tactical.Battle
             if (d <= -180f) d += 360f;
             return d;
         }
+
+        internal static float AngleBetween(float a, float b) => AngleDifference(a, b);
 
         private static float AngleDifference(float a, float b)
         {

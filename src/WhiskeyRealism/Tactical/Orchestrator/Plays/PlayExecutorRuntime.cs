@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
@@ -274,6 +275,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public double CenterContactHours = -1.0;
             public readonly Dictionary<string, ManeuverState> States = new Dictionary<string, ManeuverState>(StringComparer.Ordinal);
             public readonly List<ChildManeuver> Orders = new List<ChildManeuver>(8);
+            // The last march-leg river check per child, and the route plans this step may still spend (one per side and step).
+            public readonly Dictionary<string, EnvelopmentManeuver.MarchRouteCheck> MarchChecks =
+                new Dictionary<string, EnvelopmentManeuver.MarchRouteCheck>(StringComparer.Ordinal);
+            public int RoutePlansLeft;
 
             public void Clear()
             {
@@ -282,12 +287,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 CenterContactHours = -1.0;
                 States.Clear();
                 Orders.Clear();
+                MarchChecks.Clear();
             }
         }
 
         // Plan-scoped state per side (BattleScope "play-executor" clears it with the zone-assignment cache).
         private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(), new SideManeuvers() };
         private static readonly int[] _riverSamples = new int[4096];
+        // The march-leg route: the NavMesh corners of the planned path, copied to flat arrays for the grid sampling.
+        private static float[] _routeX = new float[64];
+        private static float[] _routeZ = new float[64];
+        private static NavMeshQueryFilter _routeFilter;
+        private static long _routeFilterTick = -1L;
         private static bool _firstFlankMarchLogged;
         private static readonly Func<float, float, float> TerrainHeightAt = HeightAt;
 
@@ -340,13 +351,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenterRect = true;
                         if (template.Rects[r].Envelops) envelopRects++;
                     }
-                    // Wait for the Center child's contact only when the assignment gave the Center rect a child (see WaitsForCenter).
-                    bool templateHasCenter = EnvelopmentManeuver.WaitsForCenter(templateHasCenterRect, _lastResult[allianceId]);
-                    NoteCenterContact(side, snapshot, allianceId, now, templateHasCenter);
+                    // Wait for the Center child's contact only when a child really acts as the Center (see CenterChildId).
+                    string centerChildId = templateHasCenterRect ? EnvelopmentManeuver.CenterChildId(_lastResult[allianceId], intents) : null;
+                    bool templateHasCenter = centerChildId != null;
+                    NoteCenterContact(side, snapshot, now, centerChildId);
 
                     PlayAnchor.EnemyAnchor(snapshot, axis, axis.OriginX, axis.OriginZ, out float enemyX, out float enemyZ);
                     BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
                     side.Orders.Clear();
+                    side.RoutePlansLeft = 1;
                     for (int i = 0; i < intents.Count; i++)
                     {
                         ManeuverSpec spec = intents[i].Maneuver;
@@ -357,7 +370,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         ManeuverPhase before = state.Phase;
                         bool wasMirrored = state.Mirrored;
 
-                        ManeuverInput input = BuildInput(snapshot, grid, axis, spec, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
+                        ManeuverInput input = BuildInput(snapshot, grid, axis, spec, intents[i].ChildId, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
                             state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now);
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;
@@ -393,30 +406,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         // The Center rect's child sees an enemy within ContactMeters: the first doctrine hour that happens is kept.
-        private static void NoteCenterContact(SideManeuvers side, BattleSnapshot snapshot, int allianceId, double now, bool templateHasCenter)
+        private static void NoteCenterContact(SideManeuvers side, BattleSnapshot snapshot, double now, string centerChildId)
         {
-            if (!templateHasCenter || side.CenterContactHours >= 0.0) return;
-            IReadOnlyList<CorpsAssignment> assignments = _lastResult[allianceId];
-            if (assignments == null) return;
-            for (int a = 0; a < assignments.Count; a++)
-            {
-                if (assignments[a].RectKind != PlayRectKind.Center) continue;
-                int index = snapshot.IndexOfOwn(ParseChildInstanceId(assignments[a].ChildId));
-                if (index >= 0 && snapshot.ClosestVisibleEnemy(index, out float distance) >= 0 && distance <= EnvelopmentManeuver.ContactMeters)
-                {
-                    side.CenterContactHours = now;
-                    return;
-                }
-            }
+            if (centerChildId == null || side.CenterContactHours >= 0.0) return;
+            int index = snapshot.IndexOfOwn(ParseChildInstanceId(centerChildId));
+            if (index >= 0 && snapshot.ClosestVisibleEnemy(index, out float distance) >= 0 && distance <= EnvelopmentManeuver.ContactMeters)
+                side.CenterContactHours = now;
         }
 
-        private static ManeuverInput BuildInput(BattleSnapshot snapshot, BattleTerrainGrid grid, TacticalFrontAxis axis, ManeuverSpec spec, int index,
+        private static ManeuverInput BuildInput(BattleSnapshot snapshot, BattleTerrainGrid grid, TacticalFrontAxis axis, ManeuverSpec spec, string childId, int index,
             int strengthBucket, bool mirrored, bool outflankReached, bool templateHasCenter, bool canMirror, SideManeuvers side,
             float enemyX, float enemyZ, BattleStance stance, double now)
         {
             ref UnitRecord child = ref snapshot.Own[index];
             float anchorX = spec.AnchorX, anchorZ = spec.AnchorZ;
-            if (mirrored) EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out anchorX, out anchorZ);
+            EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out float mirrorX, out float mirrorZ);
+            if (mirrored) { anchorX = mirrorX; anchorZ = mirrorZ; }  // the one mirrored try is spent: MirrorAnchor is not read again
             bool right = EnvelopmentManeuver.RectIsRight(in axis, anchorX, anchorZ);
 
             var input = new ManeuverInput
@@ -424,7 +429,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Kind = spec.Kind, Envelops = spec.Envelops, AnchorX = anchorX, AnchorZ = anchorZ, StartOffsetSeconds = spec.StartOffsetSeconds,
                 TemplateHasCenter = templateHasCenter, PlayActivatedHours = side.ActivatedHours, CenterContactHours = side.CenterContactHours,
                 ChildX = child.X, ChildZ = child.Z, ChildStrengthBucket = strengthBucket,
-                EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror,
+                EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror, MirrorAnchorX = mirrorX, MirrorAnchorZ = mirrorZ,
                 HeightDifferenceAnchored = GamePrefs.heightdifferencetoenemyunitanchored, Stance = stance, NowHours = now,
             };
             input.ChildInContact = snapshot.ClosestVisibleEnemy(index, out float contactDistance) >= 0 && contactDistance <= EnvelopmentManeuver.ContactMeters;
@@ -460,13 +465,68 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 int n = grid.SampleLine(anchorX, anchorZ, inwardX, inwardZ, EnvelopmentManeuver.InwardStepMeters, _riverSamples);
                 input.InwardLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
-                if (!grid.Frozen)
-                {
-                    n = grid.SampleLine(child.X, child.Z, anchorX, anchorZ, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
-                    input.MarchLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
-                }
+                if (!grid.Frozen) input.MarchLegHitsRiver = MarchLegHitsRiver(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId);
             }
             return input;
+        }
+
+        // The march leg judged on the route the child will walk (a NavMesh path from its position to the anchor, priced like
+        // the posture probe), each segment sampled on the BC10 grid: a straight line across a river that the route crosses by a
+        // bridge does not count. The check is re-run only at the leg's start, when the anchor moves (the mirrored side) and every
+        // RouteRecheckHours of doctrine time, and at most one route plan per side and step; with no budget the last result stands, with
+        // no path (or no result yet) the straight line is sampled instead (conservative).
+        private static bool MarchLegHitsRiver(SideManeuvers side, string childId, BattleTerrainGrid grid, in UnitRecord child,
+            float anchorX, float anchorZ, double now, long tickId)
+        {
+            side.MarchChecks.TryGetValue(childId, out EnvelopmentManeuver.MarchRouteCheck last);
+            if (!EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ)) return last.HitsRiver;
+            if (last.Valid && side.RoutePlansLeft <= 0) return last.HitsRiver;
+
+            var check = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = now, AnchorX = anchorX, AnchorZ = anchorZ };
+            bool planned = false;
+            if (side.RoutePlansLeft > 0)
+            {
+                side.RoutePlansLeft--;
+                try
+                {
+                    if (_routeFilterTick != tickId)
+                    {
+                        _routeFilter = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter();
+                        _routeFilterTick = tickId;
+                    }
+                    NavMeshPath path = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.SharedPath();
+                    if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)
+                        && path.status == NavMeshPathStatus.PathComplete)
+                    {
+                        int count = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.ReadCorners(path, out Vector3[] corners);
+                        if (_routeX.Length < count)
+                        {
+                            _routeX = new float[count * 2];
+                            _routeZ = new float[count * 2];
+                        }
+                        for (int c = 0; c < count; c++)
+                        {
+                            _routeX[c] = corners[c].x;
+                            _routeZ[c] = corners[c].z;
+                        }
+                        check.HitsRiver = EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
+                        planned = count > 0;
+                    }
+                }
+                catch (Exception e)
+                {
+                    OnceLog.Warning("play-executor-runtime:march-route-exception",
+                        "PlayExecutorRuntime march route plan failed, the straight line is sampled: " + e.GetType().Name + " " + e.Message);
+                }
+            }
+            if (!planned)
+            {
+                int n = grid.SampleLine(child.X, child.Z, anchorX, anchorZ, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
+                check.HitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
+            }
+            check.UsedRoute = planned;
+            side.MarchChecks[childId] = check;
+            return check.HitsRiver;
         }
 
         private static float HeightAt(float x, float z)
@@ -497,6 +557,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
                 string reason = state.Phase == ManeuverPhase.Abandoned ? (state.AbandonReason ?? order.Reason) : order.Reason;
                 bool mirrored = state.Mirrored;
+                string proceed = state.ProceedReason ?? string.Empty;
                 float targetX = order.TargetX, targetZ = order.TargetZ, anchorX = input.AnchorX, anchorZ = input.AnchorZ;
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
                     ev => ev
@@ -508,6 +569,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("phase", phase)
                         .WithField("reason", reason)
                         .WithField("mirrored", mirrored)
+                        .WithField("proceed", proceed)
                         .WithField("anchorX", anchorX)
                         .WithField("anchorZ", anchorZ)
                         .WithField("targetX", targetX)

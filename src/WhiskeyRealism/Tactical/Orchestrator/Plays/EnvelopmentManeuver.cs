@@ -69,6 +69,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float MaxCorridorEnemyHeight;
         public float HeightDifferenceAnchored;                            // GamePrefs.heightdifferencetoenemyunitanchored (5 m)
         public bool CanMirror;                                            // a lone enveloping rect: one mirrored try
+        // The rect anchor mirrored across the army's centre line (the runtime fills it when CanMirror): the mirror tick marches there.
+        public float MirrorAnchorX, MirrorAnchorZ;
         // Additive: how far the child's headquarters may stand from a point it was sent to and still have arrived. SetGroupFormation
         // paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058), so the runtime passes those.
         public float ArrivalSlackMeters;
@@ -85,6 +87,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // Additive: when the march began (MaxManeuverHours counts from it) and whether a DeepRaid reached its outflank point.
         public double ActiveSinceHours;
         public bool OutflankReached;
+        // Additive: why the Hold ended (static literal: center-contact, offset, hold-ceiling), carried into the telemetry row.
+        public string ProceedReason;
     }
 
     public struct ManeuverOrder
@@ -182,25 +186,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
             if (state.Phase == ManeuverPhase.Hold)
             {
-                if (input.TemplateHasCenter && input.CenterContactHours < 0.0) return HoldOrder(in input, "await-center-contact");
-                double reference = input.TemplateHasCenter ? Math.Max(input.PlayActivatedHours, input.CenterContactHours) : input.PlayActivatedHours;
-                double goHours = reference + input.StartOffsetSeconds / (double)TacticalBattleClock.BattleSecondsPerHour;
-                if (input.NowHours < goHours) return HoldOrder(in input, "hold-offset");
+                // The ceiling: a Hold never outlasts MaxManeuverHours from the play's activation (a Center child that never makes
+                // contact, or is destroyed, must not hold the wings for good); the wings then proceed on their own checks.
+                bool ceiling = input.NowHours - input.PlayActivatedHours >= MaxManeuverHours;
+                if (!ceiling)
+                {
+                    if (input.TemplateHasCenter && input.CenterContactHours < 0.0) return HoldOrder(in input, "await-center-contact");
+                    double reference = input.TemplateHasCenter ? Math.Max(input.PlayActivatedHours, input.CenterContactHours) : input.PlayActivatedHours;
+                    double goHours = reference + input.StartOffsetSeconds / (double)TacticalBattleClock.BattleSecondsPerHour;
+                    if (input.NowHours < goHours) return HoldOrder(in input, "hold-offset");
+                }
 
                 string failure = FlankMoveCheck(in input);
                 if (failure != null)
                 {
                     if (input.CanMirror && !state.Mirrored)
                     {
-                        // The runtime reads Mirrored and supplies the mirrored side's anchor and checks next tick.
-                        state.Mirrored = true;
-                        return HoldOrder(in input, "mirror-flank");
+                        // One mirrored try: march to the mirrored anchor now; the runtime supplies the mirrored side's anchor and
+                        // checks from the next tick, and a second failure there is final.
+                        return MirrorMarch(ref state, in input, true);
                     }
                     return Abandon(ref state, failure);
                 }
                 state.Phase = ManeuverPhase.March;
                 state.PhaseSinceHours = input.NowHours;
                 state.ActiveSinceHours = input.NowHours;
+                state.ProceedReason = ceiling ? "hold-ceiling" : (input.TemplateHasCenter ? "center-contact" : "offset");
             }
 
             // March, Turn and Attack share the abandon rules.
@@ -212,10 +223,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (failure != null)
                 {
                     if (input.CanMirror && !state.Mirrored)
-                    {
-                        state.Mirrored = true;
-                        return MarchOrder(ref state, in input);
-                    }
+                        return MirrorMarch(ref state, in input, false);
                     return Abandon(ref state, failure);
                 }
             }
@@ -244,6 +252,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 default:
                     return AttackOrder(in input);
             }
+        }
+
+        // The one mirrored try: the March phase toward the mirrored anchor (a DeepRaid re-finds its outflank point on the
+        // mirrored side next tick). A march already in progress keeps its clock (timeout counts from the first leg).
+        private static ManeuverOrder MirrorMarch(ref ManeuverState state, in ManeuverInput input, bool fromHold)
+        {
+            state.Mirrored = true;
+            state.OutflankReached = false;
+            state.Phase = ManeuverPhase.March;
+            state.PhaseSinceHours = input.NowHours;
+            if (fromHold)
+            {
+                state.ActiveSinceHours = input.NowHours;
+                state.ProceedReason = "mirror-flank";
+            }
+            return new ManeuverOrder
+            {
+                Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly,
+                TargetX = input.MirrorAnchorX, TargetZ = input.MirrorAnchorZ, Heading = -1f, Reason = "mirror-flank",
+            };
         }
 
         // The march target: the rect anchor; a DeepRaid goes first to its outflank point.
@@ -331,17 +359,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         /// <summary>
-        /// Whether an enveloping child waits for the Center child's contact: the template has a Center rect AND the zone assignment gave
-        /// it a child. DoubleEnvelopment's wings outrank its Center (priority 10 over 8), so with two corps both take wings and nobody
-        /// holds the Center; waiting for a contact that cannot come would hold the wings for good, so the offset then counts from the
-        /// play's activation.
+        /// The id of the Center child the enveloping wings wait on, or null. A child counts only if the zone assignment gave it the
+        /// Center rect AND its effective role came from that rect (<see cref="DirectChildIntent.ZoneRectKind"/>): BC10 keeps a
+        /// deployed reserve off its zone role, and a child that does not act as the Center never makes contact for the Center.
+        /// With none, the offset counts from the play's activation. (DoubleEnvelopment's wings outrank its Center, so with two
+        /// corps nobody holds it.)
         /// </summary>
-        public static bool WaitsForCenter(bool templateHasCenterRect, System.Collections.Generic.IReadOnlyList<CorpsAssignment> assignments)
+        public static string CenterChildId(System.Collections.Generic.IReadOnlyList<CorpsAssignment> assignments,
+            System.Collections.Generic.IReadOnlyList<DirectChildIntent> intents)
         {
-            if (!templateHasCenterRect || assignments == null) return false;
+            if (assignments == null || intents == null) return null;
             for (int a = 0; a < assignments.Count; a++)
-                if (assignments[a].RectKind == PlayRectKind.Center) return true;
-            return false;
+            {
+                if (assignments[a].RectKind != PlayRectKind.Center) continue;
+                for (int i = 0; i < intents.Count; i++)
+                    if (string.Equals(intents[i].ChildId, assignments[a].ChildId, StringComparison.Ordinal) && intents[i].ZoneRectKind == PlayRectKind.Center)
+                        return assignments[a].ChildId;
+            }
+            return null;
         }
 
         // ---- the checks ----------------------------------------------------------------------
@@ -356,6 +391,53 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             for (int i = 0; i < n; i++)
                 if (riverSamples[i] == BattleTerrainGrid.RiverId) return false;
             return true;
+        }
+
+        /// <summary>
+        /// The march leg judged on the route the child will actually walk: the polyline of NavMesh corners
+        /// (<paramref name="xs"/>, <paramref name="zs"/>), each segment sampled every <paramref name="stepMeters"/> on the terrain grid;
+        /// true when any sample is river id 4. A straight line from the child to the anchor can cross a river that the planned route
+        /// crosses on a bridge or ford (ids 6 and 5), which are not river. A single corner is sampled as a point.
+        /// </summary>
+        public static bool RouteHitsRiver(BattleTerrainGrid grid, float[] xs, float[] zs, int count, float stepMeters, int[] scratch)
+        {
+            if (grid == null || xs == null || zs == null || scratch == null || count <= 0) return false;
+            count = Math.Min(count, Math.Min(xs.Length, zs.Length));
+            if (count == 1) return grid.IdAt(xs[0], zs[0]) == BattleTerrainGrid.RiverId;
+            for (int c = 0; c + 1 < count; c++)
+            {
+                int n = grid.SampleLine(xs[c], zs[c], xs[c + 1], zs[c + 1], stepMeters, scratch);
+                if (!InwardLegClear(scratch, n)) return true;
+            }
+            return grid.IdAt(xs[count - 1], zs[count - 1]) == BattleTerrainGrid.RiverId;
+        }
+
+        /// <summary>The march-leg check is re-run only when it can have changed (see <see cref="NeedsRouteRecheck"/>).</summary>
+        public const double RouteRecheckHours = 0.05;
+        /// <summary>The anchor moving by more than this is a new leg.</summary>
+        public const float RouteAnchorMoveMeters = 50f;
+
+        /// <summary>The last march-leg river check of one child.</summary>
+        public struct MarchRouteCheck
+        {
+            public bool Valid;
+            public double CheckedHours;
+            public float AnchorX, AnchorZ;
+            public bool HitsRiver;
+            /// <summary>True when the result came from the planned route, false when it fell back to the straight line.</summary>
+            public bool UsedRoute;
+        }
+
+        /// <summary>
+        /// Whether the march-leg check must be recomputed: there is none yet, the anchor moved (a new leg: the first march, the
+        /// mirrored side), or <see cref="RouteRecheckHours"/> of doctrine time passed (the route and the child's position drift).
+        /// Not every tick: a route plan is a NavMesh query.
+        /// </summary>
+        public static bool NeedsRouteRecheck(in MarchRouteCheck last, double nowHours, float anchorX, float anchorZ)
+        {
+            if (!last.Valid) return true;
+            if (nowHours < last.CheckedHours || nowHours - last.CheckedHours >= RouteRecheckHours) return true;
+            return Distance(last.AnchorX, last.AnchorZ, anchorX, anchorZ) > RouteAnchorMoveMeters;
         }
 
         /// <summary>
