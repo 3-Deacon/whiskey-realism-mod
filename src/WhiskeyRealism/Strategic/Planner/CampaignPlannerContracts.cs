@@ -203,9 +203,26 @@ namespace WhiskeyRealism.Strategic.Planner
         public float Initiative, Leadership, Administration;
         public float Average; // GetAverageAttributeValue (59175)
         public bool Available, Navy, Dummy, RefreshCommand, ServingUnderPlayer, IsPlayer;
+        // Vanilla's AI appointment pool, CanBePickedForAIReplacement(alliance,
+        // includeofficerswithcommand: true) (60748-60779): available, not serving under the W&L
+        // player, not on a staff, not an army-group commander, not the alliance CIC (G2).
+        public bool Pickable;
         public int CommandInstanceId;
         public int CommandUnitTyp;
         public string Name;
+    }
+
+    // One vanilla ArmyGroup of the snapshot's alliance (BattleUnits.armygroups, 75007; its
+    // commander is ArmyGroup.GetCommanderID, 75541, and has no currentcommand). Position and
+    // strength are the members' mean position and summed groupstrengthdirect. G2's appointment
+    // targets (ArmyGroup.AppointCommander, 75559).
+    public struct ArmyGroupRecord
+    {
+        public int InstanceId;
+        public int CommanderId;
+        public float X, Z;
+        public float Strength;
+        public int[] MemberInstanceIds; // attachedunits (top formations)
     }
 
     public enum TheaterPosture

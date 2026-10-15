@@ -131,6 +131,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> EnableCampaignPlanner;
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
+        internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -915,6 +916,12 @@ namespace WhiskeyRealism
                 "Campaign Planner", "Enable Campaign Planner Executors", true,
                 "Default ON. Lets the planner steer vanilla: offensive target pointers, campaign objective, theater boxes, availability, capital pledges, " +
                 "transfers, MoveUnitTo, depots, forts, railroads. Never moves or orders the W&L player's own command. OFF = plan and telemetry only.");
+            EnableCommanderAppointmentPlanner = Config.Bind(
+                "Campaign Planner", "Enable Commander Appointment Planner", true,
+                "Default ON. Each AI alliance puts its best available commanders (vanilla's competence metric GetAverageAttributeValue, vanilla's " +
+                "appointment pool and rank rules) on its main-effort commands, at most one appointment a day; the historical succession events add a " +
+                "bonus when their conditions hold; appointees are shielded from vanilla's job-24 swap for 60 days. Never appoints or displaces the W&L " +
+                "player or his officers, and never changes a command that holds the player's. OFF = vanilla job 24 only and no succession swaps.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");

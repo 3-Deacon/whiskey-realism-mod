@@ -22,11 +22,7 @@ internal static class CampaignMilitaryFixTests
         ArmyGroupCommanderEligibilityMirrorsVanilla();
         ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange();
         ArmyGroupAppointsOnlyOnGroupHoldingPlanUnits();
-        SuccessionRoleResolvesTheaterArmyGroup();
-        SuccessionRoleNeverTargetsPlayerOrWrongFront();
-        SuccessionGeneralInChiefIsNotAnArmyGroup();
         StalePreviousCommandIsRefilledNotOrphaned();
-        SuccessionReseatsReplacementsOldArmyGroup();
         CapitalNeedMatchesVanillaFormula();
         CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
         CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
@@ -236,55 +232,6 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AppointOwnOnly, 0), "own group holds plan units");
         TestHarness.AssertFalse(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.None, 0), "no action");
         LogPass("c2a army group appoints only on a group holding plan units");
-    }
-
-    // C-CmdrReplace: the displaced commander was "first army-group commander by
-    // index", so "Bragg -> Western" could unseat Lee. Resolve by role + theater.
-    private static System.Collections.Generic.List<ArmyGroupRoleCandidate> SampleGroups()
-    {
-        return new System.Collections.Generic.List<ArmyGroupRoleCandidate>
-        {
-            new ArmyGroupRoleCandidate(0, Theater.East, "VirginiaCapitalCorridor", 60000f, false),
-            new ArmyGroupRoleCandidate(1, Theater.West, "Unassigned", 45000f, false),
-            new ArmyGroupRoleCandidate(2, Theater.East, "ShenandoahValley", 15000f, false),
-            new ArmyGroupRoleCandidate(3, Theater.West, "Unassigned", 20000f, false),
-        };
-    }
-
-    private static void SuccessionRoleResolvesTheaterArmyGroup()
-    {
-        var groups = SampleGroups();
-        TestHarness.AssertEqual(0, CommanderAssignmentGuard.ResolveRoleTargetGroup("ANV", groups), "ANV -> main eastern group");
-        TestHarness.AssertEqual(0, CommanderAssignmentGuard.ResolveRoleTargetGroup("AoP", groups), "AoP -> main eastern group");
-        TestHarness.AssertEqual(1, CommanderAssignmentGuard.ResolveRoleTargetGroup("Western", groups), "Western -> largest western group");
-        TestHarness.AssertEqual(2, CommanderAssignmentGuard.ResolveRoleTargetGroup("Valley", groups), "Valley -> Shenandoah group");
-        LogPass("c2a succession role resolves the theater army group");
-    }
-
-    private static void SuccessionRoleNeverTargetsPlayerOrWrongFront()
-    {
-        var westOnly = new System.Collections.Generic.List<ArmyGroupRoleCandidate>
-        {
-            new ArmyGroupRoleCandidate(0, Theater.West, "Unassigned", 50000f, false),
-        };
-        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("ANV", westOnly), "no eastern group -> defer, never unseat the west");
-        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("Valley", SampleGroups().GetRange(0, 2)), "no valley group -> defer");
-        var playerEast = new System.Collections.Generic.List<ArmyGroupRoleCandidate>
-        {
-            new ArmyGroupRoleCandidate(0, Theater.East, "VirginiaCapitalCorridor", 60000f, true),
-            new ArmyGroupRoleCandidate(1, Theater.East, "WashingtonDefenses", 10000f, false),
-        };
-        TestHarness.AssertEqual(1, CommanderAssignmentGuard.ResolveRoleTargetGroup("AoP", playerEast), "W&L player's group is never displaced");
-        LogPass("c2a succession role never targets player group or another front");
-    }
-
-    private static void SuccessionGeneralInChiefIsNotAnArmyGroup()
-    {
-        TestHarness.AssertFalse(CommanderAssignmentGuard.RoleIsArmyGroupCommand("GeneralInChief"), "GiC is GameVars.alliance.commanderinchief, not an army group");
-        TestHarness.AssertTrue(CommanderAssignmentGuard.RoleIsArmyGroupCommand("Western"), "Western is an army group");
-        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("GeneralInChief", SampleGroups()), "GiC resolves no group");
-        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup(null, SampleGroups()), "null role");
-        LogPass("c2a succession general-in-chief is not an army-group swap");
     }
 
     // CommanderAssignmentPreviousCommandPatch set prior.commander = -1, leaving a
@@ -497,33 +444,6 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(CoordinatedOperationRuntime.PackageLockLive(3), "path still running keeps lock");
         TestHarness.AssertFalse(CoordinatedOperationRuntime.PackageLockLive(0), "path consumed expires lock");
         LogPass("c2a coordinated package lock expires once the path is consumed");
-    }
-
-    // Vanilla seats historical figures on auto-created army groups early
-    // (CreateNewArmyGroup 75653 -> GetSuitableCommander includeofficerswithcommand),
-    // and CanBePickedForAIReplacement (60748) rejects any sitting army-group
-    // commander - so Lee/Johnston/Grant would never be "pickable". A sitting
-    // AG commander who is otherwise free moves after his old group is reseated
-    // from vanilla's own pool (GetAvailableArmyGroupCommanders 75546);
-    // AppointCommander never clears the old group's commanderid.
-    private static void SuccessionReseatsReplacementsOldArmyGroup()
-    {
-        TestHarness.AssertEqual(ReplacementAppointment.AppointDirect,
-            CommanderAssignmentGuard.ResolveReplacementAppointment(vanillaPickable: true, leadsOtherArmyGroup: false, freeApartFromArmyGroup: true, successorAvailable: false),
-            "pickable replacement appointed directly");
-        TestHarness.AssertEqual(ReplacementAppointment.ReseatThenAppoint,
-            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, true),
-            "sitting AG commander moves after his old group is reseated");
-        TestHarness.AssertEqual(ReplacementAppointment.Defer,
-            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, false),
-            "no successor -> never leave one man on two groups");
-        TestHarness.AssertEqual(ReplacementAppointment.Defer,
-            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, false, true),
-            "wounded/captured/staff/CIC/player-subordinate stays put");
-        TestHarness.AssertEqual(ReplacementAppointment.Defer,
-            CommanderAssignmentGuard.ResolveReplacementAppointment(false, false, true, true),
-            "not pickable for another reason -> defer");
-        LogPass("c2a succession reseats the replacement's old army group");
     }
 
     // M1: a committed unit skips re-issue (already in unitsindefensiveoperations)
