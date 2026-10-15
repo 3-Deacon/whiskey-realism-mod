@@ -233,6 +233,48 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // BR-M1: the Main-effort arrival hold (TacticalMainArrivalSynchronizer)
+    // arms once per role/task assignment. When it ends — supports closed, the
+    // budget ran out, or an aggressive commander released it — it stays
+    // released until the caller drops the state (role/task changed). Without
+    // the latch, an expired hold re-armed on the next tick and the brigade
+    // flipped Screen (1) ↔ Attack (3) with a waypoint re-issue each time.
+    public static class MainArrivalHoldLatch
+    {
+        public readonly struct State
+        {
+            public State(bool active, bool released, float startedAtHours)
+            {
+                Active = active;
+                Released = released;
+                StartedAtHours = startedAtHours;
+            }
+
+            public bool Active { get; }
+            public bool Released { get; }
+            public float StartedAtHours { get; }
+        }
+
+        public static bool ShouldEvaluate(State state)
+        {
+            return !state.Released;
+        }
+
+        public static float ElapsedHours(State state, float nowHours)
+        {
+            if (!state.Active || nowHours < state.StartedAtHours) return 0f;
+            return nowHours - state.StartedAtHours;
+        }
+
+        public static State Next(State previous, float nowHours, bool holding)
+        {
+            if (previous.Released) return previous;
+            if (!holding) return new State(false, true, previous.StartedAtHours);
+            if (previous.Active && nowHours >= previous.StartedAtHours) return previous;
+            return new State(true, false, nowHours);
+        }
+    }
+
     // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart
     // (game hours). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
     // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock

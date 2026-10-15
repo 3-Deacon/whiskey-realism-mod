@@ -60,6 +60,10 @@ internal static class PostureStanceFixTests
         Pass("queued courier order counts as an issued move", QueuedCourierOrderCountsAsIssuedMove);
         Pass("failed write backs off on battle time", FailedWriteBacksOffOnBattleTime);
         Pass("real seconds at 1x convert to battle hours", RealSecondsAtOneXConvertToBattleHours);
+
+        // BR-M1
+        Pass("main arrival hold arms once and keeps its start time", MainArrivalHoldArmsOnce);
+        Pass("main arrival hold stays released after expiry", MainArrivalHoldStaysReleasedAfterExpiry);
     }
 
     private static void Pass(string name, Action test)
@@ -482,5 +486,28 @@ internal static class PostureStanceFixTests
         // Macro cycle 0.015 game-hours ≈ 9 s real at 1x ⇒ 1 game-hour ≈ 600 s real.
         AssertEqual(0.015f, TacticalBattleClock.RealSecondsAtOneXToHours(9f), "macro cycle");
         AssertEqual(0f, TacticalBattleClock.RealSecondsAtOneXToHours(-3f), "negative clamps");
+    }
+
+    private static void MainArrivalHoldArmsOnce()
+    {
+        var none = default(MainArrivalHoldLatch.State);
+        AssertTrue(MainArrivalHoldLatch.ShouldEvaluate(none), "fresh state evaluates");
+        AssertEqual(0f, MainArrivalHoldLatch.ElapsedHours(none, 1f), "no elapsed before arming");
+        var armed = MainArrivalHoldLatch.Next(none, 1f, holding: true);
+        AssertTrue(armed.Active, "armed");
+        var later = MainArrivalHoldLatch.Next(armed, 1.02f, holding: true);
+        AssertEqual(1f, later.StartedAtHours, "start time kept");
+        AssertEqual(0.02f, (float)Math.Round(MainArrivalHoldLatch.ElapsedHours(later, 1.02f), 4), "elapsed on battle time");
+    }
+
+    private static void MainArrivalHoldStaysReleasedAfterExpiry()
+    {
+        var armed = MainArrivalHoldLatch.Next(default(MainArrivalHoldLatch.State), 1f, holding: true);
+        var released = MainArrivalHoldLatch.Next(armed, 1.1f, holding: false);
+        AssertTrue(released.Released, "release latched");
+        AssertFalse(MainArrivalHoldLatch.ShouldEvaluate(released), "no re-arm until role/task changes (BR-M1)");
+        var stillReleased = MainArrivalHoldLatch.Next(released, 1.2f, holding: true);
+        AssertTrue(stillReleased.Released, "hold request ignored once released");
+        AssertEqual(0f, MainArrivalHoldLatch.ElapsedHours(armed, 0.5f), "clock reset gives no negative elapsed");
     }
 }

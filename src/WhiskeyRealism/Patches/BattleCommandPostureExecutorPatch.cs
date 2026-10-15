@@ -87,6 +87,7 @@ namespace WhiskeyRealism.Patches
             // call inside this Apply will lazy-build the snapshot; subsequent
             // SetWaypoint calls reuse it.
             ResetFriendlyPathSnapshotForFrame();
+            _supportMainPositionsByAlliance.Clear();
 
             int state = SafeIntField(battle, ref _stateField, "state", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
@@ -2646,6 +2647,11 @@ namespace WhiskeyRealism.Patches
                     if (overrideReason == null) overrideReason = arrivalReason;
                 }
             }
+            else
+            {
+                // Role/task changed: the next Main attack may arm a fresh hold.
+                _mainArrivalHold.Remove(instanceId);
+            }
 
             // Override-propagation fix (2026-05-21): the earlier override fix only
             // updated synthesizedState.Task, but TryResolveLeafMovementTarget reads
@@ -2694,26 +2700,46 @@ namespace WhiskeyRealism.Patches
             ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, effectiveLeafAssignment, runtimePlayOrders);
         }
 
-        // ---- Arrival synchronization (2026-05-25 / B wire-in) ----
-        // Per-Main hold-start timestamps (realtime seconds): armed on the first
-        // hold tick, cleared on release so the next attack re-arms the 30s
-        // budget. Cleared on battle end alongside _lastExecutorOrderAt.
-        private static readonly Dictionary<int, float> _mainArrivalHoldStartedAt = new Dictionary<int, float>();
-        // Pooled scratch for SupportMain distances — avoids per-call allocation.
+        // ---- Arrival synchronization (BR-M1) ----
+        // Per-Main latch on battle time (MainArrivalHoldLatch): arms once per
+        // role/task assignment, stays released after expiry until the leaf's
+        // role/task changes. Cleared on battle end.
+        private static readonly Dictionary<int, MainArrivalHoldLatch.State> _mainArrivalHold =
+            new Dictionary<int, MainArrivalHoldLatch.State>();
         private static readonly List<TacticalMainArrivalSynchronizer.SupportMainPosition> _arrivalSupportScratch =
             new List<TacticalMainArrivalSynchronizer.SupportMainPosition>(8);
 
+        // SupportMain leaf positions, built once per Apply per alliance instead
+        // of a completeunitlist walk per Main brigade (BR-M6).
+        private static readonly Dictionary<int, List<Vector3>> _supportMainPositionsByAlliance =
+            new Dictionary<int, List<Vector3>>();
+
+        private static List<Vector3> SupportMainPositions(int alliance, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap)
+        {
+            if (_supportMainPositionsByAlliance.TryGetValue(alliance, out List<Vector3> cached)) return cached;
+            var positions = new List<Vector3>(8);
+            var units = BattleUnits.completeunitlist as IList;
+            if (units != null)
+            {
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var r = units[i] as Regiment;
+                    if (r == null || r.alliance != alliance) continue;
+                    if (r.unittyp < TacticalUnitType.BattleGroupBrigade) continue;
+                    int id = TacticalPatchIds.GameObjectInstanceId(r);
+                    if (id == 0 || !leafMap.TryGetValue(id, out var la)) continue;
+                    if (la.LeafRole != DirectChildRole.SupportMain || SafeRouted(r)) continue;
+                    positions.Add(SafePosition(r));
+                }
+            }
+            _supportMainPositionsByAlliance[alliance] = positions;
+            return positions;
+        }
+
         /// <summary>
-        /// Decides whether a Main-effort brigade on <see cref="CommandTaskType.AttackObjective"/>
-        /// should hold (return <see cref="CommandTaskType.Screen"/>) until its
-        /// SupportMain siblings close within
-        /// <see cref="TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters"/>
-        /// of the Main's position, the
-        /// <see cref="TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds"/>
-        /// budget elapses, or the commander is aggressive (≥ 0.7). The Main's
-        /// world position is the coordination anchor: supports closing on it
-        /// means the line is forming. Reads vanilla positions on the game thread
-        /// (this runs inside the leaf-cascade Postfix). Never throws.
+        /// Holds a Main-effort brigade on AttackObjective as Screen until its
+        /// SupportMain siblings close on it, the hold budget elapses, or an
+        /// aggressive commander releases it. Battle time; never throws.
         /// </summary>
         private static CommandTaskType ResolveMainArrivalHold(
             Regiment mainGroup,
@@ -2731,57 +2757,32 @@ namespace WhiskeyRealism.Patches
                 var leafMap = army?.CurrentLeafBrigadeMap;
                 if (leafMap == null || mainGroup == null) return attackTask;
 
-                Vector3 mainPos;
-                try { mainPos = ((Component)mainGroup).gameObject.transform.position; }
-                catch { return attackTask; }
+                _mainArrivalHold.TryGetValue(mainInstanceId, out MainArrivalHoldLatch.State latch);
+                if (!MainArrivalHoldLatch.ShouldEvaluate(latch)) return attackTask;
 
+                Vector3 mainPos = SafePosition(mainGroup);
                 var supports = _arrivalSupportScratch;
                 supports.Clear();
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                if (units == null) return attackTask;
-                int alliance = mainGroup.alliance;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var r = units[i] as Regiment;
-                    if (r == null) continue;
-                    if (r.alliance != alliance) continue;
-                    // Command-tier only (brigade and above) — skips the ~34k
-                    // individual regiments so the walk stays cheap.
-                    if (r.unittyp < TacticalUnitType.BattleGroupBrigade) continue;
-                    int id = TacticalPatchIds.GameObjectInstanceId(r);
-                    if (id == 0 || id == mainInstanceId) continue;
-                    if (!leafMap.TryGetValue(id, out var la)) continue;
-                    if (la.LeafRole != DirectChildRole.SupportMain) continue;
-                    if (SafeRouted(r)) continue;
-                    Vector3 sp;
-                    try { sp = ((Component)r).gameObject.transform.position; }
-                    catch { continue; }
-                    float dx = sp.x - mainPos.x, dz = sp.z - mainPos.z;
-                    float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-                    supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(dist));
-                }
+                List<Vector3> supportPositions = SupportMainPositions(mainGroup.alliance, leafMap);
+                for (int i = 0; i < supportPositions.Count; i++)
+                    supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(SafeDistance(supportPositions[i], mainPos)));
 
-                float now = Time.realtimeSinceStartup;
-                float holdStart = _mainArrivalHoldStartedAt.TryGetValue(mainInstanceId, out var s) ? s : now;
-                float elapsed = now - holdStart;
-
+                float now = BattleHours();
+                float elapsedHours = MainArrivalHoldLatch.ElapsedHours(latch, now);
+                // The synchronizer budget is in seconds at 1x; feed it battle time.
+                float elapsedAtOneX = elapsedHours * TacticalBattleClock.RealSecondsPerBattleHourAtOneX;
                 var resolved = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
                     DirectChildRole.Main, attackTask, supports,
-                    commanderAggression01, elapsed,
+                    commanderAggression01, elapsedAtOneX,
                     TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters,
                     TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds,
                     out holding);
 
+                _mainArrivalHold[mainInstanceId] = MainArrivalHoldLatch.Next(latch, now, holding);
                 if (holding)
                 {
-                    if (!_mainArrivalHoldStartedAt.ContainsKey(mainInstanceId))
-                        _mainArrivalHoldStartedAt[mainInstanceId] = now;
                     reason = "arrival-hold-screen(supports=" + supports.Count
-                        + " elapsed=" + elapsed.ToString("0.0") + "s)";
-                }
-                else
-                {
-                    _mainArrivalHoldStartedAt.Remove(mainInstanceId);
+                        + " elapsedHours=" + elapsedHours.ToString("0.000") + ")";
                 }
                 return resolved;
             }
@@ -4063,7 +4064,8 @@ namespace WhiskeyRealism.Patches
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();
             _lastTelemetryAt.Clear();
-            _mainArrivalHoldStartedAt.Clear();
+            _mainArrivalHold.Clear();
+            _supportMainPositionsByAlliance.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
