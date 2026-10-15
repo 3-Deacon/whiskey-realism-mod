@@ -644,7 +644,7 @@ namespace WhiskeyRealism.Patches
             int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
             var sector = BuildGroupSector(group, index);
 
-            if (TryApplyDoctrineStance(bunits, side, macro, group, vanillaOrdered, sector))
+            if (TryApplyDoctrineStance(bunits, side, macro, group, sector))
                 return;
 
             if (vanillaOrdered == 4)
@@ -672,7 +672,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered, sector))
+            if (TryApplyLedgerTaskStance(bunits, side, macro, group, sector))
                 return;
 
             if (!Plugin.Instance.EnableTacticalGroupSectorStance.Value) return;
@@ -696,7 +696,6 @@ namespace WhiskeyRealism.Patches
             int side,
             int macro,
             Regiment group,
-            int vanillaOrdered,
             TacticalSectorAssessment sector)
         {
             if (macro == 3) return false;
@@ -714,7 +713,7 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered, TacticalSectorAssessment sector)
+        private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, TacticalSectorAssessment sector)
         {
             if (macro == 3) return true;
             if (!TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state)) return false;
@@ -1013,18 +1012,6 @@ namespace WhiskeyRealism.Patches
                 if (instance == null) return null;
                 if (cache == null) cache = AccessTools.Field(instance.GetType(), name);
                 return cache != null ? cache.GetValue(instance) as IList : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static GameObject UnityObject(Regiment unit)
-        {
-            try
-            {
-                return unit != null ? ((Component)unit).gameObject : null;
             }
             catch
             {
