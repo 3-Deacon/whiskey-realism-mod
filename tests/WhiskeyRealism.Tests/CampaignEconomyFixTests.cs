@@ -1,5 +1,6 @@
 using System;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 
 // WS C2b — campaign economy / admin write-surface regressions (2026-10-14 review).
@@ -24,6 +25,10 @@ internal static class CampaignEconomyFixTests
         PolicySelectorDefersToVanillaWhenOnlyOptionPenalised();
         PolicySelectorSwapsPenalisedFirstForNonSuppressed();
         PolicySelectorPicksClearScoreWin();
+
+        ConstructionBiasReordersWithoutInflatingRolledRate();
+        ConstructionBiasLeavesSubsidyGroupUncapped();
+        ConstructionBiasRestoreSkipsSlotsVanillaConsumed();
     }
 
     private static void LogPass(string message)
@@ -305,5 +310,40 @@ internal static class CampaignEconomyFixTests
         var none = FiscalPolicySelector.Select(new[] { 10, 22 }, new[] { 0.6f, 0.8f });
         TestHarness.AssertEqual(-1, none.Index, "below min score / margin => vanilla");
         LogPass("c2b policy selector picks clear score win");
+    }
+
+    // ---------------------------------------------------------------- C-EconConstr
+    // Vanilla UpdateCompanyFoundations (decompile 15000-15080): non-subsidy candidates
+    // compete by prob*num3 and the winner is rolled with Random < prob*timediff*50
+    // (15056); UpdateCompanyFoundationList (15253-15261) only replaces a slot when a new
+    // site's raw prob beats the STORED prob. Bias must reorder selection only.
+
+    private static void ConstructionBiasReordersWithoutInflatingRolledRate()
+    {
+        var raw = new[] { 0.40f, 0.30f };
+        var mult = new[] { 1.0f, 2.0f };
+        var rolled = new[] { true, true };
+        var biased = ConstructionProbabilityBias.Bias(raw, mult, rolled);
+        TestHarness.AssertTrue(biased[1] > biased[0], "bias reorders selection toward candidate 1");
+        TestHarness.AssertTrue(biased[1] <= 0.40f + 1e-6f, "top biased value never exceeds vanilla's best raw (no rate inflation)");
+        LogPass("c2b construction bias reorders without inflating rolled rate");
+    }
+
+    private static void ConstructionBiasLeavesSubsidyGroupUncapped()
+    {
+        var raw = new[] { 0.40f, 0.30f, 0.20f };
+        var mult = new[] { 1.0f, 2.0f, 1.5f };
+        var rolled = new[] { true, true, false };
+        var biased = ConstructionProbabilityBias.Bias(raw, mult, rolled);
+        TestHarness.AssertTrue(Math.Abs(biased[2] - 0.30f) < 1e-6f, "subsidy-path candidate (no roll) gets plain raw*mult");
+        LogPass("c2b construction bias leaves subsidy group uncapped");
+    }
+
+    private static void ConstructionBiasRestoreSkipsSlotsVanillaConsumed()
+    {
+        TestHarness.AssertTrue(ConstructionProbabilityBias.ShouldRestore(0.35f, 0.35f, samePlace: true), "untouched slot restored");
+        TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0f, 0.35f, samePlace: false), "vanilla built it: slot cleared");
+        TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0.5f, 0.35f, samePlace: true), "vanilla refreshed value: keep");
+        LogPass("c2b construction bias restore skips slots vanilla consumed");
     }
 }
