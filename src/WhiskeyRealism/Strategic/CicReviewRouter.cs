@@ -48,6 +48,14 @@ namespace WhiskeyRealism.Strategic
                 !HistoricalOperationCatalog.IsDefensivePosture(livePhase.OperationPosture);
         }
 
+        // Sidecars written before modWrittenObjective existed: if the faction still follows the
+        // loaded plan's current phase target, that value was written by the mod.
+        internal static int InferModWritten(int? persisted, int currentFollowed, int planTargetObjectiveId)
+        {
+            if (persisted.HasValue) return persisted.Value;
+            return planTargetObjectiveId >= 0 && currentFollowed == planTargetObjectiveId ? planTargetObjectiveId : -1;
+        }
+
         internal static CampaignObjectiveSteer Decide(bool hasPlanTarget, int planTargetObjectiveId, int currentFollowed, int lastWrittenByMod)
         {
             if (hasPlanTarget && planTargetObjectiveId >= 0)

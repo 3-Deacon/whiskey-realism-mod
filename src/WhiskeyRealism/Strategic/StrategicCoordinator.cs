@@ -1773,6 +1773,25 @@ namespace WhiskeyRealism.Strategic
             InitializeFromGameState();
         }
 
+        // Vanilla AICampaign.Load restores AIFaction.followedcampaignobjective from AICampaign.dat
+        // (decompile 16549) before our Load Postfix applies the sidecar. -1 when unavailable.
+        private static int ReadFollowedCampaignObjective(int alliance)
+        {
+            try
+            {
+                int index = ResolveAifactionIndexForAlliance(alliance);
+                var faction = index >= 0 ? AICampaignReflect.GetFaction(index) : null;
+                if (faction == null) return -1;
+                var field = AccessTools.Field(faction.GetType(), "followedcampaignobjective");
+                return field != null ? Convert.ToInt32(field.GetValue(faction)) : -1;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinator:followed-objective", "[Coordinator] followedcampaignobjective read failed: " + ex.Message);
+                return -1;
+            }
+        }
+
         private SidecarSnapshot BuildSnapshot()
         {
             var snap = SidecarSnapshot.Empty();
@@ -1795,7 +1814,9 @@ namespace WhiskeyRealism.Strategic
             snap.Battles.AddRange(BattleHistory);
             snap.LastSeenMonth = LastSeenMonth;
             snap.LastSeenYear = LastSeenYear;
-            snap.ModWrittenObjective = PickCampaignObjectivePatch.SnapshotWrittenByMod();
+            var written = PickCampaignObjectivePatch.SnapshotWrittenByMod();
+            for (int a = 0; a < written.Length && a < snap.ModWrittenObjective.Length; a++)
+                snap.ModWrittenObjective[a] = written[a];
             return snap;
         }
 
@@ -1826,7 +1847,15 @@ namespace WhiskeyRealism.Strategic
             BattleHistory.AddRange(snap.Battles);
             LastSeenMonth = snap.LastSeenMonth;
             LastSeenYear = snap.LastSeenYear;
-            PickCampaignObjectivePatch.RestoreWrittenByMod(snap.ModWrittenObjective);
+            var written = new int[2];
+            for (int a = 0; a < written.Length; a++)
+            {
+                written[a] = CampaignObjectiveSteering.InferModWritten(
+                    snap.ModWrittenObjective[a],
+                    ReadFollowedCampaignObjective(a),
+                    CICs[a]?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1);
+            }
+            PickCampaignObjectivePatch.RestoreWrittenByMod(written);
         }
     }
 }

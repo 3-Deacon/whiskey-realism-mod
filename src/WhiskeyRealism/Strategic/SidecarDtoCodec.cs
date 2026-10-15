@@ -24,8 +24,9 @@ namespace WhiskeyRealism.Strategic
         public List<BattleHistoryRecord> Battles = new List<BattleHistoryRecord>();
         public int LastSeenMonth = -1;
         public int LastSeenYear = -1;
-        // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance.
-        public int[] ModWrittenObjective = { -1, -1 };
+        // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance;
+        // null = unknown (sidecar written before the field existed).
+        public int?[] ModWrittenObjective = { -1, -1 };
         // Runtime counters that would otherwise restart on every battle round-trip.
         public int[] FrontChangedDay = { -1, -1 };
         public int[] CapitalStreakDay = { -1, -1 };
@@ -219,7 +220,7 @@ namespace WhiskeyRealism.Strategic
                     result.RecentReplans[a] = f.DirectorMemory?.RecentOperationReplanDaySerials;
                     result.ProbeStates[a] = ProbeFromDto(f.ProbeState);
                     result.FiscalMemories[a] = FiscalFromDto(f.FiscalMemory);
-                    result.ModWrittenObjective[a] = f.ModWrittenObjective ?? -1;
+                    result.ModWrittenObjective[a] = f.ModWrittenObjective;
                     result.FrontChangedDay[a] = f.FrontChangedDay ?? -1;
                     result.CapitalStreakDay[a] = f.CapitalStreakDay ?? -1;
                     result.ProbeHysteresis[a] = f.ProbeHysteresis;

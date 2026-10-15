@@ -61,6 +61,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
         Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
         Check("c1 per mod-written campaign objective survives reload", PerModWrittenObjectiveSurvivesReload);
+        Check("c1 per old sidecar infers mod-written objective from the plan target", PerOldSidecarInfersModWrittenObjective);
         Check("c1 per runtime counters survive a battle round trip", PerRuntimeCountersSurviveRoundTrip);
         Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
         Check("c1 per replace fallback survives original already moved to bak", PerReplaceFallbackSurvivesMissingOriginal);
@@ -741,8 +742,21 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertEqual(29, back.ModWrittenObjective[0], "mod-written objective restored");
         TestHarness.AssertEqual(-1, back.ModWrittenObjective[1], "none written for alliance 1");
         // After reload, a now-defensive/planless faction still clears the stale id it wrote.
-        var steer = CampaignObjectiveSteering.Decide(false, -1, currentFollowed: 29, lastWrittenByMod: back.ModWrittenObjective[0]);
+        var steer = CampaignObjectiveSteering.Decide(false, -1, currentFollowed: 29, lastWrittenByMod: back.ModWrittenObjective[0].Value);
         TestHarness.AssertEqual(-1, steer.WriteFollowed, "stale mod objective cleared after reload");
+    }
+
+    private static void PerOldSidecarInfersModWrittenObjective()
+    {
+        const string json = "{\"version\":2,\"factions\":[{\"factionId\":0,\"currentEra\":\"Amateur1861\",\"cic\":{\"officerName\":\"Lincoln\"}}]}";
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out var reason), "deserialize: " + reason);
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDecode(dto, out var snap, out reason), "decode: " + reason);
+        TestHarness.AssertFalse(snap.ModWrittenObjective[0].HasValue, "field absent => unknown, not -1");
+
+        TestHarness.AssertEqual(3, CampaignObjectiveSteering.InferModWritten(null, currentFollowed: 3, planTargetObjectiveId: 3), "followed == plan target => the old mod wrote it");
+        TestHarness.AssertEqual(-1, CampaignObjectiveSteering.InferModWritten(null, currentFollowed: 12, planTargetObjectiveId: 3), "vanilla's own pick");
+        TestHarness.AssertEqual(-1, CampaignObjectiveSteering.InferModWritten(null, currentFollowed: -1, planTargetObjectiveId: -1), "no plan, nothing followed");
+        TestHarness.AssertEqual(29, CampaignObjectiveSteering.InferModWritten(29, currentFollowed: 3, planTargetObjectiveId: 3), "persisted value wins");
     }
 
     private static void PerRuntimeCountersSurviveRoundTrip()
