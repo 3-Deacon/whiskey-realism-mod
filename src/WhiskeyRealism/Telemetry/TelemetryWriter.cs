@@ -179,6 +179,21 @@ namespace WhiskeyRealism.Telemetry
             RecordSinkFailure(reason, ex);
         }
 
+        // Inverse of FileNameFor: "stem.jsonl" -> 0, "stem.NNN.jsonl" -> NNN. A handle is tagged
+        // with its own file's rotation so CloseStreamsFromOldRotations closes it even when it
+        // was first opened in the batch that rotated.
+        internal static int RotationIndexOf(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName) || !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+                return 0;
+            string stem = fileName.Substring(0, fileName.Length - ".jsonl".Length);
+            int dot = stem.LastIndexOf('.');
+            int index;
+            if (dot < 0 || !int.TryParse(stem.Substring(dot + 1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out index))
+                return 0;
+            return index;
+        }
+
         internal static string FileNameFor(TelemetryEvent ev, int rotationIndex)
         {
             string stem = StemFor(ev);
@@ -603,7 +618,7 @@ namespace WhiskeyRealism.Telemetry
                 if (_streams.TryGetValue(fileName, out file))
                     return file;
 
-                file = new OpenFile(OpenAppendStream(Path.Combine(_sessionDirectory, fileName)), _streamRotationIndex);
+                file = new OpenFile(OpenAppendStream(Path.Combine(_sessionDirectory, fileName)), RotationIndexOf(fileName));
                 _streams[fileName] = file;
                 return file;
             }

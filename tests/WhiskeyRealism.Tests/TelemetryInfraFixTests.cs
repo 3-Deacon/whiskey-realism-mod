@@ -58,6 +58,7 @@ internal static class TelemetryInfraFixTests
         WriterRetryAfterTornWriteDoesNotDuplicateRows();
         WriterCountsRowsOnlyAfterTheirWriteSucceeds();
         WriterShutdownTimeoutFailureRowNeverOpensSecondHandle();
+        WriterClosesOldRotationHandleOpenedInRotatingBatch();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         RegimentDiagnosticsLineCapWarnsOncePerBattle();
@@ -1507,5 +1508,34 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(dir);
         }
         LogPass("writer shutdown timeout failure row never opens second handle");
+    }
+
+    // ---------------------------------------------------------------- R2-3
+
+    private static void WriterClosesOldRotationHandleOpenedInRotatingBatch()
+    {
+        string dir = TempDir();
+        try
+        {
+            long rowBytes = System.Text.Encoding.UTF8.GetByteCount(TelemetryJson.ToJsonLine(Decision("w", 0)));
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: rowBytes + rowBytes / 2);
+            queue.Enqueue(Decision("w", 0));
+            queue.Enqueue(Decision("w", 1));
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            TestHarness.AssertTrue(
+                WaitUntil(() => queue.Count == 0 && CountLines(Path.Combine(dir, "tactical.jsonl")) == 1 && CountLines(Path.Combine(dir, "tactical.001.jsonl")) == 1, 3000),
+                "batch split across a rotation");
+            TestHarness.AssertTrue(WaitUntil(() => writer.OpenStreamCount == 1, 1000), "old-rotation handle opened in the rotating batch is closed; open=" + writer.OpenStreamCount.ToString(CultureInfo.InvariantCulture));
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertEqual(0, TelemetryWriter.RotationIndexOf("tactical.jsonl"), "base file rotation");
+            TestHarness.AssertEqual(12, TelemetryWriter.RotationIndexOf("performance.012.jsonl"), "rotated file rotation");
+        }
+        finally
+        {
+            DeleteQuietly(dir);
+        }
+        LogPass("writer closes old rotation handle opened in rotating batch");
     }
 }
