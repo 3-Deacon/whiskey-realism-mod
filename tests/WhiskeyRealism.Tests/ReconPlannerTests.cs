@@ -85,6 +85,7 @@ internal static class ReconPlannerTests
             ("ReconStepPinned", ReconStepPinned),
             ("ReconLedgerHasNoReaderOutsideTheReview", ReconLedgerHasNoReaderOutsideTheReview),
             ("ReconFlagIsBoundAndRead", ReconFlagIsBoundAndRead),
+            ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
         });
     }
 
@@ -1027,7 +1028,7 @@ internal static class ReconPlannerTests
         AssertContains(probeUpdate, "out localEnemy, out localEnemyConfidence);", "the probe call site reads the confidence");
         AssertContains(probeUpdate, "localEnemy,\n                    localEnemyConfidence)", "and hands it to the input builder");
         string probe = ReadRepoFile("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs");
-        AssertContains(probe, "BeliefConfidence01 = localEnemyConfidence01", "the probe's evidence input carries the confidence");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(probe, @"BeliefConfidence01 = localEnemyConfidence01").Count, "the probe input and its contact-evidence input both carry the confidence");
         AssertContains(probe, "CurrentEnemyStrength = target.HasValue ? localEnemyStrength : -1f", "the probe's enemy strength is the belief sum the coordinator passes");
     }
 
@@ -1349,7 +1350,7 @@ internal static class ReconPlannerTests
 
         string filter = BodyOf(src, "private static bool IsReconUnit(");
         AssertContains(filter, "FlagOn(Plugin.EnableCampaignReconnaissance) && ReconStep.IsReconKey(Snapshots[alliance], Recon[alliance], unitKey)", "unit key -> the snapshot's index -> IsRecon, only while the flag is on");
-        AssertContains(src, "internal static Func<string, bool> ReconFilterFor(int alliance)", "the directive ledger's filter");
+        AssertContains(BodyOf(src, "internal static Func<string, bool> ReconFilterFor(int alliance)"), "return alliance >= 0 && alliance < ReconFilters.Length ? ReconFilters[alliance] : null;", "the directive ledger's filter, for alliances 0 and 1 only");
         AssertContains(src, "ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };", "one delegate per alliance, built once");
     }
 
@@ -1369,6 +1370,26 @@ internal static class ReconPlannerTests
         AssertContains(formation, "FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey, options, CampaignPlannerRuntime.ReconFilterFor(allianceId))", "the directive ledger is told which formations are on a mission");
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         AssertContains(coordinator, "FormationDirectiveRuntime.BuildForAlliance(", "built by the coordinator's Formation job");
+    }
+
+    // The first review of a campaign (and any day after a reset) has no allocation to take a recall point
+    // from: the runtime passes null and the point falls back to the own capital.
+    private static void FirstReviewHasNoPreviousAllocation()
+    {
+        var s = World();
+        s.HasCapital = true;
+        s.CapitalX = 10f;
+        s.CapitalZ = 0f;
+        var tired = Unit(2, 300f, 0f, 3000f, 0.9f, 14);
+        tired.Supply01 = 0.3f;
+        s.Own.Add(tired);
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Screen, 2, 300f, 0f, -1);
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "low supply recalls it");
+        AssertNear(10f, MissionOf(ledger, 2).HoldX, 0.01f, "to the capital: there is no allocation yet");
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "and the next review without one is the same");
     }
 
     private static void ReconFlagIsBoundAndRead()
