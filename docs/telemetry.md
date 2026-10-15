@@ -55,10 +55,12 @@ Tags are routed by `TelemetryTagPolicy`; unregistered `Tactical*` tags fall back
 | `TacticalDirectChildIntent` | Decision | `ArmyOrchestrator.EmitDirectChildIntentTelemetry`: per-side role distribution (main/sup/fix/scrn/rL/rR/rsrv/fbck/unk counts, per-child `ChildId=Role:Sector`, plan/phase/mainEffortSector/opportunity/currentRatio). Signature-deduped, 5 s throttle. |
 | `TacticalPlayExecution` | Decision | `PlayExecutorRuntime.EmitPlayExecutionTelemetry`: per-side play summary when play assignments change (side, plan, template, rect/assigned counts, army/enemy centroid X/Z, frontage, per-corps `ChildId=RectKind`). Signature-deduped, 10 s throttle. |
 | `TacticalMacroDecision` | Decision | #44 `BattleMacroStrategyPatch`: macroai write (`old`/`whiskey`/`ledger`/`fallback`/`source`) and decision lines, 30 s signature throttle. #44 is the only writer of `macroai`; there is no separate macroai write tag. |
-| `TacticalArtilleryDecision` | Decision | `BattleGroupStancePatch.EmitArtilleryDecisionTelemetry`: per-battery decision (action, ammo mission, reason, enemy distance, support count, limber state). One row per battery per distinct decision per 30 s. |
 | `TacticalStanceWrite` | Write | `TacticalStanceWriter.EnsureStance` via OnceLog (first write/yield/refuse per key; see OnceLog). |
-| `TacticalBrigadeTaskHold` | Gate | `BattleCommandPostureExecutorPatch.EmitTaskHoldSuppressedTelemetry` via OnceLog: same-task re-issue suppressed inside the hold window. |
-| `TacticalBrigadePosture` | Decision | `BattleCommandPostureExecutorPatch` via OnceLog: brigade opportunity override. |
+| `TacticalBrigadePosture` | Decision | Posture producer via OnceLog (static key `tactical-brigade-posture:opportunity-override`): first leaf-brigade opportunity override per battle. |
+| `TacticalCommandPosture` | Decision | Posture and division-play producers (`PostureTelemetry.Group`): per group decision, task, target, intents submitted (`writeResult=submitted`/`none`); per (source, group) signature, 30 s throttle. |
+| `TacticalLeafCascade` | Decision | Posture producer (`PostureTelemetry.Leaf`): leaf brigade role/task/outcome, cascade chain, applied. |
+| `TacticalFacingPulse` | Decision / Write | Facing-pulse producer (`PostureTelemetry.Facing`): scope, task, target formation/facing, `writeResult`. |
+| `BattlePerception` | Decision | `BattlePerceptionProbe`: per-side perception mode change (mode, reason, visible, remembered). The once-per-mode `[BattlePerception]` line also goes to `LogOutput.log`. |
 | `TacticalHeavyGate` | Gate | `TacticalBattleCoordinatorRuntime`: heavy snapshot-build gate decision per side (executed/skipped + reason, battle/real-time clocks, pending flag, unit count, objective hash). |
 
 `TacticalHeavyGate` also carries GC pressure per side: `gcCountAbs` (absolute `GC.CollectionCount(0)`) and `gcDelta` (collections since the previous gate decision on that side). Mono Boehm is non-generational, so one counter suffices. Reset per battle in `ResetRuntimeTickState`. Correlate `gcDelta` with `tactical.snapshot-build*` timings: high `gcDelta` points to allocation churn, high duration with low `gcDelta` to algorithmic cost.
@@ -73,7 +75,10 @@ Keys must be static: a literal, or a literal plus a value from a small fixed set
 |---|---|---|
 | `tactical-stance-write:<source>:<reason>:<stance>` (also `:yield:` / `:refuse:` variants) | `TacticalStanceWriter.EnsureStance` | `TacticalStanceWrite` (Write) |
 | `tactical-combatbehavior-write:<behavior>` | `TacticalCombatBehaviorWriter` | default OnceLog routing |
-| `tactical-brigade-task-hold:suppressed:<task>` | task-hold suppressions | `TacticalBrigadeTaskHold` (Gate) |
+| `tactical-brigade-posture:opportunity-override` | posture producer, leaf opportunity override | `TacticalBrigadePosture` (Decision) |
+| `tactical-battle-core:<event>` (`producers`, `producers-missing`, `arbiter-first-fire`, `charge-first-fire`, `ancestry-mismatch`, `snapshot-*`, `blocked-crossings-*`, `terrain-*`, …) and `tactical-battle-core:producer-threw:<producer name>` (eleven fixed names, keys built once by `BattleProducerRegistry`) | battle core | `[BattleCore]` / `[OrderArbiter]` / `[ChargeDoctrine]` / `[BattleSnapshot]` lines: not a tactical tag, so they reach `LogOutput.log` |
+| `tactical.battle-perception:mode:<FogGrid\|RangeOnly\|OwnSideWithinFog>` | `BattlePerceptionProbe` | `[BattlePerception]`, `LogOutput.log` |
+| `tactical-feud-guard:<event>` | #42 | `TacticalFeudGuard` (Gate) |
 
 ## Performance scopes
 
@@ -84,7 +89,7 @@ Keys must be static: a literal, or a literal plus a value from a small fixed set
 
 `PerformanceAggregate` row (category Performance): `durationMs` = max call ms in the window; fields `scope`, `aggregate=true`, `count`, `slowCount`, `slow` (slowCount > 0), `totalMs`, `maxMs`, `meanMs`, `thresholdMs`, `windowMs`.
 
-Every Harmony `Prefix`/`Postfix`/`Finalizer` has a scope named `tactical.patch.<short-name>` (battle) or `campaign.patch.<short-name>` (campaign), with a `.<method>` suffix when a file has several entries; e.g. #44 is `tactical.patch.battle-macro-strategy.prefix` / `.postfix`. Threshold is 2.0 ms. List the current names from code rather than from this doc:
+Every Harmony `Prefix`/`Postfix`/`Finalizer` has a scope named `tactical.patch.<short-name>` (battle) or `campaign.patch.<short-name>` (campaign), with a `.<method>` suffix when a file has several entries; e.g. #44 is `tactical.patch.battle-macro-strategy.prefix` / `.postfix`. Threshold is 2.0 ms (5.0 ms for the arbiter patch `tactical.patch.battle-core-arbiter`). The scope name is also the patch's first-fire id (`PatchFirstFire.Mark`, `[first-fire] <id>` in `LogOutput.log`; `tools/smoke-check.py` reports declared ids that never fired). List the current names from code rather than from this doc:
 
 ```bash
 grep -rhoE 'TelemetryPerf\.Scope\(\s*"[^"]+"' src/WhiskeyRealism | sort -u   # misses multi-line calls; see table
@@ -104,14 +109,16 @@ Non-patch scopes:
 | `tactical.snapshot-build` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` in `EnsureSideSnapshot` (shared by the tick, direct-child and operations-ledger drives) |
 | `tactical.snapshot-build.evidence-bundle` | 5.0 ms | `ArmyEvidenceBuilder.Build` inside `Build` |
 | `tactical.snapshot-build.objective-records` | 5.0 ms | objective records inside `Build` |
-| `tactical.snapshot-build.aggregate-capture` | 5.0 ms | shared observation-aggregate capture (single-pass path) |
-| `tactical.snapshot-build.objective-records.aggregate` | 5.0 ms | objective records from the aggregate (single-pass path) |
-| `tactical.snapshot-build.objective-records.legacy` | 5.0 ms | per-unit walk (`Enable Single-Pass Objective Records` off) |
 | `tactical.resolved-group-decisions.build` | 5.0 ms | per-group resolved decisions after a heavy build |
 | `tactical.observer-pass` | 2.0 ms | `TacticalObserverPatch` observer pass |
-| `tactical.posture-executor` | 2.0 ms | posture executor inside the observer pass |
 | `tactical.play-executor.zone-assignments` | 5.0 ms | per-side play projection + corps assignment (cached for 3 s per side and plan) |
 | `tactical.cache-validator.run` | 5.0 ms | `TacticalCacheValidator` run |
+| `tactical.snapshot.build` | 5.0 ms | battle-core `BattleSnapshotBuilder.Build` (one per AI side per frame, at 5866 and #60's deployment) |
+| `tactical.perception` | 2.0 ms | `BattlePerceptionProbe.Probe` (probe, memory update, slice build) after each snapshot build |
+| `tactical.arbiter.resolve` | 0.5 ms | `OrderArbiter.Resolve` in the arbiter tick (#68) |
+| `tactical.arbiter.execute` | 2.0 ms | outcomes, retries and winner execution in the arbiter tick |
+| `tactical.producer.<name>` | 2.0 ms | each producer's `Produce` (`withdrawal`, `artillery`, `artillery-point-blank`, `group-stance`, `charge-demotion`, `posture` (+ `.nav-plan`), `facing-pulse`, `fire-control`, `play`, `reserve-release`, `charge`) |
+| `tactical.dispatch.emit` | 2.0 ms | `TacticalPlayerDispatchRuntime.Emit` (W&L dispatch) |
 | `tactical.scene-cache.populate` | 5.0 ms | `TacticalStableSceneCache.Populate` |
 | `campaign.daily-review`, `campaign.construction`, `campaign.defense-intent`, `campaign.fiscal`, `campaign.coordinated-operations`, `campaign.sidecar-json-serialization`, `campaign.sidecar-file-write` | 4.0 ms | strategic coordinator / coordinated-ops / sidecar save |
 | `telemetry.flush` | 10.0 ms | telemetry writer batch flush |
@@ -139,6 +146,10 @@ Non-patch scopes:
 - **Budget cut order** (`TelemetryBudget.CutPercent`): a low-priority row is refused once emitted bytes plus the row would pass a share of `Max Tuning Log MB`: Trace 90%, Performance 93%, State 95%, Decision 98%, Gate/Write 100%. Health/Failure rows go to 100%. This is the same sequence as queue eviction, so Performance rows are cut before Decision rows. Rows flagged as protected summaries (`protectedSummary=true` such as `FrameHitch`, `TelemetryShutdown`, `TelemetrySinkFailure`, or Health/Failure/Performance event names containing `summary`/`counter`) draw from a separate reserve of 2% of the cap, clamped to 64 KB-5 MB. `PerformanceAggregate` rows are not protected and follow the 93% cut.
 - **Writer:** one open handle per output file; each batch writes one chunk per file. Rows count as written only once their bytes are on disk. A failed/torn write keeps the rows that fully landed, truncates a partial row, and retries the rest after exponential backoff (50 ms doubling to 2 s), without duplicates. A torn row that cannot be truncated is left as its own invalid line and counted in manifest `droppedCounters.tornRows`; the validator tolerates that many fragment lines and reports `tornRows=N`. The file sink is disabled only after 5 consecutive failures. Sink-failure rows use the same path, with one immediate retry; when raised off the writer thread they are queued for the writer.
 - **manifest.json** is rewritten when the set of output files changes (new file or rotation), every 5 s while rows flow, and at shutdown. At shutdown: one final manifest, then the issue bundle, then the summary; the manifest is rewritten again only if a late sink failure changed the counters.
+
+## Battle-core rows
+
+`LogOutput.log` (tags outside the tactical routing): `[BattleCore] producers count=11 order=…` and `[OrderArbiter] first vanilla order issued channel=… source=…` once per battle; `[OrderArbiter] alliance=… intents=… winners=… issued=… moved=… failed=… retried=… gaveUp=… skipped=… deduped=… superseded=… topSkip=…` every 30 s real time per AI side while the arbiter runs; `[BattlePerception] alliance=… mode=… reason=… visible=… remembered=…` once per mode per battle; `[ChargeDoctrine] first infantry charge armed: …` once per battle. Battle-core warnings use `[once:tactical-battle-core:…]` keys. The ordered battle-core smoke checklist is in `docs/superpowers/plans/2026-10-15-battle-core.md` § BC7.
 
 ## Smoke checklist
 

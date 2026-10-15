@@ -1,6 +1,6 @@
 # Whiskey Realism — Repository Memory
 
-> Durable index. Volatile state (branch, build hash, harness count, deploy status) lives only in [`docs/handoff.md`](docs/handoff.md). Last reviewed 2026-10-15 after the review remediation.
+> Durable index. Volatile state (branch, build hash, harness count, deploy status) lives only in [`docs/handoff.md`](docs/handoff.md). Last reviewed 2026-10-15 after battle-core BC7 (stage D).
 
 ## How Agents Should Use This
 
@@ -36,13 +36,16 @@
 - `AICampaign.aifaction` can include alliance 2 (Europe). Per-alliance arrays sized to Union+CSA (length 2) must bound-check against `arr.Length` before indexing; `AICampaignReflect.GetAllianceId(_aifaction)` returns the underlying alliance, which can be 2. Slice 2 patches (#25 + custom-order runner) early-return for `allianceId > 1` rather than indexing.
 
 - A Steam game update can rewrite the whole install (build 14703111, 2026-10-14, removed BepInEx, plugin, cfg and logs). After an update: reinstall BepInEx 5.4.x x64, re-decompile, re-check patch anchors, redeploy.
-- Battle write ownership: every write passes `TacticalWriteGuard` (Commander Mode `Active`, AI-controlled unit, W&L player command protected, fail closed); `ai_stance` only via `Util/TacticalStanceWriter`; `macroai` only via #44 `BattleMacroStrategyPatch`. Two writers on one vanilla field oscillate — that was the root of several 2026-10 review findings.
+- Battle write ownership: Whiskey battle movement, stance, formation, facing and combat behavior go only through the battle core's order executor (arbiter producers via #68, or #42/#56 inline); every write passes `TacticalWriteGuard` (Commander Mode `Active`, `PlayerOwned` never, feuding units only for #42's replay, fail closed); `ai_stance` only via `Util/TacticalStanceWriter`; `macroai` only via #44 `BattleMacroStrategyPatch`. Two writers on one vanilla field oscillate — that was the root of several 2026-10 review findings.
+- Battle-core producers are built by one explicit registry (`BattleProducerRegistry.Order` + `BattleCoreTick.CreateProducer`). Static-constructor self-registration silently never ran (nothing referenced the producer types), so only a few producers worked until BC7; never rely on a type's static constructor for wiring.
 - W&L runs a third `AIBattle` (`isplayeraiorfeud == 2`, the feud instance) that duplicates side 0's macro cycle. Battle-level writers and the coordinator must skip it; per-side reads pick the side's own instance (`SelectAiBattleIndexForSide`).
 - Battle doctrine time is `TacticalDoctrineTime`: game-hours from `GameVars.currenttimefromstart`, frozen across vanilla's night end-of-day cycle (the raw clock jumps ~9 h overnight). Never use wall-clock time for doctrine.
-- Vanilla AI enemy lists (`enemyinrangereg` etc.) are range-limited, not fog-filtered; see `docs/vanilla-vision-and-movement.md` before claiming "fog-honest" perception.
+- Vanilla AI enemy lists (`enemyinrangereg` etc.) are range-limited, not fog-filtered, and vanilla never reads the AI side's fog grid. The battle core's perception (`BattlePerceptionProbe`: `fow.UnitIsHidden` with the 127225 arguments, remembered enemies decaying) is the only fog-honest source; Whiskey decisions read `BattleSnapshot` observations, never vanilla's unfiltered enemy fields. See `docs/vanilla-vision-and-movement.md`.
 - Per-battle/per-campaign static state registers a reset with `BattleScope`/`CampaignScope` (`Util/ScopedState.cs`); hand-wired resets drifted and leaked state between battles and campaigns.
 - Restores of temporarily rewritten vanilla state belong in a `[HarmonyFinalizer]`; a Postfix restore is skipped when vanilla throws.
-- The command hierarchy is `allattachedunits`/`GetAttachedUnitsReg`, not `transform.parent` (corps/divisions are scene-graph siblings).
+- The command parent comes from the battle snapshot's D5 map (smallest containing `allattachedunits`, which reproduces vanilla's `GetAttachedUnitsReg(directonly)` = `transform.parent` relation), never from an ad-hoc `transform.parent` walk.
+- Feud is the vanilla AI group's state (`ActivateFeud` 116613 on the group, `AddUnitToPool` re-points descendants' `groupaiobject`); the snapshot propagates `UnitFlags.Feud` from a unit's own state, AI group and command ancestors.
+- `SetMovementMode(3)` zeroes `combatbehavior`/`combatbehaviorordered` (124770-124774): a charge-armed regiment reads behavior 0, so arming state must be tracked by the producer, not read back from vanilla.
 - `tools/config-audit.py` and `tools/orphan-sweep.py` keep config honest (all on, read, bound once, described truthfully) and dead code out; both must report 0.
 
 ## Update Rules

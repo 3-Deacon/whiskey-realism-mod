@@ -70,7 +70,7 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 |---|---|---|
 | `CheckGlobalAIStrategy` | 6314 | Macro-AI stance set; preset from `aistrategies.dat`; has 1% casualty hardcode |
 | `AdjustGroupAIStance` | 4222 | Group stance ladder (none/screen/defend/attack/assault) |
-| `MicroAICheckForCharges` | 4905 | Charge fires when `aigroup.ai_stance == 4` + cooldown |
+| `MicroAICheckForCharges` | 4905 | Meant to arm a charge at `aigroup.ai_stance == 4`; dead (4910 compare, `BUG-TAC-016`) |
 | `CheckForFeudGroupActions` | 4931 | **Feud auto-charge — does NOT call `PerformAIActionDLCWL`** (the brigade-magnetization-into-melee bug) |
 | `AssignReserves` | 7018 | Reserve assignment driver |
 | `AssignReserveToOperationalGroup` | 7154 | Reserve → group |
@@ -83,16 +83,16 @@ These anchors back the operations-ledger and full-spectrum doctrine consumers. C
 
 | Symbol | Line | Notes |
 |---|---|---|
-| `AIBattle.CheckAIBombardment` | 3869 | B7 artillery doctrine surface; vanilla bombardment ownership must be preserved unless an existing safe combat-behavior write applies. |
-| `AIBattle.AdjustGroupAIStance` | 4222 | #45 stance consumer surface; vanilla stance ladder is still the immediate stance owner. |
+| `AIBattle.CheckAIBombardment` | 3869 | Vanilla bombardment for groups at stance 3/4; the battle core's ArtilleryDoctrine producer cancels/switches a running bombardment (9) for every stance and leaves the bombard order itself to vanilla. |
+| `AIBattle.AdjustGroupAIStance` | 4222 | Vanilla stance ladder, still the immediate stance owner; the GroupStance producer runs right after it in the same `UpdateAITasks` (5869 -> 5870). |
 | `AIBattle.MicroAICheckForCharges` | 4905 | Dead in vanilla: the 4910 compare never matches, so it initiates no charge (`docs/bug-fixes/vanilla-tactical-battlefield.md` `BUG-TAC-016`). The former #41 charge gate on it was deleted (e7214b6). |
-| `AIBattle.AdjustGroupFormations` | 5875 | #61 posture executor surface; runs after vanilla group formation decisions. |
-| `AIBattle.CheckUseOfReserves` | 6062 | B8 and #59 reserve/fallback surface; direct reserve move is inside this method around line 6170. |
+| `AIBattle.AdjustGroupFormations` | 5875 | #68 battle-core arbiter Postfix (called at 5870, after vanilla's movers); the posture producers run here. |
+| `AIBattle.CheckUseOfReserves` | 6062 | #59 reserve gate and #56 courier parity; the direct reserve move is at 6170. |
 | `AIBattle.CheckGlobalAIStrategy` | 6314 | Live vanilla macro-AI strategy writer; Whiskey operation selection must have an explicit boundary here rather than racing another macro writer. #44 `BattleMacroStrategyPatch` is the single owner: a value-restoring Prefix plus a Postfix that writes the AIBattle instance `macroai` (never 3), which `UpdateAITasks` (5857) then feeds to `AdjustGroupAIStance`. The former `BattleMacroAIOverridePatch`, which wrote the persisted `sideinformation[side].macroai`, was deleted (8b09cf3). See "Vanilla anchors used in the 2026-10-14/15 remediation" for 6378-6438. |
 | `BattleUnits.GetBattleType` | 86095 | Vanilla scenario-stance signal. Returns 0 (meeting) / 1 (we attack) / 2 (we defend) computed from `sideinformation[side].objectivepointsheld` ratio vs `GamePrefs.objectiveratiodefend`. Stable across the battle unless objective ownership flips. **L (2026-05-23) reads this** via `ArmyEvidenceBuilder.ReadBattleStance` → `TacticalForceBalanceEvidence.Stance` (`BattleStance` enum) for the doctrine + playbook hard gate. Mirrors Scourge `OpenType()` + `Rank(eRankSide)` pattern (`sdk/SowAiInf/offai.cpp:1151-1159`). |
 | `AIBattle.AssignReserves` | 7018 | Vanilla reserve grouping surface; reserve-list mutation must snapshot/restore and never invent membership. |
-| `BattleUnits.ChangeStance` | 90772 | Vanilla stance API used by #61 for bounded posture corrections. |
-| `BattleUnits.SetWaypoint(Regiment, ...)` | 91232 | Vanilla movement-order API used by #61 and by #56 delayed reserve conversion. |
+| `BattleUnits.ChangeStance` | 90772 | Vanilla stance API behind `TacticalStanceWriter` (the battle-core executor's Stance channel). |
+| `BattleUnits.SetWaypoint(Regiment, ...)` | 91232 | Vanilla movement-order API the battle-core executor uses (producers, #42/#56 inline). |
 | `BattleUnits.SetGroupFormation(Regiment, ...)` | 91822 | Vanilla command/group-formation API; returns immediately for `unittyp <= 13`. |
 | `Regiment.RegimentSetPath` | 130966 | Calls `StopRegiment()` before creating a new path. Reserve-deny rollback must restore movement state when this path was created by vanilla. |
 | `Regiment.RegimentSetPath` | 131098 | Writes `unitwhogavelastmovingorder`; rollback must avoid leaving a stale order owner. |

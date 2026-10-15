@@ -34,7 +34,8 @@ namespace WhiskeyRealism.Tactical
     //   - Ancestors of the player's command are AI and are not PlayerOwned. The
     //     battle-core executor resolves orders on them through
     //     TacticalChainOrderPlanner. The Regiment overloads serve writers that
-    //     cannot fan out (#61 until BC5a, deployment #60, inline paths): both
+    //     cannot fan out (deployment #60, #59's rollback, the executor's per-target
+    //     re-check, #42's no-snapshot fallback): both
     //     refuse a group with an exposed player-owned descendant — the player's
     //     attached command or an attached take-over — because a group write there
     //     would reach player-owned units.

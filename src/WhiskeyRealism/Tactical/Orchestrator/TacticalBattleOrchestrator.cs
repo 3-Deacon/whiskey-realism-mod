@@ -23,9 +23,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // has not run or snapshot is stale.
     //
     // The ledger state (CurrentObjectives, CurrentOperation, doctrine) produced here is then consumed by
-    // #61 urgent recovery (BattleCommandPostureExecutorPatch.TryResolveLedgerState + BuildRuntimeDivisionPlayOrders
-    // + doctrine order resolution) together with live vanilla per-group fields (pathinterrupted etc.).
-    // Urgent code never forces a heavy build to get fresh ledger data.
+    // the battle-core posture and division-play producers (Tactical/Battle/Producers: PostureLedger.TryResolveState /
+    // TryResolveDoctrineOrder) together with the per-tick BattleSnapshot's unit fields (path interrupted etc.).
+    // The producers never force a heavy build to get fresh ledger data.
     //
     // Authoritative: plan Task 7/8.
     // ============================================================
