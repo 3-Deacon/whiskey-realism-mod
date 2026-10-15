@@ -128,6 +128,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
         public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
+        public static ConfigEntry<bool> EnableCombineWeaponStockFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
@@ -895,6 +896,9 @@ namespace WhiskeyRealism
             EnableAutoresolveStandardGunFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Autoresolve Standard Gun Fix", true,
                 "Default ON. In vanilla autoresolve a battery armed with weapon id 0, the 6-pounder Field Gun that every campaign issues as its standard artillery, inflicts no casualties: Autocalc.FightUnit only counts weapon ids above 0. A narrow IL rewrite (left as vanilla if the code pattern is not found) counts id 0 as armed, for every side including the W&L player; this flag switches it live. Off: vanilla.");
+            EnableCombineWeaponStockFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Combine Weapon Stock Fix", true,
+                "Default ON. When two units merge, vanilla's weapon-stock bookkeeping counts a battery's men as guns (100-240 phantom guns per merge when the target's model is short), returns a partly merged battery's whole gun count, draws more guns than the target gains (downgrading it to the standard gun when that count is short), and adds a standard-armed target's whole holding to stock before re-arming it with the same model. The stock is set to the correct count (guns for batteries, men otherwise; only what changes hands) and the target keeps its model whenever the stock covers what it gains; a real shortfall still re-arms it with the standard weapon, as vanilla does. Every side, W&L player merges included. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +

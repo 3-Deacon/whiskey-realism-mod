@@ -40,7 +40,7 @@ campaign.patch.militia-act-handover-scope.*        # Policies.LaunchPolicyEffect
 campaign.patch.militia-act-handover-guard          # GameVars.SetNationToNewAlliance: only when a state changes alliance
 campaign.patch.project-appoint-observer.*          # Projects.AppointProject: only when a project is appointed
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
-campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
+campaign.patch.arty-combine-gun-transfer.*         # BattleUnits.CombineUnits: only when two units are merged
 campaign.patch.autoresolve-standard-gun.count      # Autocalc.StartLandBattle: only when a land battle is autoresolved
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
 campaign.patch.raid-supply-threshold.*            # AICampaign.RaidForce.SearchObjective: only while a raid force exists (CheckCreationOfRaidForces raises them at random)
