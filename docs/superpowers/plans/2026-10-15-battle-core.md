@@ -438,7 +438,8 @@ internal static class OrderExecutorRuntime {
 2. Chain: `TacticalChainOrderPlanner.ResolveTargets`.
 3. Waypoint validation (Move and Facing):
    - Clamp to x ∈ [1, sizeX−2], z ∈ [−sizeZ+2, −1].
-   - Run `BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, target, 4)` with `CheckTerrainLine(start, target, {4, 8}, 2f)`. On water or fence, step back toward the start in 25 m steps up to 4 times, else skip `Water`.
+   - Run `BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, target, 4)`; on a water or fence target, step back toward the start in 25 m steps up to 4 times, else skip `Water`.
+   - `CheckTerrainLine(start, target, {4, 8}, 2f)` applies only to `InContactWithdrawal` moves (immediate, under fire). Planned moves are not line-checked, because `AddPath` routes them over fords and bridges (130364-130394). The line starts one 2 m step out, because `CheckTerrainLine` tests its start position first (27659-27686) and would otherwise reject every withdrawal of a group standing on a ford or fence cell.
    - Reject a target inside a friendly group's footprint unless `ReliefOrSupport`.
    - For `ArtilleryFirePosition`, reject when the segment from the target to `FireTargetId` passes within 40 m of a friendly group, and reject when a visible enemy is within 60 m.
 4. Silent-exit pre-check.
@@ -462,6 +463,7 @@ internal static class OrderExecutorRuntime {
   - `ClampMatchesVanillaBoundsNegativeZ`
   - `WaterTargetStepsBack`
   - `WaterTargetRejectedAfterFourSteps`
+  - `WithdrawalFromFordCellSkipsStartCell`
   - `FriendlyFootprintRejectedUnlessRelief`
   - `FriendlyFireLineRejectsArtilleryPosition`
   - `PointBlankRejectsArtilleryTarget`

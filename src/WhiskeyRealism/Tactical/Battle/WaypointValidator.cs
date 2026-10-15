@@ -32,7 +32,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //      withdrawal must also not cross water or a fence line (CheckTerrainLine
     //      {4, 8}): it is an immediate move (no courier) under fire, and the NavMesh
     //      would otherwise route it over a distant ford. A planned move may cross —
-    //      AddPath routes it over a ford or bridge (130364-130394).
+    //      AddPath routes it over a ford or bridge (130364-130394). CheckTerrainLine
+    //      tests its start position first (27659-27686), so the line starts one
+    //      step out: a group standing on a ford or fence cell may still withdraw.
     //   3. Move only: a target inside another own group's footprint is rejected
     //      unless ReliefOrSupport. The group's own ancestors and descendants are not
     //      blockers.
@@ -48,6 +50,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float ArtilleryPointBlankMeters = 60f;
         public const float StepBackMeters = 25f;
         public const int MaxStepBacks = 4;
+        // CheckTerrainLine step for the withdrawal line (2 m, as 27638/27650 callers use).
+        public const float TerrainLineStepMeters = 2f;
 
         public static SkipReason Validate(
             IBattleUnitView s,
@@ -75,7 +79,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 for (int step = 0; ; step++)
                 {
                     bool blocked = terrain.IsWaterOrFence(x, z) ||
-                        (checkLine && terrain.LineCrossesWater(startX, startZ, x, z));
+                        (checkLine && LineCrossesWaterPastStart(terrain, startX, startZ, x, z));
                     if (!blocked) break;
                     if (step == MaxStepBacks) return SkipReason.Water;
                     StepToward(startX, startZ, ref x, ref z, StepBackMeters);
@@ -93,6 +97,19 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             return SkipReason.None;
+        }
+
+        // The line from one step beyond the start cell to the target; a target
+        // inside that first step has no line to test.
+        private static bool LineCrossesWaterPastStart(ITerrainProbe terrain, float startX, float startZ, float x, float z)
+        {
+            float dx = x - startX;
+            float dz = z - startZ;
+            float d = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (d <= TerrainLineStepMeters) return false;
+            float fromX = startX + dx / d * TerrainLineStepMeters;
+            float fromZ = startZ + dz / d * TerrainLineStepMeters;
+            return terrain.LineCrossesWater(fromX, fromZ, x, z);
         }
 
         private static void StepToward(float startX, float startZ, ref float x, ref float z, float meters)

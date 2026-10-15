@@ -26,6 +26,7 @@ internal static class OrderArbiterTests
             ("battle-core ClampMatchesVanillaBoundsNegativeZ", ClampMatchesVanillaBoundsNegativeZ),
             ("battle-core WaterTargetStepsBack", WaterTargetStepsBack),
             ("battle-core WaterTargetRejectedAfterFourSteps", WaterTargetRejectedAfterFourSteps),
+            ("battle-core WithdrawalFromFordCellSkipsStartCell", WithdrawalFromFordCellSkipsStartCell),
             ("battle-core FriendlyFootprintRejectedUnlessRelief", FriendlyFootprintRejectedUnlessRelief),
             ("battle-core FriendlyFireLineRejectsArtilleryPosition", FriendlyFireLineRejectsArtilleryPosition),
             ("battle-core PointBlankRejectsArtilleryTarget", PointBlankRejectsArtilleryTarget),
@@ -328,6 +329,32 @@ internal static class OrderArbiterTests
             "an in-contact withdrawal never crosses water or fences (CheckTerrainLine {4,8})");
         AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, Move(1, 440f, -100f, IntentPriority.Executor, IntentSource.PostureExecutor),
             1000f, 1000f, line, out _, out _), "a planned move may cross; vanilla's NavMesh routes it over a ford or bridge");
+    }
+
+    // CheckTerrainLine tests its start position first (27659-27686), so a group
+    // standing on a ford or fence cell would have every in-contact withdrawal
+    // rejected. The validator starts the line one step (2 m) out.
+    private static void WithdrawalFromFordCellSkipsStartCell()
+    {
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 100f, -100f);
+        var withdrawal = Move(1, 40f, -100f, IntentPriority.Safety, IntentSource.Withdrawal);
+        withdrawal.Flags = IntentFlags.InContactWithdrawal;
+
+        var ford = new FixtureTerrain { WaterDiscX = 100f, WaterDiscZ = -100f, WaterDiscRadius = 1f };
+        AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, withdrawal, 1000f, 1000f, ford, out _, out _),
+            "a group on a ford cell may withdraw off it");
+
+        var stream = new FixtureTerrain { WaterDiscX = 70f, WaterDiscZ = -100f, WaterDiscRadius = 1.5f };
+        AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, withdrawal, 1000f, 1000f, stream, out float sx, out _),
+            "water further along the line still blocks the crossing");
+        AssertNear(90f, sx, 0.01f, "stepped back twice to the near bank (40 -> 65 -> 90)");
+
+        var shortHop = Move(1, 101.5f, -100f, IntentPriority.Safety, IntentSource.Withdrawal);
+        shortHop.Flags = IntentFlags.InContactWithdrawal;
+        var everywhereButTarget = new FixtureTerrain { LineCrossesWaterAlways = true };
+        AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, shortHop, 1000f, 1000f, everywhereButTarget, out _, out _),
+            "a move inside the start cell has no line to test");
     }
 
     private static void FriendlyFootprintRejectedUnlessRelief()
@@ -841,11 +868,35 @@ internal static class OrderArbiterTests
     {
         public float WaterAboveX = float.MaxValue;
         public bool LineCrossesWaterAlways;
+        public float WaterDiscX, WaterDiscZ, WaterDiscRadius;
         public int StepBackCalls;
 
-        public bool IsWaterOrFence(float x, float z) => x > WaterAboveX;
+        public bool IsWaterOrFence(float x, float z) => x > WaterAboveX || InDisc(x, z);
 
-        public bool LineCrossesWater(float x0, float z0, float x1, float z1) => LineCrossesWaterAlways;
+        // Vanilla CheckTerrainLine (27659-27686): floor(d / 2) samples, 2 m apart,
+        // starting at (x0, z0) itself.
+        public bool LineCrossesWater(float x0, float z0, float x1, float z1)
+        {
+            if (LineCrossesWaterAlways) return true;
+            float dx = x1 - x0;
+            float dz = z1 - z0;
+            float d = (float)Math.Sqrt(dx * dx + dz * dz);
+            int samples = (int)Math.Floor(d / 2f);
+            for (int i = 0; i < samples; i++)
+            {
+                float t = i * 2f / d;
+                if (IsWaterOrFence(x0 + dx * t, z0 + dz * t)) return true;
+            }
+            return false;
+        }
+
+        private bool InDisc(float x, float z)
+        {
+            if (WaterDiscRadius <= 0f) return false;
+            float dx = x - WaterDiscX;
+            float dz = z - WaterDiscZ;
+            return dx * dx + dz * dz <= WaterDiscRadius * WaterDiscRadius;
+        }
 
         public bool StepBackFromRiver(float x0, float z0, ref float x1, ref float z1)
         {

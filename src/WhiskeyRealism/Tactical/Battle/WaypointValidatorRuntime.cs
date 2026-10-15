@@ -28,7 +28,6 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private const int RiverTerrain = 4;
         private const int FenceTerrain = 8;
-        private const float LineStepMeters = 2f;
         private static readonly int[] WaterOrFenceIds = { RiverTerrain, FenceTerrain };
 
         private static FieldInfo _bfsField;
@@ -59,7 +58,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((UnityEngine.Object)bfs == null) return false;
             try
             {
-                return bfs.CheckTerrainLine(new Vector3(x0, 0f, z0), new Vector3(x1, 0f, z1), WaterOrFenceIds, LineStepMeters);
+                return bfs.CheckTerrainLine(new Vector3(x0, 0f, z0), new Vector3(x1, 0f, z1), WaterOrFenceIds, WaypointValidator.TerrainLineStepMeters);
             }
             catch (Exception ex)
             {
