@@ -28,6 +28,15 @@ namespace WhiskeyRealism.Patches
     // only a direct MoveUnitTo commit (attack branch, 13771) is moved back, and
     // never toward an unset theaterposition.
     //
+    // W&L (stage F, C4): a commit of the player's own command (player-owned units,
+    // units in his operation, his map group) or of a CIC side is left whole:
+    // Whiskey neither cancels nor moves it back (vanilla commits them; 13711/13769
+    // skip only the move of a player-owned unit), DefenseIntent skip-revert
+    // reason=player-chain. The AI map group carrying a player below map-group level
+    // is reverted like any AI unit (WlChainRules.MayMove): a cancelled queued march
+    // drops #69's pending dispatch at its flush, and a move back goes through
+    // MoveUnitTo, so #69 dispatches it (the pass's last move of the corps).
+    //
     // Vanilla field names confirmed from Assembly-CSharp.decompiled.cs:
     //   AIFaction.ownunits               — List<Regiment> (line 10324)
     //   AIFaction.unitsindefensiveoperations — List<Regiment> (line 10358)
@@ -219,6 +228,7 @@ namespace WhiskeyRealism.Patches
 
                                 if (defOps != null)
                                 {
+                                    var chain = WlChainContext.Capture();
                                     for (int i = defOps.Count - 1; i >= 0; i--)
                                     {
                                         var unityObj = defOps[i] as UnityEngine.Object;
@@ -233,6 +243,14 @@ namespace WhiskeyRealism.Patches
                                         string sig = "<no-sig>";
                                         threatSigs?.TryGetValue(id, out sig);
 
+                                        // The W&L player's own command keeps vanilla's commit whole
+                                        // (list and queued march); see WlChainRules.
+                                        if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit)))
+                                        {
+                                            EmitDefenseIntentSkipRevert(allianceId, id, SafeUnitName(unit, id), sig, "player-chain");
+                                            continue;
+                                        }
+
                                         defOps.RemoveAt(i);
                                         RemoveFromStaticDefensiveOperation(unit);
 
@@ -246,14 +264,7 @@ namespace WhiskeyRealism.Patches
                                         }
                                         else if (revert == ForbiddenCommitRevert.MoveBack)
                                         {
-                                            if (ShouldAvoidDirectWlRevert(unit, allianceId))
-                                            {
-                                                EmitDefenseIntentSkipRevert(allianceId, id, SafeUnitName(unit, id), sig, "player-chain");
-                                            }
-                                            else
-                                            {
-                                                SafeMoveUnitTo(unit, priorPos);
-                                            }
+                                            SafeMoveUnitTo(unit, priorPos);
                                         }
 
                                         // Fix B: .name throws MissingReferenceException on destroyed objects.
@@ -399,7 +410,7 @@ namespace WhiskeyRealism.Patches
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithUnit(candidateName)
-                .WithDecision("skip-direct-revert", safeReason, signature)
+                .WithDecision("skip-revert", safeReason, signature)
                 .WithField("unitId", unitId)
                 .WithField("candidate", candidateName ?? "-")
                 .WithField("threat", safeThreat));
@@ -465,23 +476,6 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("defense-intent:filter:moveunitto",
                     "MoveUnitTo on revert failed: " + ex.Message);
-            }
-        }
-
-        private static bool ShouldAvoidDirectWlRevert(Regiment unit, int allianceId)
-        {
-            try
-            {
-                if (unit == null) return false;
-                if (!DLC_WL.dlc_scenarioactive) return false;
-                if (allianceId != GameVars.playeralliance || unit.alliance != GameVars.playeralliance) return false;
-                if (DLC_WL.IsCommanderInChief()) return true;
-                if (DLC_WL.IsMovedByPlayer(unit)) return true;
-                return unit.dlcw_isundercommander;
-            }
-            catch
-            {
-                return false;
             }
         }
 

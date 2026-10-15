@@ -15,7 +15,8 @@ namespace WhiskeyRealism.Patches
     // into the same ArmyGroup using vanilla ArmyGroup APIs.
     //
     // 2026-10-14 (C-ArmyGroup): repeats vanilla's early-return guard (army
-    // groups disabled / reform not researched / W&L player is CIC); never
+    // groups disabled / reform not researched / the CIC test, applied as #70
+    // applies it: only to the W&L CIC player's own alliance); never
     // attaches to or re-commands the W&L player's group (GetArmyGroupInRange
     // 75631); CanAddFurtherUnits (75770) gates attaching only, and commanders
     // change only on a group holding at least one plan unit; picks
@@ -175,11 +176,17 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (GameVars.alliance == null || allianceId < 0 || allianceId >= GameVars.alliance.Length) return false;
+                bool wlActive = DLC_WL.dlc_scenarioactive;
+                int chosen = DLC_WL.dlc_chosencommander;
+                bool playerIsCic = wlActive && DLC_WL.IsCommanderInChief();
+                int cicAlliance = playerIsCic && chosen >= 0 && chosen < GameVars.commander.Count
+                    ? GameVars.commander[chosen].alliance
+                    : -1;
+                bool guardEnabled = Plugin.EnableCicFactionAiBugGuard != null && Plugin.EnableCicFactionAiBugGuard.Value;
                 return ArmyGroupDoctrine.ArmyGroupsAllowed(
                     GameVars.allowarmygroups,
                     GameVars.alliance[allianceId].AllowsArmyGroups(),
-                    DLC_WL.dlc_scenarioactive,
-                    DLC_WL.IsCommanderInChief());
+                    CicFactionAiGuard.VanillaGuardBlocks(guardEnabled, wlActive, playerIsCic, cicAlliance, allianceId));
             }
             catch (Exception ex)
             {

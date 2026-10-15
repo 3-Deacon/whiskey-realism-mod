@@ -1,0 +1,275 @@
+using System;
+
+namespace WhiskeyRealism.Strategic
+{
+    internal enum ComplianceScope
+    {
+        Campaign = 0,
+        Battle = 1,
+    }
+
+    internal enum ComplianceOutcome
+    {
+        None,
+        Complied,
+        Missed,
+        Neutral,
+    }
+
+    // How reliably the W&L player executes the orders his superiors send
+    // (chain-of-command spec §E). Pure; PlayerComplianceRuntime feeds it from
+    // vanilla's given order. No penalty is attached: consumers only plan around an
+    // unreliable executor (user decision 2026-10-14).
+    //
+    // Vanilla anchors (decompile, build 14703111):
+    //   DLC_WL.GivenOrders.givenorderssession is bumped for every new order (8651);
+    //   Regiment.CheckDLCWLTopics (123468-123537) sets givenorder.firstunitreached
+    //   when a player-owned unit without a detachment parent stands in the order
+    //   zone, once per session, then clears campaign types 5/6/7/16 (123533).
+    //
+    // One pending order per scope (vanilla keeps one given order). A new order
+    // before the old one resolved, a cleared order and a clock regress are
+    // neutral: the player had no fair chance to comply. Reliability is an
+    // exponential average of complied (1) / missed (0) outcomes, starting at 1.
+    internal sealed class PlayerComplianceLedger
+    {
+        // Campaign: three game days to march into the zone.
+        public const double CampaignGraceHours = 72.0;
+        // Battle: half a battle hour on the night-frozen doctrine clock
+        // (TacticalDoctrineTime) to reach a battle order's zone. Kept from the stage F
+        // design; vanilla has no deadline of its own (CheckDLCWLTopics pays whenever a
+        // unit enters the zone, 123484-123517), so this is calibration: the stage F
+        // plan's smoke item checks it against an obedient player's arrival times.
+        public const double BattleGraceHours = 0.5;
+        public const float Alpha = 0.25f;
+        // Trust until evidence (stage F review, 2026-10-15): the AI plans around the
+        // player only after it has seen him ignore orders; nothing is held against
+        // him up front.
+        public const float Prior = 1f;
+
+        private readonly bool[] _pending = new bool[2];
+        private readonly int[] _session = new int[2];
+        private readonly double[] _issuedHours = new double[2];
+
+        public float Reliability { get; private set; } = Prior;
+        public int Samples { get; private set; }
+
+        public bool HasPending(ComplianceScope scope) => _pending[(int)scope];
+
+        public int PendingSession(ComplianceScope scope) => _pending[(int)scope] ? _session[(int)scope] : -1;
+
+        // A new order to the player. Returns Neutral when it superseded an
+        // unresolved one.
+        public ComplianceOutcome OnDispatch(ComplianceScope scope, int session, double nowHours)
+        {
+            int s = (int)scope;
+            ComplianceOutcome superseded = _pending[s] ? ComplianceOutcome.Neutral : ComplianceOutcome.None;
+            _pending[s] = true;
+            _session[s] = session;
+            _issuedHours[s] = nowHours;
+            return superseded;
+        }
+
+        public ComplianceOutcome OnReached(ComplianceScope scope, int session)
+        {
+            int s = (int)scope;
+            if (!_pending[s] || _session[s] != session) return ComplianceOutcome.None;
+            _pending[s] = false;
+            Sample(1f);
+            return ComplianceOutcome.Complied;
+        }
+
+        public ComplianceOutcome Tick(ComplianceScope scope, double nowHours)
+        {
+            int s = (int)scope;
+            if (!_pending[s]) return ComplianceOutcome.None;
+            double elapsed = nowHours - _issuedHours[s];
+            if (double.IsNaN(elapsed) || elapsed < 0.0) return DropPending(scope);
+            double grace = scope == ComplianceScope.Campaign ? CampaignGraceHours : BattleGraceHours;
+            if (elapsed <= grace) return ComplianceOutcome.None;
+            _pending[s] = false;
+            Sample(0f);
+            return ComplianceOutcome.Missed;
+        }
+
+        // The order left without being reached (vanilla cleared it, the battle or
+        // career ended).
+        public ComplianceOutcome DropPending(ComplianceScope scope)
+        {
+            int s = (int)scope;
+            if (!_pending[s]) return ComplianceOutcome.None;
+            _pending[s] = false;
+            return ComplianceOutcome.Neutral;
+        }
+
+        // Adopts a saved estimate only while this session has none of its own: the
+        // ledger measures the human player, so a reload never rolls it back.
+        public bool Restore(float reliability, int samples)
+        {
+            if (Samples > 0 || samples <= 0 || float.IsNaN(reliability) || float.IsInfinity(reliability)) return false;
+            Reliability = Clamp01(reliability);
+            Samples = samples;
+            return true;
+        }
+
+        // Strength a planner should count for a unit: player-owned units count by the
+        // player's reliability, AI units fully. A non-finite reliability counts fully.
+        public static float StrengthWeight(bool playerOwned, float reliability)
+        {
+            if (!playerOwned || float.IsNaN(reliability) || float.IsInfinity(reliability)) return 1f;
+            return Clamp01(reliability);
+        }
+
+        private void Sample(float outcome)
+        {
+            Reliability = Clamp01(Reliability + Alpha * (outcome - Reliability));
+            if (Samples < int.MaxValue) Samples++;
+        }
+
+        private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    // The W&L career a compliance estimate belongs to (chain-of-command spec §E):
+    // the chosen commander plus SceneManagement.currentcampaignscenario. That field is
+    // set when a campaign loads (LoadCampaignScenario 36642; a campaign battle loaded
+    // from a save, 36576), cleared only by a standalone battle's Start (23806-23808,
+    // currentoperation 1/7), left alone by LoadCampaignBattleScenario (36648-36661,
+    // which points GamePrefs.leveltoload at the battlefield, 36650-36651) and read
+    // back to reload the campaign after the battle (36810-36811). So the key stays the
+    // same through a campaign battle and its return. The key string is rebuilt only
+    // when an input changes: no allocation per pass or tick.
+    internal sealed class ComplianceCareerKey
+    {
+        private int _commander = int.MinValue;
+        private string _scenario;
+
+        public string Key { get; private set; }
+
+        // True when the career changed (or is seen for the first time).
+        public bool Update(int commander, string campaignScenario)
+        {
+            string scenario = campaignScenario ?? string.Empty;
+            if (Key != null && commander == _commander && string.Equals(scenario, _scenario, StringComparison.Ordinal))
+                return false;
+            _commander = commander;
+            _scenario = scenario;
+            Key = commander + ":" + scenario;
+            return true;
+        }
+    }
+
+    // One career's ledger plus the estimate a sidecar load brought in.
+    internal sealed class PlayerComplianceCareers
+    {
+        private readonly ComplianceCareerKey _key = new ComplianceCareerKey();
+        private string _savedKey;
+        private float _savedReliability;
+        private int _savedSamples;
+
+        public PlayerComplianceLedger Ledger { get; private set; } = new PlayerComplianceLedger();
+
+        public string CareerKey => _key.Key;
+
+        // Switches to the given career's ledger; true when it changed. A saved estimate
+        // for that career is adopted (PlayerComplianceLedger.Restore).
+        public bool Ensure(int commander, string campaignScenario)
+        {
+            if (!_key.Update(commander, campaignScenario)) return false;
+            Ledger = new PlayerComplianceLedger();
+            if (_savedKey != null && string.Equals(_savedKey, _key.Key, StringComparison.Ordinal))
+                Ledger.Restore(_savedReliability, _savedSamples);
+            return true;
+        }
+
+        public void Restore(string careerKey, float reliability, int samples)
+        {
+            if (string.IsNullOrEmpty(careerKey)) return;
+            _savedKey = careerKey;
+            _savedReliability = reliability;
+            _savedSamples = samples;
+            if (string.Equals(_key.Key, careerKey, StringComparison.Ordinal))
+                Ledger.Restore(reliability, samples);
+        }
+
+        // Only the current career's record (after Ensure); another career's saved
+        // record never travels into this save.
+        public bool TryExport(out string careerKey, out float reliability, out int samples)
+        {
+            careerKey = _key.Key;
+            reliability = Ledger.Reliability;
+            samples = Ledger.Samples;
+            return careerKey != null && samples > 0;
+        }
+    }
+
+    // A given order's identity for compliance: its group unit, type and target.
+    internal struct ComplianceOrderKey
+    {
+        // Vanilla's own same-order distance (AIBattle.CheckCurrentOrderUpdate 8643).
+        public const float SameTargetUnits = 110f;
+
+        public bool Valid;
+        public int Unit;
+        public int Type;
+        public float X;
+        public float Z;
+
+        public ComplianceOrderKey(int unit, int type, float x, float z)
+        {
+            Valid = true;
+            Unit = unit;
+            Type = type;
+            X = x;
+            Z = z;
+        }
+
+        public static bool Same(in ComplianceOrderKey a, in ComplianceOrderKey b)
+        {
+            if (!a.Valid || !b.Valid || a.Unit != b.Unit || a.Type != b.Type) return false;
+            float dx = a.X - b.X;
+            float dz = a.Z - b.Z;
+            return dx * dx + dz * dz < SameTargetUnits * SameTargetUnits;
+        }
+    }
+
+    internal enum ComplianceOrderEvent
+    {
+        None,   // no new session, or the first look at a career
+        New,    // a new order: count it
+        Repeat, // vanilla re-issued the order already counted: not a new sample
+    }
+
+    // New orders by givenorderssession (bumped per order, 8651). Vanilla re-issues a
+    // campaign order on every AI pass with no dedupe (the 8640-8646 check is
+    // battle-only; e.g. capital defense 11864), each with a new session. A re-issue
+    // of the same group, type and target is the same order until vanilla gives a
+    // different one; a cleared slot (123533) does not end it, or a player standing
+    // in the zone would be counted again on every re-issue.
+    internal sealed class ComplianceOrderStream
+    {
+        private int _lastSession = int.MinValue;
+        private ComplianceOrderKey _last;
+
+        public ComplianceOrderEvent See(bool hasOrder, int session, in ComplianceOrderKey order)
+        {
+            if (_lastSession == int.MinValue)
+            {
+                // First look at this career: an order already standing has an unknown age.
+                _lastSession = session;
+                if (hasOrder) _last = order;
+                return ComplianceOrderEvent.None;
+            }
+            if (!hasOrder || session == _lastSession) return ComplianceOrderEvent.None;
+            _lastSession = session;
+            bool repeat = ComplianceOrderKey.Same(in order, in _last);
+            _last = order;
+            return repeat ? ComplianceOrderEvent.Repeat : ComplianceOrderEvent.New;
+        }
+
+        public void Reset()
+        {
+            _lastSession = int.MinValue;
+            _last = default(ComplianceOrderKey);
+        }
+    }
+}
