@@ -211,7 +211,6 @@ internal static class TestFixtures
             UnitType = unitType,
             IsTopUnit = true,
             GroupStrengthActive = strength,
-            GroupStrengthDirect = strength,
             Morale = 0.8f,
             Readiness = 0.8f,
             RifleAmmo = 0.8f,

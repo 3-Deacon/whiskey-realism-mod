@@ -88,8 +88,7 @@ internal static class TacticalDirectChildTests
             UnitKey = "attached:1",
             ParentUnitKey = "corps:1",
             UnitType = 14,
-            IsTopUnit = false,
-            GroupStrengthDirect = 3000f
+            IsTopUnit = false
         };
 
         AssertEqual(FormationLevel.Division, snap.Level);

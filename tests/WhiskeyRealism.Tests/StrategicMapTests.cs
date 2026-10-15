@@ -625,7 +625,6 @@ internal static class StrategicMapTests
             AreaKey = "RichmondCorridor",
             SectorKey = "RichmondCorridor",
             GroupStrengthActive = 8000f,
-            GroupStrengthDirect = 8000f,
             Morale = 0.2f,
             Readiness = 0.2f,
             RifleAmmo = 0.2f,
