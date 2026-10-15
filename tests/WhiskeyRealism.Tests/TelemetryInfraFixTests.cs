@@ -53,6 +53,7 @@ internal static class TelemetryInfraFixTests
         ProbeRecordsTopLevelScopesSuppressedByProfile();
         PerfShutdownFlushesEveryThreadsAggregates();
         PerfProbeTickFlushesDueAggregateWindows();
+        PerfAggregateWindowDefaultsToFiveSeconds();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         FaultSiteDetectsModFramesInStack();
@@ -1264,5 +1265,15 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("perf probe tick flushes due aggregate windows");
+    }
+
+    // ---------------------------------------------------------------- L8
+
+    private static void PerfAggregateWindowDefaultsToFiveSeconds()
+    {
+        // ~150-200 MB/hr of 1 s aggregate rows against a 250 MB session cap; 5 s windows
+        // cut that 5x while slow rows stay immediate (capped per scope per window).
+        TestHarness.AssertEqual(5000L, TelemetryPerf.AggregateWindowMs, "default aggregate window");
+        LogPass("perf aggregate window defaults to five seconds");
     }
 }

@@ -12,7 +12,7 @@ namespace WhiskeyRealism.Telemetry
     //   - timing uses Stopwatch.GetTimestamp(), no Stopwatch instance;
     //   - sub-threshold calls only update a per-thread, per-scope accumulator
     //     (count/total/max/slow count), flushed as one "PerformanceAggregate" row per scope
-    //     per AggregateWindowMs of real time;
+    //     per AggregateWindowMs (5 s) of real time;
     //   - a call at/above its threshold also emits one full "Performance" row, at most
     //     MaxSlowRowsPerScopeWindow per scope per window, and only while the
     //     "Telemetry Performance Warnings" config is on.
@@ -24,8 +24,10 @@ namespace WhiskeyRealism.Telemetry
         internal const int MaxScopesPerThread = 1024;
         private const int MaxDepth = 32;
 
-        // Real-time aggregation window. Internal (not const) so tests can shorten it.
-        internal static long AggregateWindowMs = 1000;
+        // Real-time aggregation window: one PerformanceAggregate row per scope per 5 s (1 s
+        // produced ~150-200 MB/hr against the 250 MB session cap). Internal (not const) so
+        // tests can shorten it.
+        internal static long AggregateWindowMs = 5000;
 
         private static readonly double TicksToMs = 1000.0 / Stopwatch.Frequency;
 
