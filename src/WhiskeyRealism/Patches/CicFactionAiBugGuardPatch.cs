@@ -24,6 +24,12 @@ namespace WhiskeyRealism.Patches
     // the true value. A Priority.First Postfix and a Finalizer disarm when vanilla
     // returned before reaching the guard (12012's earlier tests, 17723's
     // allowarmygroups tests). Not a Prefix-skip.
+    //
+    // IsCommanderInChief overwrites its own argument (47477-47480: `manualcommander =
+    // dlc_chosencommander` when it is -1; IL starg.s), and HarmonyX loads a Postfix's
+    // arguments from the same slot after the body ran, so the Postfix sees the chosen
+    // commander's id, never -1. A non-blocking Prefix therefore records whether the
+    // call came in with the default argument, and the Postfix consumes that __state.
     internal static class CicFactionAiBugGuardPatch
     {
         private static bool _armed;
@@ -58,9 +64,9 @@ namespace WhiskeyRealism.Patches
             _armed = false;
         }
 
-        internal static void ConsumeIfGuardCall(int manualcommander, ref bool result)
+        internal static void ConsumeIfGuardCall(bool calledWithDefaultArgument, ref bool result)
         {
-            if (!CicFactionAiGuard.ConsumeAsNotCic(_armed, manualcommander)) return;
+            if (!CicFactionAiGuard.ConsumeAsNotCic(_armed, calledWithDefaultArgument)) return;
             _armed = false;
             if (!result) return;
             result = false;
@@ -145,13 +151,33 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(DLC_WL), nameof(DLC_WL.IsCommanderInChief))]
         internal static class IsCommanderInChief
         {
+            // Reads the argument before vanilla overwrites it (47477-47480). Never skips
+            // vanilla (returns void).
+            [HarmonyPrefix]
+            internal static void Prefix(int manualcommander, out bool __state)
+            {
+                __state = false;
+                using (TelemetryPerf.Scope("campaign.patch.cic-faction-ai-guard.is-cic.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    PatchFirstFire.Mark("campaign.patch.cic-faction-ai-guard.is-cic.prefix");
+                    __state = CicFactionAiGuard.IsDefaultArgumentCall(manualcommander);
+                }
+            }
+
             [HarmonyPostfix]
-            internal static void Postfix(int manualcommander, ref bool __result)
+            internal static void Postfix(bool __state, ref bool __result)
             {
                 using (TelemetryPerf.Scope("campaign.patch.cic-faction-ai-guard.is-cic", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.cic-faction-ai-guard.is-cic");
-                    ConsumeIfGuardCall(manualcommander, ref __result);
+                    try
+                    {
+                        ConsumeIfGuardCall(__state, ref __result);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnceLog.Warning("cic-faction-ai-guard:is-cic", "[Patch:CicFactionAiGuard] IsCommanderInChief postfix failed: " + ex.Message);
+                    }
                 }
             }
         }

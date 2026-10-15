@@ -26,6 +26,7 @@ campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L car
 campaign.patch.wl-operation-null-guard             # DLC_WL.CommanderRelations.Operation.UpdateOperation: W&L operations only
 campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMessageContent: W&L dispatches only
 campaign.patch.cic-faction-ai-guard.is-cic         # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
+campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
 
 # Campaign events that need not happen in a short session.
 campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit

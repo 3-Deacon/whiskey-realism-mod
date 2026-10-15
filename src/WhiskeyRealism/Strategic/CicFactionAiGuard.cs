@@ -23,10 +23,18 @@ namespace WhiskeyRealism.Strategic
         }
 
         // IsCommanderInChief(manualcommander = -1) is the guard's form; a call naming
-        // another commander is a different question.
-        public static bool ConsumeAsNotCic(bool armed, int manualCommander)
+        // another commander is a different question. Vanilla replaces -1 with
+        // dlc_chosencommander inside the body (47477-47480), so only a Prefix sees the
+        // argument as called; the Postfix sees the chosen commander's id.
+        public static bool IsDefaultArgumentCall(int manualCommanderAtEntry)
         {
-            return armed && manualCommander == -1;
+            return manualCommanderAtEntry == -1;
+        }
+
+        // Postfix decision from the Prefix's capture, never from the overwritten argument.
+        public static bool ConsumeAsNotCic(bool armed, bool calledWithDefaultArgument)
+        {
+            return armed && calledWithDefaultArgument;
         }
 
         // Whether vanilla's CIC early return still stops this faction after the guard
