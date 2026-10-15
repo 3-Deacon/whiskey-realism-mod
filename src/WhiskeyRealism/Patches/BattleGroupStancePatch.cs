@@ -516,7 +516,6 @@ namespace WhiskeyRealism.Patches
                 if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
                 if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
                 if (macro == 3) return;
-                if (resolved.RequiresCommanderWrites && !AllowsVanillaWrites()) return;
                 if (resolved.FinalStance == vanillaOrdered)
                 {
                     // Agreement: the writer re-stamps the single-owner hold so
@@ -571,7 +570,6 @@ namespace WhiskeyRealism.Patches
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
             if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
             if (macro == 3) return;
-            if (resolved.RequiresCommanderWrites && !AllowsVanillaWrites()) return;
 
             if (TacticalStanceWriter.EnsureStance(bunits, group, resolved.FinalStance, null, StanceWriteSource.Scorer))
                 LogResolvedDecision(side, group, resolved);
@@ -655,7 +653,6 @@ namespace WhiskeyRealism.Patches
 
             if (hasDoctrine)
             {
-                if (!AllowsVanillaWrites()) return;
                 int stance = doctrine.Action == DoctrineConsumerAction.Allow ? 3 : 2;
                 if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
                     LogDoctrineStanceDecision(side, group, order, doctrine, stance);
@@ -719,8 +716,6 @@ namespace WhiskeyRealism.Patches
                 state.Task,
                 TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
             if (stance < 0) return true;
-            // The ledger owns this group either way; MonitorOnly runs it without writes.
-            if (!AllowsVanillaWrites()) return true;
             if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
                 LogLedgerTaskDecision(side, group, state, stance);
             return true;

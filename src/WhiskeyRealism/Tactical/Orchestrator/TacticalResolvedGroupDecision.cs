@@ -89,13 +89,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>True if the operations-ledger resolver produced this decision.</summary>
         public bool FromLedger { get; }
 
-        /// <summary>
-        /// Doctrine and ledger-task stances come from the command system, so they are
-        /// written only when Tactical Commander Mode allows writes (MonitorOnly still
-        /// runs the ledger). Scorer stances are gated by the group-sector-stance flag.
-        /// </summary>
-        public bool RequiresCommanderWrites => FromDoctrine || FromLedger;
-
         /// <summary>True if vanillaOrdered was 4 (charge) at cache time; skips the apply fast path.</summary>
         public bool IsChargeOverride { get; }
 

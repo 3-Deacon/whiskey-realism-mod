@@ -17,31 +17,7 @@ internal static class TacticalResolvedGroupDecisionTests
 
         ChargeOverrideEnumOrdinalsStable();
         LogPass("tactical resolved group decision charge override enum ordinals stable");
-
-        CommandSystemSourcesNeedCommanderWrites();
-        LogPass("tactical resolved group decision doctrine and ledger stances need commander writes");
     }
-
-    // Doctrine and ledger-task stances come from the command system: in
-    // Commander Mode MonitorOnly the ledger still runs, so #45 must not write
-    // them. Scorer stances stay behind the group-sector-stance flag instead.
-    private static void CommandSystemSourcesNeedCommanderWrites()
-    {
-        TestHarness.AssertTrue(Make(fromDoctrine: true, fromLedger: false).RequiresCommanderWrites, "doctrine");
-        TestHarness.AssertTrue(Make(fromDoctrine: false, fromLedger: true).RequiresCommanderWrites, "ledger");
-        TestHarness.AssertFalse(Make(fromDoctrine: false, fromLedger: false).RequiresCommanderWrites, "scorer");
-        TestHarness.AssertFalse(default(TacticalResolvedGroupDecision).RequiresCommanderWrites, "default");
-    }
-
-    private static TacticalResolvedGroupDecision Make(bool fromDoctrine, bool fromLedger)
-        => new TacticalResolvedGroupDecision(
-            finalStance: 2,
-            kind: TacticalDoctrineDecisionKind.Apply,
-            reason: "t",
-            fromDoctrine: fromDoctrine,
-            fromLedger: fromLedger,
-            isChargeOverride: false,
-            chargeAction: ChargeOverrideAction.None);
 
     private static void LogPass(string message)
     {
