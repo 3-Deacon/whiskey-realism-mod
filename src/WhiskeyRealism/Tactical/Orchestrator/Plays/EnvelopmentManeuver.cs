@@ -69,6 +69,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float MaxCorridorEnemyHeight;
         public float HeightDifferenceAnchored;                            // GamePrefs.heightdifferencetoenemyunitanchored (5 m)
         public bool CanMirror;                                            // a lone enveloping rect: one mirrored try
+        // Additive: how far the child's headquarters may stand from a point it was sent to and still have arrived. SetGroupFormation
+        // paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058), so the runtime passes those.
+        public float ArrivalSlackMeters;
         public BattleStance Stance;
         public double NowHours;
     }
@@ -247,7 +250,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static ManeuverOrder MarchOrder(ref ManeuverState state, in ManeuverInput input)
         {
             bool raid = input.Kind == PlayRectKind.DeepRaid;
-            if (raid && !state.OutflankReached && Distance(input.ChildX, input.ChildZ, input.OutflankX, input.OutflankZ) <= ArrivalMeters)
+            if (raid && !state.OutflankReached && Arrived(input.ChildX, input.ChildZ, input.OutflankX, input.OutflankZ, input.ArrivalSlackMeters))
                 state.OutflankReached = true;
             bool outflank = raid && !state.OutflankReached;
             return new ManeuverOrder
@@ -315,6 +318,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (AnchoredHighGround(input.AnchorHeight, heights, input.CorridorEnemyCount > 0 ? 1 : 0, input.HeightDifferenceAnchored))
                 return "anchored-high-ground";
             return null;
+        }
+
+        /// <summary>
+        /// A child has arrived when its headquarters stands within ArrivalMeters plus <paramref name="slackMeters"/> of the point it
+        /// was sent to: the group formation paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (SetGroupFormation
+        /// 92044-92058), so the HQ of a child that has reached its anchor never stands on the anchor.
+        /// </summary>
+        public static bool Arrived(float childX, float childZ, float targetX, float targetZ, float slackMeters)
+        {
+            return Distance(childX, childZ, targetX, targetZ) <= ArrivalMeters + Math.Max(0f, slackMeters);
+        }
+
+        /// <summary>
+        /// Whether an enveloping child waits for the Center child's contact: the template has a Center rect AND the zone assignment gave
+        /// it a child. DoubleEnvelopment's wings outrank its Center (priority 10 over 8), so with two corps both take wings and nobody
+        /// holds the Center; waiting for a contact that cannot come would hold the wings for good, so the offset then counts from the
+        /// play's activation.
+        /// </summary>
+        public static bool WaitsForCenter(bool templateHasCenterRect, System.Collections.Generic.IReadOnlyList<CorpsAssignment> assignments)
+        {
+            if (!templateHasCenterRect || assignments == null) return false;
+            for (int a = 0; a < assignments.Count; a++)
+                if (assignments[a].RectKind == PlayRectKind.Center) return true;
+            return false;
         }
 
         // ---- the checks ----------------------------------------------------------------------
@@ -478,20 +505,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (!maneuver.Order.Overrides) continue;
                 string source = NodeIdOfChild(maneuver.ChildId);
                 if (source.Length == 0) continue;
-                int nodes = 0;
+                // The child node itself is the unit that is moved (direct children come from unitsused): it takes the anchor. Its
+                // direct sub-nodes take the 180 m lanes along the lateral axis, centred on the anchor; deeper nodes take the anchor
+                // (a regiment-level group follows its parent's formation).
+                int childDepth = int.MaxValue;
                 for (int i = 0; i < nodeIntents.Count; i++)
-                    if (string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) nodes++;
+                {
+                    if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
+                    if (string.Equals(nodeIntents[i].NodeId, source, StringComparison.Ordinal)) { childDepth = nodeIntents[i].Depth; break; }
+                    if (nodeIntents[i].Depth < childDepth) childDepth = nodeIntents[i].Depth;
+                }
+                int lanes = 0;
+                for (int i = 0; i < nodeIntents.Count; i++)
+                    if (string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal) && nodeIntents[i].Depth == childDepth + 1) lanes++;
                 int lane = 0;
                 for (int i = 0; i < nodeIntents.Count; i++)
                 {
                     if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
                     bool hold = maneuver.Order.Phase == ManeuverPhase.Hold;
-                    float offset = hold ? 0f : LaneOffset(lane, nodes);
+                    float offset = !hold && nodeIntents[i].Depth == childDepth + 1 ? LaneOffset(lane++, lanes) : 0f;
                     table.Add(new ManeuverNodeEntry(
                         nodeIntents[i].NodeId, maneuver.Order.Phase, maneuver.Order.Task, !hold,
                         maneuver.Order.TargetX + maneuver.LateralX * offset, maneuver.Order.TargetZ + maneuver.LateralZ * offset,
                         maneuver.Order.Heading, maneuver.Order.Reason));
-                    lane++;
                 }
             }
             return table;
@@ -510,8 +546,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     h = h * 31 + (c.ChildId?.GetHashCode() ?? 0);
                     h = h * 31 + (int)c.Order.Phase;
                     h = h * 31 + (int)c.Order.Task;
-                    h = h * 31 + (int)(c.Order.TargetX / 50f);
-                    h = h * 31 + (int)(c.Order.TargetZ / 50f);
+                    // A hold's target is the child's own (drifting) position and is never read: it stays out of the hash.
+                    if (c.Order.Phase != ManeuverPhase.Hold)
+                    {
+                        h = h * 31 + (int)(c.Order.TargetX / 50f);
+                        h = h * 31 + (int)(c.Order.TargetZ / 50f);
+                    }
                     h = h * 31 + (int)(c.Order.Heading / 5f);
                 }
                 return h;

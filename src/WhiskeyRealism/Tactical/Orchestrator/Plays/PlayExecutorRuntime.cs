@@ -333,13 +333,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         side.ActivatedHours = now;
                     }
 
-                    bool templateHasCenter = false;
+                    bool templateHasCenterRect = false;
                     int envelopRects = 0;
                     for (int r = 0; r < template.Rects.Count; r++)
                     {
-                        if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenter = true;
+                        if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenterRect = true;
                         if (template.Rects[r].Envelops) envelopRects++;
                     }
+                    // Wait for the Center child's contact only when the assignment gave the Center rect a child (see WaitsForCenter).
+                    bool templateHasCenter = EnvelopmentManeuver.WaitsForCenter(templateHasCenterRect, _lastResult[allianceId]);
                     NoteCenterContact(side, snapshot, allianceId, now, templateHasCenter);
 
                     PlayAnchor.EnemyAnchor(snapshot, axis, axis.OriginX, axis.OriginZ, out float enemyX, out float enemyZ);
@@ -426,7 +428,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 HeightDifferenceAnchored = GamePrefs.heightdifferencetoenemyunitanchored, Stance = stance, NowHours = now,
             };
             input.ChildInContact = snapshot.ClosestVisibleEnemy(index, out float contactDistance) >= 0 && contactDistance <= EnvelopmentManeuver.ContactMeters;
-            input.ChildArrived = Distance(child.X, child.Z, anchorX, anchorZ) <= EnvelopmentManeuver.ArrivalMeters;
+            // SetGroupFormation paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058).
+            input.ArrivalSlackMeters = child.GroupDepth + GamePrefs.groupunitdistancetoback;
+            input.ChildArrived = EnvelopmentManeuver.Arrived(child.X, child.Z, anchorX, anchorZ, input.ArrivalSlackMeters);
             input.HasEnemyExtent = EnvelopmentManeuver.EnemyLineEnd(in axis, enemyX, enemyZ, right, out float endX, out float endZ);
             input.EnemyEndX = endX;
             input.EnemyEndZ = endZ;
@@ -468,12 +472,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static float HeightAt(float x, float z)
         {
             return TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)).y;
-        }
-
-        private static float Distance(float ax, float az, float bx, float bz)
-        {
-            float dx = ax - bx, dz = az - bz;
-            return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
         private static int ParseChildInstanceId(string childId)

@@ -31,6 +31,10 @@ internal static partial class FlankResponseTests
             ("bc11 LostStrengthAndTimeoutAbandon", LostStrengthAndTimeoutAbandon),
             ("bc11 DefenderNeverManeuvers", DefenderNeverManeuvers),
             ("bc11 ManeuverReachesEveryNodeOfTheChild", ManeuverReachesEveryNodeOfTheChild),
+            ("bc11 ChildNodeTakesAnchorAndDeepNodesFollow", ChildNodeTakesAnchorAndDeepNodesFollow),
+            ("bc11 ArrivalAllowsHqStandingDepthBehindTheLine", ArrivalAllowsHqStandingDepthBehindTheLine),
+            ("bc11 WingsDoNotWaitForACenterNobodyHolds", WingsDoNotWaitForACenterNobodyHolds),
+            ("bc11 HoldTargetDriftStaysOutOfManeuverHash", HoldTargetDriftStaysOutOfManeuverHash),
             ("bc11 CollectOwnOnlyDirectChildren", CollectOwnOnlyDirectChildren),
             ("bc11 ManeuverTimersUseDoctrineClock", ManeuverTimersUseDoctrineClock),
             ("bc11 ManeuverPlumbingIsWired", ManeuverPlumbingIsWired),
@@ -194,8 +198,10 @@ internal static partial class FlankResponseTests
         AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref noCenterState, After(noCenter, 10.25)).Phase, "activation + 900 battle-s");
     }
 
-    private static CommandNodeIntent NodeIntent(string nodeId, string source) =>
-        new CommandNodeIntent(nodeId, source, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 50, 0.5f, 1);
+    // The child node (id == source) sits at depth 1; its sub-nodes one level deeper each.
+    private static CommandNodeIntent NodeIntent(string nodeId, string source, int depth = -1) =>
+        new CommandNodeIntent(nodeId, source, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 50, 0.5f,
+            depth >= 0 ? depth : (nodeId == source ? 1 : 2));
 
     private static void MarchTargetsRectAnchorOnLanes()
     {
@@ -206,18 +212,19 @@ internal static partial class FlankResponseTests
         AssertEqual(1000f, order.TargetX, "the rect anchor x");
         AssertEqual(500f, order.TargetZ, "the rect anchor z");
 
-        // Three nodes of child 7 (and a stranger): lanes of 180 m along the lateral axis (+x), centred on the anchor.
+        // The child node and two divisions of child 7 (and a stranger): the child node itself takes the anchor, its two direct
+        // sub-nodes the 180 m lanes along the lateral axis (+x), centred on the anchor.
         var nodes = new[] { NodeIntent("node-7", "node-7"), NodeIntent("node-70", "node-7"), NodeIntent("node-71", "node-7"), NodeIntent("node-9", "node-9") };
         var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", order, 1f, 0f) }, nodes);
         AssertEqual(3, table.Count, "every node of the child, none of another's");
-        AssertTrue(table.TryGet("node-7", out ManeuverNodeEntry a), "first node");
-        AssertTrue(table.TryGet("node-70", out ManeuverNodeEntry b), "second node");
-        AssertTrue(table.TryGet("node-71", out ManeuverNodeEntry c), "third node");
+        AssertTrue(table.TryGet("node-7", out ManeuverNodeEntry a), "child node");
+        AssertTrue(table.TryGet("node-70", out ManeuverNodeEntry b), "first division");
+        AssertTrue(table.TryGet("node-71", out ManeuverNodeEntry c), "second division");
         AssertFalse(table.TryGet("node-9", out _), "the stranger has none");
-        AssertNear(1000f - EnvelopmentManeuver.LaneMeters, a.TargetX, 0.01f, "first lane");
-        AssertNear(1000f, b.TargetX, 0.01f, "middle lane on the anchor");
-        AssertNear(1000f + EnvelopmentManeuver.LaneMeters, c.TargetX, 0.01f, "last lane");
-        AssertNear(500f, a.TargetZ, 0.01f, "lanes run along the lateral axis only");
+        AssertNear(1000f, a.TargetX, 0.01f, "the child node is sent to the anchor itself");
+        AssertNear(1000f - EnvelopmentManeuver.LaneMeters * 0.5f, b.TargetX, 0.01f, "first lane");
+        AssertNear(1000f + EnvelopmentManeuver.LaneMeters * 0.5f, c.TargetX, 0.01f, "last lane");
+        AssertNear(500f, b.TargetZ, 0.01f, "lanes run along the lateral axis only");
         AssertEqual(180f, EnvelopmentManeuver.LaneMeters, "lane spacing");
 
         // A hold carries no target: the child stands where it is.
@@ -506,11 +513,13 @@ internal static partial class FlankResponseTests
         {
             AssertEqual(CommandTaskType.AdvanceToAssembly, orders[i].Task, "node " + i + " carries the maneuver task");
             AssertEqual(345f, orders[i].ManeuverHeading, "node " + i + " carries the heading");
-            AssertTrue(orders[i].PrimaryTarget.HasValue, "node " + i + " has a lane target");
+            AssertTrue(orders[i].PrimaryTarget.HasValue, "node " + i + " has a target");
             AssertFalse(orders[i].ManeuverHold, "not a hold");
-            AssertNear(1000f + (i - 1) * EnvelopmentManeuver.LaneMeters, orders[i].PrimaryTarget.X, 0.01f, "node " + i + " lane");
             AssertEqual(500f, orders[i].PrimaryTarget.Z, "lane z");
         }
+        AssertNear(1000f, orders[0].PrimaryTarget.X, 0.01f, "the child's own node is routed to the anchor, not a lane");
+        AssertNear(1000f - EnvelopmentManeuver.LaneMeters * 0.5f, orders[1].PrimaryTarget.X, 0.01f, "first division lane");
+        AssertNear(1000f + EnvelopmentManeuver.LaneMeters * 0.5f, orders[2].PrimaryTarget.X, 0.01f, "second division lane");
         AssertEqual(-1f, orders[3].ManeuverHeading, "the other child is untouched");
         AssertTrue(orders[3].Task != CommandTaskType.AdvanceToAssembly || orders[3].Role != CommandNodeRole.MainEffort, "no maneuver task on another child's node");
 
@@ -524,6 +533,82 @@ internal static partial class FlankResponseTests
             AssertFalse(holds[i].PrimaryTarget.HasValue, "no target to route to");
             AssertEqual(DoctrineAllowedIdleReason.FormingUp, holds[i].AllowedIdle, "allowed idle");
         }
+    }
+
+    // A four-node subtree: corps (depth 1), two divisions (depth 2), a brigade under the first division (depth 3).
+    private static void ChildNodeTakesAnchorAndDeepNodesFollow()
+    {
+        var intents = new[]
+        {
+            NodeIntent("node-7", "node-7", 1), NodeIntent("node-70", "node-7", 2), NodeIntent("node-71", "node-7", 2), NodeIntent("node-700", "node-7", 3),
+        };
+        var march = new ManeuverOrder { Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly, TargetX = 1000f, TargetZ = 500f, Heading = -1f, Reason = "march" };
+        var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", march, 1f, 0f) }, intents);
+        AssertEqual(4, table.Count, "all four nodes");
+        table.TryGet("node-7", out ManeuverNodeEntry corps);
+        table.TryGet("node-70", out ManeuverNodeEntry divisionA);
+        table.TryGet("node-71", out ManeuverNodeEntry divisionB);
+        table.TryGet("node-700", out ManeuverNodeEntry brigade);
+        AssertNear(1000f, corps.TargetX, 0.01f, "the corps node is sent to the anchor, so the arrival test can pass");
+        AssertNear(1000f - EnvelopmentManeuver.LaneMeters * 0.5f, divisionA.TargetX, 0.01f, "division A lane");
+        AssertNear(1000f + EnvelopmentManeuver.LaneMeters * 0.5f, divisionB.TargetX, 0.01f, "division B lane");
+        AssertNear(1000f, brigade.TargetX, 0.01f, "a deeper node follows its parent's formation: the anchor, not a lane");
+
+        // One direct sub-node: no lane spread at all.
+        var single = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", march, 1f, 0f) },
+            new[] { NodeIntent("node-7", "node-7", 1), NodeIntent("node-70", "node-7", 2) });
+        single.TryGet("node-70", out ManeuverNodeEntry only);
+        AssertNear(1000f, only.TargetX, 0.01f, "a lone division stands on the anchor");
+    }
+
+    // SetGroupFormation paths a group's HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058): a child that has
+    // reached its anchor never has the HQ on the anchor.
+    private static void ArrivalAllowsHqStandingDepthBehindTheLine()
+    {
+        AssertTrue(EnvelopmentManeuver.Arrived(1000f, 380f, 1000f, 500f, 0f), "exactly 120 m is inside the bare tolerance");
+        AssertFalse(EnvelopmentManeuver.Arrived(1000f, 379f, 1000f, 500f, 0f), "121 m is outside it");
+        AssertFalse(EnvelopmentManeuver.Arrived(1000f, 300f, 1000f, 500f, 0f), "an HQ 200 m behind the anchor has not arrived on the bare tolerance");
+        AssertTrue(EnvelopmentManeuver.Arrived(1000f, 300f, 1000f, 500f, 100f), "...but has, with the standing depth added");
+        AssertFalse(EnvelopmentManeuver.Arrived(1000f, 100f, 1000f, 500f, 100f), "a column still far behind has not arrived");
+        AssertFalse(EnvelopmentManeuver.Arrived(1000f, 300f, 1000f, 500f, -50f), "a negative slack is ignored, not subtracted");
+    }
+
+    private static void WingsDoNotWaitForACenterNobodyHolds()
+    {
+        PlayTemplate template = PlayTemplateCatalog.Lookup(BattlePlanId.DoubleEnvelopment);
+        var rects = PlayProjection.Project(template, 0f, 0f, 0f, 1000f, 600f);
+        var twoCorps = new[] { new CorpsPosition("child-1", -600f, 300f), new CorpsPosition("child-2", 600f, 300f) };
+        var assignments = PlayCorpsAssignment.Assign(rects, twoCorps, Array.Empty<ObjectivePosition>());
+        bool hasCenterRect = false;
+        foreach (PlayRect rect in template.Rects) if (rect.Kind == PlayRectKind.Center) hasCenterRect = true;
+        AssertTrue(hasCenterRect, "the template has a Center rect");
+        foreach (CorpsAssignment a in assignments) AssertTrue(a.RectKind != PlayRectKind.Center, "the wings outrank the Center: no corps holds it");
+        AssertFalse(EnvelopmentManeuver.WaitsForCenter(hasCenterRect, assignments), "with nobody on the Center the wings count from activation");
+
+        var threeCorps = new[] { new CorpsPosition("child-1", -600f, 300f), new CorpsPosition("child-2", 0f, 300f), new CorpsPosition("child-3", 600f, 300f) };
+        var full = PlayCorpsAssignment.Assign(rects, threeCorps, Array.Empty<ObjectivePosition>());
+        AssertTrue(EnvelopmentManeuver.WaitsForCenter(hasCenterRect, full), "a third corps takes the Center: the wings wait for its contact");
+        AssertFalse(EnvelopmentManeuver.WaitsForCenter(false, full), "a template without a Center rect never waits");
+        AssertFalse(EnvelopmentManeuver.WaitsForCenter(true, null), "no assignment, no wait");
+
+        // Without the Center, the offset runs from activation and the wing releases (Hold -> March).
+        var state = default(ManeuverState);
+        ManeuverInput input = Maneuver();
+        input.TemplateHasCenter = false;
+        input.CenterContactHours = -1.0;
+        input.PlayActivatedHours = 10.0;
+        AssertEqual(ManeuverPhase.Hold, EnvelopmentManeuver.Step(ref state, After(input, 10.1)).Phase, "before the offset");
+        AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref state, After(input, 10.3)).Phase, "after 900 s from activation");
+    }
+
+    private static void HoldTargetDriftStaysOutOfManeuverHash()
+    {
+        var a = new ChildManeuver("child-7", new ManeuverOrder { Phase = ManeuverPhase.Hold, Task = CommandTaskType.FormUp, TargetX = 0f, TargetZ = 0f, Heading = -1f, Reason = "hold-offset" }, 1f, 0f);
+        var b = new ChildManeuver("child-7", new ManeuverOrder { Phase = ManeuverPhase.Hold, Task = CommandTaskType.FormUp, TargetX = 400f, TargetZ = -900f, Heading = -1f, Reason = "hold-offset" }, 1f, 0f);
+        AssertEqual(EnvelopmentManeuver.Hash(new[] { a }), EnvelopmentManeuver.Hash(new[] { b }), "a hold's drifting position does not re-tick the ledger");
+        var m1 = new ChildManeuver("child-7", new ManeuverOrder { Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly, TargetX = 1000f, TargetZ = 500f, Heading = -1f, Reason = "march" }, 1f, 0f);
+        var m2 = new ChildManeuver("child-7", new ManeuverOrder { Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly, TargetX = 1400f, TargetZ = 500f, Heading = -1f, Reason = "march" }, 1f, 0f);
+        AssertTrue(EnvelopmentManeuver.Hash(new[] { m1 }) != EnvelopmentManeuver.Hash(new[] { m2 }), "a march target change does re-tick");
     }
 
     private static void CollectOwnOnlyDirectChildren()

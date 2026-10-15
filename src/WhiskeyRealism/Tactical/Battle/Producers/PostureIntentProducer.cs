@@ -649,6 +649,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     priority, source, ManeuverFacingReason, t.RegimentQueue, t.Regiments);
             bool shapes = decision.Action == PostureExecutionAction.SetFormation ||
                 (decision.Action == PostureExecutionAction.SetFormationAndWaypoint && hasTarget);
+            // The facing keeps the refuse that is in force (not only a due one): a facing wheel re-lays every child, and a
+            // wheel without the skew would undo the refused flank the formation intent just ordered or that is already issued.
             if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
