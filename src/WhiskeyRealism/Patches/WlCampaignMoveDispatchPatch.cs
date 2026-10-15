@@ -38,10 +38,10 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static void Prefix(Vector3 position, out Vector3 __state)
             {
-                __state = position;
                 using (TelemetryPerf.Scope("campaign.patch.wl-campaign-dispatch.move.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.wl-campaign-dispatch.move.prefix");
+                    __state = position;
                 }
             }
 

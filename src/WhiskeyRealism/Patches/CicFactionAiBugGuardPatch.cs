@@ -156,7 +156,6 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static void Prefix(int manualcommander, out bool __state)
             {
-                __state = false;
                 using (TelemetryPerf.Scope("campaign.patch.cic-faction-ai-guard.is-cic.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.cic-faction-ai-guard.is-cic.prefix");
