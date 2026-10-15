@@ -1843,6 +1843,7 @@ namespace WhiskeyRealism.Strategic
                 .WithField("selected", response?.SelectedPackage != null ? response.SelectedPackage.Count : 0)
                 .WithField("adequate", response != null && response.Adequate)
                 .WithField("understrength", response != null && response.Understrength)
+                .WithField("held", response != null ? (double)response.HeldStrength : 0.0)
                 .WithField("responseSignature", responseSignature));
         }
 

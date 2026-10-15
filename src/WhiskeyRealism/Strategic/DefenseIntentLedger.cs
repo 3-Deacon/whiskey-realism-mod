@@ -42,6 +42,10 @@ namespace WhiskeyRealism.Strategic
             // that the guard-budget cap and global pool depletion work correctly.
             var assignedUnitIds = new HashSet<int>();
 
+            // Candidates credited as holding a position (the W&L map-group player's group):
+            // one group covers one place per build, never an extra package member.
+            var holdingUnitIds = new HashSet<int>();
+
             // Track which asset names are already covered by a threat-source response so
             // we don't double-emit a guard response for the same asset.
             var coveredAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -104,7 +108,7 @@ namespace WhiskeyRealism.Strategic
                 // Pre-suppression + aggregator pass.
                 var response = BuildThreatResponse(
                     input, src, sig, posture, scale, desired,
-                    caution, aggression, assignedUnitIds);
+                    caution, aggression, assignedUnitIds, holdingUnitIds);
 
                 // Mark units selected in this response as consumed.
                 foreach (var c in response.SelectedPackage)
@@ -125,7 +129,11 @@ namespace WhiskeyRealism.Strategic
                 var guardPool = FilterGuardCandidates(input.Candidates, assignedUnitIds,
                     postureCap: CandidateTier.SameTheater);
 
-                if (guardBudget <= 0f || guardCumulativeEffective >= guardBudget)
+                // A group already standing at the asset covers its slot and spends no budget.
+                float held = ClaimHeldStrength(input, asset.X, asset.Z, holdingUnitIds);
+                bool coveredByPosition = held >= CoastalGuardDesired * DefensePackageAggregator.AdequateRatio;
+
+                if (!coveredByPosition && (guardBudget <= 0f || guardCumulativeEffective >= guardBudget))
                 {
                     // Budget exhausted before we even score — emit cap-reached for all local candidates.
                     var capResponse = BuildCapReachedResponse(assetSig, asset, guardPool, CoastalGuardDesired);
@@ -134,7 +142,8 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 // Run aggregator with remaining budget headroom.
-                var pkgResult = DefensePackageAggregator.Select(guardPool, CoastalGuardDesired, caution, aggression);
+                var pkgResult = DefensePackageAggregator.Select(
+                    guardPool, CoastalGuardDesired, caution, aggression, heldStrength: held);
 
                 // Check whether adding this package would exceed the budget.
                 if (guardCumulativeEffective + pkgResult.CumulativeEffective > guardBudget &&
@@ -164,7 +173,8 @@ namespace WhiskeyRealism.Strategic
                         ResponseRadius  = CandidateTier.SameTheater
                     },
                     Adequate     = pkgResult.Adequate,
-                    Understrength = pkgResult.Understrength
+                    Understrength = pkgResult.Understrength,
+                    HeldStrength = held
                 };
 
                 foreach (var c in pkgResult.SelectedPackage)
@@ -297,7 +307,8 @@ namespace WhiskeyRealism.Strategic
             float desired,
             float caution,
             float aggression,
-            HashSet<int> assignedUnitIds)
+            HashSet<int> assignedUnitIds,
+            HashSet<int> holdingUnitIds)
         {
             // Partition candidates into normal pool and critical-front candidates.
             var normalPool    = new List<DefenseCandidate>();
@@ -351,6 +362,10 @@ namespace WhiskeyRealism.Strategic
                 normalPool.Add(c);
             }
 
+            // Strength already standing at the threat counts toward it; the aggregator
+            // sends only what is still short.
+            float held = ClaimHeldStrength(input, src.X, src.Z, holdingUnitIds);
+
             // Run aggregator without critical-front candidates first.
             float packageCap = StrategicMovementBudget.CapitalDefenseCap(input, src);
             var pkgResult = DefensePackageAggregator.Select(
@@ -359,7 +374,8 @@ namespace WhiskeyRealism.Strategic
                 caution,
                 aggression,
                 packageCap,
-                "capital-defense-cap");
+                "capital-defense-cap",
+                heldStrength: held);
 
             // Escalation: for decisive landing, check if we need cross-theater candidates.
             // The aggregator already handles AdjacentTheater via tier scoring; we just note
@@ -407,7 +423,8 @@ namespace WhiskeyRealism.Strategic
                     caution,
                     aggression,
                     packageCap,
-                    "capital-defense-cap");
+                    "capital-defense-cap",
+                heldStrength: held);
                 // Re-check escalation reason.
                 foreach (var c in pkgResult.SelectedPackage)
                 {
@@ -442,7 +459,8 @@ namespace WhiskeyRealism.Strategic
                     EscalationReason = escalationReason
                 },
                 Adequate     = pkgResult.Adequate,
-                Understrength = pkgResult.Understrength
+                Understrength = pkgResult.Understrength,
+                HeldStrength = held
             };
 
             // Merge pre-suppressions first, then aggregator suppressions.
@@ -460,6 +478,29 @@ namespace WhiskeyRealism.Strategic
                 $"|{response.SelectedPackage.Count}u|{response.Threat.ResponseRadius}";
 
             return response;
+        }
+
+        // Strength x morale of the unclaimed groups holding a position within the cover radius of
+        // (x, z), as vanilla subtracts own groups from its capital need (AssignUnitToDefendCapital
+        // 11733-11740). Claims each group so it covers one threat or asset per build. A zero
+        // radius means no position cover.
+        private static float ClaimHeldStrength(DefenseIntentInput input, float x, float z, HashSet<int> holdingUnitIds)
+        {
+            if (input.HoldCoverRadius <= 0f) return 0f;
+
+            float held = 0f;
+            foreach (var c in input.Candidates)
+            {
+                if (c == null || !c.HoldsPosition || holdingUnitIds.Contains(c.UnitInstanceId)) continue;
+
+                float dx = c.HoldX - x;
+                float dz = c.HoldZ - z;
+                if (Math.Sqrt(dx * dx + dz * dz) >= input.HoldCoverRadius) continue;
+
+                holdingUnitIds.Add(c.UnitInstanceId);
+                held += c.ActiveStrength * c.Morale;
+            }
+            return held;
         }
 
         private static DefenseResponse BuildEmptyRecoveredResponse(
