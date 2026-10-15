@@ -33,7 +33,7 @@ namespace WhiskeyRealism.Patches
     // transit (transfertime > 0, DC:93147). In a W&L career BattleUnits.MoveUnit
     // returns unless both units are player-owned (DC:93099; CheckTransferOfUnits
     // passes no skipdlccheck, DC:17328), so the row is transfer-blocked with
-    // reason wl-career-moveunit-guard (BUG-WL-003, fixed by stage G).
+    // reason wl-career-moveunit-guard (the career-transfer bug, fixed by stage G C1).
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {

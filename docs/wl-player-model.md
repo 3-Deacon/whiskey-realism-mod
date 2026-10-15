@@ -26,8 +26,9 @@ How the player works in a Whiskey & Lemons career, from the vanilla decompile (`
 | 10-14 (regiment/brigade/division) | own unit (moves with parent HQ on the map), staff, prestige actions | parent HQs, peers, army plan, recruiting, weapons, policies |
 | 15-16 (corps/army) | own HQ movement on the map; sub-HQs at 16 | army groups, other armies, CIC plan, weapons, policies |
 | 18 army group | several HQs | CIC plan, weapons, policies |
-| CIC | all armies and fleets, weapon procurement (`CheckPurchaseWeapons` 16263), fiscal budget (`IncreaseFiscalBudget` 226654), fleets (12012), army groups (17723) | **policies** (always AI; player can only buy research progress with prestige 211352) |
+| CIC | all armies and fleets, weapon procurement (`CheckPurchaseWeapons` 16263), fiscal budget (`IncreaseFiscalBudget` 226654), fleets (12012), army groups (17723) | **policies** (always AI; the player can only buy the *start* of a research with prestige, 211352) |
 
+- **Policies (stage E investigation).** Vanilla `CheckAIPolicyChange` (211019) has no CIC exemption, so the AI chooses policies for the player's alliance at every rank; the policies-panel automanage checkbox is inert under the forced `ai_vs_ai`. A purchase pays `CalculatePrestigeCostPolicy` (46081: `ResearchDuration / rank^dlcwl_prestigepolicycostmodifierexp × dlcwl_prestigepolicycostmodifier`, × incidents 21, 23, 44/47) and calls `AddResearch` (`CheckSelections` 211350-211362, any rank); a career cannot cancel research (211368). Neither vanilla nor Whiskey starts research while anything is in research, so a purchase is never replaced; vanilla's emergency cancel (211065-211074) did remove it (BUG-WL-003, fixed by #19's protection). Whiskey's need-driven pick runs for the player's alliance at every rank, CIC included (user decision 2026-10-15). Lt Gen Act (42) promotes the alliance's current CIC to rank 8 (210348-210350) — possibly the player. `dlcwl_incidentradicalizationpolicycost` is loaded (58625) but never read.
 - Recruiting caps by echelon/rank: `GetSingleUnitLimitation` (47905).
 - **Prestige economy:** moving a unit not under the player's command → "Request movement" (91663, cost `GetPrestigeCostTakeover` 45899) creating an Operation; forced march, fort/depot construction (`ConstructBuilding` 45977) and weapon upgrades (43949) cost prestige.
 - **Operations** (`CommanderRelations.Operation` 41029-41226) are *player-paid moves/take-overs of another commander's unit*, not AI operations. On finish, the original commander's relation changes (cause 4) by how the unit fared (rout time, condition, supply, attrition). Only capital defense respects `IsMovedByPlayer` (11753, 11791).
@@ -119,6 +120,7 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 - `CheckShipConstruction` (12012) and `CheckArmyGroupManagement` (17723) skip **every** faction when the W&L player is CIC (no alliance check) → the enemy stops building ships and managing army groups.
 - Possible prestige sign bugs: `EarnPrestige` passes negative gains with `AdjustPrestige` type 2 (subtract) (46733-46738); `IncreaseFiscalBudget` passes `0 − cost` with type 2 (226658). Code-read only, not reproduced.
 - Type-16 "Offensive" orders pay no prestige (`EarnPrestige` 46627 has no case 16).
+- Policies panel greys out affordable policies after the first unaffordable one (`UpdateActivations` 209248-209258; `flag` never resets) — BUG-WL-004, display only.
 - Likely NRE at 96704-96706 (type-9 completion nulls `givenorder` then reads `.type`; only reachable via debug key).
 
 ## Not verified in-game

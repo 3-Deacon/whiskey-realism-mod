@@ -32,6 +32,9 @@ namespace WhiskeyRealism.Strategic
         public int[] FrontChangedDay = { -1, -1 };
         public int[] CapitalStreakDay = { -1, -1 };
         public ProbeHysteresisDto[] ProbeHysteresis = new ProbeHysteresisDto[2];
+        // Stage E: smoothed policy needs (null = none yet) and the policy ledger pick (-1 = none).
+        public float[][] PolicyNeeds = new float[2][];
+        public int[] PolicyPicks = { -1, -1 };
 
         public static SidecarSnapshot Empty() => new SidecarSnapshot();
     }
@@ -169,7 +172,9 @@ namespace WhiskeyRealism.Strategic
                     FrontChangedDay = snap.FrontChangedDay[alliance],
                     CapitalStreakDay = snap.CapitalStreakDay[alliance],
                     ProbeHysteresis = snap.ProbeHysteresis[alliance],
-                    FiscalMemory = FiscalToDto(snap.FiscalMemories[alliance])
+                    FiscalMemory = FiscalToDto(snap.FiscalMemories[alliance]),
+                    PolicyNeeds = snap.PolicyNeeds[alliance],
+                    PolicyPick = snap.PolicyPicks[alliance] >= 0 ? snap.PolicyPicks[alliance] : (int?)null
                 };
                 if (faction.DirectorMemory != null)
                     faction.DirectorMemory.RecentOperationReplanDaySerials = snap.RecentReplans[alliance];
@@ -226,6 +231,8 @@ namespace WhiskeyRealism.Strategic
                     result.FrontChangedDay[a] = f.FrontChangedDay ?? -1;
                     result.CapitalStreakDay[a] = f.CapitalStreakDay ?? -1;
                     result.ProbeHysteresis[a] = f.ProbeHysteresis;
+                    result.PolicyNeeds[a] = f.PolicyNeeds;
+                    result.PolicyPicks[a] = f.PolicyPick ?? -1;
                 }
                 foreach (var m in dto.MinorOfficerProfiles)
                 {

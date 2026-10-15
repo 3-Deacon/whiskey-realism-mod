@@ -4,7 +4,7 @@ Branch `fix/wl-economy-bugs` (worktree `.worktrees/wl-economy-bugs`, base `main`
 
 Decompile: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (build 14703111, "DC:n"). Game data: `<GTCW>/Config/` (`actions.dat`, `staff.dat`, `camp.dat`, `effectdescriptions.dat`, `campaignprefs.txt`). Research inputs: the session's `research/wl-logistics.md`, `research/deploy-supply.md` (items 11-12), `research/battle-deploy.md`.
 
-Out of scope: campaign AI logistics (depots, supply thresholds, camps in fog, winter modifier; `fix/campaign-logistics-bugs`), the W&L campaign order chain (stage F), the career transfer fix itself (stage G, `BUG-WL-003`).
+Out of scope: campaign AI logistics (depots, supply thresholds, camps in fog, winter modifier; `fix/campaign-logistics-bugs`), the W&L campaign order chain (stage F), the career transfer fix itself (stage G C1; that branch calls it `BUG-WL-003`, an id main now uses for a policy bug).
 
 ## Items and verdicts
 

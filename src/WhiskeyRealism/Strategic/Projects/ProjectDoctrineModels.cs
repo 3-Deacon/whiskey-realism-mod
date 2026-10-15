@@ -2,30 +2,6 @@ using WhiskeyRealism.Strategic.Fiscal;
 
 namespace WhiskeyRealism.Strategic.Projects
 {
-    public sealed class ProjectDoctrineSignalInput
-    {
-        public int Alliance;
-        public EraStage Era;
-        public FiscalPosture FiscalPosture = FiscalPosture.BalancedWar;
-        public float OwnAverageRifles;
-        public float EnemyBestAverageRifles;
-        public float OwnAverageGuns;
-        public float EnemyBestAverageGuns;
-        public float OwnTotalTonnage;
-        public float EnemyTotalTonnage;
-        public float BlockadeRatio = 0.5f;
-        public float PortViabilityInput = 0.5f;
-        public float ManpowerStressInput;
-        public float SupplyPressure;
-        public float TransportPressure;
-        public float IndustryGapInput;
-        public float AgricultureFoodStressInput;
-        public float CivilOrderRiskInput;
-        public float RecognitionProbability;
-        public float OffensiveTempoInput;
-        public float StrengthRatio = 1f;
-    }
-
     public sealed class ProjectDoctrineSignals
     {
         public int Alliance;
