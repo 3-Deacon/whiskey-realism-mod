@@ -31,6 +31,10 @@ internal static class CampaignMilitaryFixTests
         AreaOrderSkipsEveryVanillaBusyAssignment();
         CoastalInterceptKeepsEnemyInsideBugleRange();
         CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose();
+        CoordinatedSingleLeadNeedsReinforceRatio();
+        CoordinatedOffensiveMirrorsVanillaEarlyOuts();
+        CoordinatedOffensiveTempoGateMatchesVanilla();
+        CoordinatedPackageLockOnlyForDirectCommits();
     }
 
     private static void LogPass(string message)
@@ -399,5 +403,94 @@ internal static class CampaignMilitaryFixTests
         CampaignMilitaryGates.CoastalInterceptPoint(10f, 5f, 10f, 5f, 0f, out x, out z);
         TestHarness.AssertEqual(10f, x, "degenerate bugle range keeps anchor");
         LogPass("c2a coastal intercept holds the anchor when enemy already close");
+    }
+
+    // C-CoordOff -------------------------------------------------------------
+    private static CoordinatedOperationCandidate Candidate(int id, float strength)
+    {
+        return new CoordinatedOperationCandidate
+        {
+            StableUnitId = id,
+            DisplayUnitKey = "unit-" + id,
+            AllianceId = 1,
+            Level = FormationLevel.Corps,
+            Directive = FormationDirective.Counterstroke,
+            AreaKey = "VirginiaCapitalCorridor",
+            SectorKey = "VirginiaCapitalCorridor",
+            CombatAvailability = strength,
+            Readiness = 0.8f,
+            Morale = 0.8f,
+            Ammo = 0.8f,
+            Supply = 0.8f,
+            OffensiveAllowed = true,
+            DefensiveAllowed = true,
+            DirectMovementAllowed = true,
+            CommitMode = CoordinatedCommitMode.DirectMovement
+        };
+    }
+
+    // Any eligible lead became SingleLead at any ratio ("single-committable-lead").
+    private static void CoordinatedSingleLeadNeedsReinforceRatio()
+    {
+        var input = new CoordinatedOperationInput
+        {
+            AllianceId = 1,
+            Intent = CoordinatedOperationIntent.Attack,
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            TargetSectorKey = "VirginiaCapitalCorridor",
+            TargetEnemyStrength = 20000f,
+            Options = CoordinatedOperationOptions.StableDefaults(20000f),
+            Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 5000f) }
+        };
+        var weak = CoordinatedOperationPackageLedger.Build(input);
+        TestHarness.AssertEqual(CoordinatedOperationDecision.Delay, weak.Decision, "0.25 ratio lone lead must not attack");
+
+        input.Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 18000f) };
+        var adequate = CoordinatedOperationPackageLedger.Build(input);
+        TestHarness.AssertEqual(CoordinatedOperationDecision.SingleLead, adequate.Decision, "0.9 ratio lone lead may commit");
+        LogPass("c2a coordinated single lead needs the reinforce ratio");
+    }
+
+    // vanilla CheckOffensiveMovements early return (decompile 14200).
+    private static void CoordinatedOffensiveMirrorsVanillaEarlyOuts()
+    {
+        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, false, false), "normal call");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(0, 0.1f, true, true, true, false, false, false), "no own units");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0f, true, true, true, false, false, false), "timediff <= 0");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, false, true, true, false, false, false), "null lead");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, false, true, false, false, false), "inactive lead");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, false, false, false, false), "recruitingzonesupdated false: one commit per job cycle");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, true, false, false), "lead already in offensive op");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, true, false), "lead in defensive op");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, false, true), "lead building depot");
+        LogPass("c2a coordinated offensive mirrors vanilla early outs");
+    }
+
+    // vanilla tempo roll (14336-14350): tval = aiagressiveness[chapter] * timediff
+    // * 10 * factionAggression * usedcampaignagressiveness * winterModifier
+    // + clamp01(idleYears^3), times the W&L multiplier; go when roll <= tval.
+    private static void CoordinatedOffensiveTempoGateMatchesVanilla()
+    {
+        float tval = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, 1f);
+        TestHarness.AssertTrue(Math.Abs(0.1f - tval) < 1e-5f, "chapter x timediff x 10, got " + tval);
+        float winter = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 0.2f, 0f, 1f);
+        TestHarness.AssertTrue(Math.Abs(0.02f - winter) < 1e-5f, "winter modifier scales the roll");
+        float idle = CoordinatedOffensiveVanillaGates.TempoProbability(0f, 0.02f, 1f, 1f, 1f, 0.5f, 1f);
+        TestHarness.AssertTrue(Math.Abs(0.125f - idle) < 1e-5f, "idle time adds clamp01(idle^3)");
+        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.05f, 0.1f, false), "roll under tval goes");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.TempoPasses(0.5f, 0.1f, false), "roll over tval waits");
+        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.99f, 0f, true), "scripted/debug forcing always goes");
+        LogPass("c2a coordinated offensive tempo gate matches vanilla");
+    }
+
+    // Package locks protect only units placed in unitsinoffensiveoperations; a
+    // W&L current-order commit never enters that list, so its lock never cleared.
+    private static void CoordinatedPackageLockOnlyForDirectCommits()
+    {
+        TestHarness.AssertTrue(CoordinatedOperationRuntime.ShouldLockPackage(CoordinatedCommitMode.DirectMovement), "direct move locks");
+        TestHarness.AssertFalse(CoordinatedOperationRuntime.ShouldLockPackage(CoordinatedCommitMode.WlCurrentOrder), "W&L current order does not lock");
+        TestHarness.AssertTrue(CoordinatedOperationRuntime.PackageLockLive(3), "path still running keeps lock");
+        TestHarness.AssertFalse(CoordinatedOperationRuntime.PackageLockLive(0), "path consumed expires lock");
+        LogPass("c2a coordinated package lock only for direct commits");
     }
 }

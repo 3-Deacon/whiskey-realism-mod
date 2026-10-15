@@ -33,6 +33,20 @@ namespace WhiskeyRealism.Strategic
         private static readonly Dictionary<int, string> _packageLockByUnitId =
             new Dictionary<int, string>();
 
+        // Locks shield units the package put into unitsinoffensiveoperations from
+        // vanilla UpdateMicroMovementInOffensive (13968) until their first path is
+        // consumed. W&L current-order commits never enter that list, so locking
+        // them only leaked entries that the micro-movement patch never cleared.
+        internal static bool ShouldLockPackage(CoordinatedCommitMode commitMode)
+        {
+            return commitMode == CoordinatedCommitMode.DirectMovement;
+        }
+
+        internal static bool PackageLockLive(int regimentPaths)
+        {
+            return regimentPaths > 0;
+        }
+
         internal static void MarkPackageLocked(int stableUnitId, string packageSignature)
         {
             if (stableUnitId == 0 || string.IsNullOrEmpty(packageSignature)) return;
@@ -43,7 +57,10 @@ namespace WhiskeyRealism.Strategic
         {
             if (unit == null) return false;
             int id = ((UnityEngine.Object)unit).GetInstanceID();
-            return _packageLockByUnitId.ContainsKey(id) && unit.regimentpaths > 0;
+            if (!_packageLockByUnitId.ContainsKey(id)) return false;
+            if (PackageLockLive(unit.regimentpaths)) return true;
+            _packageLockByUnitId.Remove(id);
+            return false;
         }
 
         internal static void ClearPackageLock(Regiment unit)
@@ -392,7 +409,8 @@ namespace WhiskeyRealism.Strategic
                             .WithField("wlResult", decision.Result.ToString()));
                     return false;
                 }
-                MarkPackageLocked(plan.StableUnitId, packageSignature);
+                if (ShouldLockPackage(CoordinatedCommitMode.WlCurrentOrder))
+                    MarkPackageLocked(plan.StableUnitId, packageSignature);
                 EmitCoordinatedOps(
                     TelemetryCategory.Write,
                     TelemetrySeverity.Info,
@@ -422,7 +440,8 @@ namespace WhiskeyRealism.Strategic
                     HadDefensiveMovingOrder = hadDefensiveMovingOrder,
                     RegimentPathsBefore = regimentPathsBefore
                 });
-                MarkPackageLocked(plan.StableUnitId, packageSignature);
+                if (ShouldLockPackage(CoordinatedCommitMode.DirectMovement))
+                    MarkPackageLocked(plan.StableUnitId, packageSignature);
                 EmitCoordinatedOps(
                     TelemetryCategory.Write,
                     TelemetrySeverity.Info,

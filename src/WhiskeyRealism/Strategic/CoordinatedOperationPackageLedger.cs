@@ -238,8 +238,12 @@ namespace WhiskeyRealism.Strategic
                 return Finish(output, CoordinatedOperationDecision.Reinforce, "reinforce-ratio-passed");
             if (lead.Morale < options.MinimumMorale || lead.Readiness < options.MinimumReadiness)
                 return Finish(output, CoordinatedOperationDecision.Recover, "lead-health-low");
-            if (output.SupportStableUnitIds.Count == 0)
+            // A lone lead commits only at the reinforce ratio; below it vanilla's own
+            // dominance test (CheckOffensiveMovements, decompile 14290) would refuse too.
+            if (output.SupportStableUnitIds.Count == 0 && output.Ratio >= options.RequiredReinforceRatio)
                 return Finish(output, CoordinatedOperationDecision.SingleLead, "single-committable-lead");
+            if (output.SupportStableUnitIds.Count == 0)
+                return Finish(output, CoordinatedOperationDecision.Delay, "lead-understrength");
             return Finish(output, CoordinatedOperationDecision.Delay, "package-understrength");
         }
 
@@ -337,5 +341,44 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static bool StringEquals(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Vanilla AICampaign.CheckOffensiveMovements gates the coordinated package
+    // must respect before it commits anything in vanilla's place.
+    public static class CoordinatedOffensiveVanillaGates
+    {
+        // Early return at decompile 14200: no own units, timediff <= 0, null or
+        // inactive lead, !recruitingzonesupdated (vanilla commits at most one
+        // offensive per faction job cycle and clears the flag at 14458), or the
+        // lead already in an offensive/defensive operation or building a depot.
+        public static bool VanillaWouldEvaluate(int ownUnitCount, float timediff, bool leadPresent, bool leadActive,
+            bool recruitingZonesUpdated, bool leadInOffensive, bool leadInDefensive, bool leadBuildingDepot)
+        {
+            if (ownUnitCount <= 0 || timediff <= 0f) return false;
+            if (!leadPresent || !leadActive) return false;
+            if (!recruitingZonesUpdated) return false;
+            return !leadInOffensive && !leadInDefensive && !leadBuildingDepot;
+        }
+
+        // Tempo roll (14336-14350), applied by vanilla when the target lies in an
+        // enemy state and enemy strength is present:
+        //   tval = aiagressiveness[chapter] * timediff * 10 * aiagressivenessoffensive
+        //          operationfaction[alliance] * usedcampaignagressiveness * winter
+        //        + clamp01(idleYears^3)        (idle = date - avg timeofnotmoving)
+        //   tval *= dlcwl_careerincreasedaggressiveness when a W&L scenario runs.
+        public static float TempoProbability(float chapterAggression, float timediff, float factionAggression,
+            float campaignAggression, float winterModifier, float idleYears, float wlMultiplier)
+        {
+            float tval = chapterAggression * timediff * 10f * factionAggression * campaignAggression * winterModifier;
+            float idle = Math.Max(0f, Math.Min(1f, idleYears * idleYears * idleYears));
+            return (tval + idle) * wlMultiplier;
+        }
+
+        // Vanilla returns when roll > tval unless debug_permanentaimovement or the
+        // scripted 1861 Union push (001, objective 6 open, date > 1861.513) forces it.
+        public static bool TempoPasses(float roll, float tempoProbability, bool forced)
+        {
+            return forced || roll <= tempoProbability;
+        }
     }
 }
