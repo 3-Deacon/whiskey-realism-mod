@@ -9,10 +9,18 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla CheckArmyGroupManagement forms ArmyGroups from nearby top units
-    // that already have theaterposition. This Postfix preserves vanilla's pass,
-    // then nudges historically related top formations into the same ArmyGroup
-    // using vanilla ArmyGroup APIs.
+    // Vanilla CheckArmyGroupManagement (decompile 17705) forms ArmyGroups from
+    // nearby top units that already have theaterposition. This Postfix
+    // preserves vanilla's pass, then nudges historically related top formations
+    // into the same ArmyGroup using vanilla ArmyGroup APIs.
+    //
+    // 2026-10-14 (C-ArmyGroup): repeats vanilla's early-return guard (army
+    // groups disabled / reform not researched / W&L player is CIC); never
+    // attaches to or re-commands the W&L player's group and respects
+    // CanAddFurtherUnits like GetArmyGroupInRange (75631, 75770); picks
+    // commanders only through Commander.CanBePickedForAIReplacement (60748)
+    // with exact historical-name matching; skips W&L player-commanded units
+    // like CheckCombinationOfUnits (17141).
     [HarmonyPatch(typeof(AICampaign), "CheckArmyGroupManagement")]
     internal static class ArmyGroupManagementPatch
     {
@@ -36,6 +44,7 @@ namespace WhiskeyRealism.Patches
                     int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                     if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
                     if (StrategicCoordinator.WlCareerStartPending()) return;
+                    if (!VanillaAllowsArmyGroups(allianceId)) return;
 
                     var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
                     if (ledger == null) return;
@@ -80,6 +89,7 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < units.Count; i++)
                 {
                     if ((UnityEngine.Object)(object)units[i].assignedarmygroup != (UnityEngine.Object)null) continue;
+                    if (!group.CanAddFurtherUnits()) break;
                     group.AddUnit(units[i], calledfromload: false, renamecorps: true);
                     attached++;
                 }
@@ -145,7 +155,37 @@ namespace WhiskeyRealism.Patches
             if (unit.unittyp < 14 || unit.unittyp > 16) return false;
             if (unit.groupstrengthdirect <= 1000f) return false;
             if (unit.inbattle || unit.onretreat) return false;
+            // vanilla CheckCombinationOfUnits: (!dlcw_isundercommander | !dlc_scenarioactive)
+            if (unit.dlcw_isundercommander && DLC_WL.dlc_scenarioactive) return false;
             return true;
+        }
+
+        private static bool VanillaAllowsArmyGroups(int allianceId)
+        {
+            try
+            {
+                if (GameVars.alliance == null || allianceId < 0 || allianceId >= GameVars.alliance.Length) return false;
+                return ArmyGroupDoctrine.ArmyGroupsAllowed(
+                    GameVars.allowarmygroups,
+                    GameVars.alliance[allianceId].AllowsArmyGroups(),
+                    DLC_WL.dlc_scenarioactive,
+                    DLC_WL.IsCommanderInChief());
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("armygroup:vanilla-guard", "[Patch:ArmyGroup] vanilla army-group guard read failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool AcceptsUnits(ArmyGroup group)
+        {
+            if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null) return false;
+            return ArmyGroupDoctrine.ArmyGroupAcceptsUnits(
+                DLC_WL.dlc_scenarioactive,
+                group.GetCommanderID(),
+                DLC_WL.dlc_chosencommander,
+                group.CanAddFurtherUnits());
         }
 
         private static bool HasCorpsOrArmy(List<Regiment> units)
@@ -159,8 +199,11 @@ namespace WhiskeyRealism.Patches
         private static ArmyGroup ExistingGroupFor(List<Regiment> units)
         {
             for (int i = 0; i < units.Count; i++)
-                if ((UnityEngine.Object)(object)units[i].assignedarmygroup != (UnityEngine.Object)null)
-                    return units[i].assignedarmygroup;
+            {
+                var group = units[i].assignedarmygroup;
+                if ((UnityEngine.Object)(object)group != (UnityEngine.Object)null && AcceptsUnits(group))
+                    return group;
+            }
             return null;
         }
 
@@ -192,7 +235,8 @@ namespace WhiskeyRealism.Patches
             if (preference.PreferredLastNames.Count == 0) return;
 
             int currentId = group.GetCommanderID();
-            if (CommanderMatches(currentId, preference.PreferredLastNames)) return;
+            if (DLC_WL.dlc_scenarioactive && currentId == DLC_WL.dlc_chosencommander) return;
+            if (CommanderMatches(allianceId, currentId, preference.PreferredLastNames)) return;
 
             int commanderId = FindPreferredCommander(allianceId, preference.PreferredLastNames, units);
             if (commanderId < 0 || commanderId == currentId) return;
@@ -205,7 +249,7 @@ namespace WhiskeyRealism.Patches
 
         private static int FindPreferredCommander(int allianceId, List<string> preferredLastNames, List<Regiment> units)
         {
-            var commanders = AccessTools.Field(typeof(GameVars), "commander")?.GetValue(null) as IList;
+            var commanders = GameVars.commander;
             if (commanders == null) return -1;
 
             for (int p = 0; p < preferredLastNames.Count; p++)
@@ -213,24 +257,31 @@ namespace WhiskeyRealism.Patches
                 string preferred = preferredLastNames[p];
                 for (int i = 0; i < commanders.Count; i++)
                 {
-                    if (IsPlayerCommander(i)) continue;
                     var commander = commanders[i];
-                    if (commander == null || ReadInt(commander, "alliance", -1) != allianceId) continue;
-                    if (!NameMatches(ReadString(commander, "combinedname"), preferred)) continue;
-                    if (CommanderCommandsOneOf(commander, units) || CommanderHasNoCommand(commander))
+                    if (commander == null || commander.alliance != allianceId) continue;
+                    if (!ArmyGroupDoctrine.CommanderNameMatches(allianceId, preferred, commander.combinedname)) continue;
+
+                    bool pickable;
+                    try { pickable = commander.CanBePickedForAIReplacement(allianceId, includeofficerswithcommand: true); }
+                    catch { pickable = false; }
+
+                    if (ArmyGroupDoctrine.IsEligibleArmyGroupCommander(
+                            pickable,
+                            IsPlayerCommander(i),
+                            CommanderCommandsOneOf(commander, units) || CommanderHasNoCommand(commander)))
                         return i;
                 }
             }
             return -1;
         }
 
-        private static bool CommanderMatches(int commanderId, List<string> preferredLastNames)
+        private static bool CommanderMatches(int allianceId, int commanderId, List<string> preferredLastNames)
         {
-            var commanders = AccessTools.Field(typeof(GameVars), "commander")?.GetValue(null) as IList;
+            var commanders = GameVars.commander;
             if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return false;
-            string name = ReadString(commanders[commanderId], "combinedname");
+            string name = commanders[commanderId]?.combinedname;
             for (int i = 0; i < preferredLastNames.Count; i++)
-                if (NameMatches(name, preferredLastNames[i]))
+                if (ArmyGroupDoctrine.CommanderNameMatches(allianceId, preferredLastNames[i], name))
                     return true;
             return false;
         }
@@ -251,30 +302,9 @@ namespace WhiskeyRealism.Patches
             return (UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)null;
         }
 
-        private static bool NameMatches(string combinedName, string preferred)
-        {
-            string name = Normalize(combinedName);
-            string want = Normalize(preferred);
-            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(want)) return false;
-            return name == want || name.EndsWith(" " + want, StringComparison.Ordinal) || name.Contains(want);
-        }
-
-        private static string Normalize(string value)
-        {
-            return (value ?? string.Empty).Trim().ToLowerInvariant().Replace(".", string.Empty);
-        }
-
         private static bool IsPlayerCommander(int commanderId)
         {
-            try
-            {
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                bool active = Convert.ToBoolean(AccessTools.Field(dlcType, "dlc_scenarioactive")?.GetValue(null) ?? false);
-                if (!active) return false;
-                int chosen = Convert.ToInt32(AccessTools.Field(dlcType, "dlc_chosencommander")?.GetValue(null) ?? -1);
-                return commanderId == chosen;
-            }
-            catch { return false; }
+            return DLC_WL.dlc_scenarioactive && commanderId == DLC_WL.dlc_chosencommander;
         }
 
         private static object GetFaction(int aifactionIndex)
@@ -303,16 +333,6 @@ namespace WhiskeyRealism.Patches
             var commanders = AccessTools.Field(typeof(GameVars), "commander")?.GetValue(null) as IList;
             if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return "<unknown>";
             return ReadString(commanders[commanderId], "combinedname") ?? "<unknown>";
-        }
-
-        private static int ReadInt(object target, string fieldName, int fallback)
-        {
-            try
-            {
-                var field = AccessTools.Field(target.GetType(), fieldName);
-                return field != null ? Convert.ToInt32(field.GetValue(target)) : fallback;
-            }
-            catch { return fallback; }
         }
 
         private static string ReadString(object target, string fieldName)

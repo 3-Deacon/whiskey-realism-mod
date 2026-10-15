@@ -16,6 +16,11 @@ internal static class CampaignMilitaryFixTests
         TransferSteersOnlyWhenPlanShortfallIsWorse();
         ImportanceRedirectHonoursVanillaCandidateGates();
         ImportanceRedirectStaysInPlanTheater();
+        ArmyGroupManagementRepeatsVanillaGuard();
+        CommanderNameMatchDisambiguatesHistoricalSurnames();
+        CommanderNameMatchFallsBackToExactSurname();
+        ArmyGroupCommanderEligibilityMirrorsVanilla();
+        ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange();
     }
 
     private static void LogPass(string message)
@@ -161,5 +166,69 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
             false, Theater.Unknown, Theater.East, 200f, 300f, 10f, 50f, true), "unclassified source keeps vanilla target");
         LogPass("c2a importance redirect stays inside the plan theater");
+    }
+
+    // C-ArmyGroup: vanilla CheckArmyGroupManagement (decompile 17705) returns
+    // when army groups are disabled, the reform is not researched, or the W&L
+    // player is commander-in-chief. The Postfix created groups regardless.
+    private static void ArmyGroupManagementRepeatsVanillaGuard()
+    {
+        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, false, false), "allowed");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(false, true, false, false), "game option off");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, false, false, false), "reform (project 88/89) not researched");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, true, true), "W&L player is CIC");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, true, false), "W&L player not CIC");
+        LogPass("c2a army group management repeats vanilla guard");
+    }
+
+    // Config/commanders.txt has 6 Lees, 4 Johnstons, 3 Shermans, 2 Grants.
+    private static void CommanderNameMatchDisambiguatesHistoricalSurnames()
+    {
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(1, "lee", "Robert E. Lee"), "R.E. Lee");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "Lee", "Fitzhugh Lee"), "not Fitzhugh Lee");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "lee", "Stephen D. Lee"), "not S.D. Lee");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "lee", "William H.F. Lee"), "not Rooney Lee");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(1, "johnston", "Joseph E. Johnston"), "J.E. Johnston");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "Johnston", "Albert S. Johnston"), "not A.S. Johnston");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(0, "sherman", "William T. Sherman"), "W.T. Sherman");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(0, "sherman", "Thomas W. Sherman"), "not T.W. Sherman");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(0, "grant", "Ulysses S. Grant"), "U.S. Grant");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(0, "grant", "Lewis A. Grant"), "not L.A. Grant");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(1, "Beauregard", "P.G.T. Beauregard"), "dotted initials");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(1, "Garnett", "Robert S. Garnett"), "R.S. Garnett (NW Virginia 1861)");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "Garnett", "Richard B. Garnett"), "not R.B. Garnett");
+        LogPass("c2a commander name match disambiguates historical surnames");
+    }
+
+    private static void CommanderNameMatchFallsBackToExactSurname()
+    {
+        TestHarness.AssertTrue(ArmyGroupDoctrine.CommanderNameMatches(1, "smith", "Edmund Kirby Smith"), "uncatalogued surname -> last token");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "smith", "John Smithson"), "no substring match");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "lee", "Leonidas Polk"), "no substring match on first name");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.CommanderNameMatches(1, "lee", null), "null name");
+        LogPass("c2a commander name match falls back to exact surname token");
+    }
+
+    // FindPreferredCommander must use vanilla Commander.CanBePickedForAIReplacement
+    // (decompile 60748: alliance, IsAvailable, not serving under player, not
+    // staff, not already army-group commander, not CIC) and skip the W&L avatar.
+    private static void ArmyGroupCommanderEligibilityMirrorsVanilla()
+    {
+        TestHarness.AssertTrue(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, true), "vanilla-pickable, commands a member unit");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(false, false, true), "vanilla says not pickable");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, true, true), "W&L chosen commander");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, false), "commands an unrelated formation");
+        LogPass("c2a army group commander eligibility mirrors vanilla replacement filter");
+    }
+
+    // vanilla GetArmyGroupInRange (75631) skips the W&L player's group and
+    // groups that cannot take more units (CanAddFurtherUnits 75770).
+    private static void ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange()
+    {
+        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(false, 12, 5, true), "AI group with room");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(true, 5, 5, true), "W&L player's army group");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(false, 5, 5, true), "chosen commander id irrelevant outside W&L");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(false, 12, 5, false), "group full");
+        LogPass("c2a army group accepts units mirrors GetArmyGroupInRange");
     }
 }
