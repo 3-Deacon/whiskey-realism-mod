@@ -39,6 +39,13 @@ internal static class TacticalEvidenceFixTests
         Run("leaf cascade feeds real flank exposure to cautious commanders", LeafCascadeUsesRealFlankExposure);
         Run("envelopment splits the army's corps into wings, not one corps's divisions", EnvelopmentSplitsArmyCorps);
         Run("orchestrator keeps the observed front axis for the leaf cascade", OrchestratorKeepsFrontAxis);
+        Run("contact ledger before contact is unknown and low confidence", ContactLedgerBeforeContact);
+        Run("contact ledger tracks largest seen and engaged share", ContactLedgerTracksContact);
+        Run("contact ledger reports broken contact then forgets it", ContactLedgerContactBroken);
+        Run("contact ledger picket gives low confidence", ContactLedgerPicketLowConfidence);
+        Run("contact ledger resets when the battle clock runs backwards", ContactLedgerResetsOnClockRewind);
+        Run("own aibattle resolves by sideofai and skips the feud instance", OwnAiBattleSkipsFeudInstance);
+        Run("intent inference strength signal is relative to own force", IntentStrengthSignalRelative);
     }
 
     private static void Run(string name, Action test)
@@ -430,5 +437,93 @@ internal static class TacticalEvidenceFixTests
             6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
         TestHarness.AssertTrue(orch.CurrentFrontAxis.IsValid, "axis stored");
         TestHarness.AssertTrue(Near(orch.CurrentFrontAxis.ForwardX, 1f), "axis faces east");
+    }
+
+    // ---- T6 / T11 fog-honest enemy knowledge ----
+
+    private static void ContactLedgerBeforeContact()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(nowHours: 0.5f, visibleEnemyStrength: 0f, engagedEnemyStrength: 0f);
+        TestHarness.AssertEqual(0f, ledger.EstimatedEnemyStrength, "nothing seen");
+        TestHarness.AssertEqual(TacticalEnemyContactLedger.UnknownReserveCommitFraction, ledger.ReserveCommitFraction(0f), "unknown reserve sentinel");
+        TestHarness.AssertTrue(ledger.Confidence(0.5f, ownStrength: 6000f) < 0.5f, "no contact -> below doctrine action gate");
+        TestHarness.AssertFalse(ledger.ContactBroken(0.5f, 0f), "never had contact -> not broken");
+    }
+
+    private static void ContactLedgerTracksContact()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(1f, 4000f, 1000f);
+        TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "largest seen");
+        TestHarness.AssertTrue(Near(ledger.ReserveCommitFraction(1000f), 0.25f), "1000 of 4000 engaged");
+        TestHarness.AssertTrue(Near(ledger.Confidence(1f, 6000f), 1f), "large enemy in sight now -> full confidence");
+        ledger.Observe(1.1f, 2500f, 2500f);
+        TestHarness.AssertTrue(ledger.EstimatedEnemyStrength > 3900f, "largest seen persists (decays slowly)");
+    }
+
+    private static void ContactLedgerContactBroken()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(1f, 4000f, 1000f);
+        ledger.Observe(1.1f, 0f, 0f);
+        TestHarness.AssertFalse(ledger.ContactBroken(1.1f, 0f), "6 minutes is not broken yet");
+        ledger.Observe(1.5f, 0f, 0f);
+        TestHarness.AssertTrue(ledger.ContactBroken(1.5f, 0f), "30 battle-minutes without contact -> broken");
+        TestHarness.AssertTrue(ledger.EstimatedEnemyStrength < 4000f && ledger.EstimatedEnemyStrength > 3500f, "estimate decays");
+        float conf = ledger.Confidence(1.5f, 6000f);
+        TestHarness.AssertTrue(conf < 1f && conf > 0.5f, "stale but recent contact -> reduced confidence, got " + conf);
+        ledger.Observe(4f, 0f, 0f);
+        TestHarness.AssertFalse(ledger.ContactBroken(4f, 0f), "contact memory expired");
+        TestHarness.AssertTrue(ledger.Confidence(4f, 6000f) < 0.5f, "old knowledge -> below action gate");
+        TestHarness.AssertFalse(ledger.ContactBroken(1.5f, 300f), "something in sight now -> not broken");
+    }
+
+    private static void ContactLedgerPicketLowConfidence()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(1f, 500f, 500f);
+        TestHarness.AssertTrue(ledger.Confidence(1f, 10000f) < 0.5f, "a 500-man picket says little about a 10,000-man army's opponent");
+    }
+
+    private static void ContactLedgerResetsOnClockRewind()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(5f, 4000f, 1000f);
+        ledger.Observe(1f, 0f, 0f);
+        TestHarness.AssertEqual(0f, ledger.EstimatedEnemyStrength, "reload / new battle clears knowledge");
+    }
+
+    private static void OwnAiBattleSkipsFeudInstance()
+    {
+        // BattleUnits.aibattle[] (85203-85212): [1] = player side, [0] = other side,
+        // [2] = feud instance SetSide(0, isfeud) -> isplayeraiorfeud 2 (SetSide 3408).
+        var sides = new[] { 1, 0, 0 };
+        var kinds = new[] { 0, 1, 2 };
+        TestHarness.AssertEqual(1, ArmyEvidenceBuilder.SelectAiBattleIndexForSide(sides, kinds, side: 0), "side 0 -> aibattle[1], not feud [2]");
+        TestHarness.AssertEqual(0, ArmyEvidenceBuilder.SelectAiBattleIndexForSide(sides, kinds, side: 1), "side 1 -> aibattle[0]");
+        TestHarness.AssertEqual(-1, ArmyEvidenceBuilder.SelectAiBattleIndexForSide(sides, kinds, side: 3), "unknown side");
+        TestHarness.AssertEqual(-1, ArmyEvidenceBuilder.SelectAiBattleIndexForSide(new[] { 0 }, new[] { 2 }, side: 0), "feud-only -> none");
+    }
+
+    private static void IntentStrengthSignalRelative()
+    {
+        // Same 600-man enemy concentration: meaningful against a 1,000-man
+        // detachment, noise against a 40,000-man army. Old code divided by a
+        // fixed 5000.
+        var small = new EnemyVisibleState(new[]
+        {
+            new EnemyVisibleSector(1, 500f, 600f, true),
+            new EnemyVisibleSector(3, 500f, 0f, false),
+        }, 0.5f, true, false, 0f);
+        var big = new EnemyVisibleState(new[]
+        {
+            new EnemyVisibleSector(1, 20000f, 600f, true),
+            new EnemyVisibleSector(3, 20000f, 0f, false),
+        }, 0.5f, true, false, 0f);
+        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+        float cSmall = ArmyIntentInference.Build(ev, small).Confidence01;
+        float cBig = ArmyIntentInference.Build(ev, big).Confidence01;
+        TestHarness.AssertTrue(cSmall > cBig, "confidence scales with enemy relative to own force: " + cSmall + " vs " + cBig);
     }
 }

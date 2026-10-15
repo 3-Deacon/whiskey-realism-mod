@@ -12,6 +12,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const float ConfidenceFloor = 0.3f;
         public const float ConfidenceActionable = 0.6f;
 
+        /// <summary>Enemy in sight equal to this share of own strength = full strength signal.</summary>
+        public const float StrengthSignalOwnFraction = 0.5f;
+
+        /// <summary>Contact broken and less than this share of own strength still in sight = withdrawal.</summary>
+        public const float WithdrawResidualOwnFraction = 0.25f;
+
         public static TacticalIntentModel Build(ArmyEvidence ownEvidence, EnemyVisibleState enemy)
         {
             if (enemy.Sectors.Length == 0)
@@ -20,6 +26,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             float totalEnemy = 0f;
+            float totalOwn = 0f;
             float maxEnemyStrength = 0f;
             float ownStrengthAtMaxEnemy = 0f;
             int sectorWithMaxEnemy = -1;
@@ -29,6 +36,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 var sector = enemy.Sectors[i];
                 totalEnemy += sector.EnemyStrength;
+                totalOwn += sector.OwnStrength;
                 if (sector.EnemyStrength > maxEnemyStrength || sectorWithMaxEnemy < 0)
                 {
                     maxEnemyStrength = sector.EnemyStrength;
@@ -43,14 +51,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             float concentration = totalEnemy <= 0f ? 0f : maxEnemyStrength / totalEnemy;
-            float strengthSignal = Math.Min(1f, totalEnemy / 5000f);
+            // Relative to our own force (an enemy half our size in sight = full
+            // signal). The old fixed /5000 made a 600-man contact the same
+            // evidence for a cavalry detachment and a 40,000-man army.
+            float strengthSignal = Math.Min(1f, totalEnemy / Math.Max(1f, StrengthSignalOwnFraction * totalOwn));
             float evenShare = 1f / Math.Max(1, enemy.Sectors.Length);
             float concentrationSignal = enemy.Sectors.Length <= 1
                 ? concentration * strengthSignal
                 : Math.Max(0f, (concentration - evenShare) / (1f - evenShare));
             float contactSignal = enemy.AnyContactSpotted ? 1f : (enemy.AnyContactBroken ? 0.4f : 0.2f);
             float confidence = Clamp01(0.5f * strengthSignal + 0.3f * concentrationSignal + 0.2f * contactSignal);
-            bool hardWithdrawSignal = enemy.AnyContactBroken && totalEnemy < 2000f && !enemy.AnyContactSpotted;
+            bool hardWithdrawSignal = enemy.AnyContactBroken && totalEnemy < WithdrawResidualOwnFraction * totalOwn && !enemy.AnyContactSpotted;
             if (hardWithdrawSignal)
             {
                 confidence = Math.Max(confidence, ConfidenceFloor);

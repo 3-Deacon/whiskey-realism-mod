@@ -113,20 +113,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownActive = SafeSideInfoFloat(bunits, side, "totalactiveforce");
                 if (ownActive <= 0f) return fallback;
 
-                float enemyActive = SumEnemyActiveForce(bunits, side);
-                float odds = enemyActive <= 0f ? 1f : ownActive / Math.Max(1f, enemyActive);
-
                 var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
+
+                // Odds against the enemy force this side has actually seen
+                // (TacticalEnemyContactLedger), not the enemy's
+                // sideinformation.totalactiveforce, which the side cannot know.
+                // Before contact the odds are unknown -> 1.
+                float enemyKnown = KnownEnemyStrength(allianceId);
+                float odds = enemyKnown <= 0f ? 1f : ownActive / Math.Max(1f, enemyKnown);
                 // Default main effort = the center band of the front, not
                 // "whatever group is first in completeunitlist".
                 var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open,
                     defaultMainEffortSector: DefaultMainEffortSector(enemyVisible.FrontAxis));
                 float ownMorale = Clamp01OrDefault(SafeSideInfoFloat(bunits, side, "averagemorale"), 1f);
-                float ownReservesCommitted = EstimateReserveCommitFraction(battle, bunits, side, ownActive);
+                // Own reserves from the side's OWN AIBattle (aibattle[] by
+                // sideofai, feud instance skipped) — the coordinator may hand us
+                // the other side's instance, whose objectivechain only lists
+                // its own groups.
+                float ownReservesCommitted = EstimateReserveCommitFraction(
+                    ResolveOwnAiBattle(bunits, side) ?? battle, bunits, side, ownActive);
                 float ownReinforcements = SanitizeNonNegative(
                     SafeSideInfoFloat(bunits, side, "reinforcementarrivalswithin24hrs"));
-                float enemyReinforcements = SanitizeNonNegative(
-                    SafeSideInfoFloat(bunits, OppositeSide(side), "reinforcementarrivalswithin24hrs"));
+                // Enemy reinforcements only once their entry point is in sight.
+                float enemyReinforcements = enemyVisible.EnemyReinforcementStrength24h;
 
                 // Readiness data: army-wide avg fatigue + ammo (for now; future
                 // refinement will aggregate per-sector) + nearest reinforcement
@@ -210,6 +219,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>W&amp;L: unit under the player's command (Regiment.dlcw_isundercommander).</summary>
+        private static bool IsPlayerCommanded(Regiment unit)
+        {
+            try { return unit != null && unit.dlcw_isundercommander; }
+            catch { return false; }
+        }
+
         private static bool SafeActive(Regiment unit)
         {
             try { return unit != null && unit.gameObject != null && unit.gameObject.activeInHierarchy; }
@@ -268,7 +284,175 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Reset when the BattleUnits instance changes (new battle / reload).
         private static readonly TacticalFrontAxis[] _lastBareAxis = new TacticalFrontAxis[2];
         private static readonly TacticalFrontAxis[] _lastFittedAxis = new TacticalFrontAxis[2];
-        private static System.WeakReference<BattleUnits> _lastBareAxisOwner;
+        private static readonly TacticalEnemyContactLedger[] _contactLedgers =
+            { new TacticalEnemyContactLedger(), new TacticalEnemyContactLedger() };
+        private static readonly HashSet<int>[] _visibleEnemyEntryPoints = { new HashSet<int>(), new HashSet<int>() };
+        private static System.WeakReference<BattleUnits> _battleOwner;
+
+        /// <summary>
+        /// Clears every per-battle cache (front axes, contact ledgers, visible
+        /// entry points). Also runs automatically when the BattleUnits instance
+        /// changes; call from the coordinator's battle teardown so a reload of
+        /// the same scene starts clean.
+        /// </summary>
+        internal static void ResetForBattleEnd()
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                _lastBareAxis[i] = TacticalFrontAxis.None;
+                _lastFittedAxis[i] = TacticalFrontAxis.None;
+                _contactLedgers[i].Reset();
+                _visibleEnemyEntryPoints[i] = new HashSet<int>();
+            }
+            _battleOwner = null;
+        }
+
+        private static void EnsureBattleOwner(BattleUnits bunits)
+        {
+            bool same = _battleOwner != null && _battleOwner.TryGetTarget(out var owner) && ReferenceEquals(owner, bunits);
+            if (same) return;
+            ResetForBattleEnd();
+            _battleOwner = new System.WeakReference<BattleUnits>(bunits);
+        }
+
+        private static TacticalEnemyContactLedger ContactLedger(int allianceId)
+            => allianceId >= 0 && allianceId <= 1 ? _contactLedgers[allianceId] : null;
+
+        /// <summary>Largest enemy strength this side has seen (decaying), 0 before contact.</summary>
+        private static float KnownEnemyStrength(int allianceId)
+        {
+            var ledger = ContactLedger(allianceId);
+            return ledger == null ? 0f : ledger.EstimatedEnemyStrength;
+        }
+
+        private static float SafeBattleClockHours()
+        {
+            try
+            {
+                float t = GameVars.currenttimefromstart;
+                return float.IsNaN(t) || float.IsInfinity(t) || t < 0f ? 0f : t;
+            }
+            catch { return 0f; }
+        }
+
+        /// <summary>
+        /// Own AIBattle for <paramref name="side"/> from BattleUnits.aibattle[]
+        /// (SelectAiBattleIndexForSide: sideofai match, feud instance skipped).
+        /// </summary>
+        private static AIBattle ResolveOwnAiBattle(BattleUnits bunits, int side)
+        {
+            try
+            {
+                var all = bunits?.aibattle;
+                if (all == null || all.Length == 0) return null;
+                var sides = new int[all.Length];
+                var kinds = new int[all.Length];
+                for (int i = 0; i < all.Length; i++)
+                {
+                    sides[i] = all[i] != null ? all[i].sideofai : -99;
+                    kinds[i] = all[i] != null ? all[i].isplayeraiorfeud : 2;
+                }
+                int idx = SelectAiBattleIndexForSide(sides, kinds, side);
+                return idx >= 0 ? all[idx] : null;
+            }
+            catch { return null; }
+        }
+
+        private readonly struct EntrySample
+        {
+            public EntrySample(int id, float x, float z) { Id = id; X = x; Z = z; }
+            public int Id { get; }
+            public float X { get; }
+            public float Z { get; }
+        }
+
+        /// <summary>
+        /// Entry points of the enemy's still-scheduled arrivals
+        /// (BattleUnits.scheduledarrival 78960, ScheduledArrival.entrypoint 78616).
+        /// </summary>
+        private static List<EntrySample> EnemyEntryPoints(BattleUnits bunits, int ownAllianceId)
+        {
+            var list = new List<EntrySample>();
+            try
+            {
+                var arrivals = bunits.scheduledarrival;
+                if (arrivals == null) return list;
+                var seen = new HashSet<int>();
+                for (int i = 0; i < arrivals.Count; i++)
+                {
+                    var a = arrivals[i];
+                    if (a?.regimentrefreg == null || a.entrypoint == null) continue;
+                    if (a.regimentrefreg.alliance == ownAllianceId) continue;
+                    int id = a.entrypoint.GetInstanceID();
+                    if (!seen.Add(id)) continue;
+                    var p = a.entrypoint.transform.position;
+                    list.Add(new EntrySample(id, p.x, p.z));
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        /// <summary>
+        /// An entry point counts as watched when an own combat unit is within
+        /// its line of sight (GamePrefs.maximumlineofsight[unittyp], the value
+        /// vanilla seeds raycastrange[0] with in InitMaxUnitRanges 122510).
+        /// </summary>
+        private static void MarkVisibleEntryPoints(int unittyp, float x, float z, List<EntrySample> entries, HashSet<int> visible)
+        {
+            if (entries.Count == 0) return;
+            float sight;
+            try
+            {
+                var los = GamePrefs.maximumlineofsight;
+                if (los == null || unittyp < 0 || unittyp >= los.Length) return;
+                sight = los[unittyp];
+            }
+            catch { return; }
+            if (sight <= 0f) return;
+            float sight2 = sight * sight;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (visible.Contains(entries[i].Id)) continue;
+                float dx = entries[i].X - x, dz = entries[i].Z - z;
+                if (dx * dx + dz * dz <= sight2) visible.Add(entries[i].Id);
+            }
+        }
+
+        private static float SumVisibleEnemyArrivals(BattleUnits bunits, int enemySide, HashSet<int> visibleEntries, float withinHours)
+        {
+            float total = 0f;
+            foreach (var a in VisibleArrivalsForSide(bunits, enemySide, visibleEntries))
+            {
+                if (a.HoursUntilArrival <= withinHours) total += a.EstimatedStrength;
+            }
+            return total;
+        }
+
+        private static IReadOnlyList<ReinforcementArrival> VisibleArrivalsForSide(BattleUnits bunits, int side, HashSet<int> visibleEntries)
+        {
+            var result = new List<ReinforcementArrival>();
+            if (visibleEntries == null || visibleEntries.Count == 0) return result;
+            try
+            {
+                int sideAlliance = SafeAlliance(bunits, side);
+                var arrivals = bunits.scheduledarrival;
+                if (sideAlliance < 0 || arrivals == null) return result;
+                for (int i = 0; i < arrivals.Count; i++)
+                {
+                    var a = arrivals[i];
+                    var regiment = a?.regimentrefreg;
+                    if (regiment == null || a.entrypoint == null) continue;
+                    if (regiment.alliance != sideAlliance) continue;
+                    if (!visibleEntries.Contains(a.entrypoint.GetInstanceID())) continue;
+                    float strength = ArrivalStrength(regiment.groupstrength, regiment.groupstrengthaigroup);
+                    if (strength <= 0f) continue;
+                    result.Add(new ReinforcementArrival(ArrivalHoursFromDurationLeft(a.durationleft), strength));
+                }
+            }
+            catch { }
+            return result;
+        }
 
         /// <summary>
         /// Builds the per-band own/enemy picture for one side.
@@ -301,6 +485,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var seenEnemy = new HashSet<int>();
                 var flankThreat = new Dictionary<int, float>();
                 bool anyRecentFire = false;
+                EnsureBattleOwner(bunits);
+                var enemyEntries = EnemyEntryPoints(bunits, ownAllianceId);
+                var visibleEntries = new HashSet<int>();
+                bool entryPointsChecked = enemyEntries.Count == 0;
 
                 for (int i = 0; i < units.Count; i++)
                 {
@@ -311,7 +499,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                     if (reg.unittyp >= effectiveCommandMin)
                     {
-                        if (routed) continue;
+                        // W&L: the player's sub-groups leak into aibattle[1]'s
+                        // pool (AddUnitToPool 7641 adds descendants,
+                        // RemoveUnitFromPool removes only the root). They are
+                        // never AI command groups, so they get no sector/role.
+                        if (routed || IsPlayerCommanded(reg)) continue;
                         ownGroups.Add(new FrontUnitSample(id, x, z, Math.Max(0, reg.groupstrengthaigroup), false));
                         float threat = reg.flanksthreated;
                         if (threat > 0f && !float.IsNaN(threat)) flankThreat[id] = threat;
@@ -325,6 +517,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (fire) anyRecentFire = true;
                     ownCombat.Add(new FrontUnitSample(id, x, z, reg.strength, fire));
                     CollectVisibleEnemies(reg, ownAllianceId, seenEnemy, enemyVisible);
+                    if (!entryPointsChecked) MarkVisibleEntryPoints(reg.unittyp, x, z, enemyEntries, visibleEntries);
+                    entryPointsChecked = enemyEntries.Count > 0 && visibleEntries.Count == enemyEntries.Count;
                 }
 
                 var bare = BareAxis(bunits, ownAllianceId, ownCombat.Count > 0 ? ownCombat : ownGroups, enemyVisible);
@@ -333,16 +527,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, ownCombat, enemyVisible);
                 var instanceSectors = EnemyVisibleSectorBuilder.MapInstances(axis, ownGroups);
 
-                float enemyActiveForce = Math.Max(1f, SafeSideInfoFloat(bunits, enemySide, "totalactiveforce"));
-                float enemyReserveCommitFraction = EstimateReserveCommitFraction(battle, bunits, enemySide, enemyActiveForce);
-                float enemyReinforcements = SanitizeNonNegative(
-                    SafeSideInfoFloat(bunits, enemySide, "reinforcementarrivalswithin24hrs"));
+                // Fog-honest enemy knowledge (T6/T11): the enemy's reserve share
+                // is the part of the force we have seen that is NOT yet in fire
+                // range of our line; contact-broken comes from real contact
+                // history. Never the enemy AIBattle's reservegroups designation.
+                float visibleStrength = 0f, engagedStrength = 0f;
+                for (int i = 0; i < enemyVisible.Count; i++)
+                {
+                    visibleStrength += enemyVisible[i].Strength;
+                    if (enemyVisible[i].RecentFire) engagedStrength += enemyVisible[i].Strength;
+                }
+                float nowHours = SafeBattleClockHours();
+                var ledger = ContactLedger(ownAllianceId);
+                float enemyReserveCommitFraction = TacticalEnemyContactLedger.UnknownReserveCommitFraction;
+                bool contactBroken = false;
+                if (ledger != null)
+                {
+                    ledger.Observe(nowHours, visibleStrength, engagedStrength);
+                    enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
+                    contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
+                }
+                if (ownAllianceId >= 0 && ownAllianceId <= 1) _visibleEnemyEntryPoints[ownAllianceId] = visibleEntries;
+                float enemyReinforcements = SumVisibleEnemyArrivals(bunits, enemySide, visibleEntries, withinHours: 24f);
 
                 return new EnemyVisibleState(
                     sectors,
                     enemyReserveCommitFraction,
                     anyContactSpotted: enemyVisible.Count > 0 || anyRecentFire,
-                    anyContactBroken: false,
+                    anyContactBroken: contactBroken,
                     enemyReinforcements,
                     frontAxis: axis,
                     instanceSectors: instanceSectors,
@@ -369,17 +581,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (!Centroid(own, out float ox, out float oz)) return TacticalFrontAxis.None;
 
-            bool sameOwner = _lastBareAxisOwner != null
-                && _lastBareAxisOwner.TryGetTarget(out var owner)
-                && ReferenceEquals(owner, bunits);
-            if (!sameOwner)
-            {
-                _lastBareAxis[0] = TacticalFrontAxis.None;
-                _lastBareAxis[1] = TacticalFrontAxis.None;
-                _lastFittedAxis[0] = TacticalFrontAxis.None;
-                _lastFittedAxis[1] = TacticalFrontAxis.None;
-                _lastBareAxisOwner = new System.WeakReference<BattleUnits>(bunits);
-            }
             int slot = allianceId == 1 ? 1 : 0;
             var previous = allianceId >= 0 && allianceId <= 1 ? _lastBareAxis[slot] : TacticalFrontAxis.None;
 
@@ -421,7 +622,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var reg = units[i] as Regiment;
                     if (reg == null || reg.alliance != allianceId) continue;
                     if (reg.unittyp < effectiveCommandMin) continue;
-                    if (reg.isrouted || reg.markedforrout) continue;
+                    if (reg.isrouted || reg.markedforrout || IsPlayerCommanded(reg)) continue;
                     if (!TryPosition(reg, out int id, out float x, out float z)) continue;
                     map[id] = axis.SectorOf(x, z);
                 }
@@ -479,13 +680,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 var range = own.unitrange;
                 if (range == null) return;
-                AddVisible(range.enemyinrangereg, ownAllianceId, seen, output);
-                AddVisible(range.enemyinfirerangereg, ownAllianceId, seen, output);
+                // Fire-range list first so an enemy in both lists is recorded
+                // as engaged (FrontUnitSample.RecentFire doubles as "in contact").
+                AddVisible(range.enemyinfirerangereg, ownAllianceId, seen, output, engaged: true);
+                AddVisible(range.enemyinrangereg, ownAllianceId, seen, output, engaged: false);
             }
             catch { }
         }
 
-        private static void AddVisible(List<Regiment> list, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output)
+        private static void AddVisible(List<Regiment> list, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output, bool engaged)
         {
             if (list == null) return;
             for (int i = 0; i < list.Count; i++)
@@ -497,7 +700,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (enemy.isrouted || !SafeActive(enemy)) continue;
                 if (!TryPosition(enemy, out int id, out float x, out float z)) continue;
                 if (!seen.Add(id)) continue;
-                output.Add(new FrontUnitSample(id, x, z, enemy.strength, false));
+                output.Add(new FrontUnitSample(id, x, z, enemy.strength, engaged));
             }
         }
 
@@ -555,22 +758,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return -1;
         }
 
-        private static float SumEnemyActiveForce(BattleUnits bunits, int ownSide)
-        {
-            float total = 0f;
-            try
-            {
-                if (bunits == null || bunits.sideinformation == null) return 0f;
-                for (int side = 0; side < 2 && side < bunits.sideinformation.Length; side++)
-                {
-                    if (side == ownSide) continue;
-                    total += Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
-                }
-            }
-            catch { }
-            return total;
-        }
-
         private static bool IsUsableOwnGroup(Regiment group, int ownAllianceId, int effectiveCommandMin)
         {
             try
@@ -579,6 +766,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (group.alliance != ownAllianceId) return false;
                 if (group.unittyp < effectiveCommandMin) return false;
                 if (group.isrouted || group.markedforrout) return false;
+                if (IsPlayerCommanded(group)) return false;
                 return true;
             }
             catch
@@ -676,13 +864,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return currentTimestamp - _battleStartTimestampHours;
             }
             catch { return 0f; }
-        }
-
-        /// <summary>Test seam: clears the battle-start cache.</summary>
-        public static void ResetBattleStartTimestampForTest()
-        {
-            _battleStartTimestampHours = -1f;
-            _battleStartTimestampOwner = null;
         }
 
         private static bool TrySideInfoFloat(BattleUnits bunits, int side, string fieldName, out float value)
@@ -868,38 +1049,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static int SafeRegimentInt(Regiment regiment, string fieldName)
-        {
-            try
-            {
-                if (regiment == null) return 0;
-                var field = ResolveObjectField(typeof(Regiment), fieldName);
-                if (field == null) return 0;
-                object value = field.GetValue(regiment);
-                return value == null ? 0 : Convert.ToInt32(value);
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static float SafeRegimentFloat(Regiment regiment, string fieldName)
-        {
-            try
-            {
-                if (regiment == null) return 0f;
-                var field = ResolveObjectField(typeof(Regiment), fieldName);
-                if (field == null) return 0f;
-                object value = field.GetValue(regiment);
-                return value == null ? 0f : Convert.ToSingle(value);
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
         private static IList SafeGetCompleteUnitList()
         {
             try
@@ -981,16 +1130,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int enemySide = OppositeSide(side);
 
                 float ownDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
-                float enemyDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, enemySide, "totalactiveforce"));
+
+                // Fog-honest enemy picture (T11): the enemy force this side has
+                // seen (largest sighting, decaying), arrivals only through an
+                // entry point our units can see, and confidence from contact
+                // coverage/recency instead of a fixed 0.8. The ledger and the
+                // watched entry points are refreshed by Build on the evidence
+                // cadence; this read is cheap.
+                EnsureBattleOwner(bunits);
+                var ledger = ContactLedger(allianceId);
+                float enemyDeployed = ledger == null ? 0f : ledger.EstimatedEnemyStrength;
+                float intelConfidence = ledger == null ? 0f : ledger.Confidence(SafeBattleClockHours(), ownDeployed);
 
                 var ownArrivals = BuildArrivalsForSide(bunits, side);
-                var enemyArrivals = BuildArrivalsForSide(bunits, enemySide);
-
-                // Intel confidence: with no visible enemy contact at all, drop
-                // to 0.4 so the doctrine falls through to NoOpportunity (it
-                // refuses to act on pure deployment-list strength estimates).
-                // Otherwise 0.8 baseline so the doctrine engages.
-                float intelConfidence = enemyDeployed > 0f ? 0.8f : 0.4f;
+                var enemyArrivals = allianceId >= 0 && allianceId <= 1
+                    ? VisibleArrivalsForSide(bunits, enemySide, _visibleEnemyEntryPoints[allianceId])
+                    : (IReadOnlyList<ReinforcementArrival>)Array.Empty<ReinforcementArrival>();
 
                 // Casualty escalation inputs (2026-05-23 / J). Read from vanilla
                 // BattleUnits.sideinformation. casualtyratio: 0..1; routedratio:

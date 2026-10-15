@@ -86,5 +86,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         internal static int DefaultMainEffortSector(TacticalFrontAxis axis)
             => axis.IsValid && axis.BandCount > 0 ? axis.CenterSector : TacticalFrontAxis.DefaultBandCount / 2;
+
+        /// <summary>
+        /// Index into <c>BattleUnits.aibattle[]</c> of the AIBattle that plays
+        /// <paramref name="side"/>: <c>sideofai == side</c> and not the feud
+        /// instance (<c>isplayeraiorfeud == 2</c>). Vanilla setup 85203-85212:
+        /// aibattle[1] = player side, aibattle[0] = the other side, aibattle[2] =
+        /// feud on side 0 (SetSide 3408). Each AIBattle's objectivechain only
+        /// holds its own side's groups, so own reserves must come from this one.
+        /// </summary>
+        internal static int SelectAiBattleIndexForSide(int[] sideOfAi, int[] isPlayerAiOrFeud, int side)
+        {
+            if (sideOfAi == null) return -1;
+            for (int i = 0; i < sideOfAi.Length; i++)
+            {
+                if (sideOfAi[i] != side) continue;
+                if (isPlayerAiOrFeud != null && i < isPlayerAiOrFeud.Length && isPlayerAiOrFeud[i] == 2) continue;
+                return i;
+            }
+            return -1;
+        }
     }
 }
