@@ -448,6 +448,13 @@ internal static class CampaignMilitaryFixTests
         input.Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 18000f) };
         var adequate = CoordinatedOperationPackageLedger.Build(input);
         TestHarness.AssertEqual(CoordinatedOperationDecision.SingleLead, adequate.Decision, "0.9 ratio lone lead may commit");
+
+        // OperationalProbeLedger probes are deliberately small contact-making
+        // packages; the ratio gate is for attack/reinforce commitments only.
+        input.Intent = CoordinatedOperationIntent.Probe;
+        input.Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 5000f) };
+        var probe = CoordinatedOperationPackageLedger.Build(input);
+        TestHarness.AssertEqual(CoordinatedOperationDecision.SingleLead, probe.Decision, "probe lead commits below reinforce ratio");
         LogPass("c2a coordinated single lead needs the reinforce ratio");
     }
 

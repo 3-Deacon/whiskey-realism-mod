@@ -240,7 +240,9 @@ namespace WhiskeyRealism.Strategic
                 return Finish(output, CoordinatedOperationDecision.Recover, "lead-health-low");
             // A lone lead commits only at the reinforce ratio; below it vanilla's own
             // dominance test (CheckOffensiveMovements, decompile 14290) would refuse too.
-            if (output.SupportStableUnitIds.Count == 0 && output.Ratio >= options.RequiredReinforceRatio)
+            // Probes (OperationalProbeLedger) are contact-making by design and exempt.
+            if (output.SupportStableUnitIds.Count == 0 &&
+                (input.Intent == CoordinatedOperationIntent.Probe || output.Ratio >= options.RequiredReinforceRatio))
                 return Finish(output, CoordinatedOperationDecision.SingleLead, "single-committable-lead");
             if (output.SupportStableUnitIds.Count == 0)
                 return Finish(output, CoordinatedOperationDecision.Delay, "lead-understrength");
