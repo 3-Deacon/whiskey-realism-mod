@@ -36,11 +36,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //   Regiment.AddPath area costs 130364-130394 (R5): PostureNavAreaCosts,
     //     applied before every NavMesh.CalculatePath of the path probe.
     //
+    //   AIBattle.BlockedMovingOrder 3054-3150 (UpdateOrders 3382): an
+    //     objective-type group move over 150 m carries
+    //     IntentFlags.AvoidCoveredCrossings, as shipped #61 sent it (vanilla's own
+    //     line-group moves, 6953-6956); OrderExecutorRuntime issues it.
+    //     UpdateBlockedCrossings (7917-7973) only lists the covered crossings.
+    //
     // Deleted with #61, not ported (the executor owns them): the recent-order
     // stamps, failed-write backoff, brigade task hold, courier cadence, outbound
-    // order ledger, duplicate-waypoint and safe-waypoint checks, the write gate,
-    // the groupsubordinatesmoving stamp, and the BlockedMovingOrder path
-    // (vanilla UpdateBlockedCrossings 7917 handles crossings).
+    // order ledger, duplicate-waypoint and safe-waypoint checks, the write gate
+    // and the groupsubordinatesmoving stamp.
     internal static class PostureProducers
     {
         /// <summary>
@@ -95,8 +100,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public readonly List<float> SupportMainX = new List<float>(8);
             public readonly List<float> SupportMainZ = new List<float>(8);
             public bool SupportMainBuilt;
-            public readonly int[] RegimentQueue = new int[64];
-            public readonly int[] Regiments = new int[64];
+            // Grow-only, sized to the roster each tick.
+            public int[] RegimentQueue = new int[64];
+            public int[] Regiments = new int[64];
+            public int[] Subtree = new int[64];
+            public int[] Children = new int[64];
+            // #44's perceived flank risk input (ArmyEvidenceBuilder.MeanFlankThreatByGroup).
+            public float[] FlankThreatMean = new float[64];
+            public int[] FlankThreatCount = new int[64];
         }
 
         private static readonly State[] _states = { new State(), new State() };
@@ -112,6 +123,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             PostureSense.AggregateDescendants(s, ref t.Descendants, ref t.Moving);
             if (t.Groups.Length < n) t.Groups = new GroupPosture[Math.Max(n, t.Groups.Length * 2)];
             Array.Clear(t.Groups, 0, n);
+            if (t.RegimentQueue.Length < n)
+            {
+                int size = Math.Max(n, t.RegimentQueue.Length * 2);
+                t.RegimentQueue = new int[size];
+                t.Regiments = new int[size];
+                t.FlankThreatMean = new float[size];
+                t.FlankThreatCount = new int[size];
+            }
+            ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, t.FlankThreatMean, t.FlankThreatCount);
 
             t.EnemyIndexById.Clear();
             UnitRecord[] enemy = s.EnemyRecords;
@@ -267,10 +287,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (PostureSense.Routed(rec)) { PostureTelemetry.Leaf(s, i, leaf, task, "routed", false); return; }
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, t.Descendants[i]);
-            bool flankRisk = PostureSense.FlankRisk(s, i);
+            bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
-            bool hasSlot = LeafSlotTarget.TryResolve(s, i, out int parent, out float x, out float z);
+            bool hasSlot = LeafSlotTarget.TryResolve(s, i, out int parent, out float x, out float z, out float slotHeading);
             bool parentActive = false;
             if (parent >= 0)
             {
@@ -282,7 +302,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             LeafMoveDecision move = LeafBrigadeMovePolicy.Decide(task, parentActive, hasSlot, closeEngaged, pending, activeMove);
             if (!move.Move) { PostureTelemetry.Leaf(s, i, leaf, task, move.Reason, false); return; }
 
-            sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, inContactWithdrawal: flankRisk));
+            sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
         }
 
@@ -429,7 +449,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 state = WithRoleAndTask(state, order.Role, order.Task);
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
-            bool flankRisk = PostureSense.FlankRisk(s, i);
+            bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
             bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
 
@@ -516,10 +536,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // flank in contact, on the formation channels.
             RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
             float heading = -1f;
+            bool hasThreatHeading = false;
             bool needsFacing = false;
             if (CommandFormationCorrection.ShouldFaceThreat(state.Task) && PostureTargets.TryThreat(s, i, out float threatX, out float threatZ))
             {
                 heading = PostureSense.HeadingTo(rec.X, rec.Z, threatX, threatZ);
+                hasThreatHeading = heading >= 0f;
                 needsFacing = CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, heading, PostureSense.FacingToleranceDegrees);
             }
 
@@ -534,7 +556,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 TargetFormation = targetFormation,
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
                 InContactWithdrawal = closeEngaged || flankRisk,
+                AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
                 Refuse = refuse,
+                // #61 wheeled with the threat heading whenever it had one (not only
+                // when the facing was off): a refuse-only wheel faces the threat.
+                HasThreatHeading = hasThreatHeading,
+                ThreatHeading = heading,
                 Priority = priority,
                 Source = source,
                 Reason = reason,
@@ -1205,7 +1232,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     {
                         int u = t.Regiments[r];
                         bool engaged = g.CloseEngaged || PostureSense.CloseEngaged(s, u, t.Descendants[u]);
-                        bool flank = g.FlankRisk || PostureSense.FlankRisk(s, u);
+                        bool flank = g.FlankRisk || BattleWriterPolicy.PerceivedFlankRisk(s, u, t.FlankThreatMean);
                         // R9: regiments only rotate — the current formation is the target.
                         TacticalFacingPulseDecision d = Evaluate(s, t, executor, u, g.State.Task, TacticalFacingPulseScope.Regiment,
                             s.Own[u].Formation, engaged, flank);
@@ -1308,11 +1335,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     bool groupMoving = PostureSense.ActiveMove(own[g], t.Moving[g]);
                     if (groupMoving || PostureSense.PendingOrder(own[g], groupMoving, allowStaleQueuedBypass: false)) continue;
 
-                    for (int u = 0; u < s.OwnCount; u++)
-                    {
-                        if (!s.IsAncestorOf(g, u)) continue;
-                        ProduceForUnit(s, t, executor, g, u, posture.State, sink);
-                    }
+                    // The group's own subtree (#61 read allattachedunits).
+                    int count = PostureSense.CollectDescendants(s, g, ref t.Subtree, ref t.Children);
+                    for (int k = 0; k < count; k++)
+                        ProduceForUnit(s, t, executor, g, t.Subtree[k], posture.State, sink);
                 }
             }
         }

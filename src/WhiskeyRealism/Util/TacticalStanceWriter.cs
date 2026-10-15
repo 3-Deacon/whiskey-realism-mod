@@ -158,18 +158,6 @@ namespace WhiskeyRealism.Util
             return EnsureStance(bunits, group, targetStance, contextTag, TacticalStanceOwnership.SourceFor(source));
         }
 
-        public static bool EnsureStanceForTask(
-            BattleUnits bunits,
-            Regiment group,
-            CommandTaskType task,
-            string contextTag = null,
-            StanceWriteSource source = StanceWriteSource.Scorer)
-        {
-            int stance = TacticalCommandTaskToStanceMapper.Map(task);
-            if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return false;
-            return EnsureStance(bunits, group, stance, contextTag, source);
-        }
-
         // Hand one group back to vanilla: drop ownership and pull a future
         // stamp back so 4264 re-evaluates it on the next macro cycle (raw
         // clock: vanillaNow is GameVars.currenttimefromstart). Only a

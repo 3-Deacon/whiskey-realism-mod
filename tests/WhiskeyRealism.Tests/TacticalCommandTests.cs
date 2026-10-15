@@ -19,6 +19,7 @@ using WhiskeyRealism.Util;
 
 using static TestFixtures;
 using static TestHarness;
+using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
 
 internal static class TacticalCommandTests
 {
@@ -896,15 +897,6 @@ internal static class TacticalCommandTests
         AssertTrue(
             CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.Probe, battleActive: true),
             "probe toward objective goes through the courier queue");
-        AssertTrue(
-            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Scout),
-            "scout movement must stamp active progress");
-        AssertTrue(
-            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Probe),
-            "probe movement must stamp active progress");
-        AssertTrue(
-            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Screen),
-            "screen movement must keep existing active progress semantics");
     }
 
     private static void PostureExecutorRetriesStalledScoutAndProbeDespiteRecentOrder()
@@ -940,32 +932,19 @@ internal static class TacticalCommandTests
 
     private static void PostureExecutorLongAttackUsesVanillaBlockedMovementOrder()
     {
+        // Whether the side has blocked-crossing data is the executor runtime's
+        // check (AIBattle.blockedcrossings, null on a map without crossings, 7919).
         AssertTrue(
-            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(
-                CommandTaskType.AttackObjective,
-                distance: 900f,
-                threshold: 150f,
-                hasBlockedCrossingData: true,
-                battleActive: true),
+            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType.AttackObjective, distance: 900f),
             "long battle attack moves should mirror vanilla objective movement through BlockedMovingOrder");
 
         AssertFalse(
-            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(
-                CommandTaskType.FallBackToLine,
-                distance: 900f,
-                threshold: 150f,
-                hasBlockedCrossingData: true,
-                battleActive: true),
+            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType.FallBackToLine, distance: 900f),
             "fallback should not use the objective blocked-move queue");
 
         AssertFalse(
-            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(
-                CommandTaskType.AttackObjective,
-                distance: 900f,
-                threshold: 150f,
-                hasBlockedCrossingData: false,
-                battleActive: true),
-            "missing blocked-crossing data must fail back to direct vanilla SetWaypoint");
+            CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType.AttackObjective, distance: float.NaN),
+            "no distance, no blocked-move queue");
     }
 
     private static void PostureExecutorGroupMovementFlagsCountAsActiveMove()

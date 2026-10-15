@@ -329,7 +329,7 @@ namespace WhiskeyRealism.Tactical.Operations
             bool pendingOrder,
             bool activeMove)
         {
-            if (!CommandWaypointWritePolicy.IsMovementTask(task)) return new LeafMoveDecision(false, "non-movement-task");
+            if (!Battle.CommandWaypointWritePolicy.IsMovementTask(task)) return new LeafMoveDecision(false, "non-movement-task");
             if (parentHasActiveOrder) return new LeafMoveDecision(false, "parent-ordered");
             if (!hasFormationSlot) return new LeafMoveDecision(false, "no-slot");
             if (closeEngaged) return new LeafMoveDecision(false, "close-engaged");
@@ -379,43 +379,15 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
-    // Moved to Tactical/Battle/OrderExecutor.cs (BC4). This forwarder stays
-    // while TacticalObserverPatch (outside BC5a's region) and
-    // TacticalCommandTests still name it in this namespace; BC7 deletes it.
+    // Moved to Tactical/Battle/OrderExecutor.cs (BC4). The forwarder keeps the
+    // one member TacticalObserverPatch (outside BC5a's region) still names in
+    // this namespace; BC7 deletes it.
     public static class CommandWaypointWritePolicy
     {
-        public const float FailedWriteBackoffHours = Battle.CommandWaypointWritePolicy.FailedWriteBackoffHours;
-
-        public static bool ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType task, bool battleActive, bool inContactWithdrawal = false)
-            => Battle.CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive, inContactWithdrawal);
-
-        public static bool MovementIssued(int movingPathsBefore, int movingPathsAfter, int queuedBefore, int queuedAfter)
-            => Battle.CommandWaypointWritePolicy.MovementIssued(movingPathsBefore, movingPathsAfter, queuedBefore, queuedAfter);
-
-        public static float FailedWriteBackoffUntil(float nowHours) => Battle.CommandWaypointWritePolicy.FailedWriteBackoffUntil(nowHours);
-
-        public static bool IsBackedOff(float nowHours, float backoffUntilHours) => Battle.CommandWaypointWritePolicy.IsBackedOff(nowHours, backoffUntilHours);
-
-        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType task, float distance, float threshold, bool hasBlockedCrossingData, bool battleActive)
-            => Battle.CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(task, distance, threshold, hasBlockedCrossingData, battleActive);
-
-        public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
-            => Battle.CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(task);
-
-        public static bool IsMovementTask(CommandTaskType task) => Battle.CommandWaypointWritePolicy.IsMovementTask(task);
-
         public static bool IsExecutorMovementActive(bool pathInterrupted, int regimentPaths, int movementMode, float groupSubordinatesMoving,
             float groupSubordinatesMovingNonAi, bool hasLastWaypoint, float distanceToLastWaypoint, float minWaypointDistance)
             => Battle.CommandWaypointWritePolicy.IsExecutorMovementActive(pathInterrupted, regimentPaths, movementMode, groupSubordinatesMoving,
                 groupSubordinatesMovingNonAi, hasLastWaypoint, distanceToLastWaypoint, minWaypointDistance);
-
-        public static bool ShouldSkipDuplicateWaypoint(float currentWaypointX, float currentWaypointZ, float targetX, float targetZ, float tolerance, bool pathInterrupted)
-            => Battle.CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(currentWaypointX, currentWaypointZ, targetX, targetZ, tolerance, pathInterrupted);
-
-        public static bool ShouldSkipDuplicateWaypoint(float currentWaypointX, float currentWaypointZ, float targetX, float targetZ, float tolerance,
-            bool pathInterrupted, int regimentPaths, bool activeMove, float currentX, float currentZ)
-            => Battle.CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(currentWaypointX, currentWaypointZ, targetX, targetZ, tolerance,
-                pathInterrupted, regimentPaths, activeMove, currentX, currentZ);
     }
 
     public static class CommandPostureExecutor
@@ -809,7 +781,10 @@ namespace WhiskeyRealism.Tactical.Operations
     //     InMelee on the group or a descendant, or the closest visible enemy
     //     within CloseContactMeters (vanilla aidefensivemaxrange 250, the AI's
     //     own pressure radius, 122719);
-    //   flanksthreated / outflanked → any positive snapshot flank pressure;
+    //   flanksthreated / outflanked → #44's perceived flank-risk rule
+    //     (BattleWriterPolicy.PerceivedFlankRisk: the group's own outflanked
+    //     state over the snapshot's flank pressure, or a positive mean vanilla
+    //     outflanked weight of its regiments, ArmyEvidenceBuilder.MeanFlankThreatByGroup);
     //   orderqueue / orderstate → UnitRecord.QueuedOrders (own queue + move
     //     orders in flight to the unit or a descendant, 124998/124878);
     //   groupsubordinatesmoving → moving descendants (regimentpaths > 0);
@@ -866,12 +841,6 @@ namespace WhiskeyRealism.Tactical.Operations
             if (s == null || index < 0 || index >= s.OwnCount) return false;
             if (((s.Own[index].Flags | descendantFlags) & UnitFlags.InMelee) != 0) return true;
             return s.ClosestVisibleEnemy(index, out float distance) >= 0 && distance <= CloseContactMeters;
-        }
-
-        public static bool FlankRisk(BattleSnapshot s, int index)
-        {
-            if (s == null) return false;
-            return s.FlankPressure(index, 0) > 0f || s.FlankPressure(index, 1) > 0f || s.FlankPressure(index, 2) > 0f;
         }
 
         public static bool Routed(in UnitRecord unit)
@@ -1042,6 +1011,30 @@ namespace WhiskeyRealism.Tactical.Operations
             return count;
         }
 
+        /// <summary>
+        /// Every descendant of <paramref name="root"/> (breadth-first over the
+        /// snapshot's command tree), the set #61 fire control read from
+        /// allattachedunits. Writes own indices to result; returns the count.
+        /// Grow-only buffers, bounded by the roster.
+        /// </summary>
+        public static int CollectDescendants(BattleSnapshot s, int root, ref int[] result, ref int[] children)
+        {
+            int n = s != null ? s.OwnCount : 0;
+            if (result == null || result.Length < n) result = new int[Math.Max(n, 64)];
+            if (children == null || children.Length < n) children = new int[Math.Max(n, 64)];
+            if (root < 0 || root >= n) return 0;
+            int count = 0;
+            int node = root;
+            for (int head = 0; ; head++)
+            {
+                int c = s.DirectChildren(node, children);
+                for (int k = 0; k < c && count < n; k++) result[count++] = children[k];
+                if (head >= count) break;
+                node = result[head];
+            }
+            return count;
+        }
+
         private static bool Rotatable(in UnitRecord unit)
         {
             if (unit.UnitTyp > TacticalUnitType.MaxCombat || unit.UnitTyp == TacticalUnitType.Artillery) return false;
@@ -1076,8 +1069,15 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool NeedsFormation;
         // A FallBackToLine under close engagement or flank risk: immediate, line-checked.
         public bool InContactWithdrawal;
+        // An objective-type move over 150 m: through vanilla BlockedMovingOrder
+        // (PostureIntentPlan.AvoidsCoveredCrossings).
+        public bool AvoidCoveredCrossings;
         // #61 refused flank, carried on the formation and facing intents.
         public RefuseFlank Refuse;
+        // #61 threat facing (holding tasks with a visible threat): the wheel's
+        // manualfinalrotation on the formation intent.
+        public bool HasThreatHeading;
+        public float ThreatHeading;
         public IntentPriority Priority;
         public IntentSource Source;
         public string Reason; // static literal
@@ -1155,10 +1155,26 @@ namespace WhiskeyRealism.Tactical.Operations
             };
         }
 
-        /// <summary>A nested leaf brigade's move to its slot: no stance (it is not an AI group).</summary>
-        public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, bool inContactWithdrawal)
+        /// <summary>
+        /// Shipped #61 TryQueueBlockedMovingOrder over the snapshot: an
+        /// Attack/Support/Fix/AdvanceToAssembly group move farther than 150 m
+        /// avoids the crossings the enemy covers (vanilla line-group moves,
+        /// 6953-6956).
+        /// </summary>
+        public static bool AvoidsCoveredCrossings(CommandTaskType task, float fromX, float fromZ, float toX, float toZ)
         {
-            return MoveIntent(groupId, task, x, z, inContactWithdrawal, IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
+            return Battle.CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(task, PostureSense.Distance(fromX, fromZ, toX, toZ));
+        }
+
+        /// <summary>
+        /// A nested leaf brigade's move to its slot, facing <paramref name="heading"/>
+        /// (-1 none): no stance (it is not an AI group), and never through
+        /// BlockedMovingOrder (#61's leaf path called SetWaypoint directly).
+        /// </summary>
+        public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, float heading, bool inContactWithdrawal)
+        {
+            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false,
+                IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
         }
 
         public static BattleOrderIntent FacingPulse(int unitId, float heading)
@@ -1217,7 +1233,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static int SubmitMove(IIntentSink sink, in PostureIntentRequest r)
         {
-            sink.Submit(MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, r.InContactWithdrawal, r.Priority, r.Source, r.Reason));
+            sink.Submit(MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
+                r.Priority, r.Source, r.Reason));
             return 1;
         }
 
@@ -1230,7 +1247,8 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 sink.Submit(new BattleOrderIntent
                 {
-                    GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation, Heading = -1f, Task = r.Task,
+                    GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation,
+                    Heading = r.HasThreatHeading ? PostureSense.NormalizeHeading(r.ThreatHeading) : -1f, Task = r.Task,
                     Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason,
                 });
                 n++;
@@ -1239,48 +1257,67 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         // B-61clock: planned moves go by courier like vanilla AI group moves; an
-        // in-contact withdrawal is immediate (CheckIfOutflanked 6235).
-        private static BattleOrderIntent MoveIntent(int groupId, CommandTaskType task, float x, float z, bool inContactWithdrawal,
-            IntentPriority priority, IntentSource source, string reason)
+        // in-contact withdrawal is immediate (CheckIfOutflanked 6235). A move
+        // through BlockedMovingOrder is immediate too once the executor takes
+        // that path (UpdateOrders' SetWaypoint has useorderdelay:false); the
+        // courier flag stays for its plain-SetWaypoint fallback.
+        private static BattleOrderIntent MoveIntent(int groupId, CommandTaskType task, float x, float z, float heading,
+            bool inContactWithdrawal, bool avoidCoveredCrossings, IntentPriority priority, IntentSource source, string reason)
         {
             bool withdrawal = inContactWithdrawal && task == CommandTaskType.FallBackToLine;
             IntentFlags flags = IntentFlags.None;
-            if (CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: withdrawal))
+            if (Battle.CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: withdrawal))
                 flags |= IntentFlags.UseOrderDelay;
             if (withdrawal) flags |= IntentFlags.InContactWithdrawal;
+            if (avoidCoveredCrossings) flags |= IntentFlags.AvoidCoveredCrossings;
             return new BattleOrderIntent
             {
-                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = -1f, Task = task,
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z,
+                Heading = heading >= 0f ? PostureSense.NormalizeHeading(heading) : -1f, Task = task,
                 Flags = flags, Priority = priority, Source = source, Reason = reason,
             };
         }
     }
 
-    // B-leaf target (plan BC5a): #61 placed a nested leaf brigade at its slot in
-    // the parent's formation from groupposition.unitoffsetposition and the
-    // parent's lastsetwaypointrotation (SetGroupFormation 92060-92075), with the
-    // parent found through the scene graph. Neither the
-    // layout nor the rotation is in the snapshot, so the slot is the leaf's
-    // current offset from its command parent (the snapshot parent map, plan D5)
-    // re-applied at the parent's last waypoint — the rule the executor uses for
-    // fanned-out children (OrderExecutor.OffsetTarget); a slot within 60 m of
-    // the leaf is no move. The executor's validator
-    // clamps it to the map (131057-131068).
+    // B-leaf target (plan BC5a). Shipped #61 placed a nested leaf brigade at
+    // its slot in the parent's formation: groupposition.unitoffsetposition laid
+    // out in the parent's frame at parent.lastsetwaypointrotation
+    // (LeafFormationSlot.OffsetXZ over GetAngleTerrainPosXYStatic 26937-26949,
+    // SetGroupFormation 92060-92075), and moved it facing that rotation. The
+    // snapshot carries neither the layout nor lastsetwaypointrotation, so the
+    // slot is the leaf's current offset from its command parent (the snapshot
+    // parent map, plan D5) turned by the parent's heading change and re-applied
+    // at the parent's last waypoint. The frame the offset was laid in is the
+    // leaf's own facing (SetGroupFormation paths every child at the group's
+    // rotation, 92063/92096); the parent's facing is its completed heading
+    // (LeafBrigadeMovePolicy moves a leaf only while the parent has no order
+    // in flight). A slot within 60 m of the leaf is no move; the executor's
+    // validator clamps it to the map (131057-131068).
     public static class LeafSlotTarget
     {
-        public static bool TryResolve(IBattleUnitView s, int leafIndex, out int parentIndex, out float x, out float z)
+        public static bool TryResolve(IBattleUnitView s, int leafIndex, out int parentIndex, out float x, out float z, out float heading)
         {
             parentIndex = -1;
             x = 0f;
             z = 0f;
+            heading = -1f;
             if (s == null || leafIndex < 0 || leafIndex >= s.OwnCount) return false;
             UnitRecord[] own = s.Own;
             int parent = own[leafIndex].ParentIndex;
             if (parent < 0 || parent >= s.OwnCount || parent == leafIndex) return false;
             parentIndex = parent;
             if (!PostureSense.HasPoint(own[parent].LastWaypointX, own[parent].LastWaypointZ)) return false;
-            x = own[parent].LastWaypointX + (own[leafIndex].X - own[parent].X);
-            z = own[parent].LastWaypointZ + (own[leafIndex].Z - own[parent].Z);
+            heading = PostureSense.NormalizeHeading(own[parent].RotationY);
+
+            // Vanilla headings turn clockwise from +z toward +x.
+            double turn = (own[parent].RotationY - own[leafIndex].RotationY) * Math.PI / 180.0;
+            if (double.IsNaN(turn) || double.IsInfinity(turn)) turn = 0.0;
+            float dx = own[leafIndex].X - own[parent].X;
+            float dz = own[leafIndex].Z - own[parent].Z;
+            float cos = (float)Math.Cos(turn);
+            float sin = (float)Math.Sin(turn);
+            x = own[parent].LastWaypointX + dx * cos + dz * sin;
+            z = own[parent].LastWaypointZ - dx * sin + dz * cos;
             // A leaf already at its slot has no move to make.
             return PostureSense.IsMoveAway(own[leafIndex], x, z);
         }

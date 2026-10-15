@@ -146,6 +146,11 @@ namespace WhiskeyRealism.Tactical.Battle
         Limber = 32,
         Unlimber = 64,
         PerRegiment = 128,
+        // BC5a, additive: route the move through vanilla AIBattle.BlockedMovingOrder
+        // (3054-3150: NavMeshObstacles over the enemy-covered crossings of the
+        // side's blockedcrossings, then SetWaypoint two frames later, UpdateOrders
+        // 3382), as vanilla's own line-group moves over 150 m do (6953-6956).
+        AvoidCoveredCrossings = 256,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

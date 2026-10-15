@@ -212,8 +212,9 @@ namespace WhiskeyRealism.Tactical.Operations
     // read it from live vanilla fields (TacticalFogOfWarContact.HasVisibleEnemy,
     // groupenemiesinrange, combatstatussubordinates, flanksthreated, morale,
     // orderqueue) and found the parent through the scene graph; here every
-    // input is a PostureSense proxy and the parent is the snapshot's command
-    // parent (plan D5). Courier cadence is the order executor's (one courier
+    // input is a PostureSense proxy (flank risk is #44's perceived rule,
+    // BattleWriterPolicy.PerceivedFlankRisk) and the parent is the snapshot's
+    // command parent (plan D5). Courier cadence is the order executor's (one courier
     // move per group per OrderExecutor.CourierIntervalBattleHours).
     public static class TacticalDivisionPlayInputs
     {
@@ -232,11 +233,12 @@ namespace WhiskeyRealism.Tactical.Operations
             int movingUnits,
             string nodeId,
             CommandNodeRole role,
-            CommandTaskType task)
+            CommandTaskType task,
+            float[] meanFlankThreat)
         {
             ref UnitRecord unit = ref s.Own[index];
             bool engaged = PostureSense.CloseEngaged(s, index, descendantFlags);
-            bool flankRisk = PostureSense.FlankRisk(s, index);
+            bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, index, meanFlankThreat);
             bool activeMove = PostureSense.ActiveMove(unit, movingUnits);
             int closest = s.ClosestVisibleEnemy(index, out float distance);
             return new TacticalDivisionPlaySubordinate(

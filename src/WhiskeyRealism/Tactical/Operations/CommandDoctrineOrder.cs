@@ -70,7 +70,6 @@ namespace WhiskeyRealism.Tactical.Operations
 
         public bool HasPurpose { get { return Role != CommandNodeRole.Unknown || Task != CommandTaskType.None; } }
         public bool AllowsIdle { get { return AllowedIdle != DoctrineAllowedIdleReason.None; } }
-        public bool HasConcreteMovementTarget { get { return PrimaryTarget.HasValue || SupportTarget.HasValue || FallbackTarget.HasValue; } }
 
         public static CommandDoctrineOrder Create(
             string nodeId,
@@ -144,31 +143,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 Delivery,
                 ParentNodeId,
                 CourierIntervalSeconds,
-                reason);
-        }
-
-        public CommandDoctrineOrder WithDelivery(
-            TacticalOrderDelivery delivery,
-            string parentNodeId,
-            float courierIntervalSeconds,
-            string reason)
-        {
-            return new CommandDoctrineOrder(
-                NodeId,
-                Role,
-                Task,
-                ObjectiveId,
-                PrimaryTarget,
-                SupportTarget,
-                FallbackTarget,
-                AllowedIdle,
-                MinCommitUntilSeconds,
-                IssuedAtSeconds,
-                Confidence01,
-                Sop,
-                delivery,
-                parentNodeId,
-                courierIntervalSeconds,
                 reason);
         }
 

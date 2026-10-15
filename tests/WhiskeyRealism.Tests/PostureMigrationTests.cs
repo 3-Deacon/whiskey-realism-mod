@@ -26,7 +26,7 @@ internal static class PostureMigrationTests
             ("bc5a PlayCentroidsUseVisibleEnemiesOnly", PlayCentroidsUseVisibleEnemiesOnly),
             ("bc5a PlayRecomputeGateOnDoctrineClock", PlayRecomputeGateOnDoctrineClock),
             ("bc5a ArmyPostureInputsExcludePlayerOwnedNotAncestors", ArmyPostureInputsExcludePlayerOwnedNotAncestors),
-            ("bc5a BlockedMovingOrderPathIsSkippedOutcome", BlockedMovingOrderPathIsSkippedOutcome),
+            ("bc5a AttackMovesOver150mAvoidCoveredCrossings", AttackMovesOver150mAvoidCoveredCrossings),
             ("bc5a RotatableRegimentsFollowVanillaDetachedExclusion", RotatableRegimentsFollowVanillaDetachedExclusion),
             ("bc5a GroupFacingOnlyOnACleanSubtree", GroupFacingOnlyOnACleanSubtree),
             ("bc5a PostureSenseProxiesReadTheSnapshot", PostureSenseProxiesReadTheSnapshot),
@@ -44,6 +44,9 @@ internal static class PostureMigrationTests
             ("bc5a PostureRefusesTheThreatenedFlankInContact", PostureRefusesTheThreatenedFlankInContact),
             ("bc5a RotationWalkSkipsEveryUnitUnderADetachedNode", RotationWalkSkipsEveryUnitUnderADetachedNode),
             ("bc5a GroupFacingOnACleanSubtreeElsePerRegiment", GroupFacingOnACleanSubtreeElsePerRegiment),
+            ("bc5a PostureFlankRiskIsThePerceivedRule", PostureFlankRiskIsThePerceivedRule),
+            ("bc5a LeafSlotTurnsWithTheParentsWheel", LeafSlotTurnsWithTheParentsWheel),
+            ("bc5a FireControlWalksTheGroupsSubtree", FireControlWalksTheGroupsSubtree),
         });
     }
 
@@ -156,6 +159,15 @@ internal static class PostureMigrationTests
         AssertTrue((retreat.Flags & IntentFlags.InContactWithdrawal) != 0, "in-contact withdrawal flagged");
         AssertTrue((retreat.Flags & IntentFlags.UseOrderDelay) == 0, "in-contact withdrawal is immediate (CheckIfOutflanked 6235)");
 
+        // P13: in contact, a move that is not FallBackToLine is no withdrawal.
+        var engaged = new Sink();
+        PostureIntentRequest attack = Request(PostureExecutionAction.SetWaypoint, CommandTaskType.AttackObjective);
+        attack.InContactWithdrawal = true;
+        PostureIntentPlan.Submit(engaged, attack);
+        BattleOrderIntent attackMove = engaged.On(OrderChannel.Move);
+        AssertTrue((attackMove.Flags & IntentFlags.InContactWithdrawal) == 0, "an in-contact attack carries no withdrawal flag");
+        AssertTrue((attackMove.Flags & IntentFlags.UseOrderDelay) != 0, "and keeps the courier delay");
+
         var hold = new Sink();
         AssertEqual(1, PostureIntentPlan.Submit(hold, Request(PostureExecutionAction.SetFormation, CommandTaskType.HoldObjective)), "hold: formation only");
         AssertTrue(hold.Has(OrderChannel.Formation), "formation intent");
@@ -189,18 +201,19 @@ internal static class PostureMigrationTests
         own[0].LastWaypointZ = -1400f;
         var s = Snapshot(own, new[] { -1, 0, 0 });
 
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, out int parent, out float x, out float z), "slot resolved");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, out int parent, out float x, out float z, out float heading), "slot resolved");
         AssertEqual(0, parent, "parent from the snapshot's command-parent map");
         AssertNear(1250f, x, 0.001f, "parent's last waypoint + the leaf's offset (x)");
         AssertNear(-1380f, z, 0.001f, "parent's last waypoint + the leaf's offset (z)");
+        AssertNear(0f, heading, 0.001f, "the leaf faces the parent's heading");
 
         var orphan = Snapshot(new[] { Group(20, 0f, -10f, typ: 14) }, new[] { -1 });
-        AssertFalse(LeafSlotTarget.TryResolve(orphan, 0, out _, out _, out _), "root leaf: no parent, no slot");
+        AssertFalse(LeafSlotTarget.TryResolve(orphan, 0, out _, out _, out _, out _), "root leaf: no parent, no slot");
 
         own[0].LastWaypointX = 0f;
         own[0].LastWaypointZ = 0f;
         var noWaypoint = Snapshot(own, new[] { -1, 0, 0 });
-        AssertFalse(LeafSlotTarget.TryResolve(noWaypoint, 1, out _, out _, out _), "parent without a waypoint: no slot");
+        AssertFalse(LeafSlotTarget.TryResolve(noWaypoint, 1, out _, out _, out _, out _), "parent without a waypoint: no slot");
     }
 
     private static void PostureProducerKeepsBattleNavMeshAreaCosts()
@@ -367,29 +380,48 @@ internal static class PostureMigrationTests
         AssertEqual(0, PostureProbeFilter.WithoutPlayerOwned(probes, null).Count, "no snapshot: no probes (nothing to vouch for)");
     }
 
-    private static void BlockedMovingOrderPathIsSkippedOutcome()
+    private static void AttackMovesOver150mAvoidCoveredCrossings()
     {
-        // #61 queued a vanilla BlockedMovingOrder for attack moves over 150 m when
-        // the battle had blocked-crossing data. That path is gone: the move is one
-        // plain Move intent, and vanilla's own UpdateBlockedCrossings (7917)
-        // handles crossings. A move vanilla would drop silently ends as a Skipped
-        // outcome with its reason, never as a queued side order.
+        // Vanilla UpdateBlockedCrossings (7917-7973) only lists the river crossings
+        // an enemy covers; the avoidance is AIBattle.BlockedMovingOrder (3054-3150:
+        // NavMeshObstacles over those crossings, SetWaypoint two frames later from
+        // UpdateOrders 3382), which vanilla uses for its own line-group moves over
+        // 150 m (6953-6956). Shipped #61 sent Attack/Support/Fix/AdvanceToAssembly
+        // group moves over 150 m through it; the posture move carries the flag there.
+        AssertEqual(256, (int)IntentFlags.AvoidCoveredCrossings, "next free intent flag bit");
+        AssertNear(150f, WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy.BlockedMoveDistanceMeters, 0.001f, "vanilla's 150 m (6953)");
+        var attackTasks = new[]
+        {
+            CommandTaskType.AttackObjective, CommandTaskType.SupportAttack, CommandTaskType.FixEnemy, CommandTaskType.AdvanceToAssembly,
+        };
+        foreach (CommandTaskType task in attackTasks)
+        {
+            AssertTrue(PostureIntentPlan.AvoidsCoveredCrossings(task, 0f, -100f, 151f, -100f), task + " over 150 m");
+            AssertFalse(PostureIntentPlan.AvoidsCoveredCrossings(task, 0f, -100f, 150f, -100f), task + " at 150 m");
+        }
+        var otherTasks = new[]
+        {
+            CommandTaskType.HoldObjective, CommandTaskType.Screen, CommandTaskType.FallBackToLine, CommandTaskType.ReleaseReserve,
+            CommandTaskType.Scout, CommandTaskType.FormUp,
+        };
+        foreach (CommandTaskType task in otherTasks)
+            AssertFalse(PostureIntentPlan.AvoidsCoveredCrossings(task, 0f, -100f, 2000f, -2000f), task + " never");
+
         var sink = new Sink();
         PostureIntentRequest far = Request(PostureExecutionAction.SetFormationAndWaypoint, CommandTaskType.AttackObjective);
-        far.TargetX = 2000f;
-        far.TargetZ = -2000f;
-        PostureIntentPlan.Submit(sink, far);
-        int moves = 0;
-        for (int i = 0; i < sink.Items.Count; i++) if (sink.Items[i].Channel == OrderChannel.Move) moves++;
-        AssertEqual(1, moves, "one plain move, whatever the distance");
+        far.AvoidCoveredCrossings = true;
+        AssertEqual(3, PostureIntentPlan.Submit(sink, far), "stance + move + formation");
+        AssertTrue((sink.On(OrderChannel.Move).Flags & IntentFlags.AvoidCoveredCrossings) != 0, "the move carries the flag");
+        AssertTrue((sink.On(OrderChannel.Stance).Flags & IntentFlags.AvoidCoveredCrossings) == 0, "only the move");
+        AssertTrue((sink.On(OrderChannel.Formation).Flags & IntentFlags.AvoidCoveredCrossings) == 0, "only the move");
 
-        var own = new[] { Group(7, 0f, -100f, flags: UnitFlags.Garrisoned) };
-        var s = Snapshot(own, new[] { -1 });
-        var executor = new OrderExecutor();
-        executor.Bind(new AllowGuard(), null);
-        ExecutionPlan plan = executor.Plan(s, sink.On(OrderChannel.Move), 10.0);
-        AssertFalse(plan.Execute, "not issued");
-        AssertEqual(SkipReason.Garrison, plan.Skip, "skipped with the vanilla silent-exit reason (91331)");
+        var near = new Sink();
+        PostureIntentPlan.Submit(near, Request(PostureExecutionAction.SetWaypoint, CommandTaskType.AttackObjective));
+        AssertTrue((near.On(OrderChannel.Move).Flags & IntentFlags.AvoidCoveredCrossings) == 0, "not flagged: plain move");
+
+        // #61's leaf brigade path called SetWaypoint directly (never BlockedMovingOrder).
+        BattleOrderIntent leaf = PostureIntentPlan.LeafMove(11, CommandTaskType.AttackObjective, 2000f, -2000f, -1f, false);
+        AssertTrue((leaf.Flags & IntentFlags.AvoidCoveredCrossings) == 0, "a leaf move is never flagged");
     }
 
     private sealed class AllowGuard : IOrderGuard
@@ -457,9 +489,6 @@ internal static class PostureMigrationTests
         AssertTrue(PostureSense.CloseEngaged(s, 2, desc[2]), "a visible enemy within 250 m");
         s.SetClosestVisibleEnemy(2, 0, 400f);
         AssertFalse(PostureSense.CloseEngaged(s, 2, desc[2]), "a visible enemy beyond 250 m");
-        AssertFalse(PostureSense.FlankRisk(s, 2), "no flank pressure");
-        s.SetFlankPressure(2, 2, 10f);
-        AssertTrue(PostureSense.FlankRisk(s, 2), "rear pressure is flank risk");
 
         CommandPhysicalState physical = PostureSense.Physical(s.Own[2], moving[2]);
         AssertFalse(physical.PathInterrupted, "no PathInterrupted flag");
@@ -499,7 +528,7 @@ internal static class PostureMigrationTests
         PostureSense.AggregateDescendants(s, ref desc, ref moving);
 
         TacticalDivisionPlaySubordinate child = TacticalDivisionPlayInputs.FromSnapshot(
-            s, 1, desc[1], moving[1], "node-2", CommandNodeRole.SupportingAttack, CommandTaskType.SupportAttack);
+            s, 1, desc[1], moving[1], "node-2", CommandNodeRole.SupportingAttack, CommandTaskType.SupportAttack, new float[3]);
         AssertEqual("node-2", child.NodeId, "node id");
         AssertTrue(child.HasTargets, "visible enemy");
         AssertTrue(child.EngagingEnemy, "visible within close contact");
@@ -509,6 +538,19 @@ internal static class PostureMigrationTests
         AssertNear(200f, child.EnemyDistance, 0.01f, "closest visible distance");
         AssertTrue(child.HasOrders, "a queued courier order");
         AssertEqual(CommandTaskType.SupportAttack, child.CurrentTask, "ledger task");
+
+        // Flank risk is the perceived rule: a regiment's flank threat makes its brigade in trouble.
+        s.Own[1].Morale = 0.9f;
+        s.SetClosestVisibleEnemy(1, 0, 600f);
+        AssertFalse(TacticalDivisionPlayInputs.FromSnapshot(s, 1, desc[1], moving[1], "node-2", CommandNodeRole.SupportingAttack,
+            CommandTaskType.SupportAttack, new float[3]).InTrouble, "steady, nothing on a flank");
+        s.SetFlankPressure(2, 1, 10f);
+        var mean = new float[3];
+        ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, new int[3]);
+        TacticalDivisionPlaySubordinate flanked = TacticalDivisionPlayInputs.FromSnapshot(s, 1, desc[1], moving[1], "node-2",
+            CommandNodeRole.SupportingAttack, CommandTaskType.SupportAttack, mean);
+        AssertTrue(flanked.InTrouble, "a flanked regiment below: in trouble");
+        AssertTrue(flanked.UnderCloseFire, "and under close fire");
 
         AssertEqual(-1, TacticalDivisionPlayInputs.ParentIndex(s, 0), "root: no division");
         AssertEqual(0, TacticalDivisionPlayInputs.ParentIndex(s, 1), "command parent from the snapshot map");
@@ -539,7 +581,7 @@ internal static class PostureMigrationTests
         own[0].LastWaypointX = 1010f;
         own[0].LastWaypointZ = -1000f;
         var s = Snapshot(own, new[] { -1, 0 });
-        AssertFalse(LeafSlotTarget.TryResolve(s, 1, out int parent, out _, out _), "slot within 60 m: no move");
+        AssertFalse(LeafSlotTarget.TryResolve(s, 1, out int parent, out _, out _, out _), "slot within 60 m: no move");
         AssertEqual(0, parent, "the parent is still reported");
         AssertFalse(PostureSense.IsMoveAway(s.Own[1], 1080f, -980f), "30 m away is underfoot");
         AssertTrue(PostureSense.IsMoveAway(s.Own[1], 1150f, -980f), "100 m away is a move");
@@ -619,8 +661,8 @@ internal static class PostureMigrationTests
         AssertFalse(IssuesAfter(fire, regiment, 260f), "fire control inside 270 s");
         AssertTrue(IssuesAfter(fire, regiment, 280f), "fire control after 270 s");
         // A new target (the pending move would dedupe the same one).
-        BattleOrderIntent move = PostureIntentPlan.LeafMove(1, CommandTaskType.AttackObjective, 900f, -100f, false);
-        BattleOrderIntent next = PostureIntentPlan.LeafMove(1, CommandTaskType.SupportAttack, 600f, -600f, false);
+        BattleOrderIntent move = PostureIntentPlan.LeafMove(1, CommandTaskType.AttackObjective, 900f, -100f, -1f, false);
+        BattleOrderIntent next = PostureIntentPlan.LeafMove(1, CommandTaskType.SupportAttack, 600f, -600f, -1f, false);
         AssertFalse(IssuesAfter(move, next, group, 170f), "move inside 180 s");
         AssertTrue(IssuesAfter(move, next, group, 190f), "move after 180 s");
     }
@@ -640,6 +682,15 @@ internal static class PostureMigrationTests
         AssertEqual(1, PostureIntentPlan.Submit(sink, r), "a refuse alone still writes the formation channel");
         BattleOrderIntent formation = sink.On(OrderChannel.Formation);
         AssertEqual(RefuseFlank.Right, formation.Refuse, "refuse carried");
+        AssertNear(-1f, formation.Heading, 0.001f, "no threat heading: none");
+
+        // #61 wheeled with the threat heading (manualfinalrotation), never -1,
+        // which SetGroupFormation would replace with lastsetwaypointrotation (91900-91902).
+        var faced = new Sink();
+        r.HasThreatHeading = true;
+        r.ThreatHeading = 90f;
+        PostureIntentPlan.Submit(faced, r);
+        AssertNear(90f, faced.On(OrderChannel.Formation).Heading, 0.001f, "the refuse-only wheel faces the threat");
 
         var own = new[] { Group(7, 0f, -1000f, typ: 14) };
         var s = Snapshot(own, new[] { -1 });
@@ -837,5 +888,101 @@ internal static class PostureMigrationTests
         arbiter.Resolve(new BattleOrderIntent[16]);
         AssertTrue(arbiter.TryGetClaim(7, OrderChannel.Move, out BattleOrderIntent walk), "move claim");
         AssertEqual(IntentSource.PostureExecutor, walk.Source, "Executor beats Support on the same channel");
+    }
+
+    private static void PostureFlankRiskIsThePerceivedRule()
+    {
+        // The posture reads #44's one perceived flank-risk rule
+        // (BattleWriterPolicy.PerceivedFlankRisk): the group's own outflanked state
+        // over the snapshot's flank pressure, or a positive mean vanilla outflanked
+        // weight of its combat regiments (ArmyEvidenceBuilder.MeanFlankThreatByGroup).
+        // Brigade 1 → regiments 2, 3; brigade 4 alone.
+        var own = new[]
+        {
+            Group(1, 0f, -500f, typ: 14), Regiment(2, -50f, -500f), Regiment(3, 50f, -500f),
+            Group(4, 800f, -500f, typ: 14),
+        };
+        var s = Snapshot(own, new[] { -1, 0, 0, -1 });
+        var mean = new float[s.OwnCount];
+        var count = new int[s.OwnCount];
+        ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertFalse(BattleWriterPolicy.PerceivedFlankRisk(s, 0, mean), "nothing on any flank");
+
+        s.SetFlankPressure(2, 0, 10f);
+        ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertTrue(BattleWriterPolicy.PerceivedFlankRisk(s, 0, mean), "a regiment's flank threat is the brigade's (no pressure on the HQ)");
+        AssertTrue(BattleWriterPolicy.PerceivedFlankRisk(s, 2, mean), "the regiment itself");
+        AssertFalse(BattleWriterPolicy.PerceivedFlankRisk(s, 1, mean), "its sibling regiment is not flanked");
+        AssertFalse(BattleWriterPolicy.PerceivedFlankRisk(s, 3, mean), "another brigade is untouched");
+
+        s.SetFlankPressure(3, 2, 10f);
+        AssertTrue(BattleWriterPolicy.PerceivedFlankRisk(s, 3, mean), "the group's own rear pressure");
+    }
+
+    private static void LeafSlotTurnsWithTheParentsWheel()
+    {
+        // Shipped #61 (LeafFormationSlot.OffsetXZ over GetAngleTerrainPosXYStatic
+        // 26937-26949) placed the leaf in the parent's frame at
+        // parent.lastsetwaypointrotation. The snapshot has the leaf's offset in
+        // the frame it was laid in (its own facing: SetGroupFormation paths each
+        // child at the group's rotation, 92063/92096) and the settled parent's
+        // facing (the leaf moves only when the parent has no order in flight).
+        // Parent at the origin facing north (0), leaf 50 m on its right (+x).
+        var own = new[] { Group(10, 0f, 0f), Group(11, 50f, 0f, typ: 14) };
+        own[0].LastWaypointX = 0f;
+        own[0].LastWaypointZ = -400f;
+        var s = Snapshot(own, new[] { -1, 0 });
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, out _, out float x, out float z, out float heading), "unwheeled slot");
+        AssertNear(50f, x, 0.01f, "still on the right (x)");
+        AssertNear(-400f, z, 0.01f, "still on the right (z)");
+        AssertNear(0f, heading, 0.01f, "faces north");
+
+        // The parent wheeled to face east (90): its right is now south (-z).
+        s.Own[0].RotationY = 90f;
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, out _, out x, out z, out heading), "wheeled slot");
+        AssertNear(0f, x, 0.01f, "right flank after the wheel (x)");
+        AssertNear(-450f, z, 0.01f, "right flank after the wheel (z)");
+        AssertNear(90f, heading, 0.01f, "faces the parent's new heading");
+
+        // The leaf already turned with it: its offset is in the new frame.
+        s.Own[1].RotationY = 90f;
+        s.Own[1].X = 0f;
+        s.Own[1].Z = -50f;
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, out _, out x, out z, out _), "turned leaf");
+        AssertNear(0f, x, 0.01f, "no second turn (x)");
+        AssertNear(-450f, z, 0.01f, "no second turn (z)");
+    }
+
+    private static void FireControlWalksTheGroupsSubtree()
+    {
+        // Fire control walks the group's own subtree (snapshot command tree), the
+        // set #61 read from allattachedunits; no fixed cap.
+        const int regiments = 100;
+        var own = new UnitRecord[regiments + 3];
+        var parents = new int[own.Length];
+        own[0] = Group(1, 0f, -100f, typ: 15);
+        parents[0] = -1;
+        own[1] = Group(2, 0f, -100f, typ: 14, flags: UnitFlags.PermanentlyDetached);
+        parents[1] = 0;
+        own[2] = Group(3, 900f, -100f, typ: 15);
+        parents[2] = -1;
+        for (int k = 0; k < regiments; k++)
+        {
+            own[3 + k] = Regiment(10 + k, 0f, -100f);
+            parents[3 + k] = k % 2 == 0 ? 0 : 1;
+        }
+        own[3].InstanceId = 999;
+        parents[3] = 2;
+        var s = Snapshot(own, parents);
+
+        int[] result = null;
+        int[] children = null;
+        int n = PostureSense.CollectDescendants(s, 0, ref result, ref children);
+        AssertEqual(regiments, n, "the detached sub-group and every regiment under brigade 1, none of brigade 3's");
+        for (int k = 0; k < n; k++)
+            AssertTrue(s.IsAncestorOf(0, result[k]), "a descendant");
+        AssertEqual(1, PostureSense.CollectDescendants(s, 2, ref result, ref children), "brigade 3 has one regiment");
+        AssertEqual(3, result[0], "its own index");
+        AssertEqual(0, PostureSense.CollectDescendants(s, 3, ref result, ref children), "a regiment has no subtree");
     }
 }
