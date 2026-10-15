@@ -174,6 +174,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryWriter.cs" Link="Telemetry\TelemetryWriter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryRuntime.cs" Link="Telemetry\TelemetryRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryPerf.cs" Link="Telemetry\TelemetryPerf.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\ObserverTelemetryCache.cs" Link="Tactical\ObserverTelemetryCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\ReferenceStringComparer.cs" Link="Telemetry\ReferenceStringComparer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryProfilerMarkers.cs" Link="Telemetry\TelemetryProfilerMarkers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryFrameProbe.cs" Link="Telemetry\TelemetryFrameProbe.cs" />
