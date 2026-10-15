@@ -47,10 +47,22 @@ namespace WhiskeyRealism.Tactical
     // yields the same way (4258; MicroAICheckForRetreats needs macroai 3 and
     // ai_stance 1, 5641).
     //
-    // Not in the carve-out: the side-level lines 4248 (macroai 2 → every
-    // group defends) and 4256 (macroai 1 with side forcebalance below the
-    // screening trigger → screen). macroai has its own single owner (#44);
-    // under its value Whiskey's group opinion stands.
+    // Not in the carve-out (side-level lines, not group valves):
+    //   4248 macroai 2 → every group defends: a pure function of macroai,
+    //     which has its own single owner (#44).
+    //   4256 macroai 1 && flag && local stance != 2 && strength > 0 → screen.
+    //     flag is computed once per call for the whole side (4229:
+    //     sideinformation[sideofai].forcebalance < GetScreeningTrigger(),
+    //     4216 = forcebalancetriggerattack * 0.5); the only per-group input is
+    //     "in combat" (strength > 0). Vanilla only sits at macroai 1 below
+    //     that ratio through the meeting/attacker branches of
+    //     CheckGlobalAIStrategy (6400 battleType 0, 6412-6424 attacker with
+    //     no retreat), so 4256 is vanilla's side-wide "outnumbered — screen
+    //     everything engaged" response. Yielding to it would hand every
+    //     engaged group of that side back to vanilla, i.e. replace Whiskey's
+    //     own force-balance doctrine wholesale; the side-level answer to being
+    //     outnumbered is #44's macroai (2, or vanilla's own 3), under which
+    //     4248 / 4258 apply.
     //
     // Design cost (remaining): while Whiskey holds a group, vanilla's
     // per-group re-decision is suppressed except through the yields above —
