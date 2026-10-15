@@ -784,7 +784,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Records the front axis and per-group flank threat (mean outflanked weight) the
         /// evidence was banded on. Called from the orchestrator tick cycle
-        /// (<see cref="ArmyTickCycle.MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float)"/>).
+        /// (<see cref="ArmyTickCycle.MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float, double)"/>).
         /// </summary>
         public void ObserveFrontGeometry(EnemyVisibleState enemyVisible)
         {

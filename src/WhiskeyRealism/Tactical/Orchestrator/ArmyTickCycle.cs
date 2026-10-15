@@ -26,6 +26,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// Stamps a replan made outside <see cref="MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float, double)"/>
+        /// (the coordinator's new-battle-day replan) so it counts against
+        /// "Min Replan Seconds" like any other. Uses the doctrine time.
+        /// </summary>
+        public static void RecordReplan(int allianceId) => RecordReplan(allianceId, TacticalDoctrineTime.NowBattleSeconds);
+
+        internal static void RecordReplan(int allianceId, double doctrineNowSeconds)
+        {
+            if (double.IsNaN(doctrineNowSeconds) || double.IsInfinity(doctrineNowSeconds)) return;
+            _clockByAlliance[allianceId] = (float)doctrineNowSeconds;
+            _lastReplanByAlliance[allianceId] = (float)doctrineNowSeconds;
+        }
+
+        /// <summary>
         /// Legacy overload that defaults readiness fields to neutral values
         /// (PushReady decision). Existing call sites stay binary-compatible
         /// until DriveTickCycle wires through the new fatigue/ammo data.
@@ -79,7 +93,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // a zero delta, so the night does not burn phase budgets or the
             // plan deadline. Legacy callers without
             // a battle clock keep the single-clock behaviour.
-            if (!double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds))
+            bool doctrineClock = !double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds);
+            if (doctrineClock)
             {
                 double delta = 0.0;
                 if (_lastDoctrineNowByAlliance.TryGetValue(allianceId, out var lastDoctrineNow) && doctrineNowSeconds > lastDoctrineNow)
@@ -89,7 +104,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             bool battleClock = battleDeltaSeconds >= 0f;
             float clockDelta = battleClock ? battleDeltaSeconds : deltaSeconds;
-            if (clockDelta > 0f && !float.IsNaN(clockDelta) && !float.IsInfinity(clockDelta))
+            // The replan cooldown runs on doctrine time itself when supplied,
+            // the same clock RecordReplan stamps; otherwise on summed deltas.
+            if (doctrineClock)
+            {
+                _clockByAlliance[allianceId] = (float)doctrineNowSeconds;
+            }
+            else if (clockDelta > 0f && !float.IsNaN(clockDelta) && !float.IsInfinity(clockDelta))
             {
                 float currentClock;
                 _clockByAlliance.TryGetValue(allianceId, out currentClock);

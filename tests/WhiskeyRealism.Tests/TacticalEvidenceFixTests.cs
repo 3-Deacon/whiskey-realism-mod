@@ -80,6 +80,7 @@ internal static class TacticalEvidenceFixTests
         Run("the orchestrator's one observe path releases reserves and holds Main", OrchestratorObservePathAppliesReleaseAndHysteresis);
         Run("evidence is built once per side per frame and shared", EvidenceMemoSharesWithinFrame);
         Run("flank threat is the mean outflanked weight of a group's regiments", FlankThreatIsMeanOverSubordinates);
+        Run("an externally recorded replan counts against the replan cooldown", RecordedReplanRateLimits);
     }
 
     private static void Run(string name, Action test)
@@ -1131,5 +1132,21 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, ArmyEvidenceBuilder.MeanOutflankedWeight(rear, rear.Length)),
             "half the wing taken in the rear refuses");
         TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.MeanOutflankedWeight(new int[0], 0), "no regiments, no threat");
+    }
+
+    private static void RecordedReplanRateLimits()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+        double dawn = 30 * 3600.0;
+        // The coordinator's new-day replan, outside MaybeReplan.
+        ArmyTickCycle.RecordReplan(orch.AllianceId, dawn);
+        var soon = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
+            doctrineNowSeconds: dawn + 30.0);
+        TestHarness.AssertEqual(ReplanTrigger.None, soon, "a trigger 30 battle-s after the recorded replan is rate-limited");
+        var later = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
+            doctrineNowSeconds: dawn + 90.0);
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, later, "after the 60 s cooldown the trigger replans");
     }
 }
