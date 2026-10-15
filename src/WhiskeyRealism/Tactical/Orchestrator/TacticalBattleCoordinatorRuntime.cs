@@ -261,6 +261,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ClearForFailure();
             }
 
+            // A failed bootstrap leaves the coordinator inactive; do not populate battle
+            // caches nothing will consume (and nothing would clear on OnBattleEnd, which
+            // early-outs while inactive).
+            if (!active) return;
+
             // Stage A perf cache (2026-05-21): populate battle-lifetime scene-scan cache
             // after vanilla has built the battle scene. Subsequent heavy-gate fires read
             // from this cache instead of re-scanning the scene every cycle. Populate is
@@ -1760,7 +1765,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void ClearForFailure()
         {
+            // ResetRuntimeTickState clears the resolved-decision caches; the battle-lifetime
+            // scene and command-tree caches are cleared here too because OnBattleEnd
+            // early-outs once active is false.
             ResetRuntimeTickState();
+            try { TacticalStableSceneCache.Clear(); } catch { }
+            try { CommandTreeRuntime.InvalidateAll(); } catch { }
             side0 = null;
             side1 = null;
             _playerAllianceId = -1;
