@@ -16,6 +16,7 @@ internal static class BattleWriterFixTests
         MacroAiSkipsWhenAlreadyAligned();
         MacroAiEarlyGateMatchesResolver();
         MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange();
+        MacroAiLegacyScorerNeverWritesWlPlayerSide();
         MacroAiShadowHandsBackVanillaValueOnce();
         MacroAiShadowKeepsVanillaOffWhiskeyValue();
         VanillaAnglePointMatchesGetAngleTerrainPos();
@@ -51,7 +52,7 @@ internal static class BattleWriterFixTests
 
     private static int Macro(
         int ledger = -1,
-        int doctrine = -1,
+        int fallback = -1,
         int current = -1,
         bool modeAllowsWrites = true,
         bool feud = false,
@@ -70,7 +71,7 @@ internal static class BattleWriterFixTests
             endBattle,
             current,
             ledger,
-            doctrine,
+            fallback,
             wlPlayerSide,
             wlPlayerIsCic,
             pending));
@@ -83,12 +84,22 @@ internal static class BattleWriterFixTests
     // nothing when the player is CIC (every unit on the side is player-owned).
     private static void MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange()
     {
-        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(doctrine: 2, current: 1, wlPlayerSide: true), "doctrine fallback ignored");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 2, current: 1, wlPlayerSide: true), "doctrine fallback ignored");
         TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 2, current: 1, pending: 2, wlPlayerSide: true), "vanilla already heading there");
         TestHarness.AssertEqual(1, Macro(ledger: 1, current: 2, pending: 2, wlPlayerSide: true), "genuine ledger change");
         TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, current: 2, wlPlayerSide: true, wlPlayerIsCic: true), "player CIC");
-        TestHarness.AssertEqual(2, Macro(doctrine: 2, current: 1, pending: 2), "AI side keeps the doctrine fallback");
+        TestHarness.AssertEqual(2, Macro(fallback: 2, current: 1, pending: 2), "AI side keeps the doctrine fallback");
         Pass("battle writers: macroai on the W&L player side only writes a genuine ledger change");
+    }
+
+    // With the army orchestrator off, #44's legacy scorer supplies the
+    // opinion. It is not a planned operation, so it travels in the fallback
+    // slot: written on an AI side, never on the W&L player side (rule 4).
+    private static void MacroAiLegacyScorerNeverWritesWlPlayerSide()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 0, current: 1, pending: 1, wlPlayerSide: true), "scorer on player side");
+        TestHarness.AssertEqual(0, Macro(fallback: 0, current: 1, pending: 1), "scorer on AI side");
+        Pass("battle writers: #44 legacy scorer never writes the W&L player side");
     }
 
     // One #44 cycle against the shadow: the Prefix restore (the value vanilla
@@ -148,8 +159,8 @@ internal static class BattleWriterFixTests
     private static void MacroAiNeverWritesRetreat()
     {
         TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 3), "ledger 3 is no opinion");
-        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(doctrine: 3), "doctrine 3 is no opinion");
-        TestHarness.AssertEqual(2, Macro(ledger: 3, doctrine: 2), "ledger 3 falls through to doctrine 2");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 3), "doctrine 3 is no opinion");
+        TestHarness.AssertEqual(2, Macro(ledger: 3, fallback: 2), "ledger 3 falls through to doctrine 2");
         Pass("battle writers: macroai never writes retreat 3");
     }
 
@@ -178,8 +189,8 @@ internal static class BattleWriterFixTests
 
     private static void MacroAiPrefersLedgerOverDoctrineOpinion()
     {
-        TestHarness.AssertEqual(1, Macro(ledger: 1, doctrine: 2), "ledger wins");
-        TestHarness.AssertEqual(2, Macro(ledger: -1, doctrine: 2), "doctrine fallback");
+        TestHarness.AssertEqual(1, Macro(ledger: 1, fallback: 2), "ledger wins");
+        TestHarness.AssertEqual(2, Macro(ledger: -1, fallback: 2), "doctrine fallback");
         TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(), "no opinion leaves vanilla");
         Pass("battle writers: macroai prefers ledger then doctrine opinion");
     }

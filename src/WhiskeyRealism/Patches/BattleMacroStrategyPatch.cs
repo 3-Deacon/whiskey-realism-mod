@@ -50,7 +50,8 @@ namespace WhiskeyRealism.Patches
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
-    // written there, never the doctrine fallback, and nothing for a CIC player.
+    // written there, never the fallback (doctrine or legacy scorer), and
+    // nothing for a CIC player.
     [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
     internal static class BattleMacroStrategyPatch
     {
@@ -120,8 +121,8 @@ namespace WhiskeyRealism.Patches
                 return;
 
             int allianceId = ResolveAllianceId(bunits, side);
-            int ledgerOpinion;
-            int doctrineOpinion = -1;
+            int ledgerOpinion = -1;
+            int fallbackOpinion;
             string source;
             if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
             {
@@ -131,16 +132,18 @@ namespace WhiskeyRealism.Patches
                 var army = TacticalBattleCoordinator.GetSideOrchestrator(allianceId)?.Army;
                 if (army == null) return;
                 ledgerOpinion = OrchestratorMacroOpinion(army);
-                doctrineOpinion = DoctrineMacroOpinion(army);
+                fallbackOpinion = DoctrineMacroOpinion(army);
                 source = "orchestrator";
             }
             else
             {
-                ledgerOpinion = ScorerMacroOpinion(bunits, side, vanillaMacro, scriptedAiStrategy, scriptedSideMacro, endBattle, battle);
+                // The legacy scorer is not a planned operation: it may fill the
+                // AI side's fallback slot but never reaches the W&L player side.
+                fallbackOpinion = ScorerMacroOpinion(bunits, side, vanillaMacro, scriptedAiStrategy, scriptedSideMacro, endBattle, battle);
                 source = "scorer";
             }
 
-            if (ledgerOpinion == 3 || doctrineOpinion == 3)
+            if (ledgerOpinion == 3 || fallbackOpinion == 3)
                 OnceLog.Info("tactical-macro:retreat-opinion-ignored",
                     "[TacticalMacroDecision] retreat (3) opinion ignored; vanilla owns army retreat (CheckGlobalAIStrategy 6355/6362).");
 
@@ -152,7 +155,7 @@ namespace WhiskeyRealism.Patches
                 endBattle,
                 vanillaMacro,
                 ledgerOpinion,
-                doctrineOpinion,
+                fallbackOpinion,
                 IsWlPlayerSide(battle, allianceId),
                 WlPlayerIsCic(),
                 battle.newmacroaitoset));
@@ -161,7 +164,7 @@ namespace WhiskeyRealism.Patches
             battle.macroai = write;
             _shadows.Remove(battle);
             _shadows.Add(battle, new MacroShadow { Written = write, VanillaMacro = vanillaMacro });
-            LogWrite(allianceId, vanillaMacro, write, ledgerOpinion, doctrineOpinion, source);
+            LogWrite(allianceId, vanillaMacro, write, ledgerOpinion, fallbackOpinion, source);
         }
 
         // W&L forces ai_vs_ai (29789), so aibattle[1] (isplayeraiorfeud == 1,
@@ -224,7 +227,7 @@ namespace WhiskeyRealism.Patches
             return decision.MacroAi;
         }
 
-        private static void LogWrite(int allianceId, int previous, int written, int ledger, int doctrine, string source)
+        private static void LogWrite(int allianceId, int previous, int written, int ledger, int fallback, string source)
         {
             string signature = allianceId + "|" + previous + "|" + written + "|" + source;
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "macro-write", signature, Time.realtimeSinceStartup, 30f, false))
@@ -234,7 +237,7 @@ namespace WhiskeyRealism.Patches
                 + " old=" + TacticalTelemetry.MacroName(previous)
                 + " whiskey=" + TacticalTelemetry.MacroName(written)
                 + " ledger=" + ledger
-                + " doctrine=" + doctrine
+                + " fallback=" + fallback
                 + " source=" + source, TelemetryLayer.Tactical);
         }
 

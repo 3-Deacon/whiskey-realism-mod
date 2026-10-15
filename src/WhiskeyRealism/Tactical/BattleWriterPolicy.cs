@@ -22,7 +22,7 @@ namespace WhiskeyRealism.Tactical
             bool endBattleActive,
             int currentMacro,
             int ledgerOpinion,
-            int doctrineOpinion,
+            int fallbackOpinion,
             bool wlPlayerSide,
             bool wlPlayerIsCic,
             int vanillaPendingMacro)
@@ -37,7 +37,7 @@ namespace WhiskeyRealism.Tactical
             EndBattleActive = endBattleActive;
             CurrentMacro = currentMacro;
             LedgerOpinion = ledgerOpinion;
-            DoctrineOpinion = doctrineOpinion;
+            FallbackOpinion = fallbackOpinion;
         }
 
         public bool ModeAllowsWrites { get; }
@@ -47,7 +47,10 @@ namespace WhiskeyRealism.Tactical
         public bool EndBattleActive { get; }
         public int CurrentMacro { get; }
         public int LedgerOpinion { get; }
-        public int DoctrineOpinion { get; }
+        // Unplanned opinion: reinforcement-opportunity doctrine, or the legacy
+        // scorer when the army orchestrator is off. Never written on the W&L
+        // player side.
+        public int FallbackOpinion { get; }
         // W&L player-side AIBattle (aibattle[1], isplayeraiorfeud == 1).
         public bool WlPlayerSide { get; }
         public bool WlPlayerIsCic { get; }
@@ -141,8 +144,8 @@ namespace WhiskeyRealism.Tactical
         //   6374  macroai == 3 returns before everything else;
         //   6378  GameVars.aistrategy >= 0 and
         //   6383  sideinformation[side].macroai >= 0 are scripted overrides.
-        // Opinions outside 0..2 mean "no opinion"; the ledger opinion wins over
-        // the reinforcement-opportunity doctrine opinion.
+        // Opinions outside 0..2 mean "no opinion"; the operations-ledger opinion
+        // wins over the fallback (doctrine or legacy scorer) opinion.
         public static int ResolveMacroAiWrite(in MacroAiWriteInput input)
         {
             if (!MacroAiMayHaveOpinion(
@@ -170,7 +173,7 @@ namespace WhiskeyRealism.Tactical
 
             int opinion = IsWritableMacro(input.LedgerOpinion)
                 ? input.LedgerOpinion
-                : IsWritableMacro(input.DoctrineOpinion) ? input.DoctrineOpinion : NoMacroWrite;
+                : IsWritableMacro(input.FallbackOpinion) ? input.FallbackOpinion : NoMacroWrite;
             if (opinion == NoMacroWrite) return NoMacroWrite;
             return opinion == input.CurrentMacro ? NoMacroWrite : opinion;
         }
