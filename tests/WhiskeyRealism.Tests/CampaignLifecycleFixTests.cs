@@ -59,6 +59,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per corrupt json is rejected", PerCorruptJsonIsRejected);
         Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
         Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
+        Check("c1 per mod-written campaign objective survives reload", PerModWrittenObjectiveSurvivesReload);
         Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
         Check("c1 per replace fallback survives original already moved to bak", PerReplaceFallbackSurvivesMissingOriginal);
         Check("c1 per load falls back to bak when primary is corrupt", PerLoadFallsBackToBak);
@@ -674,6 +675,26 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertEqual(1, back.Battles.Count, "battle history");
         TestHarness.AssertEqual(3, back.LastSeenMonth, "last seen month restored");
         TestHarness.AssertEqual(1862, back.LastSeenYear, "last seen year restored");
+    }
+
+    private static SidecarSnapshot RoundTrip(SidecarSnapshot snap)
+    {
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out var reason), "deserialize: " + reason);
+        TestHarness.AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out reason), "decode: " + reason);
+        return back;
+    }
+
+    private static void PerModWrittenObjectiveSurvivesReload()
+    {
+        var snap = SampleSnapshot();
+        snap.ModWrittenObjective[0] = 29;
+        var back = RoundTrip(snap);
+        TestHarness.AssertEqual(29, back.ModWrittenObjective[0], "mod-written objective restored");
+        TestHarness.AssertEqual(-1, back.ModWrittenObjective[1], "none written for alliance 1");
+        // After reload, a now-defensive/planless faction still clears the stale id it wrote.
+        var steer = CampaignObjectiveSteering.Decide(false, -1, currentFollowed: 29, lastWrittenByMod: back.ModWrittenObjective[0]);
+        TestHarness.AssertEqual(-1, steer.WriteFollowed, "stale mod objective cleared after reload");
     }
 
     private static void PerMissingFieldsDecodeSafely()

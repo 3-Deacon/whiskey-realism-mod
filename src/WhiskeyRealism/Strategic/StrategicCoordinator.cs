@@ -1792,6 +1792,7 @@ namespace WhiskeyRealism.Strategic
             snap.Battles.AddRange(BattleHistory);
             snap.LastSeenMonth = LastSeenMonth;
             snap.LastSeenYear = LastSeenYear;
+            snap.ModWrittenObjective = PickCampaignObjectivePatch.SnapshotWrittenByMod();
             return snap;
         }
 
@@ -1819,6 +1820,7 @@ namespace WhiskeyRealism.Strategic
             BattleHistory.AddRange(snap.Battles);
             LastSeenMonth = snap.LastSeenMonth;
             LastSeenYear = snap.LastSeenYear;
+            PickCampaignObjectivePatch.RestoreWrittenByMod(snap.ModWrittenObjective);
         }
     }
 }

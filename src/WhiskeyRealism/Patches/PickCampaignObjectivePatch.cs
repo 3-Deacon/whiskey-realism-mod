@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
@@ -27,12 +26,26 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _aifactionField;
         private static FieldInfo _allianceIdField;
         private static FieldInfo _followedField;
-        // aifaction index -> objective id the mod last wrote (cleared on campaign reset).
-        private static readonly Dictionary<int, int> LastWrittenByMod = new Dictionary<int, int>();
+        // Per alliance: objective id the mod last wrote. Patch-local bookkeeping of its own
+        // writes; the coordinator snapshots/restores it with the sidecar so a stale mod-written
+        // objective is still recognized after a reload.
+        private static readonly int[] LastWrittenByMod = { -1, -1 };
 
         internal static void ResetForNewCampaign()
         {
-            LastWrittenByMod.Clear();
+            LastWrittenByMod[0] = -1;
+            LastWrittenByMod[1] = -1;
+        }
+
+        internal static int[] SnapshotWrittenByMod()
+        {
+            return new[] { LastWrittenByMod[0], LastWrittenByMod[1] };
+        }
+
+        internal static void RestoreWrittenByMod(int[] written)
+        {
+            for (int a = 0; a < LastWrittenByMod.Length; a++)
+                LastWrittenByMod[a] = written != null && a < written.Length ? written[a] : -1;
         }
 
         [HarmonyPrefix]
@@ -58,7 +71,7 @@ namespace WhiskeyRealism.Patches
                     var phase = cic?.ActivePlan?.CurrentPhase;
                     int planTarget = phase != null ? phase.TargetObjectiveId : -1;
                     int current = Convert.ToInt32(_followedField.GetValue(faction));
-                    int lastWritten = LastWrittenByMod.TryGetValue(_aifaction, out int w) ? w : -1;
+                    int lastWritten = LastWrittenByMod[allianceId];
 
                     // Defensive-posture operations never write the objective: in vanilla it is an
                     // offensive importance weight (UpdateImportanceValues 14922/14961).
@@ -67,8 +80,7 @@ namespace WhiskeyRealism.Patches
                     if (steer.WriteFollowed != CampaignObjectiveSteering.NoWrite)
                     {
                         _followedField.SetValue(faction, steer.WriteFollowed);
-                        if (steer.WriteFollowed >= 0) LastWrittenByMod[_aifaction] = steer.WriteFollowed;
-                        else LastWrittenByMod.Remove(_aifaction);
+                        LastWrittenByMod[allianceId] = steer.WriteFollowed;
                     }
 
                     if (steer.RunVanilla)

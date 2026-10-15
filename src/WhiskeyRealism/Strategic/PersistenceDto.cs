@@ -26,6 +26,7 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("directorMemory")] public DirectorMemoryDto DirectorMemory;
         [JsonProperty("probeState")] public OperationalProbeStateDto ProbeState;
         [JsonProperty("fiscalMemory")] public FiscalMemoryDto FiscalMemory;
+        [JsonProperty("modWrittenObjective")] public int? ModWrittenObjective;
     }
 
     internal class OperationalProbeStateDto

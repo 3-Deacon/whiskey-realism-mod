@@ -24,6 +24,8 @@ namespace WhiskeyRealism.Strategic
         public List<BattleHistoryRecord> Battles = new List<BattleHistoryRecord>();
         public int LastSeenMonth = -1;
         public int LastSeenYear = -1;
+        // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance.
+        public int[] ModWrittenObjective = { -1, -1 };
 
         public static SidecarSnapshot Empty() => new SidecarSnapshot();
     }
@@ -156,6 +158,7 @@ namespace WhiskeyRealism.Strategic
                     },
                     DirectorMemory = StrategicResilienceDirector.MemoryToDto(snap.DirectorMemories[alliance]),
                     ProbeState = ProbeToDto(snap.ProbeStates[alliance]),
+                    ModWrittenObjective = snap.ModWrittenObjective[alliance],
                     FiscalMemory = FiscalToDto(snap.FiscalMemories[alliance])
                 };
                 if (faction.DirectorMemory != null)
@@ -209,6 +212,7 @@ namespace WhiskeyRealism.Strategic
                     result.RecentReplans[a] = f.DirectorMemory?.RecentOperationReplanDaySerials;
                     result.ProbeStates[a] = ProbeFromDto(f.ProbeState);
                     result.FiscalMemories[a] = FiscalFromDto(f.FiscalMemory);
+                    result.ModWrittenObjective[a] = f.ModWrittenObjective ?? -1;
                 }
                 foreach (var m in dto.MinorOfficerProfiles)
                 {
