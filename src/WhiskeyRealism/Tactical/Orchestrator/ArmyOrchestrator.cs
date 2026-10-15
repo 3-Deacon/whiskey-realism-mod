@@ -316,9 +316,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _phaseAgeSeconds = 0f;
             // Note: _planAgeSeconds is NOT reset — that timer measures time
             // since last Replan, which is independent of phase transitions.
-            // The allocator reads the phase (provisional attack axis, Exploit
-            // reserve release), so the next observation must reallocate.
-            _hasObservedEvidence = false;
         }
 
         /// <summary>
@@ -452,11 +449,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
             if (!hadPlan) _phaseAgeSeconds = 0f;
-            // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
-            // which would change DirectChildAllocator outputs. Invalidate the direct-child
-            // evidence cache so the next signature-equal observe reallocates against the new
-            // plan instead of returning stale pre-replan intents.
-            _hasObservedEvidence = false;
             // Opportunity-change trigger (2026-05-21). Snapshot the opportunity at
             // each replan so ArmyReplanTriggers.Evaluate can detect transitions
             // without firing the trigger every cycle. Next cycle's input compares
@@ -516,7 +508,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             "objective-unknown",
             0f);
         private StrategicBattleIntentSnapshot _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
-        private bool _hasObservedEvidence;
 
         public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
         public TacticalCommanderMode CommanderMode => _commanderMode;
@@ -534,7 +525,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _directChildSnapshots = Array.Empty<DirectChildSnapshot>();
                 _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
                 _directChildIntents = Array.Empty<DirectChildIntent>();
-                _hasObservedEvidence = false;
                 _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
                 return;
             }
@@ -557,7 +547,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyIntent: unknownEnemy);
             }
             _directChildIntents = initial;
-            _hasObservedEvidence = false;
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
         }
 
@@ -611,25 +600,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _directChildIntents);
         }
 
-        public void ObserveDirectChildEvidence(IReadOnlyList<DirectChildEvidence> evidence)
-        {
-            if (!HasPlan) return;
-            if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
-
-            if (_hasObservedEvidence && SignatureEqual(evidence, _directChildEvidenceCache))
-            {
-                return;
-            }
-
-            for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
-            _hasObservedEvidence = true;
-
-            _directChildIntents = DirectChildAllocator.Allocate(
-                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache);
-            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
-            EmitDirectChildIntentTelemetry();
-        }
-
         /// <summary>
         /// Zone-aware observation (Stage 2 / G geometric play layer). When
         /// <paramref name="zoneAssignments"/> is non-empty, the allocator
@@ -642,10 +612,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (!HasPlan) return;
             if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
-            // Force allocation regardless of signature when explicit per-child intent is supplied,
-            // since enemy intent (which is not part of DirectChildEvidence.SignatureEquals) can change.
+            // Allocates every call: main-role hysteresis counts consecutive
+            // cycles, and the reserve-release context (global odds) and
+            // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
-            _hasObservedEvidence = true;
             _directChildIntents = DirectChildAllocator.StabilizeMain(
                 DirectChildAllocator.AllocateWithZones(
                     _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
@@ -1159,16 +1129,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var copy = new CommandNodeOperationalState[commandOperations.Count];
             for (int i = 0; i < commandOperations.Count; i++) copy[i] = commandOperations[i];
             return copy;
-        }
-
-        private static bool SignatureEqual(IReadOnlyList<DirectChildEvidence> a, DirectChildEvidence[] b)
-        {
-            if (a.Count != b.Length) return false;
-            for (int i = 0; i < a.Count; i++)
-            {
-                if (!a[i].SignatureEquals(b[i])) return false;
-            }
-            return true;
         }
     }
 }

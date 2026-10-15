@@ -77,6 +77,7 @@ internal static class TacticalEvidenceFixTests
         Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
         Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
         Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
+        Run("the orchestrator's one observe path releases reserves and holds Main", OrchestratorObservePathAppliesReleaseAndHysteresis);
     }
 
     private static void Run(string name, Action test)
@@ -1061,5 +1062,25 @@ internal static class TacticalEvidenceFixTests
                     missing.Add(e.AllianceTag + ":" + n);
         }
         TestHarness.AssertTrue(missing.Count == 0, "not in vanilla roster: " + string.Join(", ", missing));
+    }
+
+    private static void OrchestratorObservePathAppliesReleaseAndHysteresis()
+    {
+        var orch = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        orch.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.GenericMethodical, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        orch.RegisterDirectChildren(new[] { Snap("a"), Snap("b"), Snap("reserve") });
+
+        orch.ObserveGlobalOdds(1.0f);
+        orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
+        TestHarness.AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("a"), "a takes Main");
+        TestHarness.AssertEqual(DirectChildRole.Reserve, orch.GetDirectChildRole("reserve"), "reserve held below commit odds");
+
+        // One tick where b looks better does not hand over Main.
+        orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 1), Ev(1, 3), Ev(3, 3) }, null, null);
+        TestHarness.AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("a"), "incumbent keeps Main on a one-tick challenge");
+
+        orch.ObserveGlobalOdds(1.5f);
+        orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
+        TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds");
     }
 }

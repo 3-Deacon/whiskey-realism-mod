@@ -1157,7 +1157,6 @@ static class Program
             ("army orchestrator failed replan preserves active state", ArmyOrchestratorFailedReplanPreservesActiveState),
             ("army orchestrator register direct children stores snapshots", ArmyOrchestratorRegisterDirectChildrenStoresSnapshots),
             ("army orchestrator observe evidence allocates roles", ArmyOrchestratorObserveEvidenceAllocatesRoles),
-            ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
             ("army orchestrator refreshes expanded direct child snapshots", ArmyOrchestratorRefreshesExpandedDirectChildSnapshots),
             ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
@@ -1165,7 +1164,6 @@ static class Program
             ("army orchestrator preserves O3 direct child role after command tree allocation", TestArmyOrchestratorPreservesDirectChildRoleWithCommandTree),
             ("army orchestrator resolves command node intent after direct child evidence", TestArmyOrchestratorResolvesCommandNodeIntent),
             ("army orchestrator command resolver falls back to O3 direct child intent", TestArmyOrchestratorCommandResolverFallsBackToDirectChildIntent),
-            ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -21880,7 +21878,7 @@ static class Program
             new DirectChildEvidence(1, 1, false, 4, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(3, intents.Count);
         AssertEqual(DirectChildRole.Main, intents[1].Role, "main on sector 2");
         AssertEqual(2, intents[1].PrimarySector);
@@ -21915,7 +21913,7 @@ static class Program
             new DirectChildEvidence(2, 2, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertTrue(intents[1].Role != DirectChildRole.Main,
             "locally outnumbered brigade in MainEffortSector must NOT be Main under cautious commander; got " + intents[1].Role);
         // Some other sector should have picked up Main via fallback.
@@ -21948,7 +21946,7 @@ static class Program
             new DirectChildEvidence(1, 1, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[1].Role,
             "aggressive commander bypasses local-odds gate and assigns Main to planned brigade");
     }
@@ -21971,7 +21969,7 @@ static class Program
             new DirectChildEvidence(2, 2, true, 2, 0, 0.7f),
         };
         var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role,
             "parity (own == enemy) is acceptable for Main even under cautious commander");
     }
@@ -22008,7 +22006,7 @@ static class Program
             new DirectChildEvidence(0, 0, false, 10, 0, 0.4f),
         };
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role, "c0 is Main");
         for (int i = 1; i < intents.Count; i++)
         {
@@ -22035,7 +22033,7 @@ static class Program
             new DirectChildEvidence(2, 1, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.SupportMain, intents[0].Role);
         AssertEqual(DirectChildRole.Main, intents[1].Role);
         AssertEqual(DirectChildRole.SupportMain, intents[2].Role);
@@ -22049,7 +22047,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pinning", true) };
         var evidence = new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.6f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Fix, intents[0].Role);
     }
 
@@ -22063,7 +22061,7 @@ static class Program
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, new[] { enemyAttack }, null);
 
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
         AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
@@ -22079,7 +22077,7 @@ static class Program
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, new[] { enemyAttack }, null);
 
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
         AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
@@ -22101,7 +22099,7 @@ static class Program
             new DirectChildEvidence(3, 0, false, 5, 0, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role);
         AssertEqual(DirectChildRole.Reserve, intents[1].Role);
     }
@@ -22120,10 +22118,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Distant Brigade", true) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 4, contactFlag: false, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
-            new[] { enemyAttack });
+            new[] { enemyAttack }, null);
         AssertTrue(intents[0].Role != DirectChildRole.Fallback,
             "outnumbered but not in contact must NOT be Fallback; got " + intents[0].Role);
     }
@@ -22142,10 +22140,10 @@ static class Program
         // is NOT Attack (e.g., Defend). Should NOT trigger Fallback.
         var enemyHold = new TacticalIntentModel(InferredIntent.Defend, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(2, 4, contactFlag: true, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
-            new[] { enemyHold });
+            new[] { enemyHold }, null);
         AssertTrue(intents[0].Role != DirectChildRole.Fallback,
             "outnumbered but enemy-not-attacking must hold the line; got " + intents[0].Role);
     }
@@ -22158,10 +22156,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 0, 0.8f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
-            new[] { enemyAttack });
+            new[] { enemyAttack }, null);
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
     }
 
@@ -22181,7 +22179,7 @@ static class Program
             new DirectChildEvidence(2, 2, false, 4, 3, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.RefuseLeft, intents[0].Role);
         AssertEqual(DirectChildRole.RefuseRight, intents[1].Role);
     }
@@ -22202,7 +22200,7 @@ static class Program
             new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first registered wins ties");
         AssertTrue(intents[1].Role != DirectChildRole.Main, "second registered did not also become Main");
     }
@@ -22226,7 +22224,7 @@ static class Program
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
 
         AssertEqual(DirectChildRole.Main, intents[1].Role, "strongest contact becomes fallback main effort");
         AssertEqual(4, intents[1].AxisSector, "fallback main effort sector");
@@ -22250,7 +22248,7 @@ static class Program
         };
         var personality = new PersonalityVector(0.8f, -0.6f, 0.5f, 0f, 0f);
 
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
 
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first aggressive wing becomes provisional main");
         AssertEqual(1, intents[0].AxisSector, "provisional main axis follows observed child sector");
@@ -22276,7 +22274,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Lonely", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 0, 0, 0.3f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Reserve, intents[0].Role);
     }
 
@@ -22288,7 +22286,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Screening", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 4, 0, 0.3f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Screen, intents[0].Role);
         AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
     }
@@ -22301,10 +22299,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
         // perChildEnemyIntent length 0 != snapshots length 1; allocator must rebuild internally.
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
-            Array.Empty<TacticalIntentModel>());
+            Array.Empty<TacticalIntentModel>(), null);
         // With Unknown enemy intent, Fallback rule (which needs Attack intent) cannot fire.
         // Adverse-odds child with no other rule match used to land Unknown; with
         // the 2026-05-23 G3 fall-through default → Reserve (so vanilla's macroai
@@ -23041,26 +23039,12 @@ static class Program
             new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
             new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
         });
-        orch.ObserveDirectChildEvidence(new[]
+        orch.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(1, 1, false, 0, 0, 0.3f),
             new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
-        });
+        }, null, null);
         AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("c1"));
-    }
-
-    private static void ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var firstRole = orch.GetDirectChildRole("c0");
-        var firstIntents = orch.CurrentDirectChildIntents;
-        // re-observe identical evidence — orchestrator should NOT recompute
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertEqual(firstRole, orch.GetDirectChildRole("c0"));
-        AssertTrue(object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
-            "signature-equal evidence must reuse the cached intent list (no allocation)");
     }
 
     private static void ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered()
@@ -23104,10 +23088,10 @@ static class Program
         {
             new DirectChildSnapshot("synth-army-12345", "army-12345", 16, 0, "ArmyA", true),
         });
-        orch.ObserveDirectChildEvidence(new[]
+        orch.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
-        });
+        }, null, null);
         AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("synth-army-12345"));
         AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("child-12345"),
             "orchestrator must distinguish synth-army-{id} from child-{id} by exact match");
@@ -23172,10 +23156,10 @@ static class Program
             new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
         });
         army.RegisterCommandTree(tree);
-        army.ObserveDirectChildEvidence(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
-        });
+        }, null, null);
 
         var parent = army.ResolveCommandIntentForGroup(200);
         var child = army.ResolveCommandIntentForGroup(300);
@@ -23450,50 +23434,6 @@ static class Program
         AssertEqual("unknown-role", d.Reason, "reason");
     }
 
-    private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var firstIntents = orch.CurrentDirectChildIntents;
-
-        // Force a replan (returns void; succeeds when TryPickPlan returns true).
-        // The empty-catalog helper used by NewArmyOrchestratorWithPlan would otherwise
-        // make TryPickPlan fail, so we register a single placeholder playbook by re-using
-        // SetPlanForTesting before calling Replan with the new sector.
-        orch.SetPlanForTesting(new TacticalBattlePlan(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            mainEffortSector: 5,  // different sector than before
-            Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
-
-        // Simulate post-replan: signature-equal evidence should now allocate against the new plan,
-        // because _hasObservedEvidence was reset (replan path) — but here we use SetPlanForTesting,
-        // which does not reset _hasObservedEvidence. So instead, drive the same invariant via the
-        // RegisterDirectChildren path which DOES clear _hasObservedEvidence. Then verify that
-        // re-observing with the same signature now picks up the new sector layout.
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertTrue(!object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
-            "after re-registration, the cached intent list must be replaced");
-
-        // Now exercise Replan invalidation directly. We need a non-empty catalog so TryPickPlan succeeds.
-        // The simplest path: spin up a fresh orchestrator with a real seeded catalog.
-        var orch2 = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(),
-            new PersonalityVector(0.2f, 0f, 0f, 0f, 0f));
-        orch2.PickInitialPlan(new ArmyEvidence(currentOdds: 1.2f, terrain: TerrainKind.Open, defaultMainEffortSector: 2));
-        orch2.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var preReplanIntents = orch2.CurrentDirectChildIntents;
-
-        orch2.Replan(new ArmyEvidence(currentOdds: 0.8f, terrain: TerrainKind.Open, defaultMainEffortSector: 5));
-        // Re-observing with identical evidence should now reallocate (cache invalidated by Replan).
-        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertTrue(!object.ReferenceEquals(preReplanIntents, orch2.CurrentDirectChildIntents),
-            "Replan must invalidate the cache so the next signature-equal observe reallocates");
-    }
-
-    // Helper used by the five tests above. Note the 8-arg TacticalBattlePlan ctor (the
-    // last arg is jitterSeed) and 5-arg PersonalityVector ctor (the last arg is pol).
     private static ArmyOrchestrator NewArmyOrchestratorWithPlan(int mainSector = 2)
     {
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);

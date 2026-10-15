@@ -69,28 +69,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private const int MaxRefuseRightCount = 1;
         private const int MaxSupportMainCount = 2;
 
-        public static IReadOnlyList<DirectChildIntent> Allocate(
-            TacticalBattlePlan plan,
-            PersonalityVector personality,
-            IReadOnlyList<DirectChildSnapshot> snapshots,
-            IReadOnlyList<DirectChildEvidence> evidence)
-        {
-            var enemyIntents = new TacticalIntentModel[snapshots.Count];
-            for (int i = 0; i < enemyIntents.Length; i++)
-                enemyIntents[i] = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>());
-            return AllocateWithChildIntent(plan, personality, snapshots, evidence, enemyIntents);
-        }
-
-        public static IReadOnlyList<DirectChildIntent> AllocateWithChildIntent(
-            TacticalBattlePlan plan,
-            PersonalityVector personality,
-            IReadOnlyList<DirectChildSnapshot> snapshots,
-            IReadOnlyList<DirectChildEvidence> evidence,
-            IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
-        {
-            return AllocateWithZones(plan, personality, snapshots, evidence, perChildEnemyIntent, null);
-        }
-
         /// <summary>
         /// Zone-aware allocation overload (2026-05-23 / Stage 2 G). When
         /// <paramref name="zoneAssignments"/> is non-empty, each child whose
