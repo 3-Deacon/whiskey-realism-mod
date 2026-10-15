@@ -72,15 +72,12 @@ namespace WhiskeyRealism.Util
                 float vanillaNow = GameVars.currenttimefromstart;
                 _records.TryGetValue(id, out StanceHoldRecord record);
 
-                // Cheap steady-state path: our record is fresh and nothing moved.
-                // Skips the vanilla per-group check, so a group that turns weak
-                // is yielded at most HoldHours * 0.5 after the last full pass.
-                if (record.HasValue &&
-                    record.Stance == targetStance &&
-                    record.Source >= source &&
-                    group.ai_stanceordered == targetStance &&
-                    now - record.WrittenAtHours >= 0f &&
-                    now - record.WrittenAtHours < TacticalStanceOwnership.HoldHours * 0.5f)
+                // Cheap steady-state path: our record is fresh, nothing moved and
+                // vanilla's raw-clock stamp still holds (see SteadyStateHolds).
+                // When the stamp lapsed (night jump) the full pass below claims
+                // ("held") and re-stamps.
+                if (TacticalStanceOwnership.SteadyStateHolds(record, targetStance, source, group.ai_stanceordered, now,
+                        group.lastaistancechangetime, vanillaNow, GamePrefs.updatetimeforresettingofaistance))
                     return false;
 
                 AIBattle battle = FindOwningAiBattle(bunits, group);

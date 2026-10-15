@@ -353,6 +353,39 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        // The writer's steady-state short-circuit: Whiskey's fresh record agrees,
+        // vanilla still has the stance ordered, and vanilla's own hold stamp is
+        // still live on the raw clock. Skips the per-group check, so a group that
+        // turns weak is yielded at most HoldHours * 0.5 after the last full pass.
+        // Without the stamp test the night jump (raw clock +~9 h, doctrine clock
+        // frozen) lapsed the hold while the record stayed fresh, and vanilla
+        // re-decided the group at 4264; the full pass then claims and re-stamps.
+        public static bool SteadyStateHolds(
+            in StanceHoldRecord record,
+            int targetStance,
+            StanceWriteSource source,
+            int currentOrderedStance,
+            float nowHours,
+            float vanillaStamp,
+            float vanillaNowHours,
+            float vanillaResetHours)
+        {
+            if (!record.HasValue || record.Stance != targetStance || record.Source < source) return false;
+            if (currentOrderedStance != targetStance) return false;
+            float age = nowHours - record.WrittenAtHours;
+            if (age < 0f || age >= HoldHours * 0.5f) return false;
+            return VanillaHoldLive(vanillaStamp, vanillaNowHours, vanillaResetHours);
+        }
+
+        // Vanilla 4264 re-decides a group when lastaistancechangetime <
+        // currenttimefromstart + updatetimeforresettingofaistance; otherwise the
+        // stamp holds it.
+        private static bool VanillaHoldLive(float stamp, float vanillaNowHours, float vanillaResetHours)
+        {
+            float reset = vanillaResetHours > 0f ? vanillaResetHours : 0f;
+            return !(stamp < vanillaNowHours + reset);
+        }
+
         // A write always stamps. A claim stamps only when the caller could
         // check vanilla's per-group valves; otherwise vanilla stays free to
         // re-decide (thrash, but its valves intact).

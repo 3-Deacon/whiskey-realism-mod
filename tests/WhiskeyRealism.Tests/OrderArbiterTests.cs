@@ -43,6 +43,7 @@ internal static class OrderArbiterTests
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
             ("battle-core StanceRecordUsesDoctrineClock", StanceRecordUsesDoctrineClock),
             ("battle-core StanceSourceMapsIntentLadder", StanceSourceMapsIntentLadder),
+            ("battle-core StanceCheapPathNeedsLiveVanillaStamp", StanceCheapPathNeedsLiveVanillaStamp),
             ("battle-core RetryRunsOnlyWhileItsSourceStillClaims", RetryRunsOnlyWhileItsSourceStillClaims),
         });
     }
@@ -689,6 +690,32 @@ internal static class OrderArbiterTests
         AssertNear(19.50f + TacticalStanceOwnership.HoldHours + 1f, stamp, 0.0001f, "vanilla's 4264 stamp stays on the raw clock");
         var next = TacticalStanceOwnership.Next(new StanceWriteDecision(StanceWriteAction.Write, "write"), nightInput);
         AssertNear(10.10f, next.WrittenAtHours, 0.0001f, "records are written in doctrine hours");
+    }
+
+    // The writer's steady-state short-circuit skips the full pass (and the
+    // re-stamp) while its doctrine-clock record is fresh. Vanilla's 4264 guard
+    // runs on the raw clock, which jumps ~9 h overnight: the short-circuit must
+    // also see the raw stamp still live or vanilla re-decides a held group.
+    private static void StanceCheapPathNeedsLiveVanillaStamp()
+    {
+        var record = new StanceHoldRecord(2, 10.00f, StanceWriteSource.Executor);
+        const float reset = 1f;
+        float stamp = TacticalStanceOwnership.VanillaHoldStamp(30.0f, TacticalStanceOwnership.HoldHours, reset);
+
+        AssertTrue(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.Executor, 2, 10.05f, stamp, 30.05f, reset),
+            "fresh record, live stamp: skip the full pass");
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.Executor, 2, 10.05f, stamp, 39.50f, reset),
+            "night jump: the doctrine record is fresh but vanilla's raw stamp lapsed");
+        AssertTrue(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.Executor, 2, 10.05f,
+            30.25f + reset, 30.25f, reset), "a stamp exactly at now + reset is still honoured by 4264");
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.Executor, 2,
+            10.00f + TacticalStanceOwnership.HoldHours * 0.5f, stamp, 30.05f, reset), "record older than half the hold");
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 3, StanceWriteSource.Executor, 2, 10.05f, stamp, 30.05f, reset),
+            "another target stance");
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.ChargeDemotion, 2, 10.05f, stamp, 30.05f, reset),
+            "a higher source takes the full pass");
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 2, StanceWriteSource.Executor, 3, 10.05f, stamp, 30.05f, reset),
+            "vanilla changed the ordered stance");
     }
 
     private static void StanceSourceMapsIntentLadder()
