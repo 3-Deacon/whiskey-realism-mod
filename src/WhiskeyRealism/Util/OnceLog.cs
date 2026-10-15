@@ -7,9 +7,11 @@ namespace WhiskeyRealism.Util
     //
     // Keys MUST be static (a literal, or a literal plus a value from a small fixed set such
     // as a vanilla method name). Never embed instance ids, unit names, signatures, or other
-    // unbounded values in a key: the fired set lives for the whole process and is capped at
-    // MaxKeys; once full, every new key is suppressed (one warning is written when the cap
-    // is first hit). Use Claim(key) to gate expensive message construction.
+    // unbounded values in a key: the fired set lives for the whole process. Info keys are
+    // capped at MaxKeys; once full, new Info keys are suppressed (one warning is written when
+    // the cap is first hit). Warnings are never suppressed by the cap (they are still
+    // deduplicated by key). Keys starting with "tactical" are per-battle: ResetTactical()
+    // releases them at battle end so first-fire lines re-fire in the next battle.
     internal static class OnceLog
     {
         internal const int MaxKeys = 4096;
@@ -36,6 +38,8 @@ namespace WhiskeyRealism.Util
                     return _suppressedOverCap;
             }
         }
+
+        internal const string TacticalKeyPrefix = "tactical";
 
         internal static void Info(string key, string message)
         {
@@ -71,6 +75,19 @@ namespace WhiskeyRealism.Util
             }
         }
 
+        // Battle-end hook: forget every key starting with TacticalKeyPrefix.
+        internal static void ResetTactical()
+        {
+            try
+            {
+                lock (Gate)
+                    _fired.RemoveWhere(key => key.StartsWith(TacticalKeyPrefix, System.StringComparison.Ordinal));
+            }
+            catch
+            {
+            }
+        }
+
         internal static void Reset()
         {
             try
@@ -97,7 +114,7 @@ namespace WhiskeyRealism.Util
                     // Check before building the line so repeat calls do no string work.
                     if (_fired.Contains(firedKey))
                         return;
-                    if (!HasCapacityLocked())
+                    if (!warning && !HasCapacityLocked())
                         return;
 
                     string line = "[once:" + firedKey + "] " + (message ?? string.Empty);

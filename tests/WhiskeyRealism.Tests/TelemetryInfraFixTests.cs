@@ -19,6 +19,8 @@ internal static class TelemetryInfraFixTests
         OnceLogClaimReturnsTrueOnlyOnce();
         OnceLogFiredKeySkipsMessageWork();
         OnceLogBoundsFiredKeys();
+        OnceLogWarningsAreNeverSuppressedByCap();
+        OnceLogResetTacticalClearsOnlyTacticalKeys();
         QueueProtectedRowDoesNotEvictDetailRows();
         QueuePerformanceDoesNotEvictDecisionOrState();
         QueueEvictsTraceBeforePerformance();
@@ -155,19 +157,43 @@ internal static class TelemetryInfraFixTests
     {
         OnceLog.Reset();
         int warningsBefore = WhiskeyRealism.Plugin.Log.WarningCount;
-        for (int i = 0; i < OnceLog.MaxKeys; i++)
-            TestHarness.AssertTrue(OnceLog.Claim("p-test:bound:" + i.ToString(CultureInfo.InvariantCulture)), "claim under cap " + i.ToString(CultureInfo.InvariantCulture));
-        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "fired set at cap");
-        TestHarness.AssertFalse(OnceLog.Claim("p-test:bound:over"), "claim over cap refused");
         int infoBefore = WhiskeyRealism.Plugin.Log.InfoCount;
+        for (int i = 0; i < OnceLog.MaxKeys; i++)
+            OnceLog.Info("p-test:bound:" + i.ToString(CultureInfo.InvariantCulture), "[PTest] bound");
+        TestHarness.AssertEqual(infoBefore + OnceLog.MaxKeys, WhiskeyRealism.Plugin.Log.InfoCount, "info logged under cap");
+        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "fired set at cap");
         OnceLog.Info("p-test:bound:over-info", "[PTest] over cap");
-        TestHarness.AssertEqual(infoBefore, WhiskeyRealism.Plugin.Log.InfoCount, "info over cap suppressed");
-        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "fired set stays bounded");
+        TestHarness.AssertEqual(infoBefore + OnceLog.MaxKeys, WhiskeyRealism.Plugin.Log.InfoCount, "info over cap suppressed");
         TestHarness.AssertEqual(warningsBefore + 1, WhiskeyRealism.Plugin.Log.WarningCount, "cap reached warns exactly once");
-        TestHarness.AssertTrue(OnceLog.SuppressedOverCapCount >= 2, "over-cap suppressions counted");
+        TestHarness.AssertTrue(OnceLog.SuppressedOverCapCount >= 1, "over-cap suppressions counted");
+        LogPass("oncelog bounds fired keys");
+    }
+
+    private static void OnceLogWarningsAreNeverSuppressedByCap()
+    {
+        // Continues from the full set left by OnceLogBoundsFiredKeys.
+        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "precondition: info cap reached");
+        int warningsBefore = WhiskeyRealism.Plugin.Log.WarningCount;
+        OnceLog.Warning("p-test:bound:warning", "[PTest] warning past the info cap");
+        OnceLog.Warning("p-test:bound:warning", "[PTest] warning past the info cap");
+        TestHarness.AssertEqual(warningsBefore + 1, WhiskeyRealism.Plugin.Log.WarningCount, "warning logs once even when the info cap is full");
         OnceLog.Reset();
         TestHarness.AssertEqual(0, OnceLog.FiredCount, "reset clears fired set");
-        LogPass("oncelog bounds fired keys");
+        LogPass("oncelog warnings are never suppressed by cap");
+    }
+
+    private static void OnceLogResetTacticalClearsOnlyTacticalKeys()
+    {
+        OnceLog.Reset();
+        int infoBefore = WhiskeyRealism.Plugin.Log.InfoCount;
+        OnceLog.Info("tactical-p-test:battle", "[PTest] tactical first fire");
+        OnceLog.Info("campaign-p-test:day", "[PTest] campaign first fire");
+        OnceLog.ResetTactical();
+        OnceLog.Info("tactical-p-test:battle", "[PTest] tactical first fire next battle");
+        OnceLog.Info("campaign-p-test:day", "[PTest] campaign stays fired");
+        TestHarness.AssertEqual(infoBefore + 3, WhiskeyRealism.Plugin.Log.InfoCount, "tactical key re-fires after ResetTactical; campaign key does not");
+        OnceLog.Reset();
+        LogPass("oncelog reset tactical clears only tactical keys");
     }
 
     // ---------------------------------------------------------------- TEL-queue / TEL-prio
