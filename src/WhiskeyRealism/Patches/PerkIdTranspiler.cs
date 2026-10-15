@@ -19,7 +19,7 @@ namespace WhiskeyRealism.Patches
             var original = new List<CodeInstruction>(instructions);
             try
             {
-                var code = original.ConvertAll(i => i.Clone());
+                var code = original.ConvertAll(i => new CodeInstruction(i));
                 if (rewrite(code))
                 {
                     OnceLog.Info("perk-ids:il:" + target, "[Patch:PerkIds] " + target + ": perk-id sites rewritten");
