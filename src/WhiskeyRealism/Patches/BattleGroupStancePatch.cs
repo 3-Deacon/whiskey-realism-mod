@@ -1131,11 +1131,15 @@ namespace WhiskeyRealism.Patches
             if (!resolved.IsChargeOverride && vanillaOrdered != 4)
             {
                 if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
-                if (resolved.FinalStance < 0) return;
-                if (resolved.FinalStance == vanillaOrdered) return;
-                if (resolved.FinalStance == 4) return;
-                if (resolved.FinalStance > 3) return;
+                if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
                 if (macro == 3) return;
+                if (resolved.FinalStance == vanillaOrdered)
+                {
+                    // Agreement: refresh the single-owner hold so vanilla's
+                    // AdjustGroupAIStance does not flip the group next cycle.
+                    TacticalStanceWriter.EnsureStance(bunits, group, resolved.FinalStance, null, StanceWriteSource.Scorer);
+                    return;
+                }
                 // Falls through to the safety gates + non-charge write.
             }
             // Else: charge-override path, vanilla-raced-into-charge path,
@@ -1196,21 +1200,11 @@ namespace WhiskeyRealism.Patches
             // we must screen the same predicates the original non-charge
             // branch enforced before writing the cached FinalStance.
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (resolved.FinalStance < 0) return;
-            if (resolved.FinalStance == vanillaOrdered) return;
-            if (resolved.FinalStance == 4) return;
-            if (resolved.FinalStance > 3) return;
+            if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
             if (macro == 3) return;
-            if (!AllowsVanillaWrites()) return;
 
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return;
-
-            bunits.ChangeStance(gameObject, resolved.FinalStance, immediate: false, overwriteaigroups: false);
-            group.ai_stance = resolved.FinalStance;
-            group.ai_stanceordered = resolved.FinalStance;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
-            LogResolvedDecision(side, group, resolved);
+            if (TacticalStanceWriter.EnsureStance(bunits, group, resolved.FinalStance, null, StanceWriteSource.Scorer))
+                LogResolvedDecision(side, group, resolved);
         }
 
         private static int ReadAiStanceOrdered(Regiment group)
@@ -1307,19 +1301,10 @@ namespace WhiskeyRealism.Patches
             // produced this decision on its thread.
             if (!Plugin.Instance.EnableTacticalGroupSectorStance.Value) return;
             if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (decision.GroupStance == vanillaOrdered) return;
-            if (decision.GroupStance == 4) return;
-            if (decision.GroupStance < 0 || decision.GroupStance > 3) return;
-            if (!AllowsVanillaWrites()) return;
+            if (decision.GroupStance < 1 || decision.GroupStance > 3) return;
 
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return;
-
-            bunits.ChangeStance(gameObject, decision.GroupStance, immediate: false, overwriteaigroups: false);
-            group.ai_stance = decision.GroupStance;
-            group.ai_stanceordered = decision.GroupStance;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
-            LogDecision(side, group, sector, decision);
+            if (TacticalStanceWriter.EnsureStance(bunits, group, decision.GroupStance, null, StanceWriteSource.Scorer))
+                LogDecision(side, group, sector, decision);
         }
 
         private static int SafeAllianceForSide(BattleUnits bunits, int side)
@@ -1385,19 +1370,10 @@ namespace WhiskeyRealism.Patches
                 true));
 
             if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (decision.GroupStance == vanillaOrdered) return;
-            if (decision.GroupStance == 4) return;
-            if (decision.GroupStance < 0 || decision.GroupStance > 3) return;
-            if (!AllowsVanillaWrites()) return;
+            if (decision.GroupStance < 1 || decision.GroupStance > 3) return;
 
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return;
-
-            bunits.ChangeStance(gameObject, decision.GroupStance, immediate: false, overwriteaigroups: false);
-            group.ai_stance = decision.GroupStance;
-            group.ai_stanceordered = decision.GroupStance;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
-            LogDecision(side, group, sector, decision);
+            if (TacticalStanceWriter.EnsureStance(bunits, group, decision.GroupStance, null, StanceWriteSource.Scorer))
+                LogDecision(side, group, sector, decision);
         }
 
         private static bool TryApplyDoctrineStance(
@@ -1418,17 +1394,8 @@ namespace WhiskeyRealism.Patches
             if (decision.Action == DoctrineConsumerAction.Observe) return false;
 
             int stance = decision.Action == DoctrineConsumerAction.Allow ? 3 : 2;
-            if (stance == vanillaOrdered) return true;
-            if (!AllowsVanillaWrites()) return true;
-
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return true;
-
-            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
-            group.ai_stance = stance;
-            group.ai_stanceordered = stance;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
-            LogDoctrineStanceDecision(side, group, order, decision, stance);
+            if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
+                LogDoctrineStanceDecision(side, group, order, decision, stance);
             return true;
         }
 
@@ -1437,45 +1404,14 @@ namespace WhiskeyRealism.Patches
             if (macro == 3) return true;
             if (!TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state)) return false;
 
-            int stance = StanceForTask(state.Task, vanillaOrdered, sector);
+            // Task → stance from the shared mapper so #45 and #61 agree.
+            int stance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
+                state.Task,
+                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
             if (stance < 0) return true;
-            if (stance == vanillaOrdered) return true;
-            if (stance == 4 || stance < 0 || stance > 3) return true;
-            if (!AllowsVanillaWrites()) return true;
-
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return true;
-
-            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
-            group.ai_stance = stance;
-            group.ai_stanceordered = stance;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
-            LogLedgerTaskDecision(side, group, state, stance);
+            if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
+                LogLedgerTaskDecision(side, group, state, stance);
             return true;
-        }
-
-        private static int StanceForTask(CommandTaskType task, int vanillaOrdered, TacticalSectorAssessment sector)
-        {
-            if ((task == CommandTaskType.HoldObjective ||
-                 task == CommandTaskType.HoldChoke ||
-                 task == CommandTaskType.FixEnemy) &&
-                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector))
-                return 3;
-
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.FallBackToLine:
-                    return 2;
-                default:
-                    return -1;
-            }
         }
 
         private static void LogDoctrineStanceDecision(
@@ -1524,13 +1460,7 @@ namespace WhiskeyRealism.Patches
             int side,
             TacticalLocalReactionDecision reaction)
         {
-            var gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return;
-
-            bunits.ChangeStance(gameObject, 3, immediate: false, overwriteaigroups: false);
-            group.ai_stance = 3;
-            group.ai_stanceordered = 3;
-            group.lastaistancechangetime = GameVars.currenttimefromstart;
+            if (!TacticalStanceWriter.EnsureStance(bunits, group, 3, null, StanceWriteSource.Scorer)) return;
 
             string signature = side + "|" + SafeInstanceId(group) + "|" + reaction.Reaction + "|" + reaction.Reason;
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-deny-stance", signature, Time.realtimeSinceStartup, 30f, false))

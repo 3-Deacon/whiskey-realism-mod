@@ -723,7 +723,7 @@ namespace WhiskeyRealism.Patches
                 case PostureExecutionAction.RecoverInterruptedOrder:
                     return hasTarget && SetWaypoint(battle, bunits, group, state.Task, target);
                 case PostureExecutionAction.ChangeStance:
-                    return ChangeStance(bunits, group, StanceForTask(state.Task));
+                    return TacticalStanceWriter.EnsureStanceForTask(bunits, group, state.Task, null, StanceWriteSource.Executor);
                 default:
                     return false;
             }
@@ -1341,18 +1341,6 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
-        }
-
-        private static bool ChangeStance(BattleUnits bunits, Regiment group, int stance)
-        {
-            if (stance < 0 || stance > 3) return false;
-            if (group.ai_stanceordered == stance) return false;
-
-            GameObject gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return false;
-
-            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
-            return true;
         }
 
         private static bool TryApplyContactFacingPulse(
@@ -3776,42 +3764,13 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Scope B refactor (2026-05-22): canonical stance write before any
-        // waypoint. Computes the vanilla ai_stance for the doctrine task and
-        // calls bunits.ChangeStance ONLY when the current stance differs (no
-        // redundant queue entries). When the mapped stance is StanceNone
-        // (-1 via StanceForTask), no stance write — preserves the prior
-        // behavior of "don't touch stance for tasks we don't have an opinion
-        // about" while still letting the SetWaypoint go through.
-        //
-        // Vanilla ChangeStance handles:
-        //   - ai_stanceordered = newstance (so micro-AI knows the goal)
-        //   - aibattle[1].AddUnitToPool when alliance == playeralliance
-        //   - cascade to subordinates via groupaiobject (automatic)
-        //   - queue-vs-immediate per useorderdelays/immediate flag
-        //
-        // We pass immediate=false (use vanilla's order queue if delays are
-        // enabled — matches W&L's UX) and overwriteaigroups=false (don't
-        // clobber AI group assignments — let vanilla manage those).
-        // Scope B cleanup (2026-05-22). Single canonical entry — delegates to
-        // the shared TacticalStanceWriter so every patch site uses the same
-        // skip-if-correct + telemetry contract.
+        // Stance before waypoint (vanilla ChangeStance → SetWaypoint pipeline).
+        // Goes through the single stance owner: refused for non-AI groups
+        // (attached sub-units, nested leaf brigades), deduped on
+        // ai_stanceordered, and held against #45 / vanilla flips.
         private static void EnsureStanceMatchesTask(BattleUnits bunits, Regiment group, CommandTaskType task)
         {
-            TacticalStanceWriter.EnsureStanceForTask(bunits, group, task,
-                contextTag: SafeName(group) + ":" + task);
-        }
-
-        // Scope B refactor (2026-05-22): delegates to the unified mapper that
-        // covers ALL CommandTaskType values. Returns -1 only when the mapped
-        // stance is StanceNone (no opinion), preserving the prior contract of
-        // "-1 = don't write stance" for the ChangeStance branch. Other callers
-        // wanting an explicit stance for waypoint writes use
-        // TacticalCommandTaskToStanceMapper.Map directly.
-        private static int StanceForTask(CommandTaskType task)
-        {
-            int s = TacticalCommandTaskToStanceMapper.Map(task);
-            return s == TacticalCommandTaskToStanceMapper.StanceNone ? -1 : s;
+            TacticalStanceWriter.EnsureStanceForTask(bunits, group, task, null, StanceWriteSource.Executor);
         }
 
         private static bool SafeRouted(Regiment group)

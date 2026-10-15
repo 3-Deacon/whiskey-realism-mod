@@ -1,72 +1,150 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Util
 {
-    // Scope B alignment (2026-05-22). Canonical helper for issuing
-    // vanilla ai_stance writes. Replaces the duplicated
-    //   try { if (group.ai_stance != X) bunits.ChangeStance(...); } catch { }
-    // pattern that appeared in 5+ patch files.
+    // The one ai_stance writer for Whiskey (WS T4 binding decision). Every
+    // Whiskey stance write — #45 group stance, #61 posture executor, any T3
+    // group-level stance intent — goes through here.
     //
-    // Why a shared helper:
-    //   - Single point to enforce the "skip if already correct" optimization
-    //     (avoids redundant W&L queue entries that ChangeStance internally
-    //     creates when useorderdelays is on)
-    //   - Single point for telemetry (once-log on transitions)
-    //   - Single point to fix bugs (e.g., if vanilla's ChangeStance signature
-    //     changes in a game update, one file edit instead of 8)
-    //   - Predictable parameters: immediate=false (respects vanilla queue
-    //     semantics), overwriteaigroups=false (don't clobber AI grouping)
+    // Vanilla anchors (decompile, build 14703111):
+    //   AIBattle.AdjustGroupAIStance (4221-4278) is the model: it writes stance
+    //     only for groups in its pool (unitsused), via
+    //     ChangeStance(go, s, immediate:false, overwriteaigroups:false), then
+    //     sets ai_stance / ai_stanceordered / lastaistancechangetime itself.
+    //     This writer does the same, except lastaistancechangetime gets the
+    //     hold stamp from TacticalStanceOwnership so vanilla's 4264 guard skips
+    //     the group while Whiskey holds an opinion.
+    //   BattleUnits.ChangeStance (90772): dedups on ai_stanceordered (not
+    //     ai_stance); stance > 0 sets permanentlydetached and, for the player
+    //     alliance outside ai_vs_ai, adds the unit to aibattle[1]'s pool. Vanilla
+    //     artillery AI skips detached batteries (3789, 3834, 3890, 3928) and
+    //     SetGroupFormation skips detached children (92070) — so attached
+    //     sub-units (regiments, batteries, brigades nested inside an AI group)
+    //     are refused.
+    //   Pool membership (85227-85262): only groups (unittyp > 13) at the AI
+    //     allocation level are added to aibattle[0]/[1]. aibattle[2] is the W&L
+    //     feud instance and is not a Whiskey target.
     //
-    // Returns true when a ChangeStance call actually fired (caller can use
-    // for telemetry / write-confirmation). Returns false when:
-    //   - group is null or its GameObject is null
-    //   - group.ai_stance already matches target (no-op for efficiency)
-    //   - any exception thrown during the write (fail-open — caller can
-    //     proceed with their waypoint/formation regardless)
+    // Returns true only when a ChangeStance was issued. A "claim" (Whiskey
+    // already agrees with the ordered stance) refreshes the vanilla hold
+    // without a ChangeStance.
     public static class TacticalStanceWriter
     {
-        // Write the target stance directly. Use when the caller knows the
-        // exact vanilla stance value (0/1/2/3/4) it wants.
-        public static bool EnsureStance(BattleUnits bunits, Regiment group, int targetStance, string contextTag = null)
+        private static readonly Dictionary<int, StanceHoldRecord> _records = new Dictionary<int, StanceHoldRecord>();
+
+        public static bool EnsureStance(
+            BattleUnits bunits,
+            Regiment group,
+            int targetStance,
+            string contextTag = null,
+            StanceWriteSource source = StanceWriteSource.Scorer)
         {
             try
             {
-                if (bunits == null || group == null) return false;
-                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(group)) return false;
-                if (targetStance < 0 || targetStance > 4) return false;
-                if (group.ai_stance == targetStance) return false;
-                var gameObject = ((Component)group).gameObject;
-                if (gameObject == null) return false;
-                bunits.ChangeStance(gameObject, targetStance, immediate: false, overwriteaigroups: false);
-                if (!string.IsNullOrEmpty(contextTag))
+                if (bunits == null || (UnityEngine.Object)group == null) return false;
+
+                int id = group.GetInstanceID();
+                float now = GameVars.currenttimefromstart;
+                _records.TryGetValue(id, out StanceHoldRecord record);
+
+                // Cheap steady-state path: our claim is fresh and nothing moved.
+                if (record.HasValue &&
+                    record.Stance == targetStance &&
+                    record.Source >= source &&
+                    group.ai_stanceordered == targetStance &&
+                    now - record.WrittenAtHours >= 0f &&
+                    now - record.WrittenAtHours < TacticalStanceOwnership.HoldHours * 0.5f)
+                    return false;
+
+                AIBattle battle = FindOwningAiBattle(bunits, group);
+                var input = new StanceWriteInput(
+                    isAiGroup: battle != null,
+                    targetStance: targetStance,
+                    currentOrderedStance: group.ai_stanceordered,
+                    macroAi: battle != null ? battle.macroai : -1,
+                    nowHours: now,
+                    record: record,
+                    source: source);
+                StanceWriteDecision decision = TacticalStanceOwnership.Decide(input);
+                if (decision.Action == StanceWriteAction.Refuse)
                 {
                     OnceLog.Info(
-                        "tactical-stance-write:" + contextTag + ":" + targetStance,
-                        "[TacticalStanceWrite] " + contextTag + " stance="
-                        + targetStance + " (was " + group.ai_stance + ")");
+                        "tactical-stance-write:refuse:" + source + ":" + decision.Reason,
+                        "[TacticalStanceWrite] refused " + source + " stance=" + targetStance
+                        + " reason=" + decision.Reason + " (first occurrence)");
+                    return false;
                 }
-                return true;
+
+                if (!TacticalWriteGuard.CanWrite(group)) return false;
+                GameObject gameObject = ((Component)group).gameObject;
+                if (gameObject == null || !gameObject.activeInHierarchy) return false;
+
+                float stamp = TacticalStanceOwnership.VanillaHoldStamp(
+                    now,
+                    TacticalStanceOwnership.HoldHours,
+                    GamePrefs.updatetimeforresettingofaistance);
+                bool wrote = false;
+                if (decision.Action == StanceWriteAction.Write)
+                {
+                    int was = group.ai_stanceordered;
+                    bunits.ChangeStance(gameObject, targetStance, immediate: false, overwriteaigroups: false);
+                    group.ai_stance = targetStance;
+                    group.ai_stanceordered = targetStance;
+                    wrote = true;
+                    OnceLog.Info(
+                        "tactical-stance-write:" + source + ":" + decision.Reason + ":" + targetStance,
+                        "[TacticalStanceWrite] " + source + " " + decision.Reason + " stance=" + targetStance
+                        + " (was " + was + ") first=" + (contextTag ?? "-"));
+                }
+
+                group.lastaistancechangetime = stamp;
+                _records[id] = TacticalStanceOwnership.Next(decision, input);
+                return wrote;
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-stance-write:exception",
-                    "[TacticalStanceWrite] EnsureStance threw: "
-                    + ex.GetType().Name + " " + ex.Message);
+                    "[TacticalStanceWrite] EnsureStance threw: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
         }
 
-        // Write the stance mapped from a CommandTaskType. Use when the caller
-        // has a doctrine task and wants the canonical vanilla stance for it.
-        // Returns false on tasks that map to StanceNone (no opinion).
-        public static bool EnsureStanceForTask(BattleUnits bunits, Regiment group, CommandTaskType task, string contextTag = null)
+        public static bool EnsureStanceForTask(
+            BattleUnits bunits,
+            Regiment group,
+            CommandTaskType task,
+            string contextTag = null,
+            StanceWriteSource source = StanceWriteSource.Scorer)
         {
             int stance = TacticalCommandTaskToStanceMapper.Map(task);
             if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return false;
-            return EnsureStance(bunits, group, stance, contextTag);
+            return EnsureStance(bunits, group, stance, contextTag, source);
+        }
+
+        // Called on battle teardown (coordinator OnBattleEnd).
+        public static void ResetForBattleEnd()
+        {
+            _records.Clear();
+        }
+
+        private static AIBattle FindOwningAiBattle(BattleUnits bunits, Regiment group)
+        {
+            if (group.unittyp <= 13) return null;
+            AIBattle[] battles = bunits.aibattle;
+            if (battles == null) return null;
+            for (int i = 0; i < battles.Length && i < 2; i++)
+            {
+                AIBattle battle = battles[i];
+                if ((UnityEngine.Object)battle == null) continue;
+                if (TacticalWriteGuard.IsFeudInstance(battle)) continue;
+                if (battle.unitsused != null && battle.unitsused.Contains(group)) return battle;
+            }
+
+            return null;
         }
     }
 }
