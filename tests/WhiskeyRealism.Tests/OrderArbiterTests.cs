@@ -52,6 +52,7 @@ internal static class OrderArbiterTests
             ("battle-core SafetyRegimentMoveSurvivesAnExecutorBrigadeMove", SafetyRegimentMoveSurvivesAnExecutorBrigadeMove),
             ("battle-core ClaimedBranchFansOutTheRestMovesWhole", ClaimedBranchFansOutTheRestMovesWhole),
             ("battle-core EqualOrLowerDescendantClaimDoesNotFanOut", EqualOrLowerDescendantClaimDoesNotFanOut),
+            ("battle-core UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant", UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant),
             ("battle-core GroupMoveYieldsWhenEveryChildIsClaimed", GroupMoveYieldsWhenEveryChildIsClaimed),
         });
     }
@@ -955,6 +956,32 @@ internal static class OrderArbiterTests
             AssertFalse(plan.Targets.FannedOut, child + " claim below does not outrank the group move");
             AssertEqual(brigade, plan.Targets.TargetIndices[0], "the group orders itself");
         }
+    }
+
+    // A Safety claim elsewhere on the field raises the tick's highest claim, so
+    // the group's own descendants are each compared with the group's priority:
+    // an Executor claim under an Executor group still does not fan it out.
+    private static void UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant()
+    {
+        var view = new FixtureBattleView();
+        int brigade = view.AddGroup(10, 100f, -100f);
+        view.AddGroup(11, 80f, -120f, parentIndex: brigade);
+        view.AddGroup(12, 120f, -120f, parentIndex: brigade);
+        int other = view.AddGroup(20, 300f, -100f);
+        view.AddGroup(21, 300f, -120f, parentIndex: other);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        var executor = NewExecutor();
+        var winners = new[]
+        {
+            Move(21, 300f, -40f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None),
+            Move(11, 60f, -40f, IntentPriority.Executor, IntentSource.DivisionPlay),
+            groupMove,
+        };
+        executor.BeginTickClaims(view, winners, winners.Length);
+        var plan = executor.Plan(view, groupMove, 1.0);
+        AssertFalse(plan.Targets.FannedOut, "an equal claim below does not outrank the group move");
+        AssertEqual(1, plan.Targets.Count, "one target");
+        AssertEqual(brigade, plan.Targets.TargetIndices[0], "the group orders itself");
     }
 
     private static void GroupMoveYieldsWhenEveryChildIsClaimed()

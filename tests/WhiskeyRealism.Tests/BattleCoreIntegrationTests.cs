@@ -28,6 +28,7 @@ internal static class BattleCoreIntegrationTests
             ("battle-core DiscardedLegacyRowsRouteToTheSidecar", DiscardedLegacyRowsRouteToTheSidecar),
             ("battle-core ArbiterStandsDownWhenThePluginIsDisabled", ArbiterStandsDownWhenThePluginIsDisabled),
             ("battle-core RetreatReleaseOnlyWhenWritesAllowed", RetreatReleaseOnlyWhenWritesAllowed),
+            ("battle-core RuntimeWiresEnabledAndTickClaims", RuntimeWiresEnabledAndTickClaims),
         });
     }
 
@@ -157,29 +158,50 @@ internal static class BattleCoreIntegrationTests
 
     // A statement-level LegacyInfo call discards the main-log answer, so its row
     // is written only if its tag routes to the sidecar. Every such call with a
-    // literal tag in the battle code must name a sidecar-routed tag.
+    // literal tag in src must name a sidecar-routed tag, and so must every literal
+    // row handed to a one-line wrapper around such a call (EmitCampaignInfo and
+    // the like: a static void method whose body is that call on its parameter).
+    // [once:…] tags are skipped, as TelemetryTagPolicy.ExtractTag skips them.
     private static void DiscardedLegacyRowsRouteToTheSidecar()
     {
         int checkedCalls = 0;
-        foreach (string dir in new[] { "src/WhiskeyRealism/Tactical", "src/WhiskeyRealism/Patches" })
+        foreach (string path in Directory.GetFiles(FindRepoPath("src/WhiskeyRealism"), "*.cs", SearchOption.AllDirectories))
         {
-            foreach (string path in Directory.GetFiles(FindRepoPath(dir), "*.cs", SearchOption.AllDirectories))
-            {
-                string text = File.ReadAllText(path);
-                foreach (Match m in Regex.Matches(text, @"(?m)^\s*TelemetryRouter\.LegacyInfo\("))
-                {
-                    int end = text.IndexOf(';', m.Index);
-                    string call = end > m.Index ? text.Substring(m.Index, end - m.Index) : text.Substring(m.Index);
-                    Match tag = Regex.Match(call, "\"\\[([A-Za-z&][^\\]\"]*)\\]");
-                    if (!tag.Success) continue;
-                    checkedCalls++;
-                    TelemetryTagRoute route = TelemetryTagPolicy.Route("[" + tag.Groups[1].Value + "] x=1");
-                    AssertTrue(route.RouteToSidecar,
-                        Path.GetFileName(path) + ": [" + tag.Groups[1].Value + "] goes through LegacyInfo but has no sidecar route, so it is written nowhere");
-                }
-            }
+            string text = File.ReadAllText(path);
+            foreach (Match m in Regex.Matches(text, @"(?m)^\s*TelemetryRouter\.LegacyInfo\("))
+                checkedCalls += CheckDiscardedRow(path, text, m.Index);
+
+            foreach (string wrapper in DiscardingWrappers(text))
+                foreach (Match m in Regex.Matches(text, @"(?m)^\s*" + wrapper + @"\("))
+                    checkedCalls += CheckDiscardedRow(path, text, m.Index);
         }
-        AssertTrue(checkedCalls > 10, "the scan found the battle code's LegacyInfo rows");
+        AssertTrue(checkedCalls > 40, "the scan found the LegacyInfo rows in src (" + checkedCalls + ")");
+    }
+
+    private static int CheckDiscardedRow(string path, string text, int start)
+    {
+        int end = text.IndexOf(';', start);
+        string call = end > start ? text.Substring(start, end - start) : text.Substring(start);
+        Match tag = Regex.Match(call, "\"\\[(?!once:)([A-Za-z&][^\\]\"]*)\\]");
+        if (!tag.Success) return 0;
+        TelemetryTagRoute route = TelemetryTagPolicy.Route("[" + tag.Groups[1].Value + "] x=1");
+        AssertTrue(route.RouteToSidecar,
+            Path.GetFileName(path) + ": [" + tag.Groups[1].Value + "] goes through LegacyInfo but has no sidecar route, so it is written nowhere");
+        return 1;
+    }
+
+    // Methods whose body hands one of their string parameters to a
+    // statement-level LegacyInfo call (optionally behind a once-key check).
+    private static IEnumerable<string> DiscardingWrappers(string text)
+    {
+        foreach (Match m in Regex.Matches(text,
+            @"static\s+void\s+(\w+)\s*\(([^)]*)\)\s*\{(?<body>[^{}]*)\}"))
+        {
+            Match call = Regex.Match(m.Groups["body"].Value, @"(?m)^\s*TelemetryRouter\.LegacyInfo\(\s*(\w+)\s*[,)]");
+            if (!call.Success) continue;
+            if (Regex.IsMatch(m.Groups[2].Value, @"\bstring\s+" + call.Groups[1].Value + @"\b"))
+                yield return m.Groups[1].Value;
+        }
     }
 
     // The master Enabled switch can be turned off at runtime (Plugin.cs Enabled:
@@ -209,6 +231,33 @@ internal static class BattleCoreIntegrationTests
             PostureExecutorBattleGate.ArbiterAction(true, false, 5, 3, 0, 0, false), "MonitorOnly retreat writes nothing");
         AssertEqual(ArbiterTickAction.StandDown,
             PostureExecutorBattleGate.ArbiterAction(false, true, 5, 3, 0, 0, false), "disabled retreat writes nothing");
+    }
+
+    // The arbiter patch, the write guard and the tick are runtime files (not in
+    // this csproj), so their wiring of the pure gate and the tick claims is pinned
+    // at the source.
+    private static void RuntimeWiresEnabledAndTickClaims()
+    {
+        string patch = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Patches/BattleCoreArbiterPatch.cs"));
+        AssertTrue(patch.Contains("PostureExecutorBattleGate.ArbiterAction(PluginEnabled(), TacticalWriteGuard.ModeAllowsWrites(),"),
+            "the arbiter tick decides with the live Enabled switch and the commander mode");
+        AssertTrue(Regex.IsMatch(patch, @"static bool PluginEnabled\(\)\s*\{[^}]*plugin\.Enabled\.Value"),
+            "PluginEnabled reads the master Enabled switch");
+
+        string guard = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Tactical/TacticalWriteGuard.cs"));
+        Match mode = Regex.Match(guard, @"public static bool ModeAllowsWrites\(\)\s*\{(?<body>.*?)\n        \}", RegexOptions.Singleline);
+        AssertTrue(mode.Success, "ModeAllowsWrites found");
+        AssertTrue(mode.Groups["body"].Value.Contains("plugin.Enabled.Value"), "every battle write fails closed with the plugin disabled");
+
+        string tick = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Tactical/Battle/BattleCoreTick.cs"));
+        int claims = tick.IndexOf("executor.BeginTickClaims(snapshot, _winners, winners);", StringComparison.Ordinal);
+        int observe = tick.IndexOf("executor.ObserveOutcomes(", StringComparison.Ordinal);
+        int retries = tick.IndexOf("executor.PlanRetry(", StringComparison.Ordinal);
+        int end = tick.IndexOf("executor.EndTickClaims();", StringComparison.Ordinal);
+        int plan = tick.IndexOf("executor.Plan(snapshot, _winners[w], now)", StringComparison.Ordinal);
+        AssertTrue(claims >= 0 && observe > claims && retries > claims && plan > claims,
+            "the tick's Move claims are set before outcomes, retries and winners are planned");
+        AssertTrue(end > plan, "and cleared after the winners");
     }
 
     // One reach for a group's enemies-in-range (#44 sector strength and the

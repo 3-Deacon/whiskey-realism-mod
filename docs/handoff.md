@@ -11,7 +11,7 @@
 | **Branch** | `feat/battle-core` (worktree `.worktrees/feat-battle-core`): roadmap stage D, slices BC0-BC7 complete, BC7 awaiting review. Not merged to `main`, not deployed. |
 | **`main`** | `6695ecd` — the 2026-10-15 checkpoint (review remediation + Stage B integration); last released line is v0.2.2 (2026-05-04). |
 | **Build** | `./build.sh` — 0 warnings, 0 errors on `feat/battle-core`; the test build is 0 warnings too. |
-| **Harness** | 1915 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
+| **Harness** | 1917 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
 | **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` (checkpoint tag `checkpoint-2026-10-15`): `WhiskeyRealism.dll` 1,593,856 bytes, SHA-256 `0831547f9835e3f084953e64bed7cd049c26c68f96ce22c2a0134c35fee17638` (dist and plugins match); harness 1688 PASS / 0 FAIL. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
