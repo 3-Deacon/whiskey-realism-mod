@@ -56,11 +56,13 @@ namespace WhiskeyRealism.Tactical
     //   AdjustCavalryBehavior 5047: cavalry charge targets only while
     //     ai_stance != 1 && != 2, so a group at 3 still charges with its
     //     cavalry and a group at 2 does not.
-    //   Infantry charges are not stance-driven: MicroAICheckForCharges is dead
-    //     (4910 compares the groupaiobject GameObject with the aigroup
-    //     Regiment), UpdateChargeTarget needs combatbehavior 3 (122214) which
-    //     only the UI sets (203769), and melee comes from contact
-    //     (MoveIntoMelee 125990 -> AssignChargeTarget).
+    //   Vanilla infantry charges are not stance-driven: MicroAICheckForCharges
+    //     is dead (4910 compares the groupaiobject GameObject with the aigroup
+    //     Regiment), UpdateChargeTarget needs combatbehavior 3 (122214) which in
+    //     vanilla only the UI sets (203769), and melee comes from contact
+    //     (MoveIntoMelee 125990 -> AssignChargeTarget). The battle-core charge
+    //     doctrine (BC6b) arms behavior 3 only in assault stance, so a demotion
+    //     also makes it hand its charges back.
     //
     // So the denial demotes the assault stance itself. The doctrine's Deny
     // (reserve held, fallback to line) demotes to its own defend stance (2),

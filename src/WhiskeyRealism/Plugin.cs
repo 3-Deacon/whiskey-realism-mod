@@ -385,10 +385,11 @@ namespace WhiskeyRealism
                 "Enable Tactical Charge Denial",
                 true,
                 "Default ON. When vanilla escalates an AI group to the assault stance (ai_stance 4) that the command doctrine says must not " +
-                "attack (reserve held, or falling back to the line), demotes it to defend (2): no cover-skipping assault approach, skirmishers may " +
-                "deploy again, and its cavalry stops picking charge targets. Infantry melee from contact is not affected. With Enable Tactical " +
-                "Orchestrator Army off, a legacy local-reaction DenyCharge also demotes an assault, to attack (3). Logs [TacticalChargeDeny] / " +
-                "[TacticalChargePreserved]; writes need Tactical Commander Mode = Active; W&L/player groups are never touched.");
+                "attack (reserve held, or falling back to the line), the battle-core charge-demotion producer orders it back to defend (2) at " +
+                "top priority through the order executor: no cover-skipping assault approach, skirmishers may deploy again, its cavalry stops " +
+                "picking charge targets, and the infantry charge doctrine hands back its charges. Infantry melee from contact is not affected. " +
+                "With Enable Tactical Orchestrator Army off, a legacy local-reaction DenyCharge also demotes an assault, to attack (3). Writes " +
+                "need Tactical Commander Mode = Active; W&L/player groups are never touched.");
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Intent Telemetry",
