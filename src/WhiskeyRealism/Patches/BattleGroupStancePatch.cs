@@ -68,6 +68,10 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
+            // The W&L feud instance (isplayeraiorfeud 2) duplicates side 0's
+            // macro cycle; battle-level writers skip it.
+            if (TacticalWriteGuard.IsFeudInstance(battle)) return;
+
             // Per-AIBattle CPU throttle (real time is allowed for CPU budgets):
             // at high compression vanilla calls AdjustGroupAIStance many times
             // per real second. Keyed by AIBattle instance so the W&L feud
