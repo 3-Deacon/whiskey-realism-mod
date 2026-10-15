@@ -26,6 +26,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
+    /// What the army looked like at its last replan (or plan creation). Replan
+    /// triggers compare against it so they fire on a change, not on a level
+    /// (T7). Main-effort band values are seeded lazily from the first reading
+    /// of the current main-effort band.
+    /// </summary>
+    public readonly struct ReplanBaseline
+    {
+        public ReplanBaseline(
+            float morale,
+            float reservesCommitted,
+            float reinforcementShare,
+            InferredIntent enemyIntent,
+            int mainEffortSector,
+            float mainEffortOwnStrength,
+            float mainEffortOdds)
+        {
+            Morale = morale;
+            ReservesCommitted = reservesCommitted;
+            ReinforcementShare = reinforcementShare;
+            EnemyIntent = enemyIntent;
+            MainEffortSector = mainEffortSector;
+            MainEffortOwnStrength = mainEffortOwnStrength;
+            MainEffortOdds = mainEffortOdds;
+        }
+
+        public static ReplanBaseline Initial =>
+            new ReplanBaseline(1f, 0f, 0f, InferredIntent.Unknown, -1, 0f, 0f);
+
+        public float Morale { get; }
+        public float ReservesCommitted { get; }
+        public float ReinforcementShare { get; }
+        public InferredIntent EnemyIntent { get; }
+        public int MainEffortSector { get; }
+        public float MainEffortOwnStrength { get; }
+        public float MainEffortOdds { get; }
+
+        public bool HasMainEffortSnapshot(int sector) => MainEffortSector == sector && MainEffortOwnStrength > 0f;
+
+        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds);
+    }
+
+    /// <summary>
     /// Army echelon orchestrator. Owns the army CO's TacticalBattlePlan, exposes
     /// CurrentMacroAi for the rewired BattleMacroStrategyPatch to read, emits
     /// ArmyIntent down to corps each tick.
@@ -59,6 +102,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float PlanAgeSeconds => _planAgeSeconds;
         public float HistoryGlobalOdds => _historyGlobalOdds;
         public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
+
+        private ReplanBaseline _replanBaseline = ReplanBaseline.Initial;
+        public ReplanBaseline LastReplanBaseline => _replanBaseline;
+
+        /// <summary>Recorded by the tick cycle right after a replan.</summary>
+        public void RecordReplanBaseline(ReplanBaseline baseline) => _replanBaseline = baseline;
 
         /// <summary>
         /// AIBattle.macroai derived from current plan + phase + commander aggression.
@@ -96,6 +145,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
             _phaseAgeSeconds = 0f;
+            _replanBaseline = ReplanBaseline.Initial;
         }
 
         public void AdvancePlanAge(float deltaSeconds)
@@ -438,12 +488,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
+            // A replan re-picks the playbook; it does not throw away where the
+            // battle is. Every playbook instantiates in Probe at the default
+            // sector, so without this a defensive replan reset Withdraw/
+            // Consolidate to Probe and the main effort to the default band
+            // (Withdraw -> Probe -> Withdraw loop, review T7).
+            bool hadPlan = HasPlan;
+            if (hadPlan)
+            {
+                nextPlan = nextPlan.WithPhase(_plan.Phase).WithMainEffortSector(_plan.MainEffortSector);
+            }
             _plan = nextPlan;
             HasPlan = true;
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
-            _phaseAgeSeconds = 0f;
+            if (!hadPlan) _phaseAgeSeconds = 0f;
             // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
             // which would change DirectChildAllocator outputs. Invalidate the direct-child
             // evidence cache so the next signature-equal observe reallocates against the new
@@ -1127,6 +1187,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _planAgeSeconds = 0f;
             _phaseAgeSeconds = 0f;
             _historyGlobalOdds = 1f;
+            _replanBaseline = ReplanBaseline.Initial;
         }
 
         private static CommandNodeOperationalState[] CopyCommandOperations(

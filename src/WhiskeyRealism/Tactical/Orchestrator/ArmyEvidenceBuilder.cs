@@ -114,6 +114,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (ownActive <= 0f) return fallback;
 
                 var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
+                EstimateOwnAverages(bunits, side, out float ownAvgFatigue, out float ownAvgAmmo, out float ownMoraleRatio);
 
                 // Odds against the enemy force this side has actually seen
                 // (TacticalEnemyContactLedger), not the enemy's
@@ -125,7 +126,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // "whatever group is first in completeunitlist".
                 var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open,
                     defaultMainEffortSector: DefaultMainEffortSector(enemyVisible.FrontAxis));
-                float ownMorale = Clamp01OrDefault(SafeSideInfoFloat(bunits, side, "averagemorale"), 1f);
+                // Morale relative to battle start (T17); the doctrine floor
+                // (0.4) means "lost 60% of the morale it started with", not an
+                // absolute level a green army may start below.
+                float ownMorale = ownMoraleRatio;
                 // Own reserves from the side's OWN AIBattle (aibattle[] by
                 // sideofai, feud instance skipped) — the coordinator may hand us
                 // the other side's instance, whose objectivechain only lists
@@ -140,7 +144,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Readiness data: army-wide avg fatigue + ammo (for now; future
                 // refinement will aggregate per-sector) + nearest reinforcement
                 // arrival for this side from the scheduledarrival queue.
-                EstimateOwnAverages(bunits, side, out float ownAvgFatigue, out float ownAvgAmmo);
                 FindNearestReinforcement(bunits, side, out float nearestHours, out float nearestStrength);
 
                 return new Bundle(
@@ -172,10 +175,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// active, not routed) because groupstrengthactive is only maintained on
         /// groups. Defaults to 0.2 fatigue / 0.9 ammo when nothing is sampled.
         /// </summary>
-        private static void EstimateOwnAverages(BattleUnits bunits, int side, out float avgFatigue01, out float avgAmmo01)
+        private static void EstimateOwnAverages(BattleUnits bunits, int side, out float avgFatigue01, out float avgAmmo01, out float moraleRatio01)
         {
             avgFatigue01 = 0.2f;
             avgAmmo01 = 0.9f;
+            moraleRatio01 = 1f;
             try
             {
                 int sideAlliance = SafeAlliance(bunits, side);
@@ -186,6 +190,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 float fatigueSum = 0f;
                 float ammoSum = 0f;
+                float moraleSum = 0f;
+                float startMoraleSum = 0f;
                 int sampled = 0;
 
                 for (int i = 0; i < units.Count; i++)
@@ -205,17 +211,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                     fatigueSum += fatigue;
                     ammoSum += NormalizeAmmo01(unit.ammo, unit.unittyp, 0.9f);
+                    if (unit.battlestartmorale > 0f && !float.IsNaN(unit.morale))
+                    {
+                        moraleSum += unit.morale;
+                        startMoraleSum += unit.battlestartmorale;
+                    }
                     sampled++;
                 }
 
                 if (sampled == 0) return;
                 avgFatigue01 = fatigueSum / sampled;
                 avgAmmo01 = ammoSum / sampled;
+                moraleRatio01 = NormalizedMorale01(moraleSum, startMoraleSum, 1f);
             }
             catch
             {
                 avgFatigue01 = 0.2f;
                 avgAmmo01 = 0.9f;
+                moraleRatio01 = 1f;
             }
         }
 

@@ -46,6 +46,13 @@ internal static class TacticalEvidenceFixTests
         Run("contact ledger resets when the battle clock runs backwards", ContactLedgerResetsOnClockRewind);
         Run("own aibattle resolves by sideofai and skips the feud instance", OwnAiBattleSkipsFeudInstance);
         Run("intent inference strength signal is relative to own force", IntentStrengthSignalRelative);
+        Run("casualty trigger fires on the crossing, not while morale stays low", CasualtyTriggerIsEdge);
+        Run("reserve exhaustion fires once per crossing", ReserveExhaustionIsEdge);
+        Run("reinforcement trigger uses share of own strength and fires once", ReinforcementTriggerIsShareAndEdge);
+        Run("enemy intent shift needs a changed intent", EnemyIntentShiftNeedsChange);
+        Run("replans preserve the current phase and stop the withdraw-probe loop", ReplanPreservesPhaseNoThrash);
+        Run("main effort sector loss uses the main band's own strength history", MainEffortSectorLossFromBandHistory);
+        Run("morale is normalized against battle-start morale", MoraleNormalizedToBattleStart);
     }
 
     private static void Run(string name, Action test)
@@ -525,5 +532,93 @@ internal static class TacticalEvidenceFixTests
         float cSmall = ArmyIntentInference.Build(ev, small).Confidence01;
         float cBig = ArmyIntentInference.Build(ev, big).Confidence01;
         TestHarness.AssertTrue(cSmall > cBig, "confidence scales with enemy relative to own force: " + cSmall + " vs " + cBig);
+    }
+
+    // ---- T7 / T17 triggers ----
+
+    private static ReplanTriggerInput Trig(
+        float morale = 1f, float moraleAtLast = 1f,
+        float reserves = 0.5f, float reservesAtLast = 0f,
+        float reinforcements = 0f, float ownStrength = 20000f, float reinforcementShareAtLast = 0f,
+        float enemyShift = 0f, InferredIntent? intentNow = null, InferredIntent intentAtLast = InferredIntent.Unknown)
+        => new ReplanTriggerInput(
+            planAgeSeconds: 60f, currentPhase: BattlePhase.MainEffort,
+            mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
+            globalOddsCurrent: 1f, globalOddsHistory: 1f,
+            armyMoraleCurrent: morale, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: reserves, reinforcementsArrivingDelta: reinforcements,
+            enemyMainEffortShiftConfidenceWeighted: enemyShift,
+            armyMoraleAtLastReplan: moraleAtLast,
+            reservesCommittedAtLastReplan: reservesAtLast,
+            ownStrength: ownStrength,
+            reinforcementShareAtLastReplan: reinforcementShareAtLast,
+            currentEnemyIntent: intentNow,
+            enemyIntentAtLastReplan: intentAtLast);
+
+    private static void CasualtyTriggerIsEdge()
+    {
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, ArmyReplanTriggers.Evaluate(Trig(morale: 0.3f, moraleAtLast: 0.8f)), "crossing below the floor fires");
+        TestHarness.AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(Trig(morale: 0.3f, moraleAtLast: 0.35f)), "already below at last replan -> no refire");
+    }
+
+    private static void ReserveExhaustionIsEdge()
+    {
+        TestHarness.AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(Trig(reserves: 0.9f, reservesAtLast: 0.5f)), "crossing 0.85 fires");
+        TestHarness.AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(Trig(reserves: 0.9f, reservesAtLast: 0.88f)), "already spent at last replan -> no refire");
+    }
+
+    private static void ReinforcementTriggerIsShareAndEdge()
+    {
+        TestHarness.AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(Trig(reinforcements: 500f)), "500 men on a 20,000 army is not a new situation");
+        TestHarness.AssertEqual(ReplanTrigger.ReinforcementArrival, ArmyReplanTriggers.Evaluate(Trig(reinforcements: 4000f)), "a 20% swing is");
+        TestHarness.AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(Trig(reinforcements: 4000f, reinforcementShareAtLast: 0.2f)), "same swing already planned for");
+    }
+
+    private static void EnemyIntentShiftNeedsChange()
+    {
+        TestHarness.AssertEqual(ReplanTrigger.EnemyIntentShift,
+            ArmyReplanTriggers.Evaluate(Trig(enemyShift: 0.8f, intentNow: InferredIntent.Attack, intentAtLast: InferredIntent.Defend)), "intent changed -> fires");
+        TestHarness.AssertEqual(ReplanTrigger.None,
+            ArmyReplanTriggers.Evaluate(Trig(enemyShift: 0.8f, intentNow: InferredIntent.Attack, intentAtLast: InferredIntent.Attack)), "same intent as at last replan -> no refire");
+    }
+
+    private static readonly EnemyVisibleState QuietFront = new EnemyVisibleState(
+        new[] { new EnemyVisibleSector(2, 6000f, 6000f, false) }, 0.5f, true, false, 0f);
+
+    private static ReplanTrigger Tick(ArmyOrchestrator orch, float morale, EnemyVisibleState enemy, float battleSeconds = 600f, float odds = 1f)
+        => ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), enemy,
+            6000f, morale, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: battleSeconds);
+
+    private static void ReplanPreservesPhaseNoThrash()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        var first = Tick(orch, morale: 0.3f, QuietFront);
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, first, "morale break replans once");
+        TestHarness.AssertEqual(BattlePhase.Withdraw, orch.CurrentPlan.Phase, "replan keeps the Withdraw phase (no reset to Probe)");
+        for (int i = 0; i < 5; i++)
+        {
+            var again = Tick(orch, morale: 0.3f, QuietFront, battleSeconds: 900f);
+            TestHarness.AssertEqual(ReplanTrigger.None, again, "no replan loop while morale stays low (tick " + i + ")");
+            TestHarness.AssertEqual(BattlePhase.Withdraw, orch.CurrentPlan.Phase, "Withdraw stays absorbing");
+        }
+    }
+
+    private static void MainEffortSectorLossFromBandHistory()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 5000f, false) }, 0.5f, true, false, 0f));
+        var trigger = Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false, 0f));
+        TestHarness.AssertEqual(ReplanTrigger.MainEffortSectorLoss, trigger, "main band lost two thirds of its strength");
+    }
+
+    private static void MoraleNormalizedToBattleStart()
+    {
+        // Regiment.battlestartmorale (110758) is set at first morale update to
+        // Max(morale, abovemoraleslowimprovement) (128154-128156); -1 before.
+        TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.NormalizedMorale01(sumMorale: 1.5f, sumBattleStartMorale: 3f, fallback: 1f), 0.5f), "half the starting morale");
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.NormalizedMorale01(3.3f, 3f, 1f), "above start clamps to 1");
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.NormalizedMorale01(0.5f, 0f, 1f), "no start morale yet -> fallback");
     }
 }

@@ -106,5 +106,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             return -1;
         }
+
+        /// <summary>
+        /// Army morale relative to the start of the battle, on [0, 1]. Vanilla
+        /// <c>sideinformation.averagemorale</c> is absolute (84771-84792), so a
+        /// green army can start below an absolute floor; each regiment's
+        /// <c>battlestartmorale</c> (110758, set at its first morale update to
+        /// Max(morale, abovemoraleslowimprovement), 128154-128156) is the
+        /// baseline. <paramref name="fallback"/> when no baseline is set yet.
+        /// </summary>
+        internal static float NormalizedMorale01(float sumMorale, float sumBattleStartMorale, float fallback)
+        {
+            if (!(sumBattleStartMorale > 0f) || float.IsNaN(sumMorale) || float.IsInfinity(sumMorale)) return fallback;
+            float r = sumMorale / sumBattleStartMorale;
+            if (r < 0f) return 0f;
+            if (r > 1f) return 1f;
+            return r;
+        }
     }
 }

@@ -50,7 +50,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float bestNonMainEffortSectorOdds = 0f,
             float currentMainEffortOdds = 0f,
             ReinforcementOpportunity currentOpportunity = ReinforcementOpportunity.NoOpportunity,
-            ReinforcementOpportunity lastReplanOpportunity = ReinforcementOpportunity.NoOpportunity)
+            ReinforcementOpportunity lastReplanOpportunity = ReinforcementOpportunity.NoOpportunity,
+            float armyMoraleAtLastReplan = 1f,
+            float reservesCommittedAtLastReplan = 0f,
+            float ownStrength = 0f,
+            float reinforcementShareAtLastReplan = 0f,
+            InferredIntent? currentEnemyIntent = null,
+            InferredIntent enemyIntentAtLastReplan = InferredIntent.Unknown)
         {
             PlanAgeSeconds = planAgeSeconds;
             CurrentPhase = currentPhase;
@@ -69,6 +75,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CurrentMainEffortOdds = currentMainEffortOdds;
             CurrentOpportunity = currentOpportunity;
             LastReplanOpportunity = lastReplanOpportunity;
+            ArmyMoraleAtLastReplan = armyMoraleAtLastReplan;
+            ReservesCommittedAtLastReplan = reservesCommittedAtLastReplan;
+            OwnStrength = ownStrength;
+            ReinforcementShareAtLastReplan = reinforcementShareAtLastReplan;
+            CurrentEnemyIntent = currentEnemyIntent;
+            EnemyIntentAtLastReplan = enemyIntentAtLastReplan;
         }
 
         public float PlanAgeSeconds { get; }
@@ -98,6 +110,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // plan creation). Differing values fire ReplanTrigger.OpportunityChange.
         public ReinforcementOpportunity CurrentOpportunity { get; }
         public ReinforcementOpportunity LastReplanOpportunity { get; }
+
+        // Snapshot at the last replan (T7, 2026-10-14). Triggers fire when a
+        // value CROSSES its threshold since the last replan, not every cycle
+        // the state persists; the defaults describe a healthy baseline so a
+        // caller without a snapshot still sees the first crossing.
+        public float ArmyMoraleAtLastReplan { get; }
+        public float ReservesCommittedAtLastReplan { get; }
+        /// <summary>Own strength; the reinforcement delta is judged as a share of it.</summary>
+        public float OwnStrength { get; }
+        public float ReinforcementShareAtLastReplan { get; }
+        /// <summary>Inferred enemy intent now; null = not supplied (level behaviour).</summary>
+        public InferredIntent? CurrentEnemyIntent { get; }
+        public InferredIntent EnemyIntentAtLastReplan { get; }
+
+        /// <summary>Net reinforcement delta as a share of own strength.</summary>
+        public float ReinforcementShare =>
+            ReinforcementsArrivingDelta / (OwnStrength > 1f ? OwnStrength : 1f);
     }
 
     public static class ArmyReplanTriggers
@@ -110,6 +139,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const float OddsHighHysteresis = 1.4f;
         public const float ReservesAlmostSpent = 0.85f;
         public const float EnemyShiftConfidenceFloor = 0.5f;
+
+        /// <summary>
+        /// Net reinforcements (own minus visible enemy, 24 h) worth this share
+        /// of own strength change the situation. Vanilla sums head counts into
+        /// reinforcementarrivalswithin24hrs (84767), so the old "&gt; 1" fired on
+        /// a single man.
+        /// </summary>
+        public const float ReinforcementShareThreshold = 0.15f;
 
         // Mirrors ArmyEvidenceBuilder.UnknownReserveCommitFraction. When the
         // evidence builder cannot determine a real reserve fraction (no chains,
@@ -154,12 +191,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (i.GlobalOddsCurrent >= OddsHighHysteresis && i.GlobalOddsHistory < OddsHighHysteresis)
                 return ReplanTrigger.ForceImbalanceShift;
 
-            if (i.ArmyMoraleCurrent < i.ArmyMoraleFloor) return ReplanTrigger.CasualtyThreshold;
+            if (i.ArmyMoraleCurrent < i.ArmyMoraleFloor && i.ArmyMoraleAtLastReplan >= i.ArmyMoraleFloor)
+                return ReplanTrigger.CasualtyThreshold;
             if (IsReserveCommitFractionKnown(i.ReservesCommittedFraction) &&
-                i.ReservesCommittedFraction >= ReservesAlmostSpent)
+                i.ReservesCommittedFraction >= ReservesAlmostSpent &&
+                !(IsReserveCommitFractionKnown(i.ReservesCommittedAtLastReplan) && i.ReservesCommittedAtLastReplan >= ReservesAlmostSpent))
                 return ReplanTrigger.ReserveExhaustion;
-            if (i.ReinforcementsArrivingDelta > 1f) return ReplanTrigger.ReinforcementArrival;
-            if (i.EnemyMainEffortShiftConfidenceWeighted >= EnemyShiftConfidenceFloor) return ReplanTrigger.EnemyIntentShift;
+            if (i.ReinforcementShare >= ReinforcementShareThreshold &&
+                i.ReinforcementShareAtLastReplan < ReinforcementShareThreshold)
+                return ReplanTrigger.ReinforcementArrival;
+            if (i.EnemyMainEffortShiftConfidenceWeighted >= EnemyShiftConfidenceFloor &&
+                (!i.CurrentEnemyIntent.HasValue || i.CurrentEnemyIntent.Value != i.EnemyIntentAtLastReplan))
+                return ReplanTrigger.EnemyIntentShift;
 
             // ---- Offensive triggers (probe-then-exploit doctrine) ----
             //

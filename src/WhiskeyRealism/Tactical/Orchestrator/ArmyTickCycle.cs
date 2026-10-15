@@ -190,6 +190,48 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
 
+            // ---- Main-effort band history (T7) ----
+            //
+            // The main band's own strength and odds at the last replan (or at
+            // first sighting of this band) are the history the sector-loss and
+            // breakthrough checks compare against. Previously both "histories"
+            // were the army-wide total / global odds, so MainEffortSectorLoss
+            // could never fire and the 1.35x breakthrough ratio divided sector
+            // odds by global odds.
+            float mainBandOwn = 0f;
+            float mainBandOdds = 0f;
+            bool mainBandSeen = false;
+            if (enemyVisible.Sectors != null)
+            {
+                for (int i = 0; i < enemyVisible.Sectors.Length; i++)
+                {
+                    var s = enemyVisible.Sectors[i];
+                    if (s.SectorId != currentMainEffortSector) continue;
+                    mainBandSeen = true;
+                    mainBandOwn = s.OwnStrength;
+                    if (s.HasMeaningfulEnemy) mainBandOdds = s.Odds;
+                }
+            }
+            var baseline = orchestrator.LastReplanBaseline;
+            if (mainBandSeen && mainBandOwn > 0f && !baseline.HasMainEffortSnapshot(currentMainEffortSector))
+            {
+                baseline = baseline.WithMainEffort(currentMainEffortSector, mainBandOwn, mainBandOdds);
+                orchestrator.RecordReplanBaseline(baseline);
+            }
+            else if (baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds <= 0f && mainBandOdds > 0f)
+            {
+                baseline = baseline.WithMainEffort(currentMainEffortSector, baseline.MainEffortOwnStrength, mainBandOdds);
+                orchestrator.RecordReplanBaseline(baseline);
+            }
+            float mainOwnCurrent = mainBandSeen && mainBandOwn > 0f ? mainBandOwn : ownMainEffortStrength;
+            float mainOwnHistory = baseline.HasMainEffortSnapshot(currentMainEffortSector)
+                ? baseline.MainEffortOwnStrength
+                : mainOwnCurrent;
+            float mainOddsHistory = baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds > 0f
+                ? baseline.MainEffortOdds
+                : currentMainEffortOdds;
+            float reinforcementShare = reinforcementsArrivingDelta / Math.Max(1f, ownMainEffortStrength);
+
             // ---- Phase progression evaluator ----
             //
             // Drives Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw
@@ -200,7 +242,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             orchestrator.EvaluateAndAdvancePhase(
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 mainEffortOddsCurrent: currentMainEffortOdds,
-                mainEffortOddsHistory: orchestrator.HistoryGlobalOdds,
+                mainEffortOddsHistory: mainOddsHistory,
                 armyMoraleCurrent: ownArmyMorale,
                 armyMoraleFloor: 0.4f,
                 reservesCommittedFraction: ownReservesCommittedFraction,
@@ -209,8 +251,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var input = new ReplanTriggerInput(
                 planAgeSeconds: orchestrator.PlanAgeSeconds,
                 currentPhase: orchestrator.CurrentPlan.Phase,
-                mainEffortOwnStrength: ownMainEffortStrength,
-                mainEffortHistoryOwnStrength: ownMainEffortStrength,
+                mainEffortOwnStrength: mainOwnCurrent,
+                mainEffortHistoryOwnStrength: mainOwnHistory,
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 globalOddsHistory: orchestrator.HistoryGlobalOdds,
                 armyMoraleCurrent: ownArmyMorale,
@@ -219,7 +261,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 reinforcementsArrivingDelta: reinforcementsArrivingDelta,
                 enemyMainEffortShiftConfidenceWeighted: ConfidenceWeightedShift(intent),
                 mainEffortLocalOdds: currentMainEffortOdds,
-                mainEffortLocalOddsHistory: orchestrator.HistoryGlobalOdds,
+                mainEffortLocalOddsHistory: mainOddsHistory,
                 bestNonMainEffortSectorOdds: bestNonMainEffortOdds,
                 currentMainEffortOdds: currentMainEffortOdds,
                 // Opportunity-change trigger inputs (2026-05-21). The orchestrator
@@ -227,7 +269,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // UpdateReinforcementOpportunity; _lastReplanOpportunity is
                 // snapshotted in Replan(). Differing values fire OpportunityChange.
                 currentOpportunity: orchestrator.CurrentReinforcementOpportunity.Opportunity,
-                lastReplanOpportunity: orchestrator.LastReplanOpportunity);
+                lastReplanOpportunity: orchestrator.LastReplanOpportunity,
+                armyMoraleAtLastReplan: baseline.Morale,
+                reservesCommittedAtLastReplan: baseline.ReservesCommitted,
+                ownStrength: ownMainEffortStrength,
+                reinforcementShareAtLastReplan: baseline.ReinforcementShare,
+                currentEnemyIntent: intent.PrimaryIntent,
+                enemyIntentAtLastReplan: baseline.EnemyIntent);
 
             var trigger = orchestrator.CheckReplanTriggers(input);
             if (trigger == ReplanTrigger.None) return ReplanTrigger.None;
@@ -241,6 +289,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             orchestrator.Replan(ownEvidence, intent);
+            orchestrator.RecordReplanBaseline(new ReplanBaseline(
+                ownArmyMorale,
+                ownReservesCommittedFraction,
+                reinforcementShare,
+                intent.PrimaryIntent,
+                orchestrator.CurrentPlan.MainEffortSector,
+                mainOwnCurrent,
+                mainBandOdds));
             _lastReplanByAlliance[allianceId] = now;
             return trigger;
         }
