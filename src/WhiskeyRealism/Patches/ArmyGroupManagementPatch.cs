@@ -16,8 +16,9 @@ namespace WhiskeyRealism.Patches
     //
     // 2026-10-14 (C-ArmyGroup): repeats vanilla's early-return guard (army
     // groups disabled / reform not researched / W&L player is CIC); never
-    // attaches to or re-commands the W&L player's group and respects
-    // CanAddFurtherUnits like GetArmyGroupInRange (75631, 75770); picks
+    // attaches to or re-commands the W&L player's group (GetArmyGroupInRange
+    // 75631); CanAddFurtherUnits (75770) gates attaching only, and commanders
+    // change only on a group holding at least one plan unit; picks
     // commanders only through Commander.CanBePickedForAIReplacement (60748)
     // with exact historical-name matching; skips W&L player-commanded units
     // like CheckCombinationOfUnits (17141).
@@ -77,21 +78,28 @@ namespace WhiskeyRealism.Patches
             var units = ResolveUnits(plan, ownUnits, allianceId);
             if (units.Count < 2) return;
 
-            ArmyGroup group = ExistingGroupFor(units);
-            if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null)
-            {
-                group = FindGroupInArea(allianceId, plan.AreaKey, units);
-            }
+            ArmyGroup own = OwnGroupFor(units);
+            ArmyGroup area = (UnityEngine.Object)(object)own == (UnityEngine.Object)null
+                ? FindGroupInArea(allianceId, plan.AreaKey, units)
+                : null;
+            var action = ArmyGroupDoctrine.ResolveArmyGroupPlanAction(
+                (UnityEngine.Object)(object)own != (UnityEngine.Object)null,
+                (UnityEngine.Object)(object)own != (UnityEngine.Object)null && own.CanAddFurtherUnits(),
+                (UnityEngine.Object)(object)area != (UnityEngine.Object)null);
 
-            int attached = 0;
-            if ((UnityEngine.Object)(object)group != (UnityEngine.Object)null)
+            if (action != ArmyGroupPlanAction.CreateNew)
             {
-                for (int i = 0; i < units.Count; i++)
+                ArmyGroup group = action == ArmyGroupPlanAction.AttachToArea ? area : own;
+                int attached = 0;
+                if (action == ArmyGroupPlanAction.AttachToOwn || action == ArmyGroupPlanAction.AttachToArea)
                 {
-                    if ((UnityEngine.Object)(object)units[i].assignedarmygroup != (UnityEngine.Object)null) continue;
-                    if (!group.CanAddFurtherUnits()) break;
-                    group.AddUnit(units[i], calledfromload: false, renamecorps: true);
-                    attached++;
+                    for (int i = 0; i < units.Count; i++)
+                    {
+                        if ((UnityEngine.Object)(object)units[i].assignedarmygroup != (UnityEngine.Object)null) continue;
+                        if (!group.CanAddFurtherUnits()) break;
+                        group.AddUnit(units[i], calledfromload: false, renamecorps: true);
+                        attached++;
+                    }
                 }
 
                 if (attached > 0)
@@ -102,7 +110,8 @@ namespace WhiskeyRealism.Patches
                         TelemetryLayer.Campaign);
                 }
 
-                AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
+                if (ArmyGroupDoctrine.ShouldAppointAfter(action, attached))
+                    AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
                 return;
             }
 
@@ -121,15 +130,15 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            group = ArmyGroup.CreateNewArmyGroup(prefab, "", -1, unassigned);
-            if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null) return;
+            var created = ArmyGroup.CreateNewArmyGroup(prefab, "", -1, unassigned);
+            if ((UnityEngine.Object)(object)created == (UnityEngine.Object)null) return;
 
             EmitCampaignInfoOnce(
                 $"armygroup:{allianceId}:{plan.AreaKey}:create:{UnitSignature(unassigned)}",
                 $"[ArmyArea] alliance={allianceId} area={plan.AreaKey} action=armygroup-create units={unassigned.Count}",
                 TelemetryLayer.Campaign);
 
-            AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
+            AppointPreferredCommander(allianceId, plan.AreaKey, created, units);
         }
 
         private static List<Regiment> ResolveUnits(ArmyGroupPlan plan, IList ownUnits, int allianceId)
@@ -178,14 +187,12 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool AcceptsUnits(ArmyGroup group)
+        private static bool IsPlayerGroup(ArmyGroup group)
         {
-            if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null) return false;
-            return ArmyGroupDoctrine.ArmyGroupAcceptsUnits(
+            return ArmyGroupDoctrine.IsPlayerArmyGroup(
                 DLC_WL.dlc_scenarioactive,
                 group.GetCommanderID(),
-                DLC_WL.dlc_chosencommander,
-                group.CanAddFurtherUnits());
+                DLC_WL.dlc_chosencommander);
         }
 
         private static bool HasCorpsOrArmy(List<Regiment> units)
@@ -196,12 +203,13 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static ArmyGroup ExistingGroupFor(List<Regiment> units)
+        // A non-player army group that already holds one of the plan's units.
+        private static ArmyGroup OwnGroupFor(List<Regiment> units)
         {
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i].assignedarmygroup;
-                if ((UnityEngine.Object)(object)group != (UnityEngine.Object)null && AcceptsUnits(group))
+                if ((UnityEngine.Object)(object)group != (UnityEngine.Object)null && !IsPlayerGroup(group))
                     return group;
             }
             return null;
@@ -234,8 +242,8 @@ namespace WhiskeyRealism.Patches
             var preference = ArmyGroupDoctrine.ResolveCommanderPreference(allianceId, areaKey);
             if (preference.PreferredLastNames.Count == 0) return;
 
+            if (IsPlayerGroup(group)) return;
             int currentId = group.GetCommanderID();
-            if (DLC_WL.dlc_scenarioactive && currentId == DLC_WL.dlc_chosencommander) return;
             if (CommanderMatches(allianceId, currentId, preference.PreferredLastNames)) return;
 
             int commanderId = FindPreferredCommander(allianceId, preference.PreferredLastNames, units);

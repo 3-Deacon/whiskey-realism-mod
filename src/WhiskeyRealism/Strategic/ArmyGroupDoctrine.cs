@@ -16,6 +16,8 @@ namespace WhiskeyRealism.Strategic
         public List<string> PreferredLastNames = new List<string>();
     }
 
+    public enum ArmyGroupPlanAction { None, AttachToOwn, AppointOwnOnly, AttachToArea, CreateNew }
+
     public static class ArmyGroupDoctrine
     {
         public static List<ArmyGroupPlan> PlanGroups(ArmyAreaLedger ledger, int minimumUnitsPerGroup = 2)
@@ -151,13 +153,38 @@ namespace WhiskeyRealism.Strategic
             return vanillaCanBePicked && !isWlChosenCommander && commandsMemberOrNothing;
         }
 
-        // Same exclusions vanilla ArmyGroup.GetArmyGroupInRange applies (75631):
-        // skip the W&L player's group, and groups at their subordinate cap
-        // (CanAddFurtherUnits, 75770).
-        public static bool ArmyGroupAcceptsUnits(bool wlScenarioActive, int groupCommanderId, int chosenCommanderId, bool canAddFurtherUnits)
+        // vanilla ArmyGroup.GetArmyGroupInRange (75631) never offers the W&L
+        // player's own group; the patch neither attaches to it nor re-commands it.
+        public static bool IsPlayerArmyGroup(bool wlScenarioActive, int groupCommanderId, int chosenCommanderId)
         {
-            if (wlScenarioActive && groupCommanderId == chosenCommanderId) return false;
-            return canAddFurtherUnits;
+            return wlScenarioActive && groupCommanderId == chosenCommanderId;
+        }
+
+        // "Which group do the plan's units attach to" and "which group's commander
+        // changes" are separate: the commander changes only on a group that holds
+        // at least one plan unit. A full own group (CanAddFurtherUnits false,
+        // 75770) gets no new units but keeps the appointment; capacity never
+        // diverts the appointment onto an unrelated group found in range.
+        public static ArmyGroupPlanAction ResolveArmyGroupPlanAction(bool ownGroupFound, bool ownGroupHasRoom, bool areaGroupFound)
+        {
+            if (ownGroupFound)
+                return ownGroupHasRoom ? ArmyGroupPlanAction.AttachToOwn : ArmyGroupPlanAction.AppointOwnOnly;
+            return areaGroupFound ? ArmyGroupPlanAction.AttachToArea : ArmyGroupPlanAction.CreateNew;
+        }
+
+        public static bool ShouldAppointAfter(ArmyGroupPlanAction action, int attachedCount)
+        {
+            switch (action)
+            {
+                case ArmyGroupPlanAction.AttachToOwn:
+                case ArmyGroupPlanAction.AppointOwnOnly:
+                case ArmyGroupPlanAction.CreateNew:
+                    return true;
+                case ArmyGroupPlanAction.AttachToArea:
+                    return attachedCount > 0;
+                default:
+                    return false;
+            }
         }
     }
 }
