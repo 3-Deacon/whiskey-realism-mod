@@ -84,6 +84,23 @@ internal static class BattleSnapshotTests
         AssertFalse((s.Own[1].Flags & UnitFlags.Feud) != 0, "a feuding regiment does not mark its brigade");
         AssertFalse((s.Own[3].Flags & UnitFlags.Feud) != 0, "nor its sibling");
 
+        // AI group of an AI group (verify r3, N5): H feuds; G's AI group is H; X's AI group is
+        // G. Vanilla's micro AI tests X's own aigroup (G, ai_feudstance -1; 4917/4922), so G is
+        // marked (its AI group feuds) and X is not: a propagated flag is never a source.
+        {
+            var q = new BattleSnapshot();
+            q.BeginBuild(1, 0, 0, 1, 1.0);
+            q.AddOwn(new UnitRecord { InstanceId = 900, UnitTyp = TacticalUnitType.BattleGroupBrigade, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | UnitFlags.Feud });
+            q.AddOwn(new UnitRecord { InstanceId = 901, UnitTyp = TacticalUnitType.BattleGroupBrigade, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup, AiGroupId = 900 });
+            q.AddOwn(new UnitRecord { InstanceId = 902, UnitTyp = TacticalUnitType.Infantry, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry, AiGroupId = 901 });
+            for (int i = 0; i < 3; i++) q.Own[i].ParentIndex = -1;
+            q.IndexCommandTree(null);
+            bool[] qs = null;
+            PlayerOwnership.ApplyFeudGroups(q, ref qs);
+            AssertTrue((q.Own[1].Flags & UnitFlags.Feud) != 0, "G marked from its own AI group H");
+            AssertFalse((q.Own[2].Flags & UnitFlags.Feud) != 0, "X not marked through a propagated G");
+        }
+
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int k = 0; k < 100; k++) PlayerOwnership.ApplyFeudGroups(s, ref scratch);
         AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up");
