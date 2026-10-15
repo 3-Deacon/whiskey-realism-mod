@@ -90,6 +90,7 @@ internal static class BattleReconTests
             ("defender: the posture pipeline and the leaf cascade call the stance guard", PostureGuardCallSitesPinned),
             ("defender: one stance reader for the division play", DivisionPlayReadsArmyStance),
             ("defender: #45's default sector scorer never returns attack stance", DefaultScorerDefenderCapped),
+            ("defender: every runtime call site passes the army's stance into the guards", StanceCallSitesPinned),
         });
     }
 
@@ -1401,5 +1402,42 @@ internal static class BattleReconTests
         AssertEqual(TacticalDoctrineDecisionKind.Apply, dAttack.Kind, "still Whiskey's decision");
         TacticalGroupStanceDecision dCounter = SectorStance(2, counterstroke, defending: true);
         AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, dCounter.GroupStance, "a defender's counterstroke: defend, not attack");
+    }
+
+    // ------------------------------------------------------------------ verify round 3
+
+    private static string Source(params string[] parts) =>
+        System.IO.File.ReadAllText(System.IO.Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), System.IO.Path.Combine(parts)));
+
+    private static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+
+    private static void AssertPinned(string body, string expected, string label)
+    {
+        AssertTrue(Flat(body).Contains(expected), label + ": " + expected);
+    }
+
+    // The guards are pure and tested; these runtime sites feed them the side's
+    // stance. A site that passes Meeting (or nothing) instead would keep every pure
+    // test green, so each is pinned to ArmyOrchestrator.CurrentBattleStance.
+    private static void StanceCallSitesPinned()
+    {
+        string coordinator = MethodBody(Source("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"),
+            "private static void PopulateResolvedDecisionsForSide(", "private static bool LegacyReactionDeniesCharge(");
+        AssertPinned(coordinator, "BattleStance sideStance = side.Army != null ? side.Army.CurrentBattleStance : BattleStance.Meeting;", "#45 stance");
+        AssertPinned(coordinator, "TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector), sideStance);", "#45 ledger cap");
+        AssertPinned(coordinator, "sideDefending: sideStance == BattleStance.Defender);", "#45 default scorer cap");
+
+        AssertPinned(Source("Tactical", "Orchestrator", "TacticalBattleOrchestrator.cs"),
+            "CommandNodeOperationsRuntime.Build( Army.CurrentCommandNodeIntents, OperationsLedger.CurrentOperation, OperationsLedger.CurrentObjectives, Army.CurrentBattleStance);",
+            "node planning");
+        AssertPinned(Source("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
+            "side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);", "posture fallback node");
+        AssertPinned(Source("Tactical", "Orchestrator", "ArmyOrchestrator.cs"),
+            "ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance);", "director and doctrine assignment");
+        AssertPinned(Source("Tactical", "Orchestrator", "ArmyOrchestrator.cs"),
+            "public BattleStance CurrentBattleStance => _currentForceBalanceStance;", "one stance field");
+        AssertPinned(Source("Patches", "TacticalObserverPatch.cs"),
+            "sideDefending: TacticalBattleCoordinator.GetSideOrchestrator(group.alliance)?.Army?.CurrentBattleStance == BattleStance.Defender))",
+            "decision-matrix telemetry");
     }
 }
