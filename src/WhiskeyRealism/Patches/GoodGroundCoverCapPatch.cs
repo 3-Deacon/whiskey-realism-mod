@@ -23,6 +23,14 @@ namespace WhiskeyRealism.Patches
     {
         private const int GoodGroundIncident = 18; // incidents.dat 218 "A Good Ground"
 
+        // The proof line is formatted once per battle, not per cover update.
+        private static bool _logged;
+
+        static GoodGroundCoverCapPatch()
+        {
+            BattleScope.Register("good-ground-cover-cap-log", () => _logged = false);
+        }
+
         internal static bool Enabled()
         {
             try { return Plugin.FixGoodGroundCoverCap != null && Plugin.FixGoodGroundCoverCap.Value; }
@@ -48,7 +56,11 @@ namespace WhiskeyRealism.Patches
                     if (capped == doubled) return;
                     __instance.covervalue = capped;
                     __instance.covervaluetemp = capped;
-                    OnceLog.Info("good-ground:cap", "[Patch:GoodGround] A Good Ground cover " + doubled.ToString("0.00") + " capped at " + capped.ToString("0.00"));
+                    if (!_logged)
+                    {
+                        _logged = true;
+                        OnceLog.Info("good-ground:cap", "[Patch:GoodGround] A Good Ground cover " + doubled.ToString("0.00") + " capped at " + capped.ToString("0.00"));
+                    }
                 }
                 catch (Exception ex)
                 {

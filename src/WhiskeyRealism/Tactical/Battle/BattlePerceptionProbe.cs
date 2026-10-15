@@ -228,7 +228,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (incident == null || !BattlePerception.IncidentLaunched(incident.launchedtime)) continue;
                 _incidentMask.Set(incident, BattlePerception.IncidentNotLaunched);
                 OnceLog.Info("tactical.battle-perception:incident-mask",
-                    "[BattlePerception] W&L incident " + id + " (player intelligence) ignored by the AI side's fog-grid probe");
+                    "[BattlePerception] W&L player intelligence incident (60/61/64) ignored by the AI side's fog-grid probe");
             }
         }
 

@@ -36,6 +36,14 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(Regiment), nameof(Regiment.GetTerrainSpeedAdjustment))]
         internal static class CreekSpeed
         {
+            // The proof line is formatted once per campaign, not per call (per frame).
+            private static bool _logged;
+
+            static CreekSpeed()
+            {
+                CampaignScope.Register("pontoon-creek-speed-log", () => _logged = false);
+            }
+
             [HarmonyPostfix]
             internal static void Postfix(Regiment __instance, ref float __result)
             {
@@ -53,7 +61,11 @@ namespace WhiskeyRealism.Patches
                         float factor = TerrainBugFixes.PontoonCreekSpeedMultiplier(true, true, __instance.unittyp, __instance.currentterrain, level);
                         if (factor == 1f) return;
                         __result *= factor;
-                        OnceLog.Info("pontoon-creek:speed", "[Patch:Pontoon] creek crossing speed x" + factor + " for a Pontoon Train group (level " + (level + 1) + ")");
+                        if (!_logged)
+                        {
+                            _logged = true;
+                            OnceLog.Info("pontoon-creek:speed", "[Patch:Pontoon] creek crossing speed x" + factor + " for a Pontoon Train group (level " + (level + 1) + ")");
+                        }
                     }
                     catch (Exception ex)
                     {
