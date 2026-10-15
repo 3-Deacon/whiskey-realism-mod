@@ -23,6 +23,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot index of own returns -1 for unknown", IndexOfOwnReturnsMinusOneForUnknown),
             ("battle snapshot assembler rebuilds tree only on roster change", AssemblerRebuildsTreeOnlyOnRosterChange),
             ("battle snapshot rout does not bump tree generation", RoutDoesNotBumpTreeGeneration),
+            ("battle snapshot move-unit stale source list yields to destination", MoveUnitStaleSourceListYieldsToDestination),
             ("battle snapshot assembly allocates nothing after warm-up", SnapshotAssemblyAllocatesNothingAfterWarmup),
             ("battle snapshot front axis stabilized across ticks", FrontAxisStabilizedAcrossTicks),
             ("battle snapshot direct-child and command-tree probes agree on parents", DirectChildAndCommandTreeAgreeOnParents),
@@ -250,6 +251,48 @@ internal static class BattleSnapshotTests
         f.Assemble();
         AssertEqual(generation, f.Snapshot.TreeGeneration, "a leaf rout keeps the tree generation");
         AssertEqual(Brig1, f.Parent(R2), "the routed regiment keeps its parent");
+    }
+
+    // BattleUnits.MoveUnit(R1 -> Brig3), 93091-93150: the destination is refreshed
+    // (component2.UpdateAllAttachedUnits, 93136), then the source's highest parent up to
+    // unittyp 16 (here the army) with includesubordinategroups, which refreshes it and its
+    // direct subordinate groups only (93137-93140 -> 129619-129627), then the new parent
+    // chain (UpdateAllParentUnits 93141 -> 90524-90546). Brig1, two levels below the army,
+    // keeps a stale list that still holds R1, and is as small as Brig3 and earlier in the
+    // roster, so the smallest-group rule alone would keep R1 under Brig1.
+    private static void MoveUnitStaleSourceListYieldsToDestination()
+    {
+        var f = SmallArmy();
+        int lengthSum = f.Scratch.AttachedLengthSum;
+        int generation = f.Snapshot.TreeGeneration;
+        AssertEqual(Brig1, f.Parent(R1), "R1 starts under Brig1");
+
+        f.Attached[Brig3] = new[] { Brig3, R4, R1 };                      // destination, refreshed
+        f.Attached[Div1] = new[] { Div1, Brig1, Brig2, R2, R3 };          // army's direct subordinate, refreshed
+        f.Attached[Div2] = new[] { Div2, Brig3, R4, R1 };                 // refreshed (both paths)
+        // Army: refreshed, same members. Brig1: stale, still { Brig1, R1, R2 }.
+        f.Load(tickId: 2);
+        AssertEqual(lengthSum + 1, f.Scratch.AttachedLengthSum, "the move changes the attached-length sum");
+        f.Assemble();
+        AssertEqual(generation + 1, f.Snapshot.TreeGeneration, "the move rebuilds the parent map");
+        AssertEqual(Brig3, f.Parent(R1), "R1 follows the refreshed destination, not the stale source");
+        AssertEqual(Brig1, f.Parent(R2), "R2 stays under Brig1");
+        AssertEqual(Div1, f.Parent(Brig1), "Brig1 stays under Div1");
+        AssertEqual(Div2, f.Parent(Brig3), "Brig3 stays under Div2");
+        AssertTrue(f.Snapshot.IsAncestorOf(f.Snapshot.IndexOfOwn(Div2), f.Snapshot.IndexOfOwn(R1)), "R1's chain runs through Div2");
+
+        // Without a previous map (first build of the battle) the smallest group wins.
+        var fresh = new Fixture();
+        foreach (var r in f.Records) fresh.Add(r.InstanceId, r.UnitTyp, r.X, r.Z, r.Strength, UnitFlags.None, Tail(f.Attached[r.InstanceId]));
+        fresh.Load(); fresh.Assemble();
+        AssertEqual(Brig1, fresh.Parent(R1), "no history: the smallest containing group, earliest first");
+    }
+
+    private static int[] Tail(int[] attached)
+    {
+        var tail = new int[attached.Length - 1];
+        Array.Copy(attached, 1, tail, 0, tail.Length);
+        return tail;
     }
 
     // 300 units: 1 army, 4 divisions, 20 brigades, 275 regiments.

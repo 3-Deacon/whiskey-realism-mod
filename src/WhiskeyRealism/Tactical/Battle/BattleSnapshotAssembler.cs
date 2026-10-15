@@ -18,7 +18,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - Groups are unittyp > 13 (vanilla's own cut, 129589).
     // The direct parent of a unit is therefore the smallest group (fewest allattachedunits)
     // whose list contains it, self excluded. Groups are visited smallest first and the
-    // first claim wins, so nothing is allocated and no transform is read.
+    // first claim wins, so nothing is allocated and no transform is read. A stale source
+    // list left by MoveUnit then yields to the refreshed destination
+    // (ResolveStaleSourceClaims).
     internal static class BattleSnapshotAssembler
     {
         // Sets UnitRecord.ParentIndex for own[0..count). attachedIds[i] holds the
@@ -103,6 +105,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
 
+            ResolveStaleSourceClaims(own, count, attachedIds, attachedCounts, order, groups, scratch);
+
             var parentIdById = scratch.ParentIdById;
             parentIdById.Clear();
             for (int i = 0; i < count; i++)
@@ -110,6 +114,54 @@ namespace WhiskeyRealism.Tactical.Battle
                 int p = own[i].ParentIndex;
                 if (p >= 0 && own[i].InstanceId != 0) parentIdById[own[i].InstanceId] = own[p].InstanceId;
             }
+        }
+
+        // Lists of a consistent tree are nested or disjoint (GetComponentsInChildren, 129573),
+        // so a unit listed by two groups neither of which sits above the other means one
+        // list is stale. BattleUnits.MoveUnit (93091-93150) refreshes the destination
+        // (93136) and the new parent chain (UpdateAllParentUnits 93141), but on the source
+        // side only the highest parent up to unittyp 16 and its direct subordinate groups
+        // (93137-93140 -> 129619-129627); a source group deeper than that still lists the
+        // moved unit. The stale claimant is therefore the unit's parent in the previous map:
+        // when it won the smallest-group pass, the other claimant (visited smallest first)
+        // takes the unit. With no previous map the smallest group stays.
+        private static void ResolveStaleSourceClaims(UnitRecord[] own, int count, int[][] attachedIds, int[] attachedCounts,
+            int[] order, int groups, BattleSnapshotScratch scratch)
+        {
+            var previousParentById = scratch.ParentIdById;
+            if (previousParentById.Count == 0) return;
+            var indexById = scratch.IndexById;
+            for (int g = 0; g < groups; g++)
+            {
+                int group = order[g];
+                int[] ids = attachedIds[group];
+                int n = AttachedCount(attachedIds, attachedCounts, group);
+                int selfId = own[group].InstanceId;
+                for (int k = 0; k < n; k++)
+                {
+                    int childId = ids[k];
+                    if (childId == 0 || childId == selfId) continue;
+                    if (!indexById.TryGetValue(childId, out int child) || child == group) continue;
+                    int parent = own[child].ParentIndex;
+                    if (parent < 0 || parent == group || IsAbove(own, count, group, parent)) continue;
+                    if (IsAbove(own, count, child, group)) continue; // never close a cycle
+                    if (previousParentById.TryGetValue(childId, out int previousId)
+                        && previousId == own[parent].InstanceId && previousId != selfId)
+                        own[child].ParentIndex = group;
+                }
+            }
+        }
+
+        // True when ancestor is on index's parent chain (bounded by count).
+        private static bool IsAbove(UnitRecord[] own, int count, int ancestor, int index)
+        {
+            int current = own[index].ParentIndex;
+            for (int steps = 0; current >= 0 && current < count && steps < count; steps++)
+            {
+                if (current == ancestor) return true;
+                current = own[current].ParentIndex;
+            }
+            return false;
         }
 
         private static int AttachedCount(int[][] attachedIds, int[] attachedCounts, int i)
@@ -341,7 +393,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     CreateUnitDefault 89670, which can re-parent units without changing the id set);
     //   - sum of allattachedunits.Length over own groups: a re-parent goes through
     //     UpdateAllAttachedUnits (129572), which re-reads the group's descendants;
-    //     MoveUnit always refreshes the destination (93136), so its list grows.
+    //     MoveUnit always refreshes the destination (93136), so its list grows. The sum
+    //     can still net to zero when refreshed source groups shrink by as much (plan BC1
+    //     known limitations).
     // Rout is not in it: Regiment.Rout returns for groups (unittyp > 13, 123547) and
     // writes no transform for a leaf (123537-123683), so it never re-parents; routed and
     // active flags are re-read from the snapshot every tick by the tree consumers.
