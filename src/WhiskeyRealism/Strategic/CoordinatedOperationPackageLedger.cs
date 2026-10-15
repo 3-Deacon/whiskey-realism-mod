@@ -286,7 +286,8 @@ namespace WhiskeyRealism.Strategic
             if (c.InDefensiveOperation) { reason = "in-defensive-operation"; return false; }
             if (c.ConstructingSupplyDepot) { reason = "constructing-supply-depot"; return false; }
             if (c.Directive == FormationDirective.Guard || c.Directive == FormationDirective.Hold ||
-                c.Directive == FormationDirective.Recover || c.Directive == FormationDirective.Concede)
+                c.Directive == FormationDirective.Recover || c.Directive == FormationDirective.Concede ||
+                c.Directive == FormationDirective.Screen) // on a planner recon mission: not this layer's to move
             { reason = "directive-blocked"; return false; }
             if (c.CriticalSector) { reason = "critical-sector"; return false; }
             if (c.Readiness < options.MinimumReadiness) { reason = "low-readiness"; return false; }

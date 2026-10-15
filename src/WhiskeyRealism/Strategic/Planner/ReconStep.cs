@@ -51,8 +51,9 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // Each active probe mission's ContactEvidenceLedger verdict on the main objective it screens: the
-        // main effort's mass against the believed enemy there (confidence-weighted, relocation range, as the
-        // planner's probe trigger), the battles this review judges near it, and how current that picture is.
+        // main effort's mass against the enemy G3 judged its odds against (TheaterPlan.MainEnemyStrength: one
+        // source for that number), the battles this review judges within the relocation range of it, and how
+        // current the beliefs there are (EnemyBeliefQuery.ConfidenceWithin, the stale gate).
         // Escalate clears the mission (the planner's balance uses the fresh belief), withdraw recalls it, and
         // a stale picture cannot escalate (ContactEvidenceLedger.MinEscalationConfidence).
         internal static void ProbeVerdicts(CampaignSnapshot s, TheaterPlan plan, IReadOnlyList<BattleHistoryRecord> battles,
@@ -67,7 +68,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (m.Kind != ReconKind.Probe || !ReconMissionLedger.IsActive(m.State)) continue;
                 var objective = SectorPlanOf(plan, m.SectorId);
                 if (objective == null) continue;
-                float enemy = EnemyBeliefQuery.StrengthWithin(s.Beliefs, objective.TargetX, objective.TargetZ, radius);
+                float enemy = plan.MainEnemyStrength;
                 var input = new ContactEvidenceInput
                 {
                     ObservingAllianceId = s.Alliance,

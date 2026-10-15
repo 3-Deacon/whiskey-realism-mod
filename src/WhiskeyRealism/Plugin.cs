@@ -986,7 +986,8 @@ namespace WhiskeyRealism
                 "screens toward the oldest or most uncertain believed armies and along approaches no viewer covers, pickets on threatened towns, an " +
                 "advance guard ahead of a main effort with strength to spare, and a belief-driven probe short of a main objective whose picture is stale. " +
                 "A formation on a mission gets the Screen formation directive and the Scouting perk role, and the [Recon] row logs the missions. " +
-                "No formation is sent to its post until the reconnaissance executor ships: until then this plans, marks and logs only. " +
+                "No formation is sent to its post until the reconnaissance executor ships: until then this plans, marks (Screen directive, Scouting " +
+                "perks) and logs, and keeps the marked formations out of the old probe and package layers; the old army-area moves (#15) can still move them. " +
                 "Never uses the W&L player's own command. OFF = no missions (Screen then means nothing); needs Enable Campaign Planner.");
             EnableCampaignFogHonestBeliefs = Config.Bind(
                 "Campaign Planner", "Enable Campaign Fog-Honest Beliefs", true,

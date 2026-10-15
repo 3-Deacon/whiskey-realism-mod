@@ -324,7 +324,8 @@ namespace WhiskeyRealism.Strategic
             if (assignment.Directive == FormationDirective.Guard ||
                 assignment.Directive == FormationDirective.Hold ||
                 assignment.Directive == FormationDirective.Recover ||
-                assignment.Directive == FormationDirective.Concede)
+                assignment.Directive == FormationDirective.Concede ||
+                assignment.Directive == FormationDirective.Screen) // on a planner recon mission: not this layer's to move
                 return false;
             if (assignment.Readiness < options.MinimumProbeReadiness) return false;
             if (assignment.Supply < options.MinimumProbeSupply) return false;

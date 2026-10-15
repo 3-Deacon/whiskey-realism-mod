@@ -45,6 +45,7 @@ internal static class StrategicOperationsTests
             ("operational probe pauses on enemy reaction", OperationalProbePausesOnEnemyReaction),
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe stale belief cannot escalate", OperationalProbeStaleBeliefCannotEscalate),
+            ("operational probe stale belief cannot escalate by package", OperationalProbeStaleBeliefCannotEscalateByPackage),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
             ("operational probe escalates with support package", OperationalProbeEscalatesWithSupportPackage),
@@ -60,6 +61,8 @@ internal static class StrategicOperationsTests
             ("coordinated ops lead overmatch stays single lead", CoordinatedOpsLeadOvermatchStaysSingleLead),
             ("coordinated ops reinforce uses defensive eligibility", CoordinatedOpsReinforceUsesDefensiveEligibility),
             ("coordinated ops reinforce blocks non donor support", CoordinatedOpsReinforceBlocksNonDonorSupport),
+            ("coordinated ops never use a formation on a recon mission", CoordinatedOpsNeverUseAFormationOnAReconMission),
+            ("operational probe never picks a formation on a recon mission", OperationalProbeNeverPicksAFormationOnAReconMission),
             ("coordinated ops wl current order does not require direct movement", CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement),
             ("coordinated ops bridge decision maps blocked commit mode", CoordinatedOpsBridgeDecisionMapsBlockedCommitMode),
             ("coordinated ops nearest map name resolves target", CoordinatedOpsNearestMapNameResolvesTarget),
@@ -547,7 +550,9 @@ internal static class StrategicOperationsTests
         AssertEqual(false, assignment.TransferDonorAllowed);
     }
 
-    private static void OperationalProbeEscalatesWithSupportPackage()
+    // A continuing probe whose favorable contact and support package escalate on a current picture (the second
+    // escalate branch of OperationalProbeLedger, the package path).
+    private static OperationalProbeInput SupportPackageEscalationInput()
     {
         var input = BuildProbeInput();
         input.DaySerial = 104;
@@ -587,12 +592,30 @@ internal static class StrategicOperationsTests
         support.ArtilleryAmmo = 1f;
         support.Supply = 1f;
         input.FormationDirectives = FormationDirectiveLedger.Build(new[] { probe, support }, EraStage.Operational1862, "VirginiaCapitalCorridor");
+        return input;
+    }
 
-        var output = OperationalProbeLedger.Build(input);
+    private static void OperationalProbeEscalatesWithSupportPackage()
+    {
+        var output = OperationalProbeLedger.Build(SupportPackageEscalationInput());
 
         AssertEqual(OperationalProbeDecision.Escalate, output.Decision);
         AssertTrue(output.Package != null, "package output should be set");
         AssertEqual(CoordinatedOperationDecision.CoordinateAttack, output.Package.Decision);
+    }
+
+    // The package path is the branch FavorableContact reaches when the stale gate lifts only AllowsEscalation:
+    // the probe runtime forwards the evidence enum, so the ledger itself must refuse a stale picture here too.
+    private static void OperationalProbeStaleBeliefCannotEscalateByPackage()
+    {
+        var input = SupportPackageEscalationInput();
+        input.BeliefConfidence01 = 0.3f;
+        var output = OperationalProbeLedger.Build(input);
+        AssertTrue(output.Decision != OperationalProbeDecision.Escalate, "a stale belief must not escalate through the package branch");
+        AssertFalse(output.RequiresMassCommitment, "and commits no mass");
+        AssertEqual("continue-probe", output.Reason);
+        input.BeliefConfidence01 = 1f;
+        AssertEqual(OperationalProbeDecision.Escalate, OperationalProbeLedger.Build(input).Decision);
     }
 
     private static void OperationalProbePackageEscalationRequiresFavorableEvidence()
@@ -943,6 +966,49 @@ internal static class StrategicOperationsTests
         var blocked = output.Suppressed.Find(s => s.StableUnitId == 20);
         AssertTrue(blocked != null, "non donor support should be suppressed");
         AssertEqual("transfer-donor-blocked", blocked.Reason);
+    }
+
+    // Screen means "on a planner recon mission" (FormationDirectiveLedger): until G5d's executor owns those
+    // formations, the surviving package layer must not pull one into a reinforce, attack or probe package.
+    private static void CoordinatedOpsNeverUseAFormationOnAReconMission()
+    {
+        foreach (var intent in new[] { CoordinatedOperationIntent.Reinforce, CoordinatedOperationIntent.Attack })
+        {
+            var lead = OpCandidate(10, "lead", 0f, 0f, 6000f);
+            var support = OpCandidate(20, "support", 5f, 0f, 5000f);
+            lead.OffensiveAllowed = intent == CoordinatedOperationIntent.Attack;
+            support.OffensiveAllowed = intent == CoordinatedOperationIntent.Attack;
+            support.TransferDonorAllowed = true;
+            support.Directive = FormationDirective.Screen;
+            var input = OpInput(lead, support);
+            input.Intent = intent;
+            input.TargetEnemyStrength = 12000f;
+            var output = CoordinatedOperationPackageLedger.Build(input);
+            AssertEqual(0, output.SupportStableUnitIds.Count, intent + ": a formation on a recon mission is no support");
+            var blocked = output.Suppressed.Find(x => x.StableUnitId == 20);
+            AssertTrue(blocked != null && blocked.Reason == "directive-blocked", intent + ": suppressed as directive-blocked");
+
+            var asLead = OpCandidate(30, "screen-lead", 0f, 0f, 9000f);
+            asLead.Directive = FormationDirective.Screen;
+            var leadInput = OpInput(asLead);
+            leadInput.Intent = intent;
+            AssertTrue(CoordinatedOperationPackageLedger.Build(leadInput).LeadStableUnitId != 30, intent + ": nor a lead");
+        }
+    }
+
+    private static void OperationalProbeNeverPicksAFormationOnAReconMission()
+    {
+        var onMission = BuildProbeInput();
+        onMission.FormationDirectives = FormationDirectiveLedger.Build(new[]
+        {
+            ProbeSnapshot("probe-corps", 1, 15, 7000f, 5000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor"),
+            Snapshot("hold-army", 1, 16, 26000f, 18000f, FormationLevel.Army, FrontPosture.Hold)
+        }, EraStage.Operational1862, "VirginiaCapitalCorridor", null, key => key == "probe-corps");
+        AssertEqual(FormationDirective.Screen, onMission.FormationDirectives.GetAssignment("probe-corps").Directive);
+        var output = OperationalProbeLedger.Build(onMission);
+        AssertEqual(OperationalProbeDecision.None, output.Decision);
+        AssertEqual("no-eligible-probe-formation", output.Reason);
+        AssertEqual(OperationalProbeDecision.Probe, OperationalProbeLedger.Build(BuildProbeInput()).Decision);
     }
 
     private static void CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement()
