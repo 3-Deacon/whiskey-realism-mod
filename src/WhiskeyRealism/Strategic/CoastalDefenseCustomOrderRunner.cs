@@ -119,7 +119,11 @@ namespace WhiskeyRealism.Strategic
                         var unit = FindUnitByInstanceId(ownUnits, candidate.UnitInstanceId);
                         if (unit == null) continue;
                         if (defOps.Contains(unit)) continue;
-                        if (IsPlayerControlled(unit)) continue;
+                        // WlChainRules: the player's own command and a CIC side are never
+                        // tasked; his map group gets the order as a dispatch (bridge);
+                        // the AI group carrying him is queued like any AI unit.
+                        var chain = WlStrategicOrderBridge.ChainClassOf(allianceId, unit);
+                        if (!WlChainRules.MayMove(chain) && !WlChainRules.OrderOnly(chain)) continue;
                         string wlCurrentOrderKey = $"{allianceId}|{sig}|{candidate.UnitInstanceId}";
                         if (_wlCurrentOrderAttempts.Contains(wlCurrentOrderKey))
                         {
@@ -258,12 +262,6 @@ namespace WhiskeyRealism.Strategic
                 if (((UnityEngine.Object)u).GetInstanceID() == instanceId) return u;
             }
             return null;
-        }
-
-        private static bool IsPlayerControlled(Regiment unit)
-        {
-            try { return DLC_WL.IsMovedByPlayer(unit); }
-            catch { return false; }
         }
 
         private static void AddThisTick(

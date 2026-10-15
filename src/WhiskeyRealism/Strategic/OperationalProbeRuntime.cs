@@ -167,6 +167,23 @@ namespace WhiskeyRealism.Strategic
                     if (pausedUnit == null) return;
                     bool inOffensive = offensive.Contains(pausedUnit);
                     if (!inOffensive) return;
+                    // The W&L player's own command stays in vanilla's operation: the probe
+                    // neither stops nor releases it (WlChainRules; the carrying AI group
+                    // is stopped like any AI unit, as vanilla's end of operation does).
+                    var chain = WlStrategicOrderBridge.ChainClassOf(allianceId, pausedUnit);
+                    if (!WlChainRules.MayMove(chain))
+                    {
+                        EmitOperationalProbeWriteOnce(
+                            "operational-probe:wl-skip-stop",
+                            allianceId,
+                            output,
+                            "skip-stop",
+                            pausedUnit,
+                            null,
+                            "player-chain",
+                            chain.ToString());
+                        return;
+                    }
                     // Vanilla ends an operation with StopRegiment(skipfinalrotation, manualstop)
                     // under the W&L under-commander guard (decompile 13838-13843); removing the
                     // unit from unitsinoffensiveoperations alone left it marching on the target.

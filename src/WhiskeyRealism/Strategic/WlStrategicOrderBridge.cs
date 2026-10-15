@@ -41,7 +41,8 @@ namespace WhiskeyRealism.Strategic
             bool isUnderCommander = false,
             bool isPartOfPlayerUnit = false,
             bool currentCommandIsCampaignGroup = false,
-            bool currentCommandParentIsUnderTargetUnit = false)
+            bool currentCommandParentIsUnderTargetUnit = false,
+            bool isPlayerCampaignGroup = false)
         {
             WlActive = wlActive;
             IsPlayerAlliance = isPlayerAlliance;
@@ -51,6 +52,7 @@ namespace WhiskeyRealism.Strategic
             IsPartOfPlayerUnit = isPartOfPlayerUnit;
             CurrentCommandIsCampaignGroup = currentCommandIsCampaignGroup;
             CurrentCommandParentIsUnderTargetUnit = currentCommandParentIsUnderTargetUnit;
+            IsPlayerCampaignGroup = isPlayerCampaignGroup;
         }
 
         internal bool WlActive;
@@ -61,6 +63,65 @@ namespace WhiskeyRealism.Strategic
         internal bool IsPartOfPlayerUnit;
         internal bool CurrentCommandIsCampaignGroup;
         internal bool CurrentCommandParentIsUnderTargetUnit;
+        internal bool IsPlayerCampaignGroup; // unit == BattleUnits.GetCampaignGroup(player's command)
+    }
+
+    // The W&L player's chain of command as Whiskey treats it (stage G spec decision
+    // C4, docs/wl-player-model.md):
+    //   CicSide        a CIC career: Whiskey stands down for the player's side.
+    //   PlayerCommand  the player's own command or a unit under it (player-owned,
+    //                  dlcw_isundercommander; in his operation, IsMovedByPlayer; a unit
+    //                  inside the map group that carries him; an army-group player's
+    //                  units): never moved, never stopped, never re-tasked by Whiskey.
+    //   PlayerMapGroup the player's command is itself a map group (vanilla's flag2,
+    //                  AIBattle.CheckCurrentOrderUpdate 8271-8274): order-only through
+    //                  a W&L dispatch, and an unreliable executor: never counted as a
+    //                  committed defender or the holder of a must-hold role.
+    //   CarryingGroup  the AI map group above a player whose command is below map-group
+    //                  level: a movable AI asset, as vanilla moves it (8366 sends that
+    //                  player no campaign order); #69 dispatches its march to him.
+    internal enum WlChainClass
+    {
+        None,
+        CicSide,
+        PlayerCommand,
+        PlayerMapGroup,
+        CarryingGroup,
+    }
+
+    internal static class WlChainRules
+    {
+        public static WlChainClass Classify(in WlStrategicRoleFacts facts)
+        {
+            if (!facts.WlActive || !facts.IsPlayerAlliance) return WlChainClass.None;
+            if (facts.IsPlayerCic) return WlChainClass.CicSide;
+            if (facts.IsMovedByPlayer) return WlChainClass.PlayerCommand;
+            if (facts.IsUnderCommander)
+                return facts.CurrentCommandIsCampaignGroup ? WlChainClass.PlayerMapGroup : WlChainClass.PlayerCommand;
+            if (facts.IsPartOfPlayerUnit)
+                return facts.IsPlayerCampaignGroup && !facts.CurrentCommandIsCampaignGroup
+                    ? WlChainClass.CarryingGroup
+                    : WlChainClass.PlayerCommand;
+            return WlChainClass.None;
+        }
+
+        // Moves, stops, operation-list changes, pledges and reverts.
+        public static bool MayMove(WlChainClass chain)
+        {
+            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+        }
+
+        // Defense coverage (must-hold roles, committed defenders).
+        public static bool CountsAsCommittedDefender(WlChainClass chain)
+        {
+            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+        }
+
+        // A unit Whiskey still addresses, by a W&L dispatch.
+        public static bool OrderOnly(WlChainClass chain)
+        {
+            return chain == WlChainClass.PlayerMapGroup;
+        }
     }
 
     internal readonly struct WlStrategicOrderDecision
@@ -147,6 +208,17 @@ namespace WhiskeyRealism.Strategic
             return Classify(request.Intent, BuildFacts(request));
         }
 
+        // The unit's chain class for code that changes vanilla state without an
+        // order of its own (capital pre-pledge, #25 revert, probe stop, defense
+        // coverage). Cheap exit outside a W&L career or the player's alliance.
+        internal static WlChainClass ChainClassOf(int allianceId, Regiment unit)
+        {
+            if (unit == null) return WlChainClass.None;
+            if (!SafeBool(() => DLC_WL.dlc_scenarioactive)) return WlChainClass.None;
+            if (!SafeBool(() => unit.alliance == GameVars.playeralliance)) return WlChainClass.None;
+            return WlChainRules.Classify(BuildFacts(new WlStrategicOrderRequest { AllianceId = allianceId, Unit = unit }));
+        }
+
         private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)
         {
             bool wlActive = SafeBool(() => DLC_WL.dlc_scenarioactive);
@@ -162,6 +234,7 @@ namespace WhiskeyRealism.Strategic
             bool isPartOfPlayerUnit = SafeBool(() => DLC_WL.IsPlayerPartOfUnit(request.Unit));
             bool currentCommandIsCampaignGroup = false;
             bool currentCommandParentIsUnderTargetUnit = false;
+            bool isPlayerCampaignGroup = false;
 
             try
             {
@@ -170,6 +243,7 @@ namespace WhiskeyRealism.Strategic
                 Regiment parent = BattleUnits.GetParentUnit(current);
 
                 currentCommandIsCampaignGroup = current != null && campaignGroup == current;
+                isPlayerCampaignGroup = current != null && request.Unit != null && campaignGroup == request.Unit;
                 currentCommandParentIsUnderTargetUnit =
                     parent != null &&
                     request.Unit != null &&
@@ -179,6 +253,7 @@ namespace WhiskeyRealism.Strategic
             {
                 currentCommandIsCampaignGroup = false;
                 currentCommandParentIsUnderTargetUnit = false;
+                isPlayerCampaignGroup = false;
             }
 
             return new WlStrategicRoleFacts(
@@ -189,7 +264,8 @@ namespace WhiskeyRealism.Strategic
                 isUnderCommander,
                 isPartOfPlayerUnit,
                 currentCommandIsCampaignGroup,
-                currentCommandParentIsUnderTargetUnit);
+                currentCommandParentIsUnderTargetUnit,
+                isPlayerCampaignGroup);
         }
 
         private static bool SafeBool(Func<bool> read)
@@ -237,25 +313,27 @@ namespace WhiskeyRealism.Strategic
             if (intent == WlStrategicIntent.ReportOnly)
                 return Blocked(WlStrategicOrderResult.ReportOnly, orderType, "report-only");
 
-            if (facts.IsPlayerCic)
-                return Blocked(WlStrategicOrderResult.SkippedPlayerCic, orderType, "player-cic");
-
-            if (facts.IsMovedByPlayer)
-                return Blocked(WlStrategicOrderResult.SkippedPlayerControlled, orderType, "moved-by-player");
-
-            if (facts.IsUnderCommander)
+            switch (WlChainRules.Classify(in facts))
             {
-                if (!facts.CurrentCommandIsCampaignGroup || !facts.CurrentCommandParentIsUnderTargetUnit)
+                case WlChainClass.CicSide:
+                    return Blocked(WlStrategicOrderResult.SkippedPlayerCic, orderType, "player-cic");
+                case WlChainClass.PlayerCommand when facts.IsMovedByPlayer:
+                    return Blocked(WlStrategicOrderResult.SkippedPlayerControlled, orderType, "moved-by-player");
+                case WlChainClass.PlayerMapGroup:
+                    if (!facts.CurrentCommandParentIsUnderTargetUnit)
+                        return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "current-order-chain-ineligible");
+                    if (!vanillaBridgeSucceeded)
+                        return Blocked(WlStrategicOrderResult.FailedVanillaBridge, orderType, "vanilla-bridge-failed");
+                    return Blocked(WlStrategicOrderResult.IssuedWlCurrentOrder, orderType, "issued-current-order");
+                case WlChainClass.PlayerCommand when facts.IsUnderCommander:
                     return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "current-order-chain-ineligible");
-
-                if (!vanillaBridgeSucceeded)
-                    return Blocked(WlStrategicOrderResult.FailedVanillaBridge, orderType, "vanilla-bridge-failed");
-
-                return Blocked(WlStrategicOrderResult.IssuedWlCurrentOrder, orderType, "issued-current-order");
+                case WlChainClass.PlayerCommand:
+                    return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
+                case WlChainClass.CarryingGroup:
+                    // Vanilla moves this AI group (AICampaign.MoveUnitTo); #69's MoveUnitTo
+                    // Postfix turns the march into the player's dispatch.
+                    return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "carrying-group");
             }
-
-            if (facts.IsPartOfPlayerUnit)
-                return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
 
             return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "direct-movement-allowed");
         }
