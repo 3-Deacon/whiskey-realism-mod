@@ -93,6 +93,9 @@ namespace WhiskeyRealism.Strategic
         private string _campaignMapDynamicSignature;
         private DailyCadence _operationalCadence = new DailyCadence();
         private bool _erasSeededFromSave;
+        // Armed by ApplySnapshot, consumed by the first NotifyDateAdvanced after a load: a sidecar era
+        // written under the old calendar rule may say TotalWar1864 while vanilla's chapter is below 3.
+        private bool _eraMigrationPending;
         internal static readonly CampaignEpochTracker Epoch = new CampaignEpochTracker();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
@@ -209,6 +212,7 @@ namespace WhiskeyRealism.Strategic
             _dailyOpsAnnounced = false;
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
+            _eraMigrationPending = false;
             _lastReviewSerial = -1;
             _saveSequence = 0;
             _lastSnapshot = default(WarStateObserver.Snapshot);
@@ -244,6 +248,16 @@ namespace WhiskeyRealism.Strategic
             DrainDailyReview();
             if (!Initialized) InitializeFromGameState();
 
+            // Sidecar migration. A loaded save restores LastSeenMonth, so firstCall below is false for
+            // every save written after its first review: the migration is its own one-shot. The chapter
+            // is known here (MonthlyTickHookPatch waits for vanilla's update).
+            if (_eraMigrationPending)
+            {
+                _eraMigrationPending = false;
+                for (int a = 0; a < _work.Eras.Length; a++)
+                    _work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());
+            }
+
             bool firstCall = (LastSeenMonth < 0);
             bool rollover  = !firstCall && ((gameMonth != LastSeenMonth) || (gameYear != LastSeenYear));
             if (firstCall && !_erasSeededFromSave)
@@ -251,14 +265,6 @@ namespace WhiskeyRealism.Strategic
                 // Fresh campaign state (reset or no sidecar era): derive the era from the date.
                 for (int a = 0; a < _work.Eras.Length; a++)
                     (_work.Eras[a] ?? (_work.Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear, SafePolicyChapter());
-            }
-            else if (firstCall)
-            {
-                // Sidecar migration: an era saved under the old calendar rule says TotalWar1864 from
-                // 1 Jan 1864; the stage is vanilla's chapter 3 now (the chapter is known here, the
-                // tick waits for vanilla's update).
-                for (int a = 0; a < _work.Eras.Length; a++)
-                    _work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());
             }
 
             // Fire on first valid call (campaign just started / save just loaded)
@@ -2184,7 +2190,7 @@ namespace WhiskeyRealism.Strategic
             {
                 _work.CICs[alliance] = snap.Cics[alliance];
                 _work.Eras[alliance] = new EraStageManager { Stage = snap.Eras[alliance] ?? EraStage.Amateur1861 };
-                if (snap.Eras[alliance].HasValue) _erasSeededFromSave = true;
+                if (snap.Eras[alliance].HasValue) { _erasSeededFromSave = true; _eraMigrationPending = true; }
                 _work.DirectorMemories[alliance] = snap.DirectorMemories[alliance] ?? new DirectorMemory();
                 OperationMemories[alliance] = new OperationDecisionMemory();
                 OperationMemories[alliance].RestoreRecentReplans(snap.RecentReplans[alliance]);

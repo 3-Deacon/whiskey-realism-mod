@@ -146,17 +146,36 @@ internal static class ChapterFixTests
     private static string Flat(string path) =>
         System.Text.RegularExpressions.Regex.Replace(TestFixtures.ReadRepoFile(path), @"\s+", " ");
 
+    private static string MethodText(string source, string startSignature, string endSignature)
+    {
+        int a = source.IndexOf(startSignature, StringComparison.Ordinal);
+        int b = source.IndexOf(endSignature, a + 1, StringComparison.Ordinal);
+        AssertTrue(a >= 0 && b > a, "method text " + startSignature);
+        return source.Substring(a, b - a);
+    }
+
     private static void CoordinatorPassesTheChapterToTheEra()
     {
         string src = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         AssertContains(src, ".ResetToDate(gameMonth, gameYear, SafePolicyChapter());", "fresh state derives from date and chapter");
         AssertContains(src, "cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, SafePolicyChapter());", "player CIC alliance");
         AssertContains(src, "era.CheckTransition(month, year, ws.VicksburgFallen, SafePolicyChapter());", "AI alliance");
-        AssertContains(src, "else if (firstCall) { // Sidecar migration", "a seeded era is migrated on the first call only");
-        AssertContains(src, "_work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());", "stale calendar late war pulled back");
+
+        // A loaded save restores LastSeenMonth (ApplySnapshot), so `firstCall` (LastSeenMonth < 0) is
+        // false on every save written after its first review: the sidecar migration must not hang on it.
+        string notify = MethodText(src, "public void NotifyDateAdvanced(", "private bool _forcedAllSuccession;");
+        AssertContains(notify, "if (_eraMigrationPending) { _eraMigrationPending = false;", "one-shot consumed on the first notify after a load");
+        AssertContains(notify, "_work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());", "stale calendar late war pulled back");
+        AssertTrue(notify.IndexOf("_eraMigrationPending", StringComparison.Ordinal) < notify.IndexOf("bool firstCall", StringComparison.Ordinal),
+            "the migration is decided before, and independently of, firstCall");
+        AssertTrue(notify.IndexOf("InitializeFromGameState();", StringComparison.Ordinal) < notify.IndexOf("_eraMigrationPending", StringComparison.Ordinal),
+            "after the drain and the initialisation");
+        AssertTrue(notify.IndexOf("_eraMigrationPending", StringComparison.Ordinal) < notify.IndexOf("OnMonthlyTick(", StringComparison.Ordinal),
+            "before the review reads the era");
+        AssertContains(MethodText(src, "private void ApplySnapshot(", "PublishStrategicState();"), "if (snap.Eras[alliance].HasValue) { _erasSeededFromSave = true; _eraMigrationPending = true; }", "a sidecar era arms the migration");
+        AssertContains(MethodText(src, "public void ResetAll(", "private CIC BuildCICForAlliance"), "_eraMigrationPending = false;", "a reset disarms it");
     }
 
-    // The stage is vanilla's chapter now; a project's date from is a calendar date (datefrom[alliance]).
     private static WhiskeyRealism.Strategic.Projects.ProjectDoctrineDecision SelectWithVanilla1864Project(int campaignYear)
     {
         var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals

@@ -240,7 +240,8 @@ internal static class ProjectDoctrineTests
                 DateFromKnown = id == 35,
                 DateFromYear = id == 35 ? 1864 : 0,
                 DateFromMonth = 1,
-                DateFromDay = 1
+                DateFromDay = 1,
+                CampaignYear = 1861
             },
             fundingAvailable: 0f,
             netFundingPerDay: 0f,
@@ -397,7 +398,8 @@ internal static class ProjectDoctrineTests
                 DateFromKnown = true,
                 DateFromYear = 1864,
                 DateFromMonth = 1,
-                DateFromDay = 1
+                DateFromDay = 1,
+                CampaignYear = 1861
             },
             fundingAvailable: 0f,
             netFundingPerDay: 0f,
