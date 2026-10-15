@@ -33,15 +33,10 @@ namespace WhiskeyRealism.Strategic
         private static readonly Dictionary<int, string> _packageLockByUnitId =
             new Dictionary<int, string>();
 
-        // Locks shield units the package put into unitsinoffensiveoperations from
-        // vanilla UpdateMicroMovementInOffensive (13968) until their first path is
-        // consumed. W&L current-order commits never enter that list, so locking
-        // them only leaked entries that the micro-movement patch never cleared.
-        internal static bool ShouldLockPackage(CoordinatedCommitMode commitMode)
-        {
-            return commitMode == CoordinatedCommitMode.DirectMovement;
-        }
-
+        // Locks shield units a direct-move commit put into unitsinoffensiveoperations
+        // from vanilla UpdateMicroMovementInOffensive (13968) until their first path
+        // is consumed. W&L current-order commits never enter that list and are not
+        // locked (locking them only leaked entries nothing ever cleared).
         internal static bool PackageLockLive(int regimentPaths)
         {
             return regimentPaths > 0;
@@ -409,8 +404,6 @@ namespace WhiskeyRealism.Strategic
                             .WithField("wlResult", decision.Result.ToString()));
                     return false;
                 }
-                if (ShouldLockPackage(CoordinatedCommitMode.WlCurrentOrder))
-                    MarkPackageLocked(plan.StableUnitId, packageSignature);
                 EmitCoordinatedOps(
                     TelemetryCategory.Write,
                     TelemetrySeverity.Info,
@@ -440,8 +433,7 @@ namespace WhiskeyRealism.Strategic
                     HadDefensiveMovingOrder = hadDefensiveMovingOrder,
                     RegimentPathsBefore = regimentPathsBefore
                 });
-                if (ShouldLockPackage(CoordinatedCommitMode.DirectMovement))
-                    MarkPackageLocked(plan.StableUnitId, packageSignature);
+                MarkPackageLocked(plan.StableUnitId, packageSignature);
                 EmitCoordinatedOps(
                     TelemetryCategory.Write,
                     TelemetrySeverity.Info,

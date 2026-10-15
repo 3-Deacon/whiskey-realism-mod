@@ -37,7 +37,7 @@ internal static class CampaignMilitaryFixTests
         CoordinatedSingleLeadNeedsReinforceRatio();
         CoordinatedOffensiveMirrorsVanillaEarlyOuts();
         CoordinatedOffensiveTempoGateMatchesVanilla();
-        CoordinatedPackageLockOnlyForDirectCommits();
+        CoordinatedPackageLockExpiresWithPath();
     }
 
     private static void LogPass(string message)
@@ -523,13 +523,11 @@ internal static class CampaignMilitaryFixTests
 
     // Package locks protect only units placed in unitsinoffensiveoperations; a
     // W&L current-order commit never enters that list, so its lock never cleared.
-    private static void CoordinatedPackageLockOnlyForDirectCommits()
+    private static void CoordinatedPackageLockExpiresWithPath()
     {
-        TestHarness.AssertTrue(CoordinatedOperationRuntime.ShouldLockPackage(CoordinatedCommitMode.DirectMovement), "direct move locks");
-        TestHarness.AssertFalse(CoordinatedOperationRuntime.ShouldLockPackage(CoordinatedCommitMode.WlCurrentOrder), "W&L current order does not lock");
         TestHarness.AssertTrue(CoordinatedOperationRuntime.PackageLockLive(3), "path still running keeps lock");
         TestHarness.AssertFalse(CoordinatedOperationRuntime.PackageLockLive(0), "path consumed expires lock");
-        LogPass("c2a coordinated package lock only for direct commits");
+        LogPass("c2a coordinated package lock expires once the path is consumed");
     }
 
     // Vanilla seats historical figures on auto-created army groups early
