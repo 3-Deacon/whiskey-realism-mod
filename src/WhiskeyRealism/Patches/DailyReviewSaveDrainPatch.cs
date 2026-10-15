@@ -12,7 +12,8 @@ namespace WhiskeyRealism.Patches
     // (PrepareLaunchingBattleFromCampaign, 36702), autosaves (66948) and manual saves (216812).
     // This non-skipping Prefix finishes a time-sliced daily strategic review that is still in
     // flight before vanilla saves anything, so the unit orders its remaining jobs issue are in
-    // the saved units and the sidecar holds the completed day. No-op when no review is running.
+    // the saved units and the sidecar holds the completed day. No-op when no review is running
+    // and for saves that are not campaign saves (currentoperation other than 2 or 4, 36711).
     [HarmonyPatch(typeof(SceneManagement), "SaveAll")]
     internal static class DailyReviewSaveDrainPatch
     {
@@ -24,7 +25,7 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.daily-review-save-drain");
                 try
                 {
-                    StrategicCoordinator.Instance?.DrainDailyReview();
+                    StrategicCoordinator.Instance?.DrainDailyReviewBeforeSave();
                 }
                 catch (Exception ex)
                 {

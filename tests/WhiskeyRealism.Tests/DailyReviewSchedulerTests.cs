@@ -598,7 +598,9 @@ internal static class DailyReviewSchedulerTests
     {
         string src = Coordinator();
         AssertBefore(Body(src, "public void NotifyDateAdvanced("), "DrainDailyReview();", "InitializeFromGameState();", "old day drains before the new one");
-        AssertBefore(Body(src, "public void SaveSidecar("), "DrainDailyReview();", "BuildSnapshot()", "sidecar save drains first");
+        AssertBefore(Body(src, "public void SaveSidecar("), "DrainDailyReviewBeforeSave();", "BuildSnapshot()", "sidecar save drains first");
+        string beforeSave = Body(src, "internal void DrainDailyReviewBeforeSave(");
+        AssertBefore(beforeSave, "if (operation != 2 && operation != 4) return;", "DrainDailyReview();", "only campaign saves drain");
         string reset = Body(src, "public void ResetAll(");
         AssertContains(reset, "_review.Clear();", "reset abandons the in-flight day");
         AssertContains(reset, "_deferredBattleOutcomes.Clear();", "reset drops deferred battles");
@@ -623,6 +625,6 @@ internal static class DailyReviewSchedulerTests
         AssertContains(drain, "[HarmonyPatch(typeof(SceneManagement), \"SaveAll\")]", "drain patch targets SaveAll");
         AssertContains(drain, "[HarmonyPrefix]", "drains before vanilla saves");
         AssertContains(drain, "internal static void Prefix()", "non-skipping prefix");
-        AssertContains(drain, "StrategicCoordinator.Instance?.DrainDailyReview();", "drains the review");
+        AssertContains(drain, "StrategicCoordinator.Instance?.DrainDailyReviewBeforeSave();", "drains the review");
     }
 }

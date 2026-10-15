@@ -436,7 +436,7 @@ namespace WhiskeyRealism.Strategic
 
         // Finishes an in-flight review now: before the next day starts (days never interleave)
         // and before a save, so vanilla's save and the sidecar both see a completed day.
-        internal void DrainDailyReview()
+        private void DrainDailyReview()
         {
             if (!_review.InFlight) return;
             try
@@ -448,6 +448,16 @@ namespace WhiskeyRealism.Strategic
             {
                 OnceLog.Warning("coordinator:daily-review-drain", "[DailyOps] review drain failed: " + ex.Message);
             }
+        }
+
+        // Before a campaign save: SaveAll saves campaign data for currentoperation 2 (campaign
+        // live: manual and autosaves) and 4 (PrepareLaunchingBattleFromCampaign, 36692-36702)
+        // (decompile 36711). Any other save (a battle's) never touches the campaign review.
+        internal void DrainDailyReviewBeforeSave()
+        {
+            int operation = SceneManagement.currentoperation;
+            if (operation != 2 && operation != 4) return;
+            DrainDailyReview();
         }
 
         private static long ReviewSliceBudgetTicks()
@@ -2094,7 +2104,7 @@ namespace WhiskeyRealism.Strategic
             {
                 // DailyReviewSaveDrainPatch already drained before vanilla saved; this keeps the
                 // sidecar consistent if the save came another way.
-                DrainDailyReview();
+                DrainDailyReviewBeforeSave();
                 var dto = SidecarDtoCodec.Encode(BuildSnapshot());
                 string json;
                 using (TelemetryPerf.Scope("campaign.sidecar-json-serialization", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
