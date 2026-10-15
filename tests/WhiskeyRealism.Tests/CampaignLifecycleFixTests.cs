@@ -43,7 +43,10 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r5 every profile target exists for its alliance chapter and date", R5EveryProfileTargetExistsForAllianceChapterAndDate);
         Check("c1 r5 allow list matches phase targets", R5AllowListMatchesPhaseTargets);
         Check("c1 r5 every phase target has a resolvable position", R5EveryPhaseTargetHasResolvablePosition);
-        Check("c1 r5 defensive csa ops do not target capture washington", R5DefensiveCsaOpsDoNotTargetWashington);
+        Check("c1 r5 no profile targets capture washington", R5NoProfileTargetsWashington);
+        Check("c1 r5 defensive-posture profiles do not steer followedcampaignobjective", R5DefensiveProfilesDoNotSteerObjective);
+        Check("c1 r5 retired csa defense profiles are gone", R5RetiredCsaDefenseProfilesAreGone);
+        Check("c1 r5 defensive plan releases a mod-written objective to vanilla", R5DefensivePlanReleasesModWrittenObjective);
         Check("c1 r5 resolve rejects profile whose phase targets are unavailable", R5ResolveRejectsUnavailablePhaseTargets);
         Check("c1 r5 generic fallback only targets objectives with towns or IIPs", R5GenericFallbackRequiresVanillaGround);
         Check("c1 r5 generic fallback skips abstract objectives like capture washington", R5GenericFallbackSkipsAbstractObjectives);
@@ -477,14 +480,41 @@ internal static class CampaignLifecycleFixTests
                     profile.OperationId + " target " + phase.TargetObjectiveId + " has a catalog position");
     }
 
-    private static void R5DefensiveCsaOpsDoNotTargetWashington()
+    private static void R5NoProfileTargetsWashington()
     {
-        foreach (var id in new[] { "csa-capital-defense", "csa-protraction-defense" })
-        {
-            TestHarness.AssertTrue(HistoricalOperationCatalog.TryGetById(id, out var profile), id);
+        foreach (var profile in AllProfiles())
             foreach (var phase in profile.Phases)
-                TestHarness.AssertTrue(phase.TargetObjectiveId != 4, id + " must not target objective 4 (Capture Washington)");
+                TestHarness.AssertTrue(phase.TargetObjectiveId != 4, profile.OperationId + " must not target objective 4 (Capture Washington)");
+    }
+
+    private static void R5DefensiveProfilesDoNotSteerObjective()
+    {
+        bool sawDefensive = false;
+        foreach (var profile in AllProfiles())
+        {
+            bool defensive = HistoricalOperationCatalog.IsDefensivePosture(profile.Posture);
+            sawDefensive |= defensive;
+            TestHarness.AssertEqual(!defensive, HistoricalOperationCatalog.SteersCampaignObjective(profile.OperationId), profile.OperationId + " steering");
         }
+        TestHarness.AssertTrue(sawDefensive, "catalog still has a defensive profile to exercise");
+        TestHarness.AssertTrue(HistoricalOperationCatalog.SteersCampaignObjective(null), "generic plan (ground-checked target) steers");
+        TestHarness.AssertFalse(HistoricalOperationCatalog.SteersCampaignObjective("no-such-operation"), "unknown operation never steers");
+    }
+
+    private static void R5RetiredCsaDefenseProfilesAreGone()
+    {
+        // No CSA objective with towns represents ground the CSA defends (campaignobjectives.dat);
+        // both ops only pulled forces at the offensive B&O objective 32.
+        TestHarness.AssertFalse(HistoricalOperationCatalog.TryGetById("csa-capital-defense", out _), "csa-capital-defense retired");
+        TestHarness.AssertFalse(HistoricalOperationCatalog.TryGetById("csa-protraction-defense", out _), "csa-protraction-defense retired");
+    }
+
+    private static void R5DefensivePlanReleasesModWrittenObjective()
+    {
+        bool steers = HistoricalOperationCatalog.SteersCampaignObjective("csa-western-depth");
+        var steer = CampaignObjectiveSteering.Decide(hasPlanTarget: steers, planTargetObjectiveId: 30, currentFollowed: 30, lastWrittenByMod: 30);
+        TestHarness.AssertTrue(steer.RunVanilla, "defensive plan leaves the pick to vanilla");
+        TestHarness.AssertEqual(-1, steer.WriteFollowed, "objective the mod wrote earlier is released");
     }
 
     private static void R5ResolveRejectsUnavailablePhaseTargets()
@@ -898,12 +928,16 @@ internal static class CampaignLifecycleFixTests
 
     private static void PerStaleSidecarPlanIsReplanned()
     {
-        var stale = new OperationalPlanDto { OperationId = "csa-capital-defense", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
-        stale.Phases.Add(new PhaseDto { PhaseId = "screen-and-delay", TargetObjectiveId = 4, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
-        TestHarness.AssertTrue(SidecarDtoCodec.PlanFromDto(stale, 1).IsDirty, "plan targeting objective 4 under the old catalog must replan");
+        var stale = new OperationalPlanDto { OperationId = "csa-valley-disruption", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        stale.Phases.Add(new PhaseDto { PhaseId = "develop-contact", TargetObjectiveId = 31, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
+        TestHarness.AssertTrue(SidecarDtoCodec.PlanFromDto(stale, 1).IsDirty, "plan targeting objective 31 under the old catalog must replan");
 
-        var current = new OperationalPlanDto { OperationId = "csa-capital-defense", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
-        current.Phases.Add(new PhaseDto { PhaseId = "screen-and-delay", TargetObjectiveId = 32, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
+        var retired = new OperationalPlanDto { OperationId = "csa-capital-defense", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        retired.Phases.Add(new PhaseDto { PhaseId = "screen-and-delay", TargetObjectiveId = 4, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
+        TestHarness.AssertTrue(SidecarDtoCodec.PlanFromDto(retired, 1).IsDirty, "plan of a retired operation must replan");
+
+        var current = new OperationalPlanDto { OperationId = "csa-valley-disruption", CurrentPhaseIndex = 0, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        current.Phases.Add(new PhaseDto { PhaseId = "develop-contact", TargetObjectiveId = 32, Transition = "TargetEngaged", DeadlineMonth = 12, DeadlineYear = 1861 });
         TestHarness.AssertFalse(SidecarDtoCodec.PlanFromDto(current, 1).IsDirty, "plan matching the catalog is kept");
     }
 

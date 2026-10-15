@@ -400,6 +400,23 @@ namespace WhiskeyRealism.Strategic
             return (float)Math.Round(score, 3, MidpointRounding.AwayFromZero);
         }
 
+        public static bool IsDefensivePosture(OperationPosture posture)
+        {
+            return posture == OperationPosture.ReinforceAndHold ||
+                posture == OperationPosture.ScreenAndDelay ||
+                posture == OperationPosture.Recover;
+        }
+
+        // Whether a plan may write AIFaction.followedcampaignobjective. Generic plans (no
+        // operation id) only exist on objectives with towns/IIPs (CIC fallback) and steer;
+        // catalog operations steer unless their posture is defensive; unknown ids never steer.
+        public static bool SteersCampaignObjective(string operationId)
+        {
+            if (string.IsNullOrEmpty(operationId)) return true;
+            if (!TryGetById(operationId, out var profile)) return false;
+            return !IsDefensivePosture(profile.Posture);
+        }
+
         // R5: every target below is validated against Config/campaignobjectives.dat by the
         // harness (CampaignLifecycleFixTests). Rules that come from vanilla:
         //  - CampaignObjective.GetAvailableObjectives (decompile 178827) only returns
@@ -409,14 +426,21 @@ namespace WhiskeyRealism.Strategic
         //  - IsDeactivated (178909-179010) gates chapter, scenario, validfrom/validto and
         //    precampaign prerequisites (36 needs 29).
         //  - followedcampaignobjective only adds importance to towns/IIPs that are part of the
-        //    objective (UpdateImportanceValues 14922/14961), so it must point at ground the
-        //    alliance should fight for. Objectives 0-28 have no towns (no vanilla effect).
+        //    objective (UpdateImportanceValues 14922/14961) — it pulls forces toward them.
+        //    Objectives 0-28 have no towns (no vanilla effect).
         // The allow list equals the phase targets so a match on X always pursues X.
-        // CSA "defense" ops no longer target objective 4 (Capture Washington, which pulled
-        // them north); they hold the CSA's own Potomac/B&O line objective 32 (Martinsburg,
-        // Harpers Ferry, Berkeley Springs, Cumberland, Hagerstown). In scenario 001 there is
-        // no CSA objective with ground, so they do not match there and the CIC falls back
-        // to the generic plan / vanilla.
+        //
+        // Every CSA objective with ground (30 West Virginia, 32 B&O lines, 33 Maryland, 34
+        // Pennsylvania) is an OFFENSIVE goal: its towns start Union-held or contested.
+        // followedcampaignobjective is an offensive importance weight that pulls forces toward
+        // those towns, so defensive-posture operations never write it (SteersCampaignObjective)
+        // and vanilla keeps choosing the objective. The former csa-capital-defense and
+        // csa-protraction-defense ops were retired: no CSA objective describes ground the CSA
+        // defends, and aiming them at 4 (Capture Washington) or 32 only pulled forces north.
+        // csa-western-depth stays: it holds and reinforces in western Virginia (objective 30's
+        // Charleston/Grafton/Lewisburg/Romney, the ground the CSA actually contested in 1862)
+        // through the mod's own ledgers (front/formation/probe posture flags) without steering
+        // vanilla's objective.
         private static HistoricalOperationProfile[] BuildProfiles()
         {
             return new[]
@@ -431,15 +455,6 @@ namespace WhiskeyRealism.Strategic
                         Phase("attack-objective", "Attack Objective", 3, PhaseTransition.TargetTaken, 0.65f, OperationPosture.ConcentratedAttack, true, true, false, 90)
                     }),
 
-                Profile("csa-capital-defense", "CSA Potomac Line Defense", 1, EraStage.Amateur1861, Theater.East, 32, new[] { 32 },
-                    OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.CapitalDefense, StrategyTag.DefensiveDepth },
-                    OperationTempoPreset.Deliberate, OperationPosture.ReinforceAndHold, 1, 1, 4, 1861, 12, 1861,
-                    new[]
-                    {
-                        Phase("screen-and-delay", "Screen And Delay", 32, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 30),
-                        Phase("reinforce-and-hold", "Reinforce And Hold", 32, PhaseTransition.ForceBelowThreshold, 0.65f, OperationPosture.ReinforceAndHold, false, true, false, 75),
-                        Phase("counterstroke", "Counterstroke", 32, PhaseTransition.TargetTaken, 0.60f, OperationPosture.Counterstroke, true, true, false, 105)
-                    }),
 
                 Profile("csa-valley-disruption", "CSA Valley Disruption", 1, EraStage.Amateur1861, Theater.East, 32, new[] { 32 },
                     OperationChapterPolicy.AllowDateDrift, 15, new[] { StrategyTag.RailHub, StrategyTag.ForeignRecognition },
@@ -491,17 +506,6 @@ namespace WhiskeyRealism.Strategic
                         Phase("develop-contact", "Develop Contact", 3, PhaseTransition.TargetEngaged, 0.45f, OperationPosture.ProbeAndDevelop, true, false, true, 21),
                         Phase("concentrate-for-attack", "Concentrate For Attack", 3, PhaseTransition.TargetEngaged, 0.70f, OperationPosture.ConcentratedAttack, true, true, false, 45),
                         Phase("attack-objective", "Attack Objective", 3, PhaseTransition.TargetTaken, 0.80f, OperationPosture.ExploitBreakthrough, true, true, false, 75)
-                    }),
-
-                Profile("csa-protraction-defense", "CSA Protraction Defense", 1, EraStage.TotalWar1864, Theater.East, 32, new[] { 32 },
-                    OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.CapitalDefense, StrategyTag.DefensiveDepth, StrategyTag.Manpower },
-                    OperationTempoPreset.Recover, OperationPosture.ReinforceAndHold, 3, 4, 1, 1864, 12, 1865,
-                    new[]
-                    {
-                        Phase("screen-and-delay", "Screen And Delay", 32, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 21),
-                        Phase("reinforce-and-hold", "Reinforce And Hold", 32, PhaseTransition.ForceBelowThreshold, 0.70f, OperationPosture.ReinforceAndHold, false, true, false, 60),
-                        Phase("counterstroke", "Counterstroke", 32, PhaseTransition.TargetTaken, 0.65f, OperationPosture.Counterstroke, true, true, false, 90),
-                        Phase("recover-combat-power", "Recover Combat Power", 32, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 120)
                     })
             };
         }
