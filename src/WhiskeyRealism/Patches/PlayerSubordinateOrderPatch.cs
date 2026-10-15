@@ -66,7 +66,7 @@ namespace WhiskeyRealism.Patches
                     Plugin.EnablePlayerOrderDoctrineDiagnostics.Value;
                 bool doctrineEnabled = Plugin.EnablePlayerOrderDoctrine != null &&
                     Plugin.EnablePlayerOrderDoctrine.Value;
-                bool modeAllowsWrites = TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
+                bool modeAllowsWrites = TacticalWriteGuard.ModeAllowsWrites();
                 bool writesEnabled = doctrineEnabled && modeAllowsWrites;
                 if (!diagnosticsEnabled && !writesEnabled) return;
 
@@ -117,7 +117,8 @@ namespace WhiskeyRealism.Patches
                     50f);
 
                 var afterIssue = Runtime.Snapshot(__instance, forceVanillaProvenance: false).ActiveOrder;
-                if (Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue))
+                bool matched = Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue);
+                if (matched)
                 {
                     DedupeState.RecordAccepted(
                         Runtime.WithSession(candidate, afterIssue.GivenOrderSession),
@@ -125,10 +126,11 @@ namespace WhiskeyRealism.Patches
                         evaluation.Tick);
                     if (diagnosticsEnabled) Log("issue", decision.Reason, candidate, afterIssue);
                 }
-                else if (diagnosticsEnabled)
+                else
                 {
-                    DedupeState.RecordAttempt(candidate, evaluation.Tick);
-                    Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
+                    if (BattleWriterPolicy.RecordsPlayerOrderAttempt(matched))
+                        DedupeState.RecordAttempt(candidate, evaluation.Tick);
+                    if (diagnosticsEnabled) Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
                 }
             }
             catch (Exception ex)

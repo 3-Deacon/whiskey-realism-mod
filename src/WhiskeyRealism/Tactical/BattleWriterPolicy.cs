@@ -465,6 +465,13 @@ namespace WhiskeyRealism.Tactical
             return sollGuns;
         }
 
+        // #62: dedupe bookkeeping must not depend on diagnostics logging; the
+        // patch records an unmatched bridge attempt whatever the log setting.
+        public static bool RecordsPlayerOrderAttempt(bool bridgeMatched)
+        {
+            return !bridgeMatched;
+        }
+
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
         // commits a reserve when an attached unit (unittyp <= 2, no paths, not
         // routed) is outflanked (1|5 left, 2|6 right) on a side its own flank

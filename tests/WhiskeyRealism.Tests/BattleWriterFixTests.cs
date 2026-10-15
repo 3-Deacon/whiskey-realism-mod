@@ -41,6 +41,7 @@ internal static class BattleWriterFixTests
         DeploymentSkipsFleetsAndMissingZones();
         HqLinkSameCommandUsesVanillaHierarchy();
         CombinedArtilleryGunsFollowVanillaInitializeRule();
+        PlayerOrderAttemptRecordedWithoutDiagnostics();
     }
 
     private static void Pass(string name)
@@ -313,6 +314,16 @@ internal static class BattleWriterFixTests
         TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(true, false, 7, 4), "battle: unchanged");
         TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(false, true, 7, 4), "not artillery");
         Pass("battle writers: #34 combined artillery guns follow vanilla initialize rule");
+    }
+
+    // #62: an unmatched CheckCurrentOrderUpdate bridge call must still enter
+    // the dedupe shadow, or the 120-tick throttle never applies when
+    // diagnostics are off and the order is re-issued every micro cycle 28.
+    private static void PlayerOrderAttemptRecordedWithoutDiagnostics()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.RecordsPlayerOrderAttempt(bridgeMatched: false), "unmatched attempt");
+        TestHarness.AssertFalse(BattleWriterPolicy.RecordsPlayerOrderAttempt(bridgeMatched: true), "accepted orders are recorded as accepted");
+        Pass("battle writers: #62 records dedupe attempts regardless of diagnostics");
     }
 
     private static void AssertNear(float expected, float actual, string label)
