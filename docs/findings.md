@@ -172,6 +172,34 @@ new string[5] { "none", "screen", "defend", "attack", "assault" };
 - 2 = defensive only
 - 3 = retreat (set by `VictoryBarBelowTrigger`)
 
+### Perk id tables
+
+`Regiment.HasPerk` (132765) / `GetPerkLevel` (132719) compare raw ids; the table is chosen by unit type (`PerkRow.GetPerksShown` 208802): `unittyp <= 13` battle (`PerkBattleTooltips.txt`, 1 slot), 17 fleet (`PerkFleetsTooltips.txt`), every other type campaign (`PerkTooltipsArmyCampaign.txt`, 4 slots). Battle HQs keep their campaign perks (`import_units` 88579-88632). `HasPerkParent` (132748) answers only for a campaign corps (15) asking its army.
+
+| Id | Battle | Campaign | Fleet |
+|---|---|---|---|
+| 0 | Engineering | Siege Train | Torpedoes |
+| 1 | Sharpshooters | Field Telegraph | Mortar Boats |
+| 2 | Zouave | Balloon Corps | Supply Colliers |
+| 3 | Expert Skirmishers | Bureau of Military Information | Balloon Barge |
+| 4 | Spirited Charge | Skilled Cartographers | Limelights |
+| 5 | Deadly Volley | Flying Column | Blockading Squadron |
+| 6 | Ace of Spade | Foot Cavalry | Sea Raiders |
+| 7 | Iron Discipline | Engineers & Mechanics | Amphibious Attack |
+| 8 | Expert Scouts | Ambulance Corps | Blockade Busters |
+| 9 | Cold Steel | Pontoon Train | Battery Runner |
+| 10 | Mounted Rifles | Sappers and Miners | Port Defender |
+| 11 | Stormers | Land Torpedoes | |
+| 12 | Vanguard | Partisan Brigades | |
+| 13 | Lightning Brigade | Bushwhackers | |
+| 14 | Close Support | Embedded Reporters | |
+| 15 | Skilled Laying | Limelights | |
+| 16 | Grand Battery | Expert Scouts | |
+| 17 | Flying Battery | River Expedition | |
+| 18 | Sapper Gunners | | |
+
+Full call-site audit and the wrong-table reads: [bug-fixes/vanilla-perk-ids.md](bug-fixes/vanilla-perk-ids.md). Pure rule: `Strategic/VanillaPerkTables.cs`.
+
 ## Reflection gotchas
 
 Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla methods have default-valued tail parameters; `AccessTools.Method` lookup must include them or returns null.
