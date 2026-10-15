@@ -41,6 +41,11 @@
 //   flankpositionshift (unitprefs, 53300), read once per battle; the slice count is the
 //   snapshot's (aidefensiveslices, set by the builder).
 //
+// - Perceived outflanking (BC10): after the pressure build, PerceivedFlanking.Apply fills
+//   UnitRecord.Outflanked from the regiments the side sees (UpdateFlanking 122959-123175 with
+//   its sectors and range from GamePrefs.fireangles / distancetoenemyforoutflank, read once
+//   per battle); the snapshot builder no longer copies vanilla's unfogged value.
+//
 // - Troop quality (BC8): each enemy row carries its record's Experience() and morale; only a
 //   visible row's star experience and morale reach memory (BattlePerception.Update; the
 //   player sees a visible regiment's stars, UpdateUnitIcon 121832-121852). Reinforcement
@@ -83,6 +88,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static double _battleStartHours = double.NaN;
         private static bool _geometryRead;
         private static SliceGeometry _geometry;
+        private static FlankGeometry _flank;
         private static readonly PaintedGridLatch _paintedGrids = new PaintedGridLatch(2);
 
         private static FieldInfo _firstRunField;
@@ -161,6 +167,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
             BattlePerception.Publish(s, mode, reason, side.Memory, side.MemoryCount, in side.Result);
             SlicePressureBuilder.Build(s, in _geometry);
+            using (TelemetryPerf.Scope("tactical.perceived-flanking", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
+                PerceivedFlanking.Apply(s, in _flank);
             BattleSnapshotBuilder.RefitFrontAxis(s);
             ReportModeChange(side, alliance, mode, reason);
         }
@@ -400,6 +408,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 MaxRangeMeters = GamePrefs.aidefensivemaxrange,
                 FlankShiftMeters = GamePrefs.flankpositionshift,
             };
+            // UpdateFlanking's sectors and range (122993-123010, unitprefs "Fireangle front/back").
+            float[] fire = GamePrefs.fireangles;
+            _flank = fire != null && fire.Length >= 4
+                ? new FlankGeometry
+                {
+                    FrontFrom = fire[0], FrontTo = fire[1], LeftFrom = fire[2], RightTo = fire[3],
+                    RangeMeters = GamePrefs.distancetoenemyforoutflank,
+                }
+                : default(FlankGeometry); // RangeMeters 0: every code reads 0
         }
 
         // True once the side's grid has finished its first full pass. The reflected read

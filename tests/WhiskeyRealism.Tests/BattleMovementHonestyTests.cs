@@ -37,6 +37,17 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 CoverPointNotForForestCoverOrMovingEnemy", CoverPointNotForForestCoverOrMovingEnemy),
             ("bc10 CoveredCrossingsAllocateNothingAfterWarmup", CoveredCrossingsAllocateNothingAfterWarmup),
             ("bc10 PerceptionMemoryKeepsTheRowDetailWhileVisible", PerceptionMemoryKeepsTheRowDetailWhileVisible),
+            // perceived outflanking
+            ("bc10 FlankCodesMatchVanillaSectors", FlankCodesMatchVanillaSectors),
+            ("bc10 FlankFriendlyCloserClearsSector", FlankFriendlyCloserClearsSector),
+            ("bc10 FlankFallbackModeReversesFacing", FlankFallbackModeReversesFacing),
+            ("bc10 FlankIgnoresSkirmisherScoutAndMelee", FlankIgnoresSkirmisherScoutAndMelee),
+            ("bc10 PerceivedFlankingReadsOnlyNeighbourCells", PerceivedFlankingReadsOnlyNeighbourCells),
+            ("bc10 OwnOutflankedFromVisibleOnly", OwnOutflankedFromVisibleOnly),
+            ("bc10 TargetFlankedByOwnRegimentsScreenedByVisibleFriends", TargetFlankedByOwnRegimentsScreenedByVisibleFriends),
+            ("bc10 ApplyOverwritesTheRawVanillaCode", ApplyOverwritesTheRawVanillaCode),
+            ("bc10 ChargeBarsOnPerceivedOutflankNotRaw", ChargeBarsOnPerceivedOutflankNotRaw),
+            ("bc10 PerceivedFlankingAllocatesNothingAfterWarmup", PerceivedFlankingAllocatesNothingAfterWarmup),
         });
     }
 

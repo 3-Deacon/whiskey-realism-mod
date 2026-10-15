@@ -619,17 +619,17 @@ internal static class ChargeDoctrineTests
 
     // ------------------------------------------------------------------ BC6b producer
 
-    private const int BrigadeId = 100;
-    private const int RegA = 101, RegB = 102, RegC = 103, RegD = 104;
-    private const int TargetId = 900;
-    private const float Radius = 120f;
+    internal const int BrigadeId = 100;
+    internal const int RegA = 101, RegB = 102, RegC = 103, RegD = 104;
+    internal const int TargetId = 900;
+    internal const float Radius = 120f;
     private static long _tick;
 
     // Brigade HQ (500, -500) in assault; three moving infantry regiments on z = -520 at
     // x 420/500/580, ordered behavior 2, all with the visible enemy 900 at (500, -580) as
     // enemyinrangereg[0]. Parent distance 80 < 120. Regiment distances 100/60/100: B and A
     // lead (A wins the tie with C on the lower index).
-    private static BattleSnapshot Line(double hours)
+    internal static BattleSnapshot Line(double hours)
     {
         var s = new BattleSnapshot();
         s.BeginBuild(1, 0, 0, ++_tick, hours);
@@ -667,11 +667,11 @@ internal static class ChargeDoctrineTests
         });
     }
 
-    private static ref UnitRecord Own(BattleSnapshot s, int id) => ref s.Own[s.IndexOfOwn(id)];
+    internal static ref UnitRecord Own(BattleSnapshot s, int id) => ref s.Own[s.IndexOfOwn(id)];
 
     private static ChargeIntentProducer.Settings On(float renewHours = 0f) => new ChargeIntentProducer.Settings(true, Radius, renewHours);
 
-    private sealed class Sink : IIntentSink
+    internal sealed class Sink : IIntentSink
     {
         public readonly BattleOrderIntent[] Items = new BattleOrderIntent[16];
         public int Count;
@@ -687,7 +687,7 @@ internal static class ChargeDoctrineTests
         }
     }
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public readonly ChargeIntentProducer.ChargeMemory Memory = new ChargeIntentProducer.ChargeMemory();
         public readonly OrderExecutor Executor = new OrderExecutor();

@@ -88,8 +88,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public float FireRange;
         // Charge doctrine inputs (BC6b): lastaichargetime (110798), the battle hour of
         // vanilla's last odds refusal (UpdateChargeTarget 122290-122292; 0 = never), and
-        // outflanked (111488), the flank-sector code UpdateFlanking sets from the unit's
-        // own enemyinrangereg and facing (122959-123175; 0 = not outflanked).
+        // the flank-sector code UpdateFlanking computes (122959-123175; 0 = not outflanked).
+        // BC10: the builder no longer copies vanilla's outflanked (111488), which reads the
+        // unfogged enemyinrangereg; PerceivedFlanking.Apply fills it from the units the side
+        // sees (own rows and Visible enemy rows; every other row reads 0).
         public float LastAiChargeTime;
         public int Outflanked;
         // firefromflank (111492): flank code of fire this unit received recently
