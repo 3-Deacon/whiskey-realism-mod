@@ -1696,7 +1696,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (counts[s] > 0)
                     {
                         OnceLog.Info(
-                            "tactical-resolved-cache:prepopulated",
+                            "tactical-resolved-cache:prepopulated:" + s,
                             "[TacticalResolvedCache] pre-populated alliance=" + s
                             + " count=" + counts[s]
                             + " — battle-start gap closed; tier-1 hits begin immediately");

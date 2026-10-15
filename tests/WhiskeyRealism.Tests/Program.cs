@@ -2762,6 +2762,15 @@ static class Program
         AssertFalse(traceBudget.Allow(TelemetryCategory.Trace, 20), "trace cuts above 90 percent");
         AssertTrue(traceBudget.Allow(TelemetryCategory.State, 20), "state survives trace cutoff");
 
+        // Same order as TelemetryQueue.Rank: Performance rows go after Trace and before
+        // State/Decision, so a full budget keeps doctrine rows over perf samples.
+        var perfBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        perfBudget.RecordBytes(TelemetryCategory.Performance, 925);
+        AssertFalse(perfBudget.Allow(TelemetryCategory.Performance, 20), "performance cuts above 93 percent");
+        AssertTrue(perfBudget.Allow(TelemetryCategory.State, 20), "state survives performance cutoff");
+        AssertTrue(perfBudget.Allow(TelemetryCategory.Decision, 20), "decision survives performance cutoff");
+        AssertTrue(perfBudget.Allow(TelemetryCategory.Performance, 20, lowPriority: true, protectedSummary: true), "performance summary stays in the protected reserve");
+
         var stateBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
         stateBudget.RecordBytes(TelemetryCategory.State, 940);
         AssertFalse(stateBudget.Allow(TelemetryCategory.State, 20), "state cuts above 95 percent");
