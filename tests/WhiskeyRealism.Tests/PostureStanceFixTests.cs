@@ -64,6 +64,12 @@ internal static class PostureStanceFixTests
         // BR-M1
         Pass("main arrival hold arms once and keeps its start time", MainArrivalHoldArmsOnce);
         Pass("main arrival hold stays released after expiry", MainArrivalHoldStaysReleasedAfterExpiry);
+
+        // B-leaf
+        Pass("leaf brigade moves only for movement tasks", LeafBrigadeMovesOnlyForMovementTasks);
+        Pass("leaf brigade defers to an active parent order", LeafBrigadeDefersToActiveParentOrder);
+        Pass("leaf brigade keeps executor safety gates", LeafBrigadeKeepsExecutorSafetyGates);
+        Pass("formation slot mirrors vanilla GetAngleTerrainPosXY math", FormationSlotMirrorsVanillaMath);
     }
 
     private static void Pass(string name, Action test)
@@ -509,5 +515,48 @@ internal static class PostureStanceFixTests
         var stillReleased = MainArrivalHoldLatch.Next(released, 1.2f, holding: true);
         AssertTrue(stillReleased.Released, "hold request ignored once released");
         AssertEqual(0f, MainArrivalHoldLatch.ElapsedHours(armed, 0.5f), "clock reset gives no negative elapsed");
+    }
+
+    private static LeafMoveDecision Leaf(CommandTaskType task, bool parentActive = false, bool hasSlot = true, bool closeEngaged = false, bool pending = false, bool activeMove = false)
+    {
+        return LeafBrigadeMovePolicy.Decide(task, parentActive, hasSlot, closeEngaged, pending, activeMove);
+    }
+
+    private static void LeafBrigadeMovesOnlyForMovementTasks()
+    {
+        AssertTrue(Leaf(CommandTaskType.AttackObjective).Move, "attack moves");
+        AssertFalse(Leaf(CommandTaskType.HoldObjective).Move, "hold stays in its slot");
+        AssertFalse(Leaf(CommandTaskType.ReserveWait).Move, "reserve stays");
+        AssertEqual("non-movement-task", Leaf(CommandTaskType.GuardFlank).Reason, "reason");
+    }
+
+    private static void LeafBrigadeDefersToActiveParentOrder()
+    {
+        var d = Leaf(CommandTaskType.AttackObjective, parentActive: true);
+        AssertFalse(d.Move, "vanilla group cascade places the brigade (SetGroupFormation 92060)");
+        AssertEqual("parent-ordered", d.Reason, "reason");
+        AssertFalse(Leaf(CommandTaskType.AttackObjective, hasSlot: false).Move, "no slot, no move");
+    }
+
+    private static void LeafBrigadeKeepsExecutorSafetyGates()
+    {
+        AssertFalse(Leaf(CommandTaskType.AttackObjective, closeEngaged: true).Move, "in contact");
+        AssertFalse(Leaf(CommandTaskType.AttackObjective, pending: true).Move, "pending order");
+        AssertFalse(Leaf(CommandTaskType.AttackObjective, activeMove: true).Move, "already moving");
+    }
+
+    private static void FormationSlotMirrorsVanillaMath()
+    {
+        // Vanilla 26945-26949: angle -= 90; x' = x - cos(a)*dz - cos(a+90)*dx; z' = z + sin(a)*dz + sin(a+90)*dx.
+        double a = (30.0 - 90.0) * Math.PI / 180.0;
+        double b = 30.0 * Math.PI / 180.0;
+        float ex = (float)(100.0 - Math.Cos(a) * 40.0 - Math.Cos(b) * (-25.0));
+        float ez = (float)(-200.0 + Math.Sin(a) * 40.0 + Math.Sin(b) * (-25.0));
+        LeafFormationSlot.OffsetXZ(100f, -200f, 30f, -25f, 40f, out float x, out float z);
+        AssertTrue(Math.Abs(ex - x) < 0.001f, "x");
+        AssertTrue(Math.Abs(ez - z) < 0.001f, "z");
+        LeafFormationSlot.OffsetXZ(100f, -200f, 77f, 0f, 0f, out float x0, out float z0);
+        AssertEqual(100f, x0, "zero offset x");
+        AssertEqual(-200f, z0, "zero offset z");
     }
 }

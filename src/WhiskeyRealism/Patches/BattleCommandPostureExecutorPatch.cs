@@ -2353,7 +2353,7 @@ namespace WhiskeyRealism.Patches
             }
 
             // Override-propagation fix (2026-05-21): the earlier override fix only
-            // updated synthesizedState.Task, but TryResolveLeafMovementTarget reads
+            // updated synthesizedState.Task, but the leaf move read
             // leafAssignment.LeafTask directly to pick the movement target — so the
             // unit still moved per its ORIGINAL role (e.g. RefuseLeft → GuardFlank
             // position) even when the army said WithdrawalToFightLater. Smoke logs
@@ -2494,6 +2494,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // B-leaf: a leaf brigade nested inside an AI group is moved only for
+        // movement tasks, only to its slot in the parent's formation, never
+        // while the parent has an order in flight, and through the same gates
+        // as the group path (LeafBrigadeMovePolicy). No stance write: the leaf
+        // is not an AI group (TacticalStanceWriter refuses it anyway).
         private static void ApplyLeafBrigadePosture(
             AIBattle battle,
             BattleUnits bunits,
@@ -2503,83 +2508,70 @@ namespace WhiskeyRealism.Patches
             TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
             IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
         {
-            // Minimal posture write path for a leaf brigade that doesn't carry
-            // its own ledger state. Reuses the same player-protected, routed,
-            // recent-order, and active-move gates as the primary flow, but
-            // simplifies the doctrine-order resolution (we synthesize the
-            // doctrine order from the leaf assignment task).
             try
             {
-                bool playerProtected = IsPlayerProtected(group);
-                if (playerProtected) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "player-protected", false); return; }
+                if (IsPlayerProtected(group)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "player-protected", false); return; }
                 if (SafeRouted(group)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "routed", false); return; }
 
                 int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 if (HasRecentExecutorOrder(instanceId)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "recent-order", false); return; }
-                if (group.regimentpaths > 0 || group.movementmode > 0)
+                if (_writeBackoffUntil.TryGetValue(instanceId, out float backoffUntil) &&
+                    CommandWaypointWritePolicy.IsBackedOff(BattleHours(), backoffUntil))
                 {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "movement-in-progress", false);
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "write-backoff", false);
                     return;
                 }
 
-                // Mirror the primary executor's pending-order gate: don't overwrite
-                // a vanilla courier-in-flight or a queued order. Without this check
-                // the cascade could clobber an order that's already on its way.
-                if (HasPendingOrder(group, allowStaleQueuedBypass: false))
+                Regiment parent = CommandParent(group);
+                bool parentActive = parent != null &&
+                    (parent.regimentpaths > 0 || HasPendingOrder(parent) || HasActiveMoveMakingProgress(parent));
+                bool hasSlot = TryFormationSlot(group, parent, out Vector3 target, out float slotRotation);
+                LeafMoveDecision move = LeafBrigadeMovePolicy.Decide(
+                    leafAssignment.LeafTask,
+                    parentActive,
+                    hasSlot,
+                    HasCloseEngagement(group),
+                    HasPendingOrder(group),
+                    HasActiveMoveMakingProgress(group));
+                if (!move.Move) { EmitLeafCascadeTelemetry(side, group, leafAssignment, move.Reason, false); return; }
+                if (!IsSafeWaypoint(group, target)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "unsafe-target", false); return; }
+                if (ShouldSkipDuplicateWaypoint(group, target)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "duplicate-waypoint", false); return; }
+                if (ShouldSuppressTaskRefresh(group, leafAssignment.LeafTask)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "task-hold", false); return; }
+
+                int beforeMovingPaths = CountMovingPaths(group);
+                int beforeQueued = QueuedOrderCount(group);
+                bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(
+                    leafAssignment.LeafTask,
+                    battleActive: true,
+                    inContactWithdrawal: HasLocalFlankRisk(group));
+                bunits.SetWaypoint(
+                    group,
+                    target,
+                    newpath: true,
+                    doublequick: false,
+                    manualfinalrotation: slotRotation,
+                    modifylastwaypoint: false,
+                    useorderdelay: useOrderDelay,
+                    timetomove: -1f,
+                    direction: -1,
+                    showmovementoptions: false,
+                    ignorebattlemonuments: false,
+                    groupmoveonly: false,
+                    ignoredisabledships: false,
+                    checkforreadiness: true,
+                    clearinterruptionpaths: true);
+
+                if (!CommandWaypointWritePolicy.MovementIssued(beforeMovingPaths, CountMovingPaths(group), beforeQueued, QueuedOrderCount(group)))
                 {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "order-pending", false);
+                    _writeBackoffUntil[instanceId] = CommandWaypointWritePolicy.FailedWriteBackoffUntil(BattleHours());
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "movement-unmaterialized", false);
                     return;
                 }
 
-                // W&L feud-action gate parity: if the group contains a player-
-                // subordinate attached unit (dlcw_isundercommander), deny the
-                // write. Mirrors the IsPlayerProtected walk used elsewhere in
-                // this patch — the existing IsPlayerProtected check above only
-                // catches the group itself, not its attached units.
-                if (HasPlayerSubordinateAttached(group))
-                {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "wl-player-subordinate-attached", false);
-                    return;
-                }
-
-                // Emit the cascade telemetry BEFORE attempting the write, so we
-                // always see "what task was derived for this brigade" even if
-                // the actual write is gated.
-                EmitLeafCascadeTelemetry(side, group, leafAssignment, "considering", false);
-
-                // For the actual movement write, we use vanilla SetWaypoint via
-                // the existing flow. Build a minimal CommandDoctrineOrder so the
-                // executor can pick a target.
-                if (TryResolveLeafMovementTarget(group, leafAssignment, out Vector3 target))
-                {
-                    bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(state.Task, battleActive: true);
-                    // Scope B refactor (2026-05-22): set stance before waypoint
-                    // so the leaf brigade's vanilla micro-AI executes with
-                    // proper context. Mirrors the brigade-posture SetWaypoint path.
-                    EnsureStanceMatchesTask(bunits, group, leafAssignment.LeafTask);
-                    bunits.SetWaypoint(
-                        group,
-                        target,
-                        newpath: true,
-                        doublequick: false,
-                        manualfinalrotation: -1f,
-                        modifylastwaypoint: false,
-                        useorderdelay: useOrderDelay,
-                        timetomove: -1f,
-                        direction: -1,
-                        showmovementoptions: false,
-                        ignorebattlemonuments: false,
-                        groupmoveonly: false,
-                        ignoredisabledships: false,
-                        checkforreadiness: true,
-                        clearinterruptionpaths: true);
-                    _lastExecutorOrderAt[instanceId] = BattleHours();
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask.ToString(), true);
-                }
-                else
-                {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "no-target", false);
-                }
+                _lastExecutorOrderAt[instanceId] = BattleHours();
+                _writeBackoffUntil.Remove(instanceId);
+                RecordTaskWrite(group, leafAssignment.LeafTask);
+                EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask, true);
             }
             catch (Exception ex)
             {
@@ -2588,27 +2580,58 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool HasPlayerSubordinateAttached(Regiment group)
+        // Vanilla command parent (BattleUnits.GrabNextParentUnit 86886): the
+        // transform parent, or null at the Units root.
+        private static Regiment CommandParent(Regiment group)
         {
             try
             {
-                if (group == null) return false;
-                if (group.dlcw_isundercommander) return true;
-                var units = group.allattachedunits;
-                if (units == null) return false;
-                for (int i = 0; i < units.Length; i++)
-                {
-                    var unit = units[i];
-                    if (unit == null) continue;
-                    if (unit.dlcw_isundercommander) return true;
-                }
-                return false;
+                if (group == null) return null;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parent = BattleUnits.GrabNextParentUnit(self);
+                if (parent == null || parent == self) return null;
+                return parent.GetComponent<Regiment>();
             }
             catch
             {
-                // Fail closed: assume player-attached on error so we never write
-                // to a unit we can't verify is safe.
-                return true;
+                return null;
+            }
+        }
+
+        // The brigade's slot in its parent's formation, computed the way
+        // SetGroupFormation places a group child (92060-92075): from the
+        // parent's last waypoint and rotation, offset by
+        // groupposition.unitoffsetposition[i] (lookup as GetOffsetPositionInGroup)
+        // plus the child's group depth.
+        private static bool TryFormationSlot(Regiment group, Regiment parent, out Vector3 slot, out float rotation)
+        {
+            slot = default(Vector3);
+            rotation = -1f;
+            try
+            {
+                if (group == null || parent == null || parent.groupposition == null) return false;
+                Vector3 anchor = parent.lastsetwaypointposition;
+                if (IsDefaultVector(anchor)) return false;
+
+                BattleUnits.GroupPosition layout = parent.groupposition;
+                GameObject self = ((Component)group).gameObject;
+                int index = -1;
+                for (int i = 0; layout.attachedunitid != null && i < layout.attachedunitid.Length; i++)
+                {
+                    if (layout.attachedunitid[i] == self) { index = i; break; }
+                }
+                if (index < 0 || layout.unitoffsetposition == null || index >= layout.unitoffsetposition.Length) return false;
+
+                Vector3 offset = layout.unitoffsetposition[index];
+                float depth = group.groupposition != null ? group.groupposition.groupdepth : 0f;
+                rotation = parent.lastsetwaypointrotation;
+                LeafFormationSlot.OffsetXZ(anchor.x, anchor.z, rotation, -offset.x, offset.z + depth, out float x, out float z);
+                slot = new Vector3(x, anchor.y, z);
+                return !IsDefaultVector(slot);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -2628,80 +2651,6 @@ namespace WhiskeyRealism.Patches
                 default:                          return CommandNodeRole.Unknown;
             }
         }
-
-        private static bool TryResolveLeafMovementTarget(
-            Regiment group,
-            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
-            out Vector3 target)
-        {
-            target = default(Vector3);
-            try
-            {
-                if (group == null) return false;
-                Vector3 own = SafePosition(group);
-                if (IsDefaultVector(own)) return false;
-
-                // Priority 1: parent regiment's last waypoint (SoW brigade-think
-                // pattern of following parent TACOBJLoc). Most accurate when the
-                // orchestrator has already issued a move to the parent division.
-                try
-                {
-                    var parentTransform = ((Component)group).gameObject.transform != null
-                        ? ((Component)group).gameObject.transform.parent
-                        : null;
-                    if (parentTransform != null)
-                    {
-                        var parentReg = parentTransform.GetComponent<Regiment>();
-                        if (parentReg != null && !IsDefaultVector(parentReg.lastsetwaypointposition))
-                        {
-                            target = parentReg.lastsetwaypointposition;
-                            return true;
-                        }
-                    }
-                }
-                catch { }
-
-                // Priority 2: fall back to the GROUP's own last-set waypoint
-                // (vanilla may have ordered the brigade before the orchestrator
-                // came online). Keeps the brigade on its existing line of
-                // advance rather than redirecting.
-                try
-                {
-                    if (!IsDefaultVector(group.lastsetwaypointposition))
-                    {
-                        target = group.lastsetwaypointposition;
-                        return true;
-                    }
-                }
-                catch { }
-
-                // Priority 3: nudge the brigade forward in its facing direction.
-                // 150m (was 75m) is large enough that vanilla won't immediately
-                // gate the order as "already there"; bounded so the brigade
-                // doesn't run off the map if facing is malformed.
-                try
-                {
-                    var tf = ((Component)group).gameObject.transform;
-                    if (tf == null) return false;
-                    Vector3 forward = tf.forward;
-                    // Guard against zero-length forward (malformed transform).
-                    float fwdLen = forward.x * forward.x + forward.z * forward.z;
-                    if (fwdLen < 0.001f) return false;
-                    target = new Vector3(own.x + forward.x * 150f, own.y, own.z + forward.z * 150f);
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            }
-            catch
-            {
-                target = default(Vector3);
-                return false;
-            }
-        }
-
 
         /// <summary>
         /// Live commander initiative for the given side, read defensively from

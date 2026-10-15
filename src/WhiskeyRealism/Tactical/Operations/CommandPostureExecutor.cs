@@ -1,3 +1,5 @@
+using System;
+
 namespace WhiskeyRealism.Tactical.Operations
 {
     public enum PostureExecutionAction
@@ -275,6 +277,60 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    public readonly struct LeafMoveDecision
+    {
+        public LeafMoveDecision(bool move, string reason)
+        {
+            Move = move;
+            Reason = string.IsNullOrEmpty(reason) ? "unspecified" : reason;
+        }
+
+        public bool Move { get; }
+        public string Reason { get; }
+    }
+
+    // B-leaf (2026-10-14): when #61 may move a brigade nested inside an AI
+    // group. Such a brigade is an attached sub-unit: vanilla moves it as part
+    // of its parent's SetGroupFormation (slots built from
+    // groupposition.unitoffsetposition, 92060-92090). So the leaf pass only
+    // moves it for movement tasks, only to its slot in the parent's formation,
+    // never while the parent itself has an order in flight, and with the same
+    // gates as the group path (no move in contact, none over a pending order
+    // or an active move).
+    public static class LeafBrigadeMovePolicy
+    {
+        public static LeafMoveDecision Decide(
+            CommandTaskType task,
+            bool parentHasActiveOrder,
+            bool hasFormationSlot,
+            bool closeEngaged,
+            bool pendingOrder,
+            bool activeMove)
+        {
+            if (!CommandWaypointWritePolicy.IsMovementTask(task)) return new LeafMoveDecision(false, "non-movement-task");
+            if (parentHasActiveOrder) return new LeafMoveDecision(false, "parent-ordered");
+            if (!hasFormationSlot) return new LeafMoveDecision(false, "no-slot");
+            if (closeEngaged) return new LeafMoveDecision(false, "close-engaged");
+            if (pendingOrder) return new LeafMoveDecision(false, "order-pending");
+            if (activeMove) return new LeafMoveDecision(false, "movement-in-progress");
+            return new LeafMoveDecision(true, "move-to-slot");
+        }
+    }
+
+    // Slot position math of BattlefieldSetup.GetAngleTerrainPosXYStatic
+    // (26937-26949) without the terrain clamp/height sample: rotate an
+    // (x, z) formation offset by the group's facing.
+    public static class LeafFormationSlot
+    {
+        public static void OffsetXZ(float anchorX, float anchorZ, float angleDegrees, float distanceX, float distanceZ, out float x, out float z)
+        {
+            double a = (angleDegrees - 90.0) * Math.PI / 180.0;
+            double b = angleDegrees * Math.PI / 180.0;
+            x = (float)(anchorX - Math.Cos(a) * distanceZ - Math.Cos(b) * distanceX);
+            z = (float)(anchorZ + Math.Sin(a) * distanceZ + Math.Sin(b) * distanceX);
+        }
+    }
+
     // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart
     // (game hours). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
     // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock
@@ -360,6 +416,11 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
+        {
+            return IsExecutorMovementTask(task);
+        }
+
+        public static bool IsMovementTask(CommandTaskType task)
         {
             return IsExecutorMovementTask(task);
         }
