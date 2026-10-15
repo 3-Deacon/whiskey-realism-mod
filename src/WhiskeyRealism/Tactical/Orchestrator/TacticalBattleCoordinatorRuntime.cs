@@ -57,11 +57,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // ============================================================
     public static partial class TacticalBattleCoordinator
     {
-        private const float MaxTickDeltaSeconds = 5f;
-
         // Cached AIBattle.bunits FieldInfo — avoids reflection cost on every battle bootstrap.
+        // The field is static (decompile 3306), so it also serves the doctrine clock
+        // sampler without an AIBattle instance.
         private static FieldInfo _bunitsFieldCache;
-        private static float _lastTickTimeSeconds;
+
+        static TacticalBattleCoordinator()
+        {
+            DoctrineClockFrameSource = () => UnityEngine.Time.frameCount;
+            DoctrineClockSampler = SampleVanillaBattleClock;
+        }
+
+        /// <summary>
+        /// Raw battle clock for DoctrineBattleHours: GameVars.currenttimefromstart
+        /// (SetTimeVariables 93545) and eodcycle of the battle's BattleUnits, read from
+        /// the static AIBattle.bunits (assigned from GameController in AIBattle.Start,
+        /// 3354). The campaign map's BattleUnits (IsCampaign, 78782) or a destroyed one
+        /// is "no battle" (key 0); there currenttimefromstart is in years (30171).
+        /// </summary>
+        private static DoctrineClockSample SampleVanillaBattleClock()
+        {
+            if (_bunitsFieldCache == null)
+                _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
+            var bunits = _bunitsFieldCache?.GetValue(null) as BattleUnits;
+            if ((UnityEngine.Object)bunits == null || bunits.IsCampaign) return default(DoctrineClockSample);
+            return new DoctrineClockSample(bunits.GetInstanceID(), GameVars.currenttimefromstart, bunits.eodcycle);
+        }
         private static int _battleSequence;
         private static int _playerAllianceId = -1;
         private static int _activeBattleUnitsId;
@@ -76,11 +97,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<int, float> _lastProcessedSideStatUpdateByBunitsId = new Dictionary<int, float>();
         private static readonly float[] _lastHeavyReviewHours = { 0f, 0f };
         private static readonly float[] _lastHeavyReviewRealtimeSeconds = { 0f, 0f };
-        // Per-side last-seen battle hours (game-clock time, scales with
-        // 2x/5x/20x compression). Used to derive a battle-time delta for
-        // phase progression so phase budgets track commander pace, not
-        // wallclock pace. Distinct from _lastHeavyReviewHours (the heavy-
-        // throttle gate's last review time).
+        // Per-side doctrine hours at the side's last tick (scales with
+        // 2x/5x/20x compression); ComputeCompressionAdjustedCycle's battle-time
+        // source. Distinct from _lastHeavyReviewHours (the heavy-throttle
+        // gate's last review time).
         private static readonly float[] _lastTickBattleHours = { -1f, -1f };
         private static readonly bool[] _replanAfterNight = { false, false };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
@@ -212,7 +232,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // routes through HistoricalFigureRegistry.Resolve(commanderObj, allianceId, nameHint)
                 // so registered figures pick up their personality vector.
                 var roster = TacticalCommanderRoster.BuildFromVanilla(commanders);
-                StartDoctrineClock(SafeCurrentBattleHours());
                 BuildAndActivate(suppressedAllianceId, roster);
                 _playerAllianceId = playerAllianceId;
                 _battleSequence++;
@@ -366,7 +385,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
 
                     OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
-                    EndOfDayPhase dayPhase = AdvanceDoctrineClock(SafeCurrentBattleHours(), SafeEodCycle(battle));
+                    EndOfDayPhase dayPhase = ObserveEndOfDay(SafeEodCycle(battle));
+                    SampleDoctrineClock();
                     if (dayPhase == EndOfDayPhase.Suspended)
                     {
                         MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
@@ -375,12 +395,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (dayPhase == EndOfDayPhase.Resumed) PrepareForNewBattleDay();
                     unchecked { _tickSerial++; }
                     bool aiVsAi = SafeAiVsAi();
-                    float deltaSeconds = ComputeTickDeltaSeconds();
 
                     // Drive each side; the heavy-gate publishes into
                     // _lastPublishedSnapshots[s] when it fires.
-                    DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
-                    DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
+                    DriveTacticalCommanderSide(side0, battle, aiVsAi);
+                    DriveTacticalCommanderSide(side1, battle, aiVsAi);
 
                     // Plan F (2026-05-20): flip the heavy-build parity so the
                     // NEXT vanilla side-stat cycle's Tick alternates which side
@@ -475,8 +494,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static void DriveTacticalCommanderSide(
             TacticalBattleOrchestrator side,
             AIBattle battle,
-            bool aiVsAi,
-            float deltaSeconds)
+            bool aiVsAi)
         {
             if (side == null) return;
             if (!ShouldRunTacticalCommanderForSide(side.AllianceId, _playerAllianceId, aiVsAi)) return;
@@ -486,7 +504,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (Plugin.EnableTacticalOrchestratorIntentInference != null
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
-                DriveTickCycle(side, battle, deltaSeconds);
+                DriveTickCycle(side, battle);
                 AttachDirectChildrenIfReady(side, battle);
                 AttachCommandTreeIfReady(side, battle);
                 DriveDirectChildCycle(side, battle);
@@ -495,28 +513,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DriveOperationsLedger(side, battle);
         }
 
-        private static float ComputeTickDeltaSeconds()
-        {
-            try
-            {
-                float now = UnityEngine.Time.realtimeSinceStartup;
-                float delta = _lastTickTimeSeconds <= 0f ? 1f : Math.Max(0f, now - _lastTickTimeSeconds);
-                _lastTickTimeSeconds = now;
-                return SanitizeDelta(delta);
-            }
-            catch
-            {
-                return 1f;
-            }
-        }
-
-        private static float SanitizeDelta(float deltaSeconds)
-        {
-            if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return 0f;
-            return Math.Min(deltaSeconds, MaxTickDeltaSeconds);
-        }
-
-        private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle, float deltaSeconds)
+        private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle)
         {
             try
             {
@@ -539,30 +536,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ? Plugin.TacticalOrchestratorMinReplanSeconds.Value
                     : 60;
 
-                // Battle-time delta: compute from GameVars.currenttimefromstart
-                // diff vs last tick. At 2x/5x/20x compression, this advances
-                // proportionally faster than wallclock deltaSeconds. Drives
-                // phase progression budgets so commander decisions track
-                // battle pace, not wallclock pace. Hours→seconds conversion.
+                // Last doctrine hours this side ticked at; the heavy gate's
+                // compression estimate (ComputeCompressionAdjustedCycle) reads it.
                 float nowBattleHours = (float)DoctrineBattleHours;
-                float lastBattleHours = _lastTickBattleHours[sideIdx];
-                float battleDeltaSeconds;
-                if (lastBattleHours < 0f)
-                {
-                    battleDeltaSeconds = 0f;  // first tick — no prior reference
-                }
-                else
-                {
-                    float deltaHours = nowBattleHours - lastBattleHours;
-                    if (deltaHours < 0f) deltaHours = 0f;          // battle reset / clock rollback
-                    if (deltaHours > 1f) deltaHours = 1f;          // cap at 1 battle hour per tick
-                    battleDeltaSeconds = deltaHours * 3600f;
-                }
                 _lastTickBattleHours[sideIdx] = nowBattleHours;
 
                 if (step == TickReplanStep.NightReplan)
                 {
                     ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible);
+                    // The night replan counts against "Min Replan Seconds" like any other.
+                    ArmyTickCycle.RecordReplan(side.AllianceId);
                     // Cleared only once the replan has run; a throw retries next tick.
                     _replanAfterNight[sideIdx] = false;
                     TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
@@ -571,9 +554,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
+                // Plan age, phase age and the replan cooldown run on doctrine
+                // time; the wall-clock delta is unused when it is supplied.
                 var trigger = ArmyTickCycle.MaybeReplan(
                     side.Army,
-                    deltaSeconds: deltaSeconds,
+                    deltaSeconds: 0f,
                     ownEvidence: bundleForReplan.OwnEvidence,
                     enemyVisible: bundleForReplan.EnemyVisible,
                     ownMainEffortStrength: bundleForReplan.OwnMainEffortStrength,
@@ -585,7 +570,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownAvgAmmo01: bundleForReplan.OwnAvgAmmo01,
                     nearestReinforcementHours: bundleForReplan.NearestReinforcementHours,
                     nearestReinforcementStrength: bundleForReplan.NearestReinforcementStrength,
-                    battleDeltaSeconds: battleDeltaSeconds);
+                    doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds);
 
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
@@ -912,20 +897,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return false;
-            }
-        }
-
-        private static float SafeCurrentBattleHours()
-        {
-            try
-            {
-                float t = GameVars.currenttimefromstart;
-                if (float.IsNaN(t) || float.IsInfinity(t) || t < 0f) return 0f;
-                return t;
-            }
-            catch
-            {
-                return 0f;
             }
         }
 
@@ -1614,7 +1585,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static void ResetRuntimeTickState()
         {
             try { ArmyTickCycle.Reset(); } catch { }
-            _lastTickTimeSeconds = 0f;
             _tickWarningKeys.Clear();
             // Task 6: reset heavy gate + dedup state for new battle (per-battle via BattleUnits owner + per-side)
             try

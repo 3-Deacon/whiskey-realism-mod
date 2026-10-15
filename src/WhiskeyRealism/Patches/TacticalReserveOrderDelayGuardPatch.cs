@@ -71,8 +71,7 @@ namespace WhiskeyRealism.Patches
                     __state.DoctrineOrder = order;
                     __state.DoctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                         order,
-                        BuildOperationalReserveInput(aigroup),
-                        BattleTimeSeconds());
+                        BuildOperationalReserveInput(aigroup));
                 }
             }
         }
@@ -530,13 +529,6 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
-        }
-
-        // Doctrine clocks run on battle time (game-hours -> seconds).
-        private static float BattleTimeSeconds()
-        {
-            try { return GameVars.currenttimefromstart * 3600f; }
-            catch { return 0f; }
         }
 
         private static float Sanitize(float value)

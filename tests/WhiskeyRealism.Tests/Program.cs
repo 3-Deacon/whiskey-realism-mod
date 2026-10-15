@@ -8058,8 +8058,7 @@ static class Program
         DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
             order,
             mainEffortOdds: 0.85f,
-            reserveFraction: 0.20f,
-            currentTimeSeconds: 100f);
+            reserveFraction: 0.20f);
 
         AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
         AssertEqual(CommandTaskType.ReleaseReserve, decision.Task, "task");
@@ -8081,8 +8080,7 @@ static class Program
                 flankThreat01: 0.85f,
                 reserveEndurance01: 0.80f,
                 assaultAuthorized: true,
-                fallbackPressure: false),
-            currentTimeSeconds: 100f);
+                fallbackPressure: false));
 
         AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
         AssertEqual(CommandTaskType.GuardFlank, decision.Task, "task");
@@ -8104,8 +8102,7 @@ static class Program
                 flankThreat01: 0.10f,
                 reserveEndurance01: 0.15f,
                 assaultAuthorized: true,
-                fallbackPressure: false),
-            currentTimeSeconds: 100f);
+                fallbackPressure: false));
 
         AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
         AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
@@ -8123,8 +8120,7 @@ static class Program
         DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
             order,
             mainEffortOdds: 0.5f,
-            reserveFraction: 0f,
-            currentTimeSeconds: 1000f);
+            reserveFraction: 0f);
 
         AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
         AssertEqual(CommandTaskType.FallBackToLine, decision.Task, "task");
@@ -8141,8 +8137,7 @@ static class Program
         DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
             order,
             mainEffortOdds: 0.80f,
-            reserveFraction: float.PositiveInfinity,
-            currentTimeSeconds: 100f);
+            reserveFraction: float.PositiveInfinity);
 
         AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
         AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
@@ -11211,7 +11206,6 @@ static class Program
     {
         var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput(
             "parent-1",
-            nowSeconds: 1800f,
             subordinates: new[]
             {
                 new TacticalDivisionPlaySubordinate("line-left", CommandNodeRole.SupportingAttack, true, true, false, false, false, 520f, true),
@@ -11309,7 +11303,7 @@ static class Program
         };
 
         var decision = TacticalDivisionPlayExecutor.Decide(
-            new TacticalDivisionPlayInput("division", 1000f, subs));
+            new TacticalDivisionPlayInput("division", subs));
 
         AssertTrue(decision.HasAnchor, "engaged child anchors play");
         AssertEqual("anchor", decision.AnchorNodeId, "anchor id");

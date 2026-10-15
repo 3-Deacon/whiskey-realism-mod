@@ -62,8 +62,7 @@ namespace WhiskeyRealism.Patches
 
                     DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                         doctrineOrder,
-                        BuildOperationalReserveInput(aigroup),
-                        BattleTimeSeconds());
+                        BuildOperationalReserveInput(aigroup));
                     if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
 
                     __state = new ReserveMovementState
@@ -621,13 +620,6 @@ namespace WhiskeyRealism.Patches
         {
             if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
             return value > 1f ? 1f : value;
-        }
-
-        // Doctrine clocks run on battle time (game-hours -> seconds).
-        private static float BattleTimeSeconds()
-        {
-            try { return GameVars.currenttimefromstart * 3600f; }
-            catch { return 0f; }
         }
 
         private static int SafePathCount(Regiment unit)

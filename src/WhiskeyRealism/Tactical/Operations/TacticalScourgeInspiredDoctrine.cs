@@ -249,12 +249,10 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public TacticalDivisionPlayInput(
             string parentNodeId,
-            float nowSeconds,
             IReadOnlyList<TacticalDivisionPlaySubordinate> subordinates,
             bool sideDefending = false)
         {
             ParentNodeId = string.IsNullOrWhiteSpace(parentNodeId) ? "parent-unknown" : parentNodeId.Trim();
-            NowSeconds = IsFinite(nowSeconds) && nowSeconds > 0f ? nowSeconds : 0f;
             Subordinates = subordinates ?? Array.Empty<TacticalDivisionPlaySubordinate>();
             SideDefending = sideDefending;
         }
@@ -263,13 +261,7 @@ namespace WhiskeyRealism.Tactical.Operations
         // Vanilla GetBattleType == 2 (defend, 86095): the side holds the
         // objectives, so division plays never convert its brigades to attacks.
         public bool SideDefending { get; }
-        public float NowSeconds { get; }
         public IReadOnlyList<TacticalDivisionPlaySubordinate> Subordinates { get; }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
     }
 
     public readonly struct TacticalDivisionPlayOrder

@@ -139,8 +139,8 @@ namespace WhiskeyRealism.Patches
             _lastApplyRealtimeSeconds.Clear();
         }
 
-        // Artillery audit state (2026-05-21). Per-instance battle time
-        // (GameVars.currenttimefromstart, hours) of the last accepted
+        // Artillery audit state (2026-05-21). Per-instance doctrine time
+        // (TacticalBattleCoordinator.DoctrineBattleHours) of the last accepted
         // artillery action. Reused across BGS Apply calls for
         // the same battle (cleared on OnBattleEnd via
         // ResetRegimentalControlForBattleEnd). Min-hold gating prevents
@@ -173,8 +173,8 @@ namespace WhiskeyRealism.Patches
             var allUnits = BattleUnits.completeunitlist as System.Collections.IList;
             if (allUnits == null) return;
 
-            // Hold on battle time; the config value is seconds at 1x.
-            float nowHours = GameVars.currenttimefromstart;
+            // Hold on doctrine time; the config value is seconds at 1x.
+            float nowHours = (float)TacticalBattleCoordinator.DoctrineBattleHours;
             float minHoldHours = TacticalBattleClock.RealSecondsAtOneXToHours(
                 Plugin.ArtilleryAuditMinHoldSeconds != null
                     ? Plugin.ArtilleryAuditMinHoldSeconds.Value

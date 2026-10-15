@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Operations;
 
 /// <summary>
 /// WS T1 (2026-10-14 remediation) regression tests: orchestrator evidence,
@@ -73,6 +74,7 @@ internal static class TacticalEvidenceFixTests
         Run("replan cooldown is the configured battle seconds, no hidden floor", ReplanCooldownIsConfiguredValue);
         Run("a paused night leaves phase budgets unchanged", PausedNightLeavesPhaseBudgets);
         Run("a paused night leaves contact-ledger decay unchanged", PausedNightLeavesLedgerDecay);
+        Run("a 9 h raw night jump leaves every doctrine timer unchanged", RawNightJumpLeavesDoctrineTimers);
         Run("army odds blend from unknown toward the observed ratio with confidence", ArmyOddsBlendWithConfidence);
         Run("a fully observed weak enemy gives an attack opportunity", FullyObservedWeakEnemyGivesAttack);
         Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
@@ -985,6 +987,53 @@ internal static class TacticalEvidenceFixTests
         ledger.Observe(evening, 4000f, 1000f);
         ledger.Observe(evening, 0f, 0f); // frozen doctrine hours across the night
         TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "no decay across the frozen night");
+    }
+
+    // Fixture: the raw clock jumps ~9 h across vanilla's end-of-day cycle
+    // (CheckTimeIssues 86368-86490) while eodcycle != 0. Every doctrine timer
+    // reads TacticalDoctrineTime, so none of them sees the jump.
+    private static void RawNightJumpLeavesDoctrineTimers()
+    {
+        using (var clock = new FakeBattleClock())
+        {
+            ArmyTickCycle.ResetForTest();
+            var probing = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+            var fighting = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+            var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+            var ledger = new TacticalEnemyContactLedger();
+
+            clock.At(18.0);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            var hold = MainArrivalHoldLatch.Next(default(MainArrivalHoldLatch.State), (float)TacticalDoctrineTime.NowBattleHours, holding: true);
+            clock.At(18.0 + 600.0 / 3600.0);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            ledger.Observe((float)TacticalDoctrineTime.NowBattleHours, 4000f, 1000f);
+            ArmyTickCycle.RecordReplan(fighting.AllianceId);
+            float phaseBefore = probing.PhaseAgeSeconds;
+            float holdBefore = MainArrivalHoldLatch.ElapsedBattleSeconds(hold, (float)TacticalDoctrineTime.NowBattleHours);
+
+            // End of day: provisions, night fast-forward, midnight wrap, morning, deployment.
+            clock.At(18.2, eod: 1);
+            clock.At(23.9, eod: 2);
+            clock.At(0.3, eod: 2);
+            clock.At(24.3, eod: 3);
+            clock.At(27.0, eod: 4);
+            clock.At(27.1, eod: 5);
+            clock.At(27.1 + 30.0 / 3600.0);
+
+            TestHarness.AssertTrue(Math.Abs(TacticalDoctrineTime.NowBattleHours - (18.0 + 630.0 / 3600.0)) < 1e-6,
+                "doctrine time moved 30 s, not 9 h: " + TacticalDoctrineTime.NowBattleHours);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            TestHarness.AssertTrue(Near(probing.PhaseAgeSeconds, phaseBefore + 30f), "phase budget burned 30 s, got " + probing.PhaseAgeSeconds);
+            var trigger = ArmyTickCycle.MaybeReplan(fighting, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
+                doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds);
+            TestHarness.AssertEqual(ReplanTrigger.None, trigger, "replan cooldown still running 30 s after the evening replan");
+            ledger.Observe((float)TacticalDoctrineTime.NowBattleHours, 0f, 0f);
+            TestHarness.AssertTrue(ledger.EstimatedEnemyStrength > 3990f, "contact estimate did not decay overnight: " + ledger.EstimatedEnemyStrength);
+            TestHarness.AssertFalse(ledger.ContactBroken((float)TacticalDoctrineTime.NowBattleHours, 0f), "contact not broken by the night");
+            float holdAfter = MainArrivalHoldLatch.ElapsedBattleSeconds(hold, (float)TacticalDoctrineTime.NowBattleHours);
+            TestHarness.AssertTrue(Math.Abs(holdAfter - holdBefore - 30f) < 0.5f, "arrival hold aged 30 s, got " + (holdAfter - holdBefore));
+        }
     }
 
     private static TacticalEnemyContactLedger Seen(float hours, float visible, float engaged,

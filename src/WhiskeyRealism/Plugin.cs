@@ -799,14 +799,17 @@ namespace WhiskeyRealism
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
         }
 
-        // Per-frame hitch probe for the telemetry sidecar. Tick never throws, but a
-        // Unity message must not either, so the guard stays.
+        // Per-frame hitch probe for the telemetry sidecar, and one doctrine clock
+        // sample per frame so the clock sees every end-of-day frame even when no
+        // doctrine reader runs overnight (a sample is skipped off the battle map).
+        // Neither throws, but a Unity message must not either, so the guard stays.
         private void Update()
         {
             try
             {
                 if (Enabled == null || !Enabled.Value) return;
                 WhiskeyRealism.Telemetry.TelemetryFrameProbe.Tick(UnityEngine.Time.unscaledDeltaTime);
+                WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.SampleDoctrineClock();
             }
             catch
             {

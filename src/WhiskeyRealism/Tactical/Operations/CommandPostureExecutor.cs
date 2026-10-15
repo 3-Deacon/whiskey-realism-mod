@@ -254,8 +254,8 @@ namespace WhiskeyRealism.Tactical.Operations
     // flipped Screen (1) ↔ Attack (3) with a waypoint re-issue each time.
     public static class MainArrivalHoldLatch
     {
-        // Hold budget in battle seconds (15 battle-minutes), measured on
-        // GameVars.currenttimefromstart. Same value as T1's
+        // Hold budget in battle seconds (15 battle-minutes), measured on the
+        // doctrine clock. Same value as T1's
         // TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds.
         public const float MaxHoldBattleSeconds = 15f * 60f;
 
@@ -452,9 +452,10 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
-    // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart,
-    // which in battle is game hours (uniStormSystem.Hour + battlepasseddays * 24,
-    // 86379 / 93545). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
+    // Battle clock helpers. Doctrine timers run on the doctrine clock
+    // (TacticalBattleCoordinator.DoctrineBattleHours), which follows
+    // GameVars.currenttimefromstart — in battle game hours (uniStormSystem.Hour +
+    // battlepasseddays * 24, 86379 / 93545) — frozen overnight. The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
     // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock
     // constants tuned at 1x convert with RealSecondsAtOneXToHours.
     public static class TacticalBattleClock

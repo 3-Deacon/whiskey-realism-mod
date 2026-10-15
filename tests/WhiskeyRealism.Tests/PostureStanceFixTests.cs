@@ -361,7 +361,7 @@ internal static class PostureStanceFixTests
 
     private static void DivisionPlayKeepsLedgerHoldTasks()
     {
-        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", new[]
         {
             Sub("holder", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.HoldObjective),
             Sub("attacker", CommandNodeRole.SupportingAttack, true, 300f, CommandTaskType.AttackObjective),
@@ -376,7 +376,7 @@ internal static class PostureStanceFixTests
 
     private static void DivisionPlayStandsDownForDefender()
     {
-        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", new[]
         {
             Sub("a", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.AttackObjective),
             Sub("b", CommandNodeRole.SupportingAttack, false, 0f, CommandTaskType.SupportAttack),
