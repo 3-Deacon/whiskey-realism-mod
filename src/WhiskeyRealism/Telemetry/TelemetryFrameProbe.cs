@@ -71,6 +71,8 @@ namespace WhiskeyRealism.Telemetry
             {
                 State.ResetFrameScopes();
             }
+
+            TelemetryPerf.FlushDueAggregates();
         }
 
         // Boehm (Unity Mono) is non-generational; if a generation query is unsupported the

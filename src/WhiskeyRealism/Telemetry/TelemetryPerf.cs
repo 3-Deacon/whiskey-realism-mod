@@ -33,6 +33,11 @@ namespace WhiskeyRealism.Telemetry
         [ThreadStatic] private static int t_depth;
         [ThreadStatic] private static ThreadAggregates t_aggregates;
 
+        // Every thread's accumulator, so shutdown and the per-frame probe tick can flush
+        // windows of threads that stopped calling scopes (orchestrator worker, writer).
+        private static readonly object RegistryGate = new object();
+        private static readonly List<ThreadAggregates> Registry = new List<ThreadAggregates>();
+
         internal static IDisposable Scope(
             string scope,
             TelemetryLayer layer,
@@ -69,19 +74,53 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        // Emits this thread's pending per-scope aggregates now. Called at telemetry shutdown
-        // (main thread) so the final partial window is not lost.
+        // Emits every thread's pending per-scope aggregates now (telemetry shutdown).
         internal static void FlushAggregates()
+        {
+            FlushRegistered(force: true);
+        }
+
+        // Emits the windows that have elapsed on any thread. Called once per frame by
+        // TelemetryFrameProbe.Tick so a quiet thread's window still closes on time.
+        internal static void FlushDueAggregates()
+        {
+            FlushRegistered(force: false);
+        }
+
+        private static void FlushRegistered(bool force)
         {
             try
             {
-                ThreadAggregates aggregates = t_aggregates;
-                if (aggregates != null)
-                    aggregates.Flush(Stopwatch.GetTimestamp());
+                long now = Stopwatch.GetTimestamp();
+                long windowTicks = WindowTicks();
+                lock (RegistryGate)
+                {
+                    for (int i = Registry.Count - 1; i >= 0; i--)
+                    {
+                        ThreadAggregates aggregates = Registry[i];
+                        if (force || now - aggregates.WindowStart >= windowTicks)
+                            aggregates.FlushLocked(now);
+                        if (!aggregates.OwnerAlive)
+                            Registry.RemoveAt(i);
+                    }
+                }
             }
             catch
             {
             }
+        }
+
+        private static ThreadAggregates CurrentThreadAggregates(long now)
+        {
+            ThreadAggregates aggregates = t_aggregates;
+            if (aggregates != null)
+                return aggregates;
+
+            aggregates = new ThreadAggregates(now);
+            t_aggregates = aggregates;
+            lock (RegistryGate)
+                Registry.Add(aggregates);
+            return aggregates;
         }
 
         internal static void EmitAggregate(
@@ -130,38 +169,41 @@ namespace WhiskeyRealism.Telemetry
             if (recordOnly)
                 return;
 
-            ThreadAggregates aggregates = t_aggregates ?? (t_aggregates = new ThreadAggregates(endTimestamp));
-            ScopeAggregate aggregate = aggregates.Get(name, layer, category, thresholdMs);
-            if (aggregate != null)
+            ThreadAggregates aggregates = CurrentThreadAggregates(endTimestamp);
+            lock (aggregates.Sync)
             {
-                aggregate.Count++;
-                aggregate.TotalMs += durationMs;
-                if (durationMs > aggregate.MaxMs)
-                    aggregate.MaxMs = durationMs;
-
-                if (durationMs >= thresholdMs)
+                ScopeAggregate aggregate = aggregates.Get(name, layer, category, thresholdMs);
+                if (aggregate != null)
                 {
-                    aggregate.SlowCount++;
-                    if (TelemetryRouter.PerformanceWarningsEnabled
-                        && aggregate.SlowRowsEmitted < MaxSlowRowsPerScopeWindow)
+                    aggregate.Count++;
+                    aggregate.TotalMs += durationMs;
+                    if (durationMs > aggregate.MaxMs)
+                        aggregate.MaxMs = durationMs;
+
+                    if (durationMs >= thresholdMs)
                     {
-                        aggregate.SlowRowsEmitted++;
-                        TelemetryRuntimeDiagnostics counters = TelemetryRouter.DiagnosticsSnapshot();
-                        EmitPerformance(
-                            name,
-                            layer,
-                            category,
-                            durationMs,
-                            thresholdMs,
-                            counters.EmittedCount,
-                            counters.DroppedCount,
-                            counters.EmittedBytes);
+                        aggregate.SlowCount++;
+                        if (TelemetryRouter.PerformanceWarningsEnabled
+                            && aggregate.SlowRowsEmitted < MaxSlowRowsPerScopeWindow)
+                        {
+                            aggregate.SlowRowsEmitted++;
+                            TelemetryRuntimeDiagnostics counters = TelemetryRouter.DiagnosticsSnapshot();
+                            EmitPerformance(
+                                name,
+                                layer,
+                                category,
+                                durationMs,
+                                thresholdMs,
+                                counters.EmittedCount,
+                                counters.DroppedCount,
+                                counters.EmittedBytes);
+                        }
                     }
                 }
-            }
 
-            if (endTimestamp - aggregates.WindowStart >= WindowTicks())
-                aggregates.Flush(endTimestamp);
+                if (endTimestamp - aggregates.WindowStart >= WindowTicks())
+                    aggregates.FlushLocked(endTimestamp);
+            }
         }
 
         private static long WindowTicks()
@@ -329,8 +371,13 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        // Owned by one thread; Sync guards it against cross-thread flushes (uncontended in
+        // steady state, no allocation).
         private sealed class ThreadAggregates
         {
+            internal readonly object Sync = new object();
+            private readonly System.Threading.Thread _owner = System.Threading.Thread.CurrentThread;
+
             private readonly Dictionary<string, ScopeAggregate> _byName =
                 new Dictionary<string, ScopeAggregate>(StringComparer.Ordinal);
             private readonly List<ScopeAggregate> _ordered = new List<ScopeAggregate>();
@@ -342,6 +389,11 @@ namespace WhiskeyRealism.Telemetry
             }
 
             internal long WindowStart { get; private set; }
+
+            internal bool OwnerAlive
+            {
+                get { return _owner.IsAlive; }
+            }
 
             internal ScopeAggregate Get(string name, TelemetryLayer layer, TelemetryCategory category, double thresholdMs)
             {
@@ -357,7 +409,13 @@ namespace WhiskeyRealism.Telemetry
                 return aggregate;
             }
 
-            internal void Flush(long now)
+            internal void FlushLocked(long now)
+            {
+                lock (Sync)
+                    Flush(now);
+            }
+
+            private void Flush(long now)
             {
                 if (_flushing)
                     return;

@@ -51,6 +51,8 @@ internal static class TelemetryInfraFixTests
         ProbeTickEmitsProtectedHitchRowWithTopLevelScopes();
         SummaryReportsFrameHitches();
         ProbeRecordsTopLevelScopesSuppressedByProfile();
+        PerfShutdownFlushesEveryThreadsAggregates();
+        PerfProbeTickFlushesDueAggregateWindows();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         FaultSiteDetectsModFramesInStack();
@@ -1195,5 +1197,72 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("probe records top-level scopes suppressed by profile");
+    }
+
+    // ---------------------------------------------------------------- L5
+
+    private static void PerfShutdownFlushesEveryThreadsAggregates()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            var worker = new System.Threading.Thread(() =>
+            {
+                for (int i = 0; i < 7; i++)
+                {
+                    using (TelemetryPerf.Scope("p-test.worker-thread", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                    {
+                    }
+                }
+            });
+            worker.Start();
+            worker.Join();
+            TelemetryRouter.Shutdown("p-test");
+
+            var aggregates = RowsForScope(dir, "p-test.worker-thread", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, aggregates.Count, "other thread's final window flushed at shutdown");
+            TestHarness.AssertEqual(7L, (long)aggregates[0]["fields"]["count"], "worker calls counted");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf shutdown flushes every thread's aggregates");
+    }
+
+    private static void PerfProbeTickFlushesDueAggregateWindows()
+    {
+        string gameRoot = TempDir();
+        long savedWindow = TelemetryPerf.AggregateWindowMs;
+        try
+        {
+            TelemetryPerf.AggregateWindowMs = 20;
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            var worker = new System.Threading.Thread(() =>
+            {
+                using (TelemetryPerf.Scope("p-test.tick-flush", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            });
+            worker.Start();
+            worker.Join();
+            System.Threading.Thread.Sleep(40);
+            TelemetryFrameProbe.Tick(0.016f);
+            TestHarness.AssertTrue(
+                WaitUntil(() => ReadIfExists(Path.Combine(dir, "performance.jsonl")).Contains("p-test.tick-flush"), 3000),
+                "probe tick flushes an elapsed window with no further scope calls");
+        }
+        finally
+        {
+            TelemetryPerf.AggregateWindowMs = savedWindow;
+            TelemetryRouter.Shutdown("cleanup");
+            TelemetryFrameProbe.ResetForTests();
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf probe tick flushes due aggregate windows");
     }
 }
