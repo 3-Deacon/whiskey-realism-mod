@@ -25,18 +25,46 @@ namespace WhiskeyRealism.Tactical
     //     writes neither.
     //   macroai == 3 (army retreat): vanilla forces every group to screen (4258).
     //
-    // Ownership: a Whiskey write stamps the vanilla hold so AdjustGroupAIStance
-    // leaves the group alone for HoldHours. Agreement (claim) records ownership
-    // for the #45/#61 priority rules but does not re-stamp, so vanilla still
-    // re-evaluates once per hold — keeping its strength-triggered assault
-    // escalation (4239; the only route to AI charges, MicroAICheckForCharges
-    // 4913) and weak-group screen (4252). A vanilla assault is never replaced
-    // except by an explicit charge denial. On army retreat (macroai 3) the
-    // caller releases the stamp so vanilla can screen the army at once (4258;
-    // MicroAICheckForRetreats needs ai_stance == 1, 5641). Inside the hold a lower-priority Whiskey source (#45 scorer) cannot flip a
-    // stance the posture executor (#61) set, and the same source needs a minimum
-    // dwell before changing its own opinion. Once Whiskey stops claiming, the
-    // hold lapses and vanilla resumes.
+    //
+    // Ownership: a Whiskey write AND a Whiskey claim (agreement) stamp the
+    // vanilla hold, so AdjustGroupAIStance leaves the group alone for
+    // HoldHours after Whiskey last held an opinion. Stamping only on writes
+    // made vanilla re-decide every 0.25 h, disagree, write (courier
+    // ChangeStance) and Whiskey reassert (a second courier order) — a thrash
+    // round trip per hold.
+    //
+    // Carve-out (yield): vanilla's own per-group safety valves win. Before a
+    // claim or write, the caller ports vanilla's per-group stance chain
+    // (VanillaPerGroupStance: 4239 s = 3, 4240 assault, 4244 defend, 4252
+    // screen; GetGroupStrength 6025 already folds morale and experience into
+    // the strength ratio — there are no separate morale/ammo conditions).
+    // When that says defend (2) or screen (1) and Whiskey wants something
+    // else, Whiskey yields: no stamp, the stamp is released (ReleaseStamp),
+    // the record is dropped, and no reassert — so vanilla's weak-group
+    // defend/screen fires on its next macro cycle. Army retreat (macroai 3)
+    // yields the same way (4258; MicroAICheckForRetreats needs macroai 3 and
+    // ai_stance 1, 5641).
+    //
+    // Not in the carve-out: the side-level lines 4248 (macroai 2 → every
+    // group defends) and 4256 (macroai 1 with side forcebalance below the
+    // screening trigger → screen). macroai has its own single owner (#44);
+    // under its value Whiskey's group opinion stands.
+    //
+    // Design cost (remaining): while Whiskey holds a group, vanilla's
+    // per-group re-decision is suppressed except through the yield above.
+    // In particular vanilla's assault escalation (4240) cannot happen during
+    // a Whiskey hold, and AI group charges need ai_stance 4
+    // (MicroAICheckForCharges 4913). A vanilla assault set before Whiskey's
+    // claim, or during a yield/release window, is never replaced except by an
+    // explicit charge denial. Extending YieldsToVanilla to stance 4 would
+    // restore the escalation. The caller's steady-state short-circuit
+    // re-checks the carve-out at most every HoldHours * 0.5, so a group that
+    // turns weak may wait that long before Whiskey yields.
+    //
+    // Inside the hold a lower-priority Whiskey source (#45 scorer) cannot flip
+    // a stance the posture executor (#61) set, and the same source needs a
+    // minimum dwell before changing its own opinion. Once Whiskey stops
+    // claiming, the hold lapses and vanilla resumes.
     public enum StanceWriteSource
     {
         None = 0,
@@ -51,7 +79,9 @@ namespace WhiskeyRealism.Tactical
     {
         Refuse,
         Claim,
-        Write
+        Write,
+        // Hand the group back to vanilla: release the stamp, drop ownership.
+        Yield
     }
 
     public readonly struct StanceHoldRecord
@@ -79,7 +109,8 @@ namespace WhiskeyRealism.Tactical
             int macroAi,
             float nowHours,
             StanceHoldRecord record,
-            StanceWriteSource source)
+            StanceWriteSource source,
+            int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown)
         {
             IsAiGroup = isAiGroup;
             TargetStance = targetStance;
@@ -88,6 +119,7 @@ namespace WhiskeyRealism.Tactical
             NowHours = nowHours;
             Record = record;
             Source = source == StanceWriteSource.None ? StanceWriteSource.Scorer : source;
+            VanillaGroupStance = vanillaGroupStance;
         }
 
         public bool IsAiGroup { get; }
@@ -97,6 +129,43 @@ namespace WhiskeyRealism.Tactical
         public float NowHours { get; }
         public StanceHoldRecord Record { get; }
         public StanceWriteSource Source { get; }
+        // Vanilla's per-group stance for this group right now
+        // (TacticalStanceOwnership.VanillaPerGroupStance), or VanillaStanceUnknown.
+        public int VanillaGroupStance { get; }
+    }
+
+    // Inputs of vanilla's per-group stance lines in AdjustGroupAIStance.
+    public readonly struct VanillaGroupStanceInput
+    {
+        public VanillaGroupStanceInput(
+            float groupStrength,
+            int macroAi,
+            bool lineGroup,
+            bool defenderBattle,
+            float assaultTrigger,
+            float defendTrigger,
+            float screenTrigger)
+        {
+            GroupStrength = groupStrength;
+            MacroAi = macroAi;
+            LineGroup = lineGroup;
+            DefenderBattle = defenderBattle;
+            AssaultTrigger = assaultTrigger;
+            DefendTrigger = defendTrigger;
+            ScreenTrigger = screenTrigger;
+        }
+
+        // GetGroupStrength(group, false, includemorale: true, includeexp: true, usestrengthofenemysurrounding: true).
+        public float GroupStrength { get; }
+        public int MacroAi { get; }
+        // GetUnitSymbolData().oobunitsymbolid == 0.
+        public bool LineGroup { get; }
+        // bunits.GetBattleType(alliance, usereadinesswhendraw: true) == 1.
+        public bool DefenderBattle { get; }
+        // GamePrefs.strengthtriggerforassault_micro / fordefend_micro / forscreening_micro [macroai].
+        public float AssaultTrigger { get; }
+        public float DefendTrigger { get; }
+        public float ScreenTrigger { get; }
     }
 
     public readonly struct StanceWriteDecision
@@ -121,6 +190,45 @@ namespace WhiskeyRealism.Tactical
         // 3 game-minutes before a source may change its own opinion.
         public const float MinSelfChangeHours = 0.05f;
 
+        public const int VanillaStanceUnknown = -1;
+
+        // Port of the per-group lines of AdjustGroupAIStance (4239-4252); the
+        // side-level lines 4248 and 4256 and the retreat line 4258 are left out
+        // (see header). Mirrors vanilla's local variable: 4252 tests the
+        // already-reassigned local stance, not ai_stanceordered.
+        public static int VanillaPerGroupStance(in VanillaGroupStanceInput input)
+        {
+            float strength = input.GroupStrength;
+            int macro = input.MacroAi;
+            if (float.IsNaN(strength) || float.IsInfinity(strength)) return 3;
+            if (macro < 0 || macro > 3) return 3;
+            bool offensiveMacro = macro == 0 || macro == 1;
+
+            int stance = 3;
+            if (strength > input.AssaultTrigger && offensiveMacro && input.LineGroup)
+                stance = 4;
+            if (strength < input.DefendTrigger && strength > 0f)
+                stance = 2;
+            if (offensiveMacro && (stance != 2 || input.DefenderBattle) &&
+                strength < input.ScreenTrigger && strength > 0f)
+                stance = 1;
+            return stance;
+        }
+
+        // The vanilla per-group stances Whiskey yields to: defend and screen.
+        public static bool YieldsToVanilla(int vanillaGroupStance, int targetStance)
+        {
+            return (vanillaGroupStance == 1 || vanillaGroupStance == 2) &&
+                vanillaGroupStance != targetStance;
+        }
+
+        // True when Decide can reach a claim or write, i.e. when the caller
+        // needs vanilla's per-group stance (GetGroupStrength is not free).
+        public static bool NeedsVanillaGroupStance(bool isAiGroup, int targetStance, int macroAi)
+        {
+            return isAiGroup && targetStance >= 1 && targetStance <= 3 && macroAi >= 0 && macroAi <= 2;
+        }
+
         public static StanceWriteDecision Decide(in StanceWriteInput input)
         {
             if (!input.IsAiGroup) return Refuse("not-ai-group");
@@ -128,7 +236,9 @@ namespace WhiskeyRealism.Tactical
             if (input.TargetStance == 4) return Refuse("assault-vanilla-only");
             if (input.TargetStance < 1 || input.TargetStance > 3) return Refuse("invalid-stance");
             if (input.MacroAi < 0) return Refuse("macro-inactive");
-            if (input.MacroAi == 3) return Refuse("vanilla-retreat");
+            if (input.MacroAi == 3) return new StanceWriteDecision(StanceWriteAction.Yield, "vanilla-retreat");
+            if (YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
+                return new StanceWriteDecision(StanceWriteAction.Yield, "vanilla-weak-group");
             if (input.CurrentOrderedStance == 4 && input.Source != StanceWriteSource.ChargeDemotion)
                 return Refuse("vanilla-assault");
 
@@ -171,18 +281,30 @@ namespace WhiskeyRealism.Tactical
                         record.Source > input.Source)
                         return record;
                     return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source);
+                case StanceWriteAction.Yield:
+                    return default(StanceHoldRecord);
                 default:
                     return record;
             }
         }
 
-        public static bool StampsVanillaHold(in StanceWriteDecision decision)
+        // A write always stamps. A claim stamps only when the caller could
+        // check vanilla's per-group valves; otherwise vanilla stays free to
+        // re-decide (thrash, but its valves intact).
+        public static bool StampsVanillaHold(in StanceWriteDecision decision, in StanceWriteInput input)
         {
-            return decision.Action == StanceWriteAction.Write;
+            if (decision.Action == StanceWriteAction.Write) return true;
+            return decision.Action == StanceWriteAction.Claim &&
+                input.VanillaGroupStance != VanillaStanceUnknown;
+        }
+
+        public static bool ReleasesVanillaHold(in StanceWriteDecision decision)
+        {
+            return decision.Action == StanceWriteAction.Yield;
         }
 
         // lastaistancechangetime value that lets vanilla 4264 re-evaluate on
-        // its next cycle (army retreat release).
+        // its next cycle (yield / army retreat release).
         public static float ReleaseStamp(float nowHours)
         {
             return nowHours - MinSelfChangeHours;

@@ -510,8 +510,10 @@ namespace WhiskeyRealism.Patches
                 if (macro == 3) return;
                 if (resolved.FinalStance == vanillaOrdered)
                 {
-                    // Agreement: refresh the single-owner hold so vanilla's
-                    // AdjustGroupAIStance does not flip the group next cycle.
+                    // Agreement: the writer re-stamps the single-owner hold so
+                    // vanilla's AdjustGroupAIStance does not flip the group next
+                    // cycle — unless vanilla's per-group defend/screen applies
+                    // (weak group), in which case it yields and releases the hold.
                     TacticalStanceWriter.EnsureStance(bunits, group, resolved.FinalStance, null, StanceWriteSource.Scorer);
                     return;
                 }

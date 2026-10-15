@@ -24,7 +24,10 @@ internal static class PostureStanceFixTests
         Pass("vanilla hold stamp suppresses AdjustGroupAIStance until hold ends", VanillaHoldStampSuppressesAdjustGroupAIStance);
         Pass("task stance mapping matches vanilla stance semantics", TaskStanceMappingMatchesVanillaSemantics);
         Pass("stance owner never overwrites vanilla assault except charge demotion", StanceOwnerRespectsVanillaAssault);
-        Pass("only a real write stamps the vanilla hold", OnlyWriteStampsVanillaHold);
+        Pass("write and a healthy claim stamp the vanilla hold", WriteAndHealthyClaimStampVanillaHold);
+        Pass("vanilla per-group stance ports AdjustGroupAIStance 4239-4252", VanillaPerGroupStancePortsAdjustGroupAIStance);
+        Pass("stance owner yields to vanilla weak-group defend and screen", StanceOwnerYieldsToVanillaWeakGroup);
+        Pass("stance owner claim without vanilla stance does not stamp", StanceOwnerClaimWithoutVanillaStanceDoesNotStamp);
         Pass("retreat release lets vanilla re-evaluate immediately", RetreatReleaseLetsVanillaReevaluate);
         Pass("group stance scorer uses the shared task mapping", GroupStanceScorerUsesSharedTaskMapping);
 
@@ -95,9 +98,10 @@ internal static class PostureStanceFixTests
         int macroAi = 1,
         float now = 1.0f,
         StanceHoldRecord record = default,
-        StanceWriteSource source = StanceWriteSource.Scorer)
+        StanceWriteSource source = StanceWriteSource.Scorer,
+        int vanilla = 3)
     {
-        return new StanceWriteInput(isAiGroup, target, current, macroAi, now, record, source);
+        return new StanceWriteInput(isAiGroup, target, current, macroAi, now, record, source, vanilla);
     }
 
     private static void StanceOwnerRefusesNonGroupSubUnits()
@@ -117,8 +121,9 @@ internal static class PostureStanceFixTests
     private static void StanceOwnerYieldsToVanillaRetreatAndInactiveMacro()
     {
         var retreat = TacticalStanceOwnership.Decide(Input(target: 3, macroAi: 3));
-        AssertEqual(StanceWriteAction.Refuse, retreat.Action, "macroai 3 action");
+        AssertEqual(StanceWriteAction.Yield, retreat.Action, "macroai 3 hands the group back to vanilla");
         AssertEqual("vanilla-retreat", retreat.Reason, "macroai 3 reason");
+        AssertTrue(TacticalStanceOwnership.ReleasesVanillaHold(retreat), "macroai 3 releases the stamp (4258)");
         var inactive = TacticalStanceOwnership.Decide(Input(target: 3, macroAi: -1));
         AssertEqual(StanceWriteAction.Refuse, inactive.Action, "macroai -1 action");
     }
@@ -654,11 +659,81 @@ internal static class PostureStanceFixTests
         AssertEqual(StanceWriteAction.Write, demote.Action, "explicit charge denial may demote");
     }
 
-    private static void OnlyWriteStampsVanillaHold()
+    private static void WriteAndHealthyClaimStampVanillaHold()
     {
-        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Write, "write")), "write holds vanilla off");
-        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Claim, "held")), "agreement leaves vanilla free to re-evaluate (assault escalation, weak-group screen)");
-        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Refuse, "x")), "refuse");
+        var write = new StanceWriteDecision(StanceWriteAction.Write, "write");
+        var claim = new StanceWriteDecision(StanceWriteAction.Claim, "held");
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(write, Input(target: 3, current: 2)), "write holds vanilla off");
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(claim, Input(target: 3, current: 3)),
+            "agreement re-stamps so vanilla does not flip the group every 0.25 h (4264)");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Refuse, "x"), Input(target: 3)), "refuse");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Yield, "x"), Input(target: 3)), "yield");
+
+        // An idle group: GetGroupStrength is 0 out of combat (6032), every > 0 guard
+        // fails and vanilla's per-group stance is attack (3) — a healthy claim.
+        var idle = Input(target: 3, current: 3, vanilla: TacticalStanceOwnership.VanillaPerGroupStance(Vg(strength: 0f)));
+        var d = TacticalStanceOwnership.Decide(idle);
+        AssertEqual(StanceWriteAction.Claim, d.Action, "idle group claim");
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(d, idle), "idle group claim stamps");
+    }
+
+    private static VanillaGroupStanceInput Vg(
+        float strength, int macroAi = 1, bool lineGroup = true, bool defenderBattle = false,
+        float assault = 1.5f, float defend = 0.5f, float screen = 0.7f)
+    {
+        return new VanillaGroupStanceInput(strength, macroAi, lineGroup, defenderBattle, assault, defend, screen);
+    }
+
+    private static void VanillaPerGroupStancePortsAdjustGroupAIStance()
+    {
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0f)), "no combat: every > 0 guard fails");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(1.0f)), "healthy");
+        AssertEqual(4, TacticalStanceOwnership.VanillaPerGroupStance(Vg(2.0f)), "4240 assault for a line group");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(2.0f, lineGroup: false)), "4240 needs oobunitsymbolid 0");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(2.0f, macroAi: 2)), "4240 needs macroai 0/1");
+        AssertEqual(1, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0.6f)), "4252 screen below the screening trigger");
+        AssertEqual(2, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0.4f)), "4244 defend; 4252 skipped because the local stance is 2");
+        AssertEqual(1, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0.4f, defenderBattle: true)), "4252 screens a defend group in a defender battle");
+        AssertEqual(2, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0.4f, macroAi: 2)), "4244 defend under macroai 2");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(0.6f, macroAi: 2)),
+            "side-level 4248 (macroai 2) is not a per-group valve");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(1.0f, macroAi: 7)), "trigger index out of range");
+        AssertEqual(3, TacticalStanceOwnership.VanillaPerGroupStance(Vg(float.NaN)), "NaN strength");
+    }
+
+    private static void StanceOwnerYieldsToVanillaWeakGroup()
+    {
+        var weak = Input(target: 3, current: 3, vanilla: 2);
+        var d = TacticalStanceOwnership.Decide(weak);
+        AssertEqual(StanceWriteAction.Yield, d.Action, "weak group: vanilla defends");
+        AssertEqual("vanilla-weak-group", d.Reason, "reason");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(d, weak), "no stamp");
+        AssertTrue(TacticalStanceOwnership.ReleasesVanillaHold(d), "stamp released so vanilla re-decides next cycle");
+        AssertFalse(TacticalStanceOwnership.Next(d, weak).HasValue, "ownership dropped");
+
+        // Inside Whiskey's hold vanilla's screen must not be reasserted over.
+        var record = new StanceHoldRecord(3, 1.0f, StanceWriteSource.Executor);
+        var afterVanilla = TacticalStanceOwnership.Decide(Input(target: 3, current: 1, now: 1.01f, record: record, source: StanceWriteSource.Executor, vanilla: 1));
+        AssertEqual(StanceWriteAction.Yield, afterVanilla.Action, "no reassert over vanilla's weak-group screen");
+
+        var demotion = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.ChargeDemotion, vanilla: 1));
+        AssertEqual(StanceWriteAction.Yield, demotion.Action, "a weak group's stale assault goes back to vanilla too");
+
+        var agree = TacticalStanceOwnership.Decide(Input(target: 2, current: 2, vanilla: 2));
+        AssertEqual(StanceWriteAction.Claim, agree.Action, "Whiskey agrees with vanilla's defend");
+
+        var assault = TacticalStanceOwnership.Decide(Input(target: 3, current: 3, vanilla: 4));
+        AssertEqual(StanceWriteAction.Claim, assault.Action, "assault is not in the yield set (defend/screen only)");
+    }
+
+    private static void StanceOwnerClaimWithoutVanillaStanceDoesNotStamp()
+    {
+        var unknown = Input(target: 3, current: 3, vanilla: TacticalStanceOwnership.VanillaStanceUnknown);
+        var d = TacticalStanceOwnership.Decide(unknown);
+        AssertEqual(StanceWriteAction.Claim, d.Action, "claim");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(d, unknown), "cannot check vanilla's valves → leave vanilla free");
+        var write = Input(target: 3, current: 2, vanilla: TacticalStanceOwnership.VanillaStanceUnknown);
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(TacticalStanceOwnership.Decide(write), write), "a write still stamps");
     }
 
     private static void RetreatReleaseLetsVanillaReevaluate()
