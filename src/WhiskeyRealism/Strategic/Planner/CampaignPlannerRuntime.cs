@@ -61,6 +61,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
                     var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),
                         player, in chain, tempo, Snapshots[alliance]);
+                    TerrainLineRuntime.PrepareDrain(snapshot);
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);

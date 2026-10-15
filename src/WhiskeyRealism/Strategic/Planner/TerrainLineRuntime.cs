@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Planner
@@ -27,13 +28,20 @@ namespace WhiskeyRealism.Strategic.Planner
     // length times the measured cost per step would overrun it; the first probe always runs, so
     // a review's probing costs at most the budget or one line of ReviewTerrain.MaxProbedLine steps). A refused probe changes no answer the planner uses: ReviewTerrain scores
     // a review with no river term until every question is known (G3 verify F3).
+    //   Drain   the whole static question set (TerrainMemoDrain: every area-centre pair within
+    //           ReviewTerrain.MaxProbedLine, every area centre at every own command range) is
+    //           prepared from each review's snapshot and drained by Plugin.Update a frame at a
+    //           time within the same budgets (DrainTick), only while GameController's BattleUnits
+    //           is the campaign map's (IsCampaign, 78782); a battle map's terrain is never probed.
+    //           The review keeps its own budget as a fallback. When fix/perf-hot-paths' frame-budget
+    //           daily-review scheduler merges, the drain becomes a job of that scheduler.
     //   ReadMarchSpeed  the campaign speed terms of the march-time estimate (MarchSpeedInputs).
     internal sealed class TerrainLineRuntime : ITerrainLineSource
     {
         internal const float MaxLineStepsPerReview = 1500f; // map units of CountTerrainLine per review
         internal const int MaxRiverProbesPerReview = 128;
         internal const double MaxProbeMillisPerReview = 1.0;
-        internal const int MaxMemoEntries = 50000;
+        internal const int MaxMemoEntries = 200000; // also the most questions the drain takes
         private const float Snap = 16f;
         private const int RingPoints = 8;
 
@@ -46,6 +54,11 @@ namespace WhiskeyRealism.Strategic.Planner
         private static double _probeMillis;            // time spent probing this review
         private static int _riverProbes;
         private static BattlefieldSetup _bfs;
+        private static BattleUnits _bunits;
+        private static readonly TerrainMemoDrain Drain = new TerrainMemoDrain();
+        private static int _drainFrames;
+        private static int _findAfterFrame;
+        private const int FindRetryFrames = 60; // no GameController (menus): look again a second later
 
         static TerrainLineRuntime()
         {
@@ -60,15 +73,69 @@ namespace WhiskeyRealism.Strategic.Planner
             _riverProbes = 0;
             _millisPerStep = 0.003;
             _bfs = null;
+            _bunits = null;
+            _findAfterFrame = 0;
+            Drain.Clear();
+            _drainFrames = 0;
         }
 
         // The source for one review: the memo lives for the campaign, the budgets for this review.
         internal static TerrainLineRuntime ForReview()
         {
+            NewBudget();
+            return Instance;
+        }
+
+        private static void NewBudget()
+        {
             _lineSteps = 0f;
             _riverProbes = 0;
             _probeMillis = 0.0;
-            return Instance;
+        }
+
+        // Called by each review after its snapshot: queues the map's question set once and the river
+        // points of any new command range.
+        internal static void PrepareDrain(CampaignSnapshot snapshot)
+        {
+            try
+            {
+                if (snapshot == null) return;
+                if (Drain.Prepare(snapshot.Areas, snapshot.Own, MaxMemoEntries))
+                    OnceLog.Info("campaign-planner:terrain-drain-start", "[CampaignPlanner] terrain drain started: lines=" + Drain.Lines
+                        + " rivers=" + Drain.Rivers + " remaining=" + Drain.Remaining);
+                if (Drain.Oversize)
+                    OnceLog.Warning("campaign-planner:terrain-drain-oversize", "[CampaignPlanner] terrain question set exceeds " + MaxMemoEntries
+                        + " entries; not drained, river terms only as reviews fill the memo");
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-planner:terrain-drain-failed", "[CampaignPlanner] terrain drain failed: " + ex.Message);
+            }
+        }
+
+        // Plugin.Update, once a frame: drains the queue within one frame's budget on the campaign map.
+        internal static void DrainTick()
+        {
+            if (Drain.Remaining == 0) return;
+            using (TelemetryPerf.Scope("campaign.planner.terrain-drain", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    var flag = Plugin.EnableCampaignPlanner;
+                    if (flag == null || !flag.Value) return;
+                    if ((UnityEngine.Object)ResolveBattlefieldSetup() == null) return;
+                    NewBudget();
+                    _drainFrames++;
+                    Drain.Drain(Instance);
+                    if (Drain.Remaining == 0)
+                        OnceLog.Info("campaign-planner:terrain-drain-complete", "[CampaignPlanner] terrain drain complete: lines=" + Drain.Lines
+                            + " rivers=" + Drain.Rivers + " frames=" + _drainFrames);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("campaign-planner:terrain-drain-failed", "[CampaignPlanner] terrain drain failed: " + ex.Message);
+                }
+            }
         }
 
         public bool TryLine(float ax, float az, float bx, float bz, out bool blocked)
@@ -223,12 +290,20 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // AICampaign's own lookup (11143), as CampaignSnapshotRuntime does.
+        // AICampaign's own lookup (11143-11144), as CampaignSnapshotRuntime does; null unless the
+        // GameController is the campaign map's (BattleUnits.IsCampaign, 78782), so a battle map's
+        // terrain is never probed or memoised. Found again only when the scene's objects are gone.
         private static BattlefieldSetup ResolveBattlefieldSetup()
         {
-            if ((UnityEngine.Object)_bfs != null) return _bfs;
-            var go = GameObject.Find("GameController");
-            _bfs = (UnityEngine.Object)go != null ? go.GetComponent<BattlefieldSetup>() : null;
+            if ((UnityEngine.Object)_bunits == null)
+            {
+                if (Time.frameCount < _findAfterFrame) return null;
+                _findAfterFrame = Time.frameCount + FindRetryFrames;
+                var go = GameObject.Find("GameController");
+                _bunits = (UnityEngine.Object)go != null ? go.GetComponent<BattleUnits>() : null;
+                _bfs = (UnityEngine.Object)go != null ? go.GetComponent<BattlefieldSetup>() : null;
+            }
+            if ((UnityEngine.Object)_bunits == null || !_bunits.IsCampaign) return null;
             return _bfs;
         }
     }

@@ -1047,9 +1047,10 @@ namespace WhiskeyRealism
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
         }
 
-        // Per-frame hitch probe for the telemetry sidecar, and one doctrine clock
+        // Per-frame hitch probe for the telemetry sidecar, one doctrine clock
         // sample per frame so the clock sees every end-of-day frame even when no
-        // doctrine reader runs overnight (a sample is skipped off the battle map).
+        // doctrine reader runs overnight (a sample is skipped off the battle map),
+        // and the campaign planner's terrain memo drain (campaign map only).
         // Neither throws, but a Unity message must not either, so the guard stays.
         private void Update()
         {
@@ -1058,6 +1059,7 @@ namespace WhiskeyRealism
                 if (Enabled == null || !Enabled.Value) return;
                 WhiskeyRealism.Telemetry.TelemetryFrameProbe.Tick(UnityEngine.Time.unscaledDeltaTime);
                 WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.SampleDoctrineClock();
+                WhiskeyRealism.Strategic.Planner.TerrainLineRuntime.DrainTick();
             }
             catch
             {

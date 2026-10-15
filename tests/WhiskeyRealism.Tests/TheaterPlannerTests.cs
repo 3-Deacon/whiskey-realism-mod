@@ -69,6 +69,11 @@ internal static class TheaterPlannerTests
             ("RiverDiscountIsOrderIndependent", RiverDiscountIsOrderIndependent),
             ("ReviewTerrainRecordsEachUnknownOnce", ReviewTerrainRecordsEachUnknownOnce),
             ("ReviewTerrainProbesInFixedOrder", ReviewTerrainProbesInFixedOrder),
+            ("DrainEnumeratesExactlyTheAreaPairSet", DrainEnumeratesExactlyTheAreaPairSet),
+            ("DrainRespectsTheFrameBudget", DrainRespectsTheFrameBudget),
+            ("DrainCompletesThenReviewAppliesRiverTerms", DrainCompletesThenReviewAppliesRiverTerms),
+            ("DrainAppendsNewCommandRangesOnly", DrainAppendsNewCommandRangesOnly),
+            ("TerrainDrainWiringPinned", TerrainDrainWiringPinned),
             ("BusyFormationNeverTheCandidateForce", BusyFormationNeverTheCandidateForce),
             ("CandidateForceIsTheMainBody", CandidateForceIsTheMainBody),
             ("SeedFoldsDecisionSerialAndAlliance", SeedFoldsDecisionSerialAndAlliance),
@@ -766,7 +771,8 @@ internal static class TheaterPlannerTests
         AssertContains(river, "BattlefieldSetup.GetCurrentTerrainOnPos(", "terrain lookup 26727");
         AssertContains(river, "Remember(RiverMemo,", "memoized");
         // P17: every review starts with a fresh budget.
-        string review = MethodBody(src, "internal static TerrainLineRuntime ForReview(");
+        AssertContains(MethodBody(src, "internal static TerrainLineRuntime ForReview("), "NewBudget();", "each review starts a budget");
+        string review = MethodBody(src, "private static void NewBudget(");
         AssertContains(review, "_lineSteps = 0f;", "line budget reset per review");
         AssertContains(review, "_riverProbes = 0;", "river budget reset per review");
         AssertContains(review, "_probeMillis = 0.0;", "CPU budget reset per review");
@@ -1048,6 +1054,133 @@ internal static class TheaterPlannerTests
         AssertTrue(fresh.TryLine(0f, 0f, 0f, 200f, out _) && !fresh.TryLine(0f, 0f, 200f, 0f, out _), "98 before 99 although 99 asked first");
     }
 
+    // The drain's set is every area-centre pair within MaxProbedLine and every area at every own
+    // command range, probed in order: lines by area position, then river points by range.
+    private static void DrainEnumeratesExactlyTheAreaPairSet()
+    {
+        var s = Line(0, 9); // areas at x 0..800, 100 apart: pairs up to 6 apart are within 600
+        s.Own.Add(Corps(1, 100f, 1000f));
+        s.Own.Add(Corps(2, 200f, 1000f));
+        var third = Corps(3, 300f, 1000f);
+        third.CommandRange = 60f;
+        s.Own.Add(third);
+        var expected = new List<string>();
+        for (int a = 0; a < 9; a++)
+            for (int b = a + 1; b < 9; b++)
+                if (b - a <= 6) expected.Add("L" + a * 100f + "," + b * 100f);
+        foreach (int range in new[] { 40, 60 })
+            for (int a = 0; a < 9; a++) expected.Add("R" + a * 100f + "," + range);
+        var drain = new TerrainMemoDrain();
+        AssertTrue(drain.Prepare(s.Areas, s.Own, 1000), "queued");
+        AssertEqual(33, drain.Lines, "33 of the 36 pairs are within 600");
+        AssertEqual(18, drain.Rivers, "9 areas x 2 command ranges");
+        var source = new RecordingSource(int.MaxValue);
+        source.NewFrame();
+        AssertEqual(expected.Count, drain.Drain(source), "every question probed once");
+        AssertEqual(string.Join(";", expected), string.Join(";", source.Probed), "exactly the set, in the fixed order");
+        AssertEqual(0, drain.Remaining, "complete");
+        AssertTrue(!drain.Prepare(s.Areas, s.Own, 1000), "the same map and ranges queue nothing more");
+        var tooMany = new TerrainMemoDrain();
+        AssertTrue(!tooMany.Prepare(s.Areas, s.Own, 50) && tooMany.Oversize && tooMany.Remaining == 0, "a set larger than the memo is not drained");
+    }
+
+    private static void DrainRespectsTheFrameBudget()
+    {
+        var s = Line(0, 9);
+        s.Own.Add(Corps(1, 100f, 1000f));
+        var drain = new TerrainMemoDrain();
+        drain.Prepare(s.Areas, s.Own, 1000);
+        int total = drain.Remaining; // 33 lines + 9 river points
+        var source = new RecordingSource(5);
+        source.NewFrame();
+        source.ProbeLine(0f, 0f, 100f, 0f); // a review already memoised one line
+        int frames = 0, probed = 1;
+        while (drain.Remaining > 0 && frames < 100)
+        {
+            source.NewFrame();
+            int n = drain.Drain(source);
+            AssertTrue(n <= 5, "at most the frame's budget, frame " + frames);
+            probed += n;
+            frames++;
+        }
+        AssertEqual(total, probed, "every question probed once; the memoised one skipped");
+        AssertEqual((total - 1 + 4) / 5, frames, "completes in ceil((n - 1) / 5) frames");
+    }
+
+    // F3 with the drain: until the memo holds the set the reviews read clear; once drained the
+    // review applies river terms, and a belief moving to other areas asks nothing new.
+    private static void DrainCompletesThenReviewAppliesRiverTerms()
+    {
+        var source = new MemoRiverAtZ(60f, 0);
+        var drain = new TerrainMemoDrain();
+        var s = Mirror(false);
+        drain.Prepare(s.Areas, s.Own, 1000);
+        source.NewReview();
+        var before = TheaterPlanner.Plan(s, Sectors(s), null, new PlannerState { CampaignSeed = 1L }, null, source, Speed(), out string traceBefore);
+        AssertTrue(traceBefore.Contains("terrain=filling"), "no budget: filling");
+        AssertEqual(-1, before.MainObjectiveId, "no river term yet");
+        int frames = 0;
+        while (drain.Remaining > 0 && frames < 200)
+        {
+            source.Budget = 2;
+            source.NewReview();
+            drain.Drain(source);
+            frames++;
+        }
+        AssertEqual(0, drain.Remaining, "drained");
+        source.Budget = 0;
+        source.NewReview();
+        var after = TheaterPlanner.Plan(s, Sectors(s), null, new PlannerState { CampaignSeed = 1L }, null, source, Speed(), out string traceAfter);
+        AssertTrue(traceAfter.EndsWith("terrain=complete"), "complete with no review budget");
+        AssertTrue(after.MainObjectiveId == 98 || after.MainObjectiveId == 99, "river terms applied: eligible");
+        var moved = Mirror(false);
+        moved.Beliefs.Clear();
+        moved.Beliefs.Add(Belief(400f, 0f, 20000f, 1f));
+        moved.Beliefs.Add(Belief(300f, 140f, 20000f, 1f));
+        TheaterPlanner.Plan(moved, Sectors(moved), null, new PlannerState { CampaignSeed = 1L }, null, source, Speed(), out string traceMoved);
+        AssertTrue(traceMoved.EndsWith("terrain=complete"), "a moved belief asks no new question");
+    }
+
+    private static void DrainAppendsNewCommandRangesOnly()
+    {
+        var s = Line(0, 4);
+        s.Own.Add(Corps(1, 100f, 1000f));
+        var drain = new TerrainMemoDrain();
+        drain.Prepare(s.Areas, s.Own, 1000);
+        var source = new RecordingSource(int.MaxValue);
+        source.NewFrame();
+        drain.Drain(source);
+        var wide = Corps(2, 200f, 1000f);
+        wide.CommandRange = 80f;
+        s.Own.Add(wide);
+        AssertTrue(drain.Prepare(s.Areas, s.Own, 1000), "a new command range is queued");
+        AssertEqual(4, drain.Remaining, "only its four river points");
+        AssertEqual(8, drain.Rivers, "two ranges x four areas");
+    }
+
+    // The drain runs from Plugin.Update on the campaign map, is prepared by each review and reset
+    // per campaign.
+    private static void TerrainDrainWiringPinned()
+    {
+        string plugin = ReadRepoFile("src/WhiskeyRealism/Plugin.cs");
+        AssertContains(MethodBody(plugin, "private void Update("), "WhiskeyRealism.Strategic.Planner.TerrainLineRuntime.DrainTick();", "ticked once a frame by the plugin's Update");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        string review = MethodBody(runtime, "internal static void ReviewPlan(");
+        int prepare = review.IndexOf("TerrainLineRuntime.PrepareDrain(snapshot);", StringComparison.Ordinal);
+        AssertTrue(prepare > review.IndexOf("CampaignSnapshotRuntime.Build(", StringComparison.Ordinal) && prepare < review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal), "prepared from each review's snapshot, before the plan");
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TerrainLineRuntime.cs");
+        string tick = MethodBody(src, "internal static void DrainTick(");
+        AssertContains(tick, "if (Drain.Remaining == 0) return;", "nothing to do costs nothing");
+        AssertContains(tick, "TelemetryPerf.Scope(\"campaign.planner.terrain-drain\"", "perf scope");
+        AssertContains(tick, "if ((UnityEngine.Object)ResolveBattlefieldSetup() == null) return;", "campaign map only");
+        AssertContains(tick, "NewBudget();", "a fresh budget each frame");
+        AssertContains(tick, "Drain.Drain(Instance);", "drains through the budgeted source");
+        AssertContains(tick, "catch (Exception ex)", "never throws");
+        AssertContains(MethodBody(src, "private static BattlefieldSetup ResolveBattlefieldSetup("), "!_bunits.IsCampaign", "a battle map's terrain is never probed");
+        AssertContains(MethodBody(src, "private static void Reset("), "Drain.Clear();", "per-campaign reset");
+        AssertContains(MethodBody(src, "internal static void PrepareDrain("), "Drain.Prepare(snapshot.Areas, snapshot.Own, MaxMemoEntries)", "bounded by the memo");
+    }
+
     private static CampaignSnapshot Mirror(bool reversed)
     {
         var s = Line();
@@ -1237,6 +1370,32 @@ internal static class TheaterPlannerTests
             return true;
         }
         public bool ProbeRiver(float x, float z, float range) => true;
+    }
+
+    // Memoises every probe (keys by exact coordinates), records the probe order, and refuses
+    // probes past a per-frame budget.
+    private sealed class RecordingSource : ITerrainLineSource
+    {
+        private readonly HashSet<string> _known = new HashSet<string>();
+        private readonly int _budget;
+        private int _left;
+        public readonly List<string> Probed = new List<string>();
+        public RecordingSource(int budget) { _budget = budget; }
+        public void NewFrame() => _left = _budget;
+        private static string Line(float ax, float bx) => "L" + ax + "," + bx;
+        private static string River(float x, float range) => "R" + x + "," + range;
+        public bool TryLine(float ax, float az, float bx, float bz, out bool blocked) { blocked = false; return _known.Contains(Line(ax, bx)); }
+        public bool TryRiver(float x, float z, float range, out bool river) { river = false; return _known.Contains(River(x, range)); }
+        public bool ProbeLine(float ax, float az, float bx, float bz) => Probe(Line(ax, bx));
+        public bool ProbeRiver(float x, float z, float range) => Probe(River(x, range));
+        private bool Probe(string key)
+        {
+            if (_left <= 0) return false;
+            _left--;
+            _known.Add(key);
+            Probed.Add(key);
+            return true;
+        }
     }
 
     private static BattleHistoryRecord Battle(int won, int[] sides, int day, int month, int year, float x = 0f)

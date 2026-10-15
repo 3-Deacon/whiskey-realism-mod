@@ -154,6 +154,105 @@ namespace WhiskeyRealism.Strategic.Planner
         }
     }
 
+    // The campaign's whole static terrain question set, answered outside the reviews (G3 verify r1,
+    // integrator decision on F3). A review applies river terms only when every question it asks is
+    // memoised, and moving beliefs ask new area pairs as they go, so the memo is filled in advance:
+    // every pair of AI area centres within ReviewTerrain.MaxProbedLine (the only lines a review can
+    // ask) and every area centre at every own command range seen (the only river points it can ask),
+    // in a fixed order (lines by ascending area list position, then river points by range as first
+    // seen and area position). TerrainLineRuntime drains it a frame at a time within the per-frame
+    // budget; questions already memoised by a review are skipped without a probe.
+    internal sealed class TerrainMemoDrain
+    {
+        private struct Question
+        {
+            public bool IsLine;
+            public float AX, AZ, BX, BZ;
+            public int Range;
+        }
+
+        private readonly List<Question> _queue = new List<Question>();
+        private readonly HashSet<int> _ranges = new HashSet<int>();
+        private int _areaCount = -1;
+        private int _next;
+
+        internal int Lines { get; private set; }
+        internal int Rivers => _queue.Count - Lines;
+        internal int Remaining => _queue.Count - _next;
+        internal bool Oversize { get; private set; } // more questions than the memo holds: not drained
+
+        internal void Clear()
+        {
+            _queue.Clear();
+            _ranges.Clear();
+            _areaCount = -1;
+            _next = 0;
+            Lines = 0;
+            Oversize = false;
+        }
+
+        // Enumerates the area pairs on the first call for a map (a different area count is a different
+        // map) and appends the river points of any command range not seen yet. Returns true when the
+        // queue grew.
+        internal bool Prepare(IReadOnlyList<AreaRecord> areas, IReadOnlyList<FormationRecord> own, int maxQuestions)
+        {
+            if (areas == null || areas.Count == 0) return false;
+            if (_areaCount != areas.Count)
+            {
+                Clear();
+                _areaCount = areas.Count;
+                for (int a = 0; a < areas.Count; a++)
+                    for (int b = a + 1; b < areas.Count; b++)
+                    {
+                        var p = areas[a];
+                        var q = areas[b];
+                        if (RiverLines.Distance(p.X, p.Z, q.X, q.Z) > ReviewTerrain.MaxProbedLine) continue;
+                        _queue.Add(new Question { IsLine = true, AX = p.X, AZ = p.Z, BX = q.X, BZ = q.Z });
+                    }
+                Lines = _queue.Count;
+            }
+            if (Oversize) return false;
+            int before = _queue.Count;
+            for (int i = 0; own != null && i < own.Count; i++)
+            {
+                int range = (int)Math.Round(Math.Max(0f, own[i].CommandRange));
+                if (range <= 0 || !_ranges.Add(range)) continue;
+                for (int a = 0; a < areas.Count; a++)
+                    _queue.Add(new Question { AX = areas[a].X, AZ = areas[a].Z, Range = range });
+            }
+            if (_queue.Count > maxQuestions)
+            {
+                Oversize = true;
+                _queue.Clear();
+                _next = 0;
+                Lines = 0;
+                return false;
+            }
+            return _queue.Count != before;
+        }
+
+        // Probes the queue in order until the source's budget refuses one; returns how many were
+        // probed (memoised questions are passed over without a probe).
+        internal int Drain(ITerrainLineSource source)
+        {
+            if (source == null) return 0;
+            int probed = 0;
+            while (_next < _queue.Count)
+            {
+                var q = _queue[_next];
+                bool known = q.IsLine ? source.TryLine(q.AX, q.AZ, q.BX, q.BZ, out _) : source.TryRiver(q.AX, q.AZ, q.Range, out _);
+                if (!known)
+                {
+                    bool done = q.IsLine ? source.ProbeLine(q.AX, q.AZ, q.BX, q.BZ) : source.ProbeRiver(q.AX, q.AZ, q.Range);
+                    if (!done) break;
+                    probed++;
+                }
+                _next++;
+            }
+            return probed;
+        }
+    }
+
     // A river delays a threat, it never removes one. Vanilla starts a campaign battle only when
     // the engagement line is clear (80683-80687), so an army behind a river line must cross at a
     // ford or bridge (BattlefieldSetup.rivercrossingpositions, 26628-26638) to fight.
