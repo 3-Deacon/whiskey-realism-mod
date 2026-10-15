@@ -45,13 +45,13 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | Method | Line | Notes |
 |---|---|---|
 | `PickCampaignObjective` | **17770** | **Picks objective with `Random.Range`** — root cause of "AI has one tactic"; replace with weighted scorer |
-| `UpdateImportanceValues` | 14906 | Weighted importance per zone (transport capacity, profit, population, capital, objective bonus) |
+| `UpdateImportanceValues` | 14905 | Weighted importance per zone (transport capacity, profit, population, capital, objective bonus) |
 | `CalculateMostValueableAIZones` | 10965 | Picks single highest-importance zone within distance gate |
 | `GetBestRecruitingState` | 10723 | Theater-keyed recruiting state pick |
 | `GetClosestStateWithRecruitsPotential` | 10836 | Closest-with-potential variant |
 | `GetAllStateWithRecruitsPotential` | 10858 | All-with-potential variant |
-| `UpdateSupplyCapacity` | 10773 | Per-zone supply capacity from IIPs + supply depots |
-| `CheckSupplyDepotConstruction` | 14660 | AI builds supply depots |
+| `UpdateSupplyCapacity` | 10772 | Per-zone supply capacity from IIPs + supply depots |
+| `CheckSupplyDepotConstruction` | 14659 | AI builds supply depots |
 | `CheckFortConstruction` | 16347 | AI fort construction; one active order per faction but no area cap once orders finish |
 | `CheckTransferOfUnits` | 17232 | Force consolidation gate |
 | `CheckArmyGroupManagement` | 17706 | High-level army organization |
@@ -295,6 +295,30 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
+## Campaign logistics anchors (BUG-LOG-001..014)
+
+Re-read 2026-10-15 for the campaign logistics bug fixes ([`bug-fixes/vanilla-campaign-logistics.md`](bug-fixes/vanilla-campaign-logistics.md)). `cp:n` = `Config/campaignprefs.txt` line.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| Supply metric | `AICampaign.GetGroupSupplyState` | 14063-14066 | `max(avg(groupsupplystate) × 0.5, supplystate × 0.5)`, never above 0.5. Its thresholds: raid search 0.75 (9135, cp:1411), depot trigger 0.25 (14715, cp:1520), fort builders 0.25 (9724, 16381), raid abort 0.25 hard-coded (9092), dead micro-move gate (14009-14019). Any Whiskey reader of this value must rescale (`RaidSupplyThreshold.GroupSupplyStateScale`). |
+| Raids | `RaidForce.UpdateRaidForces` / `SearchObjective` / `CheckAbort` | 9021 / 9130 / 9057 | Raid state machine 1 raising → 2 raised → 3 moving → 4 at target → 5 abort → 6 return; runs every `BattleUnits.Update` while `debug_raidgroupsactive` (true, 64459). Raised by `CheckCreationOfRaidForces` (17568, job 11573), which the job machine skips for a CIC player's faction (11620-11628). |
+| Camps | `Regiment.UpdateCampsAndEntrenchments` | 115392-115470 | Camp only when `!iswithinfog` (115408), destroyed when fogged (115426), entrenchment model only when `!iswithinfog` (115455); bugle at 115411-115414. Called at 112224 (regular cycle, after `UpdateUnitVisuals`) and 79240. |
+| Camps | `Regiment.CheckRegimentVisibility` | 127159; 127209-127229 | Campaign `iswithinfog` for a non-player unit = hidden from the player (`oppositefow.UnitIsHidden`); player-alliance units are never fogged on the campaign map (127211-127215). |
+| Camps | `campbuilding` / `entrenchment` consumers | 132917-132922, 115297, 115078-115086, 127881-127887, 125041-125046 | Winter weather reset, readiness, attrition, morale, order delay; all test the object reference only. |
+| Camps | `CBuilding.Place` (not newly created) | 96163-96284 | Camps are not added to `BattleUnits.cbuildings`; `CBuilding` has no fog code. `Regiment.OnDestroy` (127111-127146) does not remove the camp (`BUG-LOG-014`). |
+| Embarkation | `Regiment.CheckModelReplacement` | 116372-116503 | Boat/train model and `currentmodeltype` only while `!iswithinfog` (116383, 116399, 116446; removed at 116461). The model is the embarked state: rail speed 133401, rail terrain cost 132891, night halt 133958, transport capacity 116471-116501, locomotive/ship use 133900-133915, embarkation delay 116418, ration factor 114186, no reinforcements 114501 (`BUG-LOG-002a`). The removal branch re-runs `CheckRegimentVisibility` (116467). |
+| Embarkation | `Ship.Initialize` → `SoundEngine.AddPurposeArray` | 141255; 146747-146756 | Each transport model appends 20 ship-firing sound objects to lists that never shrink; `AnimateFire` (callers 19058, 19283, 19672) uses only fleet vessel models (18230), so a land transport's array is never played. |
+| AI areas | `AICampaign.UpdateImportanceValues` registration | 14927, 14946, 14965 | Area members added only while `airuns <= 1`; area rule `AIArea.GetAIArea(aiareas.GetColorOnPos(pos))` (14915, 14935, 14954). |
+| AI areas | `AIArea.UpdateSupplyCapacity`; supply gate; objective pick | 10772-10801; 10983; 14542-14658 | Owner-blind IIP capacity × 2 + depot stock; `ownpoints <= supplycapacity`; objective pick null-checks buildings (14627). |
+| Offensive roll | `CheckOffensiveMovements` winter factor | 14310-14312; 14339-14340 | Scales only the timediff term (14339); the idle term `min(1, idle³)` (14340) is not scaled. Uses `winterdefensiveoperationsmodifier`; `winteroffensiveoperationsmodifier` loaded at 56381, never read (cp:1545-1548). Roll only for objectives in another alliance's state (14336). |
+| Offensive trim | `CheckOffensiveMovements` weapon blend | 14239, 14274 vs 14294 | Add loops use `w = blend`, the trim loop `w *= blend`. |
+| Depot job | `AICampaign.CheckSupplyDepotConstruction` | 14659-14779 | Builder loop 14690-14713 (skip flag 14697, dedupe 14706-14711); trigger 14715; installation search 14719-14761 (source test 14740: own, allied, or no enemy units in range, i.e. capturable; an undefended enemy depot becomes the unit's own via frontline 87208-87250 → `CheckNewOwner` 95810 → `ChangeOwnership` 95402-95452 with its stock kept, `BUG-LOG-005` not a bug); move 14762-14768; wish 14770-14776. Builders skipped at 14122, 14200, 9741, 13610, 13658, 13744, 16381. |
+| Depot build | `CBuilding.IncreaseCondition` | 96590; 96626-96655 | A depot under construction advances only with a unit of the starting alliance inside its own bugle range; otherwise it regresses and is removed after `timetoremovemilitarybuildings`. |
+| Transfers | `BattleUnits.GrabSubordinateByStrength` | 93549-93597 (93594) | `num = num5` instead of `num += num5`; caller `CheckTransferOfUnits` 17295. |
+| Random picks | `Random.Range(0, Count - 1)` | 12146, 12241, 12302, 12793, 12801, 12928, 13040, 17611 | Unity's int `Range` excludes the upper bound; the last candidate is never picked. |
+| Policy | `Policies.UpdatePolicyEffects` / Confiscation | 209616-209653 (reset 209621); 209893; 114330-114335 | Factor 1.15 multiplies a resupply duration (cp:2787-2788). |
+
 ## Policy selection (stage E)
 
 Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md) § "Vanilla and W&L model".
@@ -318,6 +342,30 @@ Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-desi
 | `GetAIPersonality` recruiting emergency → `EmergencyManpower` | 62733 | Accepted: `PolicyRuntime.ReadPersonalityList` mirrors vanilla's own emergency personality, whose test includes `GetStrengthRatio < 0.8`. Vanilla announces the emergency publicly (newspaper event, `CheckAIPolicyChange` 211026-211058), so forcing Manpower = 1 from it leaks nothing a player cannot read. Keep it; add no other strength read. |
 | `CheckAIPolicyChange` fallback walk | 211076-211090 | Walks `personality.policies` from the head and starts the first available entry; Union Historical lists 33/39/40 and CSA Historical 139/140 early. #19 removes the held irreversible acts from the list for the call (snapshot restored in its Finalizer), never on an emergency personality. |
 | `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
+
+## W&L player-economy and battle-stat anchors (2026-10-15)
+
+Anchors behind `BUG-WL-005..010` and `BUG-TAC-018/019` (plan `superpowers/plans/2026-10-15-wl-economy-bugs.md`). The player-side model is in [`wl-player-model.md`](wl-player-model.md) § Player economy effects.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| W&L effects | `DLC_WL.cumulativeeffectsrunning` / `cumulativeeffectsonce` | 43199-43201 (private static, `float[100]`) | Running multipliers vs once values; read by reflection (`Patches/WlEffectArrays`). |
+| W&L effects | `DLC_WL.EffectMultiplier(id, type, isplayerunit)` | 44633 | Returns 1/0 when not in a career or `isplayerunit` is false; the default is `true`. |
+| W&L effects | `DLC_WL.UpdateCumulativeEffects` | 44662 (reset 44671-44675, actions 44753-44773) | Rebuilds both arrays from scratch each call; type 1/2 → once, 3/4 → running, type 0 ignored. Called from `UpdateAllianceData` (81821), `AppointStaffMember` (44475), `UpdateStaffAvailability` (44537). |
+| W&L attrition | `Regiment.UpdateCampaignUnitStats` | 114965 (sickness 115149-115151, desertion 115196-115198; medical 115107, training 115243, readiness 115276) | Runs for every regiment (120260, 120409); effect 22 read unscoped. |
+| W&L supply | `Regiment.UpdateIIPSupplyLink` (private) | 114074 (map-group return 114145; effects 10/11 114190-114195; `num15` 114320-114351; resupply 114379; effect 14 114555; camp 8 114575) | Per map group; `num15` is the resupply duration (campaignprefs `supplyspeeddistance0/2000`). |
+| W&L supply | `BattleUnits.GetCampaignGroup` | 82991 | The player's map group; vanilla's camp (172032) and `IsPlayerPartOfUnit` (47578) use it. |
+| W&L camp | `Camp.GetModifier` | 172524 | `1 + bonus × maxbonusmalus [/ commanded units]`, clamped at 0; station 5 (Inspect Logistics) not divided. |
+| W&L Buy Supplies | `DLC_WL.GetAverageSupplySubordinates` / `AddSuppliesSubordinates` | 47377 / 47411 (type test 47392, 47428) | Attribute 24 Get/Set (42235-42237, 42561-42563). |
+| W&L transfers | `AICampaign.CheckTransferOfUnits` / `BattleUnits.MoveUnit` | 17232 (purge 17255-17262, add 17327, move 17328) / 93091 (career guard 93099, `SetTransfer` 93147) | In a career the appended unit never moves; `transfertime > 0` marks a real transit. |
+| W&L morale | `Regiment.UpdateMoraleCampaign` (private) | 127816 (effect 16 on `parentcampaignunit` 127874, camp 7 on the regiment 127875-127877, rally 127891; per-regiment caller 120375) | Morale effect keyed on the campaign group (`BUG-WL-011`). |
+| W&L once readers | effects 17 / 19 / 27 | 116687, 116738 / 113593 / 44559-44583 | Fighting spirit, re-enlistment ratio, staff-skill growth rate: running only, so type-1 action qualities on them were dead (`BUG-WL-009`). |
+| W&L order delays | effects 13 / 12 in `Regiment` order-delay code | 125069 / 125136 | Campaign and battle order delay `num2 *= EffectMultiplier(13/12, 1, owned)`: running only, so Signal Corps' type-2 qualities were dead (`BUG-WL-009`). |
+| W&L incidents | `DLC_WL.CheckForIncidents` | 46139 | `1 + EffectMultiplier(4, 0)`: incident chance read only as once, so Gamble's type-3 cost was dead (`BUG-WL-009`). |
+| W&L prestige | `DLC_WL.AdjustPrestige` | 43455 | Effect 0 (prestige generation) read only as running; item, injury and event-100 type-1/2 values on it stay dead (left vanilla, `BUG-WL-009`). |
+| W&L panel | `CampaignArmyPanel.UpdateStats` | 173470 (unscoped 173699-173702, 173742-173747; scoped 173552, 173637) | Lists the player's staff effects on any group (`BUG-WL-012`). |
+| Battle stats | `BattleUnits.CalculateAllUnitsOfAlliance` | 87335 (averages 87396-87399) | `enemyentrenchmentlevel` divided by the player count; read by 85632-85642 and 87480-87481. |
+| Battle stats | `BattleUnits.AssignConditionToSubordinates` | 85453 (HQ lines 85469-85471, side averages 85473-85504; frame 26 at 23972-23975) | HQ horses/guns clamped by the men value. |
 
 ## Game-update re-decompile inventory
 
