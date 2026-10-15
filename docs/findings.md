@@ -267,7 +267,7 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
-## Campaign logistics anchors (BUG-LOG-001..013)
+## Campaign logistics anchors (BUG-LOG-001..014)
 
 Re-read 2026-10-15 for the campaign logistics bug fixes ([`bug-fixes/vanilla-campaign-logistics.md`](bug-fixes/vanilla-campaign-logistics.md)). `cp:n` = `Config/campaignprefs.txt` line.
 
@@ -278,8 +278,8 @@ Re-read 2026-10-15 for the campaign logistics bug fixes ([`bug-fixes/vanilla-cam
 | Camps | `Regiment.UpdateCampsAndEntrenchments` | 115392-115470 | Camp only when `!iswithinfog` (115408), destroyed when fogged (115426), entrenchment model only when `!iswithinfog` (115455); bugle at 115411-115414. Called at 112224 (regular cycle, after `UpdateUnitVisuals`) and 79240. |
 | Camps | `Regiment.CheckRegimentVisibility` | 127159; 127209-127229 | Campaign `iswithinfog` for a non-player unit = hidden from the player (`oppositefow.UnitIsHidden`); player-alliance units are never fogged on the campaign map (127211-127215). |
 | Camps | `campbuilding` / `entrenchment` consumers | 132917-132922, 115297, 115078-115086, 127881-127887, 125041-125046 | Winter weather reset, readiness, attrition, morale, order delay; all test the object reference only. |
-| Camps | `CBuilding.Place` (not newly created) | 96163-96284 | Camps are not added to `BattleUnits.cbuildings`; `CBuilding` has no fog code. `Regiment.OnDestroy` (127111-127146) does not remove the camp. |
-| Embarkation | `Regiment.CheckModelReplacement` | 116372-116503 | Boat/train model and `currentmodeltype` only while `!iswithinfog` (116383, 116399, 116446; removed at 116461): fogged AI units are never embarked (`BUG-LOG-002a`). |
+| Camps | `CBuilding.Place` (not newly created) | 96163-96284 | Camps are not added to `BattleUnits.cbuildings`; `CBuilding` has no fog code. `Regiment.OnDestroy` (127111-127146) does not remove the camp (`BUG-LOG-014`). |
+| Embarkation | `Regiment.CheckModelReplacement` | 116372-116503 | Boat/train model and `currentmodeltype` only while `!iswithinfog` (116383, 116399, 116446; removed at 116461). The model is the embarked state: rail speed 133401, rail terrain cost 132891, night halt 133958, transport capacity 116471-116501, locomotive/ship use 133900-133915, embarkation delay 116418, ration factor 114186, no reinforcements 114501 (`BUG-LOG-002a`). |
 | AI areas | `AICampaign.UpdateImportanceValues` registration | 14927, 14946, 14965 | Area members added only while `airuns <= 1`; area rule `AIArea.GetAIArea(aiareas.GetColorOnPos(pos))` (14915, 14935, 14954). |
 | AI areas | `AIArea.UpdateSupplyCapacity`; supply gate; objective pick | 10772-10801; 10983; 14542-14658 | Owner-blind IIP capacity × 2 + depot stock; `ownpoints <= supplycapacity`; objective pick null-checks buildings (14627). |
 | Offensive roll | `CheckOffensiveMovements` winter factor | 14310-14312; 14339 | Uses `winterdefensiveoperationsmodifier`; `winteroffensiveoperationsmodifier` loaded at 56381, never read (cp:1545-1548). Roll only for objectives in another alliance's state (14336). |

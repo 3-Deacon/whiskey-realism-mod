@@ -42,6 +42,7 @@ campaign.patch.supply-depot-fix.enemy-held        # CBuilding.EnemyUnitsInRange:
 campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateByStrength: only when CheckTransferOfUnits finds a deficit and a surplus army
 campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim loop: only when an offensive gathered more units than it needs
 campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
+campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1

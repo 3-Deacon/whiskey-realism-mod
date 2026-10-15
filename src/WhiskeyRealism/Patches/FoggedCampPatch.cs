@@ -59,7 +59,7 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if (__instance == null || !__instance.iswithinfog) return;
-                    if (!FoggedCampRule.ShouldTreatAsVisibleForCamp(
+                    if (!FoggedModelRule.ShouldTreatAsVisibleForCamp(
                             Enabled(),
                             __instance.calledfromcampaign,
                             GameVars.usefow,
@@ -101,7 +101,7 @@ namespace WhiskeyRealism.Patches
 
                     bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
                     if (isPlayerAlliance) return;
-                    bool hide = FoggedCampRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog);
+                    bool hide = FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog);
                     SetModelActive(__instance.campbuilding, !hide);
                     SetModelActive(__instance.entrenchment, !hide);
                 }

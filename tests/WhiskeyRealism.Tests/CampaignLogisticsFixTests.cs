@@ -21,6 +21,7 @@ internal static class CampaignLogisticsFixTests
             ("logistics fogged ai land unit keeps its camp", FoggedAiLandUnitKeepsItsCamp),
             ("logistics camp rule never touches player or visible units", CampRuleNeverTouchesPlayerOrVisibleUnits),
             ("logistics camp models hidden only for fogged ai units", CampModelsHiddenOnlyForFoggedAiUnits),
+            ("logistics fogged ai land unit keeps its embarkation", FoggedAiLandUnitKeepsItsEmbarkation),
             ("logistics area membership registers only after vanilla stops", AreaMembershipRegistersOnlyAfterVanillaStops),
             ("logistics area membership adds without duplicates", AreaMembershipAddsWithoutDuplicates),
             ("logistics area membership prunes destroyed members", AreaMembershipPrunesDestroyedMembers),
@@ -81,25 +82,40 @@ internal static class CampaignLogisticsFixTests
     // non-player unit iswithinfog means hidden from the player (127221-127226).
     private static void FoggedAiLandUnitKeepsItsCamp()
     {
-        AssertTrue(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, true, true, false, true, false), "fogged AI land unit on the campaign map");
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(false, true, true, false, true, false), "flag off leaves vanilla");
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, true, true, false, true, true), "fogged unit on river or sea gets no camp (vanilla shows a boat there)");
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, false, true, false, true, false), "battle map untouched");
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, true, false, false, true, false), "fog of war off");
+        AssertTrue(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, true, true, false, true, false), "fogged AI land unit on the campaign map");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(false, true, true, false, true, false), "flag off leaves vanilla");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, true, true, false, true, true), "fogged unit on river or sea gets no camp (vanilla shows a boat there)");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, false, true, false, true, false), "battle map untouched");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, true, false, false, true, false), "fog of war off");
     }
 
     private static void CampRuleNeverTouchesPlayerOrVisibleUnits()
     {
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, true, true, true, true, false), "player alliance unit");
-        AssertFalse(FoggedCampRule.ShouldTreatAsVisibleForCamp(true, true, true, false, false, false), "visible AI unit already camps in vanilla");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, true, true, true, true, false), "player alliance unit");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForCamp(true, true, true, false, false, false), "visible AI unit already camps in vanilla");
     }
 
     private static void CampModelsHiddenOnlyForFoggedAiUnits()
     {
-        AssertTrue(FoggedCampRule.ShouldHideModels(false, true), "fogged AI unit hides its camp");
-        AssertFalse(FoggedCampRule.ShouldHideModels(false, false), "visible AI unit shows its camp");
-        AssertFalse(FoggedCampRule.ShouldHideModels(true, true), "player unit never hidden");
-        AssertFalse(FoggedCampRule.ShouldHideModels(true, false), "player unit shown");
+        AssertTrue(FoggedModelRule.ShouldHideModels(false, true), "fogged AI unit hides its camp");
+        AssertFalse(FoggedModelRule.ShouldHideModels(false, false), "visible AI unit shows its camp");
+        AssertFalse(FoggedModelRule.ShouldHideModels(true, true), "player unit never hidden");
+        AssertFalse(FoggedModelRule.ShouldHideModels(true, false), "player unit shown");
+    }
+
+    // Regiment.CheckModelReplacement (116372-116503) creates the train/boat model and sets
+    // currentmodeltype only when !iswithinfog (116383, 116399, 116446) and removes it when
+    // fogged (116461); speed (133401, 132891, 133958), transport capacity (116471-116501),
+    // consumption (114186, 133900-133915) and reinforcements (114501) read them.
+    private static void FoggedAiLandUnitKeepsItsEmbarkation()
+    {
+        AssertTrue(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, true, true, false, true, false), "fogged AI land unit");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(false, true, true, false, true, false), "flag off");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, true, true, true, true, false), "player alliance");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, true, true, false, false, false), "visible unit is vanilla already");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, true, true, false, true, true), "fleets are out of scope");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, false, true, false, true, false), "battle map");
+        AssertFalse(FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(true, true, false, false, true, false), "fog of war off");
     }
 
     // AICampaign.UpdateImportanceValues fills AIArea.iips/cbuildings/towns only while
@@ -456,6 +472,10 @@ internal static class CampaignLogisticsFixTests
         AssertHasParameters(AccessTools.Method(typeof(BattleUnits), "GrabSubordinateByStrength"), "groupunit", "strengthtosearchfor", "minimumamount", "leaveminimumbrigades", "overridetype");
         AssertHasParameters(AccessTools.Method(typeof(Policies), "UpdatePolicyEffects"), "alliance", "timediff", "startsetup");
         AssertTrue(AccessTools.Field(typeof(Regiment), "sound_objectref") != null, "Regiment.sound_objectref");
+        AssertHasParameters(AccessTools.Method(typeof(Regiment), "CheckModelReplacement"));
+        AssertHasParameters(AccessTools.Method(typeof(Regiment), "OnDestroy"));
+        foreach (var field in new[] { "shownmodel", "currentmodeltype", "campbuilding", "entrenchment", "iswithinfog" })
+            AssertTrue(AccessTools.Field(typeof(Regiment), field) != null, "Regiment." + field);
     }
 
     private static void AssertHasParameters(MethodInfo method, params string[] names)

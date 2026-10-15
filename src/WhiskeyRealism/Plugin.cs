@@ -105,6 +105,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
         public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableOrphanCampCleanup;
         public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
         public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
         public static ConfigEntry<bool> EnableSupplyDepotFriendlySourceFix;
@@ -723,6 +725,12 @@ namespace WhiskeyRealism
             EnableFoggedAiCampFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
                 "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiEmbarkationFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
+                "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableOrphanCampCleanup = Config.Bind(
+                "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
+                "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");
             EnableAiAreaMembershipRefresh = Config.Bind(
                 "Campaign Bug Fixes", "Enable AI Area Membership Refresh", true,
                 "Default ON. Vanilla fills each AI area's IIP, building and town lists only during the first two AI runs, so depots and other buildings created later never count toward the area's supply capacity or as offensive objectives. Registers them into their area with vanilla's own position rule (no duplicates) and drops destroyed buildings once per full pass. Off: vanilla.");
