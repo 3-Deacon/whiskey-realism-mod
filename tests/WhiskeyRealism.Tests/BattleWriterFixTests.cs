@@ -19,8 +19,6 @@ internal static class BattleWriterFixTests
         MacroAiLegacyScorerNeverWritesWlPlayerSide();
         MacroAiShadowHandsBackVanillaValueOnce();
         MacroAiShadowKeepsVanillaOffWhiskeyValue();
-        VanillaAnglePointMatchesGetAngleTerrainPos();
-        VanillaAnglePointClampsToTerrainBounds();
         VanillaAnglePointXYMatchesGetAngleTerrainPosXY();
         B8MapsWithdrawalDecisionsToVanillaFallbackShapes();
         B8SkipsUnitsVanillaWouldNotFallBack();
@@ -30,8 +28,6 @@ internal static class BattleWriterFixTests
         ReserveDelayConversionOnlyWhereSetWaypointQueues();
         PathfinderNeverRemovesAddedPaths();
         PathfinderEndsRetryLoopOnlyWithinTolerance();
-        VetoSkipsPlayerUiOrdersAndNonAiUnits();
-        VetoMeasuresEnemyDistanceToTarget();
         ArtilleryMicroNeverInterruptsMovement();
         ArtilleryMicroMirrorsVanillaUnlimberRule();
         ArtilleryMicroMapsActionsToVanillaWrites();
@@ -340,35 +336,6 @@ internal static class BattleWriterFixTests
         TestHarness.AssertTrue(Math.Abs(expected - actual) < 0.001f, label + ": expected " + expected + " got " + actual);
     }
 
-    // BattlefieldSetup.GetAngleTerrainPosStatic 26891: angle -= 90;
-    // x += cos(a) * d; z -= sin(a) * d.
-    private static void VanillaAnglePointMatchesGetAngleTerrainPos()
-    {
-        BattleWriterPolicy.AnglePointXZ(100f, -200f, 90f, 50f, 4000f, 4000f, out float x, out float z);
-        AssertNear(150f, x, "angle 90 x");
-        AssertNear(-200f, z, "angle 90 z");
-        BattleWriterPolicy.AnglePointXZ(100f, -200f, 0f, 50f, 4000f, 4000f, out x, out z);
-        AssertNear(100f, x, "angle 0 x");
-        AssertNear(-150f, z, "angle 0 z");
-        Pass("battle writers: angle point matches vanilla GetAngleTerrainPos");
-    }
-
-    // GetAngleTerrainPosStatic 26908-26923 clamps to the terrain: x in
-    // [0, size.x - 1], z in [-(size.z - 1), 0]. A retreat point from a unit
-    // near the map edge must stay on the map.
-    private static void VanillaAnglePointClampsToTerrainBounds()
-    {
-        BattleWriterPolicy.AnglePointXZ(30f, -200f, 270f, 180f, 2000f, 1500f, out float x, out float z);
-        AssertNear(0f, x, "west edge");
-        BattleWriterPolicy.AnglePointXZ(1950f, -200f, 90f, 180f, 2000f, 1500f, out x, out z);
-        AssertNear(1999f, x, "east edge = size.x - 1");
-        BattleWriterPolicy.AnglePointXZ(500f, -40f, 0f, 180f, 2000f, 1500f, out x, out z);
-        AssertNear(0f, z, "north edge z = 0");
-        BattleWriterPolicy.AnglePointXZ(500f, -1450f, 180f, 180f, 2000f, 1500f, out x, out z);
-        AssertNear(-1499f, z, "south edge = -(size.z - 1)");
-        Pass("battle writers: angle point clamps to the terrain like vanilla");
-    }
-
     // BattlefieldSetup.GetAngleTerrainPosXYStatic 26937: the distancez term
     // points opposite to GetAngleTerrainPos, so SetGroupFormation's HQ
     // (targetpos + (0, depth + back), 92044) sits behind the line front.
@@ -412,41 +379,6 @@ internal static class BattleWriterFixTests
         var noCorners = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
         TestHarness.AssertFalse(noCorners.OverrideResult, "no corners never overrides");
         Pass("battle writers: #53 ends the retry loop only within endpoint tolerance");
-    }
-
-    private static bool Veto(
-        int unitTyp = 2,
-        int guns = 4,
-        bool routed = false,
-        bool detached = false,
-        bool showMovementOptions = false,
-        bool canWrite = true,
-        float nearestEnemyToTargetSq = 30f * 30f)
-    {
-        return BattleWriterPolicy.ShouldVetoArtilleryWaypoint(
-            unitTyp, guns, routed, detached, showMovementOptions, canWrite, nearestEnemyToTargetSq, 60f);
-    }
-
-    // BR-C2: SetWaypoint's showmovementoptions defaults true for UI orders;
-    // every vanilla AI call site passes false (e.g. 3139, 4146, 6235, 6959).
-    private static void VetoSkipsPlayerUiOrdersAndNonAiUnits()
-    {
-        TestHarness.AssertTrue(Veto(), "AI battery ordered to point blank");
-        TestHarness.AssertFalse(Veto(showMovementOptions: true), "player UI order");
-        TestHarness.AssertFalse(Veto(canWrite: false), "guard denies (player/W&L/mode)");
-        TestHarness.AssertFalse(Veto(unitTyp: 0), "infantry");
-        TestHarness.AssertFalse(Veto(guns: 0), "no guns");
-        TestHarness.AssertFalse(Veto(routed: true), "routed");
-        TestHarness.AssertFalse(Veto(detached: true), "detached");
-        Pass("battle writers: veto skips player UI orders and non-AI units");
-    }
-
-    private static void VetoMeasuresEnemyDistanceToTarget()
-    {
-        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: 61f * 61f), "target beyond point blank");
-        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: float.MaxValue), "no visible enemy");
-        TestHarness.AssertTrue(Veto(nearestEnemyToTargetSq: 59f * 59f), "target inside point blank");
-        Pass("battle writers: veto measures nearest visible enemy to the target");
     }
 
     private static ArtilleryMicroWrite Micro(

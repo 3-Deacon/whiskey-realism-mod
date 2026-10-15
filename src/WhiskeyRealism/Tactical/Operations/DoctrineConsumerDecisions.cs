@@ -70,64 +70,6 @@ namespace WhiskeyRealism.Tactical.Operations
             return new DoctrineStanceDecision(DoctrineConsumerAction.Observe, "no-doctrine-opinion");
         }
 
-        public static DoctrineReserveDecision DecideReserve(
-            CommandDoctrineOrder order,
-            float mainEffortOdds,
-            float reserveFraction)
-        {
-            if (order.Task == CommandTaskType.FallBackToLine)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
-
-            if (order.Role == CommandNodeRole.Reserve &&
-                (!IsFinite(mainEffortOdds) || !IsFinite(reserveFraction)))
-            {
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, "reserve-held");
-            }
-
-            OperationalReserveInput input = new OperationalReserveInput(
-                reserveFraction,
-                mainEffortOdds,
-                flankThreat01: 0f,
-                reserveEndurance01: 1f,
-                assaultAuthorized: IsFinite(mainEffortOdds) && mainEffortOdds >= 1.60f,
-                fallbackPressure: false);
-
-            return DecideReserve(order, input);
-        }
-
-        public static DoctrineReserveDecision DecideReserve(
-            CommandDoctrineOrder order,
-            OperationalReserveInput reserveInput)
-        {
-            if (order.Task == CommandTaskType.FallBackToLine)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
-
-            if (order.Role != CommandNodeRole.Reserve)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
-
-            if (order.Task != CommandTaskType.ReserveWait)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
-
-            OperationalReserveDecision mission = OperationalReserveDoctrine.Decide(reserveInput);
-            if (!mission.ShouldMove)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
-
-            switch (mission.Mission)
-            {
-                case OperationalReserveMission.RelieveLine:
-                case OperationalReserveMission.Counterattack:
-                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.ReleaseReserve, mission.Reason);
-                case OperationalReserveMission.SealFlank:
-                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.GuardFlank, mission.Reason);
-                case OperationalReserveMission.WithdrawReserve:
-                    return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
-                case OperationalReserveMission.RefuseReserve:
-                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.GuardFlank, mission.Reason);
-                default:
-                    return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
-            }
-        }
-
         public static DoctrineReserveDecision DecideFallback(
             CommandDoctrineOrder order,
             TacticalFallbackInput fallbackInput)

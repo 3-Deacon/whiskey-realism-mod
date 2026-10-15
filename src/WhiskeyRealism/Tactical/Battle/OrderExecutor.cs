@@ -747,7 +747,11 @@ namespace WhiskeyRealism.Tactical.Battle
                         DistSq(_pending[p].Intent.TargetX, _pending[p].Intent.TargetZ, x, z) <= OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
                 }
                 case OrderChannel.Stance:
-                    return rec.AiStanceOrdered == w.Value;
+                    // Never a duplicate: an already-ordered stance is a hold
+                    // refresh. TacticalStanceWriter decides — its cheap path
+                    // skips while vanilla's 4264 stamp is live, its full pass
+                    // claims and re-stamps a lapsed one (the #45 agreement path).
+                    return false;
                 // A refused flank is a write of its own (the skewed slots), even
                 // with the formation or facing already right.
                 case OrderChannel.Formation:
@@ -770,7 +774,10 @@ namespace WhiskeyRealism.Tactical.Battle
             if (move && _backoffUntil.TryGetValue(w.GroupId, out double until) && now < until && now >= until - FailedWriteBackoffHours)
                 return true;
 
-            if (w.Priority != IntentPriority.Safety)
+            // A hold refresh of the stance the group already has is not a new
+            // order (IsDuplicate): the recent-order cooldown does not apply.
+            bool stanceRefresh = w.Channel == OrderChannel.Stance && rec.AiStanceOrdered == w.Value;
+            if (w.Priority != IntentPriority.Safety && !stanceRefresh)
             {
                 if (_lastOrderAt.TryGetValue(Key(w.GroupId, w.Channel), out double last) &&
                     Within(now, last, RecentOrderBattleSecondsFor(w.Channel, w.Source) / TacticalBattleClock.BattleSecondsPerHour))

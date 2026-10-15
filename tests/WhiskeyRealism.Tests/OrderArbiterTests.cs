@@ -215,7 +215,7 @@ internal static class OrderArbiterTests
         view.Own[g].Formation = 1;
         AssertEqual(SkipReason.Duplicate, executor.Plan(view, Formation(1, 1, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0).Skip, "same formation");
         view.Own[g].AiStanceOrdered = 3;
-        AssertEqual(SkipReason.Duplicate, executor.Plan(view, Stance(1, 3, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0).Skip, "same ordered stance");
+        AssertTrue(executor.Plan(view, Stance(1, 3, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0).Execute, "same ordered stance: a hold refresh for the writer (BC5b)");
         view.Own[g].CombatBehaviorOrdered = 2;
         AssertEqual(SkipReason.Duplicate, executor.Plan(view, Behavior(1, 2, IntentPriority.Executor, IntentSource.FireControl), 1.0).Skip, "same ordered behavior");
         AssertTrue(executor.Plan(view, Behavior(1, 3, IntentPriority.Executor, IntentSource.FireControl), 1.0).Execute, "new behavior");

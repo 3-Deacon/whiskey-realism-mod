@@ -79,77 +79,7 @@ internal static class PlayerOrderTests
             ("player order target policy falls back to visible enemy for attack", PlayerOrderTargetPolicyFallsBackToVisibleEnemyForAttack),
             ("player order composer emits reason for diagnostics", PlayerOrderComposerEmitsReasonForDiagnostics),
             ("player order runtime classifies vanilla order scene activity", PlayerOrderRuntimeClassifiesVanillaOrderSceneActivity),
-            ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
-            ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
-            ("tactical wl guard denies player subordinate feud movement", TacticalWlGuardDeniesPlayerSubordinate),
-            ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
-            ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
         });
-    }
-
-    private static void TacticalWlGuardAllowsNonWlAction()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: false,
-            unitUnderCommander: true,
-            groupUnderCommander: true,
-            attachedUnitUnderCommander: true);
-
-        AssertTrue(decision.Allow, "non-W&L scenarios must remain vanilla");
-        AssertEqual("wl-inactive", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardAllowsWhenConfigDisabled()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: false,
-            dlcScenarioActive: true,
-            unitUnderCommander: true,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: false);
-
-        AssertTrue(decision.Allow, "disabled config must leave vanilla behavior alone");
-        AssertEqual("config-disabled", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardDeniesPlayerSubordinate()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            unitUnderCommander: true,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: false);
-
-        AssertTrue(!decision.Allow, "player-subordinate feud movement should be denied");
-        AssertEqual("player-subordinate", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: true);
-
-        AssertTrue(!decision.Allow, "feud movement should be denied when the group contains a player-subordinate unit");
-        AssertEqual("player-subordinate-attached", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardAllowsAiChainFeudMove()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: false);
-
-        AssertTrue(decision.Allow, "AI-chain feud movement should remain vanilla");
-        AssertEqual("ai-chain", decision.Reason, "reason");
     }
 
     private static void PlayerOrderPriorityRanksRetreatAboveFallback()

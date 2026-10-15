@@ -166,10 +166,26 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// D4: a patch acting inside a vanilla micro call (#56 courier parity, #42
         /// feud replay) runs its intent through the same pipeline, refused under a
-        /// higher-priority arbiter claim on the same (group, channel).
+        /// higher-priority arbiter claim on the same (group, channel). Composed of
+        /// TryPlanInline and ExecutePlannedInline.
         /// </summary>
         internal static bool ExecuteInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent, out OrderOutcome outcome)
         {
+            if (!TryPlanInline(bunits, group, intent, out ExecutionPlan plan, out outcome)) return false;
+            return ExecutePlannedInline(bunits, group, intent, plan, ref outcome);
+        }
+
+        /// <summary>
+        /// The inline pipeline up to the vanilla call: claim check, then guard, chain,
+        /// waypoint validation, silent-exit pre-check, dedupe and cooldown
+        /// (OrderExecutor.Plan) against the side's latest snapshot. Writes nothing, so
+        /// a caller (#56) can decide whether to touch vanilla state before executing.
+        /// The plan's targets stay valid until the executor's next Plan call.
+        /// </summary>
+        internal static bool TryPlanInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent,
+            out ExecutionPlan plan, out OrderOutcome outcome)
+        {
+            plan = default;
             outcome = new OrderOutcome
             {
                 GroupId = intent.GroupId, Channel = intent.Channel, Kind = OrderOutcomeKind.Skipped, Source = intent.Source,
@@ -190,15 +206,36 @@ namespace WhiskeyRealism.Tactical.Battle
                 double now = TacticalDoctrineTime.NowBattleHours;
                 outcome.AtHours = now;
                 BindForTick(executor);
-                ExecutionPlan plan = executor.Plan(view, intent, now);
+                plan = executor.Plan(view, intent, now);
                 if (!plan.Execute)
                 {
                     outcome.Kind = plan.Skip == SkipReason.Duplicate ? OrderOutcomeKind.Deduped : OrderOutcomeKind.Skipped;
                     outcome.Reason = plan.Skip;
                     return false;
                 }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                plan = default;
+                OnceLog.Warning("tactical-battle-core:inline-failed",
+                    "[OrderArbiter] ExecuteInline threw: " + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+        }
 
-                int executed = Execute(bunits, view, executor, intent, plan, now);
+        /// <summary>Issues a plan TryPlanInline returned for the same group and intent.</summary>
+        internal static bool ExecutePlannedInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent,
+            in ExecutionPlan plan, ref OrderOutcome outcome)
+        {
+            try
+            {
+                if (!plan.Execute || bunits == null || (UnityEngine.Object)group == null) return false;
+                int alliance = group.alliance;
+                OrderExecutor executor = OrderExecutor.ForAlliance(alliance);
+                if (executor == null || !BattleCore.TryGetSnapshot(alliance, out BattleSnapshot view)) return false;
+
+                int executed = Execute(bunits, view, executor, intent, plan, outcome.AtHours);
                 outcome.Kind = executed > 0 ? OrderOutcomeKind.Issued : OrderOutcomeKind.Skipped;
                 return executed > 0;
             }
@@ -213,6 +250,10 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool IssueMove(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z)
         {
             Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
+            // A limbered retreat (artillery producers): limber first, as
+            // CheckArtyFallback does before its path (3519).
+            if ((w.Flags & IntentFlags.Limber) != 0 && unit.unittyp == TacticalUnitType.Artillery && unit.mounted != 1)
+                bunits.MountUnits(unit, 1);
             bunits.SetWaypoint(
                 unit,
                 target,
@@ -229,6 +270,14 @@ namespace WhiskeyRealism.Tactical.Battle
                 ignoredisabledships: false,
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
+            // An in-contact withdrawal of an infantry/cavalry regiment is vanilla's
+            // tactical fallback, which ends in SetMovementMode(2) (CheckLineFallbacks
+            // 5178, MicroAICheckForRetreats 4898; mounted units map 2 to 4, 124714-124718):
+            // the fallback walk facing the enemy, and the movementmode != 0 mark both
+            // vanilla's filter (5137) and the Withdrawal producer read. SetWaypoint
+            // leaves movementmode alone (its ResetMovementMode(0) acts only on 5, 124661).
+            if ((w.Flags & IntentFlags.InContactWithdrawal) != 0 && unit.unittyp <= TacticalUnitType.Cavalry)
+                unit.SetMovementMode(2);
             return true;
         }
 
@@ -240,8 +289,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.Stance:
                     return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source);
                 case OrderChannel.CombatBehavior:
-                    return TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
+                    if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0)) return false;
+                    // The artillery doctrine's cease-bombardment: vanilla pairs 7 with
+                    // bombardstarttime = 0 (CheckAIBombardment 3904).
+                    if (BattleWriterPolicy.ResetsBombardStart(w)) unit.bombardstarttime = 0f;
+                    return true;
                 case OrderChannel.Formation:
+                    if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
                     return IssueFormation(bunits, unit, w, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Facing:
                     return IssueFacing(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
@@ -254,6 +308,18 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
+        }
+
+        // Artillery limber / unlimber: BattleUnits.MountUnits (90860-90890; formation
+        // 3 + mounted 1, or formation 0 + mounted 0). Never on a moving battery
+        // (BattleWriterPolicy.PlanArtilleryMicroWrite only plans idle ones).
+        private static bool IssueMount(BattleUnits bunits, Regiment unit, bool limber)
+        {
+            if (unit.unittyp != TacticalUnitType.Artillery) return false;
+            int mount = limber ? 1 : 0;
+            if (unit.mounted == mount) return false;
+            bunits.MountUnits(unit, mount);
+            return true;
         }
 
         // Group formation (R8, CommandFormationWritePolicy): the courier
@@ -391,19 +457,19 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // F7 (BC5a): the formation policy's "enemies in range" input, fog-honest.
-        // Vanilla groupenemiesinrange is the max of the subordinates'
-        // unitrange.enemiesinrange (120558-120563): enemy strength within
-        // max(maximumlineofsight[unittyp], distancetoenemytocancelinterruption)
-        // (InitMaxUnitRanges 122510, UpdateUnitRangeFast 122608/122650-122655),
-        // never fog-filtered for the AI side. Here: the strength this side
-        // perceives (snapshot observations) within that range of the unit or a
-        // descendant.
+        // Vanilla UpdateGroupStrength sets groupenemiesinrange from the group's
+        // own unitrange.enemiesinrange (120558/120563, the HQ-local reach): enemy
+        // strength within max(maximumlineofsight[unittyp],
+        // distancetoenemytocancelinterruption) (InitMaxUnitRanges 122510,
+        // UpdateUnitRangeFast 122608/122650-122655), never fog-filtered for the
+        // AI side. Here: what this side perceives within that reach of the
+        // group's own position (BattleWriterPolicy.SnapshotEnemyStrengthInRange).
         private static float EnemiesInRange(BattleSnapshot view, int index, OrderChannel channel)
         {
             if (channel != OrderChannel.Formation && channel != OrderChannel.Facing) return 0f;
             // Only the group path reads it (a regiment rotates or re-forms directly).
             if (index < 0 || index >= view.OwnCount || (view.Own[index].Flags & UnitFlags.IsGroup) == 0) return 0f;
-            return PostureSense.EnemyStrengthInRange(view, index, LineOfSightRange());
+            return BattleWriterPolicy.SnapshotEnemyStrengthInRange(view, index, LineOfSightRange());
         }
 
         private static float LineOfSightRange()

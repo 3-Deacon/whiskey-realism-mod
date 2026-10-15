@@ -6,6 +6,8 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using BattleCore = WhiskeyRealism.Tactical.Battle.BattleCore;
+using BattleSnapshot = WhiskeyRealism.Tactical.Battle.BattleSnapshot;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -266,6 +268,10 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("tactical.patch.observer.check-global", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
                 PatchFirstFire.Mark("tactical.patch.observer.check-global");
+                // Battle core (D1): build every AI-run side's snapshot first, whatever the
+                // orchestrator flag, so this call's observer context and every fog-honest
+                // reader see this frame's perception.
+                TacticalBattleCoordinator.EnsureBattleCoreSnapshots(__instance);
                 // One battle context per vanilla call, shared by both observed events.
                 var context = BuildContextIfEnabled(__instance);
                 Observe(__instance, TacticalObservedEvent.Macro, null, null, context);
@@ -1843,13 +1849,11 @@ namespace WhiskeyRealism.Patches
         {
             if (group == null || context == null) return;
 
-            var sector = BuildMatrixSector(group, index);
-            var wlGuard = TacticalWlActionGuard.Decide(
-                true,
-                SafeDlcWlActive(),
-                group.dlcw_isundercommander,
-                group.dlcw_isundercommander,
-                CountAttachedUnderCommander(group) > 0);
+            var sector = BuildPerceivedSector(group, index);
+            // Battle-core ownership (TacticalWriteGuard / PlayerOwnership): a
+            // player-owned or feuding group, or one whose order would reach an
+            // exposed player-owned descendant, is not Whiskey's to change.
+            bool wlAllows = !TacticalWriteGuard.IsPlayerProtected(group, out string wlReason);
             bool orderFrictionAllows = MatrixOrderFrictionAllowsChange(group);
             int vanillaStance = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
             var stanceDecision = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)
@@ -1858,10 +1862,10 @@ namespace WhiskeyRealism.Patches
                     context.MacroAi,
                     sector,
                     orderFrictionAllows,
-                    wlGuard.Allow))
+                    wlAllows))
                 : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
-            EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlGuard, orderFrictionAllows, vanillaStance, stanceDecision);
+            EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlAllows, wlReason, orderFrictionAllows, vanillaStance, stanceDecision);
         }
 
         private static void EmitDecisionMatrixBattle(
@@ -1933,7 +1937,8 @@ namespace WhiskeyRealism.Patches
             int index,
             bool focus,
             TacticalSectorAssessment sector,
-            TacticalWlGuardDecision wlGuard,
+            bool wlAllows,
+            string wlReason,
             bool orderFrictionAllows,
             int vanillaStance,
             TacticalGroupStanceDecision stanceDecision)
@@ -1951,7 +1956,7 @@ namespace WhiskeyRealism.Patches
                 sector.Mission,
                 sector.Odds,
                 sector.Confidence,
-                wlGuard.Allow,
+                wlAllows,
                 orderFrictionAllows,
                 SafeOrderState(group));
 
@@ -1967,8 +1972,8 @@ namespace WhiskeyRealism.Patches
                     .WithField("confidence", sector.Confidence)
                     .WithField("score", sector.Odds)
                     .WithField("selectedTarget", sector.SectorId)
-                    .WithField("gateResult", (wlGuard.Allow && orderFrictionAllows) ? "allow" : "deny")
-                    .WithField("gateReason", (wlGuard.Allow ? "wl-allow" : wlGuard.Reason) + "|" + (orderFrictionAllows ? "order-friction-allow" : "order-friction-deny"))
+                    .WithField("gateResult", (wlAllows && orderFrictionAllows) ? "allow" : "deny")
+                    .WithField("gateReason", (wlAllows ? "wl-allow" : "player-protected-" + wlReason) + "|" + (orderFrictionAllows ? "order-friction-allow" : "order-friction-deny"))
                     .WithField("writeAction", "none")
                     .WithField("writeResult", "not-attempted")
                     .WithField("row", "group")
@@ -1983,7 +1988,7 @@ namespace WhiskeyRealism.Patches
                     .WithField("aiStance", group.ai_stance)
                     .WithField("orderedStance", vanillaStance)
                     .WithField("whiskeyStance", stanceDecision.GroupStance)
-                    .WithField("wlGuard", (wlGuard.Allow ? "allow" : "deny") + ":" + wlGuard.Reason)
+                    .WithField("wlGuard", wlAllows ? "allow:ai-chain" : "deny:" + wlReason)
                     .WithField("orderFrictionAllows", orderFrictionAllows)
                     .WithField("sector", sector.SectorId)
                     .WithField("mission", sector.Mission.ToString())
@@ -2012,21 +2017,41 @@ namespace WhiskeyRealism.Patches
                     .WithField("orderState", SafeOrderState(group)));
         }
 
-        private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
+        // Enemy inputs come from the group's side snapshot (BC2b): slice pressure for the
+        // enemy strength, perceived flank pressure for the flank risk, the nearest enemy the
+        // side sees for the line contact.
+        private static TacticalSectorAssessment BuildPerceivedSector(Regiment group, int sectorId)
         {
+            int ownIndex = SnapshotIndex(group, out BattleSnapshot snapshot);
             Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
             return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
-                index,
+                sectorId,
                 group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
-                group != null ? group.groupenemiesinrange : 0f,
-                MatrixEnemyAngleStrength(group),
-                closest != null ? closest.strength : 0f,
-                closest != null ? closest.unittyp : -1,
-                closest != null ? SafeUnitName(closest) : string.Empty,
-                closest != null && closest.isrouted,
-                closest != null && closest.permanentlydetached,
-                group != null && (group.flanksthreated > 0f || group.outflanked > 0),
-                group != null && (group.covervalue > 0.5f || group.fortinrange)));
+                enemiesInRangeStrength: 0f,
+                angleEnemyStrength: ArmyEvidenceBuilder.SlicePressureTotal(snapshot, ownIndex),
+                closestEnemyStrength: closest != null ? closest.strength : 0f,
+                closestEnemyUnitType: closest != null ? closest.unittyp : -1,
+                closestEnemyName: closest != null ? SafeUnitName(closest) : string.Empty,
+                closestEnemyRouted: closest != null && closest.isrouted,
+                closestEnemyPermanentlyDetached: closest != null && closest.permanentlydetached,
+                flankRisk: ArmyEvidenceBuilder.HasFlankPressure(snapshot, ownIndex),
+                strongPoint: group != null && (group.covervalue > 0.5f || group.fortinrange)));
+        }
+
+        // The unit's own index in its side's battle snapshot; -1 (and a null snapshot when
+        // the side has none) otherwise.
+        private static int SnapshotIndex(Regiment unit, out BattleSnapshot snapshot)
+        {
+            snapshot = null;
+            try
+            {
+                if (unit == null || !BattleCore.TryGetSnapshot(unit.alliance, out snapshot)) return -1;
+                return snapshot.IndexOfOwn(unit.gameObject.GetInstanceID());
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private static bool MatrixOrderFrictionAllowsChange(Regiment group)
@@ -2056,24 +2081,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Perceived enemy pressure around the group (snapshot slices, BC2a).
         private static float MatrixEnemyAngleStrength(Regiment group)
         {
-            try
-            {
-                if (group == null ||
-                    group.unitrange == null ||
-                    group.unitrange.enemystrengthwithinangle == null ||
-                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
-                    return 0f;
-                float total = 0f;
-                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
-                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
+            int ownIndex = SnapshotIndex(group, out BattleSnapshot snapshot);
+            return ArmyEvidenceBuilder.SlicePressureTotal(snapshot, ownIndex);
         }
 
         private static string MatrixClosestEnemy(Regiment group)
@@ -2113,8 +2125,8 @@ namespace WhiskeyRealism.Patches
                 : TacticalSectorSource.None;
             context.SectorSignature = "chains=" + context.ObjectiveChainCount + ",groups=" + context.GroupCount;
             context.OrderSignature = groupScoped ? BuildGroupOrderSignature(group) : BuildOrderSignature(unitsUsed);
-            context.ForceBalance = SafeForceBalance(bunits, side);
-            context.ReinforcementsWithin24Hours = SafeReinforcements(bunits, side);
+            context.ForceBalance = KnownForceBalance(bunits, side, context.Alliance);
+            context.ReinforcementsWithin24Hours = ArmyEvidenceBuilder.OwnReinforcementsArriving(bunits, side);
 
             if (groupScoped) MergeGroupCounts(group, context);
             else CountUnits(unitsUsed, context);
@@ -2144,12 +2156,6 @@ namespace WhiskeyRealism.Patches
             float confirmedEnemy = EstimateVisibleEnemyStrength(unitsUsed);
             float inferredEnemy = EstimateInferredEnemyStrength(unitsUsed);
             float enemy = Math.Max(confirmedEnemy, inferredEnemy);
-            if (enemy <= 0f)
-            {
-                float forceBalance = SafeForceBalance(bunits, side);
-                if (forceBalance > 0.01f && forceBalance < 0.99f)
-                    enemy = own * Math.Max(0.1f, (1f - forceBalance) / Math.Max(0.1f, forceBalance));
-            }
 
             var contact = TacticalContactLedger.Classify(new TacticalContactInput(
                 confirmedEnemy,
@@ -2164,7 +2170,7 @@ namespace WhiskeyRealism.Patches
                 confirmedEnemy,
                 confirmedEnemy,
                 Math.Max(enemy, inferredEnemy),
-                SafeReinforcements(bunits, side),
+                ArmyEvidenceBuilder.OwnReinforcementsArriving(bunits, side),
                 0f,
                 contact,
                 BuildSectorAssessments(battle, unitsUsed)));
@@ -2181,19 +2187,7 @@ namespace WhiskeyRealism.Patches
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
-                Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
-                sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
-                    sectorId++,
-                    Math.Max(group.groupowninrange, group.groupstrengthaigroup),
-                    group.groupenemiesinrange,
-                    MatrixEnemyAngleStrength(group),
-                    closest != null ? closest.strength : 0f,
-                    closest != null ? closest.unittyp : -1,
-                    closest != null ? SafeUnitName(closest) : string.Empty,
-                    closest != null && closest.isrouted,
-                    closest != null && closest.permanentlydetached,
-                    group.flanksthreated > 0f || group.outflanked > 0,
-                    group.covervalue > 0.5f || group.fortinrange)));
+                sectors.Add(BuildPerceivedSector(group, sectorId++));
             }
 
             return sectors.ToArray();
@@ -2204,6 +2198,7 @@ namespace WhiskeyRealism.Patches
             return TacticalFogOfWarContact.VisibleEnemyStrength(units);
         }
 
+        // Perceived pressure (visible plus discounted remembered) summed over the AI's groups.
         private static float EstimateInferredEnemyStrength(IList units)
         {
             if (units == null) return 0f;
@@ -2211,14 +2206,8 @@ namespace WhiskeyRealism.Patches
             float total = 0f;
             for (int i = 0; i < units.Count; i++)
             {
-                var unit = units[i] as Regiment;
-                if (unit == null ||
-                    unit.unitrange == null ||
-                    unit.unitrange.enemystrengthwithinangle == null ||
-                    !TacticalFogOfWarContact.HasVisibleEnemy(unit))
-                    continue;
-                for (int j = 0; j < unit.unitrange.enemystrengthwithinangle.Length; j++)
-                    total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[j]);
+                int ownIndex = SnapshotIndex(units[i] as Regiment, out BattleSnapshot snapshot);
+                total += ArmyEvidenceBuilder.SlicePressureTotal(snapshot, ownIndex);
             }
 
             return total;
@@ -2550,27 +2539,18 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static float SafeForceBalance(BattleUnits bunits, int side)
+        // Own active force over the enemy strength the side knows of (visible plus
+        // confidence-weighted remembered, its battle snapshot); 0 when nothing is known.
+        // Vanilla's sideinformation force balance (84862) divides by the enemy's true
+        // weighted force, which the side cannot know.
+        private static float KnownForceBalance(BattleUnits bunits, int side, int alliance)
         {
             try
             {
-                if (bunits == null || bunits.sideinformation == null) return 0f;
-                if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
-                return bunits.sideinformation[side].forcebalance;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float SafeReinforcements(BattleUnits bunits, int side)
-        {
-            try
-            {
-                if (bunits == null || bunits.sideinformation == null) return 0f;
-                if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
-                return bunits.sideinformation[side].reinforcementarrivalswithin24hrs;
+                if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot snapshot)) return 0f;
+                float known = snapshot.VisibleEnemyStrength + snapshot.RememberedEnemyStrength;
+                if (!(known > 0f)) return 0f;
+                return Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce")) / known;
             }
             catch
             {

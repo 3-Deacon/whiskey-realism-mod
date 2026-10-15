@@ -1,23 +1,21 @@
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// Pre-resolved action for the vanillaOrdered==4 (charge) branch in
-    /// <c>BattleGroupStancePatch</c>. The "cheap per-group" refactor moves
-    /// doctrine + ledger + reaction resolution to the heavy-gate-fire
-    /// boundary; at apply time the patch reads this enum and dispatches
-    /// without re-walking the orchestrator state.
+    /// Pre-resolved action for a vanilla assault (ai_stanceordered 4), read by
+    /// the battle-core ChargeDemotionIntentProducer. Doctrine + ledger +
+    /// reaction resolution runs at the heavy-gate-fire boundary; the producer
+    /// reads this enum without re-walking the orchestrator state.
     ///
     /// Values:
     ///   None             — no charge answer (ledger / scorer entries). A
-    ///                       vanilla assault (4) at apply time is preserved.
+    ///                       vanilla assault (4) is preserved.
     ///   PreserveVanilla  — TacticalChargeDenial keeps the assault (flag off,
-    ///                       doctrine Allow, or no denial raised). Patch logs
-    ///                       the reason and returns without writing.
-    ///   DemoteToHold     — TacticalChargeDenial demotes the assault; the patch
-    ///                       writes FinalStance (doctrine Deny: 2, legacy
-    ///                       DenyCharge: 3) via <c>DemoteCharge</c>. Applies
-    ///                       whenever vanilla is at 4 at apply time, including
-    ///                       a doctrine entry vanilla escalated after caching.
+    ///                       doctrine Allow, or no denial raised). No intent.
+    ///   DemoteToHold     — TacticalChargeDenial demotes the assault; the
+    ///                       producer submits a Safety Stance intent to
+    ///                       FinalStance (doctrine Deny: 2, legacy DenyCharge:
+    ///                       3). Applies whenever vanilla is at 4, including a
+    ///                       doctrine entry vanilla escalated after caching.
     /// </summary>
     internal enum ChargeOverrideAction
     {
@@ -28,10 +26,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// Per-group resolved decision cached at the heavy-gate-fire boundary
-    /// and consumed by <c>BattleGroupStancePatch.ApplyResolvedDecisionFast</c>.
-    /// Bundles every doctrine/ledger/charge answer the patch needs so the
-    /// per-tick apply path becomes O(1) per group — no resolver walks, no
-    /// sector rebuild, no <c>DecideGroupStance</c> recompute.
+    /// and consumed by the battle-core GroupStanceIntentProducer and
+    /// ChargeDemotionIntentProducer. Bundles every doctrine/ledger/charge
+    /// answer they need so each arbiter tick is O(1) per group — no resolver
+    /// walks, no sector rebuild, no <c>DecideGroupStance</c> recompute.
     ///
     /// Construction happens on the main thread inside
     /// <c>TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide</c>

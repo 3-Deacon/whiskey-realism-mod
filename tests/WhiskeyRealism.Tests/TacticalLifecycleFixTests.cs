@@ -45,7 +45,6 @@ internal static class TacticalLifecycleFixTests
         Pass("perf ledger ticks on mode change or max interval", PerfLedgerTicksOnModeChangeOrMaxInterval);
         Pass("perf ledger ticks after clock rewind", PerfLedgerTicksAfterClockRewind);
         Pass("perf command tree hash sees parent change", PerfCommandTreeHashSeesParentChange);
-        Pass("perf frame cache hits within one frame only", PerfFrameCacheHitsWithinOneFrame);
         Pass("perf intents hash equal for reallocated identical intents", PerfIntentsHashEqualForReallocatedIntents);
         Pass("perf intents hash sees role change", PerfIntentsHashSeesRoleChange);
 
@@ -357,17 +356,9 @@ internal static class TacticalLifecycleFixTests
 
     // ---- T15 reserve gate ----
 
-    private static CommandIntentResolution ReserveResolution()
-    {
-        return new CommandIntentResolution(true,
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Reserve, DirectChildAxis.Hold,
-                primarySector: 2, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
-            "exact-command-node");
-    }
-
     private static void T15ReleasedReserveAllowsVanillaCommit()
     {
-        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f, reserveReleased: true);
+        var input = new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: true);
         var d = TacticalReserveCommitGate.Decide(input);
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
         TestHarness.AssertEqual("reserve-released", d.Reason, "reason");
@@ -375,7 +366,7 @@ internal static class TacticalLifecycleFixTests
 
     private static void T15UnreleasedReserveStillHeld()
     {
-        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f);
+        var input = new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: false);
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Deny, TacticalReserveCommitGate.Decide(input).Action, "deny");
     }
 
@@ -424,17 +415,6 @@ internal static class TacticalLifecycleFixTests
             new CommandTreeBuilder.CommandProbe(2, parentOfChild == "node-1" ? 1 : 3, 0, 15, "div", true, false, false),
         };
         return CommandTreeBuilder.Build(probes, 0, 0);
-    }
-
-    private static void PerfFrameCacheHitsWithinOneFrame()
-    {
-        var cache = new TacticalFrameCache<string>();
-        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "empty");
-        cache.Set(10, 7, "enemy");
-        TestHarness.AssertTrue(cache.TryGet(10, 7, out string hit) && hit == "enemy", "same frame");
-        TestHarness.AssertFalse(cache.TryGet(10, 8, out _), "other unit");
-        TestHarness.AssertFalse(cache.TryGet(11, 7, out _), "next frame");
-        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "previous frame entries dropped");
     }
 
     private static CommandNodeIntent[] Intents(DirectChildRole role)

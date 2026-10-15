@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 using static TestHarness;
 
@@ -34,6 +37,19 @@ internal static class BattlePerceptionTests
             ("battle-perception snapshot strength and centroid from observations", SnapshotStrengthAndCentroidFromObservations),
             ("battle-perception reinforcement counts only with visible entry", ReinforcementCountsOnlyWithVisibleEntry),
             ("battle-perception update allocates nothing after warmup", PerceptionUpdateAllocatesNothingAfterWarmup),
+            // BC2b: the T1 consumers read the snapshot.
+            ("battle-perception snapshot is the observation source", SnapshotIsTheObservationSource),
+            ("battle-perception objective records from snapshot match aggregate fixture", ObjectiveRecordsFromSnapshotMatchAggregateFixture),
+            ("battle-perception evidence sector strength from observations not vanilla slices", EvidenceSectorStrengthFromObservationsNotVanillaSlices),
+            ("battle-perception enemy visible state excludes hidden enemies", EnemyVisibleStateExcludesHiddenEnemies),
+            ("battle-perception contact ledger fed from snapshot observations", ContactLedgerFedFromSnapshotObservations),
+            ("battle-perception own averages from snapshot own", OwnAveragesFromSnapshotOwn),
+            ("battle-perception own reinforcements use vanilla retreat window", OwnReinforcementsUseVanillaRetreatWindow),
+            ("battle-perception group flank threat from snapshot pressure", GroupFlankThreatFromSnapshotPressure),
+            ("battle-perception unseen enemy avenues are filtered", UnseenEnemyAvenuesAreFiltered),
+            ("battle-perception signature inputs from snapshot", SignatureInputsFromSnapshot),
+            ("battle-perception group pressure helpers read the snapshot", GroupPressureHelpersReadTheSnapshot),
+            ("battle-perception evidence front axis is the snapshot axis", EvidenceFrontAxisIsTheSnapshotAxis),
         });
     }
 
@@ -588,5 +604,368 @@ internal static class BattlePerceptionTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertTrue(s.ObservationCount > 0, "observations filled");
         AssertEqual(0L, allocated, "perception tick allocated bytes after warm-up");
+    }
+
+    // ---------------------------------------------------------------- BC2b consumers
+
+    // A snapshot as the coordinator hands it to the T1 consumers: own roster, observations
+    // as perception published them, slice / flank / closest-visible rows built.
+    private static BattleSnapshot ConsumerSnapshot(double nowHours, UnitRecord[] own, params EnemyObservation[] observations)
+    {
+        var s = new BattleSnapshot();
+        Rebuild(s, own, own.Length, nowHours);
+        for (int i = 0; i < observations.Length; i++) s.AddObservation(in observations[i]);
+        SlicePressureBuilder.Build(s, VanillaGeometry());
+        return s;
+    }
+
+    private static EnemyObservation Seen(int id, float x, float z, float strength, float confidence = 1f,
+        bool remembered = false, bool reinforcement = false)
+    {
+        return new EnemyObservation
+        {
+            InstanceId = id,
+            UnitTyp = 0,
+            X = x,
+            Z = z,
+            Strength = strength,
+            State = remembered ? ObservationState.Remembered : ObservationState.Visible,
+            Confidence01 = remembered ? confidence : 1f,
+            IsReinforcement = reinforcement,
+        };
+    }
+
+    private static UnitRecord OwnUnit(int id, float x, float z, int aiGroupStrength = 0, int unitTyp = 0, int strength = 500,
+        UnitFlags flags = UnitFlags.Active | UnitFlags.Alive, float waypointX = 0f, float waypointZ = 0f, float facing = 0f)
+    {
+        return new UnitRecord
+        {
+            InstanceId = id, X = x, Z = z, RotationY = facing, UnitTyp = unitTyp, Strength = strength,
+            GroupStrengthAiGroup = aiGroupStrength, Flags = flags, LastWaypointX = waypointX, LastWaypointZ = waypointZ,
+            ParentIndex = -1,
+        };
+    }
+
+    // Ports TacticalUnitObservationAggregateTests: the snapshot replaced the pooled aggregate as
+    // the IObservationSource, and a rebuild into the same instance drops the previous capture.
+    private static void SnapshotIsTheObservationSource()
+    {
+        var s = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f), OwnUnit(3, 100f, -500f) }, Seen(2, 0f, -300f, 400f));
+        IObservationSource source = s;
+        AssertEqual(2, source.OwnCount, "own units");
+        AssertEqual(1, source.ObservationCount, "enemy observations");
+        AssertEqual(1, source.Own[0].InstanceId, "own order kept");
+        AssertEqual(2, source.Observations[0].InstanceId, "observation kept");
+        AssertEqual(1, source.IndexOfOwn(3), "own index by instance id");
+        AssertEqual(-1, source.IndexOfOwn(2), "an enemy is never an own index");
+        AssertEqual(0, source.ClosestVisibleEnemy(0, out float distance), "closest visible enemy");
+        AssertNear(200f, distance, 0.01f, "closest distance");
+
+        Rebuild(s, new[] { OwnUnit(4, 0f, -500f) }, 1, 10.1);
+        AssertEqual(1, source.OwnCount, "rebuild replaces the roster");
+        AssertEqual(0, source.ObservationCount, "rebuild clears the observations");
+        AssertEqual(-1, source.IndexOfOwn(1), "previous capture's ids are gone");
+
+        Rebuild(s, Array.Empty<UnitRecord>(), 0, 10.2);
+        AssertEqual(0, source.OwnCount, "empty build: no own");
+        AssertEqual(-1, source.ClosestVisibleEnemy(0, out _), "empty build: no closest");
+    }
+
+    // Ports ObjectiveRecordsFromAggregateTests onto a BattleSnapshot source.
+    private static void ObjectiveRecordsFromSnapshotMatchAggregateFixture()
+    {
+        // Each own unit's closest visible enemy: 11 (100), 12 (200), 13 (300). Weighted
+        // centroid X = (100*100 + 200*200 + 300*300) / 600 = 233.33; friendly is the sum of
+        // own groupstrengthaigroup (the shipped SafeStrength field).
+        var line = ConsumerSnapshot(10.0,
+            new[] { OwnUnit(1, 100f, -50f, aiGroupStrength: 100), OwnUnit(2, 200f, -50f, aiGroupStrength: 100),
+                OwnUnit(3, 300f, -50f, aiGroupStrength: 100) },
+            Seen(11, 100f, 0f, 100f), Seen(12, 200f, 0f, 200f), Seen(13, 300f, 0f, 300f));
+        bool ok = TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(
+            line, 0, out TacticalMapPoint point, out float enemyStrength, out float friendlyStrength);
+        AssertTrue(ok, "visible enemy line ok");
+        AssertNear(233.3333f, point.X, 0.1f, "visible enemy line centroid X");
+        AssertEqual(0f, point.Z, "visible enemy line centroid Z");
+        AssertEqual(600f, enemyStrength, "visible enemy line enemy strength sum");
+        AssertEqual(300f, friendlyStrength, "visible enemy line friendly strength sum");
+
+        var routed = ConsumerSnapshot(10.0,
+            new[] { OwnUnit(1, 100f, -50f, aiGroupStrength: 100, flags: UnitFlags.Active | UnitFlags.Routed),
+                OwnUnit(2, 200f, -50f, aiGroupStrength: 100, flags: UnitFlags.Active | UnitFlags.PermanentlyDetached) },
+            Seen(11, 100f, 0f, 100f));
+        AssertFalse(TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(routed, 0, out _, out _, out _),
+            "routed and permanently detached own units contribute nothing");
+
+        var unseen = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f), OwnUnit(2, 50f, -500f) },
+            Seen(11, 0f, -300f, 500f, confidence: 0.5f, remembered: true));
+        AssertFalse(TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(unseen, 0, out _, out _, out _),
+            "visible enemy line returns false when no own unit has a visible enemy");
+
+        // Strength-weighted centroid of last waypoints: (50*100 + 100*200) / 300 = 83.33.
+        var anchor = ConsumerSnapshot(10.0,
+            new[] { OwnUnit(1, 0f, -500f, aiGroupStrength: 100, waypointX: 50f, waypointZ: 50f),
+                OwnUnit(2, 0f, -500f, aiGroupStrength: 200, waypointX: 100f, waypointZ: 100f) });
+        ok = TacticalVisionRuntimeAdapter.TryMovementAnchorLineFromAggregate_ForTest(anchor, 0, out point, out friendlyStrength);
+        AssertTrue(ok, "movement anchor ok");
+        AssertNear(83.3333f, point.X, 0.1f, "movement anchor centroid X");
+        AssertNear(83.3333f, point.Z, 0.1f, "movement anchor centroid Z");
+        AssertEqual(300f, friendlyStrength, "movement anchor friendly strength sum");
+
+        var noWaypoint = ConsumerSnapshot(10.0,
+            new[] { OwnUnit(1, 0f, -500f), OwnUnit(2, 300f, -500f, waypointX: 310f, waypointZ: -510f) });
+        AssertFalse(TacticalVisionRuntimeAdapter.TryMovementAnchorLineFromAggregate_ForTest(noWaypoint, 0, out _, out _),
+            "no waypoint, or one within 25 m of the unit: no movement anchor");
+    }
+
+    private static void EvidenceSectorStrengthFromObservationsNotVanillaSlices()
+    {
+        // 21 visible (500, engaged), 22 remembered at confidence 0.5 (400 -> 200), 23 a
+        // reinforcement column at a visible entry point (off-map, not sector strength).
+        var s = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(21, 0f, -300f, 500f), Seen(22, 40f, -320f, 400f, confidence: 0.5f, remembered: true),
+            Seen(23, 0f, -310f, 3000f, reinforcement: true));
+        var visible = new List<FrontUnitSample>();
+        var weighted = new List<FrontUnitSample>();
+        var known = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int> { 21 }, visible, weighted, known);
+
+        float total = 0f;
+        for (int i = 0; i < weighted.Count; i++) total += weighted[i].Strength;
+        AssertNear(700f, total, 0.01f, "sector strength: visible + confidence-weighted remembered");
+        var axis = TacticalFrontAxis.FromCentroids(0f, -500f, 0f, -300f).WithOwnExtent(-100f, 100f);
+        var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, new[] { new FrontUnitSample(1, 0f, -500f, 500f, false) }, weighted);
+        float sectorEnemy = 0f;
+        for (int i = 0; i < sectors.Length; i++) sectorEnemy += sectors[i].EnemyStrength;
+        AssertNear(700f, sectorEnemy, 0.01f, "sectors are built from the observations");
+        AssertEqual(2, known.Count, "known positions: visible and remembered, no reinforcement column");
+    }
+
+    private static void EnemyVisibleStateExcludesHiddenEnemies()
+    {
+        var s = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(21, 0f, -300f, 500f), Seen(22, 40f, -320f, 400f, confidence: 0.5f, remembered: true),
+            Seen(23, 0f, -310f, 3000f, reinforcement: true));
+        var visible = new List<FrontUnitSample>();
+        var weighted = new List<FrontUnitSample>();
+        var known = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int> { 21, 22 }, visible, weighted, known);
+        AssertEqual(1, visible.Count, "only the visible enemy reaches the axis and the contact picture");
+        AssertEqual(21, visible[0].InstanceId, "visible enemy id");
+        AssertTrue(visible[0].RecentFire, "in an own fire-range list: engaged");
+        AssertEqual(500f, visible[0].Strength, "visible strength at full weight");
+
+        ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int>(), visible, weighted, known);
+        AssertEqual(1, visible.Count, "buffers are refilled, not appended");
+        AssertFalse(visible[0].RecentFire, "not in a fire-range list: seen, not engaged");
+    }
+
+    private static void ContactLedgerFedFromSnapshotObservations()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        var seen = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(21, 0f, -300f, 500f), Seen(22, 40f, -320f, 400f, confidence: 0.5f, remembered: true),
+            Seen(23, 0f, -310f, 3000f, reinforcement: true));
+        ledger.Observe(seen, engagedEnemyStrength: 0f);
+        AssertNear(700f, ledger.EstimatedEnemyStrength, 0.01f, "visible plus confidence-weighted remembered, no reinforcement");
+        AssertTrue(ledger.HadContact, "a visible enemy is contact");
+
+        // Half an hour later only a fading memory: the estimate decays on the doctrine clock
+        // (snapshot.DoctrineHours) and the contact counts as broken.
+        var hidden = ConsumerSnapshot(10.5, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(22, 40f, -320f, 400f, confidence: 0.25f, remembered: true));
+        ledger.Observe(hidden, engagedEnemyStrength: 0f);
+        AssertNear(700f * (1f - TacticalEnemyContactLedger.LargestSeenDecayPerHour * 0.5f), ledger.EstimatedEnemyStrength, 0.01f,
+            "largest-seen decays by the snapshot's doctrine hours");
+        AssertTrue(ledger.ContactBroken(10.5f, hidden.VisibleEnemyStrength), "remembered only: contact broken");
+
+        var none = new TacticalEnemyContactLedger();
+        none.Observe(ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(22, 40f, -320f, 400f, confidence: 0.5f, remembered: true)), engagedEnemyStrength: 0f);
+        AssertFalse(none.HadContact, "a remembered enemy alone is no new contact");
+        AssertNear(200f, none.EstimatedEnemyStrength, 0.01f, "but it is known strength");
+    }
+
+    private static void OwnAveragesFromSnapshotOwn()
+    {
+        var own = new[]
+        {
+            OwnUnit(1, 0f, 0f), OwnUnit(2, 0f, 0f), OwnUnit(3, 0f, 0f),
+            OwnUnit(4, 0f, 0f, unitTyp: 16),                                      // a group: not sampled
+            OwnUnit(5, 0f, 0f, flags: UnitFlags.Active | UnitFlags.Routed),        // routed: not sampled
+            OwnUnit(6, 0f, 0f, flags: UnitFlags.Alive),                            // not on the field
+            OwnUnit(7, 0f, 0f, strength: 0),                                       // no men
+        };
+        own[0].Fatigue = 0.2f; own[0].Ammo01 = 1f; own[0].Morale = 40f; own[0].BattleStartMorale = 80f;
+        own[1].Fatigue = 0.4f; own[1].Ammo01 = 0.5f; own[1].Morale = 60f; own[1].BattleStartMorale = 80f;
+        own[2].Fatigue = 2f; own[2].Ammo01 = 0f;                                   // fatigue clamped, no morale baseline
+        for (int i = 3; i < own.Length; i++) { own[i].Fatigue = 0.9f; own[i].Ammo01 = 0f; own[i].Morale = 1f; own[i].BattleStartMorale = 90f; }
+        ArmyEvidenceBuilder.OwnAverages(own, own.Length, out float fatigue, out float ammo, out float morale);
+        AssertNear((0.2f + 0.4f + 1f) / 3f, fatigue, 0.0001f, "mean fatigue over alive combat leaves");
+        AssertNear(0.5f, ammo, 0.0001f, "mean ammo over alive combat leaves");
+        AssertNear(100f / 160f, morale, 0.0001f, "morale relative to battle start");
+
+        ArmyEvidenceBuilder.OwnAverages(own, 0, out fatigue, out ammo, out morale);
+        AssertEqual(0.2f, fatigue, "nothing sampled: fatigue default");
+        AssertEqual(0.9f, ammo, "nothing sampled: ammo default");
+        AssertEqual(1f, morale, "nothing sampled: morale default");
+    }
+
+    // Vanilla sums own reinforcements due in (0, reinforcementmaxtimeforairetreatdecisions)
+    // hours (84764-84767); the side knows its own schedule.
+    private static void OwnReinforcementsUseVanillaRetreatWindow()
+    {
+        var arrivals = new[]
+        {
+            new ReinforcementArrival(0.5f, 1000f), new ReinforcementArrival(3f, 2000f),
+            new ReinforcementArrival(0f, 500f), new ReinforcementArrival(30f, 9000f),
+        };
+        AssertEqual(3000f, ArmyEvidenceBuilder.ReinforcementsArrivingWithin(arrivals, 24f), "due inside the window");
+        AssertEqual(0f, ArmyEvidenceBuilder.ReinforcementsArrivingWithin(Array.Empty<ReinforcementArrival>(), 24f), "none scheduled");
+        ArmyEvidenceBuilder.NearestReinforcement(arrivals, out float hours, out float strength);
+        AssertEqual(0f, hours, "nearest arrival hours");
+        AssertEqual(500f, strength, "nearest arrival strength");
+        ArmyEvidenceBuilder.NearestReinforcement(Array.Empty<ReinforcementArrival>(), out hours, out strength);
+        AssertEqual(0f, hours, "none: 0 hours");
+        AssertEqual(0f, strength, "none: 0 strength");
+    }
+
+    // Vanilla's outflanked state comes from range-list enemies at the unit's sides and rear
+    // (UpdateUnitRangeFast 122990-123015, set 123151-123175); the group threat is now the
+    // same weight over the snapshot's perceived flank pressure.
+    private static void GroupFlankThreatFromSnapshotPressure()
+    {
+        var own = new[]
+        {
+            OwnUnit(100, 1000f, -1100f, unitTyp: 16, flags: UnitFlags.Active | UnitFlags.Alive | UnitFlags.IsGroup),
+            OwnUnit(1, 1000f, -1000f, facing: 90f),
+            OwnUnit(2, 5000f, -1000f, facing: 90f),
+            OwnUnit(3, 1000f, -1000f, facing: 90f, flags: UnitFlags.Active | UnitFlags.Routed),
+        };
+        var s = new BattleSnapshot();
+        Rebuild(s, own, own.Length, 10.0);
+        for (int i = 1; i < own.Length; i++) s.Own[i].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        var enemy = Seen(9, 1000f, -840f, 100f); // 160 m north of unit 1: its left flank point
+        s.AddObservation(in enemy);
+        SlicePressureBuilder.Build(s, VanillaGeometry());
+        AssertTrue(s.FlankPressure(1, 0) > 0f, "fixture: unit 1 pressed on the left");
+
+        var mean = new float[own.Length];
+        var count = new int[own.Length];
+        ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertNear(0.5f, mean[0], 0.0001f, "mean vanilla weight over the group's unrouted combat leaves (1 and 0)");
+        AssertEqual(2, count[0], "routed leaf not sampled");
+        AssertEqual(0f, mean[1], "a leaf carries no group threat");
+
+        AssertEqual(1, ArmyEvidenceBuilder.OutflankedState(1f, 0f, 0f), "one side");
+        AssertEqual(3, ArmyEvidenceBuilder.OutflankedState(1f, 1f, 0f), "both sides");
+        AssertEqual(7, ArmyEvidenceBuilder.OutflankedState(1f, 1f, 1f), "surrounded");
+        AssertEqual(4f, ArmyEvidenceBuilder.VanillaOutflankedWeight(ArmyEvidenceBuilder.OutflankedState(1f, 1f, 1f)), "surrounded weight");
+    }
+
+    private static void UnseenEnemyAvenuesAreFiltered()
+    {
+        var s = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) },
+            Seen(70, 900f, -50f, 3000f, reinforcement: true));
+        TacticalApproachAvenueObservation Avenue(TacticalApproachAvenueSource source, int owner, float x, float z)
+            => new TacticalApproachAvenueObservation(source, owner, x, z, x + 100f, z - 100f, 0.8f, false, false, "test");
+
+        AssertTrue(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.ScheduledArrival, 0, 50f, -50f), 0, s),
+            "own arrivals: the side knows its own schedule");
+        AssertTrue(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.EntryPoint, 1, 50f, -50f), 0, s),
+            "entry point ownership is map knowledge");
+        AssertTrue(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.ScheduledArrival, 1, 900.5f, -50f), 0, s),
+            "enemy column at an entry point perception sees");
+        AssertFalse(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.ScheduledArrival, 1, 50f, -50f), 0, s),
+            "enemy column at an unseen entry point");
+        AssertFalse(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.DeploymentGroup, 1, 900f, -50f), 0, s),
+            "enemy deployment-group objectives are never perceived");
+        AssertTrue(TacticalVisionRuntimeAdapter.IsAvenueKnown(Avenue(TacticalApproachAvenueSource.DeploymentGroup, 0, 900f, -50f), 0, s),
+            "own deployment groups");
+    }
+
+    private static void SignatureInputsFromSnapshot()
+    {
+        AssertEqual(0, ArmyEvidenceBuilder.KnownEnemyStrengthBucket(0f), "nothing seen");
+        AssertEqual(0, ArmyEvidenceBuilder.KnownEnemyStrengthBucket(ArmyEvidenceBuilder.KnownEnemyStrengthBucketMen - 1f), "inside the first bucket");
+        AssertEqual(3, ArmyEvidenceBuilder.KnownEnemyStrengthBucket(ArmyEvidenceBuilder.KnownEnemyStrengthBucketMen * 3.5f), "bucketed, not exact");
+        AssertEqual(0, ArmyEvidenceBuilder.KnownEnemyStrengthBucket(float.NaN), "NaN reads as nothing");
+
+        var own = new[]
+        {
+            OwnUnit(1, 0f, -500f), OwnUnit(2, 0f, -500f), OwnUnit(3, 0f, -500f),
+            OwnUnit(4, 0f, -500f, flags: UnitFlags.Active | UnitFlags.InMelee),
+            OwnUnit(5, 0f, -500f), OwnUnit(6, 0f, -500f),
+        };
+        own[0].FirstEnemyInRangeId = 21; // visible
+        own[1].FirstEnemyInRangeId = 22; // remembered: not contact
+        own[2].FirstEnemyInRangeId = 0;
+        own[4].FirstEnemyInRangeId = 21; // visible
+        own[5].FirstEnemyInRangeId = 23; // in the range list but hidden and never seen: not contact
+        var s = ConsumerSnapshot(10.0, own, Seen(21, 0f, -300f, 500f), Seen(22, 0f, -320f, 400f, confidence: 0.5f, remembered: true));
+        AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(s),
+            "three contacts (two visible range-list enemies, melee) -> bucket 1; counting unseen range-list enemies would make five (bucket 2)");
+        AssertEqual(0, ArmyEvidenceBuilder.ContactBucket(ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) })), "no contact");
+        AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(ConsumerSnapshot(10.0, new[]
+            { OwnUnit(1, 0f, -500f, flags: UnitFlags.Active | UnitFlags.PathInterrupted) })),
+            "an interrupted own path is contact (shipped trigger)");
+    }
+
+    private static void GroupPressureHelpersReadTheSnapshot()
+    {
+        var s = ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f), OwnUnit(2, 5000f, -500f) },
+            Seen(21, 0f, -300f, 500f), Seen(22, 0f, -320f, 400f, confidence: 0.5f, remembered: true));
+        AssertNear(500f + 0.5f * 0.5f * 400f, ArmyEvidenceBuilder.SlicePressureTotal(s, 0), 0.01f, "sum of the unit's slices");
+        AssertEqual(0f, ArmyEvidenceBuilder.SlicePressureTotal(s, 1), "nothing within range of the far unit");
+        AssertEqual(0f, ArmyEvidenceBuilder.SlicePressureTotal(s, 7), "unknown own index");
+        AssertEqual(0f, ArmyEvidenceBuilder.SlicePressureTotal(null, 0), "no snapshot");
+        AssertFalse(ArmyEvidenceBuilder.HasFlankPressure(s, 1), "far unit: no flank pressure");
+        AssertFalse(ArmyEvidenceBuilder.HasFlankPressure(null, 0), "no snapshot: no flank pressure");
+    }
+
+    // Evidence bands on the snapshot's front axis (BC1 fit, refit on what is seen by BC2a);
+    // only before any enemy has given the snapshot a target does it face the nearest open
+    // objective, as the shipped evidence axis did.
+    private static void EvidenceFrontAxisIsTheSnapshotAxis()
+    {
+        var own = new[] { OwnUnit(1, -200f, -1000f, strength: 600), OwnUnit(2, 200f, -1000f, strength: 600) };
+        var seen = ConsumerSnapshot(10.0, own, Seen(21, 0f, -500f, 800f));
+        seen.SetEnemySummary(800f, 0f, 0f, -500f); // what BattlePerception.Publish sets for 21
+        BattleSnapshotTestAxis(seen);
+        AssertTrue(seen.FrontAxis.TargetDistance > 0f, "fixture: the snapshot axis faces the visible enemy");
+        var ownSample = new List<FrontUnitSample> { new FrontUnitSample(1, -200f, -1000f, 600f, false), new FrontUnitSample(2, 200f, -1000f, 600f, false) };
+        var visible = new List<FrontUnitSample> { new FrontUnitSample(21, 0f, -500f, 800f, false) };
+
+        TacticalFrontAxis axis = ArmyEvidenceBuilder.EvidenceFrontAxis(seen.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 5000f, objectiveZ: -1000f, ownSample, visible);
+        AssertNear(seen.FrontAxis.HeadingDegrees, axis.HeadingDegrees, 0.001f, "a snapshot axis with a target is used as is");
+        AssertNear(seen.FrontAxis.LateralMin, axis.LateralMin, 0.001f, "its bands too");
+        AssertTrue(axis.HasEnemyExtent, "enemy extent kept");
+
+        // Nothing ever seen: the snapshot axis is degenerate (forward +z, no target distance).
+        var blind = ConsumerSnapshot(10.0, own);
+        BattleSnapshotTestAxis(blind);
+        AssertTrue(blind.FrontAxis.IsValid && blind.FrontAxis.TargetDistance <= 0f, "fixture: degenerate snapshot axis");
+        axis = ArmyEvidenceBuilder.EvidenceFrontAxis(blind.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 2000f, objectiveZ: -1000f, ownSample, Array.Empty<FrontUnitSample>());
+        AssertNear(90f, axis.HeadingDegrees, 0.01f, "faces the nearest open objective (due east)");
+        AssertNear(blind.FrontAxis.OriginX, axis.OriginX, 0.001f, "from the snapshot's own centroid");
+        AssertEqual(TacticalFrontAxis.DefaultBandCount, axis.BandCount, "banded over the own sample");
+        AssertNear(2000f, axis.TargetDistance, 0.01f, "objective distance");
+
+        axis = ArmyEvidenceBuilder.EvidenceFrontAxis(blind.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: false, objectiveX: 0f, objectiveZ: 0f, ownSample, Array.Empty<FrontUnitSample>());
+        AssertNear(blind.FrontAxis.HeadingDegrees, axis.HeadingDegrees, 0.001f, "no open objective: the snapshot axis");
+
+        AssertFalse(ArmyEvidenceBuilder.EvidenceFrontAxis(TacticalFrontAxis.None, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 2000f, objectiveZ: -1000f, ownSample, visible).IsValid,
+            "no own sample (invalid snapshot axis): no axis");
+    }
+
+    // What BattleSnapshotBuilder.RefitFrontAxis does after perception: fit the axis on the
+    // snapshot's own sample and visible observations.
+    private static void BattleSnapshotTestAxis(BattleSnapshot s)
+    {
+        s.SetFrontAxis(BattleSnapshotAssembler.FitFrontAxis(s, TacticalFrontAxis.None, 0));
     }
 }

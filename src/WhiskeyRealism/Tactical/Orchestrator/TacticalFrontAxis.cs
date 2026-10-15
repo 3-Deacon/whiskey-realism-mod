@@ -207,7 +207,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// cascade (cautious branch at 2). Inputs: the child holds an army
         /// wing; the visible enemy line extends past that wing; the group's
         /// mean outflanked weight over its regiments
-        /// (ArmyEvidenceBuilder.MeanOutflankedWeight, vanilla's 0-4 scale:
+        /// (ArmyEvidenceBuilder.MeanFlankThreatByGroup, vanilla's 0-4 scale:
         /// 1 one flank, 2 both, 3 rear, 4 surrounded). A mean of
         /// <see cref="FlankThreatNoticeable"/> (a quarter of the line on one
         /// flank) adds one step; <see cref="FlankThreatSevere"/> (the whole line

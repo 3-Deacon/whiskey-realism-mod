@@ -45,14 +45,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// One unit's position and strength as the side sees it. Own units come
-    /// from the own roster; enemy units only from vanilla's per-regiment
-    /// sight lists (<c>unitrange.enemyinrangereg</c> /
-    /// <c>enemyinfirerangereg</c>, Regiment 122649/122692). Those lists are
-    /// range-limited, not fog-limited (vanilla AI perception): the filter is
-    /// <c>!iswithinfog | target.alliance == playeralliance | !usefow</c>
-    /// (122650/122699), and <c>iswithinfog</c> is the player's fog
-    /// (127210-127229), so the AI side gets every player unit within range.
-    /// Fog-honest perception arrives with the battle-core snapshot.
+    /// from the side's battle snapshot roster; enemy units only from its
+    /// visible and remembered observations (BC2a: vanilla's AI-side fog grid,
+    /// UnitIsHidden 101179 with the arguments of 127225), never from vanilla's
+    /// range-only sight lists, which skip the fog test for player-alliance
+    /// targets (122650/122699).
     /// </summary>
     public readonly struct FrontUnitSample
     {
@@ -229,10 +226,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
-    /// Enemy-in-range state bundle: enemy figures come only from vanilla's
-    /// per-regiment sight lists of the side's own regiments, which are
-    /// range-limited, not fog-limited (vanilla AI perception); fog-honest
-    /// perception arrives with the battle-core snapshot.
+    /// Perceived enemy state bundle: enemy figures come only from the side's
+    /// battle-snapshot observations (fog-honest, BC2a/BC2b).
     /// Built by ArmyEvidenceBuilder and
     /// consumed by ArmyIntentInference.Build. Carries the front geometry the
     /// sectors were built on so every consumer (allocator, cascade, coordinator
