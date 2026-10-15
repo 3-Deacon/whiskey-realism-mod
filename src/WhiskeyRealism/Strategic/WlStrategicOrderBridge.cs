@@ -74,8 +74,10 @@ namespace WhiskeyRealism.Strategic
     //                  units): never moved, never stopped, never re-tasked by Whiskey.
     //   PlayerMapGroup the player's command is itself a map group (vanilla's flag2,
     //                  AIBattle.CheckCurrentOrderUpdate 8271-8274): order-only through
-    //                  a W&L dispatch, and an unreliable executor: never counted as a
-    //                  committed defender or the holder of a must-hold role.
+    //                  a W&L dispatch, and an unreliable executor: never a committed
+    //                  defender or the holder of a must-hold role (CountsAsCommittedDefender),
+    //                  yet his group counts toward the hold of the sector where it is or where
+    //                  its last waypoint lies (CountsTowardHold, below).
     //   CarryingGroup  the AI map group above a player whose command is below map-group
     //                  level: a movable AI asset, as vanilla moves it (8366 sends that
     //                  player no campaign order); #69 dispatches its march to him.
@@ -114,6 +116,22 @@ namespace WhiskeyRealism.Strategic
         public static bool CountsAsCommittedDefender(WlChainClass chain)
         {
             return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+        }
+
+        // Hold coverage by position (stage G, integrator decision 2026-10-15 superseding the G4
+        // verify r1 "counts 0" rule): who counts toward the strength that holds a sector in the
+        // planner's hold sums (ReserveRules.Hold, TheaterPlanner's sector facts and capital sum,
+        // ForceAllocator). A committed defender, plus the map-group player's group, which vanilla
+        // counts too (AICampaign.AssignUnitToDefendCapital 11733-11740 subtracts every own unit's
+        // groupstrengthactive x groupmorale whose GetLastWaypointPos is nearer the capital than
+        // the nearest enemy, the player's included). Counting is not committing: the group is never
+        // mass, never pre-pledged, never given a must-hold role (CountsAsCommittedDefender and
+        // MayMove stay false for it), and its reliability is telemetry only. The player's own
+        // command and a CIC side stay out. Defense code that decides who may be pledged or
+        // re-tasked keeps asking CountsAsCommittedDefender.
+        public static bool CountsTowardHold(WlChainClass chain)
+        {
+            return CountsAsCommittedDefender(chain) || chain == WlChainClass.PlayerMapGroup;
         }
 
         // A unit Whiskey still addresses, by a W&L dispatch.
