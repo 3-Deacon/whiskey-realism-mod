@@ -59,6 +59,7 @@ internal static class TelemetryInfraFixTests
         WriterShutdownTimeoutFailureRowNeverOpensSecondHandle();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
+        RegimentDiagnosticsLineCapWarnsOncePerBattle();
         FaultSiteDetectsModFramesInStack();
         FaultSiteAcceptsOnlyListedExceptionTypes();
         FaultSiteDiarySupplyCycleMatchesVanillaNullHandling();
@@ -1086,6 +1087,17 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.IsNewBattle(7, 7), "same battle");
         TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.IsNewBattle(7, 0), "unknown identity keeps state");
         LogPass("regiment diagnostics rescan only when roster or watch list changes");
+    }
+
+    private static void RegimentDiagnosticsLineCapWarnsOncePerBattle()
+    {
+        int cap = TacticalRegimentDiagnosticsPatch.MaxLinesPerBattle;
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.ShouldWarnLineCap(cap - 2, false), "below cap");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldWarnLineCap(cap - 1, false), "last line of the battle warns");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.ShouldWarnLineCap(cap - 1, true), "already warned this battle");
+        TacticalRegimentDiagnosticsPatch.Reset();
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.LineCapWarnedThisBattle, "battle reset re-arms the warning");
+        LogPass("regiment diagnostics line cap warns once per battle");
     }
 
     // ---------------------------------------------------------------- H-finalizer

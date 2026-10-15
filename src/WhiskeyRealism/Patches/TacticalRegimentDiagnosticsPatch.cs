@@ -28,7 +28,7 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class TacticalRegimentDiagnosticsPatch
     {
-        private const int MaxLinesPerBattle = 2000;
+        internal const int MaxLinesPerBattle = 2000;
         private const float MinSecondsBetweenSamples = 0.5f;
         private const float MoraleDeltaThreshold = 0.05f;
         private const int StrengthDeltaThreshold = 10;
@@ -69,12 +69,19 @@ namespace WhiskeyRealism.Patches
         private static int _watchedRosterCount;
         private static string _watchedSource;
         private static int _battleKey;
+        private static bool _lineCapWarned;
+
+        internal static bool LineCapWarnedThisBattle
+        {
+            get { return _lineCapWarned; }
+        }
         private static System.Reflection.FieldInfo _aiBattleUnitsField;
         private static bool _aiBattleUnitsFieldResolved;
 
         public static void Reset()
         {
             _battleKey = 0;
+            _lineCapWarned = false;
             _last.Clear();
             _logCount = 0;
             _watchTokensCache = null;
@@ -149,6 +156,11 @@ namespace WhiskeyRealism.Patches
                         "[TacticalRegimentDiagnostics] " + e.GetType().Name + ": " + e.Message);
                 }
             }
+        }
+
+        internal static bool ShouldWarnLineCap(int logCountBeforeThisLine, bool warnedThisBattle)
+        {
+            return !warnedThisBattle && logCountBeforeThisLine + 1 >= MaxLinesPerBattle;
         }
 
         internal static bool IsNewBattle(int cachedBattleKey, int battleKey)
@@ -370,11 +382,13 @@ namespace WhiskeyRealism.Patches
 
             TelemetryRouter.LegacyInfo(sb.ToString(), TelemetryLayer.Tactical);
 
-            if (_logCount + 1 >= MaxLinesPerBattle)
+            if (ShouldWarnLineCap(_logCount, _lineCapWarned))
             {
-                OnceLog.Warning(
-                    "tactical-regiment-diag:line-cap",
-                    "[TacticalRegimentDiagnostics] hit MaxLinesPerBattle=" + MaxLinesPerBattle + "; suppressing further regiment trace lines until next battle.");
+                // Once per battle (re-armed by Reset), so not an OnceLog key.
+                _lineCapWarned = true;
+                string line = "[TacticalRegimentDiagnostics] hit MaxLinesPerBattle=" + MaxLinesPerBattle + "; suppressing further regiment trace lines until next battle.";
+                if (TelemetryRouter.LegacyWarning(line) && Plugin.Log != null)
+                    Plugin.Log.LogWarning(line);
             }
         }
     }
