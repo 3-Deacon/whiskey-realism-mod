@@ -4,12 +4,16 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
     // Read-only tactical map-knowledge probe. This records what vanilla scene anchors
     // exist for the current battle and what nearby objective/entry/fortification/cover
     // context a watched regiment can see. It never changes orders, facing, formation, or paths.
+    // Scene anchors (objectives, entry points, FortificationGroups — FindObjectsOfType /
+    // GameObject.Find walks) are built once per battle and cleared by Reset() at battle end
+    // (WS P); previously they were rebuilt on every CheckGlobalAIStrategy cycle.
     [HarmonyPatch]
     internal static class TacticalMapKnowledgeDiagnosticsPatch
     {
@@ -30,6 +34,9 @@ namespace WhiskeyRealism.Patches
         }
 
         private static readonly Dictionary<int, UnitEmission> UnitRows = new Dictionary<int, UnitEmission>();
+        private static List<Anchor> _objectiveAnchors;
+        private static List<Anchor> _entryPointAnchors;
+        private static List<Anchor> _fortificationAnchors;
         private static bool _inventoryEmitted;
         private static int _unitRowsEmitted;
         private static string[] _watchTokensCache;
@@ -42,6 +49,16 @@ namespace WhiskeyRealism.Patches
             _unitRowsEmitted = 0;
             _watchTokensCache = null;
             _watchTokensSource = null;
+            _objectiveAnchors = null;
+            _entryPointAnchors = null;
+            _fortificationAnchors = null;
+        }
+
+        private static void EnsureAnchors()
+        {
+            if (_objectiveAnchors == null) _objectiveAnchors = ObjectiveAnchors();
+            if (_entryPointAnchors == null) _entryPointAnchors = EntryPointAnchors();
+            if (_fortificationAnchors == null) _fortificationAnchors = FortificationAnchors();
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
@@ -65,16 +82,17 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception e)
                 {
-                    try { Plugin.Log.LogWarning("[TacticalMapKnowledge] failed " + e.GetType().Name + ": " + e.Message); } catch { }
+                    OnceLog.Warning("tactical-map-knowledge:failed", "[TacticalMapKnowledge] failed " + e.GetType().Name + ": " + e.Message);
                 }
             }
         }
 
         private static void EmitInventory()
         {
-            var objectives = ObjectiveAnchors();
-            var entryPoints = EntryPointAnchors();
-            var fortifications = FortificationAnchors();
+            EnsureAnchors();
+            var objectives = _objectiveAnchors;
+            var entryPoints = _entryPointAnchors;
+            var fortifications = _fortificationAnchors;
 
             int aiFortificationRoots = 0;
             try { aiFortificationRoots = GameObject.Find("Battlemap/Map/AIFortifications") != null ? 1 : 0; } catch { }
@@ -110,9 +128,10 @@ namespace WhiskeyRealism.Patches
             if (all == null || all.Count == 0)
                 return;
 
-            var objectives = ObjectiveAnchors();
-            var entryPoints = EntryPointAnchors();
-            var fortifications = FortificationAnchors();
+            EnsureAnchors();
+            var objectives = _objectiveAnchors;
+            var entryPoints = _entryPointAnchors;
+            var fortifications = _fortificationAnchors;
             float now = Time.time;
 
             for (int i = 0; i < all.Count && _unitRowsEmitted < MaxUnitRowsPerBattle; i++)
@@ -333,30 +352,17 @@ namespace WhiskeyRealism.Patches
             string source = Plugin.TacticalRegimentDiagnosticNames != null
                 ? Plugin.TacticalRegimentDiagnosticNames.Value
                 : null;
-            if (string.IsNullOrEmpty(source)) return null;
-            if (source == _watchTokensSource && _watchTokensCache != null) return _watchTokensCache;
-
-            var parts = source.Split(',');
-            var list = new List<string>(parts.Length);
-            for (int i = 0; i < parts.Length; i++)
-            {
-                var p = parts[i] != null ? parts[i].Trim() : null;
-                if (!string.IsNullOrEmpty(p)) list.Add(p);
-            }
+            if (_watchTokensCache != null && string.Equals(source, _watchTokensSource, StringComparison.Ordinal))
+                return _watchTokensCache;
 
             _watchTokensSource = source;
-            _watchTokensCache = list.ToArray();
+            _watchTokensCache = TacticalRegimentDiagnosticsPatch.ParseWatchTokens(source);
             return _watchTokensCache;
         }
 
         private static bool MatchesAnyToken(string name, string[] tokens)
         {
-            if (string.IsNullOrEmpty(name)) return false;
-            for (int i = 0; i < tokens.Length; i++)
-            {
-                if (name.IndexOf(tokens[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            }
-            return false;
+            return TacticalRegimentDiagnosticsPatch.MatchesAnyToken(name, tokens);
         }
 
         private static Anchor Nearest(Vector3 origin, IReadOnlyList<Anchor> anchors)

@@ -49,6 +49,8 @@ internal static class TelemetryInfraFixTests
         ProbeTickDoesNotAllocateOnNormalFrames();
         ProbeTickEmitsProtectedHitchRowWithTopLevelScopes();
         SummaryReportsFrameHitches();
+        RegimentDiagnosticsWatchTokensParse();
+        RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
     }
 
     private static void LogPass(string message)
@@ -1021,5 +1023,31 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(dir);
         }
         LogPass("summary reports frame hitches");
+    }
+
+    // ---------------------------------------------------------------- P-regdiag / map knowledge
+
+    private static void RegimentDiagnosticsWatchTokensParse()
+    {
+        TestHarness.AssertEqual(0, TacticalRegimentDiagnosticsPatch.ParseWatchTokens(null).Length, "null list watches nothing");
+        TestHarness.AssertEqual(0, TacticalRegimentDiagnosticsPatch.ParseWatchTokens("").Length, "empty list watches nothing");
+        TestHarness.AssertEqual(0, TacticalRegimentDiagnosticsPatch.ParseWatchTokens(" , ,").Length, "blank tokens ignored");
+        string[] tokens = TacticalRegimentDiagnosticsPatch.ParseWatchTokens(" Hampton ,Tennessee,,2nd_SC ");
+        TestHarness.AssertEqual(3, tokens.Length, "three tokens");
+        TestHarness.AssertEqual("Hampton", tokens[0], "trimmed token");
+        TestHarness.AssertEqual("2nd_SC", tokens[2], "last token");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.MatchesAnyToken("28th Tennessee Infantry", tokens), "case-insensitive substring match");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.MatchesAnyToken("1st Virginia", tokens), "no match");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.MatchesAnyToken(null, tokens), "null name");
+        LogPass("regiment diagnostics watch tokens parse");
+    }
+
+    private static void RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges()
+    {
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(false, 0, 120, "Hampton", "Hampton"), "no cache yet");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 120, "Hampton", "Hampton"), "same roster and list reuses cache");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 121, "Hampton", "Hampton"), "roster count change rescans");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 120, "Hampton", "Hampton,Tennessee"), "watch list change rescans");
+        LogPass("regiment diagnostics rescan only when roster or watch list changes");
     }
 }

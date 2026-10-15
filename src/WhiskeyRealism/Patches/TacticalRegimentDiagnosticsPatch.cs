@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Telemetry;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
@@ -17,6 +18,11 @@ namespace WhiskeyRealism.Patches
     // Hard-capped at MaxLinesPerBattle to bound worst-case log size.
     //
     // Reset between battles via TacticalBattleCoordinator.OnBattleEnd → ClearLedgersBetweenBattles.
+    //
+    // Cost (WS P, P-regdiag): hosted on AIBattle.CheckGlobalAIStrategy (decompile 6314, the
+    // macro AI cycle). An empty watch list returns before touching BattleUnits. Matched
+    // regiments are cached per battle; BattleUnits.completeunitlist (78920) is re-walked
+    // (reading .name for every unit) only when its Count or the watch list changes.
     [HarmonyPatch]
     internal static class TacticalRegimentDiagnosticsPatch
     {
@@ -46,10 +52,21 @@ namespace WhiskeyRealism.Patches
             public bool initialized;
         }
 
+        private struct WatchedUnit
+        {
+            public Regiment Unit;
+            public string Name;
+            public int InstanceId;
+        }
+
         private static readonly Dictionary<int, Snapshot> _last = new Dictionary<int, Snapshot>();
+        private static readonly List<WatchedUnit> _watched = new List<WatchedUnit>();
         private static int _logCount;
         private static string[] _watchTokensCache;
         private static string _watchTokensSource;
+        private static bool _watchedValid;
+        private static int _watchedRosterCount;
+        private static string _watchedSource;
 
         public static void Reset()
         {
@@ -57,6 +74,10 @@ namespace WhiskeyRealism.Patches
             _logCount = 0;
             _watchTokensCache = null;
             _watchTokensSource = null;
+            _watched.Clear();
+            _watchedValid = false;
+            _watchedRosterCount = 0;
+            _watchedSource = null;
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
@@ -70,26 +91,28 @@ namespace WhiskeyRealism.Patches
                     if (!Plugin.EnableTacticalRegimentDiagnostics.Value) return;
                     if (_logCount >= MaxLinesPerBattle) return;
 
-                    var watchTokens = ResolveWatchTokens();
-                    if (watchTokens == null || watchTokens.Length == 0) return;
+                    string source = Plugin.TacticalRegimentDiagnosticNames != null
+                        ? Plugin.TacticalRegimentDiagnosticNames.Value
+                        : null;
+                    var watchTokens = ResolveWatchTokens(source);
+                    if (watchTokens.Length == 0) return;
 
                     var all = BattleUnits.completeunitlist;
                     if (all == null || all.Count == 0) return;
 
+                    if (ShouldRescan(_watchedValid, _watchedRosterCount, all.Count, _watchedSource, source))
+                        RebuildWatched(all, watchTokens, source);
+                    if (_watched.Count == 0) return;
+
                     float now = Time.time;
 
-                    for (int i = 0; i < all.Count && _logCount < MaxLinesPerBattle; i++)
+                    for (int i = 0; i < _watched.Count && _logCount < MaxLinesPerBattle; i++)
                     {
-                        var r = all[i];
+                        var watched = _watched[i];
+                        var r = watched.Unit;
                         if (r == null) continue;
 
-                        string name = SafeName(r);
-                        if (string.IsNullOrEmpty(name)) continue;
-                        if (!MatchesAnyToken(name, watchTokens)) continue;
-
-                        int key;
-                        try { key = r.GetInstanceID(); } catch { continue; }
-
+                        int key = watched.InstanceId;
                         Snapshot prev;
                         bool isNew = !_last.TryGetValue(key, out prev);
                         if (!isNew && (now - prev.lastLogSeconds) < MinSecondsBetweenSamples) continue;
@@ -100,25 +123,61 @@ namespace WhiskeyRealism.Patches
                         bool changed = isNew || HasChanged(prev, current);
                         if (!changed) continue;
 
-                        Log(name, key, prev, current, isNew);
+                        Log(watched.Name, key, prev, current, isNew);
                         _last[key] = current;
                         _logCount++;
                     }
                 }
                 catch (Exception e)
                 {
-                    Plugin.Log.LogWarning("[TacticalRegimentDiagnostics] " + e.GetType().Name + ": " + e.Message);
+                    OnceLog.Warning(
+                        "tactical-regiment-diag:failed",
+                        "[TacticalRegimentDiagnostics] " + e.GetType().Name + ": " + e.Message);
                 }
             }
         }
 
-        private static string[] ResolveWatchTokens()
+        internal static bool ShouldRescan(bool hasCache, int cachedRosterCount, int rosterCount, string cachedSource, string source)
         {
-            string source = Plugin.TacticalRegimentDiagnosticNames != null
-                ? Plugin.TacticalRegimentDiagnosticNames.Value
-                : null;
-            if (string.IsNullOrEmpty(source)) return null;
-            if (source == _watchTokensSource && _watchTokensCache != null) return _watchTokensCache;
+            return !hasCache
+                || cachedRosterCount != rosterCount
+                || !string.Equals(cachedSource, source, StringComparison.Ordinal);
+        }
+
+        private static void RebuildWatched(List<Regiment> all, string[] watchTokens, string source)
+        {
+            _watched.Clear();
+            for (int i = 0; i < all.Count; i++)
+            {
+                var r = all[i];
+                if (r == null) continue;
+
+                string name = SafeName(r);
+                if (!MatchesAnyToken(name, watchTokens)) continue;
+
+                int key;
+                try { key = r.GetInstanceID(); } catch { continue; }
+                _watched.Add(new WatchedUnit { Unit = r, Name = name, InstanceId = key });
+            }
+
+            _watchedValid = true;
+            _watchedRosterCount = all.Count;
+            _watchedSource = source;
+        }
+
+        private static string[] ResolveWatchTokens(string source)
+        {
+            if (_watchTokensCache != null && string.Equals(source, _watchTokensSource, StringComparison.Ordinal))
+                return _watchTokensCache;
+
+            _watchTokensCache = ParseWatchTokens(source);
+            _watchTokensSource = source;
+            return _watchTokensCache;
+        }
+
+        internal static string[] ParseWatchTokens(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source)) return new string[0];
 
             var parts = source.Split(',');
             var list = new List<string>(parts.Length);
@@ -127,13 +186,12 @@ namespace WhiskeyRealism.Patches
                 var p = parts[i] != null ? parts[i].Trim() : null;
                 if (!string.IsNullOrEmpty(p)) list.Add(p);
             }
-            _watchTokensCache = list.ToArray();
-            _watchTokensSource = source;
-            return _watchTokensCache;
+            return list.ToArray();
         }
 
-        private static bool MatchesAnyToken(string name, string[] tokens)
+        internal static bool MatchesAnyToken(string name, string[] tokens)
         {
+            if (string.IsNullOrEmpty(name) || tokens == null) return false;
             for (int i = 0; i < tokens.Length; i++)
             {
                 if (name.IndexOf(tokens[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -251,7 +309,9 @@ namespace WhiskeyRealism.Patches
 
             if (_logCount + 1 >= MaxLinesPerBattle)
             {
-                Plugin.Log.LogWarning("[TacticalRegimentDiagnostics] hit MaxLinesPerBattle=" + MaxLinesPerBattle + "; suppressing further regiment trace lines until next battle.");
+                OnceLog.Warning(
+                    "tactical-regiment-diag:line-cap",
+                    "[TacticalRegimentDiagnostics] hit MaxLinesPerBattle=" + MaxLinesPerBattle + "; suppressing further regiment trace lines until next battle.");
             }
         }
     }
