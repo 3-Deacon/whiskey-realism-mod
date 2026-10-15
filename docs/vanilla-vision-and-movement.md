@@ -1,5 +1,7 @@
 # Vanilla Vision and Movement (vanilla reference)
 
+> Dated audit (2026-10-14). Since written: `BattleChargeGatePatch.cs`, `TacticalRegimentalThreatComputer` and the worker analysis path were deleted; recommendations R1-R5 are planned in `docs/superpowers/specs/2026-10-15-battle-core-design.md` / `docs/superpowers/plans/2026-10-15-battle-core.md` (R5 NavMesh costs already set by #61).
+
 How vanilla handles fog of war, spotting, line of sight, intelligence and AI movement on battle and campaign maps, and where Whiskey reads or bypasses it. Source: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (build 14703111, mapped 2026-10-14); all bare numbers are lines in that file. Config values are from `<GTCW>/Config/battleprefs.txt` and `unitprefs.txt`. Mod paths are relative to `src/WhiskeyRealism/` in the `orchestrator-worker-thread` worktree (verified at `fe94959`). Living doc: update when the game patches.
 
 ## Battle vision
