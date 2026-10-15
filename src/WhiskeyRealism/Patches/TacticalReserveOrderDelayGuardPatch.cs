@@ -22,9 +22,9 @@ namespace WhiskeyRealism.Patches
     // BattleWriterPolicy.ReserveDelayConversionApplies).
     //
     // TacticalReserveCommitGate.PlanCourierParity decides before the path is
-    // removed: a unit Whiskey may not write (W&L player-owned, feud) or one whose
-    // Move channel a higher-priority arbiter claim owns keeps vanilla's own move
-    // untouched. Vanilla picks the reserve itself (PerformAIActionDLCWL 6129).
+    // removed: a unit Whiskey may not write (W&L player-owned, feud), one missing
+    // from the side's battle snapshot, or one whose Move channel a higher-priority
+    // arbiter claim owns keeps vanilla's own move untouched. Vanilla picks the reserve itself (PerformAIActionDLCWL 6129).
     //
     // No stance is written: the reserve is an attached sub-unit (ChangeStance
     // 90772 would set permanentlydetached).
@@ -89,10 +89,13 @@ namespace WhiskeyRealism.Patches
                     if (battleUnits == null) return;
                     OrderArbiter arbiter = OrderArbiter.ForAlliance(aigroup.alliance);
                     if (arbiter == null) return;
+                    // The inline executor plans against the side's snapshot; without one
+                    // (orchestrator off, before its first tick) vanilla's move stays.
+                    if (!BattleCore.TryGetSnapshot(aigroup.alliance, out BattleSnapshot snapshot)) return;
                     bool useOrderDelays = SafeUseOrderDelays();
 
                     for (int i = 0; i < __state.Length; i++)
-                        Convert(battleUnits, arbiter, aigroup, __state[i], useOrderDelays);
+                        Convert(battleUnits, arbiter, snapshot, aigroup, __state[i], useOrderDelays);
                 }
                 catch (Exception ex)
                 {
@@ -103,7 +106,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void Convert(BattleUnits battleUnits, OrderArbiter arbiter, Regiment group, UnitState before, bool useOrderDelays)
+        private static void Convert(BattleUnits battleUnits, OrderArbiter arbiter, BattleSnapshot snapshot, Regiment group, UnitState before, bool useOrderDelays)
         {
             Regiment unit = before.Unit;
             if (unit == null) return;
@@ -113,13 +116,15 @@ namespace WhiskeyRealism.Patches
             // Vanilla's own target and facing, as RegimentSetPath stamped them
             // (131254-131259; the facing is GetAngle(target, endangered unit), 6168).
             Vector3 target = unit.lastsetwaypointposition;
+            int unitId = TacticalPatchIds.GameObjectInstanceId(unit);
             BattleOrderIntent intent = TacticalReserveCommitGate.CourierParityIntent(
-                TacticalPatchIds.GameObjectInstanceId(unit), target.x, target.z, unit.lastsetwaypointrotation);
+                unitId, target.x, target.z, unit.lastsetwaypointrotation);
 
             var action = TacticalReserveCommitGate.PlanCourierParity(
                 arbiter,
                 intent,
                 unitWritable: TacticalWriteGuard.CanWrite(unit),
+                unitInSnapshot: snapshot.IndexOfOwn(unitId) >= 0,
                 conversionApplies: BattleWriterPolicy.ReserveDelayConversionApplies(
                     unit.groupposition != null, unit.unittyp, (UnityEngine.Object)unit.parentregiment != null),
                 before.Paths,

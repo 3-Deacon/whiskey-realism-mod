@@ -137,6 +137,8 @@ internal static class ReserveMigrationTests
         AssertEqual(TacticalReserveCommitGate.CourierParityAction.Leave,
             Parity(arbiter, intent, unitWritable: false), "player-owned reserve: vanilla's own pick stays untouched");
         AssertEqual(TacticalReserveCommitGate.CourierParityAction.Leave,
+            Parity(arbiter, intent, inSnapshot: false), "no snapshot record: the inline executor could not re-issue it");
+        AssertEqual(TacticalReserveCommitGate.CourierParityAction.Leave,
             Parity(arbiter, intent, conversionApplies: false), "SetWaypoint would not queue it (91449/91463)");
         AssertEqual(TacticalReserveCommitGate.CourierParityAction.Leave,
             Parity(arbiter, intent, useOrderDelays: false), "order delays off");
@@ -265,6 +267,20 @@ internal static class ReserveMigrationTests
         AssertTrue(plan.UseOrderDelay, "courier");
 
         AssertFalse(TacticalReserveCommitGate.TryPlanRelease(s, reserve, 2, out _), "no own line in that sector: no invented target");
+        // The release band is the direct child's AxisSector, not its own PrimarySector.
+        var intents = new[]
+        {
+            ChildIntent("child-" + LeftLine, DirectChildRole.Main, primarySector: 0, axisSector: 0),
+            ChildIntent("child-" + Reserve, DirectChildRole.Fix, primarySector: 2, axisSector: leftSector),
+        };
+        AssertTrue(TacticalReserveCommitGate.TryReleaseSector(intents, Reserve, out int band), "found");
+        AssertEqual(leftSector, band, "crisis band");
+        AssertFalse(TacticalReserveCommitGate.TryReleaseSector(intents, Reserve + 1000, out _), "unknown child");
+        AssertFalse(TacticalReserveCommitGate.TryReleaseSector(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
+            Reserve, out _), "prefix of a longer id is not a match");
+        AssertTrue(TacticalReserveCommitGate.TryReleaseSector(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
+            -Reserve, out int synth) && synth == 3, "synthetic army id, negative instance id");
+
         BattleSnapshot owned = ArmySnapshot(reserveFlags: UnitFlags.PlayerOwned);
         AssertFalse(TacticalReserveCommitGate.TryPlanRelease(owned, owned.IndexOfOwn(Reserve), leftSector, out _), "player-owned reserve");
         AssertTrue(TacticalReserveCommitGate.HeldInReserve(new CommandNodeOperationalState("node-1", CommandEchelonKind.DivisionLike,
@@ -337,9 +353,10 @@ internal static class ReserveMigrationTests
 
     private static TacticalReserveCommitGate.CourierParityAction Parity(
         OrderArbiter arbiter, in BattleOrderIntent intent,
-        bool unitWritable = true, bool conversionApplies = true, bool useOrderDelays = true, int afterPaths = 1)
+        bool unitWritable = true, bool conversionApplies = true, bool useOrderDelays = true, int afterPaths = 1,
+        bool inSnapshot = true)
     {
-        return TacticalReserveCommitGate.PlanCourierParity(arbiter, intent, unitWritable, conversionApplies,
+        return TacticalReserveCommitGate.PlanCourierParity(arbiter, intent, unitWritable, inSnapshot, conversionApplies,
             beforePaths: 0, afterPaths: afterPaths, beforeQueue: 0, afterQueue: 0, useOrderDelays: useOrderDelays);
     }
 
@@ -347,6 +364,12 @@ internal static class ReserveMigrationTests
     {
         return new CommandIntentResolution(true,
             new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0f, 0), "test");
+    }
+
+    private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector)
+    {
+        return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f, 0.5f,
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
     }
 
     private static CommandIntentResolution NotFound() => new CommandIntentResolution(false, default, "no-side-orchestrator");

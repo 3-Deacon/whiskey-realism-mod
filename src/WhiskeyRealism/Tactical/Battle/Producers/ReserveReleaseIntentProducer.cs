@@ -17,7 +17,7 @@ namespace WhiskeyRealism.Tactical.Battle
     // keeps it waiting. #59 already lets vanilla's own reserve commit through for
     // such a group (TacticalReserveCommitGate.ReleasedByAllocator); this producer
     // also moves the group: a courier Move to stand behind its own line in the
-    // band the allocator gave it (TacticalReserveCommitGate.TryPlanRelease, which
+    // band the allocator gave it (DirectChildIntent.AxisSector) (TacticalReserveCommitGate.TryPlanRelease, which
     // reads the BattleSnapshot only). Once the ledger catches up the group is no
     // longer held and the posture executor owns it.
     //
@@ -57,7 +57,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     CommandIntentResolution allocator = army.ResolveCommandIntentForGroup(0, id);
                     CommandIntentResolution held = TacticalReserveCommitGate.HeldResolution(operations, id, 0, allocator);
                     if (!TacticalReserveCommitGate.ReleasedByAllocator(held, allocator)) continue;
-                    if (TacticalReserveCommitGate.TryPlanRelease(snapshot, index, allocator.Intent.PrimarySector, out BattleOrderIntent move))
+                    if (!TacticalReserveCommitGate.TryReleaseSector(army.CurrentDirectChildIntents, id, out int sector)) continue;
+                    if (TacticalReserveCommitGate.TryPlanRelease(snapshot, index, sector, out BattleOrderIntent move))
                         sink.Submit(move);
                 }
             }

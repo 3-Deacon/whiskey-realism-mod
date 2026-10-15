@@ -223,13 +223,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Convert only when vanilla gave the unit a direct path this call, SetWaypoint
-        /// would queue it, Whiskey may write the unit, and no higher arbiter claim
+        /// would queue it, Whiskey may write the unit, the unit is in the side's battle
+        /// snapshot (the inline executor plans against it), and no higher arbiter claim
         /// owns its Move channel (D4). Anything else leaves vanilla's move alone.
         /// </summary>
         public static CourierParityAction PlanCourierParity(
             OrderArbiter arbiter,
             in BattleOrderIntent intent,
             bool unitWritable,
+            bool unitInSnapshot,
             bool conversionApplies,
             int beforePaths,
             int afterPaths,
@@ -237,12 +239,51 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int afterQueue,
             bool useOrderDelays)
         {
-            if (!unitWritable || !conversionApplies) return CourierParityAction.Leave;
+            if (!unitWritable || !unitInSnapshot || !conversionApplies) return CourierParityAction.Leave;
             if (!TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
                     doctrineDeny: false, beforePaths, afterPaths, beforeQueue, afterQueue, useOrderDelays))
                 return CourierParityAction.Leave;
             if (OrderExecutor.InlineClaimCheck(arbiter, intent) != SkipReason.None) return CourierParityAction.Leave;
             return CourierParityAction.Convert;
+        }
+
+        /// <summary>
+        /// The band the allocator sent a released direct child to: its
+        /// DirectChildIntent.AxisSector (the crisis band, or the main effort's band;
+        /// DirectChildAllocator.ReleaseReserves). The command-node intent carries only
+        /// the child's own band. Child ids are "child-" / "synth-army-" + the group's
+        /// GameObject instance id (CommandIntentResolver).
+        /// </summary>
+        public static bool TryReleaseSector(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector)
+        {
+            sector = 0;
+            if (intents == null || instanceId == 0) return false;
+            for (int i = 0; i < intents.Count; i++)
+            {
+                string id = intents[i].ChildId;
+                if (!SuffixIs(id, "child-", instanceId) && !SuffixIs(id, "synth-army-", instanceId)) continue;
+                sector = intents[i].AxisSector;
+                return true;
+            }
+            return false;
+        }
+
+        // id == prefix + instanceId (canonical int form), without allocating.
+        private static bool SuffixIs(string id, string prefix, int instanceId)
+        {
+            if (id == null || id.Length <= prefix.Length || string.CompareOrdinal(id, 0, prefix, 0, prefix.Length) != 0) return false;
+            int i = prefix.Length;
+            bool negative = id[i] == '-';
+            if (negative) i++;
+            if (i >= id.Length || id.Length - i > 10 || (id[i] == '0' && id.Length - i > 1)) return false;
+            long value = 0;
+            for (; i < id.Length; i++)
+            {
+                char c = id[i];
+                if (c < '0' || c > '9') return false;
+                value = value * 10 + (c - '0');
+            }
+            return (negative ? -value : value) == instanceId;
         }
 
         /// <summary>

@@ -668,7 +668,8 @@ internal static class TacticalReserveCommitGate { // pure, Tactical/Orchestrator
   public static float VisibleAngleStrength(BattleSnapshot s, int ownIndex);                // Σ SlicePressure
   public static BattleOrderIntent CourierParityIntent(int unitId, float x, float z, float heading); // Support, UseOrderDelay|DoubleQuick|ReliefOrSupport
   public static CourierParityAction PlanCourierParity(OrderArbiter arbiter, in BattleOrderIntent intent, bool unitWritable,
-      bool conversionApplies, int beforePaths, int afterPaths, int beforeQueue, int afterQueue, bool useOrderDelays); // Leave | Convert
+      bool unitInSnapshot, bool conversionApplies, int beforePaths, int afterPaths, int beforeQueue, int afterQueue, bool useOrderDelays); // Leave | Convert
+  public static bool TryReleaseSector(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector); // AxisSector
   public static bool TryPlanRelease(BattleSnapshot s, int groupIndex, int targetSector, out BattleOrderIntent intent);
 }
 internal sealed partial class WithdrawalIntentProducer : IBattleIntentProducer { // Name "Withdrawal"
@@ -681,7 +682,7 @@ internal sealed partial class WithdrawalIntentProducer : IBattleIntentProducer {
 }
 internal sealed class ReserveReleaseIntentProducer : IBattleIntentProducer { /* Name "ReserveRelease", Support */ }
 ```
-- #56's re-issue uses BC4's `OrderExecutorRuntime.ExecuteInline`; `PlanCourierParity` runs before the path is removed, so a refused re-issue (player-owned unit, higher claim) leaves vanilla's own move. The parity intent also carries `ReliefOrSupport` (the target sits one regiment width behind the endangered sibling, inside its group's footprint).
+- #56's re-issue uses BC4's `OrderExecutorRuntime.ExecuteInline`; `PlanCourierParity` runs before the path is removed, so a refused re-issue (player-owned unit, no snapshot record, higher claim) leaves vanilla's own move. The parity intent also carries `ReliefOrSupport` (the target sits one regiment width behind the endangered sibling, inside its group's footprint).
 - `OrderExecutorRuntime.IssueMove`: an `InContactWithdrawal` Move on an infantry/cavalry regiment ends in `SetMovementMode(2)`, as vanilla's fallbacks do (5178, 4898).
 - Snapshot gaps the withdrawal re-derives or drops: `retreatangle`, `outflanked`, `covervalue/coverobject` (treated as no cover), `ReceivedFireFromUnit`, `friendlyroutednear`, `pathinterrupted`, `chargetarget` — candidates for `UnitRecord`.
 - Producers register from their static constructors; nothing in `src` touches the types yet, so BC7 adds the touch.
