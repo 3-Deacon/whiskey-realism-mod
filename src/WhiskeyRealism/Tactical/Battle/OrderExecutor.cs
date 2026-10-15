@@ -90,40 +90,18 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        // A move was issued when the group (or a subordinate) gained paths or a
-        // courier order was queued (SetWaypoint → AddToOrderQueue, 91470-91500).
-        public static bool MovementIssued(int movingPathsBefore, int movingPathsAfter, int queuedBefore, int queuedAfter)
-        {
-            return movingPathsAfter > movingPathsBefore || queuedAfter > queuedBefore;
-        }
+        // Vanilla AIBattle line-group moves farther than this go through
+        // BlockedMovingOrder with this obstacle range (6953-6956).
+        public const float BlockedMoveDistanceMeters = 150f;
 
-        // M3: a write that did not materialize backs off on battle time instead
-        // of retrying every macro cycle.
-        public const float FailedWriteBackoffHours = 0.05f;
-
-        public static float FailedWriteBackoffUntil(float nowHours)
+        // Shipped #61 TryQueueBlockedMovingOrder: an objective-type group move
+        // farther than 150 m avoids the crossings the enemy covers, as vanilla's
+        // own line-group move does. Whether the side has crossing data is the
+        // executor runtime's check (blockedcrossings stays null on a map without
+        // river crossings, UpdateBlockedCrossings 7919-7920).
+        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType task, float distance)
         {
-            return nowHours + FailedWriteBackoffHours;
-        }
-
-        public static bool IsBackedOff(float nowHours, float backoffUntilHours)
-        {
-            if (backoffUntilHours <= 0f) return false;
-            if (nowHours < backoffUntilHours - FailedWriteBackoffHours) return false;
-            return nowHours < backoffUntilHours;
-        }
-
-        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(
-            CommandTaskType task,
-            float distance,
-            float threshold,
-            bool hasBlockedCrossingData,
-            bool battleActive)
-        {
-            if (!battleActive) return false;
-            if (!hasBlockedCrossingData) return false;
-            if (!IsFinite(distance) || !IsFinite(threshold)) return false;
-            if (threshold <= 0f || distance <= threshold) return false;
+            if (!IsFinite(distance) || distance <= BlockedMoveDistanceMeters) return false;
 
             switch (task)
             {
@@ -135,11 +113,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
-        }
-
-        public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
-        {
-            return IsExecutorMovementTask(task);
         }
 
         public static bool IsMovementTask(CommandTaskType task)
@@ -607,7 +580,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _pending[p] = new PendingMove
             {
                 Intent = i, PathsBefore = pathsBefore, MovedAtCall = pathsAfter > pathsBefore, Retries = retries,
-                TargetCount = count, AlreadyThereCount = thereCount,
+                TargetCount = count, AlreadyThereCount = thereCount, IssuedAtHours = nowHours,
             };
         }
 
@@ -638,6 +611,14 @@ namespace WhiskeyRealism.Tactical.Battle
                     RemovePending(p);
                     continue;
                 }
+
+                // A move through BlockedMovingOrder (the recorded intent keeps
+                // AvoidCoveredCrossings only then) gets its SetWaypoint two frames
+                // after the call (UpdateOrders 3382). The next side-stat cycle is
+                // far later, but vanilla's override calls re-run it on the same
+                // battle clock (84021, 218963+): too early to judge.
+                if ((pm.Intent.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && !pm.MovedAtCall && nowHours <= pm.IssuedAtHours)
+                    continue;
 
                 IssuedTarget[] targets = _pendingTargets[p];
                 if (pm.MovedAtCall ||
@@ -734,13 +715,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     // #61's rule (ShouldSkipDuplicateWaypoint at the 60 m
                     // MinWaypointDistance): same target while the group moves, or
-                    // while it already stands there. Its wider radius for an
-                    // interrupted path (InterruptedReissueDistance 60 m) equals the
-                    // base radius since the 60 m bump, and the snapshot carries no
-                    // pathinterrupted, so the interrupted flag is false here.
+                    // while it already stands there. An interrupted path
+                    // (UnitFlags.PathInterrupted, vanilla pathinterrupted 111012)
+                    // widens the radius to InterruptedReissueDistance, which equals
+                    // DedupeMeters (60 m) since the 60 m bump.
                     if (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
                             rec.LastWaypointX, rec.LastWaypointZ, x, z, OrderArbiter.DedupeMeters,
-                            pathInterrupted: false, rec.RegimentPaths, IsMoving(rec), rec.X, rec.Z))
+                            (rec.Flags & UnitFlags.PathInterrupted) != 0, rec.RegimentPaths, IsMoving(rec), rec.X, rec.Z))
                         return true;
                     int p = FindPending(w.GroupId);
                     return p >= 0 &&
@@ -1025,6 +1006,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // The targets' moving-unit count rose during the vanilla call.
             public bool MovedAtCall;
             public int Retries;
+            public double IssuedAtHours;
         }
 
         private struct RetryTicket

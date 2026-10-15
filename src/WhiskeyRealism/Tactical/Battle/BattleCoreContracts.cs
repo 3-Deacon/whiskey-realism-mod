@@ -152,10 +152,15 @@ namespace WhiskeyRealism.Tactical.Battle
         Limber = 32,
         Unlimber = 64,
         PerRegiment = 128,
+        // BC5a, additive: route the move through vanilla AIBattle.BlockedMovingOrder
+        // (3054-3150: NavMeshObstacles over the enemy-covered crossings of the
+        // side's blockedcrossings, then SetWaypoint two frames later, UpdateOrders
+        // 3382), as vanilla's own line-group moves over 150 m do (6953-6956).
+        AvoidCoveredCrossings = 256,
         // CombatBehavior, charge doctrine Disarm (BC6b): after the behavior write the
         // executor also leaves charge movement mode 3 with SetMovementMode(0), as
         // vanilla's own refusal does (122290); behavior alone never ends mode 3.
-        LeaveChargeMode = 256,
+        LeaveChargeMode = 512,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

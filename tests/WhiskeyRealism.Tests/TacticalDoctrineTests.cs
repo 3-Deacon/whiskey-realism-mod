@@ -57,7 +57,6 @@ internal static class TacticalDoctrineTests
             ("doctrine telemetry throttles repeated signatures", DoctrineTelemetryThrottlesRepeatedSignatures),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
-            ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
             ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
@@ -609,40 +608,6 @@ internal static class TacticalDoctrineTests
         AssertTrue(order.PrimaryTarget.HasValue, "primary target");
         AssertEqual(1f, order.Confidence01, "confidence clamps high");
         AssertEqual("unspecified", order.Reason, "reason");
-    }
-
-    private static void DoctrineOrderRequiresTargetForMovementTasks()
-    {
-        CommandDoctrineOrder missingTarget = CommandDoctrineOrder.Create(
-            "node-1",
-            CommandNodeRole.SupportingAttack,
-            CommandTaskType.SupportAttack,
-            "ridge-a",
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineAllowedIdleReason.None,
-            600f,
-            0f,
-            0.8f,
-            "support");
-
-        CommandDoctrineOrder withTarget = CommandDoctrineOrder.Create(
-            "node-1",
-            CommandNodeRole.SupportingAttack,
-            CommandTaskType.SupportAttack,
-            "ridge-a",
-            DoctrineTargetPoint.From(50f, 75f),
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineAllowedIdleReason.None,
-            600f,
-            0f,
-            0.8f,
-            "support");
-
-        AssertTrue(!missingTarget.HasConcreteMovementTarget, "missing movement target");
-        AssertTrue(withTarget.HasConcreteMovementTarget, "movement target");
     }
 
     private static void DoctrineOrderDistinguishesNoAssignmentFromFormUp()

@@ -6,6 +6,7 @@ using static TestHarness;
 using VanillaMapBounds = WhiskeyRealism.Tactical.Battle.VanillaMapBounds;
 using VanillaPathAreaCosts = WhiskeyRealism.Tactical.Battle.VanillaPathAreaCosts;
 using TacticalBattleClock = WhiskeyRealism.Tactical.Battle.TacticalBattleClock;
+using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
 
 // WS T4 (2026-10-14 remediation): #61 posture executor + single ai_stance owner.
 internal static class PostureStanceFixTests
@@ -70,8 +71,6 @@ internal static class PostureStanceFixTests
         // B-61clock / M3 retry
         Pass("executor movement uses courier order delay like vanilla AI group moves", ExecutorMovementUsesCourierDelay);
         Pass("in-contact withdrawal skips order delay like CheckIfOutflanked", InContactWithdrawalSkipsOrderDelay);
-        Pass("queued courier order counts as an issued move", QueuedCourierOrderCountsAsIssuedMove);
-        Pass("failed write backs off on battle time", FailedWriteBacksOffOnBattleTime);
         Pass("real seconds at 1x convert to battle hours", RealSecondsAtOneXConvertToBattleHours);
 
         // BR-M1
@@ -520,22 +519,6 @@ internal static class PostureStanceFixTests
             "in-contact fallback is immediate like CheckIfOutflanked 6235");
         AssertTrue(CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.AttackObjective, battleActive: true, inContactWithdrawal: true),
             "only withdrawals skip the courier");
-    }
-
-    private static void QueuedCourierOrderCountsAsIssuedMove()
-    {
-        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 2, 0, 0), "paths appeared");
-        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 0, 0, 1), "courier queued");
-        AssertFalse(CommandWaypointWritePolicy.MovementIssued(1, 1, 2, 2), "nothing changed");
-    }
-
-    private static void FailedWriteBacksOffOnBattleTime()
-    {
-        float until = CommandWaypointWritePolicy.FailedWriteBackoffUntil(2f);
-        AssertTrue(until > 2f, "backoff in the future");
-        AssertTrue(CommandWaypointWritePolicy.IsBackedOff(2.01f, until), "inside backoff");
-        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(until + 0.001f, until), "after backoff");
-        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(0.5f, until), "clock reset clears backoff");
     }
 
     private static void RealSecondsAtOneXConvertToBattleHours()

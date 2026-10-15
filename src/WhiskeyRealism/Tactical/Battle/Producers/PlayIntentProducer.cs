@@ -110,7 +110,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 child.State = state;
                 child.HasOrder = PostureLedger.TryResolveDoctrineOrder(own[i].InstanceId, army, state.NodeId, out child.Order);
                 child.Subordinate = TacticalDivisionPlayInputs.FromSnapshot(
-                    s, i, t.Descendants[i], t.Moving[i], state.NodeId, state.Role, state.Task);
+                    s, i, t.Descendants[i], t.Moving[i], state.NodeId, state.Role, state.Task, t.FlankThreatMean);
                 if (!_byParent.TryGetValue(parent, out List<Child> children))
                 {
                     children = new List<Child>(4);
