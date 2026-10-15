@@ -415,6 +415,8 @@ namespace WhiskeyRealism.Telemetry
                     foreach (string file in _writer.OutputFilesSnapshot())
                         manifest.OutputFiles.Add(file);
                     manifest.DroppedCounters["sinkFailures"] = _writer.SinkFailureCount;
+                    if (_writer.TornRowCount > 0L)
+                        manifest.DroppedCounters["tornRows"] = _writer.TornRowCount;
                 }
 
                 if (_writerShutdownTimedOut)

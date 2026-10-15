@@ -59,6 +59,9 @@ internal static class TelemetryInfraFixTests
         WriterCountsRowsOnlyAfterTheirWriteSucceeds();
         WriterShutdownTimeoutFailureRowNeverOpensSecondHandle();
         WriterClosesOldRotationHandleOpenedInRotatingBatch();
+        WriterUnknownLengthAfterFaultReopensInsteadOfDuplicating();
+        WriterUntruncatableTornRowIsIsolatedOnItsOwnLine();
+        WriterFailureRowsUseTornWriteHandling();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         RegimentDiagnosticsLineCapWarnsOncePerBattle();
@@ -1342,21 +1345,37 @@ internal static class TelemetryInfraFixTests
         private readonly FileStream _inner;
         internal int TornWritesRemaining;
         internal Func<bool> Fail = () => false;
+        internal bool SetLengthFails;
+        internal bool LengthFailsAfterFault;
+        private bool _faulted;
 
-        internal FaultStream(string path)
+        internal FaultStream(string path, FileMode mode)
         {
-            _inner = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
+            _inner = new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
         }
 
         public override bool CanRead { get { return false; } }
         public override bool CanSeek { get { return _inner.CanSeek; } }
         public override bool CanWrite { get { return true; } }
-        public override long Length { get { return _inner.Length; } }
+        public override long Length
+        {
+            get
+            {
+                if (LengthFailsAfterFault && _faulted)
+                    throw new IOException("injected length failure on faulted handle");
+                return _inner.Length;
+            }
+        }
         public override long Position { get { return _inner.Position; } set { _inner.Position = value; } }
         public override void Flush() { _inner.Flush(); }
         public override int Read(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
         public override long Seek(long offset, SeekOrigin origin) { return _inner.Seek(offset, origin); }
-        public override void SetLength(long value) { _inner.SetLength(value); }
+        public override void SetLength(long value)
+        {
+            if (SetLengthFails)
+                throw new IOException("injected SetLength failure");
+            _inner.SetLength(value);
+        }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
@@ -1365,6 +1384,7 @@ internal static class TelemetryInfraFixTests
             if (TornWritesRemaining > 0 && count > 1)
             {
                 TornWritesRemaining--;
+                _faulted = true;
                 _inner.Write(buffer, offset, count / 2 + 7);
                 _inner.Flush();
                 throw new IOException("injected torn write");
@@ -1382,16 +1402,16 @@ internal static class TelemetryInfraFixTests
     private static void WriterRetryAfterTornWriteDoesNotDuplicateRows()
     {
         string dir = TempDir();
-        var saved = TelemetryWriter.OpenAppendStream;
+        var saved = TelemetryWriter.OpenFileStream;
         int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
         try
         {
             int torn = 1;
             TelemetryWriter.RetryBaseMilliseconds = 5;
-            TelemetryWriter.OpenAppendStream = path =>
+            TelemetryWriter.OpenFileStream = (path, mode) =>
             {
-                var stream = new FaultStream(path);
-                if (path.EndsWith("tactical.jsonl", StringComparison.Ordinal) && torn-- > 0)
+                var stream = new FaultStream(path, mode);
+                if (mode == FileMode.Append && path.EndsWith("tactical.jsonl", StringComparison.Ordinal) && torn-- > 0)
                     stream.TornWritesRemaining = 1;
                 return stream;
             };
@@ -1416,7 +1436,7 @@ internal static class TelemetryInfraFixTests
         }
         finally
         {
-            TelemetryWriter.OpenAppendStream = saved;
+            TelemetryWriter.OpenFileStream = saved;
             TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
             DeleteQuietly(dir);
         }
@@ -1426,15 +1446,15 @@ internal static class TelemetryInfraFixTests
     private static void WriterCountsRowsOnlyAfterTheirWriteSucceeds()
     {
         string dir = TempDir();
-        var saved = TelemetryWriter.OpenAppendStream;
+        var saved = TelemetryWriter.OpenFileStream;
         int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
         bool failing = true;
         try
         {
             TelemetryWriter.RetryBaseMilliseconds = 20;
-            TelemetryWriter.OpenAppendStream = path =>
+            TelemetryWriter.OpenFileStream = (path, mode) =>
             {
-                var stream = new FaultStream(path);
+                var stream = new FaultStream(path, mode);
                 if (path.EndsWith("tactical.jsonl", StringComparison.Ordinal))
                     stream.Fail = () => System.Threading.Volatile.Read(ref failing);
                 return stream;
@@ -1456,7 +1476,7 @@ internal static class TelemetryInfraFixTests
         finally
         {
             System.Threading.Volatile.Write(ref failing, false);
-            TelemetryWriter.OpenAppendStream = saved;
+            TelemetryWriter.OpenFileStream = saved;
             TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
             DeleteQuietly(dir);
         }
@@ -1466,18 +1486,18 @@ internal static class TelemetryInfraFixTests
     private static void WriterShutdownTimeoutFailureRowNeverOpensSecondHandle()
     {
         string dir = TempDir();
-        var saved = TelemetryWriter.OpenAppendStream;
+        var saved = TelemetryWriter.OpenFileStream;
         var entered = new System.Threading.ManualResetEvent(false);
         var release = new System.Threading.ManualResetEvent(false);
         int offThreadFailureOpens = 0;
         try
         {
-            TelemetryWriter.OpenAppendStream = path =>
+            TelemetryWriter.OpenFileStream = (path, mode) =>
             {
                 if (path.EndsWith("failures.jsonl", StringComparison.Ordinal)
                     && System.Threading.Thread.CurrentThread.Name != "WhiskeyRealismTelemetryWriter")
                     System.Threading.Interlocked.Increment(ref offThreadFailureOpens);
-                return new FaultStream(path);
+                return new FaultStream(path, mode);
             };
             var queue = new TelemetryQueue(capacity: 64);
             var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
@@ -1504,7 +1524,7 @@ internal static class TelemetryInfraFixTests
         finally
         {
             release.Set();
-            TelemetryWriter.OpenAppendStream = saved;
+            TelemetryWriter.OpenFileStream = saved;
             DeleteQuietly(dir);
         }
         LogPass("writer shutdown timeout failure row never opens second handle");
@@ -1537,5 +1557,142 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(dir);
         }
         LogPass("writer closes old rotation handle opened in rotating batch");
+    }
+
+    // ---------------------------------------------------------------- R2-4
+
+    private static Func<string, FileMode, Stream> TornFactory(string fileSuffix, int tornWrites, bool setLengthFails, bool lengthFailsAfterFault)
+    {
+        int remaining = tornWrites;
+        return (path, mode) =>
+        {
+            var stream = new FaultStream(path, mode);
+            if (path.EndsWith(fileSuffix, StringComparison.Ordinal))
+            {
+                if (mode == FileMode.Append && remaining > 0) { remaining--; stream.TornWritesRemaining = 1; }
+                stream.SetLengthFails = setLengthFails;
+                stream.LengthFailsAfterFault = lengthFailsAfterFault;
+            }
+            return stream;
+        };
+    }
+
+    private static List<Newtonsoft.Json.Linq.JObject> ValidRows(string path, out int invalidLines)
+    {
+        invalidLines = 0;
+        var rows = new List<Newtonsoft.Json.Linq.JObject>();
+        foreach (string line in File.ReadAllLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            try { rows.Add(Newtonsoft.Json.Linq.JObject.Parse(line)); }
+            catch (Newtonsoft.Json.JsonException) { invalidLines++; }
+        }
+        return rows;
+    }
+
+    private static void WriterUnknownLengthAfterFaultReopensInsteadOfDuplicating()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenFileStream;
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        try
+        {
+            TelemetryWriter.RetryBaseMilliseconds = 5;
+            TelemetryWriter.OpenFileStream = TornFactory("tactical.jsonl", 1, setLengthFails: false, lengthFailsAfterFault: true);
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            for (int i = 0; i < 6; i++)
+                queue.Enqueue(Decision("w", i));
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+
+            int invalid;
+            var rows = ValidRows(Path.Combine(dir, "tactical.jsonl"), out invalid);
+            TestHarness.AssertEqual(6, rows.Count, "each row once although the faulted handle could not report its length");
+            TestHarness.AssertEqual(0, invalid, "torn fragment truncated via the reopened handle");
+        }
+        finally
+        {
+            TelemetryWriter.OpenFileStream = saved;
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer unknown length after fault reopens instead of duplicating");
+    }
+
+    private static void WriterUntruncatableTornRowIsIsolatedOnItsOwnLine()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenFileStream;
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        try
+        {
+            TelemetryWriter.RetryBaseMilliseconds = 5;
+            TelemetryWriter.OpenFileStream = TornFactory("tactical.jsonl", 1, setLengthFails: true, lengthFailsAfterFault: false);
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            for (int i = 0; i < 6; i++)
+                queue.Enqueue(Decision("w", i));
+            var writer = new TelemetryWriter(queue, budget, dir, delegate
+            {
+                var manifest = TelemetryManifest.Create("w", "t", "-", TelemetryProfile.FullTuning, DateTime.UtcNow, budget, 0);
+                manifest.DroppedCounters["tornRows"] = 1L;
+                File.WriteAllText(Path.Combine(dir, "manifest.json"), manifest.ToJson());
+            }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+
+            int invalid;
+            var rows = ValidRows(Path.Combine(dir, "tactical.jsonl"), out invalid);
+            TestHarness.AssertEqual(6, rows.Count, "every row intact on its own line");
+            TestHarness.AssertEqual(1, invalid, "the torn fragment is isolated as one invalid line");
+            TestHarness.AssertEqual(1L, writer.TornRowCount, "torn row counted");
+            var seen = new HashSet<string>();
+            foreach (var row in rows)
+                TestHarness.AssertTrue(seen.Add((string)row["inputSignature"]), "no duplicate row");
+
+            var validation = TelemetrySessionValidator.ValidateDirectory(dir);
+            TestHarness.AssertTrue(validation.Success, "validator tolerates the counted torn row: " + validation.Summary);
+            string summary = TelemetrySummary.FromDirectory(dir).ToMarkdown();
+            TestHarness.AssertTrue(summary.Contains("PTestWriterDecision=6"), "summary skips the torn line");
+        }
+        finally
+        {
+            TelemetryWriter.OpenFileStream = saved;
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer untruncatable torn row is isolated on its own line");
+    }
+
+    private static void WriterFailureRowsUseTornWriteHandling()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenFileStream;
+        try
+        {
+            TelemetryWriter.OpenFileStream = TornFactory("failures.jsonl", 1, setLengthFails: true, lengthFailsAfterFault: false);
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null);
+            // Writer thread never started: failure rows take the one-shot path.
+            writer.RecordRuntimeSinkFailure("p-test-first", null);
+            writer.RecordRuntimeSinkFailure("p-test-second", null);
+
+            int invalid;
+            var rows = ValidRows(Path.Combine(dir, "failures.jsonl"), out invalid);
+            TestHarness.AssertEqual(1, invalid, "torn fragment of the first failure row isolated on its own line");
+            TestHarness.AssertEqual(2, rows.Count, "first failure row retried once and second row intact, neither glued to the fragment");
+            TestHarness.AssertTrue(((string)rows[0]["fields"]["reason"]).StartsWith("p-test-first"), "first row retried");
+            TestHarness.AssertTrue(((string)rows[1]["fields"]["reason"]).StartsWith("p-test-second"), "second row parsed");
+            TestHarness.AssertEqual(1L, writer.TornRowCount, "torn failure row counted");
+        }
+        finally
+        {
+            TelemetryWriter.OpenFileStream = saved;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer failure rows use torn write handling");
     }
 }

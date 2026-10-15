@@ -15,8 +15,10 @@ namespace WhiskeyRealism.Telemetry
     // - manifest.json is rewritten only when the output-file set changes (new file or
     //   rotation), every ManifestIntervalMs, and at shutdown (previously once per batch).
     // - A failed chunk write commits the rows that fully reached the file (measured by file
-    //   length), truncates a torn partial row, closes the handle, keeps the rest pending, and
-    //   retries after an exponential backoff, so a retry never duplicates rows. The file sink
+    //   length re-derived from a fresh handle, never the faulted one), truncates a torn
+    //   partial row (or, if truncation fails, isolates it on its own line and counts it in
+    //   tornRows), closes the handle, keeps the rest pending, and retries after an exponential
+    //   backoff, so a retry never duplicates rows. Sink-failure rows use the same path. The file sink
     //   is disabled only after MaxConsecutiveWriteFailures consecutive failures (previously
     //   the first exception disabled the sink for the whole session).
     // - Sink-failure rows raised off the writer thread while it is alive are queued, never
@@ -34,10 +36,12 @@ namespace WhiskeyRealism.Telemetry
         internal static int ManifestIntervalMs = 5000;
         internal static int RetryBaseMilliseconds = 50;
 
-        // Opens an append handle for one output file. Rows are written as one encoded chunk
-        // per file per batch, so the handle is unbuffered. Internal so tests can inject faults.
-        internal static Func<string, Stream> OpenAppendStream = path =>
-            new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
+        // Opens a write handle on one output file: FileMode.Append for row writes (one encoded
+        // chunk per file per batch, so unbuffered), FileMode.Open for post-fault length checks
+        // and truncation (an Append handle cannot truncate below its append start). Internal
+        // so tests can inject faults.
+        internal static Func<string, FileMode, Stream> OpenFileStream = (path, mode) =>
+            new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
 
         private static readonly System.Text.UTF8Encoding Utf8NoBom = new System.Text.UTF8Encoding(false);
 
@@ -63,6 +67,12 @@ namespace WhiskeyRealism.Telemetry
         private readonly List<PendingRow> _chunkRows = new List<PendingRow>();
         private readonly Dictionary<string, long> _prospectiveBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private byte[] _chunk = new byte[64 * 1024];
+        private int[] _rowEnds = new int[256];
+        private readonly int[] _singleRowEnd = new int[1];
+        // Files whose last write left an untruncatable fragment: the next write starts with a
+        // newline so the fragment stays on its own (invalid, skipped) line.
+        private readonly HashSet<string> _tornFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private long _tornRows;
         private readonly FileWritePerfAccumulator _fileWritePerf = new FileWritePerfAccumulator();
         private readonly Thread _thread;
         private volatile bool _stopRequested;
@@ -108,6 +118,14 @@ namespace WhiskeyRealism.Telemetry
         internal long SinkFailureCount
         {
             get { return Interlocked.Read(ref _sinkFailureCount); }
+        }
+
+        // Rows left as an isolated invalid fragment because a torn write could not be
+        // truncated. Recorded in manifest droppedCounters["tornRows"]; the validator tolerates
+        // that many fragment lines.
+        internal long TornRowCount
+        {
+            get { return Interlocked.Read(ref _tornRows); }
         }
 
         internal bool FileSinkDisabled
@@ -429,61 +447,187 @@ namespace WhiskeyRealism.Telemetry
         private bool WriteChunk(string fileName)
         {
             _chunkRows.Clear();
-            int total = 0;
+            int prefix = NeedsSeparator(fileName) ? 1 : 0;
+            int total = prefix;
+            EnsureChunkCapacity(total);
+            if (prefix == 1)
+                _chunk[0] = (byte)'\n';
+
             for (int i = 0; i < _pending.Count; i++)
             {
                 PendingRow row = _pending[i];
                 if (row.Done || !string.Equals(row.FileName, fileName, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                int bytes = (int)row.Bytes;
-                EnsureChunkCapacity(total + bytes);
+                EnsureChunkCapacity(total + (int)row.Bytes);
                 total += Utf8NoBom.GetBytes(row.Json, 0, row.Json.Length, _chunk, total);
-                row.ChunkEnd = total;
+                if (_rowEnds.Length <= _chunkRows.Count)
+                    Array.Resize(ref _rowEnds, _rowEnds.Length * 2);
+                _rowEnds[_chunkRows.Count] = total;
                 _chunkRows.Add(row);
             }
 
             if (_chunkRows.Count == 0)
                 return true;
 
-            OpenFile file = null;
-            long startLength = -1L;
             long started = Stopwatch.GetTimestamp();
+            int landed;
+            Exception failure;
+            bool ok = AppendRows(fileName, _chunk, total, prefix, _rowEnds, _chunkRows.Count, out landed, out failure);
+            if (landed > 0)
+                CommitRows(fileName, landed, ok ? (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency : 0.0);
+            if (ok)
+                return true;
+
+            OnWriteFailure("write-row", failure);
+            return false;
+        }
+
+        private bool NeedsSeparator(string fileName)
+        {
+            lock (_streamGate)
+                return _tornFiles.Contains(fileName);
+        }
+
+        // Appends buffer[0..total) to fileName. buffer may start with a one-byte newline
+        // separator (prefix); rowEnds[i] is the end offset of row i within buffer. Returns true
+        // when everything landed; otherwise `landed` is the number of rows that fully reached
+        // the file, measured by file length:
+        //  - the start length comes from the handle, else the file on disk; if neither is
+        //    known nothing is written (no way to tell later what landed);
+        //  - after a failure the handle is closed and the end length is re-derived from a
+        //    reopened handle (else the file on disk), never from the faulted handle;
+        //  - a torn partial row is truncated; if truncation fails the fragment is left, the
+        //    file is marked so the next write starts with a newline, and tornRows is counted.
+        private bool AppendRows(string fileName, byte[] buffer, int total, int prefix, int[] rowEnds, int rowCount, out int landed, out Exception failure)
+        {
+            landed = 0;
+            failure = null;
+            OpenFile file;
+            long start;
             try
             {
                 file = GetOrOpen(fileName);
-                startLength = TryLength(file.Stream);
-                file.Stream.Write(_chunk, 0, total);
+                start = MeasureLength(fileName, file.Stream);
+            }
+            catch (Exception ex)
+            {
+                CloseStream(fileName);
+                failure = ex;
+                return false;
+            }
+
+            if (start < 0L)
+            {
+                CloseStream(fileName);
+                failure = new IOException("telemetry file length unavailable before write: " + fileName);
+                return false;
+            }
+
+            try
+            {
+                file.Stream.Write(buffer, 0, total);
                 file.Stream.Flush();
-                CommitRows(fileName, _chunkRows.Count, (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency);
+                landed = rowCount;
+                ClearTorn(fileName);
                 return true;
             }
             catch (Exception ex)
             {
-                int committed = 0;
-                if (file != null && startLength >= 0L)
-                {
-                    long endLength = TryLength(file.Stream);
-                    long writtenBytes = endLength >= startLength ? endLength - startLength : 0L;
-                    int boundary = 0;
-                    while (committed < _chunkRows.Count && _chunkRows[committed].ChunkEnd <= writtenBytes)
-                    {
-                        boundary = _chunkRows[committed].ChunkEnd;
-                        committed++;
-                    }
+                failure = ex;
+            }
 
-                    // Drop a torn partial row so the retry does not leave half a line behind.
-                    if (writtenBytes > boundary)
-                        TryTruncate(file.Stream, startLength + boundary);
-                }
-
-                if (committed > 0)
-                    CommitRows(fileName, committed, 0.0);
-
-                CloseStream(fileName);
-                OnWriteFailure("write-row", ex);
+            CloseStream(fileName);
+            long end = MeasureLengthAfterFault(fileName);
+            if (end < 0L)
+            {
+                // Unknowable: assume nothing landed, but isolate any fragment from the retry.
+                MarkTorn(fileName, countRow: false);
                 return false;
             }
+
+            long written = Math.Max(0L, end - start);
+            if (prefix > 0 && written >= prefix)
+                ClearTorn(fileName);
+
+            int boundary = written >= prefix ? prefix : 0;
+            while (landed < rowCount && rowEnds[landed] <= written)
+            {
+                boundary = rowEnds[landed];
+                landed++;
+            }
+
+            if (written > boundary && !TryTruncateFile(fileName, start + boundary))
+                MarkTorn(fileName, countRow: true);
+            return false;
+        }
+
+        private long MeasureLength(string fileName, Stream stream)
+        {
+            long length = TryLength(stream);
+            return length >= 0L ? length : LengthOnDisk(fileName);
+        }
+
+        // Never trusts the faulted handle (already closed): a fresh non-append handle, else the
+        // file on disk.
+        private long MeasureLengthAfterFault(string fileName)
+        {
+            try
+            {
+                using (Stream fresh = OpenFileStream(Path.Combine(_sessionDirectory, fileName), FileMode.Open))
+                {
+                    long length = TryLength(fresh);
+                    if (length >= 0L)
+                        return length;
+                }
+            }
+            catch
+            {
+            }
+
+            return LengthOnDisk(fileName);
+        }
+
+        private long LengthOnDisk(string fileName)
+        {
+            try
+            {
+                var info = new FileInfo(Path.Combine(_sessionDirectory, fileName));
+                return info.Exists ? info.Length : -1L;
+            }
+            catch
+            {
+                return -1L;
+            }
+        }
+
+        // The append handle is already closed here, so the next write reopens at the true end.
+        private bool TryTruncateFile(string fileName, long length)
+        {
+            try
+            {
+                using (Stream fresh = OpenFileStream(Path.Combine(_sessionDirectory, fileName), FileMode.Open))
+                    fresh.SetLength(length);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void MarkTorn(string fileName, bool countRow)
+        {
+            lock (_streamGate)
+                _tornFiles.Add(fileName);
+            if (countRow)
+                Interlocked.Increment(ref _tornRows);
+        }
+
+        private void ClearTorn(string fileName)
+        {
+            lock (_streamGate)
+                _tornFiles.Remove(fileName);
         }
 
         private void CommitRows(string fileName, int count, double durationMs)
@@ -540,17 +684,6 @@ namespace WhiskeyRealism.Telemetry
             catch
             {
                 return -1L;
-            }
-        }
-
-        private static void TryTruncate(Stream stream, long length)
-        {
-            try
-            {
-                stream.SetLength(length);
-            }
-            catch
-            {
             }
         }
 
@@ -618,7 +751,7 @@ namespace WhiskeyRealism.Telemetry
                 if (_streams.TryGetValue(fileName, out file))
                     return file;
 
-                file = new OpenFile(OpenAppendStream(Path.Combine(_sessionDirectory, fileName)), RotationIndexOf(fileName));
+                file = new OpenFile(OpenFileStream(Path.Combine(_sessionDirectory, fileName), FileMode.Append), RotationIndexOf(fileName));
                 _streams[fileName] = file;
                 return file;
             }
@@ -715,19 +848,28 @@ namespace WhiskeyRealism.Telemetry
                 if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
                     return RowWriteResult.Dropped;
 
-                byte[] payload = Utf8NoBom.GetBytes(json);
-                if (onWriterThread)
+                // Same torn-write handling as row chunks; one immediate retry (the fragment has
+                // been truncated or isolated) before self-failure writes are given up.
+                int landed = 0;
+                bool ok = false;
+                for (int attempt = 0; attempt < 2 && !ok && landed == 0; attempt++)
                 {
-                    GetOrOpen(fileName).Stream.Write(payload, 0, payload.Length);
-                }
-                else
-                {
-                    using (Stream once = OpenAppendStream(Path.Combine(_sessionDirectory, fileName)))
-                        once.Write(payload, 0, payload.Length);
+                    int prefix = NeedsSeparator(fileName) ? 1 : 0;
+                    byte[] payload = new byte[prefix + (int)bytes];
+                    if (prefix == 1)
+                        payload[0] = (byte)'\n';
+                    Utf8NoBom.GetBytes(json, 0, json.Length, payload, prefix);
+                    _singleRowEnd[0] = payload.Length;
+
+                    Exception failure;
+                    ok = AppendRows(fileName, payload, payload.Length, prefix, _singleRowEnd, 1, out landed, out failure);
                 }
 
-                RecordOutput(fileName, bytes);
-                return RowWriteResult.Written;
+                if (!onWriterThread)
+                    CloseStream(fileName); // the writer has exited; do not leave a handle open
+                if (landed == 1)
+                    RecordOutput(fileName, bytes);
+                return landed == 1 ? RowWriteResult.Written : RowWriteResult.SinkFailed;
             }
             catch
             {
@@ -962,7 +1104,6 @@ namespace WhiskeyRealism.Telemetry
             internal string Json;
             internal long Bytes;
             internal string FileName;   // set once encoded + budget-reserved
-            internal int ChunkEnd;      // end offset inside the current chunk
             internal bool Done;         // written, dropped, or failed permanently
         }
 
