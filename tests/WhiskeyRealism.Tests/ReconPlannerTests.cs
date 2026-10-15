@@ -235,10 +235,10 @@ internal static class ReconPlannerTests
     {
         var s = World();
         s.Own.Add(Unit(1, 0f, 0f, 20000f, 0f, 15));
-        s.Own.Add(Unit(2, 100f, 0f, 3000f, 0.8f, 14));
+        s.Own.Add(Unit(2, 100f, 0f, 9500f, 0.8f, 14));
         s.Own.Add(Unit(3, 5f, 0f, 9000f, 0.3f, 15));
         var task = ScreenTask(0f, 0f, 200f, 0f, -1);
-        AssertEqual(2, Pick(s, null, null, task), "cavalry-majority group beats nearer non-cavalry groups");
+        AssertEqual(2, Pick(s, null, null, task), "cavalry-majority group beats nearer and smaller non-cavalry groups");
         s.Own.RemoveAt(1);
         AssertEqual(3, Pick(s, null, null, task), "then the smallest fighting group");
     }
@@ -592,6 +592,18 @@ internal static class ReconPlannerTests
         ledger.OnReview(s, HoldAlloc());
         AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "formation gone");
         AssertFalse(ledger.IsRecon(2), "not on a mission");
+
+        // A retreating group is vanilla's to move: the mission ends rather than recalling it.
+        var r = World();
+        var retreating = Unit(2, 300f, 0f, 3000f, 0.9f, 14);
+        r.Own.Add(retreating);
+        var ledger2 = new ReconMissionLedger();
+        AddMission(ledger2, r, ReconKind.Screen, 2, 300f, 0f, -1);
+        retreating.Flags |= FormationFlags.OnRetreat;
+        r.Own[0] = retreating;
+        ledger2.OnReview(r, HoldAlloc());
+        AssertEqual(ReconState.Cleared, ledger2.Missions[0].State, "retreat clears");
+        AssertEqual("retreat", ledger2.Missions[0].Reason, "reason");
     }
 
     private static void MissionExpiresAfterTwentyDays()
@@ -601,15 +613,16 @@ internal static class ReconPlannerTests
         s.Own.Add(Unit(2, 300f, 0f, 3000f, 0.9f, 14));
         AddMission(ledger, s, ReconKind.Screen, 2, 300f, 0f, -1);
 
-        var day19 = WorldOn(Today + ReconMissionLedger.MaxMissionDays - 1);
+        var day19 = WorldOn(Today + 19);
         day19.Own.Add(Unit(2, 300f, 0f, 3000f, 0.9f, 14));
         ledger.OnReview(day19, HoldAlloc());
         AssertEqual(ReconState.Holding, ledger.Missions[0].State, "day 19 still on the mission");
 
-        var day20 = WorldOn(Today + ReconMissionLedger.MaxMissionDays);
+        var day20 = WorldOn(Today + 20);
         day20.Own.Add(Unit(2, 300f, 0f, 3000f, 0.9f, 14));
         ledger.OnReview(day20, HoldAlloc());
         AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "cleared after 20 days, to be re-planned");
+        AssertEqual(20, ReconMissionLedger.MaxMissionDays, "the plan's MaxMissionDays");
     }
 
     private static void ProbeEscalateClearsAndWithdrawRecalls()
@@ -620,6 +633,12 @@ internal static class ReconPlannerTests
         var ledger = new ReconMissionLedger();
         AddMission(ledger, s, ReconKind.Probe, 2, 300f, 0f, -1);
         AddMission(ledger, s, ReconKind.Probe, 3, 0f, 300f, -1, keep: 2);
+
+        // A probe's own contact is its job: stamped, not recalled; the verdict decides.
+        s.Beliefs.Add(Belief("met", 305f, 0f, 3000f, Today, 1f, 5f));
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(ReconState.Holding, MissionOf(ledger, 2).State, "contact alone does not recall a probe");
+        AssertEqual(Today, MissionOf(ledger, 2).LastContactDay, "contact stamped");
 
         var favorable = ContactEvidenceLedger.Build(Evidence(friendly: 9000f, enemy: 3000f));
         AssertTrue(favorable.AllowsEscalation, "fixture: favorable contact allows escalation");
