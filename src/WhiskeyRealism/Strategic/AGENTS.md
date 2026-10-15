@@ -16,6 +16,13 @@ These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/`. Iden
 - Daily ledgers must signature-skip unchanged input.
 - Event-triggered dirty-plan work must stay idempotent.
 - Runtime adapters should degrade to empty/no-op inputs on reflection failure and log a bounded warning.
+- Per-campaign static state registers its own reset with `CampaignScope.Register(name, reset)` from the owner's static constructor (`Util/ScopedState.cs`); `StrategicCoordinator.ResetAll()` runs `CampaignScope.ResetAll()` on campaign change and before a sidecar load. Never hand-wire a reset into a teardown path. State that must survive a save/load goes into the sidecar DTO as well.
+- Weekly/alternating gates must catch up when fast-forward skips days; monthly work runs on the real month boundary.
+
+## Static Checks
+
+- `python3 -I tools/orphan-sweep.py .` — no member without a production reference (`--include-test-only` also lists members only tests reach).
+- `python3 -I tools/config-audit.py .` — every config entry read, bound once, default on, description matching code.
 
 ## Tests
 
