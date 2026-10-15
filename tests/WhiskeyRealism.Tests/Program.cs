@@ -20158,8 +20158,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = true,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            TargetSectorEnemyStrength = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20174,8 +20174,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = false,
-            TargetSectorOwnStrength = 10000f,
-            TargetSectorEnemyStrength = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20192,8 +20192,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, ForceFractionRequired = 0.5f, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 1000f,
-            TargetSectorEnemyStrength = 5000f,
+            TargetLocalOwnStrength = 1000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20208,8 +20208,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 1, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            TargetSectorEnemyStrength = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20226,8 +20226,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            TargetSectorEnemyStrength = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             TargetEngagedRecently = false,
             CurrentMonth = 6, CurrentYear = 1862
         };

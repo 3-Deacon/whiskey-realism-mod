@@ -195,12 +195,18 @@ namespace WhiskeyRealism.Strategic
             float vanilla;
             try
             {
-                vanilla = Math.Max(1f, GamePrefs.aimaximumdistancetosearchforunitrelocations);
+                vanilla = GamePrefs.aimaximumdistancetosearchforunitrelocations;
             }
             catch
             {
                 vanilla = 275f;
             }
+            return NearTargetRadius(profile, vanilla);
+        }
+
+        internal static float NearTargetRadius(HistoricalOperationProfile profile, float vanillaRadius)
+        {
+            float vanilla = Math.Max(1f, vanillaRadius);
             if (profile != null && profile.NearTargetRadius > 0f)
                 return Math.Min(profile.NearTargetRadius, vanilla);
             return vanilla;

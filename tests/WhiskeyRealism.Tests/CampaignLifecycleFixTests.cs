@@ -146,8 +146,8 @@ internal static class CampaignLifecycleFixTests
             DaySerial = Serial(1, month, year),
             ObjectiveAvailable = true,
             TargetPositionResolves = true,
-            TargetSectorOwnStrength = own,
-            TargetSectorEnemyStrength = enemy,
+            TargetLocalOwnStrength = own,
+            TargetLocalEnemyStrength = enemy,
             LastTargetEngagementDaySerial = -1,
             CurrentMonth = month,
             CurrentYear = year
@@ -1014,10 +1014,13 @@ internal static class CampaignLifecycleFixTests
 
     private static void HardWiredProfileRadiusNarrowsVanilla()
     {
-        TestHarness.AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var profile), "profile");
-        float radius = HistoricalOperationContextBuilder.NearTargetRadius(profile);
-        TestHarness.AssertTrue(radius > 0f && radius <= profile.NearTargetRadius, "profile radius is used as a cap: " + radius);
-        TestHarness.AssertTrue(profile.NearTargetRadius <= 275f, "catalog radius no wider than vanilla relocation radius (275)");
+        var narrow = new HistoricalOperationProfile { OperationId = "x", NearTargetRadius = 275f };
+        TestHarness.AssertEqual(275f, HistoricalOperationContextBuilder.NearTargetRadius(narrow, 500f), "profile radius caps a wider vanilla radius");
+        TestHarness.AssertEqual(200f, HistoricalOperationContextBuilder.NearTargetRadius(narrow, 200f), "vanilla radius wins when narrower");
+        TestHarness.AssertEqual(300f, HistoricalOperationContextBuilder.NearTargetRadius(null, 300f), "generic plans use vanilla");
+        var unset = new HistoricalOperationProfile { OperationId = "y", NearTargetRadius = 0f };
+        TestHarness.AssertEqual(300f, HistoricalOperationContextBuilder.NearTargetRadius(unset, 300f), "unset profile radius uses vanilla");
+        TestHarness.AssertEqual(1f, HistoricalOperationContextBuilder.NearTargetRadius(null, 0f), "never below 1");
     }
 
     // ------------------------------------------------------------------

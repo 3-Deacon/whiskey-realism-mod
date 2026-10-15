@@ -41,10 +41,10 @@ namespace WhiskeyRealism.Strategic
         public bool TargetEngagedRecently;
         // Day serial of the latest land battle near the target (-1 = none in the window).
         public int LastTargetEngagementDaySerial = -1;
-        // LOCAL strengths: own / enemy campaign strength within the near-target radius
+        // Own / enemy campaign strength within the near-target radius around the phase target
         // (vanilla GamePrefs.aimaximumdistancetosearchforunitrelocations), not theater totals.
-        public float TargetSectorOwnStrength;
-        public float TargetSectorEnemyStrength;
+        public float TargetLocalOwnStrength;
+        public float TargetLocalEnemyStrength;
         public int CurrentMonth;
         public int CurrentYear;
     }
@@ -137,8 +137,8 @@ namespace WhiskeyRealism.Strategic
 
             bool forceShort = IsForceShort(
                 phase.ForceFractionRequired,
-                input.TargetSectorOwnStrength,
-                input.TargetSectorEnemyStrength);
+                input.TargetLocalOwnStrength,
+                input.TargetLocalEnemyStrength);
 
             if (phase.Transition == PhaseTransition.TargetEngaged &&
                 input.LastTargetEngagementDaySerial >= 0 &&
@@ -154,7 +154,7 @@ namespace WhiskeyRealism.Strategic
             {
                 // Hold phase: being short is the phase's job (reinforce and hold), not a
                 // reason to Recover. Completes once the force requirement is met.
-                bool ready = !forceShort && input.TargetSectorEnemyStrength > 0f;
+                bool ready = !forceShort && input.TargetLocalEnemyStrength > 0f;
                 output.Verdict = PhaseTruthVerdict.Valid;
                 output.RecommendedAction = ready ? PhaseTruthAction.Advance : PhaseTruthAction.Continue;
                 output.Reason = ready ? "transition-force-ready" : "hold-building-force";

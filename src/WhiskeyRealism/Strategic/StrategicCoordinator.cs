@@ -591,8 +591,8 @@ namespace WhiskeyRealism.Strategic
                 TargetPositionResolves        = targetPos.HasValue,
                 TargetEngagedRecently         = engagedRecently,
                 LastTargetEngagementDaySerial = lastEngagementDay,
-                TargetSectorOwnStrength       = localOwn,
-                TargetSectorEnemyStrength     = localEnemy,
+                TargetLocalOwnStrength       = localOwn,
+                TargetLocalEnemyStrength     = localEnemy,
                 CurrentMonth                  = month,
                 CurrentYear                   = year
             };
