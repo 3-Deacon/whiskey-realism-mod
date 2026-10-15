@@ -206,6 +206,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderArbiter.cs" Link="Battle\OrderArbiter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleProducerRegistry.cs" Link="Battle\BattleProducerRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattlePerception.cs" Link="Battle\BattlePerception.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TroopQuality.cs" Link="Battle\TroopQuality.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SlicePressureBuilder.cs" Link="Battle\SlicePressureBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\WithdrawalIntentProducer.Plan.cs" Link="Battle\Producers\WithdrawalIntentProducer.Plan.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeDemotionTracker.cs" Link="Battle\Producers\ChargeDemotionTracker.cs" />

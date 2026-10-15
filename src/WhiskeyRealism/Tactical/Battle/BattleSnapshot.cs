@@ -70,6 +70,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public float VisibleEnemyCentroidX { get; private set; }
         public float VisibleEnemyCentroidZ { get; private set; }
         public float VisibleReinforcementStrength { get; private set; }
+        // BC8: the enemy's mean morale / star experience over the observations (visible 1,
+        // remembered by confidence, reinforcement columns excluded); Unknown with none.
+        public SideQuality PerceivedEnemyQuality { get; private set; }
         public float NearestVisibleReinforcementHours { get; private set; }
 
         // D5 telemetry: groups where the parent map and vanilla Transform.IsChildOf
@@ -162,6 +165,7 @@ namespace WhiskeyRealism.Tactical.Battle
             VisibleEnemyCentroidZ = 0f;
             VisibleReinforcementStrength = 0f;
             NearestVisibleReinforcementHours = float.MaxValue; // none seen (BC2a's sentinel)
+            PerceivedEnemyQuality = SideQuality.Unknown;
         }
 
         internal void AddOwn(in UnitRecord record)
@@ -264,6 +268,11 @@ namespace WhiskeyRealism.Tactical.Battle
             RememberedEnemyStrength = rememberedStrength;
             VisibleEnemyCentroidX = visibleCentroidX;
             VisibleEnemyCentroidZ = visibleCentroidZ;
+        }
+
+        internal void SetPerceivedEnemyQuality(SideQuality quality)
+        {
+            PerceivedEnemyQuality = quality;
         }
 
         internal void SetReinforcementSummary(float visibleStrength, float nearestHours)

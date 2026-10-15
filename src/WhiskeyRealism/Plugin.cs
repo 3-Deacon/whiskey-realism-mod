@@ -81,6 +81,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
+        public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -600,12 +601,31 @@ namespace WhiskeyRealism
                 "the two moving regiments closest to their target get combat behavior 3 when their own first range-list enemy is visible, within " +
                 "vanilla's charge radius of the brigade HQ (maxchargeradius, 50 m shipped, so charges are rare), and weaker in morale by 0.15, " +
                 "disordered or flanked; own morale at least 0.5, fatigue at most 0.6, no friendly in the lane, and (vanilla's unread pref No Micro " +
-                "AI Charge If Outflanked) not while outflanked or under flanking fire. Vanilla's own odds check still decides the charge. Reverts " +
+                "AI Charge If Outflanked) not while outflanked or under flanking fire; with Enable Experience And Drill AI Weighting on, only when " +
+                "vanilla's own experience-weighted charge odds would pass. Vanilla's own odds check still decides the charge. Reverts " +
                 "to behavior 2 when the charge resolves, the conditions fail or the brigade leaves assault, waits out vanilla's renew interval " +
                 "(at least 120 battle seconds) after a refused charge, and restores vanilla's intended cancel: an AI infantry regiment left in " +
                 "charge mode whose brigade is out of assault is taken out of it. Never on W&L player-owned or feud units; orders go through the " +
                 "battle-core order executor (Tactical Commander Mode = Active). Off: arms nothing, hands back what it armed and stops the " +
                 "restored cancel; AI infantry then reaches melee only by contact, as in vanilla.");
+            EnableExperienceAndDrillAiWeighting = Config.Bind(
+                "Tactical",
+                "Enable Experience And Drill AI Weighting",
+                true,
+                "Default ON. Whiskey's battle decisions weigh troop quality the way vanilla's own do. Army attack/hold (reinforcement " +
+                "opportunity doctrine, #44's macro opinion): vanilla's force balance, the strength ratio x (1 + own - enemy mean morale) x " +
+                "(1 + own - enemy mean experience); the attack/defend boundary is divided by 1 + commander initiative x vanilla's " +
+                "initiative influence (0.7 shipped) and the withdrawal threshold is not, as vanilla divides its attack and defend " +
+                "triggers but not its retreat trigger. Group stance sectors and #44's odds: own and enemy strength x vanilla's blends " +
+                "1 - w + experience x w and 1 - w + morale x w (expinfluenceonaidecisions / moraleinfluenceonaidecisions, 0.25 shipped), " +
+                "a group's own experience and morale against the closest visible enemy's. Withdrawal: an AI regiment under fire whose losses reach 80% of its own rout point (vanilla's unbearable-losses " +
+                "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
+                "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
+                "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
+                "Campaign: a coordinated offensive package (#38, which replaces vanilla's offensive gathering) needs its attack and reinforce " +
+                "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
+                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
+                "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
