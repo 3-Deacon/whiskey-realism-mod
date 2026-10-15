@@ -63,6 +63,13 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableBattleHqConditionFix;
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
+
+        /// <summary>Tactical / Enable Flank Response And Envelopment (BC11 decisions 1, 3, 4).</summary>
+        internal static bool FlankResponseEnabled()
+        {
+            try { return EnableFlankResponseAndEnvelopment != null && EnableFlankResponseAndEnvelopment.Value; }
+            catch { return false; }
+        }
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;

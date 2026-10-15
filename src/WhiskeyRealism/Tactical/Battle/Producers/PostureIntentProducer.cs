@@ -420,6 +420,22 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
     }
 
+    /// <summary>
+    /// BC11 decision 2: which posture NoWrite verdicts a due refused flank may override. A group that is
+    /// already doing its task (formation right, idle where idle is the task) has nothing else to write;
+    /// every other NoWrite (moving, order pending, routed, protected) keeps its verdict.
+    /// </summary>
+    internal static class PostureRefuse
+    {
+        internal const string PromotedReason = "refuse-flank";
+
+        internal static bool PromotesNoWrite(string reason)
+        {
+            return string.Equals(reason, "already-correct", StringComparison.Ordinal) ||
+                string.Equals(reason, "already-valid", StringComparison.Ordinal);
+        }
+    }
+
     // #61 TryApplyGroup minus the division-play override (D8: the division play
     // is its own Priority.Play producer): doctrine-order task, GT recon, cavalry
     // follow, local flank emergency, army opportunity override, then
@@ -427,6 +443,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     internal static class PosturePipeline
     {
         internal const string ProbeReason = "probe-nomination";
+        internal const string ManeuverFacingReason = "envelopment-turn";
 
         internal static bool Run(
             BattleSnapshot s,
@@ -543,11 +560,27 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 g.FlankRisk = flankRisk;
             }
 
+            // BC11 decision 2: the refused flank. A group already doing its task (idle, formation right) used to
+            // return here, so a refused flank never left the posture executor; a flank that is due is its own write.
+            // A refuse already ordered on that side is not re-ordered (the executor keeps the last issued refuse).
+            RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
+            OrderExecutor refuseExecutor = OrderExecutor.ForAlliance(s.Alliance);
+            bool refuseDue = refuse != RefuseFlank.None && rec.UnitTyp > TacticalUnitType.MaxCombat &&
+                (refuseExecutor == null || refuseExecutor.LastIssuedRefuse(rec.InstanceId) != refuse);
+
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
-                PostureRoutes.Forget(rec.InstanceId);
-                PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
-                return false;
+                if (refuseDue && PostureRefuse.PromotesNoWrite(decision.Reason))
+                {
+                    decision = new PostureExecutionDecision(PostureExecutionAction.SetFormation, PostureRefuse.PromotedReason,
+                        PostureExecutionTarget.CurrentPosition);
+                }
+                else
+                {
+                    PostureRoutes.Forget(rec.InstanceId);
+                    PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
+                    return false;
+                }
             }
 
             bool hasTarget = PostureTargets.TryResolve(s, t, i, side, state, order, decision.Target, out float x, out float z);
@@ -583,14 +616,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             // #61 SetFormation: threat facing for holding tasks and the refused
-            // flank in contact, on the formation channels.
-            RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
+            // flank in contact, on the formation channels. BC11 decision 1: the facing is the strongest
+            // perceived pressure on the front (FlankFacing), the closest visible enemy as before without it.
             float heading = -1f;
             bool hasThreatHeading = false;
             bool needsFacing = false;
-            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) && PostureTargets.TryThreat(s, i, out float threatX, out float threatZ))
+            string facingSource = PostureTargets.NoFacingSource;
+            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) &&
+                PostureTargets.TryFacingBearing(s, i, rec.RotationY, out heading, out facingSource))
             {
-                heading = PostureSense.HeadingTo(rec.X, rec.Z, threatX, threatZ);
                 hasThreatHeading = heading >= 0f;
                 needsFacing = CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, heading, PostureSense.FacingToleranceDegrees);
             }
@@ -607,7 +641,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
                 InContactWithdrawal = closeEngaged || flankRisk,
                 AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
-                Refuse = refuse,
+                Refuse = refuseDue ? refuse : RefuseFlank.None,
                 // #61 wheeled with the threat heading whenever it had one (not only
                 // when the facing was off): a refuse-only wheel faces the threat.
                 HasThreatHeading = hasThreatHeading,
@@ -623,12 +657,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ColumnWait = columnWait,
             };
             int submitted = PostureIntentPlan.Submit(sink, request);
+            // BC11 decision 4: an EnvelopmentManeuver Turn faces the group at the enemy line end (the executor
+            // wheels it out of combat, rotates its regiments in place in combat).
+            if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&
+                CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, order.ManeuverHeading, PostureSense.FacingToleranceDegrees))
+                submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, order.ManeuverHeading, state.Task, RefuseFlank.None,
+                    priority, source, ManeuverFacingReason, t.RegimentQueue, t.Regiments);
             bool shapes = decision.Action == PostureExecutionAction.SetFormation ||
                 (decision.Action == PostureExecutionAction.SetFormationAndWaypoint && hasTarget);
             if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
-            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason);
+            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason, facingSource);
             return submitted > 0;
         }
 
@@ -985,6 +1025,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             t.NavDeferred = false;
+            // BC11 decision 4: an EnvelopmentManeuver hold stands where the child is; no target to plan a route to,
+            // so it burns no nav plan.
+            if (kind == PostureExecutionTarget.DoctrinePrimaryTarget && order.ManeuverHold) return false;
             // BC9: a Scout or Probe task's forward target is where the recon planner looks
             // (its probe nomination, else BattleRecon.LookPoint), not an objective
             // stand-off; a break-off or recovery keeps its own target.
@@ -1029,6 +1072,32 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 !TryNavPlan(s, t, i, state, order, kind, ref x, ref z))
                 return false;
             return PostureSense.IsMoveAway(s.Own[i], x, z);
+        }
+
+        internal const string NoFacingSource = "none";
+        private const string PressureFacingSource = "pressure";
+        private const string ClosestFacingSource = "closest";
+
+        /// <summary>
+        /// BC11 decision 1: the bearing a holding group faces. The strongest perceived pressure within the slice
+        /// range (FlankFacing.MostPressuredBearing, hysteresis on the group's current facing) with Enable Flank
+        /// Response And Envelopment on, else the closest visible enemy (PostureTargets.TryThreat, as before).
+        /// <paramref name="source"/> is the telemetry facingSource: pressure, closest or none.
+        /// </summary>
+        internal static bool TryFacingBearing(BattleSnapshot s, int i, float currentFacing, out float bearing, out string source)
+        {
+            bearing = -1f;
+            source = NoFacingSource;
+            if (s == null || i < 0 || i >= s.OwnCount) return false;
+            if (Plugin.FlankResponseEnabled() && FlankFacing.MostPressuredBearing(s, i, currentFacing, out bearing, out _))
+            {
+                source = PressureFacingSource;
+                return true;
+            }
+            if (!TryThreat(s, i, out float x, out float z)) return false;
+            bearing = PostureSense.HeadingTo(s.Own[i].X, s.Own[i].Z, x, z);
+            source = ClosestFacingSource;
+            return true;
         }
 
         internal static bool TryThreat(BattleSnapshot s, int i, out float x, out float z)
@@ -1408,7 +1477,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         internal static void Group(BattleSnapshot s, int i, string source, CommandNodeOperationalState state,
-            PostureExecutionDecision decision, int submitted, string reason)
+            PostureExecutionDecision decision, int submitted, string reason, string facingSource = null)
         {
             try
             {
@@ -1431,6 +1500,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         .WithField("task", state.Task.ToString())
                         .WithField("selectedTarget", decision.Target.ToString())
                         .WithField("intents", submitted)
+                        .WithField("facingSource", facingSource ?? PostureTargets.NoFacingSource)
                         .WithField("writeResult", submitted > 0 ? "submitted" : "none"));
             }
             catch (Exception ex)
@@ -1617,6 +1687,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             int k = s.ClosestVisibleEnemy(u, out float distance);
             bool hasThreat = k >= 0;
             float heading = hasThreat ? PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z) : -1f;
+            // BC11 decision 1: a brigade or division faces the strongest pressure on its front; the regiment pulse
+            // stays on the closest visible enemy (vanilla's per-regiment rule, StopMicroUnitsCloseToEnemyAndRotateTowards 4539).
+            if (hasThreat && scope != TacticalFacingPulseScope.Regiment && Plugin.FlankResponseEnabled() &&
+                FlankFacing.MostPressuredBearing(s, u, rec.RotationY, out float pressureBearing, out _))
+                heading = pressureBearing;
             TacticalFacingThreatSource source = hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
             // BC9: with nothing visible, a screen, probe or flank guard faces where
             // unseen enemies come from (the doctrine refuses the source for other tasks).

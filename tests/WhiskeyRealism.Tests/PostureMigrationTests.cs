@@ -371,7 +371,7 @@ internal static class PostureMigrationTests
             Regiment(3, 200f, -1000f), Regiment(4, 9999f, -9999f, flags: UnitFlags.None),
         }, new[] { -1, 0, 1, 1 });
         own.Own[3].Flags &= ~UnitFlags.Active;
-        int corps = PlayAnchor.CollectOwn(own, 15, lists.Item1, lists.Item2, lists.Item3);
+        int corps = PlayAnchor.CollectOwn(own, 15, lists.Item1, lists.Item2, lists.Item3, new HashSet<string> { "child-1", "child-2" });
         AssertEqual(3, lists.Item1.Count, "own centroid from the snapshot's active units only");
         AssertEqual(2, corps, "command-level units at or above the shifted command minimum");
         AssertEqual("child-1", lists.Item3[0].ChildId, "corps id format matches DirectChildDiscovery");

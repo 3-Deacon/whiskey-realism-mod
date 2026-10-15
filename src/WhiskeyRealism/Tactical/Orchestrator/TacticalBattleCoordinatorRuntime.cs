@@ -692,7 +692,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         // Gated: the side's snapshot for this Tick (heavy gate evaluated once).
                         var snap = EnsureSideSnapshot(side, battle);
-                        int intentsHash = CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents);
+                        int intentsHash = unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash);
                         bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
                             || intentsHash != _lastLedgerIntentsHash[s];
                         if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))
@@ -1554,10 +1554,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var ex = side.Army.CurrentDirectChildIntents[0];
                         shift = ex.RawUnitTyp - ex.EffectiveCommandLevel;
                     }
+                    var childIds = new string[childCount];
+                    for (int c = 0; c < childCount; c++) childIds[c] = side.Army.CurrentDirectChildIntents[c].ChildId;
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
-                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis);
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
+                // BC11 decision 4: the enveloping children's state machines (the doctrine build overrides their nodes).
+                side.Army.SetManeuvers(zoneAssignments == null || !side.Army.HasPlan
+                    ? null
+                    : WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime.StepManeuvers(
+                        side.AllianceId, side.Army.CurrentPlan.PlanId, side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance));
                 var allocatedRoles = new DirectChildRole[side.Army.CurrentDirectChildIntents.Count];
                 for (int r = 0; r < allocatedRoles.Length; r++) allocatedRoles[r] = side.Army.CurrentDirectChildIntents[r].Role;
                 DeployedReserveMemory.Shared.NoteRoles(deployedReserve, childInstanceIds, allocatedRoles);

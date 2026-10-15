@@ -59,11 +59,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static PlayTemplate DoubleEnvelopment()
         {
             // Two wings + center pin + reserve. Both wings dispatch simultaneously
-            // (StartTimeOffset=0). Reserve sits in rear-center.
+            // (StartTimeOffset=0); each wing's child marches to its rect, faces the enemy line
+            // end on its side and attacks it (EnvelopmentManeuver). A wing that fails the
+            // FlankMove checks (river or anchored high ground on the inward leg) is abandoned.
+            // Reserve sits in rear-center.
             return new PlayTemplate("DoubleEnvelopment", BattlePlanId.DoubleEnvelopment, new[]
             {
-                new PlayRect(PlayRectKind.LeftWing,  -0.9f, +0.4f, 0.5f, 0.5f, 0f, priority: 10),
-                new PlayRect(PlayRectKind.RightWing, +0.9f, +0.4f, 0.5f, 0.5f, 0f, priority: 10),
+                new PlayRect(PlayRectKind.LeftWing,  -0.9f, +0.4f, 0.5f, 0.5f, 0f, priority: 10, envelops: true),
+                new PlayRect(PlayRectKind.RightWing, +0.9f, +0.4f, 0.5f, 0.5f, 0f, priority: 10, envelops: true),
                 new PlayRect(PlayRectKind.Center,     0.0f, +0.3f, 0.4f, 0.4f, 0f, priority: 8),
                 new PlayRect(PlayRectKind.Reserve,    0.0f, -0.4f, 0.4f, 0.4f, 0f, priority: 5),
             });
@@ -71,36 +74,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static PlayTemplate MobileFlankMarch()
         {
-            // Fast operational flanking — one wide flank wing arrives ~15min
-            // after center pin establishes contact. Reverse-engineerable from
-            // Jackson Chancellorsville flank-march pattern.
+            // Fast operational flanking: the FlankMarch rect's child holds until 900 battle-seconds
+            // after the Center child's contact, marches to the rect, faces the enemy line end
+            // and attacks it (EnvelopmentManeuver). Reverse-engineerable from Jackson
+            // Chancellorsville flank-march pattern.
             return new PlayTemplate("MobileFlankMarch", BattlePlanId.MobileFlankMarch, new[]
             {
                 new PlayRect(PlayRectKind.Center,    0.0f, +0.3f, 0.5f, 0.4f, 0f,    priority: 10),
-                new PlayRect(PlayRectKind.FlankMarch,-1.1f, +0.6f, 0.5f, 0.6f, 900f, priority: 9),
+                new PlayRect(PlayRectKind.FlankMarch,-1.1f, +0.6f, 0.5f, 0.6f, 900f, priority: 9, envelops: true),
                 new PlayRect(PlayRectKind.Reserve,    0.0f, -0.4f, 0.4f, 0.4f, 0f,   priority: 5),
             });
         }
 
         private static PlayTemplate WideFlankApproach()
         {
-            // Single wide-arc flank with a strong center fix. Right-wing chosen
-            // (mirror-arbitrary; corps assignment resolves it geographically).
+            // Single wide-arc flank with a strong center fix. The FlankMarch rect's child holds until
+            // 600 battle-seconds after the Center child's contact, then marches, faces the enemy
+            // line end and attacks it (EnvelopmentManeuver); the mirrored side is tried when the
+            // right is anchored or cut by a river. Right-wing chosen (mirror-arbitrary; corps
+            // assignment resolves it geographically).
             return new PlayTemplate("WideFlankApproach", BattlePlanId.WideFlankApproach, new[]
             {
                 new PlayRect(PlayRectKind.Center,     0.0f, +0.4f, 0.5f, 0.4f, 0f,   priority: 10),
-                new PlayRect(PlayRectKind.FlankMarch,+1.0f, +0.7f, 0.5f, 0.6f, 600f, priority: 9),
+                new PlayRect(PlayRectKind.FlankMarch,+1.0f, +0.7f, 0.5f, 0.6f, 600f, priority: 9, envelops: true),
                 new PlayRect(PlayRectKind.Reserve,    0.0f, -0.4f, 0.4f, 0.4f, 0f,   priority: 5),
             });
         }
 
         private static PlayTemplate ManeuverAndFix()
         {
-            // Fix center, maneuver one wing wide. Sherman Atlanta pattern.
+            // Fix center, maneuver one wing wide. The RIGHT wing is the maneuvering wing: the centre fixes, the
+            // right wing goes round 300 battle-seconds after the Center child's contact (EnvelopmentManeuver).
+            // Sherman Atlanta pattern.
             return new PlayTemplate("ManeuverAndFix", BattlePlanId.ManeuverAndFix, new[]
             {
                 new PlayRect(PlayRectKind.Center,     0.0f, +0.3f, 0.5f, 0.4f, 0f,   priority: 10),
-                new PlayRect(PlayRectKind.RightWing, +0.85f,+0.5f, 0.5f, 0.5f, 300f, priority: 9),
+                new PlayRect(PlayRectKind.RightWing, +0.85f,+0.5f, 0.5f, 0.5f, 300f, priority: 9, envelops: true),
                 new PlayRect(PlayRectKind.Demonstration,-0.7f,+0.3f,0.4f,0.4f, 0f,   priority: 6),
                 new PlayRect(PlayRectKind.Reserve,    0.0f, -0.4f, 0.4f, 0.4f, 0f,   priority: 5),
             });
@@ -146,8 +155,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static PlayTemplate HesitatedCommit()
         {
-            // Methodical-aggressive with deferred commit — center moves first,
-            // wings hold then advance after delay.
+            // Methodical-aggressive with deferred commit — center moves first, the wings hold for
+            // their 600 battle-second offset (a start delay: the child holds, then takes its
+            // allocator role; no maneuver) and then advance.
             return new PlayTemplate("HesitatedCommit", BattlePlanId.HesitatedCommit, new[]
             {
                 new PlayRect(PlayRectKind.Center,    0.0f, +0.4f, 0.5f, 0.4f, 0f,   priority: 10),
@@ -201,11 +211,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static PlayTemplate CavalryRaid()
         {
-            // Cavalry deep raid — single rect anchored far behind enemy.
-            // Other forces (if any) hold a screening rect.
+            // Cavalry deep raid — single rect anchored far behind enemy; the child marches first to an
+            // outflank point beyond the less-pressured end of the perceived enemy line, then to the rect
+            // (EnvelopmentManeuver). Other forces (if any) hold a screening rect.
             return new PlayTemplate("CavalryRaid", BattlePlanId.CavalryRaid, new[]
             {
-                new PlayRect(PlayRectKind.DeepRaid,     0.0f, +1.5f, 0.4f, 0.4f, 0f, priority: 10),
+                new PlayRect(PlayRectKind.DeepRaid,     0.0f, +1.5f, 0.4f, 0.4f, 0f, priority: 10, envelops: true),
                 new PlayRect(PlayRectKind.ForwardScreen,0.0f, +0.3f, 0.5f, 0.3f, 0f, priority: 5),
             });
         }
@@ -262,6 +273,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static PlayTemplate GenericMethodical()
         {
+            // The wings' 300 battle-second offset is a start delay (hold, then the allocator's role; no maneuver).
             return new PlayTemplate("GenericMethodical", BattlePlanId.GenericMethodical, new[]
             {
                 new PlayRect(PlayRectKind.Center,     0.0f, +0.3f, 0.5f, 0.4f, 0f,   priority: 10),

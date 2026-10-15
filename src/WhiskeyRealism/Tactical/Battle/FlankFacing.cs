@@ -15,6 +15,7 @@
 //     counted subordinate (120566-120580); the intended weight is each subordinate's own.
 
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Battle
@@ -411,6 +412,48 @@ namespace WhiskeyRealism.Tactical.Battle
         public static bool Counts(int unitTyp, bool activeInHierarchy, bool ignoreActiveState, bool exceptionIsThisGroupAndInactive, bool surrendering)
         {
             return unitTyp <= 13 && (activeInHierarchy || ignoreActiveState || exceptionIsThisGroupAndInactive || surrendering);
+        }
+    }
+
+    /// <summary>
+    /// BC11 decision 6 measurement: a vanilla FlankMove sets the group's lastaiorder to 4 + direction (117107), and the AI
+    /// returns it to 0 when the group is idle again. This watch reports, per snapshot, the groups whose value went from 0
+    /// to 4 or 5 since the previous snapshot (a group first seen is only recorded), so the flank-move rate with the
+    /// flank tally patch on and off can be compared (smoke item 2.33). Pooled, grow-only.
+    /// </summary>
+    public sealed class VanillaFlankMoveWatch
+    {
+        private readonly Dictionary<int, int> _last = new Dictionary<int, int>(64);
+
+        /// <summary>
+        /// Notes every group's LastAiOrder; writes the instance ids (and directions, lastaiorder - 4) of the groups that
+        /// started a flank move since the last call. Returns how many (up to the buffer length).
+        /// </summary>
+        public int Observe(BattleSnapshot s, int[] groupIds, int[] directions)
+        {
+            if (s == null || groupIds == null || directions == null) return 0;
+            int found = 0;
+            int capacity = Math.Min(groupIds.Length, directions.Length);
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((own[i].Flags & UnitFlags.IsGroup) == 0) continue;
+                int id = own[i].InstanceId;
+                int now = own[i].LastAiOrder;
+                if (_last.TryGetValue(id, out int before) && before == 0 && (now == 4 || now == 5) && found < capacity)
+                {
+                    groupIds[found] = id;
+                    directions[found] = now - 4;
+                    found++;
+                }
+                _last[id] = now;
+            }
+            return found;
+        }
+
+        public void Clear()
+        {
+            _last.Clear();
         }
     }
 }

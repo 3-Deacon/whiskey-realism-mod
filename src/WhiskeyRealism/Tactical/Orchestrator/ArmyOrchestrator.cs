@@ -596,13 +596,56 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // cycles, and the reserve-release context (global odds) and
             // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
+            IReadOnlyList<DirectChildIntent> previousIntents = _directChildIntents;
             _directChildIntents = DirectChildAllocator.StabilizeMain(
                 DirectChildAllocator.AllocateWithZones(
                     _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                    perChildEnemyIntent, zoneAssignments, new ReserveReleaseContext(_lastGlobalOdds)),
+                    perChildEnemyIntent, zoneAssignments, new ReserveReleaseContext(_lastGlobalOdds, Plugin.FlankResponseEnabled())),
                 _mainHysteresis);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
+            EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitDirectChildIntentTelemetry();
+        }
+
+        // BC11 decision 3: one TacticalReserveRelease row when a Reserve child becomes the guard of a threatened
+        // wing (a state change, so it is bounded by the role flips themselves).
+        private void EmitFlankReserveReleaseTelemetry(IReadOnlyList<DirectChildIntent> previous, IReadOnlyList<DirectChildIntent> current)
+        {
+            if (previous == null || current == null) return;
+            try
+            {
+                for (int i = 0; i < current.Count; i++)
+                {
+                    DirectChildRole role = current[i].Role;
+                    if (role != DirectChildRole.RefuseLeft && role != DirectChildRole.RefuseRight) continue;
+                    int before = IndexOfChild(previous, current[i].ChildId);
+                    if (before < 0 || previous[before].Role != DirectChildRole.Reserve) continue;
+                    DirectChildIntent released = current[i];
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", "flank-threat", "side=" + AllianceId + "|child=" + released.ChildId + "|role=" + released.Role)
+                            .WithField("side", AllianceId)
+                            .WithField("child", released.ChildId)
+                            .WithField("role", released.Role.ToString())
+                            .WithField("wingSector", released.AxisSector)
+                            .WithField("reason", "flank-threat"));
+                }
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalReserveRelease] emit failed: " + ex.Message); } catch { }
+            }
+        }
+
+        private static int IndexOfChild(IReadOnlyList<DirectChildIntent> intents, string childId)
+        {
+            for (int i = 0; i < intents.Count; i++)
+                if (string.Equals(intents[i].ChildId, childId, System.StringComparison.Ordinal)) return i;
+            return -1;
         }
 
         // ---- Role-distribution telemetry (2026-05-22 — D from "Fix it all correctly") ----
@@ -1068,6 +1111,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _currentDoctrineOrders = Array.Empty<CommandDoctrineOrder>();
         }
 
+        // BC11 decision 4: the side's maneuver orders (EnvelopmentManeuver), set by the coordinator each direct-child cycle.
+        private IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> _maneuvers =
+            Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver>();
+        private int _maneuverHash;
+
+        public IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> CurrentManeuvers => _maneuvers;
+
+        /// <summary>A hash of the maneuver orders; the ledger gate ticks when it changes (a phase change must reach the doctrine orders).</summary>
+        internal int ManeuverHash => _maneuverHash;
+
+        internal void SetManeuvers(IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> maneuvers)
+        {
+            _maneuvers = maneuvers ?? Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver>();
+            _maneuverHash = WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.Hash(_maneuvers);
+        }
+
         internal void UpdateOperationsLedger(
             TacticalOperationsLedgerRuntime ledger,
             IReadOnlyList<CommandNodeOperationalState> commandOperations)
@@ -1089,7 +1148,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance);
+            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents));
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
         }

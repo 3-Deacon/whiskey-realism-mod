@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -46,6 +48,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static readonly List<float>[] _ownXsScratch = { new List<float>(64), new List<float>(64) };
         private static readonly List<float>[] _ownZsScratch = { new List<float>(64), new List<float>(64) };
         private static readonly List<CorpsPosition>[] _corpsPosScratch = { new List<CorpsPosition>(16), new List<CorpsPosition>(16) };
+        private static readonly HashSet<string>[] _childIdScratch =
+            { new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal) };
 
         /// <summary>Position-bucket size (meters) for signature comparison.</summary>
         private const float PositionBucketMeters = 50f;
@@ -62,17 +66,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         /// <param name="frontAxis">The side's front axis, the play's heading when
         /// the side sees no enemy (PlayAnchor.EnemyAnchor).</param>
+        /// <param name="directChildIds">The side's direct children ("child-&lt;id&gt;"): only they are offered a rect (BC11).</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
             int commandHierarchyShift,
             int childCount,
-            TacticalFrontAxis frontAxis)
+            TacticalFrontAxis frontAxis,
+            IReadOnlyList<string> directChildIds)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds);
             }
         }
 
@@ -81,7 +87,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             BattlePlanId planId,
             int commandHierarchyShift,
             int childCount,
-            TacticalFrontAxis frontAxis)
+            TacticalFrontAxis frontAxis,
+            IReadOnlyList<string> directChildIds)
         {
             try
             {
@@ -107,7 +114,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 var ownXs = _ownXsScratch[allianceId]; ownXs.Clear();
                 var ownZs = _ownZsScratch[allianceId]; ownZs.Clear();
                 var corpsPositions = _corpsPosScratch[allianceId]; corpsPositions.Clear();
-                if (PlayAnchor.CollectOwn(snapshot, effectiveCommandMin, ownXs, ownZs, corpsPositions) == 0) return null;
+                var childIdSet = _childIdScratch[allianceId];
+                childIdSet.Clear();
+                if (directChildIds != null)
+                    for (int c = 0; c < directChildIds.Count; c++)
+                        if (!string.IsNullOrEmpty(directChildIds[c])) childIdSet.Add(directChildIds[c]);
+                if (PlayAnchor.CollectOwn(snapshot, effectiveCommandMin, ownXs, ownZs, corpsPositions, childIdSet) == 0) return null;
 
                 PlayProjection.ComputeCentroid(ownXs, ownZs, out float armyX, out float armyZ, out int ownN);
                 if (ownN == 0) return null;
@@ -249,6 +261,236 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastComputePlan[i] = BattlePlanId.Unknown;
             }
             _lastPlayExecutionTelemetryAt.Clear();
+            for (int i = 0; i < SideCount; i++) _maneuvers[i].Clear();
+        }
+
+        // ---- BC11 decision 4: envelopment maneuvers --------------------------------------------
+
+        private sealed class SideManeuvers
+        {
+            public BattlePlanId Plan = BattlePlanId.Unknown;
+            public double ActivatedHours = -1.0;
+            public double CenterContactHours = -1.0;
+            public readonly Dictionary<string, ManeuverState> States = new Dictionary<string, ManeuverState>(StringComparer.Ordinal);
+            public readonly List<ChildManeuver> Orders = new List<ChildManeuver>(8);
+
+            public void Clear()
+            {
+                Plan = BattlePlanId.Unknown;
+                ActivatedHours = -1.0;
+                CenterContactHours = -1.0;
+                States.Clear();
+                Orders.Clear();
+            }
+        }
+
+        // Plan-scoped state per side (BattleScope "play-executor" clears it with the zone-assignment cache).
+        private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(), new SideManeuvers() };
+        private static readonly int[] _riverSamples = new int[4096];
+        private static readonly Func<float, float, float> TerrainHeightAt = HeightAt;
+
+        /// <summary>
+        /// Steps every maneuvering child's state machine (EnvelopmentManeuver.Step) from what the side perceives and returns
+        /// the orders; the army turns them into doctrine orders for each node of the child (CommandDoctrineAssignment).
+        /// Fog-honest (observations only) and on the doctrine clock. Empty when Enable Flank Response And Envelopment is off,
+        /// no play is active or the side is a Defender. The child's evidence supplies its strength bucket.
+        /// </summary>
+        public static IReadOnlyList<ChildManeuver> StepManeuvers(
+            int allianceId,
+            BattlePlanId planId,
+            IReadOnlyList<DirectChildIntent> intents,
+            IReadOnlyList<DirectChildEvidence> evidence,
+            TacticalFrontAxis axis,
+            BattleStance stance)
+        {
+            using (TelemetryPerf.Scope("tactical.envelopment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1.0))
+            {
+                if (allianceId < 0 || allianceId >= SideCount) return Array.Empty<ChildManeuver>();
+                SideManeuvers side = _maneuvers[allianceId];
+                try
+                {
+                    if (!Plugin.FlankResponseEnabled() || planId == BattlePlanId.Unknown || intents == null || !axis.IsValid)
+                    {
+                        side.Clear();
+                        return side.Orders;
+                    }
+                    PlayTemplate template = PlayTemplateCatalog.Lookup(planId);
+                    if (template == null || !BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot snapshot) || snapshot == null)
+                    {
+                        side.Clear();
+                        return side.Orders;
+                    }
+
+                    double now = TacticalDoctrineTime.NowBattleHours;
+                    // A new plan, or the clock went back (reload, new battle): the maneuvers start over.
+                    if (side.Plan != planId || now < side.ActivatedHours)
+                    {
+                        side.Clear();
+                        side.Plan = planId;
+                        side.ActivatedHours = now;
+                    }
+
+                    bool templateHasCenter = false;
+                    int envelopRects = 0;
+                    for (int r = 0; r < template.Rects.Count; r++)
+                    {
+                        if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenter = true;
+                        if (template.Rects[r].Envelops) envelopRects++;
+                    }
+                    NoteCenterContact(side, snapshot, allianceId, now, templateHasCenter);
+
+                    PlayAnchor.EnemyAnchor(snapshot, axis, axis.OriginX, axis.OriginZ, out float enemyX, out float enemyZ);
+                    BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+                    side.Orders.Clear();
+                    for (int i = 0; i < intents.Count; i++)
+                    {
+                        ManeuverSpec spec = intents[i].Maneuver;
+                        if (!spec.HasValue) continue;
+                        int index = snapshot.IndexOfOwn(ParseChildInstanceId(intents[i].ChildId));
+                        if (index < 0) continue;
+                        side.States.TryGetValue(intents[i].ChildId, out ManeuverState state);
+                        ManeuverPhase before = state.Phase;
+                        bool wasMirrored = state.Mirrored;
+
+                        ManeuverInput input = BuildInput(snapshot, grid, axis, spec, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
+                            state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now);
+                        ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
+                        side.States[intents[i].ChildId] = state;
+                        side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
+                        if (state.Phase != before || state.Mirrored != wasMirrored) EmitEnvelopment(allianceId, planId, intents[i].ChildId, order, state, input);
+                    }
+                    return side.Orders;
+                }
+                catch (Exception e)
+                {
+                    OnceLog.Warning("play-executor-runtime:maneuver-exception",
+                        "PlayExecutorRuntime.StepManeuvers failed: " + e.GetType().Name + " " + e.Message);
+                    side.Orders.Clear();
+                    return side.Orders;
+                }
+            }
+        }
+
+        // The Center rect's child sees an enemy within ContactMeters: the first doctrine hour that happens is kept.
+        private static void NoteCenterContact(SideManeuvers side, BattleSnapshot snapshot, int allianceId, double now, bool templateHasCenter)
+        {
+            if (!templateHasCenter || side.CenterContactHours >= 0.0) return;
+            IReadOnlyList<CorpsAssignment> assignments = _lastResult[allianceId];
+            if (assignments == null) return;
+            for (int a = 0; a < assignments.Count; a++)
+            {
+                if (assignments[a].RectKind != PlayRectKind.Center) continue;
+                int index = snapshot.IndexOfOwn(ParseChildInstanceId(assignments[a].ChildId));
+                if (index >= 0 && snapshot.ClosestVisibleEnemy(index, out float distance) >= 0 && distance <= EnvelopmentManeuver.ContactMeters)
+                {
+                    side.CenterContactHours = now;
+                    return;
+                }
+            }
+        }
+
+        private static ManeuverInput BuildInput(BattleSnapshot snapshot, BattleTerrainGrid grid, TacticalFrontAxis axis, ManeuverSpec spec, int index,
+            int strengthBucket, bool mirrored, bool outflankReached, bool templateHasCenter, bool canMirror, SideManeuvers side,
+            float enemyX, float enemyZ, BattleStance stance, double now)
+        {
+            ref UnitRecord child = ref snapshot.Own[index];
+            float anchorX = spec.AnchorX, anchorZ = spec.AnchorZ;
+            if (mirrored) EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out anchorX, out anchorZ);
+            bool right = EnvelopmentManeuver.RectIsRight(in axis, anchorX, anchorZ);
+
+            var input = new ManeuverInput
+            {
+                Kind = spec.Kind, Envelops = spec.Envelops, AnchorX = anchorX, AnchorZ = anchorZ, StartOffsetSeconds = spec.StartOffsetSeconds,
+                TemplateHasCenter = templateHasCenter, PlayActivatedHours = side.ActivatedHours, CenterContactHours = side.CenterContactHours,
+                ChildX = child.X, ChildZ = child.Z, ChildStrengthBucket = strengthBucket,
+                EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror,
+                HeightDifferenceAnchored = GamePrefs.heightdifferencetoenemyunitanchored, Stance = stance, NowHours = now,
+            };
+            input.ChildInContact = snapshot.ClosestVisibleEnemy(index, out float contactDistance) >= 0 && contactDistance <= EnvelopmentManeuver.ContactMeters;
+            input.ChildArrived = Distance(child.X, child.Z, anchorX, anchorZ) <= EnvelopmentManeuver.ArrivalMeters;
+            input.HasEnemyExtent = EnvelopmentManeuver.EnemyLineEnd(in axis, enemyX, enemyZ, right, out float endX, out float endZ);
+            input.EnemyEndX = endX;
+            input.EnemyEndZ = endZ;
+
+            if (spec.Kind == PlayRectKind.DeepRaid)
+            {
+                EnvelopmentManeuver.EnemyPressureSplit(snapshot, in axis, out float left, out float rightPressure);
+                float depth = (anchorX - axis.OriginX) * axis.ForwardX + (anchorZ - axis.OriginZ) * axis.ForwardZ;
+                if (EnvelopmentManeuver.OutflankPoint(in axis, depth, left, rightPressure, right, out float ox, out float oz))
+                {
+                    input.OutflankX = ox;
+                    input.OutflankZ = oz;
+                }
+                else
+                {
+                    input.OutflankX = anchorX;
+                    input.OutflankZ = anchorZ;
+                }
+            }
+
+            // FlankMove's checks (116929-117108) on the inward leg (anchor to the line end) and the march leg.
+            float inwardX = input.HasEnemyExtent ? endX : enemyX, inwardZ = input.HasEnemyExtent ? endZ : enemyZ;
+            input.AnchorHeight = HeightAt(anchorX, anchorZ);
+            input.CorridorEnemyCount = EnvelopmentManeuver.CorridorEnemies(snapshot, anchorX, anchorZ, inwardX, inwardZ, TerrainHeightAt, out float maxHeight);
+            input.MaxCorridorEnemyHeight = maxHeight;
+            if (grid != null)
+            {
+                int n = grid.SampleLine(anchorX, anchorZ, inwardX, inwardZ, EnvelopmentManeuver.InwardStepMeters, _riverSamples);
+                input.InwardLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
+                if (!grid.Frozen)
+                {
+                    n = grid.SampleLine(child.X, child.Z, anchorX, anchorZ, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
+                    input.MarchLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
+                }
+            }
+            return input;
+        }
+
+        private static float HeightAt(float x, float z)
+        {
+            return TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)).y;
+        }
+
+        private static float Distance(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx, dz = az - bz;
+            return (float)Math.Sqrt(dx * dx + dz * dz);
+        }
+
+        private static int ParseChildInstanceId(string childId)
+        {
+            const string prefix = "child-";
+            return !string.IsNullOrEmpty(childId) && childId.StartsWith(prefix, StringComparison.Ordinal) &&
+                int.TryParse(childId.Substring(prefix.Length), out int id) ? id : 0;
+        }
+
+        // One TacticalEnvelopment row per phase change (or mirror), so the stream is bounded by the state machine.
+        private static void EmitEnvelopment(int allianceId, BattlePlanId planId, string childId, in ManeuverOrder order, in ManeuverState state,
+            in ManeuverInput input)
+        {
+            try
+            {
+                string kind = input.Kind.ToString();
+                string phase = state.Phase.ToString();
+                string reason = state.Phase == ManeuverPhase.Abandoned ? (state.AbandonReason ?? order.Reason) : order.Reason;
+                bool mirrored = state.Mirrored;
+                float targetX = order.TargetX, targetZ = order.TargetZ, anchorX = input.AnchorX, anchorZ = input.AnchorZ;
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(allianceId)
+                        .WithDecision("TacticalEnvelopment", phase, "side=" + allianceId + "|child=" + childId + "|phase=" + phase)
+                        .WithField("plan", planId.ToString())
+                        .WithField("child", childId)
+                        .WithField("kind", kind)
+                        .WithField("phase", phase)
+                        .WithField("reason", reason)
+                        .WithField("mirrored", mirrored)
+                        .WithField("anchorX", anchorX)
+                        .WithField("anchorZ", anchorZ)
+                        .WithField("targetX", targetX)
+                        .WithField("targetZ", targetZ));
+            }
+            catch { }
         }
     }
 }
