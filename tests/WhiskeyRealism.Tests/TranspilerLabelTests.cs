@@ -23,6 +23,7 @@ internal static class TranspilerLabelTests
             ("transpiler offensive trim keeps every label and block", OffensiveTrimKeepsLabels),
             ("transpiler random pick keeps every label and block", RandomPickKeepsLabels),
             ("transpiler allocation trims keep every label and block", AllocationTrimsKeepLabels),
+            ("transpiler autoresolve weapon gate keeps every label and block", AutoresolveGateKeepsLabels),
             ("transpiler sources never copy instructions with clone", SourcesNeverCloneInstructions),
         });
     }
@@ -66,6 +67,16 @@ internal static class TranspilerLabelTests
             WhiskeyRealism.Patches.AllocationTrimIl.ResolveStringEquality(), nameHook, out int nameMatches);
         AssertEqual(1, nameMatches, "IsUnitUnderCommander site");
         AssertMarksKept(name, nameEdited, "IsUnitUnderCommander");
+    }
+
+    private static void AutoresolveGateKeepsLabels()
+    {
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(Autocalc), "FightUnit"));
+        var hook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(IntHookStub));
+        var edited = AutoresolveWeaponGateIl.Transpile(vanilla, AutoresolveWeaponGateIl.ResolveWeaponField(), hook, out int matches);
+        AssertEqual(AutoresolveWeaponGateIl.ExpectedSites, matches, "FightUnit sites");
+        AssertFalse(ReferenceEquals(edited, vanilla), "FightUnit edited copy");
+        AssertMarksKept(vanilla, edited, "FightUnit");
     }
 
     // PerkIdTranspiler needs the game-bound hooks, so it is not compiled here; this sweep

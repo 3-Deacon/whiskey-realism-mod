@@ -131,8 +131,20 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
         public static ConfigEntry<bool> ReuseCampaignAiUnitList;
         public static ConfigEntry<bool> SkipDeadWlUnitNameRead;
+        public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
+        public static ConfigEntry<bool> EnableCombineWeaponStockFix;
+        public static ConfigEntry<bool> EnableAiWeaponPurchaseOrderableFix;
+        public static ConfigEntry<bool> EnableGroupWeaponStrengthGuard;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetScopeFix;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetPrestigeGateFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
+        internal static ConfigEntry<bool> FixAiPerkPickRange;
+        internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
+        internal static ConfigEntry<bool> FixEngineerBranchBonus;
+        internal static ConfigEntry<bool> FixGoodGroundCoverCap;
+        internal static ConfigEntry<bool> FixAutoresolveEntrenchmentSide;
+        internal static ConfigEntry<bool> FixPlayerEntrenchmentPoints;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -372,6 +384,14 @@ namespace WhiskeyRealism
                 "player-owned groups never feud-move. The orchestrator direct-child gate may deny the move. Without a battle snapshot for the " +
                 "side it fails closed: vanilla's move goes out directly only where the write guard allows it. Needs Tactical Commander Mode = " +
                 "Active. Off: vanilla feud movement runs unmodified and the direct-child gate is skipped. (The key name is kept for existing cfg files.)");
+            FixGoodGroundCoverCap = Config.Bind(
+                "W&L",
+                "Fix Good Ground Cover Cap",
+                true,
+                "Default ON. W&L incident 'A Good Ground' doubles the cover of the player's command with no ceiling, so behind " +
+                "parapets cover reaches 1.0 or more and the units take no ranged losses at all. With this on the doubled cover is " +
+                "capped at 0.9 (ranged losses never below 10%); below that the incident keeps its full doubling, and a unit never ends " +
+                "below its cover without the incident. Set false for rollback to vanilla.");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -441,6 +461,13 @@ namespace WhiskeyRealism
                 "resupply). Left vanilla because their texts promise something else: the attrition values of Harsh Punishments, Ample " +
                 "Rewards and Purge, and the prestige values on items, injuries and one career event; three companions' rank values use a " +
                 "quality type vanilla has no meaning for. Off: vanilla.");
+            FixPlayerEntrenchmentPoints = Config.Bind(
+                "Tactical",
+                "Fix Player Entrenchment Points",
+                true,
+                "Default ON. At battle start the player's engineering points get a bonus for the army's campaign entrenchment, " +
+                "but vanilla multiplies it by the entrenchment level twice, so the player gets less than the AI for the same works " +
+                "(the AI's bonus is linear). With this on the player's bonus is linear too. Set false for rollback to vanilla.");
             EnableBattleEntrenchmentAverageFix = Config.Bind(
                 "Tactical",
                 "Enable Battle Entrenchment Average Fix",
@@ -902,6 +929,25 @@ namespace WhiskeyRealism
             EnableConfiscationSupplyFlowFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
                 "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
+            // Armament vanilla bug fixes (docs/bug-fixes/vanilla-armament.md).
+            EnableAutoresolveStandardGunFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Autoresolve Standard Gun Fix", true,
+                "Default ON. In vanilla autoresolve a battery armed with weapon id 0, the 6-pounder Field Gun that every campaign issues as its standard artillery, inflicts no casualties: Autocalc.FightUnit only counts weapon ids above 0. A narrow IL rewrite (left as vanilla if the code pattern is not found) counts id 0 as armed, for every side including the W&L player; this flag switches it live. Off: vanilla.");
+            EnableCombineWeaponStockFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Combine Weapon Stock Fix", true,
+                "Default ON. When two units merge, vanilla's weapon-stock bookkeeping counts a battery's men as guns (100-240 phantom guns per merge when the target's model is short), returns a partly merged battery's whole gun count, draws more guns than the target gains (downgrading it to the standard gun when that count is short), and adds a standard-armed target's whole holding to stock before re-arming it with the same model. The stock is set to the correct count (guns for batteries, men otherwise; only what changes hands) and the target keeps its model whenever the stock covers what it gains; a real shortfall still re-arms it with the standard weapon, as vanilla does. Every side, W&L player merges included. Off: vanilla.");
+            EnableAiWeaponPurchaseOrderableFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Weapon Purchase Orderable Fix", true,
+                "Default ON. Vanilla AI weapon purchasing may order models it has researched but does not produce or import (Gatling, Coffee Mill and Williams Gun), which the player's order screen refuses; it pays the whole order up front for a delivery of up to two years. The AI now orders only models the order screen allows for its own alliance (researched and produced, or imported), choosing among them as vanilla does; units still receive the machine guns the projects stock. Every side, including the AI buying for the W&L player's alliance. Off: vanilla.");
+            EnableGroupWeaponStrengthGuard = Config.Bind(
+                "Campaign Bug Fixes", "Enable Group Weapon Strength Guard", true,
+                "Default ON. Vanilla's group weapon factor divides by the group's armed men with no zero check, so a group with no armed men returns NaN, which corrupts the campaign AI's area weapon averages and offensive outgunned tests. Such a group gets weapon factor 0. Off: vanilla.");
+            EnableWlWeaponBudgetScopeFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Scope Fix", true,
+                "Default ON. Vanilla subtracts every alliance's weapon orders, the enemy's included, from the W&L career player's federal weapon budget. Only orders of the player's own alliance (his own, or the AI's for his alliance) spend it now. Off: vanilla.");
+            EnableWlWeaponBudgetPrestigeGateFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Prestige Gate Fix", true,
+                "Default ON. Buying weapon budget as commander-in-chief costs 500 prestige, but vanilla only checks that prestige is at least -500, so it can be bought into negative prestige. The purchase now needs the prestige to pay for it; the charge is vanilla's. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
@@ -917,6 +963,30 @@ namespace WhiskeyRealism
                 "Default ON. Applies two perks only where their tooltips say: Foot Cavalry's forced-march speed only while the unit is on a " +
                 "forced march (vanilla applies it to every campaign move), and Embedded Reporters' fame bonus for the unit that has the perk at " +
                 "that unit's level (vanilla ignores a corps' own perk when the corps sits under an army, and reads the level from the corps even when its army holds the perk). Set false for rollback to vanilla.");
+            FixAiPerkPickRange = Config.Bind(
+                "Campaign", "Fix AI Perk Pick Range", true,
+                "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +
+                "and no AI fleet Port Defender. With this on every perk id is a candidate, both for Whiskey's role-aware pick and for the " +
+                "plain random pick vanilla makes where Whiskey does not steer (a W&L commander-in-chief's own alliance, Europe). Set false " +
+                "for rollback to vanilla.");
+            FixPontoonTrainCreekSpeed = Config.Bind(
+                "Campaign", "Fix Pontoon Train Creek Speed", true,
+                "Default ON. Pontoon Train promises +25/50/75% movement speed across small rivers; vanilla only lowers the creek path cost " +
+                "(x0.75/0.5/0.25), so armies route through creeks they still cross at normal creek speed. With this on a division, corps, " +
+                "army or army group with the perk (or under an army that has it) crosses creeks 1.25/1.5/1.75 times as fast, and its creek " +
+                "path cost is 1/1.25, 1/1.5, 1/1.75 so routes are chosen by real travel time. Every side, including the W&L player. Set " +
+                "false for rollback to vanilla.");
+            FixAutoresolveEntrenchmentSide = Config.Bind(
+                "Campaign", "Fix Autoresolve Entrenchment Side", true,
+                "Default ON. In an autoresolved battle a defending side's entrenchments reduce the fire it takes, but vanilla always " +
+                "reads side 1's engineering points, so when side 0 defends it is protected by its attacker's works. With this on each " +
+                "defending side uses its own engineering points. Set false for rollback to vanilla.");
+            FixEngineerBranchBonus = Config.Bind(
+                "Campaign", "Fix Engineer Branch Bonus", true,
+                "Default ON. The engineering-point bonus for an engineer regiment whose commander is an engineer officer (unitprefs " +
+                "'if commander fits to branch of arms (engineers)', x1.5) tests the navy branch in vanilla, so no engineer officer " +
+                "(Lee, McClellan, Meade, a W&L Engineer) ever gets it. With this on the bonus goes to engineer-branch commanders, in " +
+                "battle deployment and in autoresolve. Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");

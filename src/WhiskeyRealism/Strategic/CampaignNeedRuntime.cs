@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
 
@@ -42,14 +43,13 @@ namespace WhiskeyRealism.Strategic
                 // CampaignController.UpdateAllianceData (81515-81614).
                 s.RecruitsAvailable = state.volunteersavailable + state.draftsavailable;
                 s.TroopsFielded = state.troopsfielded;
-                s.TroopsInRecruitment = state.troopsinrecruitment;
                 s.ContractExpiries = state.recruitscontractexpiries;
                 s.NationalMorale = state.nationalmorale;
                 s.AverageSupport = state.averagesupport;
                 s.OwnBlockadeRatio = state.averageblockaderatio;
                 if (alliances.Length > 1 && alliances[1] != null)
                     s.CsaBlockadeRatio = alliances[1].averageblockaderatio;
-                s.WeaponStock = Sum(state.weaponstock);
+                ReadArms(alliance, state, s);
                 s.PeakTransportUse = Max(state.transportcapacitypeak);
                 s.RecruitableStates = CountRecruitableStates(alliance);
                 s.InterventionProbability = Math.Max(
@@ -85,13 +85,46 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static float Sum(float[] values)
+        // Own arming (ArmsCoverage): the alliance tick's unit counts and average WSF per lane
+        // (81589-81605), its stock and open orders, and which models it can order.
+        private static void ReadArms(int alliance, GameVars.Alliance state, NeedSnapshot s)
         {
-            if (values == null) return 0f;
-            float sum = 0f;
-            for (int i = 0; i < values.Length; i++)
-                if (values[i] > 0f) sum += values[i];
-            return sum;
+            try
+            {
+                s.Rifles = new ArmsLane { Units = state.otherunits, AverageStrength = state.averageweaponstrengthrifles };
+                s.Guns = new ArmsLane { Units = state.artilleryunits, AverageStrength = state.averageweaponstrengthguns };
+                s.MinEquippableShare = GamePrefs.aiminnumberofequippableunits;
+                s.ImportCutAtFullBlockade = GamePrefs.influenceofblockadesonweaponimports;
+                var weapons = GameVars.weapon;
+                if (weapons == null || state.weaponstock == null) return;
+                var models = new List<ArmsModel>(weapons.Length);
+                for (int id = 0; id < weapons.Length; id++)
+                {
+                    var weapon = weapons[id];
+                    if (weapon == null) continue;
+                    float open = 0f;
+                    if (state.weaponorders != null && id < state.weaponorders.Length && state.weaponorders[id] != null)
+                        open = state.weaponorders[id].quantity - state.weaponorders[id].alreadydelivered;
+                    var restriction = weapon.restriction;
+                    models.Add(new ArmsModel
+                    {
+                        IsArtillery = weapon.isari,
+                        FitsBattery = restriction != null && restriction.Contains(2),
+                        FitsLine = restriction != null && (restriction.Contains(0) || restriction.Contains(1)),
+                        Strength = AICampaign.GetWeaponStrengthFactor(id),
+                        StockAndOpenOrders = (id < state.weaponstock.Length ? state.weaponstock[id] : 0f) + open,
+                        Orderable = WeaponOrderability.IsOrderable(weapon.IsResearched(alliance), weapon.IsImported(alliance), weapon.productionmultiplier)
+                    });
+                }
+                int riflesPerUnit = GamePrefs.unittypesize != null && GamePrefs.unittypesize.Length > 0 ? GamePrefs.unittypesize[0] : 0;
+                ArmsCoverage.Fill(models, s.Rifles, s.Guns, GamePrefs.usedstatsgunsdummy, riflesPerUnit);
+            }
+            catch (Exception ex)
+            {
+                s.Rifles = new ArmsLane();
+                s.Guns = new ArmsLane();
+                OnceLog.Warning("campaign-need:arms", "[CampaignNeedRuntime] arms read failed (no arming need this review): " + ex.Message);
+            }
         }
 
         private static float Max(float[] values)

@@ -1,6 +1,6 @@
 # Performance Hot Paths Plan (as built)
 
-> Branch `fix/perf-hot-paths` (worktree `.worktrees/perf-hot-paths`), base `main` `742d7e4`. Source review: the 2026-10-15 performance review ("campaign map and battles"), § 1 "fix now" items plus the user's scope addendum. Sub-branches merged into this one: `fix/perf-transpilers`, `fix/perf-campaign-hooks`, `fix/perf-fog-budgets`, `fix/perf-daily-review`.
+> Branch `fix/perf-hot-paths` (worktree `.worktrees/perf-hot-paths`), base `main` `742d7e4`, `main` `0c2bd01` merged in. Source review: the 2026-10-15 performance review ("campaign map and battles"), § 1 "fix now" items plus the user's scope addendum. Sub-branches merged into this one: `fix/perf-transpilers`, `fix/perf-campaign-hooks`, `fix/perf-fog-budgets`, `fix/perf-daily-review`.
 
 **User direction (2026-10-15):** "fix it all correctly", then "fix all that and bring it up to par to what games do". Transpilers #109/#110: the user approved both, answer "Approve both (Recommended)" (2026-10-15).
 
@@ -45,7 +45,7 @@ Not built, with reason:
 
 ## PROVE-MODE
 
-Harness (2348 PASS on this branch) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Runtime proof is the smoke below; nothing is deployed. Before any smoke on `main`, merge the label fix: the DLL deployed from `main` most likely fails to apply its transpilers (see the hand-off).
+Harness (2399 PASS on this branch, with `main` `0c2bd01` merged) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Runtime proof is the smoke below; nothing is deployed. The `Clone()` label fix found here is already on `main` (`dce672e`, deployed); `TranspilerLabelTests` covers #109 and #110 with their real `Transpile` on the real IL.
 
 ## Smoke (first perf smoke: `Logging Profile = FullTuning`, `Max Tuning Log MB = 2000`, review § 7)
 

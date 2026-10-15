@@ -34,6 +34,10 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.realism-checkboxes-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.realism-checkboxes-lock");
+            // Vanilla syncs the menu checkboxes only on the setup screen (193616: currentoperation
+            // 0). In a running game the player's own toggles (the weapon panel's automanage box,
+            // WeaponList.UpdateCheckBox 227209) are the choice; never force them from here.
+            if (SceneManagement.currentoperation > 0) return;
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {

@@ -23,6 +23,7 @@ campaign.patch.save-load.load                      # AICampaign.Load: only when 
 campaign.patch.daily-review-save-drain             # SceneManagement.SaveAll: only when the game saves (manual, autosave or before a battle)
 
 # W&L career (DLC_WL) only.
+tactical.patch.good-ground-cover-cap               # Regiment.CheckCoyCovers: marks only for a W&L player's unit in battle
 campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L career camp and diary only
 campaign.patch.wl-operation-null-guard             # DLC_WL.CommanderRelations.Operation.UpdateOperation: W&L operations only
 campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMessageContent: W&L dispatches only
@@ -34,6 +35,7 @@ campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: 
 campaign.patch.wl-morale-scope.*                   # UpdateMoraleCampaign: returns before its scope outside a W&L career (perf L3)
 campaign.patch.wl-unit-stats-scope.*               # UpdateCampaignUnitStats: returns before its scope outside a W&L career (perf L3)
 campaign.patch.wl-unit-name-read.hook             # BattleUnits.IsUnitUnderCommander: the name read sits past its W&L-career early return
+campaign.patch.wl-weapon-budget.purchase.*        # WeaponList.IncreaseFiscalBudget: W&L CIC buying weapon budget with prestige only
 
 # Campaign events that need not happen in a short session.
 campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit
@@ -44,7 +46,10 @@ campaign.patch.militia-act-handover-scope.*        # Policies.LaunchPolicyEffect
 campaign.patch.militia-act-handover-guard          # GameVars.SetNationToNewAlliance: only when a state changes alliance
 campaign.patch.project-appoint-observer.*          # Projects.AppointProject: only when a project is appointed
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
-campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
+campaign.patch.arty-combine-gun-transfer.*         # BattleUnits.CombineUnits: only when two units are merged
+campaign.patch.autoresolve-standard-gun.count      # Autocalc.StartLandBattle: only when a land battle is autoresolved
+campaign.patch.autoresolve-standard-gun.hook       # Autocalc.FightUnit: only while an autoresolved battle, raid or skirmish fights
+campaign.patch.wl-weapon-budget.order.*           # WeaponList.PlaceWeaponOrder: only when an alliance places a weapon order (AI coverage below 15 %, or the player)
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
 campaign.patch.raid-supply-threshold.*            # AICampaign.RaidForce.SearchObjective: only while a raid force exists (CheckCreationOfRaidForces raises them at random)
 campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateByStrength: only when CheckTransferOfUnits finds a deficit and a surplus army
@@ -52,6 +57,9 @@ campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim
 campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
 campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
+campaign.patch.pontoon-creek.speed                 # Regiment.GetTerrainSpeedAdjustment: only while a campaign group stands on a creek cell
+campaign.patch.engineer-branch.autocalc.*          # Autocalc.CalculateEngineeringPoints: only when a battle is autoresolved
+campaign.patch.autocalc-entrenchment-side.*        # Autocalc.FightUnit: only when a battle is autoresolved
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
