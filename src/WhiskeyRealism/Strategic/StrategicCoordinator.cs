@@ -1162,8 +1162,35 @@ namespace WhiskeyRealism.Strategic
                 $"{record.BattleName} winner={record.AllianceWon} loser={record.LosingAlliance} " +
                 $"result={scale} theater={record.Theater}");
 
-            OnEventTrigger(record.AllianceWon, "battle_result");
-            OnEventTrigger(record.LosingAlliance, "battle_result");
+            DirtyPlanIfBattleInvalidates(record.AllianceWon, record);
+            if (record.LosingAlliance != record.AllianceWon)
+                DirtyPlanIfBattleInvalidates(record.LosingAlliance, record);
+        }
+
+        // R4: only a decisive land battle in the plan's target theater / near its target
+        // re-plans an operation; any other battle is recorded in BattleHistory only.
+        private void DirtyPlanIfBattleInvalidates(int allianceId, BattleHistoryRecord record)
+        {
+            if (allianceId < 0 || allianceId >= CICs.Length) return;
+            var plan = CICs[allianceId]?.ActivePlan;
+            var phase = plan?.CurrentPhase;
+            if (phase == null) return;
+
+            var target = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
+            HistoricalOperationProfile profile = null;
+            if (!string.IsNullOrEmpty(plan.OperationId))
+                HistoricalOperationCatalog.TryGetById(plan.OperationId, out profile);
+            var query = new BattleReplanQuery
+            {
+                HasTarget = target.HasValue,
+                TargetX = target.HasValue ? target.Value.x : 0f,
+                TargetZ = target.HasValue ? target.Value.z : 0f,
+                TargetTheater = target.HasValue ? CampaignMapTheaterRuntime.FromPosition(target.Value) : Theater.Unknown,
+                BattleTheater = CampaignMapTheaterRuntime.FromPosition(new Vector3(record.PositionX, 0f, record.PositionZ)),
+                Radius = HistoricalOperationContextBuilder.NearTargetRadius(profile)
+            };
+            if (CicReviewRouter.BattleInvalidatesPlan(record, query))
+                OnEventTrigger(allianceId, "battle_result");
         }
 
         internal void RecordConstructionStart(ConstructionStartEvent start)

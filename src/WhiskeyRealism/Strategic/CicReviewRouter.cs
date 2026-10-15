@@ -10,6 +10,17 @@ namespace WhiskeyRealism.Strategic
         AbandonPlan
     }
 
+    // Where the active plan's current target sits, for the battle-replan gate (R4).
+    internal sealed class BattleReplanQuery
+    {
+        public bool HasTarget;
+        public float TargetX;
+        public float TargetZ;
+        public Theater TargetTheater = Theater.Unknown;
+        public Theater BattleTheater = Theater.Unknown;
+        public float Radius;
+    }
+
     // Single implementation of "what does a PhaseTruthOutput do to the active plan".
     // CIC.ReviewPlanWithTruth delegates here (it only adds the abandon → null and the
     // phase-advanced log line), so the console harness exercises the exact runtime path.
@@ -117,6 +128,24 @@ namespace WhiskeyRealism.Strategic
             allowAttack = !leadIn;
             allowReinforce = true;
             probeOnly = leadIn;
+        }
+
+        // R4: a finished land battle only invalidates an operation when it was decisive
+        // (vanilla battleresulttype 1 "glorious victory" / 3 "disaster"; decompile
+        // FinishLandBattle 21874-21886 maps endbattle 0/8 -> 1/3 for AI-vs-AI battles too,
+        // so magnitude does not depend on the player's alliance) AND it was fought in the
+        // target's theater or within the near-target radius. Everything else is history only.
+        internal static bool BattleInvalidatesPlan(BattleHistoryRecord record, BattleReplanQuery query)
+        {
+            if (record == null || query == null || !query.HasTarget) return false;
+            if (!record.IsLandBattle || !record.IsMajorResult) return false;
+
+            if (query.TargetTheater != Theater.Unknown && query.BattleTheater == query.TargetTheater)
+                return true;
+
+            float dx = record.PositionX - query.TargetX;
+            float dz = record.PositionZ - query.TargetZ;
+            return query.Radius > 0f && dx * dx + dz * dz <= query.Radius * query.Radius;
         }
 
         // Legacy bool shape kept for existing harness callers: true = keep plan.

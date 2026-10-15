@@ -23,6 +23,13 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r3 target-engaged transition advances on engagement after phase start", R3TargetEngagedTransitionAdvancesOnNewEngagement);
         Check("c1 r3 target-engaged transition ignores engagement before phase start", R3TargetEngagedTransitionIgnoresOldEngagement);
         Check("c1 r3 hold phase is not force gated and advances when force ready", R3HoldPhaseAdvancesWhenForceReady);
+
+        // R4 — battle resets
+        Check("c1 r4 minor out-of-theater battle does not dirty plan", R4MinorOutOfTheaterBattleDoesNotDirtyPlan);
+        Check("c1 r4 minor battle at target does not dirty plan", R4MinorBattleAtTargetDoesNotDirtyPlan);
+        Check("c1 r4 major battle elsewhere does not dirty plan", R4MajorBattleElsewhereDoesNotDirtyPlan);
+        Check("c1 r4 major battle in target theater dirties plan", R4MajorBattleInTargetTheaterDirtiesPlan);
+        Check("c1 r4 major battle near target dirties plan", R4MajorBattleNearTargetDirtiesPlan);
     }
 
     private static void Check(string name, Action test)
@@ -228,6 +235,72 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertEqual(PhaseTruthAction.Continue, shortOutput.RecommendedAction, "hold phase keeps holding while short");
         var ready = PhaseTruthLedger.Evaluate(TruthInput(plan, 2, 1862, own: 12000f, enemy: 10000f));
         TestHarness.AssertEqual(PhaseTruthAction.Advance, ready.RecommendedAction, "hold phase advances once force requirement met");
+    }
+
+    // ------------------------------------------------------------------
+    // R4
+    // ------------------------------------------------------------------
+
+    private static BattleHistoryRecord Battle(int resultType, float x, float z)
+    {
+        return new BattleHistoryRecord
+        {
+            BattleName = "Battle of Test",
+            Day = 1, Month = 6, Year = 1862,
+            LandOrSea = 0,
+            AllianceWon = 0,
+            BattleResultType = resultType,
+            PositionX = x,
+            PositionZ = z,
+            Alliance = new[] { 0, 1 }
+        };
+    }
+
+    private static BattleReplanQuery TargetQuery()
+    {
+        return new BattleReplanQuery
+        {
+            HasTarget = true,
+            TargetX = 760f,
+            TargetZ = 60f,
+            TargetTheater = Theater.East,
+            Radius = 275f
+        };
+    }
+
+    private static void R4MinorOutOfTheaterBattleDoesNotDirtyPlan()
+    {
+        var q = TargetQuery();
+        q.BattleTheater = Theater.West;
+        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(0, 100f, -300f), q), "minor western battle");
+    }
+
+    private static void R4MinorBattleAtTargetDoesNotDirtyPlan()
+    {
+        var q = TargetQuery();
+        q.BattleTheater = Theater.East;
+        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(2, 760f, 60f), q), "minor battle never resets an operation");
+    }
+
+    private static void R4MajorBattleElsewhereDoesNotDirtyPlan()
+    {
+        var q = TargetQuery();
+        q.BattleTheater = Theater.West;
+        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(1, 100f, -300f), q), "major battle in another theater");
+    }
+
+    private static void R4MajorBattleInTargetTheaterDirtiesPlan()
+    {
+        var q = TargetQuery();
+        q.BattleTheater = Theater.East;
+        TestHarness.AssertTrue(CicReviewRouter.BattleInvalidatesPlan(Battle(3, 600f, 400f), q), "major battle in target theater");
+    }
+
+    private static void R4MajorBattleNearTargetDirtiesPlan()
+    {
+        var q = TargetQuery();
+        q.BattleTheater = Theater.Unknown;
+        TestHarness.AssertTrue(CicReviewRouter.BattleInvalidatesPlan(Battle(1, 800f, 100f), q), "major battle within radius");
     }
 
     // ------------------------------------------------------------------
