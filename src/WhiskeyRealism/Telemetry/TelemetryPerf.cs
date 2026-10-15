@@ -100,9 +100,12 @@ namespace WhiskeyRealism.Telemetry
                     for (int i = Registry.Count - 1; i >= 0; i--)
                     {
                         ThreadAggregates aggregates = Registry[i];
-                        if (force || now - aggregates.WindowStart >= windowTicks)
+                        bool ownerAlive = aggregates.OwnerAlive;
+                        // A dead thread's partial window is flushed before its accumulator is
+                        // dropped; otherwise its last counts are lost.
+                        if (force || !ownerAlive || now - aggregates.WindowStart >= windowTicks)
                             aggregates.FlushLocked(now);
-                        if (!aggregates.OwnerAlive)
+                        if (!ownerAlive)
                             Registry.RemoveAt(i);
                     }
                 }

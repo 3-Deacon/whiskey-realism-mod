@@ -53,6 +53,7 @@ internal static class TelemetryInfraFixTests
         ProbeRecordsTopLevelScopesSuppressedByProfile();
         PerfShutdownFlushesEveryThreadsAggregates();
         PerfProbeTickFlushesDueAggregateWindows();
+        PerfTickBetweenThreadExitAndShutdownKeepsDeadThreadCounts();
         PerfAggregateWindowDefaultsToFiveSeconds();
         WriterRetryAfterTornWriteDoesNotDuplicateRows();
         WriterCountsRowsOnlyAfterTheirWriteSucceeds();
@@ -1285,6 +1286,40 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("perf probe tick flushes due aggregate windows");
+    }
+
+    private static void PerfTickBetweenThreadExitAndShutdownKeepsDeadThreadCounts()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            var worker = new System.Threading.Thread(() =>
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    using (TelemetryPerf.Scope("p-test.dead-thread", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                    {
+                    }
+                }
+            });
+            worker.Start();
+            worker.Join();
+            TelemetryFrameProbe.Tick(0.016f); // window not due; owner is dead
+            TelemetryRouter.Shutdown("p-test");
+
+            var aggregates = RowsForScope(dir, "p-test.dead-thread", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, aggregates.Count, "dead thread's partial window flushed before its accumulator is dropped");
+            TestHarness.AssertEqual(3L, (long)aggregates[0]["fields"]["count"], "dead thread calls counted");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            TelemetryFrameProbe.ResetForTests();
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf tick between thread exit and shutdown keeps dead thread counts");
     }
 
     // ---------------------------------------------------------------- L8
