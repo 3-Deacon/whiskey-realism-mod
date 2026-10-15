@@ -105,6 +105,24 @@ namespace WhiskeyRealism.Strategic
         internal const float PlanTransferMinimumPresence = 2500f;
         internal const float PlanTransferLocalSuperiority = 1.25f;
 
+        // Vanilla ZoneRecruiting (12470-12507) builds positiondeficit from cells of
+        // recruitmentheatmapown / recruitmentheatmapenemy, filled by UpdateHeatmaps
+        // (12332, 12341) via Heatmap.AddObject(groupstrengthdirect, rangetodraw 4,
+        // reduceintensity) and PaintObject (34117): 20x20 grid over the terrain,
+        // the unit's own cell gets max(strength, 999), rings 1..3 cells away get
+        // strength * (1 - ring/4). The plan target's own/enemy strength uses the
+        // same kernel so ShouldSteerTransfer compares like with like.
+        internal const int HeatmapRangeToDraw = 4;
+
+        internal static float HeatmapContribution(float strength, float distance, float cellSize)
+        {
+            if (strength <= 0f || cellSize <= 0f) return 0f;
+            int ring = (int)Math.Round(Math.Max(0f, distance) / cellSize, MidpointRounding.AwayFromZero);
+            if (ring >= HeatmapRangeToDraw) return 0f;
+            if (ring == 0) return Math.Max(strength, 999f);
+            return strength * (1f - (float)ring / HeatmapRangeToDraw);
+        }
+
         internal static float PlanTransferRequiredAtTarget(float totalOwn, float forceFraction, float enemyNear)
         {
             float share = Math.Max(0f, totalOwn) * Clamp(forceFraction, 0.15f, 0.95f);

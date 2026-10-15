@@ -18,6 +18,8 @@ namespace WhiskeyRealism.Patches
     //
     // 2026-10-14 (C-Transfer): steer only when the plan target's local
     // shortfall is worse than the deficit vanilla found (or vanilla found none),
+    // both measured on vanilla's recruitment-heatmap scale (ZoneRecruiting
+    // 12470-12507 reads cells painted by UpdateHeatmaps/PaintObject),
     // so a genuinely threatened zone keeps its transfer; the plan requirement
     // is local (CampaignMilitaryGates.PlanTransferRequiredAtTarget) instead of
     // a share of the whole army. The deficit restore runs in a Finalizer so a
@@ -25,7 +27,6 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {
-        private const float FallbackSearchRadius = 650f;
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
         private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
 
@@ -91,9 +92,19 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                float searchRadius = ReadGamePrefsFloat("aimaximumdistancetosearchforunitrelocations", FallbackSearchRadius);
-                float ownNear = SumStrengthNear(ownUnits, target.Value, searchRadius);
-                float enemyNear = SumStrengthNear(enemyUnits, target.Value, searchRadius);
+                // Same scale vanilla's positiondeficit uses (L5): heatmap kernel over
+                // groupstrengthdirect with UpdateHeatmaps' per-unit weights (12320-12341).
+                float cellSize = HeatmapCellSize(faction);
+                if (cellSize <= 0f) return;
+                var capitalDefenders = AccessTools.Field(factionType, "groupstodefendcapital")?.GetValue(faction) as IList;
+                int followedObjective = ReadFollowedObjective(faction);
+                float ownNear = HeatmapStrengthAt(ownUnits, target.Value, cellSize,
+                    u => capitalDefenders != null && capitalDefenders.Contains(u) ? GamePrefs.reducedrecruitmentcapital : 1f);
+                float enemyNear = HeatmapStrengthAt(enemyUnits, target.Value, cellSize,
+                    u => CampaignObjective.IsPositionWithinRangeOfTownObjective(
+                            followedObjective, ((Component)u).transform.position, GamePrefs.aienemeydistancefromobjectivetown)
+                        ? GamePrefs.aienemyweightfactorobjectiverecruiting
+                        : 1f);
                 float totalOwn = SumStrength(ownUnits);
                 if (totalOwn <= 0f) return;
 
@@ -281,18 +292,41 @@ namespace WhiskeyRealism.Patches
             return null;
         }
 
-        private static float SumStrengthNear(IList units, Vector3 position, float radius)
+        private static bool _heatmapRatioResolved;
+        private static System.Reflection.FieldInfo _heatmapRatioField;
+
+        // Heatmap cell size from the faction's own recruitment heatmap:
+        // ratioheatmaptoterrain = segments / terrain size (Heatmap.Initialize(20),
+        // 12310 / 33833), so one cell = 1 / ratio.x world units.
+        private static float HeatmapCellSize(object faction)
+        {
+            var heatmap = AccessTools.Field(faction.GetType(), "recruitmentheatmapown")?.GetValue(faction);
+            if (heatmap == null) return 0f;
+            if (!_heatmapRatioResolved)
+            {
+                _heatmapRatioResolved = true;
+                _heatmapRatioField = AccessTools.Field(heatmap.GetType(), "ratioheatmaptoterrain");
+                if (_heatmapRatioField == null)
+                    OnceLog.Warning("transfer:heatmap-ratio", "TransferOfUnitsPatch missing Heatmap.ratioheatmaptoterrain; plan steering disabled");
+            }
+            if (_heatmapRatioField == null) return 0f;
+            var ratio = (Vector2)_heatmapRatioField.GetValue(heatmap);
+            return ratio.x > 0f ? 1f / ratio.x : 0f;
+        }
+
+        // Heatmap value vanilla would read at `position`: each unit paints
+        // groupstrengthdirect * weight with CampaignMilitaryGates.HeatmapContribution.
+        private static float HeatmapStrengthAt(IList units, Vector3 position, float cellSize, Func<Regiment, float> weight)
         {
             float total = 0f;
             if (units == null) return total;
             for (int i = 0; i < units.Count; i++)
             {
-                var unit = units[i];
-                if (unit == null) continue;
-                var pos = UnitPosition(unit);
-                if (!pos.HasValue) continue;
-                if (Tools.GetXZDistance(position, pos.Value) <= radius)
-                    total += ReadStrength(unit);
+                var unit = units[i] as Regiment;
+                if ((UnityEngine.Object)(object)unit == (UnityEngine.Object)null) continue;
+                if (!((Component)unit).gameObject.activeInHierarchy) continue; // PaintObject skips inactive
+                float distance = Tools.GetXZDistance(position, ((Component)unit).transform.position);
+                total += CampaignMilitaryGates.HeatmapContribution(unit.groupstrengthdirect * weight(unit), distance, cellSize);
             }
             return total;
         }
@@ -302,45 +336,18 @@ namespace WhiskeyRealism.Patches
             float total = 0f;
             if (units == null) return total;
             for (int i = 0; i < units.Count; i++)
-                total += ReadStrength(units[i]);
+            {
+                var unit = units[i] as Regiment;
+                if ((UnityEngine.Object)(object)unit != (UnityEngine.Object)null)
+                    total += Math.Max(0, unit.groupstrengthactive);
+            }
             return total;
         }
 
-        private static Vector3? UnitPosition(object unit)
+        private static int ReadFollowedObjective(object faction)
         {
-            if (unit is Component component) return component.transform.position;
-            try
-            {
-                var method = AccessTools.Method(unit.GetType(), "GetPosition");
-                if (method != null) return (Vector3)method.Invoke(unit, null);
-            }
-            catch { }
-            return null;
-        }
-
-        private static float ReadStrength(object unit)
-        {
-            if (unit == null) return 0f;
-            string[] fields = { "groupstrengthactive", "groupstrengthdirect", "groupstrength", "strength" };
-            for (int i = 0; i < fields.Length; i++)
-            {
-                var field = AccessTools.Field(unit.GetType(), fields[i]);
-                if (field == null) continue;
-                try { return Math.Max(0f, Convert.ToSingle(field.GetValue(unit))); }
-                catch { return 0f; }
-            }
-            return 0f;
-        }
-
-        private static float ReadGamePrefsFloat(string fieldName, float fallback)
-        {
-            try
-            {
-                var field = AccessTools.Field(AccessTools.TypeByName("GamePrefs"), fieldName);
-                if (field == null) return fallback;
-                return Math.Max(1f, Convert.ToSingle(field.GetValue(null)));
-            }
-            catch { return fallback; }
+            try { return Convert.ToInt32(AccessTools.Field(faction.GetType(), "followedcampaignobjective")?.GetValue(faction) ?? -1); }
+            catch { return -1; }
         }
 
         private static void EmitPlanTransferSteer(
