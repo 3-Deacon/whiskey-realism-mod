@@ -45,13 +45,13 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | Method | Line | Notes |
 |---|---|---|
 | `PickCampaignObjective` | **17770** | **Picks objective with `Random.Range`** — root cause of "AI has one tactic"; replace with weighted scorer |
-| `UpdateImportanceValues` | 14906 | Weighted importance per zone (transport capacity, profit, population, capital, objective bonus) |
+| `UpdateImportanceValues` | 14905 | Weighted importance per zone (transport capacity, profit, population, capital, objective bonus) |
 | `CalculateMostValueableAIZones` | 10965 | Picks single highest-importance zone within distance gate |
 | `GetBestRecruitingState` | 10723 | Theater-keyed recruiting state pick |
 | `GetClosestStateWithRecruitsPotential` | 10836 | Closest-with-potential variant |
 | `GetAllStateWithRecruitsPotential` | 10858 | All-with-potential variant |
-| `UpdateSupplyCapacity` | 10773 | Per-zone supply capacity from IIPs + supply depots |
-| `CheckSupplyDepotConstruction` | 14660 | AI builds supply depots |
+| `UpdateSupplyCapacity` | 10772 | Per-zone supply capacity from IIPs + supply depots |
+| `CheckSupplyDepotConstruction` | 14659 | AI builds supply depots |
 | `CheckFortConstruction` | 16347 | AI fort construction; one active order per faction but no area cap once orders finish |
 | `CheckTransferOfUnits` | 17232 | Force consolidation gate |
 | `CheckArmyGroupManagement` | 17706 | High-level army organization |
@@ -266,6 +266,29 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | Commanders | `Commander.combinedname` | 59081 | `firstname + " " + name`; registry names must match `Config/commanders.txt` on this. |
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
+
+## Campaign logistics anchors (BUG-LOG-001..013)
+
+Re-read 2026-10-15 for the campaign logistics bug fixes ([`bug-fixes/vanilla-campaign-logistics.md`](bug-fixes/vanilla-campaign-logistics.md)). `cp:n` = `Config/campaignprefs.txt` line.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| Supply metric | `AICampaign.GetGroupSupplyState` | 14063-14066 | `max(avg(groupsupplystate) × 0.5, supplystate × 0.5)`, never above 0.5. Its thresholds: raid search 0.75 (9135, cp:1411), depot trigger 0.25 (14715, cp:1520), fort builders 0.25 (9724, 16381), raid abort 0.25 hard-coded (9092), dead micro-move gate (14009-14019). Any Whiskey reader of this value must rescale (`RaidSupplyThreshold.GroupSupplyStateScale`). |
+| Raids | `RaidForce.UpdateRaidForces` / `SearchObjective` / `CheckAbort` | 9021 / 9130 / 9057 | Raid state machine 1 raising → 2 raised → 3 moving → 4 at target → 5 abort → 6 return; runs every `BattleUnits.Update` while `debug_raidgroupsactive` (true, 64459). Raised by `CheckCreationOfRaidForces` (17568). |
+| Camps | `Regiment.UpdateCampsAndEntrenchments` | 115392-115470 | Camp only when `!iswithinfog` (115408), destroyed when fogged (115426), entrenchment model only when `!iswithinfog` (115455); bugle at 115411-115414. Called at 112224 (regular cycle, after `UpdateUnitVisuals`) and 79240. |
+| Camps | `Regiment.CheckRegimentVisibility` | 127159; 127209-127229 | Campaign `iswithinfog` for a non-player unit = hidden from the player (`oppositefow.UnitIsHidden`); player-alliance units are never fogged on the campaign map (127211-127215). |
+| Camps | `campbuilding` / `entrenchment` consumers | 132917-132922, 115297, 115078-115086, 127881-127887, 125041-125046 | Winter weather reset, readiness, attrition, morale, order delay; all test the object reference only. |
+| Camps | `CBuilding.Place` (not newly created) | 96163-96284 | Camps are not added to `BattleUnits.cbuildings`; `CBuilding` has no fog code. `Regiment.OnDestroy` (127111-127146) does not remove the camp. |
+| Embarkation | `Regiment.CheckModelReplacement` | 116372-116503 | Boat/train model and `currentmodeltype` only while `!iswithinfog` (116383, 116399, 116446; removed at 116461): fogged AI units are never embarked (`BUG-LOG-002a`). |
+| AI areas | `AICampaign.UpdateImportanceValues` registration | 14927, 14946, 14965 | Area members added only while `airuns <= 1`; area rule `AIArea.GetAIArea(aiareas.GetColorOnPos(pos))` (14915, 14935, 14954). |
+| AI areas | `AIArea.UpdateSupplyCapacity`; supply gate; objective pick | 10772-10801; 10983; 14542-14658 | Owner-blind IIP capacity × 2 + depot stock; `ownpoints <= supplycapacity`; objective pick null-checks buildings (14627). |
+| Offensive roll | `CheckOffensiveMovements` winter factor | 14310-14312; 14339 | Uses `winterdefensiveoperationsmodifier`; `winteroffensiveoperationsmodifier` loaded at 56381, never read (cp:1545-1548). Roll only for objectives in another alliance's state (14336). |
+| Offensive trim | `CheckOffensiveMovements` weapon blend | 14239, 14274 vs 14294 | Add loops use `w = blend`, the trim loop `w *= blend`. |
+| Depot job | `AICampaign.CheckSupplyDepotConstruction` | 14659-14779 | Builder loop 14690-14713 (skip flag 14697, dedupe 14706-14711); trigger 14715; installation search 14719-14761 (source test 14740); move 14762-14768; wish 14770-14776. Builders skipped at 14122, 14200, 9741, 13610, 13658, 13744, 16381. |
+| Depot build | `CBuilding.IncreaseCondition` | 96590; 96626-96655 | A depot under construction advances only with a unit of the starting alliance inside its own bugle range; otherwise it regresses and is removed after `timetoremovemilitarybuildings`. |
+| Transfers | `BattleUnits.GrabSubordinateByStrength` | 93549-93597 (93594) | `num = num5` instead of `num += num5`; caller `CheckTransferOfUnits` 17295. |
+| Random picks | `Random.Range(0, Count - 1)` | 12146, 12241, 12302, 12793, 12801, 12928, 13040, 17611 | Unity's int `Range` excludes the upper bound; the last candidate is never picked. |
+| Policy | `Policies.UpdatePolicyEffects` / Confiscation | 209616-209653 (reset 209621); 209893; 114330-114335 | Factor 1.15 multiplies a resupply duration (cp:2787-2788). |
 
 ## Game-update re-decompile inventory
 

@@ -68,7 +68,7 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("random-candidate-pick:pattern:" + name, "[Patch:RandomPick] " + name + " (" + anchor + "): found " + matches + " Count - 1 picks, expected " + expected + "; left as vanilla");
                     return vanilla;
                 }
-                OnceLog.Info("random-candidate-pick:applied", "[Patch:RandomPick] AICampaign candidate picks now include the last candidate");
+                OnceLog.Info("random-candidate-pick:applied:" + name, "[Patch:RandomPick] " + name + " candidate pick now includes the last candidate");
                 return code;
             }
             catch (Exception ex)
