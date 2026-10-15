@@ -36,6 +36,16 @@ namespace WhiskeyRealism.Tactical.Battle
         private static PropertyInfo _terrainDataProperty;
         private static PropertyInfo _terrainSizeProperty;
         private static bool _terrainReflectionResolved;
+        // The battle's map size, read once per battle (on the first successful
+        // read; a read before the terrain exists is not cached).
+        private static float _mapSizeX;
+        private static float _mapSizeZ;
+        private static bool _mapSizeKnown;
+
+        static WaypointValidatorRuntime()
+        {
+            BattleScope.Register("waypoint-validator-runtime", ResetMapSize);
+        }
 
         public bool IsWaterOrFence(float x, float z)
         {
@@ -92,9 +102,15 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        /// <summary>Terrain.activeTerrain.terrainData.size x/z; false (0, 0) when unavailable.</summary>
+        /// <summary>
+        /// Terrain.activeTerrain.terrainData.size x/z, cached for the battle; false
+        /// (0, 0) when unavailable.
+        /// </summary>
         internal static bool TryMapSize(out float sizeX, out float sizeZ)
         {
+            sizeX = _mapSizeX;
+            sizeZ = _mapSizeZ;
+            if (_mapSizeKnown) return true;
             sizeX = 0f;
             sizeZ = 0f;
             try
@@ -117,14 +133,23 @@ namespace WhiskeyRealism.Tactical.Battle
                 object data = terrain != null ? _terrainDataProperty.GetValue(terrain, null) : null;
                 if (data == null) return false;
                 Vector3 size = (Vector3)_terrainSizeProperty.GetValue(data, null);
-                sizeX = size.x;
-                sizeZ = size.z;
-                return sizeX > 3f && sizeZ > 3f;
+                if (size.x <= 3f || size.z <= 3f) return false;
+                _mapSizeX = sizeX = size.x;
+                _mapSizeZ = sizeZ = size.z;
+                _mapSizeKnown = true;
+                return true;
             }
             catch
             {
                 return false;
             }
+        }
+
+        private static void ResetMapSize()
+        {
+            _mapSizeX = 0f;
+            _mapSizeZ = 0f;
+            _mapSizeKnown = false;
         }
 
         private static BattlefieldSetup Bfs()

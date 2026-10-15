@@ -112,6 +112,8 @@ namespace WhiskeyRealism.Tactical.Battle
             int issued = 0;
             int queuedBefore = 0, pathsBefore = 0, queuedAfter = 0, pathsAfter = 0;
             if (_issued.Length < plan.Targets.Count) _issued = new IssuedTarget[Math.Max(plan.Targets.Count, _issued.Length * 2)];
+            float sizeX = 0f, sizeZ = 0f;
+            if (plan.Targets.FannedOut) WaypointValidatorRuntime.TryMapSize(out sizeX, out sizeZ);
             for (int t = 0; t < plan.Targets.Count; t++)
             {
                 int targetIndex = plan.Targets.TargetIndices[t];
@@ -123,7 +125,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 float z = plan.Z;
                 if (plan.Targets.FannedOut)
                 {
-                    WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
                     OrderExecutor.OffsetTarget(own[groupIndex], own[targetIndex], plan.X, plan.Z, sizeX, sizeZ, out x, out z);
                 }
 

@@ -135,7 +135,12 @@ namespace WhiskeyRealism.Tactical.Battle
             return _published.TryGet(groupId, channel, out claim);
         }
 
-        private void Reset()
+        /// <summary>
+        /// Drops this tick's intents and the published claim table: the arbiter is
+        /// gated off (or stood down), so inline intents must not be refused by the
+        /// claims of a tick that no longer applies. Also the battle-end reset.
+        /// </summary>
+        public void ClearClaims()
         {
             _intentCount = 0;
             _working.Clear();
@@ -144,7 +149,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static void ResetAll()
         {
-            for (int i = 0; i < _byAlliance.Length; i++) _byAlliance[i].Reset();
+            for (int i = 0; i < _byAlliance.Length; i++) _byAlliance[i].ClearClaims();
         }
 
         // Groups get a slot in first-submission order; each slot holds one cell per channel.

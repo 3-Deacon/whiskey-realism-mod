@@ -41,6 +41,8 @@ internal static class OrderArbiterTests
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
             ("battle-core SelfOnlyChainFailsClosedForPlayerAncestor", SelfOnlyChainFailsClosedForPlayerAncestor),
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
+            ("battle-core FanOutOutcomeCountsTheOrderedSet", FanOutOutcomeCountsTheOrderedSet),
+            ("battle-core GatedOffArbiterPublishesNoClaims", GatedOffArbiterPublishesNoClaims),
             ("battle-core StanceRecordUsesDoctrineClock", StanceRecordUsesDoctrineClock),
             ("battle-core StanceSourceMapsIntentLadder", StanceSourceMapsIntentLadder),
             ("battle-core StanceCheapPathNeedsLiveVanillaStamp", StanceCheapPathNeedsLiveVanillaStamp),
@@ -656,6 +658,51 @@ internal static class OrderArbiterTests
         OrderExecutor.OffsetTarget(view.Own[division], view.Own[1], plan.X, plan.Z, 1000f, 1000f, out float cx, out float cz);
         AssertNear(380f, cx, 0.01f, "a fanned-out brigade keeps its offset from the division");
         AssertNear(-420f, cz, 0.01f, "z offset kept");
+    }
+
+    // The runtime sums moving units over the units it ordered (the AI brigades),
+    // so the outcome compares the same set — not the whole division, whose
+    // player brigade moves on the player's orders.
+    private static void FanOutOutcomeCountsTheOrderedSet()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(10, 100f, -100f, flags: UnitFlags.AncestorOfPlayerCommand);
+        int left = view.AddGroup(11, 80f, -120f, parentIndex: division);
+        view.AddGroup(12, 120f, -120f, parentIndex: division);
+        int player = view.AddGroup(13, 100f, -140f, parentIndex: division, flags: UnitFlags.PlayerCommand | UnitFlags.PlayerOwned);
+        var executor = NewExecutor();
+        var outcomes = new OrderOutcome[8];
+        var order = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        order.Flags = IntentFlags.UseOrderDelay;
+        var targets = new[]
+        {
+            new IssuedTarget { InstanceId = 11, X = 380f, Z = -420f },
+            new IssuedTarget { InstanceId = 12, X = 420f, Z = -420f },
+        };
+        executor.RecordIssued(order, 1.0, targets, 2, queuedBefore: 0, pathsBefore: 0, queuedAfter: 2, pathsAfter: 0);
+
+        view.Own[player].RegimentPaths = 1;
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+        AssertEqual(1, n, "one outcome");
+        AssertEqual(OrderOutcomeKind.Pending, outcomes[0].Kind, "the player's brigade moving is not the ordered brigades moving");
+
+        view.Own[left].RegimentPaths = 1;
+        executor.ObserveOutcomes(view, 1.02, outcomes, out n);
+        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "an ordered brigade gained paths");
+    }
+
+    private static void GatedOffArbiterPublishesNoClaims()
+    {
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(Move(7, 100f, -100f, IntentPriority.Safety, IntentSource.Withdrawal));
+        arbiter.Resolve(new BattleOrderIntent[4]);
+        var parity = Move(7, 300f, -300f, IntentPriority.Support, IntentSource.ReserveCourierParity);
+        AssertEqual(SkipReason.LowerPriorityThanClaim, OrderExecutor.InlineClaimCheck(arbiter, parity), "claim published");
+
+        arbiter.ClearClaims();
+        AssertFalse(arbiter.TryGetClaim(7, OrderChannel.Move, out _), "gated off: no claim left");
+        AssertEqual(SkipReason.None, OrderExecutor.InlineClaimCheck(arbiter, parity), "an inline intent is not refused by a stale claim");
     }
 
     // ------------------------------------------------------------ stance clock

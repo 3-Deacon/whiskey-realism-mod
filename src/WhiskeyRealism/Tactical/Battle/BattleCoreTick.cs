@@ -130,6 +130,13 @@ namespace WhiskeyRealism.Tactical.Battle
             return (object)snapshot as IBattleUnitView;
         }
 
+        /// <summary>The side's arbiter is gated off this tick: drop its published claims.</summary>
+        internal static void StandDown(int alliance)
+        {
+            OrderArbiter arbiter = OrderArbiter.ForAlliance(alliance);
+            if (arbiter != null) arbiter.ClearClaims();
+        }
+
         internal static void RunArbiter(AIBattle battle, int alliance)
         {
             if (_producerCount == 0) return;
@@ -142,6 +149,7 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleUnits bunits = ResolveBattleUnits();
             if (view == null || (UnityEngine.Object)bunits == null)
             {
+                arbiter.ClearClaims();
                 OnceLog.Warning("tactical-battle-core:snapshot-unavailable",
                     "[OrderArbiter] no battle snapshot; producers registered but the arbiter stands down");
                 return;

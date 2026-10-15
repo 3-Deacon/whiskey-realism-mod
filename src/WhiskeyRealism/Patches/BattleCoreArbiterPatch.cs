@@ -29,7 +29,8 @@ namespace WhiskeyRealism.Patches
     // Gate (D3): PostureExecutorBattleGate.Allows (state >= 5, macroai >= 0,
     // macroai 3 → hand Whiskey-held stances back to vanilla, no end-of-day, no
     // feud instance, no player instance unless ai_vs_ai), DrivesOrchestrator, and
-    // Tactical Commander Mode Active.
+    // Tactical Commander Mode Active. A side gated off drops its published claims
+    // (BattleCoreTick.StandDown) so InlineClaimCheck never reads a stale tick.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCoreArbiterPatch
     {
@@ -59,18 +60,26 @@ namespace WhiskeyRealism.Patches
             BattleUnits bunits = BattleCoreTick.ResolveBattleUnits();
             if ((UnityEngine.Object)bunits == null) return;
 
+            int side = battle.sideofai;
+            int[] alliances = bunits.alliance;
+            if (alliances == null || side < 0 || side >= alliances.Length) return;
+            int alliance = alliances[side];
+
+            // Gated off: no claims stay published for inline intents to hit.
             if (!PostureExecutorBattleGate.Allows(battle.state, battle.macroai, bunits.eodcycle, battle.isplayeraiorfeud,
                     GameVars.ai_vs_ai, out string reason))
             {
                 if (reason == "vanilla-retreat") TacticalStanceWriter.ReleaseForRetreat(battle);
+                BattleCoreTick.StandDown(alliance);
                 return;
             }
-            if (!TacticalWriteGuard.ModeAllowsWrites()) return;
+            if (!TacticalWriteGuard.ModeAllowsWrites())
+            {
+                BattleCoreTick.StandDown(alliance);
+                return;
+            }
 
-            int side = battle.sideofai;
-            int[] alliances = bunits.alliance;
-            if (alliances == null || side < 0 || side >= alliances.Length) return;
-            BattleCoreTick.RunArbiter(battle, alliances[side]);
+            BattleCoreTick.RunArbiter(battle, alliance);
         }
     }
 }

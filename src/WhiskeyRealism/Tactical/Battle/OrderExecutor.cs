@@ -607,7 +607,10 @@ namespace WhiskeyRealism.Tactical.Battle
                     continue;
                 }
 
-                if (pm.State == MoveState.Moving || MovingUnits(s, idx) > pm.PathsBefore || TargetTaken(s, _pendingTargets[p], pm.TargetCount))
+                IssuedTarget[] targets = _pendingTargets[p];
+                if (pm.State == MoveState.Moving ||
+                    MovingUnits(s, targets, pm.TargetCount) > pm.PathsBefore ||
+                    TargetTaken(s, targets, pm.TargetCount))
                 {
                     Emit(outcomes, ref count, pm, OrderOutcomeKind.Moved, SkipReason.None, nowHours, pm.Retries);
                     RemovePending(p);
@@ -801,14 +804,21 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
-        private static int MovingUnits(IBattleUnitView s, int idx)
+        // Moving units (regimentpaths > 0) among the units a move went to and
+        // their descendants: the set the runtime summed before the call.
+        private static int MovingUnits(IBattleUnitView s, IssuedTarget[] targets, int count)
         {
             UnitRecord[] own = s.Own;
             int moving = 0;
-            for (int j = 0; j < s.OwnCount; j++)
+            for (int t = 0; t < count; t++)
             {
-                if (own[j].RegimentPaths <= 0) continue;
-                if (j == idx || s.IsAncestorOf(idx, j)) moving++;
+                int idx = s.IndexOfOwn(targets[t].InstanceId);
+                if (idx < 0) continue;
+                for (int j = 0; j < s.OwnCount; j++)
+                {
+                    if (own[j].RegimentPaths <= 0) continue;
+                    if (j == idx || s.IsAncestorOf(idx, j)) moving++;
+                }
             }
             return moving;
         }
