@@ -243,6 +243,11 @@ namespace WhiskeyRealism.Tactical.Operations
     // flipped Screen (1) ↔ Attack (3) with a waypoint re-issue each time.
     public static class MainArrivalHoldLatch
     {
+        // Hold budget in battle seconds (15 battle-minutes), measured on
+        // GameVars.currenttimefromstart. Same value as T1's
+        // TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds.
+        public const float MaxHoldBattleSeconds = 15f * 60f;
+
         public readonly struct State
         {
             public State(bool active, bool released, float startedAtHours)
@@ -266,6 +271,11 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             if (!state.Active || nowHours < state.StartedAtHours) return 0f;
             return nowHours - state.StartedAtHours;
+        }
+
+        public static float ElapsedBattleSeconds(State state, float nowHours)
+        {
+            return TacticalBattleClock.HoursToBattleSeconds(ElapsedHours(state, nowHours));
         }
 
         public static State Next(State previous, float nowHours, bool holding)
@@ -371,13 +381,21 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
-    // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart
-    // (game hours). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
+    // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart,
+    // which in battle is game hours (uniStormSystem.Hour + battlepasseddays * 24,
+    // 86379 / 93545). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
     // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock
     // constants tuned at 1x convert with RealSecondsAtOneXToHours.
     public static class TacticalBattleClock
     {
         public const float RealSecondsPerBattleHourAtOneX = 600f;
+        public const float BattleSecondsPerHour = 3600f;
+
+        public static float HoursToBattleSeconds(float hours)
+        {
+            if (float.IsNaN(hours) || float.IsInfinity(hours) || hours <= 0f) return 0f;
+            return hours * BattleSecondsPerHour;
+        }
 
         public static float RealSecondsAtOneXToHours(float seconds)
         {

@@ -1054,8 +1054,8 @@ namespace WhiskeyRealism.Patches
 
         // Returns true when the proposed task waypoint should be suppressed
         // because the brigade was given the SAME task recently. Hold window
-        // is Plugin.BrigadeTaskHoldSeconds (default 12s wallclock). Set to 0
-        // to disable.
+        // is Plugin.BrigadeTaskHoldSeconds (default 12), read as real seconds
+        // at 1x and run on battle time. Set to 0 to disable.
         private static bool ShouldSuppressTaskRefresh(Regiment group, CommandTaskType task)
         {
             try
@@ -2402,22 +2402,21 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < supportPositions.Count; i++)
                     supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(SafeDistance(supportPositions[i], mainPos)));
 
+                // Battle seconds on currenttimefromstart (hours x 3600).
                 float now = BattleHours();
-                float elapsedHours = MainArrivalHoldLatch.ElapsedHours(latch, now);
-                // The synchronizer budget is in seconds at 1x; feed it battle time.
-                float elapsedAtOneX = elapsedHours * TacticalBattleClock.RealSecondsPerBattleHourAtOneX;
+                float elapsedSeconds = MainArrivalHoldLatch.ElapsedBattleSeconds(latch, now);
                 var resolved = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
                     DirectChildRole.Main, attackTask, supports,
-                    commanderAggression01, elapsedAtOneX,
+                    commanderAggression01, elapsedSeconds,
                     TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters,
-                    TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds,
+                    MainArrivalHoldLatch.MaxHoldBattleSeconds,
                     out holding);
 
                 _mainArrivalHold[mainInstanceId] = MainArrivalHoldLatch.Next(latch, now, holding);
                 if (holding)
                 {
                     reason = "arrival-hold-screen(supports=" + supports.Count
-                        + " elapsedHours=" + elapsedHours.ToString("0.000") + ")";
+                        + " elapsedSeconds=" + elapsedSeconds.ToString("0") + ")";
                 }
                 return resolved;
             }

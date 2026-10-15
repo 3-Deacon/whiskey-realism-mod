@@ -70,6 +70,7 @@ internal static class PostureStanceFixTests
         // BR-M1
         Pass("main arrival hold arms once and keeps its start time", MainArrivalHoldArmsOnce);
         Pass("main arrival hold stays released after expiry", MainArrivalHoldStaysReleasedAfterExpiry);
+        Pass("main arrival hold runs 900 battle seconds on currenttimefromstart", MainArrivalHoldRunsOnBattleSeconds);
 
         // B-leaf
         Pass("leaf brigade moves only for movement tasks", LeafBrigadeMovesOnlyForMovementTasks);
@@ -530,6 +531,27 @@ internal static class PostureStanceFixTests
         var stillReleased = MainArrivalHoldLatch.Next(released, 1.2f, holding: true);
         AssertTrue(stillReleased.Released, "hold request ignored once released");
         AssertEqual(0f, MainArrivalHoldLatch.ElapsedHours(armed, 0.5f), "clock reset gives no negative elapsed");
+    }
+
+    private static void MainArrivalHoldRunsOnBattleSeconds()
+    {
+        // currenttimefromstart is game hours in battle (Hour + battlepasseddays * 24, 86379 / 93545).
+        AssertEqual(3600f, TacticalBattleClock.HoursToBattleSeconds(1f), "one battle hour");
+        AssertEqual(0f, TacticalBattleClock.HoursToBattleSeconds(-1f), "negative clamps");
+        AssertEqual(0f, TacticalBattleClock.HoursToBattleSeconds(float.NaN), "NaN clamps");
+        AssertEqual(900f, MainArrivalHoldLatch.MaxHoldBattleSeconds, "15 battle-minutes");
+
+        var armed = MainArrivalHoldLatch.Next(default(MainArrivalHoldLatch.State), 2f, holding: true);
+        var distant = new[] { new TacticalMainArrivalSynchronizer.SupportMainPosition(2000f) };
+        float almost = MainArrivalHoldLatch.ElapsedBattleSeconds(armed, 2f + 0.24f);
+        AssertEqual(864f, (float)Math.Round(almost, 1), "elapsed in battle seconds");
+        TacticalMainArrivalSynchronizer.ResolveMainAttackTask(DirectChildRole.Main, CommandTaskType.AttackObjective, distant,
+            0.3f, almost, TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters, MainArrivalHoldLatch.MaxHoldBattleSeconds, out bool holding);
+        AssertTrue(holding, "still holding at 14.4 battle-minutes");
+        float expired = MainArrivalHoldLatch.ElapsedBattleSeconds(armed, 2f + 0.26f);
+        TacticalMainArrivalSynchronizer.ResolveMainAttackTask(DirectChildRole.Main, CommandTaskType.AttackObjective, distant,
+            0.3f, expired, TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters, MainArrivalHoldLatch.MaxHoldBattleSeconds, out holding);
+        AssertFalse(holding, "released after 15 battle-minutes");
     }
 
     private static LeafMoveDecision Leaf(CommandTaskType task, bool parentActive = false, bool hasSlot = true, bool closeEngaged = false, bool pending = false, bool activeMove = false)

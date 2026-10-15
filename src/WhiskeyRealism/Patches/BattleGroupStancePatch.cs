@@ -135,17 +135,18 @@ namespace WhiskeyRealism.Patches
         // Resets between battles. Called from TacticalBattleCoordinatorRuntime.OnBattleEnd.
         internal static void ResetRegimentalControlForBattleEnd()
         {
-            _artilleryLastActionRealtimeSeconds.Clear();
+            _artilleryLastActionHours.Clear();
             _lastApplyRealtimeSeconds.Clear();
         }
 
-        // Artillery audit state (2026-05-21). Per-instance timestamp of the
-        // last accepted artillery action. Reused across BGS Apply calls for
+        // Artillery audit state (2026-05-21). Per-instance battle time
+        // (GameVars.currenttimefromstart, hours) of the last accepted
+        // artillery action. Reused across BGS Apply calls for
         // the same battle (cleared on OnBattleEnd via
         // ResetRegimentalControlForBattleEnd). Min-hold gating prevents
         // thrash when doctrine output oscillates near thresholds (e.g.
         // Retreat ↔ Fire when enemy is at panic boundary).
-        private static readonly Dictionary<int, float> _artilleryLastActionRealtimeSeconds = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _artilleryLastActionHours = new Dictionary<int, float>();
 
         // All-stance artillery audit. Walks completeunitlist filtered by alliance
         // + unittyp==2, evaluates TacticalArtilleryMicroDoctrine per unit,
@@ -172,10 +173,12 @@ namespace WhiskeyRealism.Patches
             var allUnits = BattleUnits.completeunitlist as System.Collections.IList;
             if (allUnits == null) return;
 
-            float nowReal = SafeRealtimeSeconds();
-            float minHold = Plugin.ArtilleryAuditMinHoldSeconds != null
-                ? Plugin.ArtilleryAuditMinHoldSeconds.Value
-                : 3.0f;
+            // Hold on battle time; the config value is seconds at 1x.
+            float nowHours = GameVars.currenttimefromstart;
+            float minHoldHours = TacticalBattleClock.RealSecondsAtOneXToHours(
+                Plugin.ArtilleryAuditMinHoldSeconds != null
+                    ? Plugin.ArtilleryAuditMinHoldSeconds.Value
+                    : 3.0f);
 
             for (int i = 0; i < allUnits.Count; i++)
             {
@@ -191,11 +194,12 @@ namespace WhiskeyRealism.Patches
                 catch { continue; }
                 if (instanceId == 0) continue;
 
-                // Per-unit hold gate. If we acted on this unit < minHold seconds
-                // ago, don't act again. Lets the prior vanilla write settle.
+                // Per-unit hold gate. If we acted on this unit < minHold ago,
+                // don't act again. Lets the prior vanilla write settle. A clock
+                // going backwards (reload) ends the hold.
                 float lastActionAt;
-                if (_artilleryLastActionRealtimeSeconds.TryGetValue(instanceId, out lastActionAt)
-                    && nowReal - lastActionAt < minHold)
+                if (_artilleryLastActionHours.TryGetValue(instanceId, out lastActionAt)
+                    && nowHours - lastActionAt >= 0f && nowHours - lastActionAt < minHoldHours)
                 {
                     continue;
                 }
@@ -276,7 +280,7 @@ namespace WhiskeyRealism.Patches
                     bunits, unit, currentBehavior, decision, "art-audit");
                 if (wrote)
                 {
-                    _artilleryLastActionRealtimeSeconds[instanceId] = nowReal;
+                    _artilleryLastActionHours[instanceId] = nowHours;
                 }
             }
         }
