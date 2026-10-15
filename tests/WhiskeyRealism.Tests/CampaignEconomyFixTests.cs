@@ -24,9 +24,6 @@ internal static class CampaignEconomyFixTests
         FiscalTaxFloorAnchorRefreshesAfterStressEnds();
         FiscalSingleLowSupplySectorDoesNotBlockExpansion();
         FiscalLowSupplyThirdOfSectorsIsStress();
-        PolicySelectorDefersToVanillaWhenOnlyOptionPenalised();
-        PolicySelectorSwapsPenalisedFirstForNonSuppressed();
-        PolicySelectorPicksClearScoreWin();
 
         ConstructionBiasReordersWithoutInflatingRolledRate();
         ConstructionBiasNormalisesEachSubsidyTypeToItsRawMax();
@@ -354,35 +351,6 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertTrue(output.SupplyProtection, "two of six sectors starving is stress");
         TestHarness.AssertEqual(FiscalPosture.BalancedWar, output.Posture, "expansion held");
         LogPass("c2b fiscal low supply in a third of sectors is stress");
-    }
-
-    // Vanilla Policies.CheckAIPolicyChange (decompile 211076-211086) researches the
-    // first available personality policy. Blocking it when no alternative exists
-    // stalls policy research until the penalty clears.
-    private static void PolicySelectorDefersToVanillaWhenOnlyOptionPenalised()
-    {
-        var result = FiscalPolicySelector.Select(new[] { 136 }, new[] { -0.8f });
-        TestHarness.AssertEqual(-1, result.Index, "no override");
-        TestHarness.AssertEqual("vanilla", result.Reason, "defer to vanilla");
-        LogPass("c2b policy selector defers to vanilla when only option penalised");
-    }
-
-    private static void PolicySelectorSwapsPenalisedFirstForNonSuppressed()
-    {
-        var result = FiscalPolicySelector.Select(new[] { 136, 40, 41 }, new[] { -0.8f, 0f, 0.2f });
-        TestHarness.AssertEqual(1, result.Index, "first non-suppressed");
-        TestHarness.AssertEqual("suppress-force-growth", result.Reason, "reason");
-        LogPass("c2b policy selector swaps penalised first for non-suppressed");
-    }
-
-    private static void PolicySelectorPicksClearScoreWin()
-    {
-        var result = FiscalPolicySelector.Select(new[] { 10, 22 }, new[] { 0f, 1.5f });
-        TestHarness.AssertEqual(1, result.Index, "score win");
-        TestHarness.AssertEqual("score-win", result.Reason, "reason");
-        var none = FiscalPolicySelector.Select(new[] { 10, 22 }, new[] { 0.6f, 0.8f });
-        TestHarness.AssertEqual(-1, none.Index, "below min score / margin => vanilla");
-        LogPass("c2b policy selector picks clear score win");
     }
 
     // ---------------------------------------------------------------- C-EconConstr

@@ -11,7 +11,9 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla AICampaign.UpdateProjects picks/funds the next AI research project
     // per subsidy lane. This Prefix seeds/replaces nextprojecttoresearch[subsidy]
-    // before vanilla spending so the original method still funds/appoints.
+    // before vanilla spending so the original method still funds/appoints. Doctrine
+    // signals come from the daily review's need vector (CampaignNeedBuilder.ToProjectSignals),
+    // shared with the need-driven policy selection.
     [HarmonyPatch(typeof(AICampaign), "UpdateProjects")]
     internal static class ProjectSelectionPatch
     {
@@ -76,6 +78,11 @@ namespace WhiskeyRealism.Patches
                     EmitProjectDoctrineCatalog(ProjectDoctrineCatalog.AllActive.Count);
                 }
 
+                // Doctrine signals from the daily review's need vector (stage E); neutral before the first review.
+                var signals = CampaignNeedBuilder.ToProjectSignals(
+                    StrategicCoordinator.Instance.NeedSnapshots[alliance],
+                    StrategicCoordinator.Instance.Needs[alliance]);
+
                 for (int subsidyType = 0; subsidyType < lanes; subsidyType++)
                 {
                     if (subsidyType == 6 || subsidyType == 7) continue;
@@ -86,7 +93,6 @@ namespace WhiskeyRealism.Patches
                     int vanillaProjectId = nextProjects[subsidyType];
                     float vanillaWeight = ReadVanillaProjectWeight(aiPersonality, vanillaProjectId);
                     var candidates = BuildCandidates(alliance, subsidyType, aiPersonality);
-                    var signals = BuildSignals(alliance, era, fiscalIntent);
                     float fundingAvailable = allianceState.subsidyfunding != null && subsidyType < allianceState.subsidyfunding.Length
                         ? allianceState.subsidyfunding[subsidyType]
                         : 0f;
@@ -332,76 +338,6 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("project-selection:subsidy-purpose", "[Patch:ProjectSelection] AICampaign.UseSubsidyForPurpose failed: " + ex.Message);
                 return 1;
-            }
-        }
-
-        private static ProjectDoctrineSignals BuildSignals(int alliance, EraStage era, FiscalOutput fiscalIntent)
-        {
-            var input = new ProjectDoctrineSignalInput
-            {
-                Alliance = alliance,
-                Era = era,
-                FiscalPosture = fiscalIntent != null ? fiscalIntent.Posture : FiscalPosture.BalancedWar,
-                PortViabilityInput = 0.5f,
-                StrengthRatio = 1f
-            };
-
-            try
-            {
-                int enemy = alliance == 0 ? 1 : 0;
-                if (GameVars.alliance != null && alliance >= 0 && enemy >= 0 && alliance < GameVars.alliance.Length && enemy < GameVars.alliance.Length)
-                {
-                    var ownState = GameVars.alliance[alliance];
-                    var enemyState = GameVars.alliance[enemy];
-
-                    input.BlockadeRatio = GameVars.alliance.Length > 1 && GameVars.alliance[1] != null
-                        ? GameVars.alliance[1].averageblockaderatio
-                        : 0f;
-                    input.SupplyPressure = fiscalIntent != null && fiscalIntent.SupplyProtection ? 0.75f : 0f;
-                    input.TransportPressure = fiscalIntent != null && fiscalIntent.LogisticsExpansion ? 0.75f : 0f;
-
-                    input.RecognitionProbability = ReadRecognitionProbability(alliance);
-
-                    if (ownState != null && enemyState != null)
-                    {
-                        float ownWeaponProduction = ownState.GetProjectLevel(102);
-                        float enemyWeaponProduction = enemyState.GetProjectLevel(102);
-                        float ownIndustry = ownState.GetProjectLevel(104);
-                        float enemyIndustry = enemyState.GetProjectLevel(104);
-                        input.IndustryGapInput = ProjectDoctrineSignalBuilder.Clamp01(
-                            Math.Max(enemyWeaponProduction + enemyIndustry - ownWeaponProduction - ownIndustry, 0f) / 3f);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("project-selection:signals", "[Patch:ProjectSelection] signal read failed: " + ex.Message);
-            }
-
-            return ProjectDoctrineSignalBuilder.Build(input);
-        }
-
-        private static float ReadRecognitionProbability(int alliance)
-        {
-            try
-            {
-                if (alliance < 0 || alliance >= 2) return 0f;
-                if (GameVars.alliance == null || GameVars.alliance.Length <= 3) return 0f;
-                if (GameVars.alliance[0] == null || GameVars.alliance[1] == null) return 0f;
-
-                var unionIntervention = GameVars.alliance[0].interventionlevels;
-                var confederateIntervention = GameVars.alliance[1].interventionlevels;
-                if (unionIntervention == null || confederateIntervention == null) return 0f;
-                if (unionIntervention.Length <= 3 || confederateIntervention.Length <= 3) return 0f;
-
-                return Math.Max(
-                    GameVars.Alliance.GetInterventionProbability(2),
-                    GameVars.Alliance.GetInterventionProbability(3));
-            }
-            catch (Exception)
-            {
-                OnceLog.Warning("project-selection:recognition-signal", "[Patch:ProjectSelection] recognition signal unavailable; using neutral value");
-                return 0f;
             }
         }
 

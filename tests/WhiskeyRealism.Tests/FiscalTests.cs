@@ -38,8 +38,6 @@ internal static class FiscalTests
             ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
             ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
-            ("fiscal force cap suppresses manpower policies", FiscalForceCapSuppressesManpowerPolicies),
-            ("fiscal force costs suppress manpower policies", FiscalForceCostsSuppressManpowerPolicies),
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
             ("fiscal credit defense requires stable exit ticks", FiscalCreditDefenseRequiresStableExitTicks),
             ("fiscal emergency residue clears after stable ticks", FiscalEmergencyResidueClearsAfterStableTicks),
@@ -430,39 +428,6 @@ internal static class FiscalTests
         AssertEqual(true, output.SupplyProtection);
         AssertEqual(true, output.ForceCapWarning);
         AssertEqual("VirginiaCapitalCorridor", output.TheaterSupplyPriority);
-    }
-
-    private static void FiscalForceCapSuppressesManpowerPolicies()
-    {
-        var input = BuildFiscalInput();
-        input.CurrentRating = 10;
-        input.SupplyPressure = 0.80f;
-        input.LowSupplyFormationCount = 5;
-
-        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
-        float weight = FiscalPolicyScorer.PolicyWeight(output, 1, 136);
-
-        AssertTrue(weight < 0f, "force-cap state should suppress CSA draft escalation");
-    }
-
-    private static void FiscalForceCostsSuppressManpowerPolicies()
-    {
-        var input = BuildFiscalInput();
-        input.CurrentRating = 4;
-        input.SupplyPressure = 0.10f;
-        input.LowSupplyFormationCount = 0;
-        input.LowAmmoFormationCount = 0;
-        input.ArmyUpkeep = -50000000f;
-        input.NavyUpkeep = -5000000f;
-        input.RecruitmentCost = -5000000f;
-        input.SupplyDepotPurchases = 0f;
-        input.AnnualBalance = -30000000f;
-
-        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
-        float weight = FiscalPolicyScorer.PolicyWeight(output, 1, 136);
-
-        AssertEqual(true, output.ForceCapWarning);
-        AssertTrue(weight < 0f, "force-cost pressure should suppress CSA draft escalation");
     }
 
     private static void FiscalHysteresisPreventsImmediateRecovery()
