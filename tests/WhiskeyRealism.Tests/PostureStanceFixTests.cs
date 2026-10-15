@@ -70,6 +70,9 @@ internal static class PostureStanceFixTests
         Pass("leaf brigade defers to an active parent order", LeafBrigadeDefersToActiveParentOrder);
         Pass("leaf brigade keeps executor safety gates", LeafBrigadeKeepsExecutorSafetyGates);
         Pass("formation slot mirrors vanilla GetAngleTerrainPosXY math", FormationSlotMirrorsVanillaMath);
+
+        // B-61state / perf: probe cache keyed on roster, not frame
+        Pass("roster signature changes with roster not with frame", RosterSignatureChangesWithRosterOnly);
     }
 
     private static void Pass(string name, Action test)
@@ -558,5 +561,16 @@ internal static class PostureStanceFixTests
         LeafFormationSlot.OffsetXZ(100f, -200f, 77f, 0f, 0f, out float x0, out float z0);
         AssertEqual(100f, x0, "zero offset x");
         AssertEqual(-200f, z0, "zero offset z");
+    }
+
+    private static void RosterSignatureChangesWithRosterOnly()
+    {
+        var a = new TacticalRosterSignature(1, 120, 3, 7);
+        var same = new TacticalRosterSignature(1, 120, 3, 7);
+        AssertTrue(a.Equals(same), "same roster, any frame");
+        AssertFalse(a.Equals(new TacticalRosterSignature(1, 121, 3, 7)), "unit added");
+        AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 4, 7)), "unit routed");
+        AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 3, 8)), "new battle (BattleUnits instance)");
+        AssertFalse(a.Equals(new TacticalRosterSignature(0, 120, 3, 7)), "other alliance");
     }
 }

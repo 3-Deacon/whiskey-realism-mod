@@ -2128,50 +2128,6 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        // Cache for extended probe lists per alliance. completeunitlist may have
-        // 200+ regiments and walking it twice per Postfix per side is expensive.
-        // Cache invalidated by a coarse signature (alliance unit count + frame
-        // index) so a fresh probe build happens only when the unit roster
-        // materially changes between ticks.
-        private static readonly Dictionary<int, CachedExtendedProbes> _extendedProbeCache = new Dictionary<int, CachedExtendedProbes>();
-
-        private readonly struct CachedExtendedProbes
-        {
-            public CachedExtendedProbes(int unitCount, int frame, IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes)
-            {
-                UnitCount = unitCount; Frame = frame; Probes = probes;
-            }
-            public int UnitCount { get; }
-            public int Frame { get; }
-            public IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Probes { get; }
-        }
-
-        private static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> GetCachedExtendedProbes(int allianceId)
-        {
-            int frame = -1;
-            int unitCount = -1;
-            try
-            {
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                unitCount = units != null ? units.Count : 0;
-                frame = UnityEngine.Time.frameCount;
-            }
-            catch { }
-            if (_extendedProbeCache.TryGetValue(allianceId, out var cached) &&
-                cached.UnitCount == unitCount &&
-                cached.Frame == frame &&
-                cached.Probes != null)
-                return cached.Probes;
-            var probes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
-            _extendedProbeCache[allianceId] = new CachedExtendedProbes(unitCount, frame, probes);
-            return probes;
-        }
-
-        internal static void ResetExtendedProbeCache()
-        {
-            _extendedProbeCache.Clear();
-        }
-
         /// <summary>
         /// Second pass that writes posture decisions for leaf brigades nested
         /// inside division-tier nodes. Builds the depth-agnostic leaf brigade
@@ -2199,48 +2155,11 @@ namespace WhiskeyRealism.Patches
                     : -1;
                 if (allianceId < 0 || allianceId >= 2) return;
 
-                var sideOrch = TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
-                ArmyOrchestrator army = sideOrch?.Army;
+                // B-61state: the leaf map, live initiative and reinforcement
+                // opportunity are refreshed by the coordinator tick
+                // (ArmyPostureInputsRuntime.Refresh); this Postfix only reads them.
+                ArmyOrchestrator army = TacticalBattleCoordinator.GetSideOrchestrator(allianceId)?.Army;
                 if (army == null) return;
-
-                var extendedProbes = GetCachedExtendedProbes(allianceId);
-                if (extendedProbes == null || extendedProbes.Count == 0) return;
-
-                var tree = TacticalCommandTreeProbe.BuildTree(extendedProbes, 0);
-                army.UpdateLeafBrigadeMap(tree);
-
-                // Refresh the reinforcement-opportunity decision off the same
-                // Postfix tick as the leaf-map update. Reads BattleUnits.
-                // scheduledarrival + sideinformation; bounded by the doctrine's
-                // own pure deterministic path. Default-on rollback via
-                // Enable Tactical Reinforcement Opportunity Doctrine config flag.
-                if (Plugin.EnableTacticalReinforcementOpportunityDoctrine != null
-                    && Plugin.EnableTacticalReinforcementOpportunityDoctrine.Value)
-                {
-                    // Refresh live commander initiative from vanilla using the
-                    // proven pattern from BattleMacroStrategyPatch.CommanderAggression01:
-                    // bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
-                    // .GetCommanderInitiative(). The orchestrator caches the validated
-                    // value; doctrine consumes it via army.LiveCommanderInitiative01.
-                    float liveInitiative01 = ReadLiveCommanderInitiative01(bunits, side);
-                    army.UpdateLiveCommanderInitiative(liveInitiative01);
-
-                    // Aggression remains the PersonalityVector-derived historical
-                    // baseline (Hood vs McClellan etc.) — distinct from live
-                    // initiative which may differ per vanilla state. Map from
-                    // [-1, 1] PersonalityVector range to [0, 1] doctrine domain.
-                    float commanderAggression01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
-                    if (commanderAggression01 < 0f) commanderAggression01 = 0f;
-                    if (commanderAggression01 > 1f) commanderAggression01 = 1f;
-
-                    var forceBalance = ArmyEvidenceBuilder.BuildForceBalance(
-                        battle, allianceId, army.LiveCommanderInitiative01, commanderAggression01);
-                    if (forceBalance.HasValue)
-                    {
-                        army.UpdateReinforcementOpportunity(forceBalance.Value);
-                        EmitReinforcementOpportunityTelemetry(side, army.CurrentReinforcementOpportunity);
-                    }
-                }
 
                 var leafMap = army.CurrentLeafBrigadeMap;
                 if (leafMap == null || leafMap.Count == 0) return;
@@ -2649,77 +2568,6 @@ namespace WhiskeyRealism.Patches
                 case DirectChildRole.Fallback:    return CommandNodeRole.FallbackGuard;
                 case DirectChildRole.Unknown:
                 default:                          return CommandNodeRole.Unknown;
-            }
-        }
-
-        /// <summary>
-        /// Live commander initiative for the given side, read defensively from
-        /// vanilla. Mirrors the proven BattleMacroStrategyPatch.CommanderAggression01
-        /// pattern: bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
-        /// .GetCommanderInitiative(), with NaN/range guards. Returns 0.5 mid-band
-        /// on any failure so the doctrine degrades gracefully rather than locking
-        /// to a misleading 0 or NaN.
-        /// </summary>
-        private static float ReadLiveCommanderInitiative01(BattleUnits bunits, int side)
-        {
-            try
-            {
-                if (bunits == null || bunits.alliance == null) return 0.5f;
-                if (side < 0 || side >= bunits.alliance.Length) return 0.5f;
-                int commanderId = bunits.GetCommandingOfficerFromSide(side);
-                if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
-                var commander = GameVars.commander[commanderId];
-                if (commander == null) return 0.5f;
-                float init = commander.GetCommanderInitiative();
-                if (float.IsNaN(init) || float.IsInfinity(init)) return 0.5f;
-                if (init < 0f) return 0f;
-                if (init > 1f) return 1f;
-                return init;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-reinforcement-opportunity:init-read-failed",
-                    "ReadLiveCommanderInitiative01 threw: " + ex.GetType().Name + " " + ex.Message);
-                return 0.5f;
-            }
-        }
-
-        private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision)
-        {
-            try
-            {
-                string sig = "TacticalReinforcementOpportunity|side=" + side
-                    + "|outcome=" + decision.Opportunity
-                    + "|reason=" + decision.Reason
-                    + "|ratio=" + decision.CurrentRatio.ToString("0.00")
-                    + "|enemyParityHrs=" + (decision.ParityHoursForEnemy >= 999f ? "never" : decision.ParityHoursForEnemy.ToString("0.0"))
-                    + "|ownParityHrs=" + (decision.ParityHoursForOwn >= 999f ? "never" : decision.ParityHoursForOwn.ToString("0.0"))
-                    + "|threshold=" + decision.AttackThreshold.ToString("0.00")
-                    + "|window=" + decision.AttackWindowHours.ToString("0.0");
-                string key = "tactical-reinforcement-opportunity:" + side;
-                if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, sig, Time.realtimeSinceStartup, TelemetrySeconds, false))
-                    return;
-
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Decision,
-                    "TacticalReinforcementOpportunity",
-                    TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(side)
-                        .WithDecision("TacticalReinforcementOpportunity", decision.Opportunity.ToString(), sig)
-                        .WithField("outcome", decision.Opportunity.ToString())
-                        .WithField("reason", decision.Reason)
-                        .WithField("currentRatio", decision.CurrentRatio)
-                        .WithField("enemyParityHours", decision.ParityHoursForEnemy >= 999f ? -1f : decision.ParityHoursForEnemy)
-                        .WithField("ownParityHours", decision.ParityHoursForOwn >= 999f ? -1f : decision.ParityHoursForOwn)
-                        .WithField("attackThreshold", decision.AttackThreshold)
-                        .WithField("attackWindowHours", decision.AttackWindowHours));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-reinforcement-opportunity:telemetry-failed",
-                    "EmitReinforcementOpportunityTelemetry threw: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 

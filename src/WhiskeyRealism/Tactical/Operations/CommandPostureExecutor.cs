@@ -331,6 +331,46 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // Roster identity for per-battle caches (#61 perf): a cache built from the
+    // unit roster stays valid until a unit is added/removed, a unit routs, or
+    // a new battle starts — not merely until the next frame.
+    public readonly struct TacticalRosterSignature : IEquatable<TacticalRosterSignature>
+    {
+        public TacticalRosterSignature(int allianceId, int unitCount, int routedCount, int battleKey)
+        {
+            AllianceId = allianceId;
+            UnitCount = unitCount;
+            RoutedCount = routedCount;
+            BattleKey = battleKey;
+        }
+
+        public int AllianceId { get; }
+        public int UnitCount { get; }
+        public int RoutedCount { get; }
+        public int BattleKey { get; }
+
+        public bool Equals(TacticalRosterSignature other)
+        {
+            return AllianceId == other.AllianceId &&
+                UnitCount == other.UnitCount &&
+                RoutedCount == other.RoutedCount &&
+                BattleKey == other.BattleKey;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is TacticalRosterSignature other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return ((AllianceId * 397 ^ UnitCount) * 397 ^ RoutedCount) * 397 ^ BattleKey;
+            }
+        }
+    }
+
     // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart
     // (game hours). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
     // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock
