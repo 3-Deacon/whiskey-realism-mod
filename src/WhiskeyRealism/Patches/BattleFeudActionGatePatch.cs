@@ -30,9 +30,13 @@ namespace WhiskeyRealism.Patches
     // dedupe, cooldown, refusal under a higher arbiter claim), where the Feud
     // refusal is exempt for FeudReplay but PlayerOwned never is; and the
     // orchestrator's direct-child gate may deny it. lastfeudactiontime is stamped
-    // only when the executor issued the move. Vanilla runs instead when Tactical
-    // Commander Mode is not Active, the flag is off, a vanilla anchor is missing
-    // or the side has no battle snapshot (the battle core is not running).
+    // only when the move was issued. Without a battle snapshot for the side (the
+    // battle core is not running) it still fails closed: the move goes out
+    // directly (vanilla's SetWaypoint arguments, 4957) only where
+    // TacticalWriteGuard.CanWrite(Regiment, feudReplay: true) allows it, so a
+    // player-owned group never feud-moves (BattleWriterPolicy.DecideFeudReplayPath).
+    // Vanilla runs instead only when Tactical Commander Mode is not Active, the
+    // flag is off, or a vanilla anchor is missing.
     [HarmonyPatch(typeof(AIBattle), "CheckForFeudGroupActions")]
     internal static class BattleFeudActionGatePatch
     {
@@ -60,7 +64,6 @@ namespace WhiskeyRealism.Patches
                     if (!isPlayerAiOrFeud.HasValue) return true;
                     if (!HasIsGroupStillAbleToFight()) return true;
                     if (groups == null || bunits == null) return true;
-                    if (!SnapshotsAvailable(groups)) return true;
 
                     tookOwnership = true;
                     for (int i = 0; i < groups.Count; i++)
@@ -90,9 +93,23 @@ namespace WhiskeyRealism.Patches
 
                         // Vanilla rolls for every eligible group before testing its target (4953).
                         if (UnityEngine.Random.Range(0f, 1f) > probability) continue;
-                        if (!BattleCore.TryGetSnapshot(group.alliance, out BattleSnapshot snapshot)) continue;
-                        int index = snapshot.IndexOfOwn(((Component)group).gameObject.GetInstanceID());
-                        if (index < 0) continue;
+                        int index = BattleCore.TryGetSnapshot(group.alliance, out BattleSnapshot snapshot)
+                            ? snapshot.IndexOfOwn(((Component)group).gameObject.GetInstanceID())
+                            : -1;
+                        FeudReplayPath path = BattleWriterPolicy.DecideFeudReplayPath(
+                            index >= 0, index >= 0 || TacticalWriteGuard.CanWrite(group, feudReplay: true));
+                        if (path != FeudReplayPath.Executor)
+                        {
+                            OnceLog.Info("tactical-feud-guard:no-snapshot",
+                                "[TacticalFeudGuard] no battle snapshot for a feud group's side; guarded direct replay (first occurrence)");
+                            if (path == FeudReplayPath.Refused)
+                            {
+                                LogRefused(group, SkipReason.PlayerOwned);
+                                continue;
+                            }
+                            ReplayDirect(__instance, bunits, group, probability, commanderInitiative);
+                            continue;
+                        }
                         if (!BattleWriterPolicy.TryFeudReplayIntent(snapshot, index, GamePrefs.neededdistancefeudgroupmovement, out BattleOrderIntent intent))
                             continue;
 
@@ -132,22 +149,27 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Every assigned group's side has a battle snapshot this battle; without
-        // one the battle core is not running and vanilla keeps its feud body.
-        private static bool SnapshotsAvailable(IList groups)
+        // No snapshot (the battle core is not running for the side): vanilla's own
+        // move — closest visible enemy within the cap, delayed SetWaypoint (4957) —
+        // for a group TacticalWriteGuard.CanWrite(Regiment, feudReplay: true)
+        // already allowed; checked again right before the write.
+        private static void ReplayDirect(AIBattle battle, BattleUnits bunits, Regiment group, float probability, float commanderInitiative)
         {
-            for (int i = 0; i < groups.Count; i++)
+            TacticalFogOfWarContact.TryClosestVisibleEnemy(group, out Regiment enemy, out float distance);
+            if (!BattleWriterPolicy.FeudMoveTargetAllowed((UnityEngine.Object)enemy != null, distance, GamePrefs.neededdistancefeudgroupmovement)) return;
+            Vector3 target = ((Component)enemy).transform.position;
+            var orchDecision = DecideDirectChildGate(battle, bunits, group, target);
+            if (!orchDecision.Allow)
             {
-                var group = groups[i] as Regiment;
-                if (group == null) continue;
-                if (!BattleCore.TryGetSnapshot(group.alliance, out _))
-                {
-                    OnceLog.Info("tactical-feud-guard:no-snapshot",
-                        "[TacticalFeudGuard] no battle snapshot for a feud side; vanilla CheckForFeudGroupActions runs");
-                    return false;
-                }
+                LogDeniedOrch(group, orchDecision);
+                return;
             }
-            return true;
+            if (!TacticalWriteGuard.CanWrite(group, feudReplay: true)) return;
+            group.lastfeudactiontime = CurrentBattleHour(bunits);
+            bunits.SetWaypoint(group, target, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
+            GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
+                " is under feud and moving towards closest visible enemy (guarded direct) prob:" + probability +
+                " init:" + commanderInitiative);
         }
 
         private static bool Enabled()

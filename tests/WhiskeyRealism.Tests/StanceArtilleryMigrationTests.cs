@@ -22,6 +22,7 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core FeudReplayNeverEntersTheArbiter", FeudReplayNeverEntersTheArbiter),
             ("battle-core FeudReplayUsesInlineExecutor", FeudReplayUsesInlineExecutor),
             ("battle-core FeudReplayRefusedForPlayerOwned", FeudReplayRefusedForPlayerOwned),
+            ("battle-core FeudReplayFailsClosedWithoutSnapshot", FeudReplayFailsClosedWithoutSnapshot),
             ("battle-core MacroUsesSnapshotSlices", MacroUsesSnapshotSlices),
             ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
             ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
@@ -502,6 +503,23 @@ internal static class StanceArtilleryMigrationTests
         ExecutionPlan plan = executor.Plan(s, intent, 1.0);
         AssertFalse(plan.Execute, "never on a player-owned group");
         AssertEqual(SkipReason.PlayerOwned, plan.Skip, "PlayerOwned is never exempt");
+    }
+
+    // Without a battle snapshot for the feud side the executor cannot run; the
+    // replay must not hand the body back to vanilla (whose feud move has no
+    // ownership check, 4931-4960) but fall back to a direct move behind
+    // TacticalWriteGuard.CanWrite(Regiment, feudReplay: true), which refuses
+    // player-owned groups and groups whose order would reach an exposed
+    // player-owned descendant.
+    private static void FeudReplayFailsClosedWithoutSnapshot()
+    {
+        AssertEqual(FeudReplayPath.Executor, BattleWriterPolicy.DecideFeudReplayPath(hasSnapshot: true, canWriteFeudReplay: false),
+            "with a snapshot the executor's guard and chain fan-out decide");
+        AssertEqual(FeudReplayPath.Executor, BattleWriterPolicy.DecideFeudReplayPath(hasSnapshot: true, canWriteFeudReplay: true), "executor");
+        AssertEqual(FeudReplayPath.DirectGuarded, BattleWriterPolicy.DecideFeudReplayPath(hasSnapshot: false, canWriteFeudReplay: true),
+            "no snapshot, AI group: guarded direct replay");
+        AssertEqual(FeudReplayPath.Refused, BattleWriterPolicy.DecideFeudReplayPath(hasSnapshot: false, canWriteFeudReplay: false),
+            "no snapshot, player-protected group: refused, never vanilla's unguarded move");
     }
 
     // A feuding brigade at (500, -500) and one enemy `enemyDistance` due south.

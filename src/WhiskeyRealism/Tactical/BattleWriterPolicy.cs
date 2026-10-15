@@ -74,6 +74,14 @@ namespace WhiskeyRealism.Tactical
         public string Reason { get; }
     }
 
+    // How #42 replays one feud move (BattleWriterPolicy.DecideFeudReplayPath).
+    internal enum FeudReplayPath
+    {
+        Executor = 0,      // FeudReplay intent through OrderExecutorRuntime.ExecuteInline
+        DirectGuarded = 1, // no snapshot: vanilla's move, behind CanWrite(Regiment, feudReplay: true)
+        Refused = 2,       // no snapshot and the guard refuses (player-owned / exposed descendant)
+    }
+
     // Own-battery inputs the battle snapshot does not carry, read from the live
     // battery by ArtilleryIntentProducer (own side only; every enemy input comes
     // from the snapshot's observations).
@@ -842,6 +850,17 @@ namespace WhiskeyRealism.Tactical
         public static bool FeudMoveTargetAllowed(bool hasVisibleEnemy, float distance, float neededDistance)
         {
             return hasVisibleEnemy && distance <= neededDistance;
+        }
+
+        // #42 fails closed: vanilla's feud move (4931-4960) has no ownership
+        // check, so the body is never handed back to it. With the side's battle
+        // snapshot the executor decides (guard, chain fan-out around player-owned
+        // descendants); without one the replay is a direct move only where
+        // TacticalWriteGuard.CanWrite(Regiment, feudReplay: true) allows it.
+        public static FeudReplayPath DecideFeudReplayPath(bool hasSnapshot, bool canWriteFeudReplay)
+        {
+            if (hasSnapshot) return FeudReplayPath.Executor;
+            return canWriteFeudReplay ? FeudReplayPath.DirectGuarded : FeudReplayPath.Refused;
         }
 
         // #42's replay of vanilla's feud move (4955-4957) for own record `index`:
