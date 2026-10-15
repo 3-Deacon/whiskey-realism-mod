@@ -55,8 +55,6 @@ internal static class StrategicMapTests
             ("asset role catalog resolves real gtcw names", AssetRoleCatalogResolvesRealGtcwNames),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
-            ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
-            ("csa early policy scorer favors trade and recognition over naval parity", CsaEarlyPolicyScorerFavorsTradeAndRecognition),
             ("theater classifier maps wl capitals to east", TheaterClassifierMapsWlCapitalsToEast),
             ("army area classifier maps W&L northwest Virginia towns", ArmyAreaClassifierMapsWlNorthwestVirginiaTowns),
             ("campaign map ledger only maps states represented by towns", CampaignMapLedgerOnlyMapsRepresentedStates),
@@ -396,34 +394,6 @@ internal static class StrategicMapTests
 
         AssertTrue(tagged.HasTag(StrategyTag.Blockade), "expected coast fallback to add Blockade");
         AssertTrue(tagged.HasTag(StrategyTag.PortAccess), "expected coast fallback to add PortAccess");
-    }
-
-    private static void UnionEarlyPolicyScorerFavorsLegalBlockade()
-    {
-        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
-
-        float legalBlockade = GrandStrategyPolicyScorer.PolicyWeight(profile, 0, 41);
-        float civilianShips = GrandStrategyPolicyScorer.PolicyWeight(profile, 0, 35);
-        float enrollment = GrandStrategyPolicyScorer.PolicyWeight(profile, 0, 39);
-
-        AssertTrue(legalBlockade > enrollment, "Union early policy should prioritize legal blockade over raw enrollment");
-        AssertTrue(civilianShips > enrollment, "Union early policy should prioritize blockade capacity before enrollment");
-    }
-
-    private static void CsaEarlyPolicyScorerFavorsTradeAndRecognition()
-    {
-        var profile = GrandStrategyRegistry.Resolve(1, EraStage.Amateur1861);
-
-        float kingCotton = GrandStrategyPolicyScorer.PolicyWeight(profile, 1, 103);
-        float freeTrade = GrandStrategyPolicyScorer.PolicyWeight(profile, 1, 141);
-        float blockadeRunning = GrandStrategyPolicyScorer.PolicyWeight(profile, 1, 142);
-        float diplomacy = GrandStrategyPolicyScorer.PolicyWeight(profile, 1, 115);
-        float navalParity = GrandStrategyPolicyScorer.PolicyWeight(profile, 1, 135);
-
-        AssertTrue(kingCotton > navalParity, "CSA early policy should prioritize cotton leverage over naval parity");
-        AssertTrue(freeTrade > navalParity, "CSA early policy should prioritize trade access over naval parity");
-        AssertTrue(blockadeRunning > navalParity, "CSA early policy should prioritize blockade running over naval parity");
-        AssertTrue(diplomacy > navalParity, "CSA early policy should prioritize foreign recognition over naval parity");
     }
 
     private static void ObjectiveCatalogMapsKnownWlObjectives()

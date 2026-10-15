@@ -8,12 +8,12 @@
 
 | | |
 |---|---|
-| **Branch** | `main` — roadmap stage D (battle core, BC0-BC7) merged 2026-10-15 at `fc0b8af`; BC8 (experience- and drill-aware AI) merged at `75a7000`. In progress: stage E need-driven policy, stage F W&L campaign chain of command (both in review), stage G campaign planner (plan ready). |
+| **Branch** | `main` — roadmap stage D (battle core, BC0-BC7) merged 2026-10-15 at `fc0b8af`; BC8 (experience- and drill-aware AI) merged at `75a7000`; stage E need-driven policy merged at `99bf4eb`. In progress: stage F W&L campaign chain of command (in review), stage G campaign planner (plan in review), bug-fix slices `fix/campaign-perk-ids`, `fix/campaign-logistics-bugs`, `fix/wl-economy-bugs`, BC9 battle recon. |
 | **`main`** | `75a7000` — battle core + BC8 on top of the 2026-10-15 checkpoint (`6695ecd`); last released line is v0.2.2 (2026-05-04). |
 | **Build** | `./build.sh` — 0 warnings, 0 errors on `main`; the test build is 0 warnings too. |
 | **Harness** | 2014 PASS / 0 FAIL on `main` with stage F merged (1961 before) (auto-discovered `*Tests.Run()`; exit 0). |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
-| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `75a7000` (battle core + BC8): `WhiskeyRealism.dll` 1,648,128 bytes, SHA-256 `3257f907e4f1c2ca11910af283f567b187d12dc85d4062745140f1099405f6e1` (dist and plugins match); harness 1961 PASS / 0 FAIL. Earlier DLLs (`0831547f…`, `4f6e01fa…`) were never smoke-tested and are superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
+| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `99bf4eb` (battle core + BC8 + stage E): `WhiskeyRealism.dll` 1,672,704 bytes, SHA-256 `055eb4409f1abc7d39e74f68126ee72b99a2a0a04f794bb17603127e1c555ddd` (dist and plugins match); harness 2003 PASS / 0 FAIL. Earlier DLLs (`0831547f…`, `4f6e01fa…`, `3257f907…`) were never smoke-tested and are superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
 
 ### Stage F — W&L chain of command, campaign side (branch `feat/wl-chain-campaign`, not merged)
@@ -58,6 +58,7 @@ Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found alon
 - **Battle core + BC8:** merged and deployed 2026-10-15 (`75a7000`, SHA-256 `3257f907…`). Next: run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
 - **BC8 experience and drill:** merged `75a7000` (smoke items 2.12-2.14 in the battle-core plan).
 - **`[CIC:diag]`** was never written on `main` before `fc0b8af`; fixed in BC7 landing.
+- **E need-driven policy** (2026-10-15, merged to `main` at `99bf4eb` and deployed, SHA-256 `055eb440…`; awaiting smoke): daily per-alliance need vector + ranked policy plan (`Strategic/Policies/`, `CampaignNeedBuilder`), #19 consumes it, holds irreversible acts out of vanilla's fallback walk too, and protects the player's in-progress research from vanilla's emergency cancel (`BUG-WL-003`), #17 reads the same needs. New flag `Enable Need-Driven Policy Selection` (config entries 103 after the main merge).  Smoke items and PROVE-MODE: [`superpowers/plans/2026-10-14-need-driven-policy.md`](superpowers/plans/2026-10-14-need-driven-policy.md) § PROVE-MODE / Smoke expectations. A W&L Commander-in-Chief player's alliance gets the need-driven picks too (user decision 2026-10-15). Harness after the landing revision, the main merge and the verify round 3 items: 2003 PASS / 0 FAIL.
 
 ## Next stages
 
@@ -65,7 +66,7 @@ From [`superpowers/plans/2026-10-15-full-overhaul-roadmap.md`](superpowers/plans
 
 1. **C — Checkpoint.** Done: `main` at `6695ecd`, deployed 2026-10-15 (SHA-256 `0831547f…`).
 2. **D — Battle core.** Merged to `main` at `fc0b8af` and deployed 2026-10-15; awaiting the in-game smoke (see Open items). BC8 (experience/drill) follows. Spec: [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md).
-3. **E — Need-driven policy.** Plan: [`superpowers/plans/2026-10-14-need-driven-policy.md`](superpowers/plans/2026-10-14-need-driven-policy.md); spec [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md).
+3. **E — Need-driven policy.** Merged to `main` at `99bf4eb` after three verify rounds and deployed 2026-10-15; awaiting smoke. Plan: [`superpowers/plans/2026-10-14-need-driven-policy.md`](superpowers/plans/2026-10-14-need-driven-policy.md); spec [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md).
 4. **F — W&L chain of command** on the arbiter. Spec: [`superpowers/specs/2026-10-14-wl-chain-of-command-design.md`](superpowers/specs/2026-10-14-wl-chain-of-command-design.md) (§D-§F; §A-§C moved to battle core).
 5. **G — Live theater campaign planner.** Spec: [`superpowers/specs/2026-10-14-campaign-planner-design.md`](superpowers/specs/2026-10-14-campaign-planner-design.md). Supersedes locked design choices #3-#6 once it ships.
 6. **H — Naval and river war.** Spec: [`superpowers/specs/2026-10-14-naval-river-war-design.md`](superpowers/specs/2026-10-14-naval-river-war-design.md).
