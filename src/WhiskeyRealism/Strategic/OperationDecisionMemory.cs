@@ -129,8 +129,8 @@ namespace WhiskeyRealism.Strategic
             return proposed;
         }
 
-        // A probe state belongs to one target area; when the plan target moves the old probe
-        // is not this operation's probe any more.
+        // Persisted with the sidecar so a battle round-trip keeps the withdraw streak and the
+        // re-probe cooldown.
         internal ProbeHysteresisDto Snapshot()
         {
             return new ProbeHysteresisDto
@@ -151,6 +151,8 @@ namespace WhiskeyRealism.Strategic
             return h;
         }
 
+        // A probe state belongs to one target area; when the plan target moves the old probe
+        // is not this operation's probe any more.
         public static bool KeepPreviousState(string previousTargetAreaKey, string currentTargetAreaKey)
         {
             return !string.IsNullOrEmpty(currentTargetAreaKey) &&
