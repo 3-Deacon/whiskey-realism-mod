@@ -127,6 +127,16 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlEconomyFixes.cs" Link="WlEconomyFixes.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\WlEffectSwaps.cs" Link="Patches\WlEffectSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\LogisticsSwaps.cs" Link="Patches\LogisticsSwaps.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\AIAreaMembership.cs" Link="BugFixes\AIAreaMembership.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ConfiscationSupplyFlow.cs" Link="BugFixes\ConfiscationSupplyFlow.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\FoggedModelRule.cs" Link="BugFixes\FoggedModelRule.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\OffensiveWeaponTrimIl.cs" Link="BugFixes\OffensiveWeaponTrimIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RaidSupplyThreshold.cs" Link="BugFixes\RaidSupplyThreshold.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RandomPickRangeIl.cs" Link="BugFixes\RandomPickRangeIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\SubordinateStrengthSelector.cs" Link="BugFixes\SubordinateStrengthSelector.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\SupplyDepotAiRules.cs" Link="BugFixes\SupplyDepotAiRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\WinterOperationsModifier.cs" Link="BugFixes\WinterOperationsModifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionModels.cs" Link="ConstructionModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />

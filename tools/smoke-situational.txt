@@ -42,6 +42,11 @@ campaign.patch.project-appoint-observer.*          # Projects.AppointProject: on
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
 campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
+campaign.patch.raid-supply-threshold.*            # AICampaign.RaidForce.SearchObjective: only while a raid force exists (CheckCreationOfRaidForces raises them at random)
+campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateByStrength: only when CheckTransferOfUnits finds a deficit and a surplus army
+campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim loop: only when an offensive gathered more units than it needs
+campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
+campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
 
 # Battle paths a single battle may not reach.

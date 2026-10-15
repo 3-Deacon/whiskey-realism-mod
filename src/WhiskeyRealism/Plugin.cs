@@ -116,6 +116,17 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
+        public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
+        public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableOrphanCampCleanup;
+        public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
+        public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
+        public static ConfigEntry<bool> EnableSupplyDepotBuilderFix;
+        public static ConfigEntry<bool> EnableSubordinateStrengthGrabFix;
+        public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
+        public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
+        public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
@@ -845,6 +856,40 @@ namespace WhiskeyRealism
             EnableArtilleryCombineGunSync = Config.Bind(
                 "Campaign", "Enable Artillery Combine Gun Sync", true,
                 "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
+            // Campaign logistics vanilla bug fixes (docs/bug-fixes/vanilla-campaign-logistics.md).
+            EnableRaidSupplyThresholdFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Raid Supply Threshold Fix", true,
+                "Default ON. Vanilla raid forces never pick a target: RaidForce.SearchObjective needs GetGroupSupplyState >= 'minimum supply level to continue offensive operations' (0.75), but that function halves its 0-1 inputs and never exceeds 0.5. During the search the threshold is put on the same halved scale, so a raid force sets out once its real supply reaches the configured level. Raid groups under the W&L player's command stay vanilla. Off: vanilla (raid forces wait forever).");
+            EnableFoggedAiCampFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
+                "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiEmbarkationFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
+                "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableOrphanCampCleanup = Config.Bind(
+                "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
+                "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");
+            EnableAiAreaMembershipRefresh = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Area Membership Refresh", true,
+                "Default ON. Vanilla fills each AI area's IIP, building and town lists only during the first two AI runs, so depots and other buildings created later never count toward the area's supply capacity or as offensive objectives. Registers them into their area with vanilla's own position rule (no duplicates) and drops destroyed buildings once per full pass. Off: vanilla.");
+            EnableWinterOffensiveModifierFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Winter Offensive Modifier Fix", true,
+                "Default ON. Vanilla's winter roll for AI offensives uses the 'Probability modifier for defensive operations in winter' (0.2) and never reads the offensive one (0.05). Uses the offensive modifier for vanilla's offensive roll and for Whiskey's coordinated-offensive mirror of it; it scales the roll's time term (the idle-time term is not scaled, as in vanilla). Off: vanilla.");
+            EnableSupplyDepotBuilderFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Supply Depot Builder Fix", true,
+                "Default ON. In vanilla's depot job a unit near any depot its side started, even a finished, empty or captured one, is skipped (no move to resupply, no depot wish), and depot 'builders' (kept out of offensive, defensive and fort jobs) are counted within command range and several per depot, while construction only advances with a unit inside bugle range. Only depots still under construction skip a unit, and each such depot keeps one builder, its smallest unit inside bugle range. Off: vanilla.");
+            EnableSubordinateStrengthGrabFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Subordinate Strength Grab Fix", true,
+                "Default ON. Vanilla's BattleUnits.GrabSubordinateByStrength compares each brigade only with the last one picked instead of the running total, so AI transfers between armies move more than the deficit they were sized for. The pick now stops at the requested strength, with vanilla's other filters. Off: vanilla.");
+            EnableOffensiveWeaponTrimFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Offensive Weapon Trim Fix", true,
+                "Default ON. When vanilla trims surplus units from an AI offensive it credits each with its weapon factor squared into the blend instead of the blended factor used when the unit was added. A narrow IL rewrite of AICampaign.CheckOffensiveMovements (left as vanilla if the code pattern is not found) applies the same blend; this flag switches it live. Off: vanilla.");
+            EnableAiRandomCandidatePickFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Random Candidate Pick Fix", true,
+                "Default ON. Eight vanilla campaign-AI random picks (fleet port, fleet, ship type, recruit division and corps, recruiting IIP, army for a new corps, raid-force town) use Random.Range(0, Count - 1), which never returns the last candidate. A narrow IL rewrite (left as vanilla where the code pattern is not found) lets the pick include it; this flag switches it live. Off: vanilla.");
+            EnableConfiscationSupplyFlowFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
+                "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
