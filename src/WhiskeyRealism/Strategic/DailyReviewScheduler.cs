@@ -184,6 +184,26 @@ namespace WhiskeyRealism.Strategic
         internal static bool ReadsWorking => _inJob == null || _inJob();
     }
 
+    // Review work and the campaign planner's terrain memo drain never share a frame: any slice of the
+    // review (a pump, a drain before a new day or before a save) marks the frame, and the drain runs
+    // only on a frame without review work. Vanilla's SaveAll (#111 DailyReviewSaveDrainPatch) can finish
+    // a review earlier in the same frame than the AICampaign.Update Postfix that pumps, which would
+    // otherwise put the drain's 0.9 ms after the save drain's work.
+    internal sealed class ReviewFrameGate
+    {
+        private int _workFrame = -1;
+
+        internal void MarkWork(int frame)
+        {
+            _workFrame = frame;
+        }
+
+        internal bool MayDrain(int frame)
+        {
+            return frame != _workFrame;
+        }
+    }
+
     // One reader-facing copy of review state outside StrategicLedgerSet, published with it: the
     // day's commit fills the spare copy from the working state (Prepare) and, once every copy of
     // the day is complete, swaps it in (Swap). A fill that throws leaves the previous day

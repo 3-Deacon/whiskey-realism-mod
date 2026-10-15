@@ -6,12 +6,13 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
-    // The planner's two calls per AI alliance in the daily strategic review (plan P1), from
-    // StrategicCoordinator.RunStrategicReviewCore inside `if (operationalRuntimeReady)`:
-    //   ReviewPlan    after the fiscal and policy steps, before the front ledger: snapshot ->
+    // The planner's two calls per AI alliance in the daily strategic review (plan P1), from the Plan and
+    // Execute jobs of StrategicCoordinator.RunReviewJob (time-sliced since the perf merge), each inside
+    // `if (ready)` with the pause the day captured at its start (BeginReviewDay, spec C5):
+    //   ReviewPlan    the Plan job, after the fiscal and policy jobs, before the front job: snapshot ->
     //                 G1 detection and beliefs -> (G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
     //                 recon mission sync) -> CampaignPlanStore.Publish.
-    //   ReviewExecute after the defense intent: G2 appointments (CommanderAppointmentRuntime, on
+    //   ReviewExecute the Execute job, after the defense job: G2 appointments (CommanderAppointmentRuntime, on
     //                 this review's snapshot and plan), then the G5b, G5a, G5c, G5d executors.
     //                 Executors write vanilla state only from here.
     // Both return for alliances other than 0 and 1 and before AICampaign.aifaction holds the
@@ -60,7 +61,7 @@ namespace WhiskeyRealism.Strategic.Planner
             PendingBattles.Clear();
         }
 
-        internal static void ReviewPlan(int alliance, int day, int month, int year, DirectorPosture tempo)
+        internal static void ReviewPlan(int alliance, int day, int month, int year, DirectorPosture tempo, bool jobMachinePaused)
         {
             using (TelemetryPerf.Scope("campaign.planner.review", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
             {
@@ -69,7 +70,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!FlagOn(Plugin.EnableCampaignPlanner) || alliance < 0 || alliance >= Snapshots.Length) return;
                     var chain = WlChainContext.Capture();
                     PlayerCommandClass player = ReadPlayerClass(in chain);
-                    var mode = PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance);
+                    var mode = PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance, jobMachinePaused);
                     int faction = FactionIndexOf(alliance);
                     if (faction < 0) return;
 
@@ -122,7 +123,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        internal static void ReviewExecute(int alliance)
+        internal static void ReviewExecute(int alliance, bool jobMachinePaused)
         {
             using (TelemetryPerf.Scope("campaign.planner.execute", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
             {
@@ -131,7 +132,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;
                     if (alliance < 0 || alliance >= Snapshots.Length) return;
                     var chain = WlChainContext.Capture();
-                    if (PlayerCommandClassifier.ReviewMode(ReadPlayerClass(in chain), GameVars.playeralliance, alliance) != PlannerReviewMode.Full) return;
+                    // The day's captured pause decides; the live predicate is read again as defence in depth, so an
+                    // executor never writes while either says vanilla's job machine is frozen.
+                    var live = ReadPlayerClass(in chain);
+                    if (PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance, jobMachinePaused) != PlannerReviewMode.Full) return;
+                    if (PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance) != PlannerReviewMode.Full) return;
                     if (FactionIndexOf(alliance) < 0) return;
                     // Executors in plan order: G2 appointments, then G5b, G5a, G5c, G5d.
                     CommanderAppointmentRuntime.Execute(alliance, Snapshots[alliance]);

@@ -39,8 +39,17 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public static PlannerReviewMode ReviewMode(PlayerCommandClass c, int playerAlliance, int alliance)
         {
+            return ReviewMode(c, playerAlliance, alliance, ExecutorsPaused(c));
+        }
+
+        // The same decision with the day's pause supplied: a time-sliced review captures vanilla's
+        // job-machine predicate (11368) once, when the day begins (StrategicCoordinator.BeginReviewDay),
+        // and every job of the day follows that capture, so a pause that flips between the frames of one
+        // day never splits it into a planned half and a bookkeeping half.
+        public static PlannerReviewMode ReviewMode(PlayerCommandClass c, int playerAlliance, int alliance, bool jobMachinePaused)
+        {
             if (PlannerStandsDown(c, playerAlliance, alliance)) return PlannerReviewMode.StandDown;
-            return ExecutorsPaused(c) ? PlannerReviewMode.Bookkeeping : PlannerReviewMode.Full;
+            return jobMachinePaused ? PlannerReviewMode.Bookkeeping : PlannerReviewMode.Full;
         }
     }
 }

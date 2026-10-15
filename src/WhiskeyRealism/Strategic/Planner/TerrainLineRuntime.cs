@@ -23,7 +23,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // endpoints snapped to a 16-unit grid (the probe runs between the snapped points), bounded to
     // MaxMemoEntries. The memo, the drain and the partial lines survive CampaignScope resets (a
     // sidecar load, a return from a battle) and are cleared only when the map's identity changes
-    // (TerrainMemoDrain.MapIdentity: scenario and area geometry; PrepareDrain).
+    // (TerrainMemoDrain.MapIdentity: scenario and area geometry; PrepareDrain) or a load lands on another
+    // scenario (TerrainMemoDrain.DropForScenario, from the CampaignScope reset).
     // Per review or frame: at most MaxLineStepsPerReview map units of lines, MaxRiverProbesPerReview
     // river points, and MaxProbeMillisPerReview (a drain frame: MaxDrainMillisPerFrame) of wall clock
     // spent probing (a CPU budget, AGENTS.md
@@ -89,6 +90,8 @@ namespace WhiskeyRealism.Strategic.Planner
             _bfs = null;
             _bunits = null;
             _findAfterFrame = 0;
+            // A load onto another scenario drops the old map's queue and memo now (F3), not at the next review.
+            if (Drain.DropForScenario(SceneManagement.currentcampaignscenario)) ClearMap();
         }
 
         private static void ClearMap()
@@ -124,6 +127,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 long map = TerrainMemoDrain.MapIdentity(SceneManagement.currentcampaignscenario, snapshot.Areas);
                 bool grew = Drain.Prepare(map, snapshot.Areas, snapshot.Own, MaxMemoEntries, out bool mapChanged);
                 if (mapChanged) ClearMap();
+                Drain.NoteScenario(SceneManagement.currentcampaignscenario);
                 if (grew)
                     OnceLog.Info("campaign-planner:terrain-drain-start", "[CampaignPlanner] terrain drain started: lines=" + Drain.Lines
                         + " rivers=" + Drain.Rivers + " remaining=" + Drain.Remaining);

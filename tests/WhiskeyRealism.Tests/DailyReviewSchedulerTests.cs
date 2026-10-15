@@ -46,6 +46,12 @@ internal static class DailyReviewSchedulerTests
             ("daily review jobs hand off what the single-frame review did", JobHandOffsPinned),
             ("daily review published day swaps only a complete copy", PublishedDaySwapsOnlyCompleteCopy),
             ("daily review commit prepares every copy before swapping any", CommitPreparesEveryCopyBeforeSwapping),
+            ("daily review planner follows the pause the day captured", PlannerFollowsTheDaysPauseAcrossAMidDayFlip),
+            ("daily review review mode follows the supplied pause", ReviewModeFollowsTheSuppliedPause),
+            ("daily review coordinator hands the day's pause to the planner", CoordinatorHandsTheDaysPauseToThePlanner),
+            ("daily review terrain drain never shares a frame with review work", TerrainDrainNeverSharesAFrameWithReviewWork),
+            ("daily review terrain queue drops at a load onto another scenario", TerrainQueueDropsAtLoadOntoAnotherScenario),
+            ("daily review planner header and belief comment describe the code", PlannerCommentsDescribeTheCode),
         });
     }
 
@@ -285,6 +291,144 @@ internal static class DailyReviewSchedulerTests
         AssertDaysEqual(unsliced, hurried, "a day cut short by the next date change");
     }
 
+    // F1 (integration verify): a pause that flips between the frames of a sliced day must not split the day into
+    // a planned half and a bookkeeping half. The model flips its live predicate after the third frame of every
+    // day; the unsliced review (no frames between jobs) never sees a flip. Following the day's capture, the
+    // sliced days equal the unsliced ones; reading the live value per job (the control) does not.
+    private static void PlannerFollowsTheDaysPauseAcrossAMidDayFlip()
+    {
+        bool PausedAtStart(int day) => day % 4 == 2;
+
+        var unsliced = new ModelReview();
+        for (int day = 1; day <= Days; day++)
+        {
+            unsliced.LivePause = PausedAtStart(day);
+            unsliced.BeginDay(day);
+            AssertTrue(unsliced.Drain(), "unsliced day completes");
+        }
+
+        ModelReview Sliced(bool readLive)
+        {
+            var review = new ModelReview(0, readLive);
+            for (int day = 1; day <= Days; day++)
+            {
+                review.LivePause = PausedAtStart(day);
+                review.BeginDay(day);
+                int pumps = 0;
+                while (!review.Pump(0))
+                {
+                    AssertTrue(pumps < DailyReviewJobList.Ordered.Length, "day " + day + " finishes");
+                    if (++pumps == 3) review.LivePause = !PausedAtStart(day); // the flip, before the Policy job
+                }
+            }
+            return review;
+        }
+
+        AssertDaysEqual(unsliced, Sliced(false), "a pause flip mid-day, captured at the day's start");
+        var control = Sliced(true);
+        bool differs = false;
+        for (int i = 0; i < unsliced.CommittedPlanner.Count; i++)
+            if (unsliced.CommittedPlanner[i] != control.CommittedPlanner[i]) differs = true;
+        AssertTrue(differs, "reading the live pause per job does split a day (the control has teeth)");
+        string all = string.Join("|", unsliced.CommittedPlanner);
+        AssertContains(all, "bookkeeping:", "paused days run bookkeeping only");
+        AssertContains(all, "paused:", "and execute nothing");
+    }
+
+    private static void ReviewModeFollowsTheSuppliedPause()
+    {
+        foreach (int alliance in new[] { 0, 1 })
+        {
+            AssertEqual(PlannerReviewMode.Bookkeeping, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.BelowMapLevel, 0, alliance, true), "the day's captured pause pauses both alliances");
+            AssertEqual(PlannerReviewMode.Full, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.NoCommand, 0, alliance, false), "...and the day's captured 'not paused' wins over the live class");
+        }
+        AssertEqual(PlannerReviewMode.StandDown, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.CommanderInChief, 1, 1, true), "the CIC player's own alliance stands down whatever the pause");
+        AssertEqual(PlannerReviewMode.Bookkeeping, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.NoCommand, 0, 1),
+            "the live overload still derives the pause from the class (the executor's defence in depth)");
+    }
+
+    private static void CoordinatorHandsTheDaysPauseToThePlanner()
+    {
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string job = BodyOf(coordinator, "private void RunReviewJob(");
+        string plan = "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused)";
+        AssertEqual(2, job.Split(new[] { plan }, StringSplitOptions.None).Length - 1, "both Plan calls (the CIC player's bookkeeping and the AI alliance's) carry the day's pause");
+        AssertContains(job, "CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused)", "the Execute job carries it too");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertContains(BodyOf(runtime, "internal static void ReviewPlan("), "PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance, jobMachinePaused)", "the plan step's mode follows the capture");
+        string execute = BodyOf(runtime, "internal static void ReviewExecute(");
+        AssertContains(execute, "PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance, jobMachinePaused) != PlannerReviewMode.Full) return;", "the executor obeys the capture");
+        AssertContains(execute, "PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance) != PlannerReviewMode.Full) return;", "and still re-checks the live predicate");
+    }
+
+    // F4: the terrain drain runs on a frame only when no review slice ran on it. The one route to a shared
+    // frame was the save drain (SaveAll Prefix) finishing a review before the Update Postfix that pumps.
+    private static void TerrainDrainNeverSharesAFrameWithReviewWork()
+    {
+        var gate = new ReviewFrameGate();
+        AssertTrue(gate.MayDrain(10), "a frame with no review work may drain");
+        gate.MarkWork(10);
+        AssertFalse(gate.MayDrain(10), "a frame that ran a review slice (a save drain, a pump) may not");
+        AssertTrue(gate.MayDrain(11), "the next frame may");
+        gate.MarkWork(12);
+        gate.MarkWork(13);
+        AssertTrue(gate.MayDrain(12), "only the latest marked frame is remembered, and 12 is behind it");
+        AssertFalse(gate.MayDrain(13), "the latest one is blocked");
+
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string slice = BodyOf(coordinator, "private void RunReviewSlice(");
+        AssertTrue(slice.IndexOf("_reviewFrames.MarkWork(Time.frameCount);", StringComparison.Ordinal) is int mark && mark >= 0
+            && mark < slice.IndexOf("_review.Pump(", StringComparison.Ordinal), "every slice marks its frame before it works");
+        string pump = BodyOf(coordinator, "internal void PumpDailyReview(");
+        AssertContains(pump, "if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick();", "the drain asks the gate");
+        string drain = BodyOf(coordinator, "private void DrainDailyReview(");
+        AssertContains(drain, "RunReviewSlice(long.MaxValue)", "the save drain and the new-day drain are slices too, so they mark the frame");
+        int callers = 0;
+        foreach (string file in System.IO.Directory.GetFiles(FindRepoPath("src"), "*.cs", System.IO.SearchOption.AllDirectories))
+            callers += System.IO.File.ReadAllText(file).Split(new[] { "TerrainLineRuntime.DrainTick(" }, StringSplitOptions.None).Length - 1;
+        AssertEqual(1, callers, "the coordinator's pump is the drain's only caller");
+    }
+
+    // F3: a load onto another scenario drops the old map's queue at the load; the same scenario (a save of
+    // the same campaign, the return from a battle) keeps queue and memo.
+    private static void TerrainQueueDropsAtLoadOntoAnotherScenario()
+    {
+        var areas = new List<AreaRecord>();
+        for (int i = 0; i < 5; i++)
+            areas.Add(new AreaRecord { Index = i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f } });
+        var drain = new TerrainMemoDrain();
+        AssertFalse(drain.DropForScenario("002"), "nothing prepared: nothing to drop");
+        long map = TerrainMemoDrain.MapIdentity("002", areas);
+        drain.Prepare(map, areas, new List<FormationRecord>(), 100000, out bool changed);
+        AssertTrue(changed, "queue prepared for the map");
+        drain.NoteScenario("002");
+        int queued = drain.Remaining;
+        AssertTrue(queued > 0, "questions queued");
+        AssertFalse(drain.DropForScenario("002"), "the same scenario keeps the queue");
+        AssertEqual(queued, drain.Remaining, "queue intact");
+        AssertTrue(drain.DropForScenario("003"), "another scenario drops it at the load");
+        AssertEqual(0, drain.Remaining, "no stale question is probed against the new map");
+        AssertFalse(drain.DropForScenario("004"), "and a second drop finds nothing");
+        drain.Prepare(TerrainMemoDrain.MapIdentity("003", areas), areas, new List<FormationRecord>(), 100000, out bool again);
+        AssertTrue(again && drain.Remaining > 0, "the new map prepares afresh");
+
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TerrainLineRuntime.cs");
+        string reset = BodyOf(runtime, "private static void Reset(");
+        AssertContains(reset, "if (Drain.DropForScenario(SceneManagement.currentcampaignscenario)) ClearMap();", "the CampaignScope reset (a load) drops the old map's queue and memo");
+        AssertContains(BodyOf(runtime, "internal static void PrepareDrain("), "Drain.NoteScenario(SceneManagement.currentcampaignscenario);", "each prepared queue is tagged with its scenario");
+    }
+
+    // F2 and F5: comments that named code which no longer exists.
+    private static void PlannerCommentsDescribeTheCode()
+    {
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertFalse(runtime.Contains("RunStrategicReviewCore"), "the runtime header names the Plan and Execute jobs, not the removed single-frame core");
+        AssertContains(runtime, "StrategicCoordinator.RunReviewJob", "it names the jobs");
+        string beliefs = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyArmyModel.cs");
+        AssertFalse(System.Text.RegularExpressions.Regex.IsMatch(beliefs, @"sidecar-\s*//\s*restored after a load"), "no claim that beliefs are restored after a load");
+        AssertContains(beliefs, "EnemyArmyModel.Restore has no caller yet", "the comment says what is true until G6");
+    }
+
     private static void AssertDaysEqual(ModelReview expected, ModelReview actual, string label)
     {
         AssertEqual(expected.Committed.Count, actual.Committed.Count, label + ": day count");
@@ -316,9 +460,17 @@ internal static class DailyReviewSchedulerTests
         private long _clock;
         private int _day;
 
-        internal ModelReview(int costSeed = 0)
+        // Vanilla's job-machine predicate (11368) as the model sees it now; it can flip between frames. The
+        // coordinator captures it when the day begins (BeginReviewDay) and the planner's jobs follow that
+        // capture; readPauseLive models the pre-fix behaviour (each job reads the live value) as a control.
+        internal bool LivePause;
+        private bool _capturedPause;
+        private readonly bool _readPauseLive;
+
+        internal ModelReview(int costSeed = 0, bool readPauseLive = false)
         {
             _cost = new Random(costSeed);
+            _readPauseLive = readPauseLive;
         }
 
         private readonly ReconMissionLedger[] _recon = { new ReconMissionLedger(), new ReconMissionLedger() };
@@ -362,6 +514,8 @@ internal static class DailyReviewSchedulerTests
             return AllocationSignature(allocation) + "#" + _recon[a].Missions.Count;
         }
 
+        private bool PauseNow => _readPauseLive ? LivePause : _capturedPause;
+
         // StrategicCoordinator.View.
         private StrategicLedgerSet View => Scheduler.RunningJob ? Work : Published;
 
@@ -370,6 +524,7 @@ internal static class DailyReviewSchedulerTests
         internal void BeginDay(int day)
         {
             _day = day;
+            _capturedPause = LivePause;
             Scheduler.Begin(DailyReviewJobList.Ordered.Length);
         }
 
@@ -472,13 +627,19 @@ internal static class DailyReviewSchedulerTests
                 case DailyReviewJobKind.Plan:
                     // Today's posture (CIC) and policy, yesterday's front (the front runs later); the force
                     // allocation (G4) runs inside the Plan job, after the plan, with the recon ledger that carries over.
+                    // While the job machine is paused the planner keeps its bookkeeping only: no replan, no allocation.
+                    if (PauseNow)
+                    {
+                        _plans[a] = "bookkeeping:" + _day;
+                        break;
+                    }
                     _plans[a] = "p" + _day + ":" + View.DirectorMemories[a].LastPosture.Pace + "/" + View.PolicyPlans[a].CurrentPick
                         + "/" + (View.Fronts[a]?.Signature() ?? "-") + "/" + rng.Next(100) + "/alloc:" + AllocateModelDay(a, rng);
                     break;
 
                 case DailyReviewJobKind.Execute:
                     // Today's plan and defense intent.
-                    _executed[a] = _plans[a] + "|" + View.DefenseIntents[a].Signature;
+                    _executed[a] = PauseNow ? "paused:" + _day : _plans[a] + "|" + View.DefenseIntents[a].Signature;
                     break;
 
                 case DailyReviewJobKind.Front:
@@ -805,8 +966,8 @@ internal static class DailyReviewSchedulerTests
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: true)",
             "UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay)",
-            "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture)",
-            "case DailyReviewJobKind.Execute: if (ready && !paused) d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance));",
+            "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused)",
+            "case DailyReviewJobKind.Execute: if (ready && !paused) d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused));",
             "case DailyReviewJobKind.Front: { a.FrontChanged = false; if (paused) break;",
             "case DailyReviewJobKind.Defense: if (!paused)",
             "if (!ready || paused) break;",
@@ -923,7 +1084,7 @@ internal static class DailyReviewSchedulerTests
         // The campaign planner's terrain drain is a client of the same frame pump: only on a
         // frame with no review day in flight.
         string pump = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "internal void PumpDailyReview("), @"\s+", " ");
-        AssertContains(pump, "if (!_review.InFlight) { TerrainLineRuntime.DrainTick(); return; }", "drain only when no day is in flight");
+        AssertContains(pump, "if (!_review.InFlight) { if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick(); return; }", "drain only when no day is in flight and no review slice ran this frame (F4)");
         AssertBefore(tick, "CampaignIsLive(SceneManagement.currentoperation)", "PumpDailyReview()", "no pumping while the campaign is not live");
         string drain = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Patches/DailyReviewSaveDrainPatch.cs");
         AssertContains(drain, "[HarmonyPatch(typeof(SceneManagement), \"SaveAll\")]", "drain patch targets SaveAll");
