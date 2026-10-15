@@ -1913,7 +1913,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         macro,
                         sector,
                         true,
-                        true);
+                        true,
+                        sideDefending: sideStance == BattleStance.Defender);
                     TacticalGroupStanceDecision dec = TacticalDoctrineScorer.DecideGroupStance(scorerInput);
 
                     cache[instanceId] = new TacticalResolvedGroupDecision(

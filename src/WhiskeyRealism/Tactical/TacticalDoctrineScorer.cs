@@ -75,12 +75,17 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");
             if (input.Sector.Confidence < 0.55f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, input.VanillaStance, "pre-contact-preserve-vanilla");
+            // BC9: Whiskey never issues attack stance for a Defender side (vanilla's own
+            // stance cascade may still counterattack): both escalations cap at defend.
+            int escalated = input.SideDefending ? 2 : 3;
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint &&
                 (input.MacroAi == 0 || input.MacroAi == 1))
-                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, escalated,
+                    input.SideDefending ? "defender-weak-point-hold" : "attack-weak-point");
             if (input.MacroAi == 2 &&
                 ShouldCommitVisibleWeakPoint(input.Sector))
-                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "defensive-counterstroke");
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, escalated,
+                    input.SideDefending ? "defender-counterstroke-hold" : "defensive-counterstroke");
             if (input.MacroAi == 2 &&
                 (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint ||
                  input.Sector.Mission == TacticalSectorMission.Fix ||

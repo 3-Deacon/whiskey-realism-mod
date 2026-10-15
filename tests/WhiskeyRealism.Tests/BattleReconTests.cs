@@ -89,6 +89,7 @@ internal static class BattleReconTests
             ("defender: the posture stance guard rewrites state and order", PostureStanceGuardRewrites),
             ("defender: the posture pipeline and the leaf cascade call the stance guard", PostureGuardCallSitesPinned),
             ("defender: one stance reader for the division play", DivisionPlayReadsArmyStance),
+            ("defender: #45's default sector scorer never returns attack stance", DefaultScorerDefenderCapped),
         });
     }
 
@@ -1372,5 +1373,33 @@ internal static class BattleReconTests
         string text = ProducerSource("PlayIntentProducer.cs");
         AssertTrue(text.Contains("army.CurrentBattleStance == BattleStance.Defender"), "the division play reads the army's stance");
         AssertFalse(text.Contains("ArmyPostureInputsRuntime.SideDefending"), "no second stance reader");
+    }
+
+    // ------------------------------------------------------------------ integrator round 4
+
+    private static TacticalGroupStanceDecision SectorStance(int macroAi, TacticalSectorAssessment sector, bool defending) =>
+        TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2, macroAi: macroAi, sector: sector, orderFrictionAllowsChange: true, wlAllowsControl: true,
+            sideDefending: defending));
+
+    private static void DefaultScorerDefenderCapped()
+    {
+        var weakPoint = new TacticalSectorAssessment(0, TacticalSectorSource.VisibleLineContact, 1000f, 400f, 0.85f,
+            strongPoint: false, flankRisk: false, mission: TacticalSectorMission.AttackWeakPoint);
+        var counterstroke = new TacticalSectorAssessment(4, TacticalSectorSource.VisibleLineContact, 17651f, 914f, 0.85f,
+            strongPoint: false, flankRisk: false, mission: TacticalSectorMission.AttackWeakPoint);
+
+        TacticalGroupStanceDecision attack = SectorStance(1, weakPoint, defending: false);
+        AssertEqual(3, attack.GroupStance, "control: a meeting side attacks the weak point");
+        AssertEqual("attack-weak-point", attack.Reason, "control reason");
+        TacticalGroupStanceDecision counter = SectorStance(2, counterstroke, defending: false);
+        AssertEqual(3, counter.GroupStance, "control: a meeting side's counterstroke");
+        AssertEqual("defensive-counterstroke", counter.Reason, "control reason");
+
+        TacticalGroupStanceDecision dAttack = SectorStance(1, weakPoint, defending: true);
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, dAttack.GroupStance, "a defender's weak point: defend, not attack");
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, dAttack.Kind, "still Whiskey's decision");
+        TacticalGroupStanceDecision dCounter = SectorStance(2, counterstroke, defending: true);
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, dCounter.GroupStance, "a defender's counterstroke: defend, not attack");
     }
 }
