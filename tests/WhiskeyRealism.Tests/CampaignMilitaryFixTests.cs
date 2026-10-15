@@ -10,6 +10,8 @@ internal static class CampaignMilitaryFixTests
         SeaInvasionLandedSignalUsesEnemyBalance();
         WlCampaignContextSourcesAreRealVanillaFields();
         WlCampaignContextKeyDistinguishesCareersAndSaves();
+        ListSnapshotRestoreUndoesVanillaMutation();
+        ListSnapshotRestoreIsIdempotent();
     }
 
     private static void LogPass(string message)
@@ -76,5 +78,31 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(a != otherSave, "save folder changes key");
         TestHarness.AssertTrue(a != otherScenario, "scenario changes key");
         LogPass("c2a wl campaign context key distinguishes careers and saves");
+    }
+
+    // B-46-campaign: the ownunits restore moves into a [HarmonyFinalizer] so it
+    // runs even when vanilla CheckForDefensiveOperations throws. The restore
+    // itself must be exact and safe to run twice (Postfix + Finalizer paths).
+    private static void ListSnapshotRestoreUndoesVanillaMutation()
+    {
+        var live = new System.Collections.ArrayList { "a", "c" };
+        var snapshot = new System.Collections.Generic.List<object> { "a", "b", "c" };
+        TestHarness.AssertTrue(CampaignMilitaryGates.RestoreListSnapshot(live, snapshot), "restore reports success");
+        TestHarness.AssertEqual(3, live.Count, "restored count");
+        TestHarness.AssertEqual("b", (string)live[1], "restored original order");
+        LogPass("c2a list snapshot restore undoes vanilla mutation");
+    }
+
+    private static void ListSnapshotRestoreIsIdempotent()
+    {
+        var live = new System.Collections.ArrayList { "x" };
+        var snapshot = new System.Collections.Generic.List<object> { "a", "b" };
+        CampaignMilitaryGates.RestoreListSnapshot(live, snapshot);
+        CampaignMilitaryGates.RestoreListSnapshot(live, snapshot);
+        TestHarness.AssertEqual(2, live.Count, "second restore keeps exact contents");
+        TestHarness.AssertFalse(CampaignMilitaryGates.RestoreListSnapshot(null, snapshot), "null live list is a no-op");
+        TestHarness.AssertFalse(CampaignMilitaryGates.RestoreListSnapshot(live, null), "missing snapshot is a no-op");
+        TestHarness.AssertEqual(2, live.Count, "missing snapshot leaves list alone");
+        LogPass("c2a list snapshot restore is idempotent and null-safe");
     }
 }
