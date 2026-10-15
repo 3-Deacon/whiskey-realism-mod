@@ -6,6 +6,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -13,11 +14,25 @@ namespace WhiskeyRealism.Patches
 {
     // #60 — Vanilla BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew
     // (decompile 85524) places AI groups immediately, then clamps deployment-zone
-    // and terrain state (MoveAllUnitsIntoDeploymentZone 85862). This Postfix
-    // (default ON) samples bounded terrain-safe candidates and corrects clear AI
-    // terrain/deployment failures through vanilla SetGroupFormation when a safe
-    // candidate exists. Visible enemy bearing may shape final facing only after
-    // that terrain/deployment gate trips.
+    // and terrain state (MoveAllUnitsIntoDeploymentZone 85862). Vanilla chooses each
+    // group's objective and facing from the TRUE enemy: the candidate objectives exclude any
+    // with an enemy unit within 50 m (a scan of the whole unit list, 85604-85618), day 1 takes the
+    // objective nearest any enemy group (86260-86281), and the facing is the bearing to
+    // unitrange.closestenemyunitfar (85809-85815).
+    //
+    // The Prefix (non-skipping) records the side's group positions and the W&L command's AI
+    // group before vanilla runs. The Postfix (BC10 decisions 7-9):
+    //   1. fog-honest re-placement (DeploymentPlanRuntime / DeploymentDoctrine): the groups vanilla
+    //      moved in this call are re-planned from the assumed enemy point (what the side sees, else
+    //      the nearest enemy-owned entry point, else the map centre) and a third of the eligible
+    //      direct children go 425 m back as a reserve echelon; groups whose choice differs are
+    //      placed again;
+    //   2. terrain discipline (as before): a group left on water or outside its zone is moved to a
+    //      terrain-safe candidate, facing the same assumed enemy point.
+    // Every write is an immediate-placement Move through the battle core's order executor
+    // (OrderExecutorRuntime.TryPlanInline / ExecutePlannedInline); this patch calls no vanilla
+    // writer. Fog-honest re-placement and the reserve are gated by Enable Deployment And March
+    // Doctrine; the terrain discipline by Enable Tactical Deployment Terrain Discipline.
     //
     // Vanilla rules (WS T3):
     //   - SetGroupFormation's targetpos is the LINE FRONT; vanilla puts the HQ at
@@ -25,11 +40,12 @@ namespace WhiskeyRealism.Patches
     //     corrected HQ point is converted to the front the same way, and the
     //     front is re-checked for water / deployment zone;
     //   - groups vanilla placed on fortification lines (num3 == 1, 85684-85751,
-    //     ignoredeplyomentzone: true) are left alone;
+    //     ignoredeplyomentzone: true) are left alone, so a Defender whose groups all take
+    //     fortifications gets no deployment reserve;
+    //   - the W&L current command's AI group is never re-placed (the command and its parent
+    //     stay together; vanilla re-attaches the command for this call, 85650-85674);
     //   - fleets and zones with fewer than 2 frontline vectors are skipped;
-    //   - writes go through TacticalWriteGuard.CanWrite;
-    //   - the visible-enemy bearing reads the side's battle snapshot, which this patch
-    //     builds first (BC2b D1 amendment: deployment precedes the first doctrine tick).
+    //   - writes go through TacticalWriteGuard.CanWrite.
     [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
     internal static class TacticalDeploymentTerrainDisciplinePatch
     {
@@ -37,6 +53,8 @@ namespace WhiskeyRealism.Patches
         private const int MaxAdviceRowsPerBattle = 64;
         private const float DefaultMaxCorrectionMeters = 60f;
         private const float DefaultPreferredFacingDeltaDegrees = 90f;
+        // A group counts as placed by vanilla in this call when its position changed by more than this.
+        private const float MovedMeters = 1f;
 
         private static readonly FieldInfo GrpField = AccessTools.Field(typeof(BattleUnits), "grp");
         private static readonly FieldInfo EodCycleField = AccessTools.Field(typeof(BattleUnits), "eodcycle");
@@ -44,12 +62,14 @@ namespace WhiskeyRealism.Patches
         private static readonly HashSet<string> EmittedAdvice = new HashSet<string>();
         private static string _emittedAdviceBattleKey;
 
-        [HarmonyPostfix]
-        internal static void Postfix(BattleUnits __instance, int foralliance)
+        // Records what vanilla's placement is about to move. Never skips vanilla, writes nothing.
+        [HarmonyPrefix]
+        internal static void Prefix(BattleUnits __instance, int foralliance, out DeploymentPass __state)
         {
-            using (TelemetryPerf.Scope("tactical.patch.deployment-terrain", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            __state = null;
+            using (TelemetryPerf.Scope("tactical.patch.deployment-terrain.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                PatchFirstFire.Mark("tactical.patch.deployment-terrain");
+                PatchFirstFire.Mark("tactical.patch.deployment-terrain.prefix");
                 if (!Enabled()) return;
 
                 try
@@ -60,6 +80,34 @@ namespace WhiskeyRealism.Patches
 
                     BattleUnits.Grp[] groups = ReadGroups(__instance);
                     if (groups.Length == 0) return;
+                    __state = DeploymentPlanRuntime.Begin(__instance, groups);
+                }
+                catch (Exception ex)
+                {
+                    __state = null;
+                    OnceLog.Warning(
+                        "tactical-deployment-terrain:prefix-failed",
+                        "TacticalDeploymentTerrainDisciplinePatch prefix failed: " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+        }
+
+        [HarmonyPostfix]
+        internal static void Postfix(BattleUnits __instance, int foralliance, DeploymentPass __state)
+        {
+            using (TelemetryPerf.Scope("tactical.patch.deployment-terrain.postfix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            {
+                PatchFirstFire.Mark("tactical.patch.deployment-terrain.postfix");
+                if (!Enabled() || __state == null) return;
+
+                try
+                {
+                    if ((object)__instance == null) return;
+                    if (GameVars.playeralliance == foralliance && !GameVars.ai_vs_ai) return;
+                    if (GameVars.tutorialactive && !Tutorial.engaged) return;
+
+                    BattleUnits.Grp[] groups = ReadGroups(__instance);
+                    if (groups.Length == 0 || groups.Length != __state.Groups.Length) return;
                     EnsureSideSnapshot(__instance, foralliance);
 
                     if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
@@ -72,6 +120,8 @@ namespace WhiskeyRealism.Patches
                         "tactical-deployment-terrain-advice",
                         "TacticalDeploymentTerrainDisciplinePatch advice surface wired.");
 
+                    // The groups vanilla placed in this call that the doctrine may re-plan.
+                    bool[] candidate = new bool[groups.Length];
                     for (int i = 0; i < groups.Length; i++)
                     {
                         BattleUnits.Grp group = groups[i];
@@ -88,7 +138,18 @@ namespace WhiskeyRealism.Patches
                             continue;
                         }
 
-                        TryDisciplineGroup(__instance, group, regiment, phase);
+                        Vector3 now = regiment.transform.position;
+                        Vector3 before = __state.Before[i];
+                        float dx = now.x - before.x, dz = now.z - before.z;
+                        candidate[i] = dx * dx + dz * dz > MovedMeters * MovedMeters;
+                    }
+
+                    if (DeploymentDoctrineEnabled())
+                        DeploymentPlanRuntime.Run(__instance, foralliance, __state, candidate, initialDeployment);
+
+                    for (int i = 0; i < groups.Length; i++)
+                    {
+                        if (candidate[i]) TryDisciplineGroup(__instance, groups[i], groups[i].regref, phase);
                     }
                 }
                 catch (Exception ex)
@@ -116,6 +177,11 @@ namespace WhiskeyRealism.Patches
                 WhiskeyRealism.Tactical.Battle.BattleCoreTick.EnsureSnapshot(sideBattle, alliance);
                 return;
             }
+        }
+
+        private static bool DeploymentDoctrineEnabled()
+        {
+            return Plugin.EnableDeploymentAndMarchDoctrine != null && Plugin.EnableDeploymentAndMarchDoctrine.Value;
         }
 
         private static bool Enabled()
@@ -304,7 +370,7 @@ namespace WhiskeyRealism.Patches
                 bool footprintWater = footprint.Any(sample => sample.Water);
                 bool footprintOutOfZone = footprint.Any(sample => !sample.InDeploymentZone);
                 TacticalEnemyBearingEvidence enemy =
-                    TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, original);
+                    TacticalTerrainProbe.GetAssumedEnemyBearing(regiment, original);
 
                 bool terrainFailure = center.Water || footprintWater || !center.InDeploymentZone || footprintOutOfZone;
 
@@ -368,29 +434,13 @@ namespace WhiskeyRealism.Patches
                 if (frontSample.Water || !frontSample.InDeploymentZone)
                     return;
 
-                battleUnits.SetGroupFormation(
-                    group.go,
-                    regiment.groupformation,
-                    facing,
-                    front,
-                    immediateplacement: true,
-                    newpath: true,
-                    modifylastwaypoint: false,
-                    newstate: 2,
-                    refuseflank: -1,
-                    ignoredeplyomentzone: false,
-                    skiprotation: false,
-                    showmovementoptions: false,
-                    placeentrenchments: false,
-                    adjustbyterrainshape: true);
-
-                ClearPostDeploymentState(regiment);
+                DeploymentPlanRuntime.Place(battleUnits, regiment, frontX, frontZ, facing, IntentSource.Deployment);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-deployment-terrain:set-group-formation",
-                    "TacticalDeploymentTerrainDisciplinePatch SetGroupFormation failed: " + ex.GetType().Name);
+                    "tactical-deployment-terrain:correction",
+                    "TacticalDeploymentTerrainDisciplinePatch correction failed: " + ex.GetType().Name);
             }
         }
 
@@ -539,40 +589,6 @@ namespace WhiskeyRealism.Patches
                     "tactical-deployment-terrain:read-field",
                     "Failed reading BattleUnits." + fieldName + ": " + ex.GetType().Name);
                 return 0;
-            }
-        }
-
-        private static void ClearPostDeploymentState(Regiment regiment)
-        {
-            var visited = new HashSet<int>();
-            ClearPostDeploymentState(regiment, visited);
-        }
-
-        private static void ClearPostDeploymentState(Regiment regiment, HashSet<int> visited)
-        {
-            try
-            {
-                if ((UnityEngine.Object)regiment == null) return;
-                int id = regiment.GetInstanceID();
-                if (!visited.Add(id)) return;
-
-                regiment.lastsetwaypointposition = default(Vector3);
-                regiment.immediateunitplacement = false;
-
-                if (regiment.groupposition == null || regiment.groupposition.attachedunitreg == null)
-                    return;
-
-                int attached = Math.Min(
-                    regiment.groupposition.attachedunits,
-                    regiment.groupposition.attachedunitreg.Length);
-                for (int i = 0; i < attached; i++)
-                    ClearPostDeploymentState(regiment.groupposition.attachedunitreg[i], visited);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-deployment-terrain:cleanup",
-                    "TacticalDeploymentTerrainDisciplinePatch cleanup failed: " + ex.GetType().Name);
             }
         }
 

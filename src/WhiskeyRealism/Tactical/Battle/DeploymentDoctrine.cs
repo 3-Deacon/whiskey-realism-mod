@@ -38,6 +38,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool PlayerOwned;           // the group's direct child holds player-owned units: never a reserve
         public bool CavalryOnly, ArtilleryOnly;
         public bool WlCommandAncestor;     // an ancestor of the W&L current command: its child is never a reserve
+        // The pass must not touch this group (the W&L command's AI group): it keeps vanilla's
+        // placement and still holds the objective vanilla gave it. Its child is never a reserve.
+        public bool Locked;
     }
 
     public struct DeploymentObjective
@@ -193,6 +196,17 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int g = 0; g < groupCount; g++)
             {
                 ref DeploymentGroup group = ref groups[g];
+                if (group.Locked)
+                {
+                    HoldObjectiveOf(objectives, objectiveCount, into, group);
+                    into.Placements[g] = new DeploymentPlacement
+                    {
+                        GroupId = group.GroupId, ObjectiveIndex = -1, X = group.VanillaX, Z = group.VanillaZ,
+                        Heading = group.VanillaHeading, Kind = PlacementKind.Kept,
+                    };
+                    placed++;
+                    continue;
+                }
                 AssumedEnemyPoint(s, group.OldX, group.OldZ, enemyEntryX, enemyEntryZ, entries, mapCentreX, mapCentreZ,
                     out float ex, out float ez, out AssumedEnemySource source);
 
@@ -391,6 +405,25 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        /// <summary>
+        /// The instance id of the army direct child the unit at <paramref name="ownIndex"/> belongs to
+        /// (the unit itself or its nearest ancestor whose id is in <paramref name="childIds"/>), else 0.
+        /// Walks the snapshot's command parent map, never the scene graph.
+        /// </summary>
+        public static int DirectChildOf(IBattleUnitView s, int ownIndex, int[] childIds, int childCount)
+        {
+            if (s == null || childIds == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 0;
+            childCount = Math.Min(childCount, childIds.Length);
+            UnitRecord[] own = s.Own;
+            int current = ownIndex;
+            for (int hops = 0; current >= 0 && current < s.OwnCount && hops <= s.OwnCount; hops++)
+            {
+                if (IndexOf(childIds, childCount, own[current].InstanceId) >= 0) return own[current].InstanceId;
+                current = own[current].ParentIndex;
+            }
+            return 0;
+        }
+
         // ------------------------------------------------------------------ helpers
 
         private static int PickObjective(DeploymentObjective[] objectives, int count, DeploymentPlan plan, bool[,] ownZone, bool[,] enemyZone,
@@ -412,6 +445,20 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (d < bestSq) { bestSq = d; best = o; }
             }
             return best;
+        }
+
+        // The objective a locked group stands on (nearest within its spacing radius) counts as taken.
+        private static void HoldObjectiveOf(DeploymentObjective[] objectives, int count, DeploymentPlan plan, in DeploymentGroup group)
+        {
+            float radius = Math.Max(1, group.Brigades) * SpacingPerBrigadeMeters + 1f;
+            int best = -1;
+            float bestDistance = radius;
+            for (int o = 0; o < count; o++)
+            {
+                float d = Distance(objectives[o].X, objectives[o].Z, group.VanillaX, group.VanillaZ);
+                if (d <= bestDistance && !plan.ObjectiveUsed[o]) { bestDistance = d; best = o; }
+            }
+            if (best >= 0) plan.ObjectiveUsed[best] = true;
         }
 
         // CheckForSimilarPositions (94132-94232): inside the radius of the enemy point nothing
@@ -454,7 +501,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int g = 0; g < count; g++)
             {
                 if (groups[g].DirectChildId != childId) continue;
-                if (groups[g].PlayerOwned || groups[g].WlCommandAncestor) return false;
+                if (groups[g].PlayerOwned || groups[g].WlCommandAncestor || groups[g].Locked) return false;
                 if (!groups[g].CavalryOnly && !groups[g].ArtilleryOnly) combat = true;
             }
             return combat;

@@ -592,4 +592,95 @@ internal static partial class BattleMovementHonestyTests
         evidence = DirectChildEvidenceBuilder.BuildAll(snaps, new[] { 2, 2 }, new[] { 0, 0 }, enemy);
         AssertFalse(evidence[1].DeployedReserve, "no list: nobody is a deployed reserve");
     }
+
+    // The army's direct child a placed group belongs to: the nearest ancestor-or-self whose
+    // instance id is one of the discovered direct children (the snapshot's D5 parent map, not
+    // the scene graph). A group under none is its own child id 0.
+    private static void DirectChildOfWalksToTheArmysChild()
+    {
+        BattleSnapshot s = ArrivalFixture(out int[] ix);   // Top(100) -> SubGroup(110) -> Mem2, Mem3;  Top -> Mem1;  Outside
+        int[] children = { SubGroup, 777 };
+        AssertEqual(SubGroup, DeploymentDoctrine.DirectChildOf(s, ix[3], children, 2), "Mem2 is under the child SubGroup");
+        AssertEqual(SubGroup, DeploymentDoctrine.DirectChildOf(s, ix[1], children, 2), "the child itself");
+        AssertEqual(0, DeploymentDoctrine.DirectChildOf(s, ix[2], children, 2), "Mem1 hangs off the army root, not a listed child");
+        AssertEqual(0, DeploymentDoctrine.DirectChildOf(s, ix[5], children, 2), "Outside belongs to none");
+        AssertEqual(0, DeploymentDoctrine.DirectChildOf(s, -1, children, 2), "bad index");
+        AssertEqual(0, DeploymentDoctrine.DirectChildOf(s, ix[3], children, 0), "no children listed");
+    }
+
+    // A group the pass must not touch (the W&L command's AI group, whose parent and command stay
+    // together) keeps its vanilla placement and still holds the objective vanilla gave it, so no
+    // other group is re-placed onto it (vanilla's list of objectives already taken, 85766).
+    private static void LockedGroupIsNeverReplacedAndHoldsItsObjective()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // nearest the enemy
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },
+        };
+        float[] ex = { 3000f }, ez = { -100f };
+        DeploymentGroup locked = Placed(1, 290f, -100f, 270f);   // stands on objective 0, facing the wrong way
+        locked.Locked = true;
+        DeploymentPlan plan = Plan(s, new[] { locked, Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out int replaced);
+        AssertEqual(PlacementKind.Kept, plan.Placements[0].Kind, "the locked group is never re-placed, whatever its facing");
+        AssertNear(290f, plan.Placements[0].X, 0.001f, "vanilla's spot stands");
+        AssertEqual(1, plan.Placements[1].ObjectiveIndex, "the other group cannot take the locked group's objective");
+        AssertEqual(1, replaced, "one re-placement");
+    }
+
+    // ------------------------------------------------------------------ runtime wiring (source pins)
+
+    private static string Code(string repoPath)
+    {
+        return StripComments(System.IO.File.ReadAllText(TestFixtures.FindRepoPath(repoPath)));
+    }
+
+    // #60 writes only through the battle core's executor: no vanilla writer call in the patch or
+    // in the planning runtime, and the executor runtime is the only SetGroupFormation caller left in src.
+    private static void DeploymentWritesOnlyThroughTheExecutor()
+    {
+        string patch = Code("src/WhiskeyRealism/Patches/TacticalDeploymentTerrainDisciplinePatch.cs");
+        string plan = Code("src/WhiskeyRealism/Tactical/Battle/DeploymentPlanRuntime.cs");
+        var vanillaWriter = new System.Text.RegularExpressions.Regex(
+            @"\.(SetGroupFormation|SetWaypoint|SetFormation|ChangeStance|RegimentSetPath)\(");
+        AssertFalse(vanillaWriter.IsMatch(patch), "the #60 patch calls no vanilla writer");
+        AssertFalse(vanillaWriter.IsMatch(plan), "nor does the planning runtime");
+        AssertTrue(plan.Contains("OrderExecutorRuntime.TryPlanInline(") && plan.Contains("OrderExecutorRuntime.ExecutePlannedInline("),
+            "the placement is an inline executor Move");
+        AssertTrue(plan.Contains("Flags = IntentFlags.ImmediatePlacement") && plan.Contains("Priority = IntentPriority.Executor"),
+            "an immediate placement at Executor priority");
+        AssertTrue(plan.Contains("IntentSource.DeploymentReserve") && plan.Contains("IntentSource.Deployment"), "both placement sources");
+        AssertTrue(patch.Contains("DeploymentPlanRuntime.Place("), "the terrain correction places through the same call");
+
+        string src = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var callers = new List<string>();
+        foreach (string path in System.IO.Directory.GetFiles(src, "*.cs", System.IO.SearchOption.AllDirectories))
+            if (StripComments(System.IO.File.ReadAllText(path)).Contains(".SetGroupFormation(")) callers.Add(System.IO.Path.GetFileName(path));
+        AssertEqual("OrderExecutorRuntime.cs", string.Join(",", callers), "the executor runtime is the only SetGroupFormation caller");
+    }
+
+    private static void DeploymentPatchIsPrefixAndPostfixWithScopes()
+    {
+        string patch = Code("src/WhiskeyRealism/Patches/TacticalDeploymentTerrainDisciplinePatch.cs");
+        AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(patch, @"\[HarmonyPrefix\]\s*internal static void Prefix\("), "a void (non-skipping) Prefix");
+        AssertTrue(patch.Contains("TelemetryPerf.Scope(\"tactical.patch.deployment-terrain.prefix\"") &&
+                   patch.Contains("PatchFirstFire.Mark(\"tactical.patch.deployment-terrain.prefix\")"), "the Prefix scope and first-fire id");
+        AssertTrue(patch.Contains("TelemetryPerf.Scope(\"tactical.patch.deployment-terrain.postfix\"") &&
+                   patch.Contains("PatchFirstFire.Mark(\"tactical.patch.deployment-terrain.postfix\")"), "the Postfix scope and first-fire id");
+        AssertTrue(patch.Contains("DeploymentDoctrineEnabled()") && patch.Contains("DeploymentPlanRuntime.Run("), "the doctrine flag gates the re-placement");
+        AssertFalse(patch.Contains("GetVisibleEnemyBearing"), "the range-only visible bearing is gone");
+        string probe = Code("src/WhiskeyRealism/Tactical/TacticalTerrainProbe.cs");
+        AssertFalse(probe.Contains("GetVisibleEnemyBearing") || probe.Contains("enemyinrangereg"), "the probe reads no enemy unit list");
+        string observer = Code("src/WhiskeyRealism/Patches/TacticalDeploymentObserverPatch.cs");
+        AssertTrue(observer.Contains("GetAssumedEnemyBearing("), "#58's observer row reads the same assumed point");
+    }
+
+    private static void DeployedReserveIsReadFromTheExecutorOutcome()
+    {
+        string coordinator = Code("src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleCoordinatorRuntime.cs");
+        AssertTrue(coordinator.Contains("DeploymentDoctrine.IsDeployedReserve("), "the evidence reads the executor's outcome");
+        AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(coordinator,
+            @"DirectChildEvidenceBuilder\.BuildAll\([^;]*DeployedReserveFlags\(side\.AllianceId, childInstanceIds\)"), "and hands the flags to the builder");
+    }
 }

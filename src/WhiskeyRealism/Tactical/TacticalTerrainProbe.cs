@@ -87,53 +87,29 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
-        // Nearest enemy to a candidate point among the regiment's vanilla range list
-        // (enemyinrangereg, range-only and unsorted, UpdateUnitRangeFast 122649 / 122840),
-        // keeping only enemies the side's battle snapshot sees (BC2a fog; none before the
-        // side's first snapshot), ranked by true XZ distance from the point.
-        internal static TacticalEnemyBearingEvidence GetVisibleEnemyBearing(Regiment regiment, Vector3 origin)
+        // The bearing a deployed group faces from a point: toward the point the side's deployment
+        // assumes the enemy is at (DeploymentDoctrine.AssumedEnemyPoint: what the side sees, else
+        // the nearest enemy-owned entry point, else the map centre). It reads no enemy unit.
+        // The evidence's Visible flag means "a bearing exists"; Strength is 0 (nothing is known of it).
+        internal static TacticalEnemyBearingEvidence GetAssumedEnemyBearing(Regiment regiment, Vector3 origin)
         {
             try
             {
                 if (regiment == null ||
-                    regiment.unitrange == null ||
-                    regiment.unitrange.enemyinrangereg == null ||
-                    regiment.unitrange.enemyinrangereg.Count == 0 ||
-                    !BattleCore.TryGetSnapshot(regiment.alliance, out BattleSnapshot snapshot))
+                    !DeploymentPlanRuntime.TryAssumedEnemyPoint(regiment.alliance, origin.x, origin.z, out float x, out float z, out _))
                 {
                     return new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f);
                 }
 
-                Regiment best = null;
-                float bestDistance = float.MaxValue;
-                float bestStrength = 0f;
-
-                for (int i = 0; i < regiment.unitrange.enemyinrangereg.Count; i++)
-                {
-                    Regiment enemy = regiment.unitrange.enemyinrangereg[i];
-                    if (!IsBearingEligibleEnemy(regiment, enemy) || !snapshot.IsVisible(enemy.gameObject.GetInstanceID()))
-                        continue;
-
-                    float distance = XzDistance(origin, enemy.transform.position);
-                    if (distance < bestDistance)
-                    {
-                        best = enemy;
-                        bestDistance = distance;
-                        bestStrength = Math.Max(0f, enemy.strength);
-                    }
-                }
-
-                if (best == null)
-                    return new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f);
-
-                float bearing = Tools.GetAngle(origin, best.transform.position) + 180f;
-                return new TacticalEnemyBearingEvidence(true, bearing, bestDistance, bestStrength);
+                var point = new Vector3(x, origin.y, z);
+                float bearing = Tools.GetAngle(origin, point) + 180f;
+                return new TacticalEnemyBearingEvidence(true, bearing, XzDistance(origin, point), 0f);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning(
                     "tactical-terrain-probe:enemy-bearing",
-                    "TacticalTerrainProbe visible enemy bearing failed: " + ex.GetType().Name);
+                    "TacticalTerrainProbe assumed enemy bearing failed: " + ex.GetType().Name);
                 return new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f);
             }
         }
@@ -307,16 +283,6 @@ namespace WhiskeyRealism.Tactical
         private static bool IsWater(Vector3 point, int terrainId)
         {
             return terrainId == WaterTerrainId;
-        }
-
-        private static bool IsBearingEligibleEnemy(Regiment regiment, Regiment enemy)
-        {
-            if (enemy == null || regiment == null) return false;
-            if (enemy.alliance == regiment.alliance) return false;
-            if (enemy.isrouted || !enemy.gameObject.activeInHierarchy) return false;
-            if (enemy.unittyp == 3 || enemy.unittyp == 4) return false;
-            if (enemy.inmelee > 0f) return false;
-            return true;
         }
 
         private static bool IsInsideDeploymentZone(

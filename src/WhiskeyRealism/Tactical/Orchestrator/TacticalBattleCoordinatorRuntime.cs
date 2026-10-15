@@ -1437,6 +1437,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return string.IsNullOrWhiteSpace(value) ? "<unresolved>" : value.Trim().Replace(' ', '_');
         }
 
+        // BC10: which direct children the executor placed as a deployment reserve and has not moved
+        // since (DeploymentDoctrine.IsDeployedReserve over the executor's last Move outcomes). The
+        // outcome table is executor bookkeeping, so the allocator reads it without any patch-written state.
+        private static bool[] DeployedReserveFlags(int alliance, int[] childInstanceIds)
+        {
+            var flags = new bool[childInstanceIds.Length];
+            Battle.OrderExecutor executor = Battle.OrderExecutor.ForAlliance(alliance);
+            if (executor == null || !Battle.BattleCore.TryGetSnapshot(alliance, out Battle.BattleSnapshot snapshot) || snapshot == null)
+                return flags;
+            for (int i = 0; i < flags.Length; i++)
+            {
+                int index = snapshot.IndexOfOwn(childInstanceIds[i]);
+                flags[i] = Battle.DeploymentDoctrine.IsDeployedReserve(snapshot, executor, index);
+            }
+            return flags;
+        }
+
         private static void DriveDirectChildCycle(TacticalBattleOrchestrator side, AIBattle battle)
         {
             try
@@ -1517,7 +1534,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         active: true);
                 }
 
-                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren);
+                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren,
+                    DeployedReserveFlags(side.AllianceId, childInstanceIds));
                 // Stage 2 / G: geometric play layer. Compute corps→rect
                 // assignments from the current plan's template. When zone
                 // assignments are available, the allocator uses them in

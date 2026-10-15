@@ -397,7 +397,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public static int ViaLegs(in BattleOrderIntent w, int coveredPoints, int planned)
         {
             if (planned <= 0 || TakesBlockedMovingOrder(w, coveredPoints)) return 0;
-            return Math.Min(planned, 2);
+            return Math.Min(planned, RoadRoutePlanner.MaxVia);
         }
 
         /// <summary>
@@ -885,7 +885,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // one that cannot be made safe is dropped and the others stay in order.
         private void ValidateVia(IBattleUnitView s, int idx, in BattleOrderIntent w, ref ExecutionPlan plan)
         {
-            for (int k = 0; k < w.ViaCount && k < 2; k++)
+            for (int k = 0; k < w.ViaCount && k < RoadRoutePlanner.MaxVia; k++)
             {
                 BattleOrderIntent via = w;
                 via.TargetX = k == 0 ? w.ViaX0 : w.ViaX1;

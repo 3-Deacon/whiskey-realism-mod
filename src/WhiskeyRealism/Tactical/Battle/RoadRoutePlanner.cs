@@ -159,17 +159,12 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static float WoodedShare(BattleTerrainGrid g, float x0, float z0, float x1, float z1)
         {
-            float dx = x1 - x0;
-            float dz = z1 - z0;
-            float d = (float)Math.Sqrt(dx * dx + dz * dz);
-            int count = (int)Math.Floor(d / StraightSampleMeters) + 1;
-            float ux = dx / d, uz = dz / d;
+            // 1024 samples of StraightSampleMeters cover any battle map's longest move.
+            Span<int> ids = stackalloc int[1024];
+            int count = g.SampleLine(x0, z0, x1, z1, StraightSampleMeters, ids);
             int wooded = 0;
             for (int i = 0; i < count; i++)
-            {
-                int id = g.IdAt(x0 + ux * i * StraightSampleMeters, z0 + uz * i * StraightSampleMeters);
-                if (id == BattleTerrainGrid.ForestId || id == BattleTerrainGrid.SwampId) wooded++;
-            }
+                if (ids[i] == BattleTerrainGrid.ForestId || ids[i] == BattleTerrainGrid.SwampId) wooded++;
             return count > 0 ? (float)wooded / count : 0f;
         }
 
@@ -437,7 +432,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (Distance(s.SnapX[node], s.SnapZ[node], route.ViaX0, route.ViaZ0) < MinViaSeparationMeters) continue;
                 route.ViaX1 = s.SnapX[node];
                 route.ViaZ1 = s.SnapZ[node];
-                route.ViaCount = 2;
+                route.ViaCount = MaxVia;
                 break;
             }
         }
