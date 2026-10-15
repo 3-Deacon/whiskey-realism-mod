@@ -20,7 +20,11 @@ These rules apply to Harmony patches under `src/WhiskeyRealism/Patches/`.
 - Preserve vanilla side effects unless the spec explicitly says to replace them.
 - Bound-check alliance indexes. `AICampaign.aifaction` can include alliance `2` for Europe.
 - Do not mutate strategic mod state from a patch. Patches may read ledgers and steer vanilla behavior only.
-- If a Prefix filters a vanilla list, snapshot and restore it in Postfix even on failure.
+- If a Prefix filters or temporarily rewrites vanilla state, restore it in a `[HarmonyFinalizer]` so the restore runs even when vanilla throws.
+- Battle writes: check `TacticalWriteGuard.CanWrite(unit)` (and skip the W&L feud instance for battle-level writes); write `ai_stance` only through `Util/TacticalStanceWriter`; only #44 writes `macroai`. Under `Tactical Commander Mode` `MonitorOnly`/`Off` nothing is written.
+- Battle doctrine timers use `TacticalDoctrineTime` (battle game-hours), never wall-clock time.
+- Per-battle / per-campaign static state in a patch registers its reset with `BattleScope.Register` / `CampaignScope.Register` (`Util/ScopedState.cs`) from the patch's static constructor. OnceLog keys are static strings (no instance ids).
+- Every config flag defaults on and is a working rollback; match `Plugin.cs` descriptions to the code.
 
 ## Required Verification
 
@@ -28,3 +32,4 @@ These rules apply to Harmony patches under `src/WhiskeyRealism/Patches/`.
 - Deploy `dist/WhiskeyRealism.dll` to the BepInEx plugins folder.
 - Verify deployed and dist DLLs by timestamp/size and `sha256sum`.
 - Do not report runtime readiness from build output alone.
+- Run `python3 -I tools/config-audit.py .` and `python3 -I tools/orphan-sweep.py .` (both must report 0 findings) and update `docs/patch-catalog.md` for any added, removed or re-owned patch.
