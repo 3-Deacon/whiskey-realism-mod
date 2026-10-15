@@ -20,7 +20,7 @@ cd /tmp/gt_src
 dotnet /tmp/ilspy/tools/net8.0/any/ilspycmd.dll Assembly-CSharp.dll -o ./asm
 ```
 
-Result: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` — 266,134 lines.
+Result: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` — 266,136 lines for Steam build 14703111 (the 2026-10-14 update). Line numbers in this doc, `docs/vanilla-vision-and-movement.md` and `docs/wl-player-model.md` refer to that build.
 
 `/tmp` is volatile — re-run when the host is rebooted or `/tmp` cleaned.
 
@@ -70,8 +70,8 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 |---|---|---|
 | `CheckGlobalAIStrategy` | 6314 | Macro-AI stance set; preset from `aistrategies.dat`; has 1% casualty hardcode |
 | `AdjustGroupAIStance` | 4222 | Group stance ladder (none/screen/defend/attack/assault) |
-| `MicroAICheckForCharges` | 4906 | Charge fires when `aigroup.ai_stance == 4` + cooldown |
-| `CheckForFeudGroupActions` | 4953 | **Feud auto-charge — does NOT call `PerformAIActionDLCWL`** (the brigade-magnetization-into-melee bug) |
+| `MicroAICheckForCharges` | 4905 | Charge fires when `aigroup.ai_stance == 4` + cooldown |
+| `CheckForFeudGroupActions` | 4931 | **Feud auto-charge — does NOT call `PerformAIActionDLCWL`** (the brigade-magnetization-into-melee bug) |
 | `AssignReserves` | 7018 | Reserve assignment driver |
 | `AssignReserveToOperationalGroup` | 7154 | Reserve → group |
 | `LinkReservesToLineGroup` | 6643 | Reserve linking |
@@ -85,10 +85,10 @@ These anchors back the operations-ledger and full-spectrum doctrine consumers. C
 |---|---|---|
 | `AIBattle.CheckAIBombardment` | 3869 | B7 artillery doctrine surface; vanilla bombardment ownership must be preserved unless an existing safe combat-behavior write applies. |
 | `AIBattle.AdjustGroupAIStance` | 4222 | #45 stance consumer surface; vanilla stance ladder is still the immediate stance owner. |
-| `AIBattle.MicroAICheckForCharges` | 4906 | #41 charge consumer surface; charge allows remain subordinate to W&L/player, orchestrator, and B6c deny gates. |
+| `AIBattle.MicroAICheckForCharges` | 4905 | Dead in vanilla: the 4910 compare never matches, so it initiates no charge (`docs/bug-fixes/vanilla-tactical-battlefield.md` `BUG-TAC-016`). The former #41 charge gate on it was deleted (e7214b6). |
 | `AIBattle.AdjustGroupFormations` | 5875 | #61 posture executor surface; runs after vanilla group formation decisions. |
 | `AIBattle.CheckUseOfReserves` | 6062 | B8 and #59 reserve/fallback surface; direct reserve move is inside this method around line 6170. |
-| `AIBattle.CheckGlobalAIStrategy` | 6314 | Live vanilla macro-AI strategy writer; Whiskey operation selection must have an explicit boundary here rather than racing another macro writer. **F (2026-05-23) wires `BattleMacroAIOverridePatch` as a Prefix here** — writes `sideinformation[side].macroai` BEFORE vanilla reads it at line 6383, so vanilla's downstream `AdjustGroupAIStance` cascade applies our doctrine intent to per-group `ai_stance`. Player-protection gated; config flag `EnableVanillaMacroAiSync` default-on. |
+| `AIBattle.CheckGlobalAIStrategy` | 6314 | Live vanilla macro-AI strategy writer; Whiskey operation selection must have an explicit boundary here rather than racing another macro writer. #44 `BattleMacroStrategyPatch` is the single owner: a value-restoring Prefix plus a Postfix that writes the AIBattle instance `macroai` (never 3), which `UpdateAITasks` (5857) then feeds to `AdjustGroupAIStance`. The former `BattleMacroAIOverridePatch`, which wrote the persisted `sideinformation[side].macroai`, was deleted (8b09cf3). See "Vanilla anchors used in the 2026-10-14/15 remediation" for 6378-6438. |
 | `BattleUnits.GetBattleType` | 86095 | Vanilla scenario-stance signal. Returns 0 (meeting) / 1 (we attack) / 2 (we defend) computed from `sideinformation[side].objectivepointsheld` ratio vs `GamePrefs.objectiveratiodefend`. Stable across the battle unless objective ownership flips. **L (2026-05-23) reads this** via `ArmyEvidenceBuilder.ReadBattleStance` → `TacticalForceBalanceEvidence.Stance` (`BattleStance` enum) for the doctrine + playbook hard gate. Mirrors Scourge `OpenType()` + `Rank(eRankSide)` pattern (`sdk/SowAiInf/offai.cpp:1151-1159`). |
 | `AIBattle.AssignReserves` | 7018 | Vanilla reserve grouping surface; reserve-list mutation must snapshot/restore and never invent membership. |
 | `BattleUnits.ChangeStance` | 90772 | Vanilla stance API used by #61 for bounded posture corrections. |
@@ -221,6 +221,51 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 - `BattleUnits.SetGroupFormation(Regiment, ...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:91822` is the vanilla group/command-node formation API. It returns immediately for `unittyp <= 13`, then walks the attached hierarchy with `GetHierarchyTree(...)` at lines 91988-91999.
 - `BattleUnits.GetHierarchyTree(Regiment, ...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:92720` reads direct attached units and builds the vanilla command tree used by group formation movement.
 - `AIBattle.CheckCurrentOrderUpdate(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:8233` is not a regular campaign movement anchor. It returns immediately unless `DLC_WL.dlc_scenarioactive` is true, then creates `DLC_WL.GivenOrders` and career-panel order messages. Treat it as W&L current-order/message machinery only.
+
+## Vanilla anchors used in the 2026-10-14/15 remediation
+
+Anchors cited by the remediation commits (`git log 262a50d..`) and checked against build 14703111. Vision, fog, pathing and campaign movement live in [`vanilla-vision-and-movement.md`](vanilla-vision-and-movement.md); the W&L player, dispatches, the three AIBattle instances (85203-85212), `UpdateAITasks` (5857), `ai_vs_ai` (29787-29793), the hierarchy −1 pause (11368) and `permanentlydetached` live in [`wl-player-model.md`](wl-player-model.md). They are not repeated here.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| Battle clock | `BattleUnits.SetTimeVariables` | 93545 | `currenttimefromstart = Hour + battlepasseddays * 24`; the doctrine clock is derived from it. |
+| Battle clock | `BattleUnits.CheckTimeIssues` | 86369; 86382-86384 | End-of-day `eodcycle` machine; `battlepasseddays++` happens mid-night, so the raw clock jumps ~9 h. |
+| Battle clock | morning deployment panel close | 164874-164882 | Clears `deploymentmodeactive` and resets `eodcycle = 0`. |
+| Battle clock | `BattleUnits.IsCampaign` | 78782 | Campaign map uses the same component; its clock is not battle time. |
+| Battle lifecycle | `AIBattle.bunits` / `AIBattle.Start` | 3306 / 3354 | Static `BattleUnits` cache, set per battle in `Start`. |
+| Battle lifecycle | `AIBattle.SetSide` | 3408 | Sets the instance side and the feud flag (`isplayeraiorfeud == 2`). |
+| Battle lifecycle | `BattleUnits.OnDestroy`; `UpdateUnitList`; `BattleUnits.objectives` | 79207; 79974; 78910 | Battle teardown and per-battle unit/objective rebuild; caches must key on battle identity. |
+| Battle lifecycle | `BattleUnits.CalculateSideStatsAndUpdateAITasks` | 84570 (84866) | `aibattle[0].UpdateAITasks()` runs first. |
+| Macro AI | `AIBattle.CheckGlobalAIStrategy` | 6378-6386 | `GameVars.aistrategy >= 0` and `sideinformation[side].macroai >= 0` are scripted overrides that return early. |
+| Macro AI | same | 6388; 6438 | Timer revert of `macroai` to `newmacroaitoset` each cycle, and the timer re-stamp while `newmacroaitoset >= 0 && macroai <= 0`; why #44 restores vanilla's value before vanilla runs. |
+| Macro AI | `sideinformation.macroai` save / load / scenario | 74819 / 74689 / 88254 | Persisted and scenario-scripted; a value Whiskey wrote cannot be told apart from a scripted one. |
+| Stance | `AIBattle.AdjustGroupAIStance` | 4240; 4264 | Strength-triggered assault escalation (stance 4) and the per-unit stance re-evaluation gate. |
+| Stance | `AIBattle.GetGroupStrength` | 6025 | Group strength used by the stance ladder. |
+| Charges | `MicroAICheckForCharges` / `UpdateChargeTarget` / `AssignChargeTarget` | 4905 / 122199 / 126024 | AI charge paths; see `BUG-TAC-016` and `BUG-TAC-017` in `bug-fixes/vanilla-tactical-battlefield.md`. |
+| Facing | `StopMicroUnitsCloseToEnemyAndRotateTowards` facing rule | 4599-4606 | Turn threshold `angletriggerforturningtowardsenemy`, enlarged in cover (4600-4603). |
+| Facing | `Regiment.RotateRegiment` | 130159 (stop at 130165) | Rotating stops the unit, so re-issuing it every hold window freezes a battery. |
+| Artillery | `Regiment.ammo`; `Autocalc.GetROF` | 111498; 21025 (mean at 21038) | Ammo is per-slot 0..1; vanilla reads a battery as `SumUp(ammo) / 3`. |
+| Hierarchy | `BattleUnits.GrabNextParentUnit` | 86886 | Vanilla command-parent lookup (use this, never `transform.parent`). |
+| Hierarchy | `Regiment.UpdateAllAttachedUnits` | 129572 (129574) | `allattachedunits = GetComponentsInChildren<Regiment>(true)`: the unit itself and every descendant. |
+| Movement | `BattleUnits.SetGroupFormation` `ClearTargets` gate | 91960 | `newpath:false, modifylastwaypoint:true` skips `ClearTargets`. |
+| Campaign objectives | `AICampaign.PickCampaignObjective` | 17769; 17780-17785 | Re-picks with `Random.Range` whenever `followedcampaignobjective < 0`. |
+| Campaign objectives | `CampaignObjective.GetAvailableObjectives`; `InitializeObjectives` | 178827; 178630 | Default `mintownobjectives = 1`; objective towns/IIPs come from `campaignobjectives.dat`. |
+| Campaign objectives | `AICampaign.UpdateImportanceValues` | 14922; 14961 | Objective weight is applied to IIPs and towns of `followedcampaignobjective`, the only steering channel. |
+| Recruitment | `ZoneRecruiting`; `UpdateHeatmaps`; `Heatmap.PaintObject`; `Heatmap.GetValueOnPos` | 12405 (12470-12507); 12318; 34117; 33840 | Vanilla recruitment heatmap and `positiondeficit`; Whiskey reads the same grids. |
+| Campaign movement | `DefensiveMovingOrder` queue; `UpdateOrders` | 13713; 79295 | Defensive moves are queued and executed later, not immediately. |
+| Campaign movement | `AICampaign.CheckOffensiveMovements` | 14166; 14200; 14229 | Early return on empty `ownunits`; area strength term of the tempo gate. |
+| Scene | `SceneManagement.ExitCampaignBattleAndRebuildCampaign` | 36802 | Leaving a battle rebuilds the campaign scene; strategic caches must not survive it unchecked. |
+| Fiscal | `AICampaign.UpdateFinancialAI` | 15352-15447; 15405; 15443 | Random tax/subsidy lane nudges; balance trigger; subsidy cap at `subsidyfocus`. |
+| Fiscal | `Economy.UpdateMacroEconomy` | 32541; 32594-32597 | Re-rolls every alliance's interest with `Random.Range`; never call it to apply a refund. |
+| Policy | `Policies.UpdateSubsidyEffect` | 209505-209539 | Sets `maxpolicies` from the politics subsidy; evicts non-acts only while over the cap. |
+| Policy | `Policies.CanBeActivated` / `AddResearch` / `CheckAIPolicyChange` | 209541 / 209554 / 211017-211099 | Slot-cap stall; see `BUG-POL-002` in `bug-fixes/vanilla-ai-economy.md`. |
+| Construction | `CBuilding.AddConstructionWish` | 97479 (placeholder `Place` 97506) | The wish is paid when made (`Place` pay branch 96215). |
+| Construction | `WorkDownConstructionWishes` | 97562; 97578-97585 | Final placement uses `pay: false`; the no-site cancellation removes the building without a refund. |
+| Construction | `CBuilding.Place` / `RemoveBuilding` | 96163 / 98334 | Add / remove the building in `BattleUnits.cbuildings`. |
+| Army groups | `ArmyGroup.AppointCommander`; `GetArmyGroupInRange`; `CanAddFurtherUnits` | 75559; 75631; 75770 | Vanilla army-group APIs; `CanAddFurtherUnits` gates attaching only. |
+| Commanders | `Commander.combinedname` | 59081 | `firstname + " " + name`; registry names must match `Config/commanders.txt` on this. |
+| W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
+| W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
 ## Game-update re-decompile inventory
 
