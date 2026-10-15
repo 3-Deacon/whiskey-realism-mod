@@ -91,6 +91,10 @@ namespace WhiskeyRealism.Patches
                 !InRange(source.distancepoints, aifaction) || !InRange(source.importancevalues, aifaction))
                 return false;
 
+            // averageposition is only meaningful once vanilla has accumulated area
+            // samples (avgposcount, 11290-11299); (0,0) would classify as West.
+            if (source.avgposcount <= 0 || target.avgposcount <= 0) return false;
+
             float distance = ClosestAreaDistance(source, target);
             if (float.IsNaN(distance)) return false;
 
