@@ -124,6 +124,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlOperationNullGuard.cs" Link="WlOperationNullGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlEconomyFixes.cs" Link="WlEconomyFixes.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\WlEffectSwaps.cs" Link="Patches\WlEffectSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\LogisticsSwaps.cs" Link="Patches\LogisticsSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\AIAreaMembership.cs" Link="BugFixes\AIAreaMembership.cs" />
@@ -225,6 +227,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattlePerception.cs" Link="Battle\BattlePerception.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TroopQuality.cs" Link="Battle\TroopQuality.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SlicePressureBuilder.cs" Link="Battle\SlicePressureBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleRecon.cs" Link="Battle\BattleRecon.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\WithdrawalIntentProducer.Plan.cs" Link="Battle\Producers\WithdrawalIntentProducer.Plan.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeDemotionTracker.cs" Link="Battle\Producers\ChargeDemotionTracker.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeIntentProducer.Plan.cs" Link="Battle\Producers\ChargeIntentProducer.Plan.cs" />
@@ -360,5 +363,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalRegimentDiagnosticsPatch.cs" Link="Patches\TacticalRegimentDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleWriterPolicy.cs" Link="Tactical\BattleWriterPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleStatFixes.cs" Link="Tactical\BattleStatFixes.cs" />
   </ItemGroup>
 </Project>

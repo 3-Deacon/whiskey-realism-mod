@@ -1,3 +1,5 @@
+using WhiskeyRealism.Tactical.Orchestrator;
+
 namespace WhiskeyRealism.Tactical.Operations
 {
     public enum TacticalObjectiveGate
@@ -119,6 +121,30 @@ namespace WhiskeyRealism.Tactical.Operations
             return closeEngaged &&
                 hasFallbackTarget &&
                 UsesReconBreakoffTarget(task);
+        }
+
+        /// <summary>
+        /// The final stance guard every task assignment passes (ledger doctrine, GT
+        /// recon, the posture pipeline, the leaf cascade): a Defender (vanilla
+        /// GetBattleType 2) never gets reconnaissance in force or an attack-stance task
+        /// (TacticalCommandTaskToStanceMapper: Attack/Support/Fix → 3). Probe becomes
+        /// Screen; an attack task becomes HoldObjective. Scouting and screening are
+        /// information-gathering and stay. Meeting and Attacker are unchanged.
+        /// </summary>
+        public static CommandTaskType TaskForStance(CommandTaskType task, BattleStance stance)
+        {
+            if (stance != BattleStance.Defender) return task;
+            switch (task)
+            {
+                case CommandTaskType.Probe:
+                    return CommandTaskType.Screen;
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                    return CommandTaskType.HoldObjective;
+                default:
+                    return task;
+            }
         }
 
         public static CommandTaskType ReconnaissanceTaskFor(CommandNodeRole role)

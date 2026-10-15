@@ -343,6 +343,30 @@ Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-desi
 | `CheckAIPolicyChange` fallback walk | 211076-211090 | Walks `personality.policies` from the head and starts the first available entry; Union Historical lists 33/39/40 and CSA Historical 139/140 early. #19 removes the held irreversible acts from the list for the call (snapshot restored in its Finalizer), never on an emergency personality. |
 | `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
 
+## W&L player-economy and battle-stat anchors (2026-10-15)
+
+Anchors behind `BUG-WL-005..010` and `BUG-TAC-018/019` (plan `superpowers/plans/2026-10-15-wl-economy-bugs.md`). The player-side model is in [`wl-player-model.md`](wl-player-model.md) § Player economy effects.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| W&L effects | `DLC_WL.cumulativeeffectsrunning` / `cumulativeeffectsonce` | 43199-43201 (private static, `float[100]`) | Running multipliers vs once values; read by reflection (`Patches/WlEffectArrays`). |
+| W&L effects | `DLC_WL.EffectMultiplier(id, type, isplayerunit)` | 44633 | Returns 1/0 when not in a career or `isplayerunit` is false; the default is `true`. |
+| W&L effects | `DLC_WL.UpdateCumulativeEffects` | 44662 (reset 44671-44675, actions 44753-44773) | Rebuilds both arrays from scratch each call; type 1/2 → once, 3/4 → running, type 0 ignored. Called from `UpdateAllianceData` (81821), `AppointStaffMember` (44475), `UpdateStaffAvailability` (44537). |
+| W&L attrition | `Regiment.UpdateCampaignUnitStats` | 114965 (sickness 115149-115151, desertion 115196-115198; medical 115107, training 115243, readiness 115276) | Runs for every regiment (120260, 120409); effect 22 read unscoped. |
+| W&L supply | `Regiment.UpdateIIPSupplyLink` (private) | 114074 (map-group return 114145; effects 10/11 114190-114195; `num15` 114320-114351; resupply 114379; effect 14 114555; camp 8 114575) | Per map group; `num15` is the resupply duration (campaignprefs `supplyspeeddistance0/2000`). |
+| W&L supply | `BattleUnits.GetCampaignGroup` | 82991 | The player's map group; vanilla's camp (172032) and `IsPlayerPartOfUnit` (47578) use it. |
+| W&L camp | `Camp.GetModifier` | 172524 | `1 + bonus × maxbonusmalus [/ commanded units]`, clamped at 0; station 5 (Inspect Logistics) not divided. |
+| W&L Buy Supplies | `DLC_WL.GetAverageSupplySubordinates` / `AddSuppliesSubordinates` | 47377 / 47411 (type test 47392, 47428) | Attribute 24 Get/Set (42235-42237, 42561-42563). |
+| W&L transfers | `AICampaign.CheckTransferOfUnits` / `BattleUnits.MoveUnit` | 17232 (purge 17255-17262, add 17327, move 17328) / 93091 (career guard 93099, `SetTransfer` 93147) | In a career the appended unit never moves; `transfertime > 0` marks a real transit. |
+| W&L morale | `Regiment.UpdateMoraleCampaign` (private) | 127816 (effect 16 on `parentcampaignunit` 127874, camp 7 on the regiment 127875-127877, rally 127891; per-regiment caller 120375) | Morale effect keyed on the campaign group (`BUG-WL-011`). |
+| W&L once readers | effects 17 / 19 / 27 | 116687, 116738 / 113593 / 44559-44583 | Fighting spirit, re-enlistment ratio, staff-skill growth rate: running only, so type-1 action qualities on them were dead (`BUG-WL-009`). |
+| W&L order delays | effects 13 / 12 in `Regiment` order-delay code | 125069 / 125136 | Campaign and battle order delay `num2 *= EffectMultiplier(13/12, 1, owned)`: running only, so Signal Corps' type-2 qualities were dead (`BUG-WL-009`). |
+| W&L incidents | `DLC_WL.CheckForIncidents` | 46139 | `1 + EffectMultiplier(4, 0)`: incident chance read only as once, so Gamble's type-3 cost was dead (`BUG-WL-009`). |
+| W&L prestige | `DLC_WL.AdjustPrestige` | 43455 | Effect 0 (prestige generation) read only as running; item, injury and event-100 type-1/2 values on it stay dead (left vanilla, `BUG-WL-009`). |
+| W&L panel | `CampaignArmyPanel.UpdateStats` | 173470 (unscoped 173699-173702, 173742-173747; scoped 173552, 173637) | Lists the player's staff effects on any group (`BUG-WL-012`). |
+| Battle stats | `BattleUnits.CalculateAllUnitsOfAlliance` | 87335 (averages 87396-87399) | `enemyentrenchmentlevel` divided by the player count; read by 85632-85642 and 87480-87481. |
+| Battle stats | `BattleUnits.AssignConditionToSubordinates` | 85453 (HQ lines 85469-85471, side averages 85473-85504; frame 26 at 23972-23975) | HQ horses/guns clamped by the men value. |
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:

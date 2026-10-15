@@ -1832,8 +1832,8 @@ internal static class TacticalLedgerTests
         AssertEqual(1, TacticalUnitType.Cavalry, "cavalry = 1");
         AssertEqual(2, TacticalUnitType.Artillery, "artillery = 2");
         AssertEqual(3, TacticalUnitType.Skirmisher, "skirmisher = 3");
-        AssertEqual(4, TacticalUnitType.Officer, "officer = 4");
-        AssertEqual(5, TacticalUnitType.Excluded, "excluded = 5");
+        AssertEqual(4, TacticalUnitType.Scout, "scouts = 4 (unitprefs Unit Type 4)");
+        AssertEqual(5, TacticalUnitType.Courier, "courier = 5 (unitprefs Unit Type 5)");
         AssertEqual(13, TacticalUnitType.MaxCombat, "max combat = 13");
         AssertEqual(14, TacticalUnitType.BattleGroupBrigade, "battle group brigade = 14");
         AssertEqual(15, TacticalUnitType.BattleGroupDivision, "battle group division = 15");

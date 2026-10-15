@@ -35,7 +35,7 @@ internal static class BattleCoreIntegrationTests
     private static readonly string[] PlanOrder =
     {
         "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Posture",
-        "FacingPulse", "FireControl", "DivisionPlay", "ReserveRelease", "Charge",
+        "FacingPulse", "FireControl", "DivisionPlay", "Recon", "ReserveRelease", "Charge",
     };
 
     private sealed class NamedProducer : IBattleIntentProducer
@@ -45,7 +45,8 @@ internal static class BattleCoreIntegrationTests
         public void Produce(BattleSnapshot snapshot, IIntentSink sink) { }
     }
 
-    // Plan BC5 order without "Play": the geometric play is no mover (BC5a As built).
+    // Plan BC5 order without "Play": the geometric play is no mover (BC5a As built);
+    // BC9 adds Recon after DivisionPlay (it reads the posture producer's per-group record).
     private static void ProducerRegistryOrderIsThePlanOrder()
     {
         AssertEqual(PlanOrder.Length, BattleProducerRegistry.Order.Count, "producer count");

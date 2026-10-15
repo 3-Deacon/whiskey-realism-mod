@@ -543,7 +543,7 @@ internal static class TacticalPlaybookTests
             TacticalObjectiveStatus.Scouting,
             0f,
             0f);
-        var baseStates = CommandNodeOperationsRuntime.Build(intents, operation, new[] { objective });
+        var baseStates = CommandNodeOperationsRuntime.Build(intents, operation, new[] { objective }, BattleStance.Meeting);
 
         var nestedStates = TacticalNestedDivisionPlayPlanner.Apply(tree, baseStates);
         var nestedArray = new CommandNodeOperationalState[nestedStates.Count];
