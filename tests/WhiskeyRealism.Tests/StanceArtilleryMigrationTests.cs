@@ -24,12 +24,15 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core FeudReplayRefusedForPlayerOwned", FeudReplayRefusedForPlayerOwned),
             ("battle-core FeudReplayFailsClosedWithoutSnapshot", FeudReplayFailsClosedWithoutSnapshot),
             ("battle-core MacroUsesSnapshotSlices", MacroUsesSnapshotSlices),
+            ("battle-core MacroEnemiesInRangeFromSnapshot", MacroEnemiesInRangeFromSnapshot),
             ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
             ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
             ("battle-core ArtilleryLimberUnlimberFaceAreFormationAndFacing", ArtilleryLimberUnlimberFaceAreFormationAndFacing),
             ("battle-core ArtilleryRetreatTargetValidatedNotStraightLine180m", ArtilleryRetreatTargetValidatedNotStraightLine180m),
             ("battle-core PointBlankVanillaMoveTriggersSafetyRetreat", PointBlankVanillaMoveTriggersSafetyRetreat),
             ("battle-core ArtilleryNeverStanceWrites", ArtilleryNeverStanceWrites),
+            ("battle-core ArtilleryWheelFacesTheWinningQuadrant", ArtilleryWheelFacesTheWinningQuadrant),
+            ("battle-core InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy", InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy),
             ("battle-core ArtilleryIgnoresFeudPlayerAndHeldBatteries", ArtilleryIgnoresFeudPlayerAndHeldBatteries),
         });
     }
@@ -310,6 +313,65 @@ internal static class StanceArtilleryMigrationTests
                 }
     }
 
+    // The wheel is chosen by quadrant strength (best > current + 1000), so it faces
+    // the winning quadrant: its strongest visible enemy in fire range, the same
+    // "turn toward one enemy unit's position" convention vanilla's micro facing
+    // uses (GetAngleTerrain(own, enemy) + 180, 4603). Never the closest enemy,
+    // which is in front exactly when the wheel fires.
+    private static void ArtilleryWheelFacesTheWinningQuadrant()
+    {
+        var buffer = new BattleOrderIntent[4];
+        // Battery at (500, -500) facing south (180): 100 men 600 m south, 5000 men 700 m north.
+        BattleSnapshot s = TwoEnemyBatterySnapshot(ObservationState.Visible);
+        BattleWriterPolicy.QuadrantThreats(s, 500f, -500f, 180f, 1000f, out float current, out float best, out float bestX, out float bestZ);
+        AssertEqual(100f, current, "front quadrant: the small enemy");
+        AssertEqual(5000f, best, "rear quadrant wins");
+        AssertNear(-500f + 700f, bestZ, 0.01f, "the strongest enemy of the winning quadrant");
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer);
+        AssertEqual(1, n, "one wheel");
+        AssertEqual(OrderChannel.Facing, buffer[0].Channel, "facing");
+        AssertNear(0f, buffer[0].Heading, 0.01f, "wheels to the rear threat (north), not the closest enemy in front");
+
+        // The rear enemy only remembered: no quadrant threat behind, no wheel.
+        s = TwoEnemyBatterySnapshot(ObservationState.Remembered);
+        BattleWriterPolicy.QuadrantThreats(s, 500f, -500f, 180f, 1000f, out current, out best, out _, out _);
+        AssertEqual(100f, best, "a remembered enemy is not a threat in fire range");
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "no wheel toward a remembered enemy");
+    }
+
+    private static BattleSnapshot TwoEnemyBatterySnapshot(ObservationState rearState)
+    {
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+        s.Observations[0].Strength = 100f;
+        s.AddObservation(new EnemyObservation { InstanceId = 902, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -500f + 700f, Strength = 5000f, State = rearState, Confidence01 = 1f });
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+        return s;
+    }
+
+    // Port of the audit's CountFriendlyInfantryCavInterposed: a friend shields the
+    // battery only on the enemy side of it, short of the enemy, within one frontage.
+    private static void InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy()
+    {
+        // Battery at (500, -500), enemy 600 m due south (z = -1100).
+        AssertEqual(1, Support(500f, -700f), "a friend between the battery and the enemy");
+        AssertEqual(0, Support(500f, -450f), "a friend behind the battery does not shield it");
+        AssertEqual(0, Support(500f, -1200f), "a friend past the enemy");
+        AssertEqual(0, Support(700f, -700f), "a friend 200 m off the line");
+        AssertEqual(1, Support(590f, -700f), "within one frontage of the line");
+    }
+
+    private static int Support(float fx, float fz)
+    {
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+        var snapshot = new BattleSnapshot();
+        snapshot.BeginBuild(1, 0, 0, 1, 1.0);
+        snapshot.AddOwn(s.Own[0]);
+        snapshot.AddOwn(s.Own[1]);
+        snapshot.AddOwn(new UnitRecord { InstanceId = 81, UnitTyp = TacticalUnitType.Infantry, X = fx, Z = fz, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry });
+        snapshot.IndexCommandTree(null);
+        return BattleWriterPolicy.CountInterposedSupport(snapshot, 1, true, 500f, -1100f, 600f);
+    }
+
     private static void ArtilleryIgnoresFeudPlayerAndHeldBatteries()
     {
         var buffer = new BattleOrderIntent[4];
@@ -573,6 +635,35 @@ internal static class StanceArtilleryMigrationTests
         AssertNear(expected, BattleWriterPolicy.SnapshotPressure(s, 0), 0.01f, "visible + discounted remembered");
         AssertEqual(0f, BattleWriterPolicy.SnapshotPressure(s, -1), "a group outside the snapshot reads no pressure");
         AssertEqual(0f, BattleWriterPolicy.SnapshotPressure(null, 0), "no snapshot reads no pressure");
+    }
+
+    // vanilla groupenemiesinrange (120558-120563) is the max of the subordinates'
+    // unitrange.enemiesinrange: enemy strength within the line-of-sight range,
+    // never fog-filtered for the AI side (122650-122655). #44 now reads what the
+    // side perceives within that range of the group or a descendant: visible in
+    // full, remembered by confidence, off-map reinforcements never, each enemy once.
+    private static void MacroEnemiesInRangeFromSnapshot()
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        var group = Group(91, Brigade, 3);
+        group.X = 0f;
+        group.Z = -1000f;
+        s.AddOwn(group);
+        s.AddOwn(new UnitRecord { InstanceId = 92, UnitTyp = TacticalUnitType.Infantry, X = 0f, Z = -1400f, ParentIndex = 0, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry });
+        s.Own[1].ParentIndex = 0;
+        s.AddOwn(new UnitRecord { InstanceId = 93, UnitTyp = TacticalUnitType.Infantry, X = 5000f, Z = -1000f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry });
+        s.IndexCommandTree(null);
+        s.AddObservation(new EnemyObservation { InstanceId = 1, X = 0f, Z = -1200f, Strength = 1000f, State = ObservationState.Visible, Confidence01 = 1f });
+        s.AddObservation(new EnemyObservation { InstanceId = 2, X = 0f, Z = -1700f, Strength = 400f, State = ObservationState.Remembered, Confidence01 = 0.5f });
+        s.AddObservation(new EnemyObservation { InstanceId = 3, X = 5000f, Z = -1100f, Strength = 9000f, State = ObservationState.Visible, Confidence01 = 1f });
+        s.AddObservation(new EnemyObservation { InstanceId = 4, X = 0f, Z = -1300f, Strength = 7000f, State = ObservationState.Visible, Confidence01 = 1f, IsReinforcement = true });
+
+        float inRange = BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 0, 350f);
+        AssertNear(1000f + 0.5f * 400f, inRange, 0.01f,
+            "visible in full + remembered by confidence, reached through the descendant; another command's enemy and off-map arrivals never");
+        AssertEqual(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, -1, 350f), "outside the snapshot");
+        AssertEqual(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(null, 0, 350f), "no snapshot");
     }
 
     // ------------------------------------------------------------------ fixtures

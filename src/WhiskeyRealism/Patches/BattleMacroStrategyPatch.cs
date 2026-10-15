@@ -60,7 +60,10 @@ namespace WhiskeyRealism.Patches
     // Battle core (BC5b): the legacy scorer's enemy pressure (sector and
     // inferred strength) is the battle snapshot's slice pressure
     // (BattleWriterPolicy.SnapshotPressure), no longer vanilla's
-    // enemystrengthwithinangle over true enemy positions (122719-122733).
+    // enemystrengthwithinangle over true enemy positions (122719-122733), and
+    // its in-range enemy strength is BattleWriterPolicy.SnapshotEnemyStrengthInRange
+    // (perceived enemies within vanilla's line-of-sight reach) instead of
+    // groupenemiesinrange (120558-120563, not fog-filtered for the AI side).
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
@@ -370,17 +373,19 @@ namespace WhiskeyRealism.Patches
 
             var sectors = new List<TacticalSectorAssessment>();
             int sectorId = 0;
+            float sightRange = LineOfSightRange();
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
+                int index = OwnIndex(snapshot, group);
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
-                    group.groupenemiesinrange,
-                    BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, group)),
+                    BattleWriterPolicy.SnapshotEnemyStrengthInRange(snapshot, index, sightRange),
+                    BattleWriterPolicy.SnapshotPressure(snapshot, index),
                     closest != null ? closest.strength : 0f,
                     closest != null ? closest.unittyp : -1,
                     closest != null ? SafeName(closest) : string.Empty,
@@ -406,6 +411,21 @@ namespace WhiskeyRealism.Patches
             for (int i = 0; i < units.Count; i++)
                 total += BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, units[i] as Regiment));
             return total;
+        }
+
+        // vanilla's enemiesinrange reach: max(maximumlineofsight[unittyp],
+        // distancetoenemytocancelinterruption) (InitMaxUnitRanges 122510,
+        // UpdateUnitRangeFast 122608), over the combat unit types a group holds.
+        private static float LineOfSightRange()
+        {
+            float range = GamePrefs.distancetoenemytocancelinterruption;
+            float[] sight = GamePrefs.maximumlineofsight;
+            if (sight != null)
+            {
+                for (int t = 0; t <= TacticalUnitType.Skirmisher && t < sight.Length; t++)
+                    if (sight[t] > range) range = sight[t];
+            }
+            return range;
         }
 
         // The unit's record in the side's snapshot (keyed by GameObject id), or -1.

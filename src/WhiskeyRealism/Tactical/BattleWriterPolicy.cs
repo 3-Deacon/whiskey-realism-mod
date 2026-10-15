@@ -536,7 +536,8 @@ namespace WhiskeyRealism.Tactical
 
             // 3. Micro doctrine (limber / unlimber / face / retreat / conserve).
             bool limbered = b.Mounted == 1;
-            QuadrantThreats(s, battery.X, battery.Z, battery.RotationY, b.FireRange, out float currentThreat, out float bestThreat);
+            QuadrantThreats(s, battery.X, battery.Z, battery.RotationY, b.FireRange, out float currentThreat, out float bestThreat,
+                out float threatX, out float threatZ);
             var micro = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
                 hasEnemy: hasEnemy,
                 enemyCloseDistance: enemyDistance,
@@ -583,15 +584,23 @@ namespace WhiskeyRealism.Tactical
                     break;
                 }
                 case ArtilleryMicroWrite.Face:
-                    if (towardEnemy >= 0f &&
-                        ShouldRotateTowardTarget(battery.RotationY, towardEnemy, r.TurnTriggerDegrees, b.CoverValue, b.CoverObject,
+                {
+                    // The wheel is chosen by quadrant strength, so it faces the
+                    // winning quadrant's strongest visible enemy in fire range
+                    // (vanilla micro facing turns toward one enemy unit's
+                    // position, GetAngleTerrain(own, enemy) + 180, 4603); with no
+                    // enemy in fire range, the closest visible one.
+                    float wheelTo = bestThreat > 0f ? HeadingTo(battery.X, battery.Z, threatX, threatZ) : towardEnemy;
+                    if (wheelTo >= 0f &&
+                        ShouldRotateTowardTarget(battery.RotationY, wheelTo, r.TurnTriggerDegrees, b.CoverValue, b.CoverObject,
                             r.MaxCoverValueForRotation, r.AdditionalAngleInCover))
                     {
                         BattleOrderIntent face = BatteryIntent(battery, OrderChannel.Facing, 0, IntentPriority.Executor, "artillery-face");
-                        face.Heading = towardEnemy;
+                        face.Heading = wheelTo;
                         buffer[n++] = face;
                     }
                     break;
+                }
                 case ArtilleryMicroWrite.Retreat:
                     if (hasEnemy)
                         buffer[n++] = ArtilleryRetreatIntent(battery, ex, ez, r.FallbackDistance, IntentSource.ArtilleryDoctrine, "artillery-retreat");
@@ -733,10 +742,16 @@ namespace WhiskeyRealism.Tactical
 
         // Visible enemy strength in fire range per 90-degree quadrant around the
         // battery's facing: current = the front quadrant, best = the strongest.
-        // Feeds the micro doctrine's wheel test (best > current + 1000).
-        public static void QuadrantThreats(BattleSnapshot s, float x, float z, float facing, float range, out float current, out float best)
+        // Feeds the micro doctrine's wheel test (best > current + 1000);
+        // (bestX, bestZ) is the strongest single enemy of the winning quadrant, the
+        // wheel's facing target. A remembered enemy is never in fire range.
+        public static void QuadrantThreats(BattleSnapshot s, float x, float z, float facing, float range, out float current, out float best,
+            out float bestX, out float bestZ)
         {
             float q0 = 0f, q1 = 0f, q2 = 0f, q3 = 0f;
+            // Per quadrant: strongest enemy index and its strength (stack, no alloc).
+            int t0 = -1, t1 = -1, t2 = -1, t3 = -1;
+            float s0 = 0f, s1 = 0f, s2 = 0f, s3 = 0f;
             EnemyObservation[] obs = s.Observations;
             float r2 = range * range;
             for (int k = 0; k < s.ObservationCount; k++)
@@ -749,15 +764,57 @@ namespace WhiskeyRealism.Tactical
                 float strength = obs[k].Strength > 0f ? obs[k].Strength : 1f;
                 switch ((int)(rel / 90f))
                 {
-                    case 0: q0 += strength; break;
-                    case 1: q1 += strength; break;
-                    case 2: q2 += strength; break;
-                    default: q3 += strength; break;
+                    case 0: q0 += strength; if (strength > s0) { s0 = strength; t0 = k; } break;
+                    case 1: q1 += strength; if (strength > s1) { s1 = strength; t1 = k; } break;
+                    case 2: q2 += strength; if (strength > s2) { s2 = strength; t2 = k; } break;
+                    default: q3 += strength; if (strength > s3) { s3 = strength; t3 = k; } break;
                 }
             }
             current = q0;
-            best = System.Math.Max(System.Math.Max(q0, q1), System.Math.Max(q2, q3));
+            best = q0;
+            int target = t0;
+            if (q1 > best) { best = q1; target = t1; }
+            if (q2 > best) { best = q2; target = t2; }
+            if (q3 > best) { best = q3; target = t3; }
+            bestX = target >= 0 ? obs[target].X : x;
+            bestZ = target >= 0 ? obs[target].Z : z;
         }
+
+        // Fog-honest replacement for vanilla groupenemiesinrange (#44 sector
+        // input): vanilla takes the max of the subordinates'
+        // unitrange.enemiesinrange (120558-120563), the strength of every enemy
+        // within max(maximumlineofsight, distancetoenemytocancelinterruption) of
+        // the unit (122608, 122650-122655), not fog-filtered for the AI side.
+        // Here: the enemies this side perceives within rangeMeters of the unit or
+        // any descendant, each counted once — visible in full, remembered by
+        // confidence, off-map reinforcements never.
+        public static float SnapshotEnemyStrengthInRange(BattleSnapshot s, int index, float rangeMeters)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount || rangeMeters <= 0f) return 0f;
+            UnitRecord[] own = s.Own;
+            if (_subtree.Length < s.OwnCount) _subtree = new int[System.Math.Max(s.OwnCount, _subtree.Length * 2)];
+            int members = 0;
+            for (int j = 0; j < s.OwnCount; j++)
+                if (j == index || s.IsAncestorOf(index, j)) _subtree[members++] = j;
+
+            EnemyObservation[] obs = s.Observations;
+            float r2 = rangeMeters * rangeMeters;
+            float total = 0f;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (obs[k].IsReinforcement) continue;
+                for (int m = 0; m < members; m++)
+                {
+                    if (DistSq(obs[k].X, obs[k].Z, own[_subtree[m]].X, own[_subtree[m]].Z) > r2) continue;
+                    total += obs[k].State == ObservationState.Visible ? obs[k].Strength : obs[k].Strength * obs[k].Confidence01;
+                    break;
+                }
+            }
+            return total;
+        }
+
+        // Main-thread scratch for SnapshotEnemyStrengthInRange (grow-only).
+        private static int[] _subtree = new int[64];
 
         // Within max(80 m, 20 % of fire range) of a friendly infantry/cavalry
         // regiment: the doctrine's danger-close input (B7 HasFriendlyCloseRangeRisk

@@ -100,13 +100,15 @@ namespace WhiskeyRealism.Patches
                             index >= 0, index >= 0 || TacticalWriteGuard.CanWrite(group, feudReplay: true));
                         if (path != FeudReplayPath.Executor)
                         {
-                            OnceLog.Info("tactical-feud-guard:no-snapshot",
-                                "[TacticalFeudGuard] no battle snapshot for a feud group's side; guarded direct replay (first occurrence)");
                             if (path == FeudReplayPath.Refused)
                             {
+                                OnceLog.Info("tactical-feud-guard:no-snapshot-refused",
+                                    "[TacticalFeudGuard] no battle snapshot for a feud group's side; feud move refused for a player-protected group (first occurrence)");
                                 LogRefused(group, SkipReason.PlayerOwned);
                                 continue;
                             }
+                            OnceLog.Info("tactical-feud-guard:no-snapshot",
+                                "[TacticalFeudGuard] no battle snapshot for a feud group's side; guarded direct replay (first occurrence)");
                             ReplayDirect(__instance, bunits, group, probability, commanderInitiative);
                             continue;
                         }
