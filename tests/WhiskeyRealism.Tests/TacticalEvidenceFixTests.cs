@@ -62,6 +62,9 @@ internal static class TacticalEvidenceFixTests
         Run("meeting and attacker stances attack at parity like vanilla", DoctrineAttacksAtParityForMeetingAndAttacker);
         Run("attack threshold formula pinned to its documented values", AttackThresholdPinned);
         Run("stance reconciler keeps attacker on defensive hold", ReconcilerKeepsAttackerOnDefensiveHold);
+        Run("registry matches full names, not colliding surnames", RegistryMatchesFullNames);
+        Run("registry builds the full name from firstname and name", RegistryUsesFirstAndLastName);
+        Run("terrain classifier reads vanilla terrain ids and relief", TerrainClassifierReadsVanillaIds);
     }
 
     private static void Run(string name, Action test)
@@ -743,5 +746,54 @@ internal static class TacticalEvidenceFixTests
             BattleStance.Meeting, ReinforcementOpportunity.DefensiveHold), "keep Meeting");
         TestHarness.AssertEqual(BattleStance.Defender, TacticalStanceReconciler.ResolveEffectiveStance(
             BattleStance.Attacker, ReinforcementOpportunity.DelayingDefense), "outnumbered DelayingDefense still demotes");
+    }
+
+    // ---- T12 inputs ----
+
+    private sealed class FakeCommander
+    {
+        public string combinedname;
+        public string firstname;
+        public string name;
+    }
+
+    private static bool Historical(string combined, int alliance, string first = null, string last = null)
+    {
+        var c = new FakeCommander { combinedname = combined, firstname = first, name = last };
+        return WhiskeyRealism.Strategic.HistoricalFigureRegistry.Resolve(c, alliance, last).isHistorical;
+    }
+
+    private static void RegistryMatchesFullNames()
+    {
+        // commanders.txt: CSA has 7 Lees, 4 Johnstons, 12 Jacksons, 14 Smiths,
+        // 11 Andersons. Only the historical figure the vector describes matches.
+        TestHarness.AssertTrue(Historical("Robert E. Lee", 1), "R.E. Lee matches");
+        TestHarness.AssertFalse(Historical("Fitzhugh Lee", 1), "Fitzhugh Lee is not R.E. Lee");
+        TestHarness.AssertFalse(Historical("Stephen D. Lee", 1), "S.D. Lee is not R.E. Lee");
+        TestHarness.AssertTrue(Historical("Thomas J. Jackson", 1), "Stonewall matches");
+        TestHarness.AssertFalse(Historical("John K. Jackson", 1), "John K. Jackson does not");
+        TestHarness.AssertFalse(Historical("Joseph R. Davis", 1), "brigadier Joseph R. Davis is not the president");
+        TestHarness.AssertTrue(Historical("P.G.T. Beauregard", 1), "initials normalized");
+        TestHarness.AssertTrue(Historical("Ambrose P. Hill", 1), "A.P. Hill matches");
+        TestHarness.AssertFalse(Historical("Daniel H. Hill", 1), "D.H. Hill does not get A.P. Hill's vector");
+        TestHarness.AssertTrue(Historical("Ulysses S. Grant", 0), "Union Grant");
+        TestHarness.AssertFalse(Historical("Ulysses S. Grant", 1), "alliance still checked");
+    }
+
+    private static void RegistryUsesFirstAndLastName()
+    {
+        TestHarness.AssertTrue(Historical(null, 1, first: "James", last: "Longstreet"), "combinedname unset: firstname + name");
+        TestHarness.AssertFalse(Historical(null, 1, first: null, last: "Lee"), "a bare surname is ambiguous -> no match");
+    }
+
+    private static void TerrainClassifierReadsVanillaIds()
+    {
+        // battleprefs terrain specifics: 0 grass, 3 creek, 4 river, 5 river
+        // crossing, 7 road, 8 fences, 14 forest, 15 swamp, 16 field.
+        TestHarness.AssertEqual(TerrainKind.Open, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 0, 0, 16, 7, 8, 0, 0, 0, 14, 0 }, 4f), "mostly fields");
+        TestHarness.AssertEqual(TerrainKind.Wooded, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 14, 14, 15, 0, 14, 0, 16, 14, 0, 0 }, 4f), "half forest/swamp");
+        TestHarness.AssertEqual(TerrainKind.River, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 0, 4, 0, 0, 0, 0, 0, 5, 0, 0 }, 4f), "a river through the field");
+        TestHarness.AssertEqual(TerrainKind.Mountain, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 0, 14, 0, 0 }, 80f), "high relief");
+        TestHarness.AssertEqual(TerrainKind.Open, ArmyEvidenceBuilder.ClassifyTerrain(new int[0], 0f), "no samples -> open");
     }
 }

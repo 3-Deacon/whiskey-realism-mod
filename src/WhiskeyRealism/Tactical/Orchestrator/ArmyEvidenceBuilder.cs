@@ -124,7 +124,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float odds = enemyKnown <= 0f ? 1f : ownActive / Math.Max(1f, enemyKnown);
                 // Default main effort = the center band of the front, not
                 // "whatever group is first in completeunitlist".
-                var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open,
+                var ownEvidence = new ArmyEvidence(odds, BattlefieldTerrain(allianceId, enemyVisible.FrontAxis),
                     defaultMainEffortSector: DefaultMainEffortSector(enemyVisible.FrontAxis));
                 // Morale relative to battle start (T17); the doctrine floor
                 // (0.4) means "lost 60% of the morale it started with", not an
@@ -316,6 +316,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _lastFittedAxis[i] = TacticalFrontAxis.None;
                 _contactLedgers[i].Reset();
                 _visibleEnemyEntryPoints[i] = new HashSet<int>();
+                _terrainByAlliance[i] = null;
             }
             _battleOwner = null;
         }
@@ -326,6 +327,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (same) return;
             ResetForBattleEnd();
             _battleOwner = new System.WeakReference<BattleUnits>(bunits);
+        }
+
+        private static readonly TerrainKind?[] _terrainByAlliance = new TerrainKind?[2];
+        private const int TerrainSamplesLateral = 7;
+        private const int TerrainSamplesDepth = 5;
+
+        /// <summary>
+        /// Battlefield terrain for playbook selection (T12; was the constant
+        /// Open). Samples a 7x5 grid over the side's front — its lateral extent,
+        /// from its line out to the target — with vanilla's
+        /// BattlefieldSetup.GetCurrentTerrainOnPos (26727) and terrain height
+        /// (GetTerrainHeight 27002 via TacticalTerrainProbe), classified by
+        /// <see cref="ClassifyTerrain"/>. Computed once per battle per side.
+        /// </summary>
+        private static TerrainKind BattlefieldTerrain(int allianceId, TacticalFrontAxis axis)
+        {
+            if (allianceId < 0 || allianceId > 1) return TerrainKind.Open;
+            var cached = _terrainByAlliance[allianceId];
+            if (cached.HasValue) return cached.Value;
+            if (!axis.IsValid || axis.BandCount <= 0) return TerrainKind.Open;
+            try
+            {
+                float depth = axis.TargetDistance >= 1f ? axis.TargetDistance : 800f;
+                var ids = new int[TerrainSamplesLateral * TerrainSamplesDepth];
+                float minH = float.MaxValue, maxH = float.MinValue;
+                int k = 0;
+                for (int a = 0; a < TerrainSamplesLateral; a++)
+                {
+                    float lat = axis.LateralMin + (axis.LateralMax - axis.LateralMin) * a / (TerrainSamplesLateral - 1);
+                    for (int b = 0; b < TerrainSamplesDepth; b++)
+                    {
+                        float d = depth * b / (TerrainSamplesDepth - 1);
+                        float x = axis.OriginX + axis.RightX * lat + axis.ForwardX * d;
+                        float z = axis.OriginZ + axis.RightZ * lat + axis.ForwardZ * d;
+                        var point = new UnityEngine.Vector3(x, 0f, z);
+                        ids[k++] = BattlefieldSetup.GetCurrentTerrainOnPos(point);
+                        float h = TacticalTerrainProbe.WithTerrainHeight(point).y;
+                        if (h < minH) minH = h;
+                        if (h > maxH) maxH = h;
+                    }
+                }
+                var kind = ClassifyTerrain(ids, maxH > minH ? maxH - minH : 0f);
+                _terrainByAlliance[allianceId] = kind;
+                return kind;
+            }
+            catch
+            {
+                return TerrainKind.Open;
+            }
         }
 
         private static TacticalEnemyContactLedger ContactLedger(int allianceId)

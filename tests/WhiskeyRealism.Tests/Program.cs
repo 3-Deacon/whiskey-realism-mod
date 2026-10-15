@@ -26158,55 +26158,56 @@ static class Program
     {
         // Telemetry showed TacticalCommanderUnknown for Hunter and Beauregard.
         // Hunter was unregistered. Beauregard was registered but failed name match
-        // because the GTCW combinedname was 'P.G.T. Beauregard'. Both must now resolve.
-        AssertTrue(LookupEntry("Union", "Hunter").HasValue, "Hunter (Union) must be registered");
+        // because the GTCW combinedname was 'P.G.T. Beauregard'. Both must now resolve
+        // by their full vanilla names (T12: surnames alone never match).
         AssertTrue(LookupEntry("Union", "David Hunter").HasValue, "Hunter (full name) must match");
-        AssertTrue(LookupEntry("CSA", "Beauregard").HasValue, "Beauregard (CSA last name) must match");
         AssertTrue(LookupEntry("CSA", "P.G.T. Beauregard").HasValue, "Beauregard (full name with initials) must match");
+        AssertTrue(!LookupEntry("CSA", "Beauregard").HasValue, "bare surname never matches");
     }
 
     private static void HistoricalRegistryNormalizesInitialsAndPunctuation()
     {
-        // NormalizeLastName must strip initials and punctuation when picking the
-        // last meaningful token. Short surnames (3 chars) like "Lee" and "Ord"
-        // must still be preserved.
-        AssertEqual("beauregard", HistoricalFigureRegistry.NormalizeLastNameForTest("P.G.T. Beauregard"), "PGT initials stripped");
-        AssertEqual("hill", HistoricalFigureRegistry.NormalizeLastNameForTest("A.P. Hill"), "AP initials stripped");
-        AssertEqual("lee", HistoricalFigureRegistry.NormalizeLastNameForTest("R.E. Lee"), "RE initials stripped, Lee kept");
-        AssertEqual("ord", HistoricalFigureRegistry.NormalizeLastNameForTest("E.O.C. Ord"), "EOC initials stripped, Ord kept");
-        AssertEqual("hunter", HistoricalFigureRegistry.NormalizeLastNameForTest("David Hunter"), "single first-name + lastname");
-        AssertEqual("forrest", HistoricalFigureRegistry.NormalizeLastNameForTest("Nathan Bedford Forrest"), "three-token name takes last");
+        AssertEqual("pgt beauregard", HistoricalFigureRegistry.NormalizeFullNameForTest("P.G.T. Beauregard"), "PGT initials compacted");
+        AssertEqual("ambrose p hill", HistoricalFigureRegistry.NormalizeFullNameForTest("Ambrose P. Hill"), "middle initial kept");
+        AssertEqual("edward oc ord", HistoricalFigureRegistry.NormalizeFullNameForTest("Edward O.C.  Ord"), "whitespace collapsed");
+        AssertEqual("nathan b forrest", HistoricalFigureRegistry.NormalizeFullNameForTest(" Nathan B. Forrest "), "trimmed");
     }
 
     private static void HistoricalRegistryCoversMajorCivilWarCommanders()
     {
         string[] mustCover = new[]
         {
-            "Lee", "Jackson", "Longstreet", "Stuart", "Hood", "Bragg", "Johnston",
-            "Beauregard", "Forrest", "Polk", "Ewell", "Hill", "Early", "Hardee",
-            "Cleburne", "Pickett", "Wheeler", "Morgan", "Hampton",
-            "Grant", "Sherman", "Sheridan", "Meade", "Thomas", "Hooker", "Burnside",
-            "McClellan", "Pope", "Halleck", "Hunter", "Sigel", "Banks", "Buell",
-            "Rosecrans", "Schofield", "McPherson", "Reynolds", "Hancock", "Sedgwick",
-            "Buford", "Custer",
+            "Robert E. Lee", "Thomas J. Jackson", "James Longstreet", "J.E.B. Stuart", "John B. Hood",
+            "Braxton Bragg", "Joseph E. Johnston", "P.G.T. Beauregard", "Nathan B. Forrest", "Leonidas Polk",
+            "Richard S. Ewell", "Ambrose P. Hill", "Jubal A. Early", "William J. Hardee", "Patrick R. Cleburne",
+            "George E. Pickett", "Joseph Wheeler", "John H. Morgan", "Wade Hampton",
+            "Ulysses S. Grant", "William T. Sherman", "Philip H. Sheridan", "George G. Meade", "George H. Thomas",
+            "Joseph Hooker", "Ambrose E. Burnside", "George B. McClellan", "John Pope", "Henry W. Halleck",
+            "David Hunter", "Franz Sigel", "Nathaniel P. Banks", "Don Carlos Buell", "William Rosecrans",
+            "John M. Schofield", "James B. McPherson", "John F. Reynolds", "Winfield S. Hancock", "John Sedgwick",
+            "John Buford", "George A. Custer",
         };
         var missing = new System.Collections.Generic.List<string>();
-        foreach (var last in mustCover)
+        foreach (var full in mustCover)
         {
-            var union = LookupEntry("Union", last);
-            var csa = LookupEntry("CSA", last);
-            if (!union.HasValue && !csa.HasValue) missing.Add(last);
+            var union = LookupEntry("Union", full);
+            var csa = LookupEntry("CSA", full);
+            if (!union.HasValue && !csa.HasValue) missing.Add(full);
         }
         AssertTrue(missing.Count == 0, "registry missing: " + string.Join(",", missing));
     }
 
-    private static PersonalityVector? LookupEntry(string allianceTag, string nameOrFull)
+    private static PersonalityVector? LookupEntry(string allianceTag, string fullName)
     {
-        string normalized = HistoricalFigureRegistry.NormalizeLastNameForTest(nameOrFull);
+        string normalized = HistoricalFigureRegistry.NormalizeFullNameForTest(fullName);
         foreach (var entry in HistoricalFigureRegistry.EntriesForTest)
         {
-            if (entry.AllianceTag == allianceTag && entry.CanonicalName == normalized)
-                return entry.V;
+            if (entry.AllianceTag != allianceTag || entry.FullNames == null) continue;
+            foreach (var n in entry.FullNames)
+            {
+                if (HistoricalFigureRegistry.NormalizeFullNameForTest(n) == normalized)
+                    return entry.V;
+            }
         }
         return null;
     }

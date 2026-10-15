@@ -123,5 +123,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (r > 1f) return 1f;
             return r;
         }
+
+        // Vanilla terrain ids (BattlefieldSetup.GetCurrentTerrainOnPos 26727,
+        // battleprefs "TERRAIN SPECIFICS"): meshes 0 grass, 3 creek, 4 river,
+        // 5 river crossing, 6 bridge, 7 road, 8 fences/walls, 9-13 pontoons;
+        // textures 14 forest, 15 swamp, 16 field.
+        private const int TerrainCreek = 3;
+        private const int TerrainRiver = 4;
+        private const int TerrainRiverCrossing = 5;
+        private const int TerrainForest = 14;
+        private const int TerrainSwamp = 15;
+
+        /// <summary>Forest/swamp share of the sampled ground that makes it a wooded fight.</summary>
+        internal const float WoodedShare = 0.35f;
+
+        /// <summary>
+        /// Water share (creek/river/crossing) that makes a river the dominant
+        /// feature: rivers are thin, so even a modest share of samples on water
+        /// means the field is cut by one.
+        /// </summary>
+        internal const float RiverShare = 0.08f;
+
+        /// <summary>Height range (world units) of the sampled ground that reads as mountainous.</summary>
+        internal const float MountainRelief = 60f;
+
+        /// <summary>
+        /// Battlefield terrain for playbook selection, from terrain ids sampled
+        /// over the side's front and the height range of those samples.
+        /// </summary>
+        internal static TerrainKind ClassifyTerrain(int[] terrainIds, float heightRange)
+        {
+            if (heightRange >= MountainRelief) return TerrainKind.Mountain;
+            if (terrainIds == null || terrainIds.Length == 0) return TerrainKind.Open;
+            int water = 0, wooded = 0;
+            for (int i = 0; i < terrainIds.Length; i++)
+            {
+                int t = terrainIds[i];
+                if (t == TerrainCreek || t == TerrainRiver || t == TerrainRiverCrossing) water++;
+                else if (t == TerrainForest || t == TerrainSwamp) wooded++;
+            }
+            float n = terrainIds.Length;
+            if (water / n >= RiverShare) return TerrainKind.River;
+            if (wooded / n >= WoodedShare) return TerrainKind.Wooded;
+            return TerrainKind.Open;
+        }
     }
 }
