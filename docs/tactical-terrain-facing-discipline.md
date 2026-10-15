@@ -9,30 +9,36 @@ The behavior does not replace Grand Tactician's native pathfinder. It layers evi
 
 ## Behavior Boundary
 
-#60 is a Postfix on vanilla `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew(int foralliance)`. It skips the player's alliance outside `ai_vs_ai`, and returns while a tutorial is active but not engaged.
+#60 is a Prefix + Postfix pair on vanilla `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew(int foralliance)`. It skips the player's alliance outside `ai_vs_ai`, and returns while a tutorial is active but not engaged. The Prefix never skips vanilla and writes nothing: it records each group's position before vanilla places it and the W&L current command's AI group (by the Postfix, vanilla has set that command's `permanentlydetached` again, 85886). Every write the Postfix makes is an immediate-placement Move through the battle core's order executor (`OrderExecutorRuntime.TryPlanInline` / `ExecutePlannedInline`, `IntentFlags.ImmediatePlacement`, sources `Deployment` and `DeploymentReserve`); #60 calls no vanilla writer.
 
-A group is eligible only when it is an active, unrouted, vanilla-owned AI group with a `groupposition`, is not the W&L player's current command, and:
+Vanilla chooses each group's objective and facing from the true enemy (a scan of the whole unit list excludes any objective with an enemy within 50 m, 85604-85618; day 1 takes the objective nearest any enemy group, 86260-86281; the facing is the bearing to `unitrange.closestenemyunitfar`, 85809-85815). The Postfix replaces those inputs with what the side can know.
+
+**Eligible groups.** A group is acted on only when it is an active, unrouted, vanilla-owned AI group with a `groupposition`, is not the W&L player's current command, vanilla **moved it in this call** (its position changed by more than 1 m since the Prefix), and:
 
 - is not a fleet (`unittyp 17`);
 - the deployment zone has at least 2 frontline vectors (otherwise every point reads as out of zone);
-- vanilla did not place it on fortification lines (`BattleWriterPolicy.WouldTakeFortifiedDeploymentPath`: a defender, or a shaken attacker, with at least 3 eligible sub-units, which vanilla places with `ignoredeplyomentzone: true` on purpose);
+- vanilla did not place it on fortification lines (`BattleWriterPolicy.WouldTakeFortifiedDeploymentPath`: a defender, or a shaken attacker, with at least 3 eligible sub-units, which vanilla places with `ignoredeplyomentzone: true` on purpose). A Defender whose groups all take fortifications therefore gets no deployment reserve (recorded residual);
 - `TacticalWriteGuard.CanWrite` passes (`Tactical Commander Mode = Active` and W&L/player protection).
 
-It corrects an eligible group only when vanilla left a clear terrain or deployment-zone failure:
+**1. Fog-honest re-placement (`Enable Deployment And March Doctrine`; `DeploymentDoctrine`, pure; `DeploymentPlanRuntime`, the vanilla reads).** The assumed enemy point serves the objective choice, the facing and the spacing: under `RangeOnly` perception (every day-1 deployment, `GridNotPainted`) no observation is used, because vanilla's range lists admit enemy units within 150-450 m with no line-of-sight test (122650), so the point is the nearest enemy-owned entry point to the group (public scenario data), else the bearing to the map centre that `DoUnitPositioning` already used (87789-87790). Under `FogGrid` (a later-day deployment with a painted grid) the strength-weighted centroid of the Visible observations comes first. The candidate objectives are the ones vanilla considers (own zone, not enemy zone, not taken earlier in the pass, owner own or neutral; `frontline2.CheckIfWithinZone`), with the 50 m enemy filter applied to Visible observations under `FogGrid` and to enemy-owned entry points under `RangeOnly`. Day 1 takes the candidate nearest the assumed point, later days the nearest to the group (86285-86301). Spacing re-uses `CheckForSimilarPositions` (radius `brigadesinaigroup x 25 m`, 8 tries, 45 degree steps, compared against the groups re-deployed in this call only). A group is re-placed only when its fog-honest objective differs from vanilla's (vanilla's spot is not within its spacing radius of it) or its facing differs by more than 20 degrees; the W&L current command's AI group is never re-placed and still holds its objective. Every position in the plan is a line front (the `targetpos` frame); the HQ conversion is `DeploymentLineFrontFromHq` / `DeploymentHqFromLineFront`.
+
+**2. Deployment reserve echelon.** With at least three eligible direct children (the army's children from `DirectChildDiscovery`, groups mapped through the snapshot's parent map; none holding a player-owned unit or the W&L command, none cavalry-only or artillery-only), the `floor(N / 3)` children whose placements lie farthest from the assumed enemy point go 425 m behind the line centroid of the others, on lanes of at most 90 m, each child by one translation vector so its groups keep their offsets. Every proposed front is clamped into the zone with `frontline2.GetClosestPointInDeploymentZone`; a child that no longer stands 150 m behind the line (or whose clamp fails) reverts to its fog-honest placement. The executor's outcome for the placement (`Source = DeploymentReserve`, Issued or Moved) is what the direct-child allocator reads as `DirectChildEvidence.DeployedReserve`: the child gets `Reserve` ahead of the main-effort pick until another source moves it or `ReleaseReserves` (crisis, Exploit, odds) releases it. The executor, not a patch, owns that outcome table.
+
+**3. Terrain discipline (unchanged rule).** It corrects an eligible group only when vanilla (or the re-placement) left a clear terrain or deployment-zone failure:
 
 - center is water;
 - a footprint sample is water;
 - center is outside the deployment zone;
 - a footprint sample is outside the deployment zone.
 
-It never rotates a terrain-safe group for facing alone. `TacticalTerrainFacingDiscipline.Choose` scores bounded candidates (within `Max Correction Meters`, up to `Max Candidates`); visible enemy bearing shapes the final facing only for an accepted correction, and with no visible enemy the vanilla facing is kept.
+It never rotates a terrain-safe group for facing alone. `TacticalTerrainFacingDiscipline.Choose` scores bounded candidates (within `Max Correction Meters`, up to `Max Candidates`); the assumed enemy bearing (`TacticalTerrainProbe.GetAssumedEnemyBearing`, the same point as the re-placement; it reads no enemy unit) shapes the final facing only for an accepted correction.
 
-Corrections use vanilla `BattleUnits.SetGroupFormation(... immediateplacement: true ...)` so attached-unit placement stays on the native formation path. `SetGroupFormation` treats its target as the line front and places the HQ behind it by group depth plus back distance, so the corrected HQ point is converted to the line front (`BattleWriterPolicy.DeploymentLineFrontFromHq`) and the front is re-checked for water and zone before the write. After the call, #60 mirrors vanilla's deployment cleanup for the corrected group tree by clearing only:
+**The write.** `SetGroupFormation` treats its target as the line front and places the HQ behind it by group depth plus back distance, so a corrected HQ point is converted to the line front before the write and the front is re-checked for water and zone. The executor issues `SetGroupFormation(immediateplacement: true, newpath: true, ignoredeplyomentzone: false)` once and then mirrors vanilla's deployment cleanup for the placed tree (85873-85883), clearing only:
 
 - `Regiment.lastsetwaypointposition`
 - `Regiment.immediateunitplacement`
 
-It does not clear `lastsetwaypointrotation`, orders, paths, movement modes, command roles, reserve lists, rout state, or tactical orchestrator state.
+It does not clear `lastsetwaypointrotation`, orders, paths, movement modes, command roles, reserve lists, rout state, or tactical orchestrator state. An immediate placement skips the executor's friendly-footprint, dedupe, cooldown and courier rules (the snapshot is stale after the pass's first placement; spacing among the pass's groups is the doctrine's); `WaypointValidator`'s terrain checks and the write guard still apply. Its outcome is judged by where the group stands at the next observation: Moved within 60 m of the placed HQ, else Failed with no retry.
 
 ## Config
 
@@ -41,6 +47,7 @@ Existing BepInEx config files override C# defaults. Defaults:
 ```ini
 [Tactical]
 Enable Tactical Deployment Terrain Discipline = true
+Enable Deployment And March Doctrine = true
 Tactical Deployment Terrain Discipline Max Correction Meters = 60
 Tactical Deployment Terrain Discipline Max Candidates = 16
 Tactical Deployment Facing Preferred Delta Degrees = 90
@@ -49,7 +56,7 @@ Tactical Deployment Facing Preferred Delta Degrees = 90
 Enable Tactical Deployment Observer = true
 ```
 
-Rollback is config-only: set `Enable Tactical Deployment Terrain Discipline = false` and restart the game. Keep `Enable Tactical Deployment Observer = true` if terrain evidence is still useful. `Tactical Commander Mode = MonitorOnly` or `Off` also stops #60 writes.
+Rollback is config-only: `Enable Deployment And March Doctrine = false` restores vanilla's own objective, facing and placement (no re-placement, no reserve; the road march is off too); `Enable Tactical Deployment Terrain Discipline = false` stops the terrain correction (and the whole patch). Restart the game. Keep `Enable Tactical Deployment Observer = true` if terrain evidence is still useful. `Tactical Commander Mode = MonitorOnly` or `Off` also stops #60 writes.
 
 ## Vanilla Anchors
 
@@ -63,7 +70,10 @@ Confirmed against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 | `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` 85524-85872 | Native AI deployment placement surface used by #58/#60. |
 | `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` 85684-85751 | Fortification-line placement (`num3 == 1`) that #60 leaves alone. |
 | `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` 85873-85880 | Vanilla final cleanup clears `lastsetwaypointposition` and `immediateunitplacement` on active units. |
-| `BattleUnits.SetGroupFormation(GameObject, ...)` 91815 | Public formation placement overload used by #60. |
+| `BattleUnits.SetGroupFormation(Regiment, ...)` 91815 | Formation placement overload the order executor calls for an immediate placement. |
+| `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` 85604-85618, 86260-86301, 85809-85815 | The omniscient inputs #60 replaces: the 50 m enemy filter over `completeunitlist`, the day-1 objective rule, the facing from `closestenemyunitfar`. |
+| `BattleUnits.CheckForSimilarPositions` 94132 | The spacing rule the doctrine re-uses (substitute base angle: the bearing to the group's old position). |
+| `Frontline2.GetClosestPointInDeploymentZone` 102819 | The zone clamp for a re-placed front and for the reserve. |
 | `BattleUnits.SetGroupFormation` 92044-92058 | Target is the line front; HQ placed at front + (`groupdepth` + `groupunitdistancetoback`). |
 | `BattleUnits.SetGroupFormation` 92056-92067 | Immediate placement writes `lastsetwaypointposition` and `lastsetwaypointrotation`. |
 | `BattleUnits.SetGroupFormation` 92075-92205 | Walks attached units and grandchildren during formation placement. |
@@ -82,7 +92,9 @@ Confirmed against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 
 - `TacticalTerrainFacingDiscipline` — pure scorer/decision model.
 - `TacticalTerrainFacingTelemetry` — bounded `[TacDeployTerrain]` row formatter and sanitizer.
-- `TacticalTerrainProbe` — Unity/vanilla adapter for terrain id (river id 4 as water), deployment-zone, footprint, height, and visible-enemy bearing evidence. It has no terrain-line (water-crossing) probe.
+- `TacticalTerrainProbe` — Unity/vanilla adapter for terrain id (river id 4 as water), deployment-zone, footprint, height, and the assumed-enemy bearing. It has no terrain-line (water-crossing) probe and reads no enemy unit.
+- `DeploymentDoctrine` — pure fog-honest placement, spacing, reserve proposal and clamp (`BattleMovementHonestyTests`).
+- `DeploymentPlanRuntime` — the vanilla reads (objectives, zones, entry points, map size, snapshot) and the executor placements.
 - `BattleWriterPolicy` — pure line-front conversion, fortified-path and eligibility rules.
 - `TacticalDeploymentObserverPatch` — read-only terrain/facing evidence extension around large deployment moves.
 - `TacticalDeploymentTerrainDisciplinePatch` — the #60 behavior patch.
@@ -93,6 +105,7 @@ Expected markers:
 
 - `[TacDeployTerrain]` from observer evidence on large deployment moves.
 - `[TacDeployTerrainAdvice]` from #60 correction decisions, bounded per battle.
+- `TacticalDeploymentPlan` Decision rows (alliance, assumed-point source, `day1`, `candidates`, `replaced`, `issued`, `refused`, `reserveGroups`, `reserveChildren`, `clampReverted`), at most 64 per battle; OnceLog lines `[once:tactical-battle-core:deployment-fog-first-fire]` and `[once:tactical-battle-core:deployment-reserve-first-fire]`.
 
 Deployment phase semantics match `TacticalDeploymentTelemetry`: `eodcycle > 0 || battlepasseddays > 0` means `eod`; otherwise `initial`, with `skipped` reserved for vanilla player/tutorial early returns.
 
@@ -111,6 +124,9 @@ Pass criteria:
 - `[TacDeployTerrain]` or `[TacDeployTerrainAdvice]` appears around deployment placement, not every frame.
 - Any correction is tied to a terrain/deployment failure, not facing-only rotation.
 - Groups on fortification lines keep their vanilla placement.
+- Day 1 `TacticalDeploymentPlan` rows read `EntryPoint` (or `MapCentre`), never `Visible`; the AI brigades face the enemy-owned entry points.
+- With three or more eligible direct children, about a third stand 425 m behind the line at battle start and their `[TacticalDirectChildIntent]` rows read `role=Reserve` on the first allocation.
+- The W&L player's command and its parent stand where vanilla placed them.
 - No player-side or player-subordinate deployment correction.
 - No repeated `Exception`, `TargetInvocationException`, Harmony failure, missing-anchor warning, or #60 failure marker.
 - #53 pathfinder discipline remains stable.
