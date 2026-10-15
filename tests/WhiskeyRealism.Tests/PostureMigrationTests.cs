@@ -36,6 +36,11 @@ internal static class PostureMigrationTests
             ("bc5a LeafAtItsSlotHasNoMove", LeafAtItsSlotHasNoMove),
             ("bc5a MovingSubordinateIsAnActiveMove", MovingSubordinateIsAnActiveMove),
             ("bc5a FireControlNeverTargetsArtillery", FireControlNeverTargetsArtillery),
+            ("bc5a RecentOrderCooldownIsPerChannelWithShippedValues", RecentOrderCooldownIsPerChannelWithShippedValues),
+            ("bc5a RefusedFlankTravelsOnTheIntentAndBypassesDedupe", RefusedFlankTravelsOnTheIntentAndBypassesDedupe),
+            ("bc5a PostureRefusesTheThreatenedFlankInContact", PostureRefusesTheThreatenedFlankInContact),
+            ("bc5a RotationWalkSkipsEveryUnitUnderADetachedNode", RotationWalkSkipsEveryUnitUnderADetachedNode),
+            ("bc5a GroupFacingOnACleanSubtreeElsePerRegiment", GroupFacingOnACleanSubtreeElsePerRegiment),
         });
     }
 
@@ -112,7 +117,7 @@ internal static class PostureMigrationTests
         return new PostureIntentRequest
         {
             GroupId = 7, Action = action, Task = task, HasTarget = true, TargetX = 400f, TargetZ = -400f,
-            TargetFormation = 1, NeedsFormation = true, Heading = -1f,
+            TargetFormation = 1, NeedsFormation = true,
             Priority = priority, Source = source, Reason = PostureIntentPlan.ExecutorReason,
         };
     }
@@ -230,12 +235,9 @@ internal static class PostureMigrationTests
         arbiter.BeginTick();
         arbiter.Submit(PostureIntentPlan.FacingPulse(30, 45f));
         var executorFacing = new Sink();
-        PostureIntentRequest r = Request(PostureExecutionAction.SetFormation, CommandTaskType.HoldObjective);
-        r.GroupId = 30;
-        r.NeedsFormation = false;
-        r.HasFacing = true;
-        r.Heading = 180f;
-        PostureIntentPlan.Submit(executorFacing, r);
+        var group = Snapshot(new[] { Group(30, 0f, -100f, typ: 14) }, new[] { -1 });
+        PostureIntentPlan.SubmitFacing(executorFacing, group, 0, UnitFlags.None, 180f, CommandTaskType.HoldObjective,
+            RefuseFlank.None, IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason, new int[4], new int[4]);
         arbiter.Submit(executorFacing.On(OrderChannel.Facing));
         arbiter.Resolve(new BattleOrderIntent[4]);
         AssertTrue(arbiter.TryGetClaim(30, OrderChannel.Facing, out BattleOrderIntent claim), "facing claim");
@@ -566,5 +568,138 @@ internal static class PostureMigrationTests
         AssertFalse(PostureSense.IsFireControlUnit(Regiment(5, 0f, -10f, flags: UnitFlags.IsArtillery)),
             "anything flagged artillery");
         AssertFalse(PostureSense.IsFireControlUnit(Group(6, 0f, -10f, typ: 14)), "never a group (D10)");
+    }
+
+    // Plans the intent on a one-group snapshot after the executor recorded the
+    // same intent at t; true when the executor would issue it at t + seconds.
+    private static bool IssuesAfter(BattleOrderIntent intent, UnitRecord rec, float seconds)
+    {
+        return IssuesAfter(intent, intent, rec, seconds);
+    }
+
+    // The recorded order, then another on the same (group, channel).
+    private static bool IssuesAfter(BattleOrderIntent recorded, BattleOrderIntent intent, UnitRecord rec, float seconds)
+    {
+        var s = Snapshot(new[] { rec }, new[] { -1 });
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        executor.TaskHoldHours = 0f;
+        executor.RecordIssued(recorded, 10.0, null, 0, null, 0, 0, 0);
+        return executor.Plan(s, intent, 10.0 + seconds / 3600.0).Execute;
+    }
+
+    private static void RecentOrderCooldownIsPerChannelWithShippedValues()
+    {
+        // #61 RecentOrderHours = RealSecondsAtOneXToHours(30) = 0.05 h = 180 battle-s.
+        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Move), "move");
+        AssertEqual(180f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Stance), "stance");
+        // #61 RegimentFacingPulseCooldownHours = RealSecondsAtOneXToHours(5) = 5/600 h = 30 battle-s.
+        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(5f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing), 0.01f, "facing");
+        AssertNear(30f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Facing), 0.01f, "facing 30 s");
+        // CommandFormationWritePolicy.CooldownHours 0.05 h (0.1 h under fire stays the policy's own rule).
+        AssertNear(CommandFormationWritePolicy.CooldownHours * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.Formation), 0.01f, "formation");
+        // #61 FireControlOrderCooldownHours = RealSecondsAtOneXToHours(45) = 0.075 h = 270 battle-s.
+        AssertNear(WhiskeyRealism.Tactical.Battle.TacticalBattleClock.RealSecondsAtOneXToHours(45f) * 3600f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior), 0.01f, "combat behavior");
+
+        UnitRecord group = Group(1, 0f, -1000f, typ: 14);
+        UnitRecord regiment = Regiment(1, 0f, -1000f);
+        BattleOrderIntent facing = PostureIntentPlan.FacingPulse(1, 90f);
+        AssertFalse(IssuesAfter(facing, regiment, 25f), "facing inside 30 s");
+        AssertTrue(IssuesAfter(facing, regiment, 35f), "facing after 30 s (not 180)");
+        BattleOrderIntent formation = PostureIntentPlan.FacingPulseFormation(1, 2);
+        AssertFalse(IssuesAfter(formation, group, 170f), "formation inside 180 s");
+        AssertTrue(IssuesAfter(formation, group, 190f), "formation after 180 s");
+        BattleOrderIntent fire = PostureIntentPlan.FireControl(1, TacticalFireControlDoctrine.InfantryShort);
+        AssertFalse(IssuesAfter(fire, regiment, 260f), "fire control inside 270 s");
+        AssertTrue(IssuesAfter(fire, regiment, 280f), "fire control after 270 s");
+        // A new target (the pending move would dedupe the same one).
+        BattleOrderIntent move = PostureIntentPlan.LeafMove(1, CommandTaskType.AttackObjective, 900f, -100f, false);
+        BattleOrderIntent next = PostureIntentPlan.LeafMove(1, CommandTaskType.SupportAttack, 600f, -600f, false);
+        AssertFalse(IssuesAfter(move, next, group, 170f), "move inside 180 s");
+        AssertTrue(IssuesAfter(move, next, group, 190f), "move after 180 s");
+    }
+
+    private static void RefusedFlankTravelsOnTheIntentAndBypassesDedupe()
+    {
+        AssertEqual(-1, OrderExecutor.VanillaRefuseFlank(RefuseFlank.None), "none: SetGroupFormation refuseflank -1");
+        AssertEqual(0, OrderExecutor.VanillaRefuseFlank(RefuseFlank.Left), "left: 0 (CommandFormationCorrection.RefuseFlankParameter)");
+        AssertEqual(1, OrderExecutor.VanillaRefuseFlank(RefuseFlank.Right), "right: 1");
+        AssertEqual(RefuseFlank.None, default(BattleOrderIntent).Refuse, "a default intent refuses nothing");
+
+        var sink = new Sink();
+        PostureIntentRequest r = Request(PostureExecutionAction.SetFormation, CommandTaskType.GuardFlank);
+        r.NeedsFormation = false;
+        r.TargetFormation = 0;
+        r.Refuse = RefuseFlank.Right;
+        AssertEqual(1, PostureIntentPlan.Submit(sink, r), "a refuse alone still writes the formation channel");
+        BattleOrderIntent formation = sink.On(OrderChannel.Formation);
+        AssertEqual(RefuseFlank.Right, formation.Refuse, "refuse carried");
+
+        var own = new[] { Group(7, 0f, -1000f, typ: 14) };
+        var s = Snapshot(own, new[] { -1 });
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        AssertTrue(executor.Plan(s, formation, 10.0).Execute, "same formation but a refuse: not a duplicate");
+        BattleOrderIntent plain = formation;
+        plain.Refuse = RefuseFlank.None;
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, plain, 10.0).Skip, "same formation, no refuse: duplicate");
+    }
+
+    private static void PostureRefusesTheThreatenedFlankInContact()
+    {
+        // Facing north (0); the threat due east (90) is 90 degrees off: refuse right.
+        var own = new[] { Group(1, 0f, -1000f, typ: 14) };
+        var s = Snapshot(own, new[] { -1 });
+        s.AddObservation(Enemy(9, 200f, -1000f, ObservationState.Visible));
+        s.SetClosestVisibleEnemy(0, 0, 200f);
+        AssertEqual(RefuseFlank.Right, PostureSense.RefuseFor(s, 0, CommandTaskType.GuardFlank, closeEngaged: true, flankRisk: true), "threat on the right");
+        AssertEqual(RefuseFlank.None, PostureSense.RefuseFor(s, 0, CommandTaskType.GuardFlank, closeEngaged: true, flankRisk: false), "no flank risk");
+        AssertEqual(RefuseFlank.None, PostureSense.RefuseFor(s, 0, CommandTaskType.GuardFlank, closeEngaged: false, flankRisk: true), "not in contact");
+        AssertEqual(RefuseFlank.None, PostureSense.RefuseFor(s, 0, CommandTaskType.AttackObjective, closeEngaged: true, flankRisk: true), "an attack never skews");
+        s.Own[0].RotationY = 90f;
+        AssertEqual(RefuseFlank.None, PostureSense.RefuseFor(s, 0, CommandTaskType.GuardFlank, closeEngaged: true, flankRisk: true), "already facing it");
+    }
+
+    private static void RotationWalkSkipsEveryUnitUnderADetachedNode()
+    {
+        // Brigade 1 → detached sub-group 2 → nested group 3 → regiment 4; regiment 5
+        // directly under 1. Vanilla's group order (GetAttachedUnitsReg
+        // excludedechainedunits, 119865) never reaches 3 or 4.
+        var own = new[]
+        {
+            Group(1, 0f, -100f, typ: 15),
+            Group(2, 0f, -100f, typ: 14, flags: UnitFlags.PermanentlyDetached),
+            Group(3, 0f, -100f, typ: 14), Regiment(4, 0f, -100f),
+            Regiment(5, 0f, -100f),
+        };
+        var s = Snapshot(own, new[] { -1, 0, 1, 2, 0 });
+        var result = new int[8];
+        int n = PostureSense.CollectRotatableRegiments(s, 0, new int[8], result);
+        AssertEqual(1, n, "only the regiment outside the detached subtree");
+        AssertEqual(4, result[0], "regiment 5");
+    }
+
+    private static void GroupFacingOnACleanSubtreeElsePerRegiment()
+    {
+        var clean = Snapshot(new[] { Group(1, 0f, -100f, typ: 14), Regiment(2, 0f, -100f), Regiment(3, 0f, -100f) }, new[] { -1, 0, 0 });
+        var sink = new Sink();
+        int n = PostureIntentPlan.SubmitFacing(sink, clean, 0, UnitFlags.IsInfantry, 90f, CommandTaskType.HoldObjective,
+            RefuseFlank.None, IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason, new int[8], new int[8]);
+        AssertEqual(1, n, "one group facing (the executor rotates or wheels as shipped)");
+        AssertEqual(1, sink.Items[0].GroupId, "the group");
+
+        var dirty = Snapshot(new[]
+        {
+            Group(1, 0f, -100f, typ: 15), Regiment(2, 0f, -100f),
+            Group(3, 0f, -100f, typ: 14, flags: UnitFlags.PermanentlyDetached), Regiment(4, 0f, -100f),
+        }, new[] { -1, 0, 0, 2 });
+        var perRegiment = new Sink();
+        n = PostureIntentPlan.SubmitFacing(perRegiment, dirty, 0, UnitFlags.PermanentlyDetached | UnitFlags.IsInfantry, 90f,
+            CommandTaskType.HoldObjective, RefuseFlank.None, IntentPriority.Executor, IntentSource.PostureExecutor,
+            PostureIntentPlan.ExecutorReason, new int[8], new int[8]);
+        AssertEqual(1, n, "a detached descendant: face the reachable regiments one by one");
+        AssertEqual(2, perRegiment.Items[0].GroupId, "regiment 2 only");
+        AssertEqual(OrderChannel.Facing, perRegiment.Items[0].Channel, "facing channel");
+        AssertEqual(IntentPriority.Executor, perRegiment.Items[0].Priority, "the caller's priority");
     }
 }

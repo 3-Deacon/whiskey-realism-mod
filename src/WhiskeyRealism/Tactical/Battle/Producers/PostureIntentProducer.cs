@@ -512,14 +512,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 return false;
             }
 
-            bool hasFacing = false;
+            // #61 SetFormation: threat facing for holding tasks and the refused
+            // flank in contact, on the formation channels.
+            RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
             float heading = -1f;
-            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) &&
-                PostureSense.SubtreeAcceptsGroupFacing(descendants) &&
-                PostureTargets.TryThreat(s, i, out float threatX, out float threatZ))
+            bool needsFacing = false;
+            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) && PostureTargets.TryThreat(s, i, out float threatX, out float threatZ))
             {
                 heading = PostureSense.HeadingTo(rec.X, rec.Z, threatX, threatZ);
-                hasFacing = CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, heading, PostureSense.FacingToleranceDegrees);
+                needsFacing = CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, heading, PostureSense.FacingToleranceDegrees);
             }
 
             var request = new PostureIntentRequest
@@ -532,14 +533,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 TargetZ = z,
                 TargetFormation = targetFormation,
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
-                HasFacing = hasFacing,
-                Heading = heading,
                 InContactWithdrawal = closeEngaged || flankRisk,
+                Refuse = refuse,
                 Priority = priority,
                 Source = source,
                 Reason = reason,
             };
             int submitted = PostureIntentPlan.Submit(sink, request);
+            bool shapes = decision.Action == PostureExecutionAction.SetFormation ||
+                (decision.Action == PostureExecutionAction.SetFormationAndWaypoint && hasTarget);
+            if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
+                submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
+                    priority, source, reason, t.RegimentQueue, t.Regiments);
             PostureTelemetry.Group(s, i, reason, state, decision, submitted, hasTarget ? decision.Reason : "target-unresolved");
             return submitted > 0;
         }
@@ -1178,6 +1183,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (brigade.ShouldWrite && brigade.TargetFormation >= 0 && brigade.TargetFormation != rec.Formation)
                     {
                         sink.Submit(PostureIntentPlan.FacingPulseFormation(rec.InstanceId, brigade.TargetFormation));
+                        submitted = true;
+                    }
+                    // #61 sent the brigade pulse through SetFormation, whose threat
+                    // facing (holding tasks only) rotated the regiments in contact or
+                    // wheeled the group out of it. On a clean subtree the group order
+                    // is as shipped; a detached or player-owned descendant leaves the
+                    // facing to the per-regiment pulses below.
+                    if (brigade.ShouldWrite && CommandFormationCorrection.ShouldFaceThreat(g.State.Task) &&
+                        PostureSense.SubtreeAcceptsGroupFacing(t.Descendants[i]) &&
+                        CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, brigade.TargetFacingDegrees, PostureSense.FacingToleranceDegrees))
+                    {
+                        sink.Submit(PostureIntentPlan.FacingPulse(rec.InstanceId, brigade.TargetFacingDegrees));
                         submitted = true;
                     }
                     PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted);

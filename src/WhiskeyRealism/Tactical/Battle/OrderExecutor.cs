@@ -358,6 +358,41 @@ namespace WhiskeyRealism.Tactical.Battle
         // (BattleCommandPostureExecutorPatch.cs:30). Spans ~3 macro cycles
         // (sidestatupdatecycle 0.015 h); 30 battle-s would expire inside one.
         public const float RecentOrderBattleSeconds = 180f;
+        // Per-channel recent-order windows, #61's shipped values in battle seconds
+        // (RealSecondsAtOneXToHours: 600 real s at 1x per battle hour):
+        //   Move, Stance, Stop: RecentOrderBattleSeconds (#61 RecentOrderHours).
+        //   Facing: #61 RegimentFacingPulseCooldownHours = RealSecondsAtOneXToHours(5)
+        //     = 5/600 h = 30 battle-s.
+        //   Formation: CommandFormationWritePolicy.CooldownHours 0.05 h = 180 battle-s;
+        //     the policy's own 0.1 h under fire still applies at execution
+        //     (OrderExecutorRuntime feeds it the last formation/facing write).
+        //   CombatBehavior: #61 FireControlOrderCooldownHours =
+        //     RealSecondsAtOneXToHours(45) = 0.075 h = 270 battle-s.
+        public const float FacingRecentOrderBattleSeconds = 30f;
+        public const float FormationRecentOrderBattleSeconds = CommandFormationWritePolicy.CooldownHours * TacticalBattleClock.BattleSecondsPerHour;
+        public const float CombatBehaviorRecentOrderBattleSeconds = 270f;
+
+        public static float RecentOrderBattleSecondsFor(OrderChannel channel)
+        {
+            switch (channel)
+            {
+                case OrderChannel.Facing: return FacingRecentOrderBattleSeconds;
+                case OrderChannel.Formation: return FormationRecentOrderBattleSeconds;
+                case OrderChannel.CombatBehavior: return CombatBehaviorRecentOrderBattleSeconds;
+                default: return RecentOrderBattleSeconds;
+            }
+        }
+
+        /// <summary>SetGroupFormation's refuseflank: -1 none, 0 left, 1 right.</summary>
+        public static int VanillaRefuseFlank(RefuseFlank refuse)
+        {
+            switch (refuse)
+            {
+                case RefuseFlank.Left: return 0;
+                case RefuseFlank.Right: return 1;
+                default: return -1;
+            }
+        }
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
         public const float RetryBearingDegrees = 30f;
@@ -695,12 +730,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 case OrderChannel.Stance:
                     return rec.AiStanceOrdered == w.Value;
+                // A refused flank is a write of its own (the skewed slots), even
+                // with the formation or facing already right.
                 case OrderChannel.Formation:
-                    return rec.Formation == w.Value;
+                    return rec.Formation == w.Value && w.Refuse == RefuseFlank.None;
                 case OrderChannel.CombatBehavior:
                     return rec.CombatBehaviorOrdered == w.Value;
                 case OrderChannel.Facing:
-                    return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees;
+                    return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees &&
+                        w.Refuse == RefuseFlank.None;
                 case OrderChannel.Stop:
                     return !IsMoving(rec);
                 default:
@@ -717,7 +755,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (w.Priority != IntentPriority.Safety)
             {
                 if (_lastOrderAt.TryGetValue(Key(w.GroupId, w.Channel), out double last) &&
-                    Within(now, last, RecentOrderBattleSeconds / TacticalBattleClock.BattleSecondsPerHour))
+                    Within(now, last, RecentOrderBattleSecondsFor(w.Channel) / TacticalBattleClock.BattleSecondsPerHour))
                     return true;
                 if (move && TaskHoldHours > 0f && w.Task != CommandTaskType.None &&
                     _taskHold.TryGetValue(w.GroupId, out TaskStamp stamp) && stamp.Task == w.Task &&

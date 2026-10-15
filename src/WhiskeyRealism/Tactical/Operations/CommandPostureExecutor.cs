@@ -918,6 +918,31 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         /// <summary>
+        /// #61 ResolveRefusedFlank: a close-engaged group with flank risk on a
+        /// holding/guarding task refuses the flank its closest visible threat
+        /// is on (CommandFormationCorrection.RefuseDecisionForThreatFacing, 45-150
+        /// degrees off its facing); vanilla skews the slots (SetGroupFormation
+        /// refuseflank, 92095-92097).
+        /// </summary>
+        public static RefuseFlank RefuseFor(BattleSnapshot s, int index, CommandTaskType task, bool closeEngaged, bool flankRisk)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount || !closeEngaged || !flankRisk) return RefuseFlank.None;
+            if (CommandFormationCorrection.RefuseFlankParameter(TacticalRefuseFlankIntent.Decision.RefuseLeft, task, closeEngaged) < 0)
+                return RefuseFlank.None;
+            int k = s.ClosestVisibleEnemy(index, out _);
+            if (k < 0) return RefuseFlank.None;
+            ref UnitRecord rec = ref s.Own[index];
+            float threatRotation = CommandFormationCorrection.ThreatFacingRotationDegrees(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+            TacticalRefuseFlankIntent.Decision decision = CommandFormationCorrection.RefuseDecisionForThreatFacing(rec.RotationY, threatRotation);
+            switch (CommandFormationCorrection.RefuseFlankParameter(decision, task, closeEngaged))
+            {
+                case 0: return RefuseFlank.Left;
+                case 1: return RefuseFlank.Right;
+                default: return RefuseFlank.None;
+            }
+        }
+
+        /// <summary>
         /// The floor half of #61's safe-waypoint band (60 m): a target closer than
         /// that is where the unit already stands. The executor dedupes a repeat of
         /// the last waypoint but has no floor, and a move onto the unit's own
@@ -1085,18 +1110,18 @@ namespace WhiskeyRealism.Tactical.Operations
         public float TargetX, TargetZ;
         public int TargetFormation;
         public bool NeedsFormation;
-        public bool HasFacing;
-        public float Heading;
         // A FallBackToLine under close engagement or flank risk: immediate, line-checked.
         public bool InContactWithdrawal;
+        // #61 refused flank, carried on the formation and facing intents.
+        public RefuseFlank Refuse;
         public IntentPriority Priority;
         public IntentSource Source;
         public string Reason; // static literal
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
-    // (#61 changed stance before SetWaypoint, L768-774); a formation and the
-    // threat facing go with formation decisions and with SetFormationAndWaypoint,
+    // (#61 changed stance before SetWaypoint, L768-774); a formation (and the
+    // threat facing, SubmitFacing) go with formation decisions and with SetFormationAndWaypoint,
     // where the executor's formation policy refuses them while the group moves —
     // vanilla re-forms only a settled group (AdjustGroupFormations 5886), and #61
     // re-formed only when no move went out (L976-988).
@@ -1116,10 +1141,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 case PostureExecutionAction.ChangeStance:
                     return SubmitStance(sink, r);
                 case PostureExecutionAction.SetFormation:
-                    return SubmitFormationAndFacing(sink, r);
+                    return SubmitFormation(sink, r);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!r.HasTarget) return 0;
-                    return SubmitStance(sink, r) + SubmitMove(sink, r) + SubmitFormationAndFacing(sink, r);
+                    return SubmitStance(sink, r) + SubmitMove(sink, r) + SubmitFormation(sink, r);
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
@@ -1129,6 +1154,41 @@ namespace WhiskeyRealism.Tactical.Operations
                 default:
                     return 0;
             }
+        }
+
+        /// <summary>
+        /// A group's threat facing. On a clean subtree (no player-owned or
+        /// detached descendant) one group Facing intent, which the executor turns
+        /// into the shipped rotate-in-place or wheel (CommandFormationWritePolicy);
+        /// otherwise one Facing intent per regiment the group's order may reach
+        /// (PostureSense.CollectRotatableRegiments). Returns the intents submitted.
+        /// </summary>
+        public static int SubmitFacing(IIntentSink sink, BattleSnapshot s, int groupIndex, UnitFlags descendantFlags, float heading,
+            CommandTaskType task, RefuseFlank refuse, IntentPriority priority, IntentSource source, string reason,
+            int[] queue, int[] regiments)
+        {
+            heading = PostureSense.NormalizeHeading(heading);
+            if (sink == null || s == null || heading < 0f || groupIndex < 0 || groupIndex >= s.OwnCount) return 0;
+            if (PostureSense.SubtreeAcceptsGroupFacing(descendantFlags))
+            {
+                sink.Submit(GroupFacing(s.Own[groupIndex].InstanceId, heading, task, refuse, priority, source, reason));
+                return 1;
+            }
+
+            int count = PostureSense.CollectRotatableRegiments(s, groupIndex, queue, regiments);
+            for (int k = 0; k < count; k++)
+                sink.Submit(GroupFacing(s.Own[regiments[k]].InstanceId, heading, task, RefuseFlank.None, priority, source, reason));
+            return count;
+        }
+
+        private static BattleOrderIntent GroupFacing(int id, float heading, CommandTaskType task, RefuseFlank refuse,
+            IntentPriority priority, IntentSource source, string reason)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = id, Channel = OrderChannel.Facing, Heading = heading, Task = task, Refuse = refuse,
+                Priority = priority, Source = source, Reason = reason,
+            };
         }
 
         /// <summary>A nested leaf brigade's move to its slot: no stance (it is not an AI group).</summary>
@@ -1197,30 +1257,19 @@ namespace WhiskeyRealism.Tactical.Operations
             return 1;
         }
 
-        private static int SubmitFormationAndFacing(IIntentSink sink, in PostureIntentRequest r)
+        private static int SubmitFormation(IIntentSink sink, in PostureIntentRequest r)
         {
             int n = 0;
-            if (r.NeedsFormation && r.TargetFormation >= 0 && r.TargetFormation <= 4)
+            // #61 SetFormation wrote for a formation change or a refused flank
+            // alone (CommandFormationWritePolicy needsRefuse → wheel).
+            if ((r.NeedsFormation || r.Refuse != RefuseFlank.None) && r.TargetFormation >= 0 && r.TargetFormation <= 4)
             {
                 sink.Submit(new BattleOrderIntent
                 {
                     GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation, Heading = -1f, Task = r.Task,
-                    Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason,
                 });
                 n++;
-            }
-            if (r.HasFacing)
-            {
-                float heading = PostureSense.NormalizeHeading(r.Heading);
-                if (heading >= 0f)
-                {
-                    sink.Submit(new BattleOrderIntent
-                    {
-                        GroupId = r.GroupId, Channel = OrderChannel.Facing, Heading = heading, Task = r.Task,
-                        Priority = r.Priority, Source = r.Source, Reason = r.Reason,
-                    });
-                    n++;
-                }
             }
             return n;
         }

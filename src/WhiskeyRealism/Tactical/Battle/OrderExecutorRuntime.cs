@@ -55,6 +55,10 @@ namespace WhiskeyRealism.Tactical.Battle
             new Regiment.StopOrder(_lastwaypointrotation: true, _manualstop: true, _skipmarchcolumnstop: false,
                 _skipadvancefallbackstops: false, _clearregimentpathsbeforerotation: true);
 
+        // Scratch for the in-place rotation walk (grown to the roster).
+        private static int[] _rotationQueue = new int[64];
+        private static int[] _rotationTargets = new int[64];
+
         // The units one Move reached (grown to the largest chain seen).
         private static IssuedTarget[] _issued = new IssuedTarget[64];
         // Pre-call waypoints of those units and their descendants (grown as needed).
@@ -124,7 +128,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 else
                 {
-                    wrote = IssueOther(bunits, unit, winner, feudReplay, nowHours, EnemiesInRange(view, targetIndex, winner.Channel));
+                    wrote = IssueOther(bunits, view, targetIndex, unit, winner, feudReplay, nowHours,
+                        EnemiesInRange(view, targetIndex, winner.Channel), LastShapeWriteHours(executor, own[targetIndex].InstanceId));
                 }
 
                 if (wrote) executed++;
@@ -227,8 +232,8 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        private static bool IssueOther(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool feudReplay, double nowHours,
-            float enemiesInRange)
+        private static bool IssueOther(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
+            bool feudReplay, double nowHours, float enemiesInRange, float lastShapeWriteHours)
         {
             switch (w.Channel)
             {
@@ -237,9 +242,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.CombatBehavior:
                     return TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
                 case OrderChannel.Formation:
-                    return IssueFormation(bunits, unit, w.Value, nowHours, enemiesInRange);
+                    return IssueFormation(bunits, unit, w, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Facing:
-                    return IssueFacing(bunits, unit, w.Heading, feudReplay, nowHours, enemiesInRange);
+                    return IssueFacing(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Stop:
                     GameObject go = ((Component)unit).gameObject;
                     if (go == null) return false;
@@ -251,9 +256,16 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static bool IssueFormation(BattleUnits bunits, Regiment unit, int formation, double nowHours, float enemiesInRange)
+        // Group formation (R8, CommandFormationWritePolicy): the courier
+        // SetFormation for a real change out of contact and cover, else - for a
+        // refused flank (BC5a) - the in-place wheel with the skew. The policy's
+        // cooldown (0.05 h, 0.1 h under fire) runs from the group's last
+        // formation or facing write, as #61's _lastFormationWriteAt did.
+        private static bool IssueFormation(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, double nowHours,
+            float enemiesInRange, float lastShapeWriteHours)
         {
             GameObject go = ((Component)unit).gameObject;
+            int formation = w.Value;
             if (go == null || formation < 0) return false;
             if (unit.unittyp <= TacticalUnitType.MaxCombat)
             {
@@ -262,84 +274,120 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             FormationWriteDecision decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
-                needsFormation: true,
+                needsFormation: unit.groupformation != formation,
                 needsFacing: false,
-                needsRefuse: false,
+                needsRefuse: w.Refuse != RefuseFlank.None,
                 unit.combatstatussubordinates,
                 unit.groupsubordinatesmoving,
                 unit.regimentpaths,
                 unit.covervaluesubordinates,
                 (float)nowHours,
-                lastWriteHours: -1f,
+                lastShapeWriteHours,
                 enemiesInRange));
-            if (decision.Kind != FormationWriteKind.VanillaFormation) return false;
-            int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(formation);
-            if (index < 0) return false;
-            bunits.SetFormation(go, index, exitifsameformation: true);
-            return true;
+            switch (decision.Kind)
+            {
+                case FormationWriteKind.VanillaFormation:
+                {
+                    int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(formation);
+                    if (index < 0) return false;
+                    bunits.SetFormation(go, index, exitifsameformation: true);
+                    return true;
+                }
+                case FormationWriteKind.WheelGroup:
+                    return Wheel(bunits, unit, -1f, w.Refuse, formation);
+                default:
+                    return false;
+            }
         }
 
-        private static bool IssueFacing(BattleUnits bunits, Regiment unit, float heading, bool feudReplay, double nowHours, float enemiesInRange)
+        // Group facing: in contact rotate the reachable regiments in place, out of
+        // contact wheel the group (with a refused flank when the intent carries
+        // one). The rotation walk is vanilla's group order: it stops at a
+        // detached node (GetAttachedUnitsReg(excludedechainedunits) 119865) and at
+        // player-owned units (PostureSense.CollectRotatableRegiments), and each
+        // rotated regiment still passes the write guard.
+        private static bool IssueFacing(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
+            bool feudReplay, double nowHours, float enemiesInRange, float lastShapeWriteHours)
         {
+            float heading = w.Heading;
             if (heading < 0f) return false;
             if (unit.unittyp <= TacticalUnitType.MaxCombat) return RotateInPlace(unit, heading);
 
             FormationWriteDecision decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
                 needsFormation: false,
                 needsFacing: true,
-                needsRefuse: false,
+                needsRefuse: w.Refuse != RefuseFlank.None,
                 unit.combatstatussubordinates,
                 unit.groupsubordinatesmoving,
                 unit.regimentpaths,
                 unit.covervaluesubordinates,
                 (float)nowHours,
-                lastWriteHours: -1f,
+                lastShapeWriteHours,
                 enemiesInRange));
             switch (decision.Kind)
             {
                 case FormationWriteKind.RotateInPlace:
                 {
-                    int rotated = 0;
-                    Regiment[] units = unit.allattachedunits;
-                    if (units == null) return false;
-                    for (int i = 0; i < units.Length; i++)
+                    if (_rotationQueue.Length < view.OwnCount)
                     {
-                        Regiment child = units[i];
-                        if (child == null || child.unittyp > TacticalUnitType.MaxCombat) continue;
-                        if (child.unittyp == TacticalUnitType.Artillery) continue;
-                        if (child.permanentlydetached) continue;
-                        // allattachedunits holds every descendant (129574), and a
-                        // detached player command shields only its own node, so each
-                        // rotated regiment passes the guard itself (BC3 136b445).
-                        if (!TacticalWriteGuard.CanWrite(child, feudReplay)) continue;
+                        _rotationQueue = new int[view.OwnCount];
+                        _rotationTargets = new int[view.OwnCount];
+                    }
+                    int count = PostureSense.CollectRotatableRegiments(view, targetIndex, _rotationQueue, _rotationTargets);
+                    int rotated = 0;
+                    for (int k = 0; k < count; k++)
+                    {
+                        Regiment child = BattleSnapshotBuilder.UnitAt(view, _rotationTargets[k], enemy: false);
+                        if ((UnityEngine.Object)child == null || !TacticalWriteGuard.CanWrite(child, feudReplay)) continue;
                         if (RotateInPlace(child, heading)) rotated++;
                     }
                     return rotated > 0;
                 }
                 case FormationWriteKind.WheelGroup:
-                {
-                    int current = unit.groupformation;
-                    if (current < 0 || current > 4) return false;
-                    bunits.SetGroupFormation(
-                        unit,
-                        current,
-                        manualfinalrotation: heading,
-                        targetpos: default(Vector3),
-                        immediateplacement: false,
-                        newpath: false,
-                        modifylastwaypoint: true,
-                        newstate: 2,
-                        refuseflank: -1,
-                        ignoredeplyomentzone: false,
-                        skiprotation: false,
-                        showmovementoptions: false,
-                        placeentrenchments: false,
-                        adjustbyterrainshape: true);
-                    return true;
-                }
+                    return Wheel(bunits, unit, heading, w.Refuse, unit.groupformation);
                 default:
                     return false;
             }
+        }
+
+        // SetGroupFormation(current formation, rotation, newpath:false,
+        // modifylastwaypoint:true): skips ClearTargets (91960) and re-paths every
+        // non-detached child to its rotated, optionally skewed slot (92095-92097).
+        private static bool Wheel(BattleUnits bunits, Regiment unit, float heading, RefuseFlank refuse, int fallbackFormation)
+        {
+            int current = unit.groupformation;
+            int formation = current >= 0 && current <= 4 ? current : fallbackFormation;
+            if (formation < 0 || formation > 4) return false;
+            bunits.SetGroupFormation(
+                unit,
+                formation,
+                manualfinalrotation: heading,
+                targetpos: default(Vector3),
+                immediateplacement: false,
+                newpath: false,
+                modifylastwaypoint: true,
+                newstate: 2,
+                refuseflank: OrderExecutor.VanillaRefuseFlank(refuse),
+                ignoredeplyomentzone: false,
+                skiprotation: false,
+                showmovementoptions: false,
+                placeentrenchments: false,
+                adjustbyterrainshape: true);
+            return true;
+        }
+
+        // The last formation or facing write the executor issued for the unit
+        // (#61 _lastFormationWriteAt covered both), or -1.
+        private static float LastShapeWriteHours(OrderExecutor executor, int instanceId)
+        {
+            float last = -1f;
+            if (executor.TryGetLastOutcome(instanceId, OrderChannel.Formation, out OrderOutcome formation) &&
+                formation.Kind == OrderOutcomeKind.Issued)
+                last = (float)formation.AtHours;
+            if (executor.TryGetLastOutcome(instanceId, OrderChannel.Facing, out OrderOutcome facing) &&
+                facing.Kind == OrderOutcomeKind.Issued && facing.AtHours > last)
+                last = (float)facing.AtHours;
+            return last;
         }
 
         // F7 (BC5a): the formation policy's "enemies in range" input, fog-honest.

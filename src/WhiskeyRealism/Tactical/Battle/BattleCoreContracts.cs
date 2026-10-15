@@ -141,6 +141,17 @@ namespace WhiskeyRealism.Tactical.Battle
         PerRegiment = 128,
     }
 
+    // Refused flank of a group's formation or facing order (BC5a, additive).
+    // None is the default so an intent built without it refuses nothing;
+    // OrderExecutor.VanillaRefuseFlank maps it to SetGroupFormation's refuseflank
+    // (-1 none, 0 left, 1 right; SkewedPosition 92095-92097).
+    public enum RefuseFlank : byte
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+    }
+
     public struct BattleOrderIntent
     {
         public int GroupId;
@@ -154,6 +165,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentFlags Flags;
         public WhiskeyRealism.Tactical.Operations.CommandTaskType Task;
         public string Reason;     // static literal only
+        public RefuseFlank Refuse; // Formation / Facing on a group (BC5a)
     }
 
     public interface IIntentSink
