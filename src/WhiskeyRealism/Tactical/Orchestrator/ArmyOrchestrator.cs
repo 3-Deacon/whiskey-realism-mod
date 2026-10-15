@@ -986,6 +986,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // GetBattleType signal.
         private BattleStance _currentForceBalanceStance = BattleStance.Meeting;
 
+        /// <summary>The side's battle stance (vanilla GetBattleType via ArmyEvidenceBuilder.ReadBattleStance).</summary>
+        public BattleStance CurrentBattleStance => _currentForceBalanceStance;
+
+        /// <summary>
+        /// BC9: refreshed on every coordinator tick by ArmyPostureInputsRuntime.Refresh,
+        /// independent of the reinforcement-opportunity doctrine flag, so the director,
+        /// the doctrine assignment and the posture guard see a Defender as one.
+        /// </summary>
+        internal void UpdateBattleStance(BattleStance stance) { _currentForceBalanceStance = stance; }
+
         // Battle time (seconds) of the most recent accepted opportunity-category
         // change. Read by TacticalOpportunityHysteresis.Smooth to enforce the
         // minimum hold.

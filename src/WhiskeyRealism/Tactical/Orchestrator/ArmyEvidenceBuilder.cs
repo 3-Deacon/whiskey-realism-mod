@@ -759,7 +759,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// the doctrine + playbook layer fall through to evidence-based
         /// behavior rather than acting on a wrong stance assumption.
         /// </summary>
-        private static BattleStance ReadBattleStance(BattleUnits bunits, int allianceId)
+        internal static BattleStance ReadBattleStance(BattleUnits bunits, int allianceId)
         {
             try
             {

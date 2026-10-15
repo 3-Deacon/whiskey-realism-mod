@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -69,6 +70,20 @@ internal static class BattleReconTests
             ("probe hold: released when the ledger reassigns the group", ProbeHoldReleasedOnReassign),
             ("probe hold: blocks only moves back over the ground gained", ProbeHoldBlocksOnlyBackward),
             ("probe hold: a new nomination replaces the hold", ProbeHoldReplacedByNomination),
+            ("defender: the stance guard turns probe and attack tasks into screen and hold", StanceGuardTable),
+            ("defender: never committed to an offensive shape", DefenderNeverCommitsOffensively),
+            ("defender: a commit that is downgraded leaves no probe or attack task", DefenderDowngradeNoProbe),
+            ("defender: an offensive operation held from before is neutralised", DefenderLegacyOffensiveOperation),
+            ("defender: doctrine assignment guards every shape", DefenderGuardIndependentOfShape),
+            ("gt recon: a defender with a visible enemy gets no probe or attack task", GtReconDefenderVisibleEnemy),
+            ("defender: the army's stance reaches the ledger without the opportunity doctrine", DefenderStanceReachesLedger),
+            ("defender: the stance is read before the opportunity doctrine flag", StanceReadBeforeOpportunityFlag),
+            ("facing: the entry source turns only screens, probes and flank guards", EntryFacingOnlyWatchingTasks),
+            ("facing: a regiment follows its screen's entry bearing out of range", RegimentFollowsEntryBearing),
+            ("facing: the brigade pulse submits a screen's entry turn, never a hold's", BrigadePulseEntrySubmits),
+            ("recon never rides to a visible enemy as a remembered one", RememberedTargetIsNeverVisible),
+            ("probe a band holding only remembered enemies", ProbeBandWithOnlyRememberedEnemy),
+            ("probe hold: a new hold never overwrites another group's", ProbeHoldNeverOverwrites),
         });
     }
 
@@ -733,13 +748,16 @@ internal static class BattleReconTests
     private static CommandDoctrineOrder[] Orders(TacticalOperationShape shape, params CommandNodeRole[] roles) =>
         Orders(new OperationRecord(shape, TacticalOperationPhase.Scouting, "obj-1", 500f), NoEnemyObjective(0.4f), roles);
 
-    private static CommandDoctrineOrder[] Orders(OperationRecord operation, BattlefieldObjectiveEstimate objective, params CommandNodeRole[] roles)
+    private static CommandDoctrineOrder[] Orders(OperationRecord operation, BattlefieldObjectiveEstimate objective, params CommandNodeRole[] roles) =>
+        Orders(operation, objective, roles, BattleStance.Meeting);
+
+    private static CommandDoctrineOrder[] Orders(OperationRecord operation, BattlefieldObjectiveEstimate objective, CommandNodeRole[] roles, BattleStance stance)
     {
         var nodes = new CommandNodeOperationalState[roles.Length];
         for (int i = 0; i < roles.Length; i++)
             nodes[i] = new CommandNodeOperationalState("node-" + (i + 1), CommandEchelonKind.DivisionLike, roles[i], CommandTaskType.FormUp, CommandTaskState.Planning);
         var picture = new BattlefieldPictureSnapshot(new[] { objective });
-        return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f);
+        return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f, stance);
     }
 
     private static void ScoutingWithoutContactTasks()
@@ -1030,5 +1048,213 @@ internal static class BattleReconTests
         AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out float z), "probes the next bound after the hour");
         AssertNear(-600f, z, 0.5f, "from the ground gained");
         AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "the new probe replaces the hold");
+    }
+
+    // ------------------------------------------------------------------ verify round 1
+
+    private static readonly CommandNodeRole[] AllRoles =
+    {
+        CommandNodeRole.MainEffort, CommandNodeRole.SupportingAttack, CommandNodeRole.FixingForce,
+        CommandNodeRole.ScreeningForce, CommandNodeRole.Probe, CommandNodeRole.FlankMarch, CommandNodeRole.Defender,
+    };
+
+    private static void AssertDefensive(CommandDoctrineOrder[] orders, string label)
+    {
+        for (int i = 0; i < orders.Length; i++)
+        {
+            CommandTaskType t = orders[i].Task;
+            AssertTrue(t != CommandTaskType.Probe && t != CommandTaskType.AttackObjective &&
+                t != CommandTaskType.SupportAttack && t != CommandTaskType.FixEnemy, label + ": node " + (i + 1) + " is " + t);
+        }
+    }
+
+    private static void AssertNotOffensive(OperationRecord op, string label)
+    {
+        AssertTrue(op.Shape == TacticalOperationShape.DefensiveNetwork || op.Shape == TacticalOperationShape.DelayAndFallback,
+            label + ": shape " + op.Shape);
+        AssertTrue(op.Phase != TacticalOperationPhase.Committed && op.Phase != TacticalOperationPhase.Exploiting,
+            label + ": phase " + op.Phase);
+    }
+
+    private static BattlefieldObjectiveEstimate ExposedLine() =>
+        new BattlefieldObjectiveEstimate("obj-1", TacticalObjectiveType.VictoryPoint, 2000f, 0.9f, true, 0.8f, 0f, 0f, 0f, 0f);
+
+    private static void StanceGuardTable()
+    {
+        AssertEqual(CommandTaskType.Screen, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.Probe, BattleStance.Defender), "probe");
+        AssertEqual(CommandTaskType.HoldObjective, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.AttackObjective, BattleStance.Defender), "attack");
+        AssertEqual(CommandTaskType.HoldObjective, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.SupportAttack, BattleStance.Defender), "support");
+        AssertEqual(CommandTaskType.HoldObjective, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.FixEnemy, BattleStance.Defender), "fix");
+        AssertEqual(CommandTaskType.Scout, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.Scout, BattleStance.Defender), "scouting is information-gathering");
+        AssertEqual(CommandTaskType.Screen, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.Screen, BattleStance.Defender), "screen");
+        foreach (BattleStance stance in new[] { BattleStance.Meeting, BattleStance.Attacker })
+            foreach (CommandTaskType t in (CommandTaskType[])Enum.GetValues(typeof(CommandTaskType)))
+                AssertEqual(t, TacticalDecisionDoctrine.TaskForStance(t, stance), stance + " keeps " + t);
+    }
+
+    private static void DefenderNeverCommitsOffensively()
+    {
+        TacticalOperationDirectorDecision meeting = DecideFor(BattleStance.Meeting, ExposedLine());
+        AssertEqual(TacticalOperationPhase.Committed, meeting.Operation.Phase, "control: a meeting side commits on 10:1");
+        TacticalOperationDirectorDecision defender = DecideFor(BattleStance.Defender, ExposedLine());
+        AssertNotOffensive(defender.Operation, "defender on 10:1");
+        AssertDefensive(Orders(defender.Operation, ExposedLine(), AllRoles, BattleStance.Defender), "defender orders");
+    }
+
+    private static void DefenderDowngradeNoProbe()
+    {
+        // Committed before (stance not yet known), then the contact turns out a screen.
+        var committed = new OperationRecord(TacticalOperationShape.FixAndFlank, TacticalOperationPhase.Committed, "obj-1", 900f);
+        TacticalOperationDirectorDecision d = TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(committed, 5000f,
+            20000f, 0.3f, 0.5f, 0.5f, new[] { ScreenContactObjective() }).WithStance(BattleStance.Defender));
+        AssertNotOffensive(d.Operation, "after the downgrade");
+        AssertDefensive(Orders(d.Operation, ScreenContactObjective(), AllRoles, BattleStance.Defender), "downgraded orders");
+    }
+
+    private static void DefenderLegacyOffensiveOperation()
+    {
+        var committed = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "obj-1", 900f);
+        TacticalOperationDirectorDecision d = TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(committed, 100f,
+            20000f, 0.3f, 0.5f, 0.5f, new[] { ExposedLine() }).WithStance(BattleStance.Defender));
+        AssertNotOffensive(d.Operation, "inside the commit window");
+    }
+
+    private static void DefenderGuardIndependentOfShape()
+    {
+        foreach (TacticalOperationShape shape in (TacticalOperationShape[])Enum.GetValues(typeof(TacticalOperationShape)))
+            foreach (TacticalOperationPhase phase in (TacticalOperationPhase[])Enum.GetValues(typeof(TacticalOperationPhase)))
+            {
+                var op = new OperationRecord(shape, phase, "obj-1", 900f);
+                AssertDefensive(Orders(op, ScreenContactObjective(), AllRoles, BattleStance.Defender), shape + "/" + phase + " screen contact");
+                AssertDefensive(Orders(op, ExposedLine(), AllRoles, BattleStance.Defender), shape + "/" + phase + " exposed line");
+                AssertDefensive(Orders(op, NoEnemyObjective(0.4f), AllRoles, BattleStance.Defender), shape + "/" + phase + " no contact");
+            }
+    }
+
+    private static void GtReconDefenderVisibleEnemy()
+    {
+        foreach (CommandTaskType task in new[] { CommandTaskType.Probe, CommandTaskType.AttackObjective, CommandTaskType.SupportAttack, CommandTaskType.FixEnemy })
+        {
+            TacticalGrandTacticianReconDecision d = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+                CommandNodeRole.MainEffort, task, hasFowVisibleEnemy: true, underRecentFire: false, sideDefending: true));
+            AssertTrue(d.Task != CommandTaskType.Probe && d.Task != CommandTaskType.AttackObjective &&
+                d.Task != CommandTaskType.SupportAttack && d.Task != CommandTaskType.FixEnemy, task + " with a visible enemy became " + d.Task);
+        }
+        TacticalGrandTacticianReconDecision attacker = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, hasFowVisibleEnemy: true, underRecentFire: false));
+        AssertEqual(CommandTaskType.AttackObjective, attacker.Task, "control: contact confirmed keeps an attacker's attack");
+    }
+
+    private static void DefenderStanceReachesLedger()
+    {
+        var side = new TacticalBattleOrchestrator(1, TacticalCommanderRoster.BuildFromSynthetic(Array.Empty<SyntheticCommanderInput>()));
+        var army = TestFixtures.NewArmyOrchestratorWithPlan();
+        side.AttachArmy(army);
+        // No reinforcement-opportunity update: only the stance refresh.
+        army.UpdateBattleStance(BattleStance.Defender);
+        AssertEqual(BattleStance.Defender, army.CurrentBattleStance, "stance");
+        side.TickOperationsLedger(
+            TacticalCommanderMode.Active,
+            new[] { TestFixtures.ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        AssertNotOffensive(army.CurrentOperation, "the ledger saw the defender stance");
+    }
+
+    private static void StanceReadBeforeOpportunityFlag()
+    {
+        string path = System.IO.Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), "Tactical", "Orchestrator", "ArmyPostureInputsRuntime.cs");
+        string text = System.IO.File.ReadAllText(path);
+        int stance = text.IndexOf("army.UpdateBattleStance(ArmyEvidenceBuilder.ReadBattleStance(", StringComparison.Ordinal);
+        int flag = text.IndexOf("Plugin.EnableTacticalReinforcementOpportunityDoctrine == null", StringComparison.Ordinal);
+        AssertTrue(stance >= 0, "Refresh reads the stance");
+        AssertTrue(flag >= 0, "the opportunity flag gate is still there");
+        AssertTrue(stance < flag, "the stance is read before the opportunity flag can return");
+    }
+
+    private static TacticalFacingPulseDecision EntryPulse(TacticalFacingPulseScope scope, CommandTaskType task) =>
+        TacticalFacingPulseDoctrine.Decide(EntryInput(scope, task));
+
+    private static TacticalFacingPulseInput EntryInput(TacticalFacingPulseScope scope, CommandTaskType task) =>
+        new TacticalFacingPulseInput(scope, task, 0, 0, 0f, 90f, true, TacticalFacingThreatSource.Entry,
+            false, false, false, false, false, false, false, 15f, isArtillery: false, threatWithinFireRange: false);
+
+    private static readonly CommandTaskType[] FrontAxisTasks =
+    {
+        CommandTaskType.HoldObjective, CommandTaskType.ReserveWait, CommandTaskType.Consolidate, CommandTaskType.FixEnemy,
+        CommandTaskType.Delay, CommandTaskType.HoldChoke, CommandTaskType.FallBackToLine,
+    };
+
+    private static void EntryFacingOnlyWatchingTasks()
+    {
+        foreach (CommandTaskType task in new[] { CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.GuardFlank })
+            AssertEqual(TacticalFacingPulseAction.CorrectFacing, EntryPulse(TacticalFacingPulseScope.Brigade, task).Action, task + " faces the entry point");
+        foreach (CommandTaskType task in FrontAxisTasks)
+            AssertFalse(EntryPulse(TacticalFacingPulseScope.Brigade, task).ShouldWrite, task + " keeps its front-axis facing");
+    }
+
+    private static void RegimentFollowsEntryBearing()
+    {
+        TacticalFacingPulseDecision d = EntryPulse(TacticalFacingPulseScope.Regiment, CommandTaskType.Screen);
+        AssertEqual(TacticalFacingPulseAction.CorrectFacing, d.Action, "an entry point is not a threat out of range: " + d.Reason);
+        AssertNear(90f, d.TargetFacingDegrees, 0.01f, "the bearing handed down");
+        AssertFalse(d.Urgent, "never urgent");
+        AssertFalse(EntryPulse(TacticalFacingPulseScope.Regiment, CommandTaskType.HoldObjective).ShouldWrite, "a hold's regiments do not turn");
+    }
+
+    private static int BrigadePulse(CommandTaskType task)
+    {
+        var sink = new Sink();
+        TacticalFacingPulseInput input = EntryInput(TacticalFacingPulseScope.Brigade, task);
+        TacticalFacingPulseDecision d = TacticalFacingPulseDoctrine.Decide(input);
+        PostureIntentPlan.SubmitBrigadePulse(sink, InfBrigade, input, d, subtreeAcceptsGroupFacing: true);
+        return sink.CountOf(OrderChannel.Facing);
+    }
+
+    private static void BrigadePulseEntrySubmits()
+    {
+        AssertEqual(1, BrigadePulse(CommandTaskType.Screen), "a screen turns to the entry point");
+        AssertEqual(1, BrigadePulse(CommandTaskType.Probe), "a probe turns to the entry point");
+        AssertEqual(1, BrigadePulse(CommandTaskType.GuardFlank), "a flank guard keeps its turn");
+        foreach (CommandTaskType task in FrontAxisTasks)
+            AssertEqual(0, BrigadePulse(task), task + " submits nothing from the entry source");
+    }
+
+    private static void RememberedTargetIsNeverVisible()
+    {
+        var s = Field(3.0);
+        SeeEnemy(s, 0f, -300f, 50f, 3.0);          // visible, weak, nearer
+        SeeRemembered(s, 900f, -300f, 3000f);      // last seen here
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.1f, hadContact: true));
+        AssertEqual(ReconTargetKind.RememberedEnemy, rig.Memory.Kind, "a remembered enemy is looked at again");
+        AssertTrue(rig.Memory.TargetX > 500f, "not the visible one: x " + rig.Memory.TargetX);
+    }
+
+    private static void ProbeBandWithOnlyRememberedEnemy()
+    {
+        var s = Field(3.0);
+        SeeRemembered(s, 400f, -500f, 300f); // in the infantry brigade's band, no longer seen
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "only a visible enemy makes a band known");
+    }
+
+    private static void ProbeHoldNeverOverwrites()
+    {
+        var m = new ReconMemory();
+        const int groups = 3 * ReconMemory.MaxBands;
+        for (int g = 1; g <= groups; g++)
+        {
+            int band = g % ReconMemory.MaxBands;
+            m.Nominate(band, 1000 + g, 0f, 0f, 0f, 200f, CommandTaskType.FormUp, 0.0);
+            AssertTrue(m.Hold(band, g, 200f), "hold " + g);
+        }
+        for (int g = 1; g <= groups; g++)
+        {
+            AssertTrue(m.TryGetHold(1000 + g, CommandTaskType.FormUp, out float x, out _, out _, out _), "hold " + g + " kept");
+            AssertNear(g, x, 0.01f, "its own point");
+        }
     }
 }

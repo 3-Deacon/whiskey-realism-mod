@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -11,7 +12,8 @@ namespace WhiskeyRealism.Tactical.Operations
             BattlefieldPictureSnapshot picture,
             float ownStrength,
             float nowSeconds,
-            float reserveFraction = 0f)
+            float reserveFraction = 0f,
+            BattleStance stance = BattleStance.Meeting)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -40,6 +42,9 @@ namespace WhiskeyRealism.Tactical.Operations
                 CommandNodeOperationalState node = nodes[i];
                 CommandTaskType task = ResolveTask(node.Role, operation, objective, objectiveMatched, odds);
                 task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length);
+                // BC9 stance guard, whatever the shape or phase: a Defender gets no
+                // Probe and no attack-stance task.
+                task = TacticalDecisionDoctrine.TaskForStance(task, stance);
                 DoctrineAllowedIdleReason idle = ResolveIdle(node.Role, task, operation);
                 TacticalBattleLinePlan linePlan = TacticalBattleLinePlanner.PlanNode(
                     node,

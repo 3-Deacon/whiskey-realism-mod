@@ -1195,6 +1195,30 @@ namespace WhiskeyRealism.Tactical.Operations
             };
         }
 
+        /// <summary>
+        /// The facing pulse's brigade intents for one decision: the formation correction,
+        /// then (#61's SetFormation threat facing, for the tasks that face a threat or,
+        /// BC9, a Screen/Probe watching an entry point) the group facing on a clean
+        /// subtree. Returns the intents submitted.
+        /// </summary>
+        public static int SubmitBrigadePulse(IIntentSink sink, int groupId, in TacticalFacingPulseInput input,
+            in TacticalFacingPulseDecision d, bool subtreeAcceptsGroupFacing)
+        {
+            int n = 0;
+            if (d.ShouldWrite && d.TargetFormation >= 0 && d.TargetFormation != input.CurrentFormation)
+            {
+                sink.Submit(FacingPulseFormation(groupId, d.TargetFormation));
+                n++;
+            }
+            if (d.ShouldWrite && CommandFormationCorrection.ShouldFaceThreat(input.Task, input.ThreatSource) && subtreeAcceptsGroupFacing &&
+                CommandFormationCorrection.NeedsFacingCorrection(input.CurrentFacingDegrees, d.TargetFacingDegrees, PostureSense.FacingToleranceDegrees))
+            {
+                sink.Submit(FacingPulse(groupId, d.TargetFacingDegrees));
+                n++;
+            }
+            return n;
+        }
+
         public static BattleOrderIntent FacingPulseFormation(int groupId, int formation)
         {
             return new BattleOrderIntent

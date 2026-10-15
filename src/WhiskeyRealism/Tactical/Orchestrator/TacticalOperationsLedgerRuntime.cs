@@ -161,7 +161,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     picture,
                     _currentForce.AvailableStrength,
                     _currentTimeSeconds,
-                    _currentForce.ReserveFraction));
+                    _currentForce.ReserveFraction,
+                    stance));
         }
 
         private static IReadOnlyList<ObjectiveRecord> CopyObjectives(IReadOnlyList<ObjectiveRecord> objectives)

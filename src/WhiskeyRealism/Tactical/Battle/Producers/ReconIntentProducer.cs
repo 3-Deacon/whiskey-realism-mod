@@ -17,7 +17,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // Inputs, all read-only: the side's battle snapshot; the contact ledger's
     // confidence, stalest band and entry-point watch stamps
     // (ArmyEvidenceBuilder.ContactLedgerFor, fed by the evidence build); the army plan's
-    // phase; the battle stance (ArmyPostureInputsRuntime.SideDefending, GetBattleType);
+    // phase; the battle stance (ArmyOrchestrator.CurrentBattleStance, GetBattleType via
+    // ArmyEvidenceBuilder.ReadBattleStance, the stance the director and the posture
+    // guard read);
     // the AI pool (unitsused, captured on the coordinator tick); the operation's
     // objective; vanilla's GamePrefs distances (maximumlineofsight 51308,
     // distancetoenemytocancelinterruption / distancetoenemyforinterruption 52444-52446,
@@ -130,7 +132,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(alliance);
             ArmyOrchestrator army = side?.Army;
             p.Phase = army != null && army.HasPlan ? army.CurrentPlan.Phase : (BattlePhase?)null;
-            p.SideDefending = ArmyPostureInputsRuntime.SideDefending(alliance);
+            p.SideDefending = army != null && army.CurrentBattleStance == BattleStance.Defender;
             p.HasObjective = PostureTargets.TryOperationObjective(side, out p.ObjectiveX, out p.ObjectiveZ, out _);
 
             PostureTick.State posture = PostureTick.Current(s);

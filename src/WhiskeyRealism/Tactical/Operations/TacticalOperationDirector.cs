@@ -135,6 +135,40 @@ namespace WhiskeyRealism.Tactical.Operations
 
         public static TacticalOperationDirectorDecision Decide(TacticalOperationDirectorInput input)
         {
+            TacticalOperationDirectorDecision decision = DecideForAnyStance(input);
+            return input.Stance == BattleStance.Defender ? ForDefender(decision) : decision;
+        }
+
+        // BC9: a Defender (vanilla GetBattleType 2) is never committed to, nor left in,
+        // an offensive shape, whatever path selected it (a new selection, a commit made
+        // before the stance was known, a downgrade that keeps the committed shape, the
+        // commit window or hysteresis holding the current operation): once an objective
+        // is selected, every shape but DefensiveNetwork / DelayAndFallback becomes
+        // DefensiveNetwork, and a
+        // Committed / Exploiting phase becomes Forming. Scouting stays Scouting (its
+        // screens screen; CommandDoctrineAssignment's stance guard turns any Probe into
+        // Screen). Its cavalry still scouts (the recon producer).
+        private static TacticalOperationDirectorDecision ForDefender(TacticalOperationDirectorDecision decision)
+        {
+            OperationRecord op = decision.Operation;
+            bool defensiveShape = op.Shape == TacticalOperationShape.DefensiveNetwork ||
+                op.Shape == TacticalOperationShape.DelayAndFallback;
+            bool offensivePhase = op.Phase == TacticalOperationPhase.Committed ||
+                op.Phase == TacticalOperationPhase.Exploiting;
+            // Planning: nothing selected yet (no objective), nothing to send forward.
+            if ((defensiveShape && !offensivePhase) || op.Phase == TacticalOperationPhase.Planning) return decision;
+            TacticalOperationPhase phase = offensivePhase ? TacticalOperationPhase.Forming : op.Phase;
+            return new TacticalOperationDirectorDecision(
+                new OperationRecord(
+                    defensiveShape ? op.Shape : TacticalOperationShape.DefensiveNetwork,
+                    phase,
+                    op.PrimaryObjectiveId,
+                    op.MinimumCommitSeconds),
+                phase == TacticalOperationPhase.Scouting ? "defender-screen" : "defender-hold");
+        }
+
+        private static TacticalOperationDirectorDecision DecideForAnyStance(TacticalOperationDirectorInput input)
+        {
             bool activeOperation = IsActiveOperation(input.Current.Phase);
             bool committed = input.Current.Phase == TacticalOperationPhase.Committed;
             bool insideCommitWindow = committed && input.CurrentTimeSeconds < input.Current.MinimumCommitSeconds;
@@ -186,26 +220,8 @@ namespace WhiskeyRealism.Tactical.Operations
             // An operation already active on that objective keeps the shipped rules
             // (a committed advance on an empty known map objective continues,
             // ShouldCancelCommittedContact).
-            bool noContact = primary.EnemyStrength <= 0f &&
-                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId));
-
-            // BC9: a Defender (vanilla GetBattleType 2) scouts without being sent
-            // forward: the DefensiveNetwork shape keeps CommandDoctrineAssignment off
-            // the Probe tasks, so its screens screen and the recon producer's cavalry
-            // looks (information-gathering, not an attack).
-            if (input.Stance == BattleStance.Defender &&
-                (noContact || objectiveGate == TacticalObjectiveGate.ReconnaissanceContact))
-            {
-                return new TacticalOperationDirectorDecision(
-                    new OperationRecord(
-                        TacticalOperationShape.DefensiveNetwork,
-                        TacticalOperationPhase.Scouting,
-                        primary.ObjectiveId,
-                        input.CurrentTimeSeconds + 420f),
-                    "defender-screen");
-            }
-
-            if (noContact)
+            if (primary.EnemyStrength <= 0f &&
+                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId)))
             {
                 return new TacticalOperationDirectorDecision(
                     new OperationRecord(

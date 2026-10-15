@@ -21,6 +21,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //     leaf-brigade pass;
     //   - defending: GetBattleType(alliance, usereadinesswhendraw) == 2 (86095,
     //     as AdjustGroupAIStance 4252 reads it), for the division play;
+    //   - the battle stance: ArmyEvidenceBuilder.ReadBattleStance (GetBattleType
+    //     without the readiness tie-break) into ArmyOrchestrator.UpdateBattleStance,
+    //     ungated (BC9: a Defender never probes nor attacks);
     //   - live commander initiative: UpdateLiveCommanderInitiative;
     //   - reinforcement opportunity: UpdateReinforcementOpportunity from
     //     ArmyEvidenceBuilder.BuildForceBalance (gated by
@@ -59,6 +62,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 RefreshAiPool(battle, allianceId);
                 _defending[allianceId] = bunits.GetBattleType(allianceId, usereadinesswhendraw: true) == 2;
+                // BC9: the battle stance the director, the doctrine assignment and the
+                // posture guard read, whatever the opportunity doctrine flag below.
+                army.UpdateBattleStance(ArmyEvidenceBuilder.ReadBattleStance(bunits, allianceId));
 
                 var probes = ExtendedProbes(bunits, allianceId);
                 if (probes != null && probes.Count > 0)

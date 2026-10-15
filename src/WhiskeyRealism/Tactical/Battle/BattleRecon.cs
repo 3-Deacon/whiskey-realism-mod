@@ -227,12 +227,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Ground a probe gained without meeting a superior enemy: the group holds it
         // (the posture pipeline does not walk it back) until the ledger reassigns it.
-        private readonly int[] _holdGroup = new int[MaxBands];
-        private readonly float[] _holdX = new float[MaxBands];
-        private readonly float[] _holdZ = new float[MaxBands];
-        private readonly float[] _holdDirX = new float[MaxBands];
-        private readonly float[] _holdDirZ = new float[MaxBands];
-        private readonly CommandTaskType[] _holdTask = new CommandTaskType[MaxBands];
+        // One slot per holding group, grow-only: a new hold never takes another
+        // group's slot (at most one hold per own group, so growth stops at the roster).
+        private int[] _holdGroup = new int[MaxBands];
+        private float[] _holdX = new float[MaxBands];
+        private float[] _holdZ = new float[MaxBands];
+        private float[] _holdDirX = new float[MaxBands];
+        private float[] _holdDirZ = new float[MaxBands];
+        private CommandTaskType[] _holdTask = new CommandTaskType[MaxBands];
 
         // Scratch (grow-only).
         internal UnitFlags[] Descendants = new UnitFlags[BattleSnapshot.InitialCapacity];
@@ -257,8 +259,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 _probeGroup[b] = 0;
                 _probeLastStart[b] = double.NegativeInfinity;
-                _holdGroup[b] = 0;
             }
+            Array.Clear(_holdGroup, 0, _holdGroup.Length);
         }
 
         /// <summary>The probe nomination of <paramref name="groupId"/>: its look point.</summary>
@@ -395,7 +397,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (groupId == 0 || _probeTask[band] == CommandTaskType.None) return false;
             int k = HoldSlotOf(groupId);
             if (k < 0) k = HoldSlotOf(0); // a free slot
-            if (k < 0) k = band;
+            if (k < 0) k = GrowHolds();
             _holdGroup[k] = groupId;
             _holdX[k] = x;
             _holdZ[k] = z;
@@ -405,6 +407,7 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
+        internal int HoldSlots => _holdGroup.Length;
         internal int HoldGroup(int slot) => _holdGroup[slot];
         internal CommandTaskType HoldTask(int slot) => _holdTask[slot];
         internal void ClearHold(int slot) { _holdGroup[slot] = 0; }
@@ -415,9 +418,23 @@ namespace WhiskeyRealism.Tactical.Battle
             if (k >= 0) _holdGroup[k] = 0;
         }
 
+        // Doubles the store; returns the first new (free) slot.
+        private int GrowHolds()
+        {
+            int old = _holdGroup.Length;
+            int size = old * 2;
+            Array.Resize(ref _holdGroup, size);
+            Array.Resize(ref _holdX, size);
+            Array.Resize(ref _holdZ, size);
+            Array.Resize(ref _holdDirX, size);
+            Array.Resize(ref _holdDirZ, size);
+            Array.Resize(ref _holdTask, size);
+            return old;
+        }
+
         private int HoldSlotOf(int groupId)
         {
-            for (int k = 0; k < MaxBands; k++)
+            for (int k = 0; k < _holdGroup.Length; k++)
                 if (_holdGroup[k] == groupId) return k;
             return -1;
         }
@@ -460,11 +477,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 // Rollback: hand everything back to the posture executor and vanilla.
                 if (memory.Leg != ReconLeg.None) End(memory, ref result, "disabled");
-                for (int b = 0; b < ReconMemory.MaxBands; b++)
-                {
-                    memory.ClearProbe(b);
-                    memory.ClearHold(b);
-                }
+                for (int b = 0; b < ReconMemory.MaxBands; b++) memory.ClearProbe(b);
+                for (int k = 0; k < memory.HoldSlots; k++) memory.ClearHold(k);
                 return result;
             }
 
@@ -756,7 +770,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // posture task is no longer the probe rewrite): released when the ledger
             // reassigned the group, the group is gone, or a visible enemy at least as
             // strong is within infantry sight.
-            for (int k = 0; k < ReconMemory.MaxBands; k++)
+            for (int k = 0; k < m.HoldSlots; k++)
             {
                 int id = m.HoldGroup(k);
                 if (id == 0) continue;

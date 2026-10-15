@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -416,6 +417,18 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public static TacticalGrandTacticianReconDecision Decide(TacticalGrandTacticianReconInput input)
         {
+            TacticalGrandTacticianReconDecision decision = DecideForAnyStance(input);
+            if (!input.SideDefending) return decision;
+            // BC9 stance guard, with or without a visible enemy: a Defender screens
+            // instead of probing and holds instead of attacking.
+            CommandTaskType guarded = TacticalDecisionDoctrine.TaskForStance(decision.Task, BattleStance.Defender);
+            return guarded == decision.Task
+                ? decision
+                : new TacticalGrandTacticianReconDecision(guarded, guarded == CommandTaskType.Screen ? "defender-screen" : "defender-hold");
+        }
+
+        private static TacticalGrandTacticianReconDecision DecideForAnyStance(TacticalGrandTacticianReconInput input)
+        {
             if (!IsReconOrAssaultTask(input.Task))
                 return new TacticalGrandTacticianReconDecision(input.Task, "not-recon-task");
 
@@ -427,10 +440,6 @@ namespace WhiskeyRealism.Tactical.Operations
             // Probe target is BattleRecon.LookPoint, a bounded advance.
             if (IsScreenRole(input.Role) || input.Task == CommandTaskType.Screen)
                 return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "infantry-screen-by-bounds");
-
-            // A Defender screens its unseen front instead of probing it.
-            if (input.SideDefending)
-                return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "defender-screen");
 
             return new TacticalGrandTacticianReconDecision(CommandTaskType.Probe, "infantry-probe-by-bounds");
         }
