@@ -17150,8 +17150,9 @@ static class Program
 
         var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
 
+        // Bands are directional (C-Fiscal): never negative, ceiling = personality focus cap.
         AssertEqual(0f, output.TargetSubsidyMin[3]);
-        AssertEqual(0f, output.TargetSubsidyMax[3]);
+        AssertEqual(0.20f, output.TargetSubsidyMax[3]);
     }
 
     private static void FinancialAiLogGateSuppressesRepeatedCorrections()

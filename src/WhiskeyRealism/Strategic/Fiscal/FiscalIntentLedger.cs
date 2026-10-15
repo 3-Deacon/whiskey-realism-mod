@@ -62,6 +62,17 @@ namespace WhiskeyRealism.Strategic.Fiscal
             return output;
         }
 
+        // One bounded correction per call: move at most one vanilla step toward the band,
+        // never past its edge. Inside the band the value (vanilla's own nudge) stands.
+        public static float StepTowardBand(float current, float min, float max, float step)
+        {
+            if (min > max) min = max;
+            if (step <= 0f) step = 0.05f;
+            if (current < min) return current + step > min ? min : current + step;
+            if (current > max) return current - step < max ? max : current - step;
+            return current;
+        }
+
         private static int MinPositive(params int[] values)
         {
             int result = int.MaxValue;
@@ -102,8 +113,18 @@ namespace WhiskeyRealism.Strategic.Fiscal
             return input.SupplyPressure >= options.MinimumSupplyProtection
                 || input.AmmoPressure >= options.MinimumSupplyProtection
                 || input.TransportPressure >= options.MinimumSupplyProtection
-                || input.LowSupplyFormationCount > 0
-                || input.LowAmmoFormationCount > 0;
+                || LowShare(input.LowSupplyFormationCount, input.SectorCount) >= options.LowSupplySectorShare
+                || LowShare(input.LowAmmoFormationCount, input.SectorCount) >= options.LowSupplySectorShare;
+        }
+
+        // A single starving sector out of six (theater buckets) is local, not systemic;
+        // it must not hold Expansion / force-growth policy research indefinitely.
+        // SectorCount unknown (0) => the count itself is the denominator (legacy: any low => stress).
+        private static float LowShare(int lowCount, int sectorCount)
+        {
+            if (lowCount <= 0) return 0f;
+            int denominator = sectorCount > lowCount ? sectorCount : lowCount;
+            return lowCount / (float)denominator;
         }
 
         private static bool ForceCostsThreatenBalance(FiscalInput input)
@@ -126,21 +147,31 @@ namespace WhiskeyRealism.Strategic.Fiscal
             return FiscalGate.None;
         }
 
+        // Bands are directional so vanilla UpdateFinancialAI nudges (decompile 15386-15447)
+        // in the allowed direction survive: open [0,1] by default; credit stress sets a
+        // tax FLOOR (snapshot + step) on excise/income and an industry-subsidy CEILING
+        // (snapshot - step). Only EmergencySolvency pins the industry subsidy to a point.
         private static void FillTargets(FiscalInput input, FiscalOutput output, FiscalOptions options)
         {
-            CopyBand(input.Taxes, output.TargetTaxMin, output.TargetTaxMax);
-            CopyBand(input.Subsidies, output.TargetSubsidyMin, output.TargetSubsidyMax);
+            OpenBand(output.TargetTaxMin, output.TargetTaxMax);
+            OpenBand(output.TargetSubsidyMin, output.TargetSubsidyMax);
 
             if (output.Posture == FiscalPosture.CreditDefense || output.Posture == FiscalPosture.EmergencySolvency)
             {
-                RaiseTaxBand(output, 1, options.VanillaStep);
-                RaiseTaxBand(output, 2, options.VanillaStep);
-                LowerSubsidyBand(output, 3, options.VanillaStep);
+                RaiseTaxFloor(input.Taxes, output, GameTaxExcise, options.VanillaStep);
+                RaiseTaxFloor(input.Taxes, output, GameTaxIncome, options.VanillaStep);
+                LowerSubsidyCeiling(input.Subsidies, output, GameSubsidyIndustry, options.VanillaStep,
+                    pinFloor: output.Posture == FiscalPosture.EmergencySolvency);
             }
 
+            // King Cotton / free trade / blockade running: tariff (GameVars.tax_tarifs = 0)
+            // ceiling. Vanilla may still move it below the ceiling.
             if (input.AllianceId == 1 && (input.HasKingCotton || input.HasFreeTrade || input.HasOrganizedBlockadeRunning) && output.Posture <= FiscalPosture.BalancedWar)
             {
-                output.TargetTaxMax[0] = input.Taxes[0] < 0.15f ? 0.15f : input.Taxes[0];
+                if (output.TargetTaxMax[GameTaxTariffs] > KingCottonTariffCeiling)
+                    output.TargetTaxMax[GameTaxTariffs] = KingCottonTariffCeiling;
+                if (output.TargetTaxMin[GameTaxTariffs] > output.TargetTaxMax[GameTaxTariffs])
+                    output.TargetTaxMin[GameTaxTariffs] = output.TargetTaxMax[GameTaxTariffs];
             }
 
             for (int i = 0; i < output.TargetSubsidyMax.Length && i < input.SubsidyFocus.Length; i++)
@@ -153,13 +184,19 @@ namespace WhiskeyRealism.Strategic.Fiscal
             }
         }
 
-        private static void CopyBand(float[] source, float[] min, float[] max)
+        // GameVars.tax_tarifs/tax_excise/tax_income and subsidy_industry (decompile 64309-64327).
+        public const int GameTaxTariffs = 0;
+        public const int GameTaxExcise = 1;
+        public const int GameTaxIncome = 2;
+        public const int GameSubsidyIndustry = 3;
+        public const float KingCottonTariffCeiling = 0.15f;
+
+        private static void OpenBand(float[] min, float[] max)
         {
-            for (int i = 0; i < min.Length && i < source.Length; i++)
+            for (int i = 0; i < min.Length && i < max.Length; i++)
             {
-                float value = Clamp01(source[i]);
-                min[i] = value;
-                max[i] = value;
+                min[i] = 0f;
+                max[i] = 1f;
             }
         }
 
@@ -176,19 +213,17 @@ namespace WhiskeyRealism.Strategic.Fiscal
             return value;
         }
 
-        private static void RaiseTaxBand(FiscalOutput output, int lane, float step)
+        private static void RaiseTaxFloor(float[] taxes, FiscalOutput output, int lane, float step)
         {
-            if (lane < 0 || lane >= output.TargetTaxMax.Length) return;
-            output.TargetTaxMax[lane] += step;
-            output.TargetTaxMin[lane] += step;
+            if (taxes == null || lane < 0 || lane >= taxes.Length || lane >= output.TargetTaxMin.Length) return;
+            output.TargetTaxMin[lane] = Clamp01(Clamp01(taxes[lane]) + step);
         }
 
-        private static void LowerSubsidyBand(FiscalOutput output, int lane, float step)
+        private static void LowerSubsidyCeiling(float[] subsidies, FiscalOutput output, int lane, float step, bool pinFloor)
         {
-            if (lane < 0 || lane >= output.TargetSubsidyMax.Length) return;
-            output.TargetSubsidyMax[lane] -= step;
-            if (output.TargetSubsidyMax[lane] < 0f) output.TargetSubsidyMax[lane] = 0f;
-            output.TargetSubsidyMin[lane] = output.TargetSubsidyMax[lane];
+            if (subsidies == null || lane < 0 || lane >= subsidies.Length || lane >= output.TargetSubsidyMax.Length) return;
+            output.TargetSubsidyMax[lane] = Clamp01(Clamp01(subsidies[lane]) - step);
+            if (pinFloor) output.TargetSubsidyMin[lane] = output.TargetSubsidyMax[lane];
         }
 
         private static FiscalSuppression[] BuildSuppressions(FiscalInput input, FiscalOutput output)

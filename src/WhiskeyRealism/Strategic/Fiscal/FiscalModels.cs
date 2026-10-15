@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public int CreditDefenseExitBuffer = 2;
         public int EmergencyExitStableTicks = 14;
         public float MinimumSupplyProtection = 0.35f;
+        public float LowSupplySectorShare = 0.33f;
     }
 
     public sealed class FiscalStateMemory
@@ -78,6 +79,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public float AmmoPressure;
         public float TransportPressure;
         public int LowSupplyFormationCount;
+        public int SectorCount;
         public int LowAmmoFormationCount;
         public string TopSupplyTheater;
     }

@@ -181,6 +181,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
                     input.TopSupplyTheater = sector.Theater.ToString();
             }
 
+            input.SectorCount = sectors;
             input.SupplyPressure = sectors > 0 ? supplyStress / sectors : 0f;
             input.TransportPressure = input.SupplyPressure;
             input.AmmoPressure = input.SupplyPressure * 0.5f;
