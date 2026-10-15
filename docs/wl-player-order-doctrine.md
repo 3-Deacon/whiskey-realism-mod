@@ -1,190 +1,121 @@
 # W&L Player Order Doctrine
 
-Living reference for #62, Whiskey's W&L player-facing current-order doctrine for player-subordinate tactical commands and the shared campaign current-order cache in `WlStrategicOrderBridge`.
+Living reference for #62 `PlayerSubordinateOrderPatch`, Whiskey's W&L current-order doctrine for a player who is a subordinate in the W&L chain, and the campaign current-order path in `WlStrategicOrderBridge`. Build, deploy and smoke status live in [`docs/handoff.md`](handoff.md). Player-model background: [`docs/wl-player-model.md`](wl-player-model.md).
 
-## Current State
-
-- **Implementation state:** merged to `main` and hash-deployed locally; runtime smoke is still pending.
-- **Patch ordinal:** #62 `PlayerSubordinateOrderPatch`.
-- **Default behavior:** diagnostics are on by default, writes are off by default.
-- **Verification:** console harness exits 0 across `1110` registered tests; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `562a61b5cd0cbbedc6d6002a349cd3d68ebf50ea1d60c941e3a5a9deeaafc57a` (1327104 bytes). Focused #62 runtime smoke is still pending and requires explicitly enabling `Enable Player Order Doctrine`.
-- **Lifecycle:** the design spec and implementation plan are archived for traceability. Fresh in-game smoke still needs to prove bounded diagnostics and focused write behavior before this surface is runtime-smoke-complete.
-
-The doctrine translates existing tactical-orchestrator intent into vanilla W&L current orders for the player when the player is a subordinate in the W&L chain. It does not replace vanilla movement, campaign movement, or the W&L order UI. It asks vanilla `AIBattle.CheckCurrentOrderUpdate(...)` to deliver an order only after Whiskey dedupe and safety gates predict the request is valid.
+The doctrine translates existing tactical-orchestrator intent into vanilla W&L current orders for the player's command. It does not replace vanilla movement, campaign movement or the W&L order UI. It asks the static vanilla `AIBattle.CheckCurrentOrderUpdate(...)` to deliver an order only after Whiskey's dedupe and safety gates predict the request is valid.
 
 ## Config
 
-Existing BepInEx config files override C# defaults. Check `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` before interpreting smoke.
+Existing BepInEx config files override C# defaults. Check `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` before interpreting smoke. Defaults:
 
 ```ini
 [W&L]
-Enable W&L Player Order Doctrine = false
-Enable W&L Player Order Doctrine Diagnostics = true
+Enable Player Order Doctrine = true
+Enable Player Order Doctrine Diagnostics = true
 
 [Tactical Orchestrator]
 Tactical Commander Mode = Active
 ```
 
-Writes require all of these:
+A write requires all of:
 
-- plugin master enable is true;
-- W&L player-order doctrine is true;
-- `Tactical Commander Mode = Active`;
-- vanilla W&L scenario/current-command gates accept the current battle state;
-- Whiskey dedupe/provenance accepts the candidate order.
+- plugin master `Enabled`;
+- `Enable Player Order Doctrine`;
+- `TacticalWriteGuard.ModeAllowsWrites()`, i.e. `Tactical Commander Mode = Active`;
+- an evaluable W&L state (scenario active, a current command, not Commander-in-Chief, a side and army orchestrator);
+- a candidate that passes Whiskey dedupe.
 
-Diagnostics can compose, classify, and log without writes when `Enable W&L Player Order Doctrine Diagnostics = true`.
+With writes off, `Enable Player Order Doctrine Diagnostics` still composes, classifies and logs candidates.
 
 ## Runtime Behavior
 
-#62 wraps `AIBattle.UpdateDLCPlayerOrders()` with a Prefix/Postfix snapshot pair:
+#62 wraps `AIBattle.UpdateDLCPlayerOrders()` with a Prefix/Postfix pair:
 
-- Prefix snapshots vanilla `DLC_WL.givenorder`, `DLC_WL.GivenOrders.givenorderssession`, and whether vanilla had an active current order before the tick.
-- Vanilla runs its own W&L player-order coordinator.
-- Postfix detects vanilla same-cycle self-orders and either yields or composes a Whiskey candidate from the tactical orchestrator.
-- Whiskey never calls `CheckCurrentOrderUpdate(..., calledfromcampaign:true)` from the tactical patch.
-- Whiskey never mutates `DLC_WL.givenorder` directly.
+- Prefix snapshots the active vanilla order (`DLC_WL.givenorder`, `DLC_WL.GivenOrders.givenorderssession`).
+- Vanilla runs its own W&L player-order coordinator, which can self-issue transitions 13/14/15 in `CheckRemovalOfOrders`.
+- Postfix compares the snapshot, treats a changed active order as vanilla-owned, and composes a Whiskey candidate from the tactical orchestrator.
+- After a call to `CheckCurrentOrderUpdate`, the active order is re-read; a match records the order as accepted, otherwise the attempt is recorded so the throttle applies.
+- The tactical patch never passes `calledfromcampaign: true` and never writes `DLC_WL.givenorder` directly.
 
-The campaign side remains centralized in `WlStrategicOrderBridge`. Strategic callers that already route through the bridge now share the same signature/provenance discipline, so repeated campaign signatures are suppressed and campaign orders do not replace fresh tactical orders unless the cross-scope rule allows it.
+Dedupe state is cleared when the battle identity, the player's current command or the Commander-in-Chief status changes.
+
+The campaign side stays in `WlStrategicOrderBridge`, which runs the same `PlayerOrderDedupe.Decide` rules with its own state and campaign throttle and issues its orders with `calledfromcampaign: true`.
+
+## Composer
+
+`PlayerOrderComposer` produces no candidate unless the side orchestrator exists, the player is a subordinate (not Commander-in-Chief), and either a command intent or a command task is found. Candidates, in the order the composer tries them:
+
+| Intent | Vanilla type | Target |
+|---|---|---|
+| `RetreatToExit` | 15 | valid exit point only |
+| `FallBackToLine` | 12 | fallback point |
+| `HoldObjective` | 12 | objective point, else the unit's current position |
+| `SupportMainEffort` | 11 | objective point |
+| `AttackObjective` | 0 | objective point |
+| `ProbeObjective` | 5 | objective point |
+| `AdvanceToAssemblyArea` | 1 | objective point |
+
+Objective points resolve from the command target, then the current objective, then (when allowed) the closest visible enemy (`PlayerOrderTargetPolicy`). Without a concrete target the composer fails closed, except that a hold intent falls back to a type-12 order at the unit's current position.
+
+Type 15 is not a generic withdraw. Vanilla derives it in `CheckRemovalOfOrders(...)` from `bunits.SearchForClosestEntryPoint(...)`; Whiskey uses the same lookup and skips the candidate when no valid exit exists.
+
+Orchestrator surfaces read by `PlayerOrderRuntimeAdapter`: `TacticalBattleCoordinator.GetSideOrchestrator(...)`, `TacticalBattleOrchestrator.Army`, `ArmyOrchestrator.ResolveCommandIntentForGroup(...)`, `CurrentDirectChildIntents`, `CurrentCommandOperations`, `CurrentDoctrineOrders`, `CurrentOperation` and `CurrentStrategicBattleIntent`.
 
 ## Dedupe And Provenance
 
-`DLC_WL.givenorder` is one global vanilla slot, so Whiskey keeps its own shadow state instead of treating every active slot as a Whiskey order.
+`DLC_WL.givenorder` is one global vanilla slot, so Whiskey keeps its own per-unit shadow (request and accepted signatures, tick, battle identity) instead of treating every active order as a Whiskey order. `PlayerOrderDedupe.Decide`, in order:
 
-Rules:
+1. Vanilla transition: an active vanilla/unknown type 13 or 15, or vanilla type 14, makes Whiskey yield.
+2. An active vanilla/unknown type 7 or 12 with no matching Whiskey shadow blocks, unless the candidate is a type-15 retreat with a valid exit.
+3. Vanilla dedupe model (`VanillaWouldBlock`): active 15 blocks tactical candidates; candidate 12 over active 0-5 or 13 is rejected; active 13 blocks non-13; candidate 14 is accepted only over active 12; same type is a duplicate. Stale or battle-ended orders never block.
+4. An active vanilla type-11 support request blocks candidates of equal or lower priority.
+5. A higher-priority active order of the same scope blocks (the 14-over-12 clear-hold transition excepted).
+6. Cross-scope: a tactical candidate replaces a campaign order only with priority at least 40 above it and a campaign order that is no longer actionable (a type-15 retreat needs only a valid exit); a campaign candidate replaces a tactical order only when that order is stale, battle-ended or 40 below.
+7. Same request signature as the shadow is suppressed; otherwise a 120-tick throttle applies after the last attempt.
 
-- Accepted Whiskey orders record scope, unit, vanilla type, signature, priority, tick/time, and session.
-- Failed vanilla bridge attempts are also recorded for cooldown so a rejected candidate does not retry every tactical cadence.
-- Static caches clear when battle context changes, when the target unit/scene is no longer active, or when the active order can no longer be tied to the Whiskey shadow.
-- Stale or battle-ended vanilla scene orders are ignored for priority suppression.
-- Vanilla same-cycle transition orders type 13 and type 15 make the tactical Postfix yield.
-- Vanilla type 14 is protected as a same-cycle transition, not as a permanent lock.
-- Valid emergency retreat type 15 can override ambiguous active type 7 or type 12 orders when the scene and target are still valid.
-
-Whiskey models vanilla tactical dedupe before issuing:
-
-- active type 15 blocks further non-campaign tactical orders;
-- candidate type 12 over active type 0, 1, 2, 3, 4, 5, or 13 is expected to be rejected;
-- active type 13 blocks non-13 candidates;
-- candidate type 14 is accepted only over active type 12;
-- same-type duplicates are suppressed unless vanilla's positional/rotation checks require a material refresh;
-- type 11 support requests stay owned by vanilla recursion inside `CheckCurrentOrderUpdate(...)`.
-
-The priority model is therefore a request model, not a force model. Whiskey does not bypass vanilla dedupe by switching tactical calls to `calledfromcampaign:true`.
-
-## Scope Boundary
-
-Campaign and tactical orders share one vanilla current-order slot, but they are not the same commitment.
-
-- Tactical orders may not replace fresh campaign-scope orders unless the tactical order exceeds the active campaign priority by the configured cross-scope gap and the campaign order is stale or no longer valid for the current orchestrator context.
-- Campaign orders may refresh through `WlStrategicOrderBridge` only when their signature materially changes or their cooldown expires.
-- Tactical diagnostics may still classify a suppressed candidate to explain why the slot was left alone.
-
-## Tactical Inputs
-
-The composer reads only existing orchestrator surfaces and safe vanilla scene data:
-
-- `TacticalBattleCoordinator.GetSideOrchestrator(...)`
-- `TacticalBattleOrchestrator.Army`
-- `ArmyOrchestrator.ResolveCommandIntentForGroup(...)`
-- `ArmyOrchestrator.CurrentDirectChildIntents`
-- `ArmyOrchestrator.CurrentCommandOperations`
-- `ArmyOrchestrator.CurrentDoctrineOrders`
-- `ArmyOrchestrator.CurrentOperation`
-- `ArmyOrchestrator.CurrentStrategicBattleIntent`
-
-The consumed `CommandIntentResolution` shape is `Found`, `Intent`, and `Reason`. The consumed `CommandNodeIntent` fields are `NodeId`, `SourceNodeId`, `Role`, `Axis`, `PrimarySector`, `SupportPriority`, `AggressionBias01`, and `Depth`.
-
-All vanilla object reads go through safe runtime helpers. Missing objectives, group geometry, current waypoints, entry points, or target names downgrade to a bounded warning or a skipped candidate; patches must not throw.
-
-The composer fails closed without a concrete target except for inherited defensive/refuse/guard hold intent. In that case, a player-subordinate command may receive a type-12 hold order at its current position so W&L has an explicit "hold here" current order even when the tactical ledger has no separate objective marker for that exact brigade/division.
-
-## Type 15
-
-Type 15 is not a generic "withdraw somewhere" order. Vanilla derives it through `CheckRemovalOfOrders(...)` using `bunits.SearchForClosestEntryPoint(...)`.
-
-Whiskey mirrors that entry-point lookup for tactical retreat/leave-field orders. If the lookup cannot produce a concrete exit target, #62 skips instead of issuing type 15 with an invented fallback point.
+The priority model is a request model, not a force model: Whiskey never bypasses vanilla dedupe by switching tactical calls to `calledfromcampaign: true`.
 
 ## Telemetry
 
-Expected marker:
+Decision rows are the `TacticalPlayerOrder` telemetry event (Tactical layer, Decision category) with `scope`, action, reason, `type`, `intent`, `priority` and `target` fields. Actions:
 
-```text
-[PlayerOrderIntent]
-```
+- `skip`: W&L inactive, missing battle or current command, player Commander-in-Chief, no side or army orchestrator, no candidate.
+- `suppress`: a dedupe reason, `writes-disabled`, or `vanilla-bridge-no-match`.
+- `issue`: vanilla accepted the current-order call.
 
-Rows should include scope, action, reason, unit, type, priority, signature, and whether vanilla accepted the bridge call when a write was attempted. Common actions:
-
-- `classify` for diagnostics-only classification;
-- `suppress` for dedupe, disabled writes, cross-scope, vanilla transition, missing target, or cooldown;
-- `issue` for accepted vanilla current-order calls;
-- `skip` for inactive W&L, missing orchestrator, unsupported command, or unsafe target state.
-
-Rows must be signature-gated or interval-bounded. Repeated `Exception`, `ERROR`, `missing-anchor`, Harmony failure, or unbounded `[PlayerOrderIntent]` spam is a smoke failure.
+Rows are deduplicated per unit and signature (`PlayerOrderDiagnostics`, capacity 128). Failures log once as `[PlayerOrderIntent] ... failed` warnings.
 
 ## Smoke Checklist
 
-First run diagnostics-only:
+Pass criteria with the defaults above:
 
-```ini
-[W&L]
-Enable W&L Player Order Doctrine = false
-Enable W&L Player Order Doctrine Diagnostics = true
-
-[Tactical Orchestrator]
-Tactical Commander Mode = Active
-```
-
-Pass criteria:
-
-- `[PlayerOrderIntent]` rows are bounded and explain classification/suppression.
-- no vanilla current-order write is attempted by #62 while writes are disabled.
-- no repeated warning/error/Harmony failure appears.
-- player-CIC or non-subordinate states produce skips, not writes.
-- same-cycle vanilla transition orders are preserved.
-
-Focused write smoke:
-
-```ini
-[W&L]
-Enable W&L Player Order Doctrine = true
-Enable W&L Player Order Doctrine Diagnostics = true
-
-[Tactical Orchestrator]
-Tactical Commander Mode = Active
-```
-
-Pass criteria:
-
-- #62 issues orders only for W&L player-subordinate commands.
-- accepted writes produce a matching vanilla current-order session advance.
+- `TacticalPlayerOrder` rows are bounded and explain classification or suppression.
+- #62 issues orders only for W&L player-subordinate commands; player Commander-in-Chief and non-W&L battles produce skips.
+- accepted writes advance the vanilla current-order session.
+- vanilla same-cycle transition orders are preserved.
 - active campaign orders are not displaced unless the cross-scope rule allows it.
 - type 15 orders use a valid closest-entry-point target.
-- stale/rejected candidates do not retry every tactical cadence.
-- no player-CIC, unrelated player-side, or non-W&L battle receives a Whiskey player order.
+- rejected candidates do not retry every tactical cadence.
+- no repeated `[PlayerOrderIntent]` warning or Harmony failure.
 
 ## Rollback
 
-Set:
-
 ```ini
 [W&L]
-Enable W&L Player Order Doctrine = false
+Enable Player Order Doctrine = false
 ```
 
-If diagnostics are noisy, also set:
+Diagnostics keep running. To silence them too:
 
 ```ini
-Enable W&L Player Order Doctrine Diagnostics = false
+Enable Player Order Doctrine Diagnostics = false
 ```
 
-`Tactical Commander Mode = Off` remains the broad tactical-command rollback, but #62 also has its own W&L valve so player-order writes can be disabled without losing the rest of tactical diagnostics.
+`Tactical Commander Mode = MonitorOnly` or `Off` also stops #62 writes, together with every other tactical write.
 
 ## Source Files
 
 - Patch: `src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs`
-- Pure doctrine: `src/WhiskeyRealism/Tactical/PlayerOrders/`
+- Doctrine: `src/WhiskeyRealism/Tactical/PlayerOrders/`
 - Campaign bridge: `src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs`
 - Patch catalog: `docs/patch-catalog.md`
-- Archived spec: `docs/superpowers/specs/archive/2026-05-12-wl-player-order-doctrine-design.md`
-- Archived plan: `docs/superpowers/plans/archive/2026-05-12-wl-player-order-doctrine-implementation.md`
