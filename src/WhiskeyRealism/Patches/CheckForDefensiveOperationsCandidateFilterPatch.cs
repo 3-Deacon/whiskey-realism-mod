@@ -39,6 +39,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "CheckForDefensiveOperations")]
     internal static class CheckForDefensiveOperationsCandidateFilterPatch
     {
+        static CheckForDefensiveOperationsCandidateFilterPatch()
+        {
+            CampaignScope.Register("defensive-ops-revert-log", () => _revertLogged.Clear());
+        }
+
         // Per-call snapshots indexed by aifaction index. Static dicts are safe because
         // vanilla CheckForDefensiveOperations is called once per AI faction per update
         // tick and is not re-entrant. The Finalizer always clears via ClearSnapshots().
@@ -58,6 +63,8 @@ namespace WhiskeyRealism.Patches
             new Dictionary<int, Dictionary<int, string>>();
         // Dedup set for revert log lines — key "<allianceId>|<threatSig>|<unitId>".
         // First revert per tuple logs unconditionally; subsequent reverts only under verbose.
+        // Lives for one campaign (CampaignScope): keys embed unit ids and threat
+        // signatures, so it must not carry over to the next campaign.
         private static readonly HashSet<string> _revertLogged = new HashSet<string>();
         private static readonly Dictionary<Type, FieldInfo> _ownUnitsFields =
             new Dictionary<Type, FieldInfo>();
@@ -491,10 +498,8 @@ namespace WhiskeyRealism.Patches
             _priorTheaterPositionByUnitId.Remove(aifactionIndex);
             _suppressionReasonByUnitId.Remove(aifactionIndex);
             _threatSigByUnitId.Remove(aifactionIndex);
-            // _revertLogged is intentionally not cleared — it is the persistent dedup set
-            // that prevents the same (alliance, threat-sig, unit) tuple from spamming
-            // across ticks. Cross-campaign bleed is accepted as a known limitation
-            // (same as _firstAssignmentLogged in CoastalDefenseCustomOrderRunner).
+            // _revertLogged is not cleared per call: it dedups the same (alliance,
+            // threat-sig, unit) tuple across ticks and is reset per campaign.
         }
 
         private static FieldInfo GetOwnUnitsField(Type factionType)
