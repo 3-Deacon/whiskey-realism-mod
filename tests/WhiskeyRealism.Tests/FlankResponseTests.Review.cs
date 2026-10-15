@@ -25,6 +25,7 @@ internal static partial class FlankResponseTests
             ("bc11 MarchLegRecheckIsBounded", MarchLegRecheckIsBounded),
             ("bc11 MarchLegRouteIsWired", MarchLegRouteIsWired),
             ("bc11 RefuseRowThrottleBuildsNoStringOnRepeat", RefuseRowThrottleBuildsNoStringOnRepeat),
+            ("bc11 NavMeshQueriesSitAtTerrainHeight", NavMeshQueriesSitAtTerrainHeight),
             ("bc11 NoRouteResultKeepsTheChildInItsPhase", NoRouteResultKeepsTheChildInItsPhase),
             ("bc11 SecondWingWaitsOneStepForItsRouteAndIsNotAbandoned", SecondWingWaitsOneStepForItsRouteAndIsNotAbandoned),
             ("bc11 RoutePlanOrderIsFairAndBounded", RoutePlanOrderIsFairAndBounded),
@@ -267,7 +268,7 @@ internal static partial class FlankResponseTests
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
         AssertPinned(runtime, "else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId, ref input);",
             "the march leg is judged by the route result, and a frozen map skips it");
-        AssertPinned(runtime, "NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)", "the planned route");
+        AssertPinned(runtime, "NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)", "the planned route, to the anchor at terrain height");
         AssertPinned(runtime, "WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter()", "priced like the posture probe");
         AssertPinned(runtime, "EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples)", "sampled segment by segment on the grid");
         AssertPinned(runtime, "side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now);", "one route plan per side and step, served fairly");
@@ -422,6 +423,16 @@ internal static partial class FlankResponseTests
         AssertEqual(1, EnvelopmentManeuver.PickRoutePlan(mix, new[] { true, true, true }, 3), "the child with no result outranks the stalest re-check");
         mix[1] = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = 9.0, AnchorX = 1f, AnchorZ = 1f };
         AssertEqual(2, EnvelopmentManeuver.PickRoutePlan(mix, new[] { true, true, true }, 3), "then the stalest result goes first");
+        // "No result goes first" is not "stalest first": a result checked at doctrine hour 0 (the battle's start) is as stale as an empty
+        // one by the clock, yet the empty one must still go first whatever the index order.
+        var atZero = new[]
+        {
+            new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = 0.0, AnchorX = 1f, AnchorZ = 1f },
+            default(EnvelopmentManeuver.MarchRouteCheck),
+        };
+        AssertEqual(1, EnvelopmentManeuver.PickRoutePlan(atZero, new[] { true, true }, 2), "an empty result goes before a result checked at hour 0");
+        AssertTrue(EnvelopmentManeuver.PlansBefore(in atZero[1], in atZero[0]) && !EnvelopmentManeuver.PlansBefore(in atZero[0], in atZero[1]),
+            "the order is strict: empty before a result checked at hour 0, never the reverse");
         AssertEqual(-1, EnvelopmentManeuver.PickRoutePlan(mix, new[] { false, false, false }, 3), "nobody needs one: no plan");
         AssertEqual(-1, EnvelopmentManeuver.PickRoutePlan(null, null, 0), "no children, no plan");
     }
@@ -456,5 +467,39 @@ internal static partial class FlankResponseTests
         AssertTrue(all.IsBackedOff(2, 40f, 100f, 5.011), "the others stay");
         AssertTrue(all.IsBackedOff(64, 40f, 100f, 5.011), "the latest back-off stays");
         AssertEqual(RefuseTurnBackMemory.Capacity, all.Count, "capacity held");
+    }
+
+    // CalculatePath / SamplePosition snap each end to the mesh within a small extent: a target built with y = 0 misses it on any map with
+    // relief (vanilla paths from GetPosition() + (0, 1.5, 0) to waypoint positions at the terrain height, AddPath 130259 and
+    // GetTerrainHeight 27002). Every Whiskey query is pinned: the set of call sites, and the target of each at terrain height.
+    private static void NavMeshQueriesSitAtTerrainHeight()
+    {
+        string root = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var calls = new System.Collections.Generic.List<string>();
+        var query = new System.Text.RegularExpressions.Regex(@"NavMesh\.(CalculatePath|SamplePosition)\(([^;]*?)\)\s*(;|&&|\)|\|\|)");
+        foreach (string file in System.IO.Directory.GetFiles(root, "*.cs", System.IO.SearchOption.AllDirectories))
+        {
+            string text = System.IO.File.ReadAllText(file);
+            foreach (System.Text.RegularExpressions.Match m in query.Matches(text))
+            {
+                string line = text.Substring(0, m.Index);
+                // A comment mention is not a call.
+                int lineStart = line.LastIndexOf('\n') + 1;
+                if (text.Substring(lineStart, m.Index - lineStart).TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
+                string args = m.Groups[2].Value;
+                calls.Add(System.IO.Path.GetFileName(file) + ": " + Flat(args));
+                AssertFalse(System.Text.RegularExpressions.Regex.IsMatch(args, @"new Vector3\([^()]*,\s*0(\.0)?f?\s*,"),
+                    "no NavMesh query is built with a literal 0 height: " + Flat(args));
+            }
+        }
+        AssertEqual(3, calls.Count, "the Whiskey NavMesh queries (a new one must be added here with its target at terrain height): " + string.Join(" | ", calls));
+
+        string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        AssertPinned(producers, "Vector3 to = PostureTargets.AtTerrain(x, z);", "the road-route plan target is at terrain height");
+        AssertPinned(producers, "NavMesh.CalculatePath(own, AtTerrain(candidate.x, candidate.z), t.NavFilter, path)", "the probe's candidate is at terrain height");
+        AssertPinned(producers, "return new Vector3(x, SampleHeight(new Vector3(x, 0f, z)), z);", "AtTerrain reads the terrain height");
+        AssertFalse(Flat(producers).Contains("var to = new Vector3(x, 0f, z);"), "the old y = 0 target is gone");
+        string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        AssertPinned(runtime, "new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)", "the envelopment route target is at terrain height");
     }
 }

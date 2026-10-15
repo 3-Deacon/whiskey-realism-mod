@@ -920,7 +920,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     PostureTargets.EnsureNavFilter(t);
                     NavMeshPath path = PostureTargets.SharedPath();
                     var from = new Vector3(rec.X, rec.Y, rec.Z);
-                    var to = new Vector3(x, 0f, z);
+                    Vector3 to = PostureTargets.AtTerrain(x, z);
                     if (NavMesh.CalculatePath(from, to, t.NavFilter, path) && path.status == NavMeshPathStatus.PathComplete)
                     {
                         int count = PostureTargets.ReadCorners(path, out Vector3[] corners);
@@ -1307,7 +1307,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             try
             {
                 NavMeshPath path = SharedPath();
-                bool found = NavMesh.CalculatePath(own, candidate, t.NavFilter, path);
+                bool found = NavMesh.CalculatePath(own, AtTerrain(candidate.x, candidate.z), t.NavFilter, path);
                 int count = ReadCorners(path, out Vector3[] corners);
                 if (!found || path.status != NavMeshPathStatus.PathComplete || count <= 0)
                 {
@@ -1419,6 +1419,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (len2 < 0.001f) return Flat(point, start);
             float u = Math.Max(0f, Math.Min(1f, ((point.x - start.x) * vx + (point.z - start.z) * vz) / len2));
             return PostureSense.Distance(point.x, point.z, start.x + u * vx, start.z + u * vz);
+        }
+
+        // A NavMesh query target at the terrain's height. CalculatePath snaps each end to the mesh within a small extent, so a
+        // target built with y = 0 misses the mesh on any map with relief; vanilla paths from GetPosition() + (0, 1.5, 0) to waypoint
+        // positions that carry the terrain height (AddPath 130259, GetTerrainHeight 27002).
+        internal static Vector3 AtTerrain(float x, float z)
+        {
+            return new Vector3(x, SampleHeight(new Vector3(x, 0f, z)), z);
         }
 
         private static float SampleHeight(Vector3 point)

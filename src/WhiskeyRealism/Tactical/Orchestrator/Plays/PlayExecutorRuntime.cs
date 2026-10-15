@@ -552,7 +552,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     _routeFilterTick = tickId;
                 }
                 NavMeshPath path = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.SharedPath();
-                if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)
+                if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)
                     && path.status == NavMeshPathStatus.PathComplete)
                 {
                     int count = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.ReadCorners(path, out Vector3[] corners);

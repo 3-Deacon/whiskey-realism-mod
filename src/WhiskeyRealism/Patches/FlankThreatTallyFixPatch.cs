@@ -7,8 +7,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // The flank tally patch (patch ordinal assigned at merge to main); the flanksthreated bug (bug id
-    // assigned at merge). Vanilla Regiment.UpdateGroupStrength (DC:120135) tallies, for every group, how
+    // Patch #113 (BUG-TAC-023): the flanksthreated tally. Vanilla Regiment.UpdateGroupStrength (DC:120135) tallies, for every group, how
     // many weight points of flank threat its subordinates carry: inside the loop over allattachedunits
     // (DC:120148, counted subordinates filtered at DC:120284) it adds 1 / 2 / 3 / 4 points by `outflanked`
     // (DC:120566-120580), but reads the GROUP's own `outflanked` field, not the subordinate's
