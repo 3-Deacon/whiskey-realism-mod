@@ -75,7 +75,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 catch (Exception e)
                 {
                     snapshot.BeginBuild(0, alliance, -1, tickId, doctrineHours);
-                    OnceLog.Warning("battle-core:snapshot-degraded",
+                    OnceLog.Warning("tactical-battle-core:snapshot-degraded",
                         "[BattleSnapshot] build failed, empty snapshot: " + e.GetType().Name + " " + e.Message);
                 }
                 if (slot) _current[alliance] = snapshot;
@@ -98,7 +98,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (TryGetCurrent(alliance, out snapshot)) return true;
             if (alliance >= 0 && alliance < Sides)
-                OnceLog.Warning("battle-core:snapshot-missing",
+                OnceLog.Warning("tactical-battle-core:snapshot-missing",
                     "[BattleSnapshot] no snapshot built for a side; command tree and direct children stay empty");
             return false;
         }
@@ -130,7 +130,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 snapshot.BeginBuild(0, alliance, -1, tickId, doctrineHours);
                 snapshot.IndexCommandTree(scratch);
-                OnceLog.Warning("battle-core:snapshot-degraded",
+                OnceLog.Warning("tactical-battle-core:snapshot-degraded",
                     "[BattleSnapshot] no BattleUnits or completeunitlist; empty snapshot");
                 return;
             }
@@ -379,7 +379,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 try { _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits"); }
                 catch { _bunitsField = null; }
                 if (_bunitsField == null)
-                    OnceLog.Warning("battle-core:bunits-field", "[BattleSnapshot] AIBattle.bunits not found; snapshots stay empty");
+                    OnceLog.Warning("tactical-battle-core:bunits-field", "[BattleSnapshot] AIBattle.bunits not found; snapshots stay empty");
             }
             return _bunitsField != null ? _bunitsField.GetValue(battle) as BattleUnits : null;
         }
