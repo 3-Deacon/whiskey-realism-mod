@@ -70,8 +70,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// Army echelon orchestrator. Owns the army CO's TacticalBattlePlan, exposes
-    /// CurrentMacroAi for the rewired BattleMacroStrategyPatch to read, emits
-    /// ArmyIntent down to corps each tick.
+    /// CurrentMacroAi for the rewired BattleMacroStrategyPatch to read, and
+    /// allocates direct-child (corps) roles each tick.
     ///
     /// AIBattle.macroai values: -1 dynamic / 0 assault / 1 attack / 2 defend / 3 retreat.
     /// </summary>
@@ -316,6 +316,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _phaseAgeSeconds = 0f;
             // Note: _planAgeSeconds is NOT reset — that timer measures time
             // since last Replan, which is independent of phase transitions.
+            // The allocator reads the phase (provisional attack axis, Exploit
+            // reserve release), so the next observation must reallocate.
+            _hasObservedEvidence = false;
         }
 
         /// <summary>
@@ -422,19 +425,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return decision;
         }
 
-        public ArmyIntent EmitArmyIntent()
-        {
-            return new ArmyIntent(
-                _plan.PlanId,
-                _plan.Phase,
-                _plan.MainEffortSector,
-                _plan.FixingSectors,
-                _plan.ScreeningSectors,
-                _plan.ReserveCommitTriggerOdds,
-                aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
-                directChildIntents: _directChildIntents);
-        }
-
         public ReplanTrigger CheckReplanTriggers(ReplanTriggerInput input) => ArmyReplanTriggers.Evaluate(input);
 
         public void ObserveIntent(TacticalIntentModel enemyIntent)
@@ -473,8 +463,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
             // which would change DirectChildAllocator outputs. Invalidate the direct-child
             // evidence cache so the next signature-equal observe reallocates against the new
-            // plan instead of returning stale pre-replan intents. (AdvancePhase does not need
-            // this — the allocator does not read BattlePhase.)
+            // plan instead of returning stale pre-replan intents.
             _hasObservedEvidence = false;
             // Opportunity-change trigger (2026-05-21). Snapshot the opportunity at
             // each replan so ArmyReplanTriggers.Evaluate can detect transitions
@@ -649,11 +638,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             EmitDirectChildIntentTelemetry();
         }
 
-        public void ObserveDirectChildEvidenceWithIntent(IReadOnlyList<DirectChildEvidence> evidence, IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
-        {
-            ObserveDirectChildEvidenceWithZones(evidence, perChildEnemyIntent, null);
-        }
-
         /// <summary>
         /// Zone-aware observation (Stage 2 / G geometric play layer). When
         /// <paramref name="zoneAssignments"/> is non-empty, the allocator
@@ -670,9 +654,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // since enemy intent (which is not part of DirectChildEvidence.SignatureEquals) can change.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
             _hasObservedEvidence = true;
-            _directChildIntents = DirectChildAllocator.AllocateWithZones(
-                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                perChildEnemyIntent, zoneAssignments);
+            _directChildIntents = DirectChildAllocator.StabilizeMain(
+                DirectChildAllocator.AllocateWithZones(
+                    _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                    perChildEnemyIntent, zoneAssignments, new ReserveReleaseContext(_lastGlobalOdds)),
+                _mainHysteresis);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitDirectChildIntentTelemetry();
         }
@@ -820,6 +806,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // from it; UpdateLeafBrigadeMap is called by the #61 patch without an
         // axis, so the orchestrator keeps the one the tick cycle observed.
         private TacticalFrontAxis _frontAxis = TacticalFrontAxis.None;
+
+        // Reserve release / main-role hysteresis inputs (T15/T16), refreshed
+        // by the tick cycle.
+        private float _lastGlobalOdds = 1f;
+        private readonly MainRoleHysteresisState _mainHysteresis = new MainRoleHysteresisState();
+
+        /// <summary>Army-wide odds from the latest evidence; read by reserve release.</summary>
+        public void ObserveGlobalOdds(float globalOdds)
+        {
+            if (!float.IsNaN(globalOdds) && !float.IsInfinity(globalOdds) && globalOdds >= 0f) _lastGlobalOdds = globalOdds;
+        }
         private IReadOnlyDictionary<int, float> _flankThreat = new Dictionary<int, float>();
 
         public TacticalFrontAxis CurrentFrontAxis => _frontAxis;

@@ -1033,12 +1033,7 @@ static class Program
             ("tactical battle plan records id phase main effort and age", TacticalBattlePlanRecordsIdPhaseMainEffortAndAge),
             ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
             ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
-            ("army intent carries plan id phase and aggression bias", ArmyIntentCarriesPlanIdPhaseAndAggressionBias),
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
-            ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
-            ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
-            ("army intent carries direct child intents list", ArmyIntentCarriesDirectChildIntentsList),
-            ("army intent direct child intents defaults empty", ArmyIntentDirectChildIntentsDefaultsEmpty),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
@@ -1155,7 +1150,6 @@ static class Program
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
             ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
-            ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan),
             ("army orchestrator records history on initial plan", ArmyOrchestratorRecordsHistoryOnInitialPlan),
             ("army orchestrator tick advances age without replanning", ArmyOrchestratorTickAdvancesAgeWithoutReplanning),
             ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
@@ -1164,7 +1158,6 @@ static class Program
             ("army orchestrator register direct children stores snapshots", ArmyOrchestratorRegisterDirectChildrenStoresSnapshots),
             ("army orchestrator observe evidence allocates roles", ArmyOrchestratorObserveEvidenceAllocatesRoles),
             ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
-            ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
             ("army orchestrator refreshes expanded direct child snapshots", ArmyOrchestratorRefreshesExpandedDirectChildSnapshots),
             ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
@@ -21300,7 +21293,31 @@ static class Program
         AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(5), "second BattleStart after reset");
     }
 
-    // ---- TacticalBattlePlan / ArmyIntent tests (O1.1) ----
+    // ---- TacticalPlaybook tests (O1.2) ----
+
+    private sealed class StubPlaybook : TacticalPlaybook
+    {
+        public StubPlaybook() : base(
+            BattlePlanId.GenericMethodical,
+            "stub",
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(0.5f, 0.5f, 0.5f, 0.5f),
+            new OddsRange(0.8f, 1.4f),
+            reserveCommitTriggerOdds: 1.0f) { }
+
+        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
+            new TacticalBattlePlan(
+                BattlePlanId.GenericMethodical,
+                BattlePhase.Probe,
+                ctx.DefaultMainEffortSector,
+                null,
+                null,
+                ReserveCommitTriggerOdds,
+                0f,
+                ctx.JitterSeed);
+    }
+
+    // ---- TacticalBattlePlan tests (O1.1) ----
 
     private static void TacticalBattlePlanRecordsIdPhaseMainEffortAndAge()
     {
@@ -21357,22 +21374,6 @@ static class Program
         AssertEqual(2, plan.MainEffortSector, "main effort preserved");
     }
 
-    private static void ArmyIntentCarriesPlanIdPhaseAndAggressionBias()
-    {
-        var intent = new ArmyIntent(
-            BattlePlanId.ManeuverAndFix,
-            BattlePhase.MainEffort,
-            mainEffortSector: 1,
-            fixingSectors: new[] { 2, 3 },
-            screeningSectors: System.Array.Empty<int>(),
-            reserveCommitTriggerOdds: 1.3f,
-            aggressionBias01: 0.65f);
-        AssertEqual(BattlePlanId.ManeuverAndFix, intent.PlanId, "plan id");
-        AssertEqual(BattlePhase.MainEffort, intent.Phase, "phase");
-        AssertEqual(1, intent.MainEffortSector, "main effort sector");
-        AssertNear(0.65f, intent.AggressionBias01, 1e-5f, "aggression bias");
-    }
-
     private static void TacticalBattlePlanSanitizesNanAndInfinityFloats()
     {
         var plan = new TacticalBattlePlan(
@@ -21388,82 +21389,6 @@ static class Program
         AssertNear(0f, plan.AgeSeconds, 1e-5f, "Infinity ageSeconds sanitized then clamped to 0");
         AssertEqual(0, plan.FixingSectors.Length, "null fixingSectors coalesced to empty");
         AssertEqual(0, plan.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
-    }
-
-    private static void ArmyIntentSanitizesNanAndInfinityFloats()
-    {
-        var intent = new ArmyIntent(
-            BattlePlanId.GenericMethodical,
-            BattlePhase.Probe,
-            mainEffortSector: 0,
-            fixingSectors: null,
-            screeningSectors: null,
-            reserveCommitTriggerOdds: float.PositiveInfinity,
-            aggressionBias01: float.NaN);
-        AssertNear(0f, intent.ReserveCommitTriggerOdds, 1e-5f, "Infinity reserveOdds sanitized to 0");
-        AssertNear(0.5f, intent.AggressionBias01, 1e-5f, "NaN aggressionBias coerced to 0.5");
-        AssertEqual(0, intent.FixingSectors.Length, "null fixingSectors coalesced to empty");
-        AssertEqual(0, intent.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
-    }
-
-    private static void ArmyIntentClampsAggressionBiasOutOfRange()
-    {
-        var below = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, -2.0f);
-        var above = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, 5.0f);
-        AssertNear(0f, below.AggressionBias01, 1e-5f, "below 0 clamped to 0");
-        AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
-    }
-
-    private static void ArmyIntentCarriesDirectChildIntentsList()
-    {
-        var children = new[]
-        {
-            new DirectChildIntent(
-                "c0", 15, 16, "First", 2, DirectChildRole.Main,
-                DirectChildAxis.SectorAxis, 2, 1.0f, 0.6f,
-                new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>())),
-        };
-        var intent = new ArmyIntent(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
-            reserveCommitTriggerOdds: 1.2f, aggressionBias01: 0.7f,
-            directChildIntents: children);
-        AssertEqual(1, intent.DirectChildIntents.Count);
-        AssertEqual("c0", intent.DirectChildIntents[0].ChildId);
-        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
-    }
-
-    private static void ArmyIntentDirectChildIntentsDefaultsEmpty()
-    {
-        // existing 7-arg ctor must continue to work and yield empty children list
-        var intent = new ArmyIntent(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            2, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0.5f);
-        AssertEqual(0, intent.DirectChildIntents.Count);
-    }
-
-    // ---- TacticalPlaybook tests (O1.2) ----
-
-    private sealed class StubPlaybook : TacticalPlaybook
-    {
-        public StubPlaybook() : base(
-            BattlePlanId.GenericMethodical,
-            "stub",
-            new PersonalityFit(0f, 0f, 0f),
-            new TerrainPreference(0.5f, 0.5f, 0.5f, 0.5f),
-            new OddsRange(0.8f, 1.4f),
-            reserveCommitTriggerOdds: 1.0f) { }
-
-        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
-            new TacticalBattlePlan(
-                BattlePlanId.GenericMethodical,
-                BattlePhase.Probe,
-                ctx.DefaultMainEffortSector,
-                null,
-                null,
-                ReserveCommitTriggerOdds,
-                0f,
-                ctx.JitterSeed);
     }
 
     private static void TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff()
@@ -23022,18 +22947,6 @@ static class Program
         AssertEqual(2, orch.CurrentMacroAi, "Consolidate phase -> macroai 2 (defend)");
     }
 
-    private static void ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan()
-    {
-        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 2));
-        var intent = orch.EmitArmyIntent();
-        AssertEqual(BattlePlanId.DoubleEnvelopment, intent.PlanId, "intent plan id matches");
-        AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
-        AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
-        AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
-    }
-
     private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
@@ -23150,16 +23063,6 @@ static class Program
             "signature-equal evidence must reuse the cached intent list (no allocation)");
     }
 
-    private static void ArmyOrchestratorEmitArmyIntentIncludesDirectChildren()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var intent = orch.EmitArmyIntent();
-        AssertEqual(1, intent.DirectChildIntents.Count);
-        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
-    }
-
     private static void ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered()
     {
         var orch = NewArmyOrchestratorWithPlan();
@@ -23240,13 +23143,13 @@ static class Program
             new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
         });
         army.RegisterCommandTree(tree);
-        army.ObserveDirectChildEvidenceWithIntent(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
         }, new[]
         {
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()),
-        });
+        }, null);
 
         AssertEqual(DirectChildRole.Main, army.GetDirectChildRole("child-200"), "O3 direct child role should remain authoritative");
         var resolution = army.ResolveCommandIntentForGroup(200);
@@ -23290,13 +23193,13 @@ static class Program
         {
             new DirectChildSnapshot("synth-army-200", "army-200", 15, 0, "Detached Corps", true),
         });
-        army.ObserveDirectChildEvidenceWithIntent(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(1, 3, true, 4, 0, 0.8f),
         }, new[]
         {
             new TacticalIntentModel(InferredIntent.Attack, 4, 0.8f, 0.5f, Array.Empty<EvidenceTag>()),
-        });
+        }, null);
 
         var resolution = army.ResolveCommandIntentForGroup(200);
 

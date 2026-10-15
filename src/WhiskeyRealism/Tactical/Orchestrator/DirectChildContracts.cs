@@ -107,7 +107,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
-    /// Per-direct-child intent emitted as part of ArmyIntent.DirectChildIntents.
+    /// Per-direct-child intent produced by DirectChildAllocator (ArmyOrchestrator.CurrentDirectChildIntents).
     /// Cascaded to consumers (#42 gate, future O4 division attach).
     /// </summary>
     public readonly struct DirectChildIntent

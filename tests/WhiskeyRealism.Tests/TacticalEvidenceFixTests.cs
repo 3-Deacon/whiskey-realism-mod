@@ -65,6 +65,11 @@ internal static class TacticalEvidenceFixTests
         Run("registry matches full names, not colliding surnames", RegistryMatchesFullNames);
         Run("registry builds the full name from firstname and name", RegistryUsesFirstAndLastName);
         Run("terrain classifier reads vanilla terrain ids and relief", TerrainClassifierReadsVanillaIds);
+        Run("reserve stays reserve without a release condition", ReserveHeldWithoutRelease);
+        Run("reserve is released into the exploit phase", ReserveReleasedOnExploit);
+        Run("reserve is released at the plan's reserve-commit odds", ReserveReleasedAtCommitOdds);
+        Run("reserve reinforces an adjacent sector in crisis", ReserveReinforcesCrisisSector);
+        Run("main role needs a challenger to win three cycles running", MainRoleHysteresis);
     }
 
     private static void Run(string name, Action test)
@@ -795,5 +800,80 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(TerrainKind.River, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 0, 4, 0, 0, 0, 0, 0, 5, 0, 0 }, 4f), "a river through the field");
         TestHarness.AssertEqual(TerrainKind.Mountain, ArmyEvidenceBuilder.ClassifyTerrain(new[] { 0, 14, 0, 0 }, 80f), "high relief");
         TestHarness.AssertEqual(TerrainKind.Open, ArmyEvidenceBuilder.ClassifyTerrain(new int[0], 0f), "no samples -> open");
+    }
+
+    // ---- T13 / T15 / T16 roles ----
+
+    private static DirectChildSnapshot Snap(string id) => new DirectChildSnapshot(id, "army", 15, 0, id, true);
+
+    private static DirectChildEvidence Ev(int sector, int own, int enemy = 0, bool contact = false)
+        => new DirectChildEvidence(own, enemy, contact, sector, 0, 0.9f);
+
+    private static IReadOnlyList<DirectChildIntent> AllocateRoles(BattlePhase phase, float globalOdds, float commitOdds,
+        DirectChildSnapshot[] snaps, DirectChildEvidence[] ev)
+    {
+        var plan = new TacticalBattlePlan(BattlePlanId.GenericMethodical, phase, 0, null, null, commitOdds, 0f, 7);
+        return DirectChildAllocator.AllocateWithZones(plan, default(WhiskeyRealism.Strategic.PersonalityVector),
+            snaps, ev, null, null, new ReserveReleaseContext(globalOdds));
+    }
+
+    private static DirectChildIntent Role(IReadOnlyList<DirectChildIntent> intents, string id)
+    {
+        for (int i = 0; i < intents.Count; i++) if (intents[i].ChildId == id) return intents[i];
+        throw new Exception("missing " + id);
+    }
+
+    private static void ReserveHeldWithoutRelease()
+    {
+        var intents = AllocateRoles(BattlePhase.MainEffort, 1.0f, 1.4f,
+            new[] { Snap("main"), Snap("reserve") }, new[] { Ev(0, 3), Ev(3, 3) });
+        TestHarness.AssertEqual(DirectChildRole.Main, Role(intents, "main").Role, "main");
+        TestHarness.AssertEqual(DirectChildRole.Reserve, Role(intents, "reserve").Role, "reserve held");
+    }
+
+    private static void ReserveReleasedOnExploit()
+    {
+        var intents = AllocateRoles(BattlePhase.Exploit, 1.0f, 1.4f,
+            new[] { Snap("main"), Snap("reserve") }, new[] { Ev(0, 3), Ev(3, 3) });
+        TestHarness.AssertEqual(DirectChildRole.SupportMain, Role(intents, "reserve").Role, "exploit commits the reserve behind the main effort");
+    }
+
+    private static void ReserveReleasedAtCommitOdds()
+    {
+        var intents = AllocateRoles(BattlePhase.MainEffort, 1.5f, 1.4f,
+            new[] { Snap("main"), Snap("reserve") }, new[] { Ev(0, 3), Ev(3, 3) });
+        TestHarness.AssertEqual(DirectChildRole.SupportMain, Role(intents, "reserve").Role, "odds reached ReserveCommitTriggerOdds");
+    }
+
+    private static void ReserveReinforcesCrisisSector()
+    {
+        var intents = AllocateRoles(BattlePhase.MainEffort, 1.0f, 1.4f,
+            new[] { Snap("main"), Snap("pressed"), Snap("reserve") },
+            new[] { Ev(0, 3), Ev(4, 1, enemy: 4, contact: true), Ev(3, 3) });
+        var r = Role(intents, "reserve");
+        TestHarness.AssertEqual(DirectChildRole.Fix, r.Role, "reserve moves up to hold the pressed sector");
+        TestHarness.AssertEqual(4, r.AxisSector, "toward the crisis band");
+    }
+
+    private static DirectChildIntent DI(string id, DirectChildRole role, int sector)
+        => new DirectChildIntent(id, 15, 15, id, sector, role, DirectChildAxis.SectorAxis, sector, 0.5f, 0.5f,
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+
+    private static void MainRoleHysteresis()
+    {
+        var state = new MainRoleHysteresisState();
+        var first = DirectChildAllocator.StabilizeMain(new[] { DI("a", DirectChildRole.Main, 2), DI("b", DirectChildRole.SupportMain, 3) }, state);
+        TestHarness.AssertEqual(DirectChildRole.Main, Role(first, "a").Role, "first main accepted");
+        for (int i = 1; i <= 2; i++)
+        {
+            var flip = DirectChildAllocator.StabilizeMain(new[] { DI("a", DirectChildRole.SupportMain, 2), DI("b", DirectChildRole.Main, 3) }, state);
+            TestHarness.AssertEqual(DirectChildRole.Main, Role(flip, "a").Role, "incumbent keeps Main on challenge " + i);
+            TestHarness.AssertEqual(DirectChildRole.SupportMain, Role(flip, "b").Role, "challenger takes the incumbent's role " + i);
+            TestHarness.AssertEqual(2, Role(flip, "b").AxisSector, "support follows the incumbent's sector");
+        }
+        var third = DirectChildAllocator.StabilizeMain(new[] { DI("a", DirectChildRole.SupportMain, 2), DI("b", DirectChildRole.Main, 3) }, state);
+        TestHarness.AssertEqual(DirectChildRole.Main, Role(third, "b").Role, "third consecutive win hands over Main");
+        var fallback = DirectChildAllocator.StabilizeMain(new[] { DI("a", DirectChildRole.Main, 2), DI("b", DirectChildRole.Fallback, 3) }, state);
+        TestHarness.AssertEqual(DirectChildRole.Main, Role(fallback, "a").Role, "incumbent falling back loses Main at once");
     }
 }

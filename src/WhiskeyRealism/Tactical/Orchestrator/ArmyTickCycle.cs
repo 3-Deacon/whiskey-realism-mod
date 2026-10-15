@@ -87,6 +87,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             orchestrator.AdvancePlanAge(clockDelta);
 
             orchestrator.ObserveFrontGeometry(enemyVisible);
+            orchestrator.ObserveGlobalOdds(ownEvidence.CurrentOdds);
             if (!orchestrator.HasPlan) return ReplanTrigger.None;
 
             var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);

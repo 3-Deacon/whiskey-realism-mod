@@ -11,8 +11,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// in registration order), produces a parallel list of DirectChildIntent
     /// with role assignments per spec rules. No Unity types.
     /// </summary>
+    /// <summary>
+    /// Army-level inputs for releasing Reserve-role children (T15): the army's
+    /// current global odds, compared with the plan's ReserveCommitTriggerOdds.
+    /// </summary>
+    public readonly struct ReserveReleaseContext
+    {
+        public ReserveReleaseContext(float globalOdds)
+        {
+            GlobalOdds = float.IsNaN(globalOdds) || float.IsInfinity(globalOdds) || globalOdds < 0f ? 0f : globalOdds;
+        }
+
+        public float GlobalOdds { get; }
+    }
+
+    /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
+    public sealed class MainRoleHysteresisState
+    {
+        public string IncumbentMainId { get; internal set; } = string.Empty;
+        public string ChallengerId { get; internal set; } = string.Empty;
+        public int ChallengerStreak { get; internal set; }
+    }
+
     public static class DirectChildAllocator
     {
+        /// <summary>
+        /// Consecutive allocation cycles a different child must win Main
+        /// before the incumbent hands it over (T16). Main used to hop between
+        /// corps every tick on contact-flag / strength-bucket noise, rebuilding
+        /// the leaf cascade and re-issuing #61 orders.
+        /// </summary>
+        public const int MainChallengeCyclesRequired = 3;
+
         // Role budgets + thresholds (2026-05-22 tuning, was producing
         // "main alone + 4×RefuseRight" allocations in smoke):
         //
@@ -83,7 +113,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<DirectChildSnapshot> snapshots,
             IReadOnlyList<DirectChildEvidence> evidence,
             IReadOnlyList<TacticalIntentModel> perChildEnemyIntent,
-            IReadOnlyList<CorpsAssignment> zoneAssignments)
+            IReadOnlyList<CorpsAssignment> zoneAssignments,
+            ReserveReleaseContext release = default(ReserveReleaseContext))
         {
             if (snapshots == null || evidence == null || snapshots.Count != evidence.Count)
                 return Array.Empty<DirectChildIntent>();
@@ -251,6 +282,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 roles[i] = DirectChildRole.Reserve;
             }
 
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release);
+
             var intents = new DirectChildIntent[snapshots.Count];
             float aggressionBias01 = (personality.Aggression + 1f) * 0.5f;
             for (int i = 0; i < snapshots.Count; i++)
@@ -258,9 +291,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var snap = snapshots[i];
                 var ev = evidence[i];
                 var role = roles[i];
-                int axisSector = role == DirectChildRole.Main || role == DirectChildRole.SupportMain
-                    ? (mainIdx >= 0 ? evidence[mainIdx].PrimarySector : plan.MainEffortSector)
-                    : ev.PrimarySector;
+                int axisSector = axisOverride[i] >= 0
+                    ? axisOverride[i]
+                    : role == DirectChildRole.Main || role == DirectChildRole.SupportMain
+                        ? (mainIdx >= 0 ? evidence[mainIdx].PrimarySector : plan.MainEffortSector)
+                        : ev.PrimarySector;
                 var axis = AxisFor(role);
                 float supportPriority = SupportPriorityFor(role, ev);
                 intents[i] = new DirectChildIntent(
@@ -278,6 +313,124 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             return intents;
         }
+
+        /// <summary>
+        /// Reserve release as a ROLE change (T15). The reserve gate
+        /// (TacticalReserveCommitGate) denies vanilla CheckUseOfReserves for
+        /// Reserve-role children, and nothing ever changed that role. A Reserve
+        /// child is released when:
+        ///   1. a sector within support range is in crisis (own line engaged
+        ///      and outmatched by two buckets) -> Fix on the crisis band;
+        ///   2. the plan is in Exploit -> SupportMain behind the main effort;
+        ///   3. global odds reach the plan's ReserveCommitTriggerOdds ->
+        ///      SupportMain.
+        /// Returns per-child axis-sector overrides (-1 = none).
+        /// </summary>
+        private static int[] ReleaseReserves(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildEvidence> evidence,
+            DirectChildRole[] roles,
+            ReserveReleaseContext release)
+        {
+            var axisOverride = new int[roles.Length];
+            for (int i = 0; i < axisOverride.Length; i++) axisOverride[i] = -1;
+
+            bool exploit = plan.Phase == BattlePhase.Exploit;
+            bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
+
+            for (int i = 0; i < roles.Length; i++)
+            {
+                if (roles[i] != DirectChildRole.Reserve) continue;
+
+                int crisisSector = -1;
+                for (int j = 0; j < roles.Length; j++)
+                {
+                    if (j == i) continue;
+                    var other = evidence[j];
+                    if (!other.ContactFlag || other.EnemyStrengthBucket <= other.OwnStrengthBucket + 1) continue;
+                    if (!IsAdjacentSector(other.PrimarySector, evidence[i].PrimarySector)) continue;
+                    crisisSector = other.PrimarySector;
+                    break;
+                }
+
+                if (crisisSector >= 0)
+                {
+                    roles[i] = DirectChildRole.Fix;
+                    axisOverride[i] = crisisSector;
+                }
+                else if (exploit || oddsReached)
+                {
+                    roles[i] = DirectChildRole.SupportMain;
+                }
+            }
+            return axisOverride;
+        }
+
+        /// <summary>
+        /// Main-role hysteresis (T16): keep the incumbent Main unless the same
+        /// challenger has won Main for <see cref="MainChallengeCyclesRequired"/>
+        /// consecutive allocations, or the incumbent is gone / falling back.
+        /// While held, the incumbent and challenger swap roles; SupportMain
+        /// children keep supporting the incumbent's sector.
+        /// </summary>
+        public static IReadOnlyList<DirectChildIntent> StabilizeMain(
+            IReadOnlyList<DirectChildIntent> intents,
+            MainRoleHysteresisState state)
+        {
+            if (intents == null || state == null) return intents;
+            int newMain = -1, incumbent = -1;
+            for (int i = 0; i < intents.Count; i++)
+            {
+                if (newMain < 0 && intents[i].Role == DirectChildRole.Main) newMain = i;
+                if (intents[i].ChildId == state.IncumbentMainId) incumbent = i;
+            }
+            if (newMain < 0) return intents;
+
+            string newId = intents[newMain].ChildId;
+            bool incumbentUsable = incumbent >= 0 && intents[incumbent].Role != DirectChildRole.Fallback;
+            if (newId == state.IncumbentMainId || !incumbentUsable)
+            {
+                Accept(state, newId);
+                return intents;
+            }
+
+            if (state.ChallengerId == newId) state.ChallengerStreak++;
+            else { state.ChallengerId = newId; state.ChallengerStreak = 1; }
+            if (state.ChallengerStreak >= MainChallengeCyclesRequired)
+            {
+                Accept(state, newId);
+                return intents;
+            }
+
+            var held = new DirectChildIntent[intents.Count];
+            int keepSector = intents[incumbent].PrimarySector;
+            var challenger = intents[newMain];
+            var inc = intents[incumbent];
+            for (int i = 0; i < intents.Count; i++)
+            {
+                var x = intents[i];
+                if (i == incumbent)
+                    held[i] = With(x, DirectChildRole.Main, challenger.Axis, keepSector, challenger.SupportPriority01);
+                else if (i == newMain)
+                    held[i] = With(x, inc.Role, inc.Axis, inc.Role == DirectChildRole.SupportMain ? keepSector : inc.AxisSector, inc.SupportPriority01);
+                else if (x.Role == DirectChildRole.SupportMain)
+                    held[i] = With(x, x.Role, x.Axis, keepSector, x.SupportPriority01);
+                else
+                    held[i] = x;
+            }
+            return held;
+        }
+
+        private static void Accept(MainRoleHysteresisState state, string mainId)
+        {
+            state.IncumbentMainId = mainId ?? string.Empty;
+            state.ChallengerId = string.Empty;
+            state.ChallengerStreak = 0;
+        }
+
+        private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
+            => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
+                role, axis, axisSector, support, x.AggressionBias01, x.EnemyIntent);
 
         /// <summary>
         /// Aggression threshold above which the local-odds gate is bypassed.
