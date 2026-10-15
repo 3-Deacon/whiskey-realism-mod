@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Util
             try
             {
                 if (bunits == null || unit == null) return false;
+                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(unit)) return false;
                 if (targetBehavior < 0) return false;
                 if (unit.combatbehaviorordered == targetBehavior) return false;
                 var gameObject = ((Component)unit).gameObject;

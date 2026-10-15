@@ -3138,31 +3138,12 @@ namespace WhiskeyRealism.Patches
 
         private static bool IsPlayerProtected(Regiment group)
         {
-            try
-            {
-                if (group == null) return true;
-                // Removed 2026-05-19: the prior blanket alliance check
-                // `group.alliance == GameVars.playeralliance && !ai_vs_ai`
-                // returned true for EVERY unit on the player's alliance,
-                // not just the player's directly-commanded unit. Symptom:
-                // in W&L play the AI could not issue orders to any brigade
-                // on the player's side because the protection fired on
-                // every group — the player's own brigade just sat at
-                // vanilla "hold" with no orchestrator activity.
-                //
-                // W&L scope is the player's specific commanded unit +
-                // ancestors/descendants of it (via transform chain) +
-                // any DLC-taken-over unit. The three checks below capture
-                // that scope correctly.
-                if (!WlOwnershipSafe(group)) { EmitPlayerProtectedDiagnostic(group, "wl-ownership"); return true; }
-                if (IsWlCurrentCommandOrChain(group)) { EmitPlayerProtectedDiagnostic(group, "wl-current-command"); return true; }
-                if (SafeDlcTakenOver(group)) { EmitPlayerProtectedDiagnostic(group, "dlc-taken-over"); return true; }
-                return false;
-            }
-            catch
-            {
-                return true;
-            }
+            // Scope lives in TacticalWriteGuard (shared by every battle writer):
+            // player-owned units, the W&L player's command + chain, units with
+            // dlcw_isundercommander attached, and DLC-taken-over units.
+            if (!WhiskeyRealism.Tactical.TacticalWriteGuard.IsPlayerProtected(group, out string reason)) return false;
+            EmitPlayerProtectedDiagnostic(group, reason);
+            return true;
         }
 
         /// <summary>
@@ -3200,54 +3181,6 @@ namespace WhiskeyRealism.Patches
 
         private static readonly System.Collections.Generic.Dictionary<string, float> _lastPlayerProtectedTelemetryAt = new System.Collections.Generic.Dictionary<string, float>();
         private const float PlayerProtectedTelemetrySeconds = 30f;
-
-        private static bool WlOwnershipSafe(Regiment group)
-        {
-            try
-            {
-                if (!DLC_WL.dlc_scenarioactive) return true;
-                if (GameVars.ai_vs_ai) return true;
-                if (group == null) return false;
-                if (group.dlcw_isundercommander) return false;
-                if (group.allattachedunits == null) return true;
-
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if (unit != null && unit.dlcw_isundercommander) return false;
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool IsWlCurrentCommandOrChain(Regiment group)
-        {
-            try
-            {
-                if (!DLC_WL.dlc_scenarioactive) return false;
-                if (DLC_WL.dlc_chosencommander < 0) return false;
-                if (GameVars.commander == null || DLC_WL.dlc_chosencommander >= GameVars.commander.Count) return true;
-
-                Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
-                if ((UnityEngine.Object)current == null) return false;
-                if ((UnityEngine.Object)current == (UnityEngine.Object)group) return true;
-
-                Transform currentTransform = current.transform;
-                Transform groupTransform = group.transform;
-                if (currentTransform == null || groupTransform == null) return true;
-
-                return currentTransform.IsChildOf(groupTransform) || groupTransform.IsChildOf(currentTransform);
-            }
-            catch
-            {
-                return true;
-            }
-        }
 
         private static bool HasPendingOrder(Regiment group)
         {
@@ -3884,12 +3817,6 @@ namespace WhiskeyRealism.Patches
         private static bool SafeRouted(Regiment group)
         {
             try { return group == null || group.isrouted || group.markedforrout; }
-            catch { return true; }
-        }
-
-        private static bool SafeDlcTakenOver(Regiment group)
-        {
-            try { return DLC_WL.dlc_scenarioactive && group != null && DLC_WL.IsUnitTakenOver(group); }
             catch { return true; }
         }
 

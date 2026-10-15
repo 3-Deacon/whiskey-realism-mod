@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Util
             try
             {
                 if (bunits == null || group == null) return false;
+                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(group)) return false;
                 if (targetFormation < 0 || targetFormation > 4) return false;
                 if (group.formationordered == targetFormation) return false;
                 bunits.SetGroupFormation(
@@ -85,6 +86,7 @@ namespace WhiskeyRealism.Util
             try
             {
                 if (bunits == null || group == null) return false;
+                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(group)) return false;
                 if (targetFormation < 0 || targetFormation > 4) return false;
                 // Don't skip if only the facing changed but formation matches —
                 // facing-only writes are still meaningful for re-orientation.
@@ -127,6 +129,7 @@ namespace WhiskeyRealism.Util
             try
             {
                 if (bunits == null || group == null) return false;
+                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(group)) return false;
                 if (targetFormation < 0 || targetFormation > 4) return false;
                 // We can't cheaply check the existing refuseflank value (vanilla
                 // doesn't expose a stable accessor across game updates) — write

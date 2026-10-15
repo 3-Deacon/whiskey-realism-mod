@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Util
             try
             {
                 if (bunits == null || group == null) return false;
+                if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(group)) return false;
                 if (targetStance < 0 || targetStance > 4) return false;
                 if (group.ai_stance == targetStance) return false;
                 var gameObject = ((Component)group).gameObject;

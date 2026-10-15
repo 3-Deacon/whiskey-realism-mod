@@ -229,8 +229,12 @@ namespace WhiskeyRealism
         private bool _loggedTacticalCommanderMode;
         private TelemetryRuntime _telemetryRuntime;
 
+        // Parsed once and re-parsed only when the config value changes; this is
+        // read from per-group hot paths.
+        private TacticalCommanderMode? _cachedTacticalCommanderMode;
+
         internal TacticalCommanderMode TacticalCommanderModeValue =>
-            ResolveTacticalCommanderMode();
+            _cachedTacticalCommanderMode ?? (_cachedTacticalCommanderMode = ResolveTacticalCommanderMode()).Value;
 
         internal bool TacticalOperationsLedgerEnabled =>
             TacticalCommanderModePolicy.RunsLedger(TacticalCommanderModeValue);
@@ -243,9 +247,13 @@ namespace WhiskeyRealism
 
         private TacticalCommanderMode ResolveTacticalCommanderMode()
         {
-            var mode = TacticalCommanderModePolicy.Parse(
-                TacticalCommanderModeRaw?.Value,
-                TacticalCommanderMode.Active);
+            string raw = TacticalCommanderModeRaw?.Value;
+            var mode = TacticalCommanderModePolicy.Parse(raw, TacticalCommanderMode.Active);
+            if (!TacticalCommanderModePolicy.IsRecognized(raw))
+            {
+                Log?.LogWarning(
+                    $"[TacticalCommanderMode] unrecognized value '{raw}' — expected Off, MonitorOnly or Active; using {mode}.");
+            }
 
             LogTacticalCommanderModeOnce(mode);
             return mode;
@@ -488,7 +496,12 @@ namespace WhiskeyRealism
                 "Tactical Commander Mode",
                 // User-approved default for the full doctrine feature: Active. Existing config files still take precedence over this default.
                 "Active",
-                "Default Active. Off disables the operations-ledger command system; MonitorOnly runs vision/ledger/tasks/monitor without vanilla writes; Active runs the full tactical command system for AI sides.");
+                "Default Active. Values: Off, MonitorOnly, Active (case-insensitive). Off disables every Whiskey battle write (full tactical rollback); MonitorOnly runs vision/ledger/tasks/monitor without any vanilla writes; Active runs the full tactical command system for AI-controlled units. Unrecognized values log a warning and fall back to Active.");
+            TacticalCommanderModeRaw.SettingChanged += (_, __) =>
+            {
+                _cachedTacticalCommanderMode = null;
+                _loggedTacticalCommanderMode = false;
+            };
             _ = TacticalCommanderModeValue;
             EnableTacticalHeavyPathThrottling = Config.Bind(
                 "TacticalTickOptimization",
