@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Patches;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -37,7 +38,7 @@ namespace WhiskeyRealism.Strategic
                     return null;
                 }
 
-                var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
+                var ownUnits = VanillaFieldCache.Get(faction, "ownunits") as IList;
                 if (ownUnits == null)
                 {
                     OnceLog.Warning(
@@ -99,7 +100,7 @@ namespace WhiskeyRealism.Strategic
                 return 0;
             }
 
-            var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
+            var ownUnits = VanillaFieldCache.Get(faction, "ownunits") as IList;
             if (ownUnits == null)
             {
                 OnceLog.Warning(
@@ -177,9 +178,11 @@ namespace WhiskeyRealism.Strategic
                     continue;
                 }
 
+                // No theaterposition write: vanilla UpdateCampaignTheaters (17034)
+                // resets/reassigns it from the unit's real position; forcing the
+                // anchor distorted CheckCombinationOfUnits (17141) for the cycle.
                 if (MoveUnitTo(unit, anchor))
                 {
-                    SetTheaterPosition(unit, anchor);
                     issued++;
                     EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}",
@@ -190,17 +193,15 @@ namespace WhiskeyRealism.Strategic
             return issued;
         }
 
+        private const int AifactionScanLimit = 8;
+
         private static object FindFaction(int allianceId)
         {
-            var aicType = AccessTools.TypeByName("AICampaign");
-            var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
-            if (list == null) return null;
-            for (int i = 0; i < list.Count; i++)
+            // AICampaign.aifaction holds one entry per alliance (incl. Europe = 2).
+            for (int i = 0; i < AifactionScanLimit; i++)
             {
-                var faction = list[i];
-                var field = AccessTools.Field(faction.GetType(), "allianceid");
-                if (field != null && Convert.ToInt32(field.GetValue(faction)) == allianceId)
-                    return faction;
+                if (AICampaignReflect.GetAllianceId(i) == allianceId)
+                    return AICampaignReflect.GetFaction(i);
             }
             return null;
         }
@@ -210,9 +211,9 @@ namespace WhiskeyRealism.Strategic
             if (unit == null) return false;
             try
             {
-                int unitType = Convert.ToInt32(AccessTools.Field(unit.GetType(), "unittyp")?.GetValue(unit) ?? -1);
-                bool top = Convert.ToBoolean(AccessTools.Field(unit.GetType(), "istopunit")?.GetValue(unit) ?? false);
-                object garrison = AccessTools.Field(unit.GetType(), "garrisonreference")?.GetValue(unit);
+                int unitType = Convert.ToInt32(VanillaFieldCache.Get(unit, "unittyp") ?? -1);
+                bool top = Convert.ToBoolean(VanillaFieldCache.Get(unit, "istopunit") ?? false);
+                object garrison = VanillaFieldCache.Get(unit, "garrisonreference");
                 float strength = ReadFloat(0f, unit, "groupstrengthdirect");
                 if (strength <= 0f) strength = ReadFloat(0f, unit, "groupstrengthactive");
                 return unitType >= 14 &&
@@ -224,23 +225,61 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
+        // 2026-10-14 (C-ArmyArea): reuse vanilla's full busy set so area orders
+        // never pull capital defenders, depot/fort builders, raid or sea-invasion
+        // forces, queued defensive movers or town-takers - vanilla would send
+        // them straight back (ping-pong).
         private static bool IsIdleForAreaOrder(object unit, object faction)
         {
             try
             {
-                if (Convert.ToBoolean(AccessTools.Field(unit.GetType(), "inbattle")?.GetValue(unit) ?? false)) return false;
-                if (Convert.ToBoolean(AccessTools.Field(unit.GetType(), "onretreat")?.GetValue(unit) ?? false)) return false;
-                if (Convert.ToInt32(AccessTools.Field(unit.GetType(), "regimentpaths")?.GetValue(unit) ?? 0) > 0) return false;
-                if (ContainsUnit(faction, "unitsinoffensiveoperations", unit)) return false;
-                if (ContainsUnit(faction, "unitsindefensiveoperations", unit)) return false;
-                return true;
+                var regiment = unit as Regiment;
+                if (regiment == null) return false;
+                var busy = new AreaOrderBusyFlags
+                {
+                    InBattle = regiment.inbattle,
+                    OnRetreat = regiment.onretreat,
+                    HasPaths = regiment.regimentpaths > 0,
+                    InOffensiveOperation = ContainsUnit(faction, "unitsinoffensiveoperations", unit),
+                    InDefensiveOperation = ContainsUnit(faction, "unitsindefensiveoperations", unit),
+                    DefendingCapital = ContainsUnit(faction, "groupstodefendcapital", unit),
+                    BuildingSupplyDepot = ContainsUnit(faction, "unitsconstructingsupplydepots", unit),
+                    BuildingFort = AICampaign.FortConstructionOrder.UnitAlreadyConstructing(regiment),
+                    RaidForce = AICampaign.RaidForce.IsRaidUnit(regiment),
+                    SeaInvasionForce = AICampaign.SeaInvasionForce.GetSeaInvasionForceReference(regiment) != null,
+                    DefensiveOrderQueued = AICampaign.DefensiveMovingOrder.OrderRunning(regiment),
+                    TakingTown = IsUnitTakingTown(regiment)
+                };
+                return CampaignMilitaryGates.IsIdleForAreaOrder(busy);
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("army-area:idle-check", "[Patch:ArmyArea] idle check failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool _isUnitTakingTownResolved;
+        private static System.Reflection.MethodInfo _isUnitTakingTown;
+
+        // Private static AICampaign.IsUnitTakingTown(Regiment) (decompile 13438).
+        // Unresolvable -> treat as busy (fail closed).
+        private static bool IsUnitTakingTown(Regiment unit)
+        {
+            if (!_isUnitTakingTownResolved)
+            {
+                _isUnitTakingTownResolved = true;
+                _isUnitTakingTown = AccessTools.Method(typeof(AICampaign), "IsUnitTakingTown", new[] { typeof(Regiment) });
+                if (_isUnitTakingTown == null)
+                    OnceLog.Warning("army-area:taking-town", "[Patch:ArmyArea] AICampaign.IsUnitTakingTown(Regiment) not found; area orders treat units as busy");
+            }
+            if (_isUnitTakingTown == null) return true;
+            return Convert.ToBoolean(_isUnitTakingTown.Invoke(null, new object[] { unit }));
         }
 
         private static bool ContainsUnit(object faction, string fieldName, object unit)
         {
-            var list = AccessTools.Field(faction.GetType(), fieldName)?.GetValue(faction) as IList;
+            var list = VanillaFieldCache.Get(faction, fieldName) as IList;
             if (list == null) return false;
             return list.Contains(unit);
         }
@@ -249,7 +288,7 @@ namespace WhiskeyRealism.Strategic
         {
             string name = ObjectName(unit);
             int commander = -1;
-            try { commander = Convert.ToInt32(AccessTools.Field(unit.GetType(), "commander")?.GetValue(unit) ?? -1); }
+            try { commander = Convert.ToInt32(VanillaFieldCache.Get(unit, "commander") ?? -1); }
             catch { }
             return name + ":" + commander.ToString();
         }
@@ -264,11 +303,10 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                int commanderId = Convert.ToInt32(AccessTools.Field(unit.GetType(), "commander")?.GetValue(unit) ?? -1);
-                var commanders = AccessTools.Field(AccessTools.TypeByName("GameVars"), "commander")?.GetValue(null) as IList;
+                int commanderId = Convert.ToInt32(VanillaFieldCache.Get(unit, "commander") ?? -1);
+                var commanders = GameVars.commander;
                 if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return null;
-                var commander = commanders[commanderId];
-                return AccessTools.Field(commander.GetType(), "combinedname")?.GetValue(commander) as string;
+                return commanders[commanderId]?.combinedname;
             }
             catch { return null; }
         }
@@ -285,29 +323,14 @@ namespace WhiskeyRealism.Strategic
             return null;
         }
 
-        private static void SetTheaterPosition(object unit, Vector3 position)
-        {
-            try
-            {
-                AccessTools.Field(unit.GetType(), "theaterposition")?.SetValue(unit, position);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("army-area:theaterposition", "[Patch:ArmyArea] theaterposition write failed: " + ex.Message);
-            }
-        }
-
         private static bool MoveUnitTo(object unit, Vector3 position)
         {
             try
             {
-                var method = AccessTools.Method(AccessTools.TypeByName("AICampaign"), "MoveUnitTo");
-                if (method == null)
-                {
-                    OnceLog.Warning("army-area:move-method", "[Patch:ArmyArea] AICampaign.MoveUnitTo not found");
-                    return false;
-                }
-                return Convert.ToBoolean(method.Invoke(null, new object[] { unit, position, true, false, true }));
+                var regiment = unit as Regiment;
+                if (regiment == null) return false;
+                // AICampaign.MoveUnitTo(Regiment, Vector3, movearoundenemyunits, useseamovementonly, checkforreadiness) (14479)
+                return AICampaign.MoveUnitTo(regiment, position, movearoundenemyunits: true, useseamovementonly: false, checkforreadiness: true);
             }
             catch (Exception ex)
             {
@@ -321,7 +344,7 @@ namespace WhiskeyRealism.Strategic
             if (target == null) return fallback;
             for (int i = 0; i < fields.Length; i++)
             {
-                var field = AccessTools.Field(target.GetType(), fields[i]);
+                var field = VanillaFieldCache.Field(target.GetType(), fields[i]);
                 if (field == null) continue;
                 try { return Math.Max(0f, Convert.ToSingle(field.GetValue(target))); }
                 catch { return fallback; }

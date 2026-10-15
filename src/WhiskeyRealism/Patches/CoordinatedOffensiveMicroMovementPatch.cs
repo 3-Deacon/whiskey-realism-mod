@@ -13,8 +13,9 @@ namespace WhiskeyRealism.Patches
     // retargets units already in unitsinoffensiveoperations toward a nearest
     // area objective. We temporarily remove package-locked units with active
     // paths so their initial coordinated package move is not overwritten before
-    // the path is consumed, then reinsert only those removed units in
-    // Postfix/Finalizer so vanilla removals of unrelated units survive.
+    // the path is consumed, then reinsert only those removed units in the
+    // Finalizer (runs on success and on exceptions) so vanilla removals of
+    // unrelated units survive.
     [HarmonyPatch(typeof(AICampaign), "UpdateMicroMovementInOffensive")]
     internal static class CoordinatedOffensiveMicroMovementPatch
     {
@@ -30,7 +31,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
         {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("campaign.patch.coord-offensive-micro.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 try
                 {
@@ -67,26 +68,17 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        [HarmonyPostfix]
-        internal static void Postfix(int _aifaction)
-        {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
-            {
-                RestoreSnapshot(_aifaction, "postfix");
-            }
-        }
-
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, int _aifaction)
         {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("campaign.patch.coord-offensive-micro.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                RestoreSnapshot(_aifaction, "finalizer");
+                RestoreSnapshot(_aifaction);
                 return __exception;
             }
         }
 
-        private static void RestoreSnapshot(int aifactionIndex, string source)
+        private static void RestoreSnapshot(int aifactionIndex)
         {
             try
             {
@@ -109,7 +101,7 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("coordinated-ops:micro:restore:" + source,
+                OnceLog.Warning("coordinated-ops:micro:restore",
                     "[CoordinatedOps] micro restore failed: " + ex.Message);
             }
             finally

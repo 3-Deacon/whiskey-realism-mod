@@ -18,6 +18,16 @@ namespace WhiskeyRealism.Patches
     // the snapshot and revert any forbidden cross-map pull vanilla committed
     // despite filtering (defense-in-depth).
     //
+    // Restore ownership (B-46-campaign, 2026-10-14): the ownunits restore and
+    // snapshot clearing live in a [HarmonyFinalizer], because a Postfix does not
+    // run when vanilla throws and the filtered list would then leak into every
+    // later AI job. The Postfix only does the defense-in-depth revert, which
+    // needs vanilla to have completed. Vanilla's first branch queues the move as
+    // a DefensiveMovingOrder (decompile 13713) executed later by UpdateOrders
+    // (79295): the revert cancels that queued order (the unit has not moved);
+    // only a direct MoveUnitTo commit (attack branch, 13771) is moved back, and
+    // never toward an unset theaterposition.
+    //
     // Vanilla field names confirmed from Assembly-CSharp.decompiled.cs:
     //   AIFaction.ownunits               — List<Regiment> (line 10324)
     //   AIFaction.unitsindefensiveoperations — List<Regiment> (line 10358)
@@ -31,7 +41,7 @@ namespace WhiskeyRealism.Patches
     {
         // Per-call snapshots indexed by aifaction index. Static dicts are safe because
         // vanilla CheckForDefensiveOperations is called once per AI faction per update
-        // tick and is not re-entrant. Postfix always clears via ClearSnapshots().
+        // tick and is not re-entrant. The Finalizer always clears via ClearSnapshots().
         private static readonly Dictionary<int, List<object>> _ownUnitsSnapshot =
             new Dictionary<int, List<object>>();
         private static readonly Dictionary<int, HashSet<int>> _defensiveOpsBefore =
@@ -156,8 +166,8 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("defense-intent:filter:prefix",
                     "candidate-filter Prefix failed: " + ex.Message);
-                // If we partially filtered before throwing, Postfix still sees the snapshot
-                // and restores ownunits. No explicit rollback needed here.
+                // If we partially filtered before throwing, the Finalizer still sees the
+                // snapshot and restores ownunits. No explicit rollback needed here.
             }
             } // end using TelemetryPerf.Scope
         }
@@ -170,26 +180,9 @@ namespace WhiskeyRealism.Patches
             try
             {
                 var faction = AICampaignReflect.GetFaction(_aifaction);
-                if (faction == null)
-                {
-                    ClearSnapshots(_aifaction);
-                    return;
-                }
+                if (faction == null) return;
 
-                // Restore ownunits FIRST — before any other vanilla code in the same frame
-                // iterates the list. This is the primary invariant: ownunits must look
-                // unchanged to everything that runs after CheckForDefensiveOperations.
-                if (_ownUnitsSnapshot.TryGetValue(_aifaction, out var snapshot))
-                {
-                    var ownUnitsField = GetOwnUnitsField(faction.GetType());
-                    var ownUnits = ownUnitsField?.GetValue(faction) as IList;
-                    if (ownUnits != null)
-                    {
-                        ownUnits.Clear();
-                        for (int i = 0; i < snapshot.Count; i++) ownUnits.Add(snapshot[i]);
-                    }
-                }
-
+                // ownunits restore + snapshot clearing happen in the Finalizer.
                 // Defense-in-depth: revert any forbidden units vanilla committed to
                 // unitsindefensiveoperations despite our filter. This can happen when
                 // vanilla uses a secondary code path (e.g., the attack-operation branch
@@ -234,7 +227,15 @@ namespace WhiskeyRealism.Patches
                                         defOps.RemoveAt(i);
                                         RemoveFromStaticDefensiveOperation(unit);
 
-                                        if (priorPositions != null && priorPositions.TryGetValue(id, out var priorPos))
+                                        Vector3 priorPos = default(Vector3);
+                                        bool hasPrior = priorPositions != null && priorPositions.TryGetValue(id, out priorPos) &&
+                                            priorPos != default(Vector3);
+                                        var revert = CampaignMilitaryGates.ResolveForbiddenCommitRevert(QueuedDefensiveMove(unit), hasPrior);
+                                        if (revert == ForbiddenCommitRevert.CancelQueuedOrder)
+                                        {
+                                            CancelQueuedDefensiveMove(unit);
+                                        }
+                                        else if (revert == ForbiddenCommitRevert.MoveBack)
                                         {
                                             if (ShouldAvoidDirectWlRevert(unit, allianceId))
                                             {
@@ -271,11 +272,56 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("defense-intent:filter:postfix",
                     "candidate-filter Postfix failed: " + ex.Message);
             }
-            finally
-            {
-                ClearSnapshots(_aifaction);
-            }
             } // end using TelemetryPerf.Scope
+        }
+
+        // Runs after Postfix, and also when vanilla (or the Postfix) threw.
+        // A void Finalizer leaves any exception untouched.
+        [HarmonyFinalizer]
+        internal static void Finalizer(int _aifaction)
+        {
+            using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    var faction = AICampaignReflect.GetFaction(_aifaction);
+                    if (faction != null) RestoreOwnUnits(_aifaction, faction);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("defense-intent:filter:finalizer",
+                        "candidate-filter Finalizer restore failed: " + ex.Message);
+                }
+                finally
+                {
+                    ClearSnapshots(_aifaction);
+                }
+            }
+        }
+
+        private static void RestoreOwnUnits(int aifactionIndex, object faction)
+        {
+            if (!_ownUnitsSnapshot.TryGetValue(aifactionIndex, out var snapshot)) return;
+            var ownUnits = GetOwnUnitsField(faction.GetType())?.GetValue(faction) as IList;
+            CampaignMilitaryGates.RestoreListSnapshot(ownUnits, snapshot);
+        }
+
+        private static bool QueuedDefensiveMove(Regiment unit)
+        {
+            if (unit == null) return false;
+            try { return AICampaign.DefensiveMovingOrder.OrderRunning(unit); }
+            catch { return false; }
+        }
+
+        private static void CancelQueuedDefensiveMove(Regiment unit)
+        {
+            if (unit == null) return;
+            try { AICampaign.DefensiveMovingOrder.RemoveOrder(unit); }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("defense-intent:filter:remove-order",
+                    "DefensiveMovingOrder.RemoveOrder on revert failed: " + ex.Message);
+            }
         }
 
         // Collect all UnitInstanceIds that are suppressed for one of the three

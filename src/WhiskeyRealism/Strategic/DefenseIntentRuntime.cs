@@ -169,6 +169,25 @@ namespace WhiskeyRealism.Strategic
             return input;
         }
 
+        private static bool _seaInvasionStrengthResolved;
+        private static System.Reflection.MethodInfo _seaInvasionStrengthMethod;
+
+        private static System.Reflection.MethodInfo SeaInvasionStrengthMethod()
+        {
+            if (_seaInvasionStrengthResolved) return _seaInvasionStrengthMethod;
+            _seaInvasionStrengthResolved = true;
+            try { _seaInvasionStrengthMethod = CampaignMilitaryGates.ResolveSeaInvasionStrengthMethod(); }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("defense-intent:runtime:sif:strength-method",
+                    "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange(int,bool,int) lookup failed: " + ex.Message);
+            }
+            if (_seaInvasionStrengthMethod == null)
+                OnceLog.Warning("defense-intent:runtime:sif:strength-method",
+                    "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange(int,bool,int) not found; landed condition 3 disabled");
+            return _seaInvasionStrengthMethod;
+        }
+
         // ---------------------------------------------------------------------------
         // ResolveAifactionIndex
         // ---------------------------------------------------------------------------
@@ -264,21 +283,27 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
-                // Condition 3: enemy strength reported at the sea invasion spot.
+                // Condition 3: enemy land strength outweighs ours at the sea invasion
+                // spot. SeaInvasion.GetUnitStrengthInRange(int,bool,int) (decompile
+                // 141061 → 141066) with returnbalance=true, as vanilla's own callers use.
                 if (!landedSignal && seaSpot != null)
                 {
-                    try
+                    var getStrength = SeaInvasionStrengthMethod();
+                    if (getStrength != null)
                     {
-                        var getStrength = AccessTools.Method(AccessTools.TypeByName("SeaInvasion"), "GetUnitStrengthInRange");
-                        if (getStrength != null)
+                        try
                         {
-                            float enemyAtSpot = Convert.ToSingle(
-                                getStrength.Invoke(seaSpot, new object[] { allianceId, false, 1000 }));
-                            if (enemyAtSpot > 0f)
+                            int balance = Convert.ToInt32(
+                                getStrength.Invoke(seaSpot, CampaignMilitaryGates.SeaInvasionBalanceArgs(allianceId)));
+                            if (CampaignMilitaryGates.IsLandedByStrengthBalance(balance))
                                 landedSignal = true;
                         }
+                        catch (Exception ex)
+                        {
+                            OnceLog.Warning("defense-intent:runtime:sif:strength-invoke",
+                                "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange invoke failed: " + ex.Message);
+                        }
                     }
-                    catch { }
                 }
 
                 // Find nearest owned asset to use as asset metadata.

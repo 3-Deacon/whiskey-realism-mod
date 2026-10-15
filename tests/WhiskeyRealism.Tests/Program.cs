@@ -1393,6 +1393,7 @@ static class Program
         CommanderModeParseTests.Run();
         CampaignEconomyFixTests.Run();
         CampaignLifecycleFixTests.Run();
+        CampaignMilitaryFixTests.Run();
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
 
@@ -16717,7 +16718,7 @@ static class Program
 
         AssertTrue(output.Decision != CoordinatedOperationDecision.Reinforce,
             "non donor support must not create reinforce package");
-        AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
+        AssertEqual(CoordinatedOperationDecision.Delay, output.Decision); // 0.5 ratio lone lead: below RequiredReinforceRatio (C-CoordOff)
         AssertEqual(0, output.SupportStableUnitIds.Count);
         var blocked = output.Suppressed.Find(s => s.StableUnitId == 20);
         AssertTrue(blocked != null, "non donor support should be suppressed");
