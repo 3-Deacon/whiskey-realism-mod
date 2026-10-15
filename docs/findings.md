@@ -267,6 +267,10 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
+## Subsidy lanes (2026-10-15, campaign-planner investigation)
+
+`GameVars.subsidynames` (64301) = Politics 0, Economy 1, Agriculture 2, Industry 3, **Military 4**, Diplomacy 5, N/A 6-7; index constants 64303-64319 (`subsidy_military = 4`, alias `subsidy_transportx = 4`; `subsidy_tradewarx = 5`, `subsidy_civilorderx = 7` are aliases too). `FinancialAIPatch` (#18) lane 4 is therefore the **Military** subsidy: it funds military projects (`nextprojecttoresearch[4]`, `UseSubsidyForPurpose` 17529-17562, project filter 213462) and policies scale it (`militarysubsidies`, 209625, 209818-209830). No building type has `subsidytype 4`; supply depots, forts and telegraph stations have `subsidytype -1` (`Config/buildingtypes.dat` 353, 1094, 1137), so `CBuilding.Place` charges them to the treasury (`constructioncosts`, 96211-96257), not to a subsidy lane. The stage G campaign planner does not touch fiscal steering.
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:
