@@ -996,6 +996,9 @@ internal static class CampaignSnapshotTests
                                         "Condition = depot.Condition", "Built = depot.constructiontimer <= 0f" })
             AssertContains(supply, live, "supply reads live: " + live);
         AssertFalse(supply.Contains("TryGetValue") || supply.Contains("Cache") || supply.Contains("Source."), "no cached supply record");
+        int iipLoop = supply.IndexOf("for (int i = 0; i < iips.Count; i++)", StringComparison.Ordinal);
+        AssertTrue(iipLoop >= 0, "supply walks every IIP");
+        AssertFalse(supply.Substring(0, iipLoop).Contains("return"), "no early return before the live IIP reads");
 
         string objectives = MethodBody(src, "private static void ReadObjectives(");
         AssertContains(objectives, "Rails.LinesNearTown(", "town rail lines come from the cached geometry");
