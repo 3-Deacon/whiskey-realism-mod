@@ -1,6 +1,6 @@
 # W&L Chain of Command — Design
 
-**Status:** approved direction (user, 2026-10-14: "implement your improvements"; disobedience → AI adapts, no penalty). Vanilla reference: `docs/wl-player-model.md`.
+**Status:** §A-§C (battle ownership, chain target resolution, battle dispatches) are implemented by the battle core (`2026-10-15-battle-core-design.md`, OrderArbiter); this spec's own slice covers §D-§F. Approved direction (user, 2026-10-14: "implement your improvements"; disobedience → AI adapts, no penalty). Vanilla reference: `docs/wl-player-model.md`.
 
 ## Problem
 
