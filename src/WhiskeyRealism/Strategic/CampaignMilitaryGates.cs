@@ -71,7 +71,7 @@ namespace WhiskeyRealism.Strategic
 
         // ---- B-46-campaign: snapshot restore --------------------------------
         // Exact in-place restore of a vanilla list from a Prefix snapshot.
-        // Idempotent, so Postfix and Finalizer paths can both call it.
+        // Idempotent and null-safe (callers run it from Finalizers).
         internal static bool RestoreListSnapshot(System.Collections.IList live, System.Collections.Generic.IList<object> snapshot)
         {
             if (live == null || snapshot == null) return false;

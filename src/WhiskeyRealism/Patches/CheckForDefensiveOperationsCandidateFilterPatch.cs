@@ -181,10 +181,7 @@ namespace WhiskeyRealism.Patches
                 var faction = AICampaignReflect.GetFaction(_aifaction);
                 if (faction == null) return;
 
-                // Restore ownunits FIRST so the revert below sees the real list.
-                // The Finalizer repeats the (idempotent) restore and clears snapshots.
-                RestoreOwnUnits(_aifaction, faction);
-
+                // ownunits restore + snapshot clearing happen in the Finalizer.
                 // Defense-in-depth: revert any forbidden units vanilla committed to
                 // unitsindefensiveoperations despite our filter. This can happen when
                 // vanilla uses a secondary code path (e.g., the attack-operation branch

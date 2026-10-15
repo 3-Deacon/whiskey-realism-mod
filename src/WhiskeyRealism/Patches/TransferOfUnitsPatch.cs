@@ -29,12 +29,11 @@ namespace WhiskeyRealism.Patches
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
         private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
 
-        internal sealed class TransferSteerState
+        private sealed class TransferSteerState
         {
             public object Faction;
             public System.Reflection.FieldInfo DeficitField;
             public object OriginalDeficit;
-            public bool Changed;
             public int AllianceId;
             public int ObjectiveId;
             public int BeforeTransferCount;
@@ -156,7 +155,6 @@ namespace WhiskeyRealism.Patches
                     Faction = faction,
                     DeficitField = deficitField,
                     OriginalDeficit = vanillaDeficit,
-                    Changed = true,
                     AllianceId = allianceId,
                     ObjectiveId = phase.TargetObjectiveId,
                     BeforeTransferCount = TransferCount(faction),
@@ -190,7 +188,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-            if (!_pending.TryGetValue(_aifaction, out var state) || state == null || !state.Changed) return;
+            if (!_pending.TryGetValue(_aifaction, out var state) || state == null) return;
 
             try
             {
@@ -216,7 +214,7 @@ namespace WhiskeyRealism.Patches
             {
                 if (!_pending.TryGetValue(_aifaction, out var state)) return;
                 _pending.Remove(_aifaction);
-                if (state == null || !state.Changed) return;
+                if (state == null) return;
                 try
                 {
                     state.DeficitField?.SetValue(state.Faction, state.OriginalDeficit);

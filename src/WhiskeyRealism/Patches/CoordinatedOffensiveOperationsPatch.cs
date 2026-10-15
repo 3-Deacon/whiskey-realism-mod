@@ -17,7 +17,8 @@ namespace WhiskeyRealism.Patches
     // builds and commits offensive operation packages by iterating
     // aifaction[i].ownunits. When Whiskey selects AND commits a coordinated
     // package, this Prefix empties ownunits only for that vanilla call so vanilla
-    // cannot broaden or silently retarget it. Postfix/Finalizer restore the list.
+    // cannot broaden or silently retarget it. The Finalizer (runs on success and on
+    // exceptions) restores the list.
     //
     // 2026-10-14 (C-CoordOff), aligned with vanilla:
     //   - vanilla's early return (14200) is mirrored first, incl.
@@ -199,26 +200,17 @@ namespace WhiskeyRealism.Patches
             } // end using TelemetryPerf.Scope
         }
 
-        [HarmonyPostfix]
-        internal static void Postfix(int _aifaction)
-        {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
-            {
-                RestoreSnapshot(_aifaction, "postfix");
-            }
-        }
-
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, int _aifaction)
         {
             using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                RestoreSnapshot(_aifaction, "finalizer");
+                RestoreSnapshot(_aifaction);
                 return __exception;
             }
         }
 
-        private static void RestoreSnapshot(int aifactionIndex, string source)
+        private static void RestoreSnapshot(int aifactionIndex)
         {
             try
             {
@@ -253,8 +245,8 @@ namespace WhiskeyRealism.Patches
                     -1,
                     "restore-failed",
                     ex.Message,
-                    "aifaction=" + aifactionIndex + "|source=" + source);
-                OnceLog.Warning("coordinated-ops:offensive:restore:" + source,
+                    "aifaction=" + aifactionIndex);
+                OnceLog.Warning("coordinated-ops:offensive:restore",
                     "Patch CoordinatedOps offensive restore failed: " + ex.Message);
             }
             finally
