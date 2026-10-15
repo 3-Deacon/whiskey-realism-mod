@@ -109,7 +109,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly int[] _snapshotGeneration = { 0, 0 };
         private static readonly int[] _lastLedgerSnapshotGeneration = { -1, -1 };
         private static readonly int[] _directChildrenRegisteredGeneration = { -1, -1 };
-        private static readonly IReadOnlyList<CommandNodeIntent>[] _lastLedgerIntents = new IReadOnlyList<CommandNodeIntent>[2];
+        private static readonly int[] _lastLedgerIntentsHash = { 0, 0 };
         private static readonly TacticalCommanderMode[] _lastLedgerMode = new TacticalCommanderMode[2];
         private static readonly float[] _lastLedgerTickBattleSeconds = { -1f, -1f };
         // Per-battle dedupe for the intent / replan info lines (keys embed battle
@@ -670,13 +670,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         // Gated: the side's snapshot for this Tick (heavy gate evaluated once).
                         var snap = EnsureSideSnapshot(side, battle);
-                        var intents = side.Army.CurrentCommandNodeIntents;
+                        int intentsHash = CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents);
                         bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
-                            || !ReferenceEquals(intents, _lastLedgerIntents[s]);
+                            || intentsHash != _lastLedgerIntentsHash[s];
                         if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))
                             return;
                         _lastLedgerSnapshotGeneration[s] = _snapshotGeneration[s];
-                        _lastLedgerIntents[s] = intents;
+                        _lastLedgerIntentsHash[s] = intentsHash;
                         objectivesToUse = snap.Objectives;
                         bundleForStrategic = BundleFromSnapshot(snap);
                         forceMain = snap.OwnMainEffortStrength;
@@ -719,8 +719,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (states == null || states.Count == 0) return 0f;
-                Dictionary<int, Regiment> byInstanceId = null;
-                HashSet<int> counted = null;
+                bool mapBuilt = false;
+                _countedUnitIds.Clear();
                 float total = 0f;
                 for (int i = 0; i < states.Count; i++)
                 {
@@ -728,12 +728,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack) continue;
                     int instanceId = ParseCommandNodeInstanceId(states[i].NodeId);
                     if (instanceId == 0) continue;
-                    if (byInstanceId == null)
+                    if (!mapBuilt)
                     {
-                        byInstanceId = BuildGameObjectInstanceMap();
-                        counted = new HashSet<int>();
+                        FillGameObjectInstanceMap(_regimentByGameObjectId);
+                        mapBuilt = true;
                     }
-                    if (!byInstanceId.TryGetValue(instanceId, out Regiment group) || group == null) continue;
+                    if (!_regimentByGameObjectId.TryGetValue(instanceId, out Regiment group) || group == null) continue;
                     var units = group.allattachedunits;
                     if (units == null) continue;
                     for (int u = 0; u < units.Length; u++)
@@ -743,7 +743,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         // unittyp 5 is dropped from completeunitlist by UpdateUnitList (79984).
                         if (unit.unittyp == 3 || unit.unittyp == 4 || unit.unittyp == 5 || unit.permanentlydetached) continue;
                         if (unit.isrouted || unit.markedforrout || !unit.gameObject.activeInHierarchy) continue;
-                        if (!counted.Add(unit.GetInstanceID())) continue;
+                        if (!_countedUnitIds.Add(unit.GetInstanceID())) continue;
                         total += Math.Max(0f, unit.strength);
                     }
                 }
@@ -755,18 +755,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static Dictionary<int, Regiment> BuildGameObjectInstanceMap()
+        // Reused across ledger ticks (main thread only) to avoid per-tick allocation.
+        private static readonly Dictionary<int, Regiment> _regimentByGameObjectId = new Dictionary<int, Regiment>();
+        private static readonly HashSet<int> _countedUnitIds = new HashSet<int>();
+
+        private static void FillGameObjectInstanceMap(Dictionary<int, Regiment> map)
         {
-            var map = new Dictionary<int, Regiment>();
+            map.Clear();
             var units = BattleUnits.completeunitlist;
-            if (units == null) return map;
+            if (units == null) return;
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i];
                 if (reg == null) continue;
                 map[reg.gameObject.GetInstanceID()] = reg;
             }
-            return map;
         }
 
         // Command node ids are "node-<GameObject InstanceID>" (CommandTreeBuilder) or a
@@ -1659,12 +1662,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _snapshotGeneration[i] = 0;
                     _lastLedgerSnapshotGeneration[i] = -1;
                     _directChildrenRegisteredGeneration[i] = -1;
-                    _lastLedgerIntents[i] = null;
+                    _lastLedgerIntentsHash[i] = 0;
                     _lastLedgerMode[i] = TacticalCommanderMode.Off;
                     _lastLedgerTickBattleSeconds[i] = -1f;
                     _lastHeavyBuildFrame[i] = -1;
                 }
                 _battleInfoLogged.Clear();
+                _regimentByGameObjectId.Clear();
+                _countedUnitIds.Clear();
                 _endOfDayGate = new TacticalEndOfDayGate();
                 _doctrineClock = new TacticalDoctrineClock();
                 _doctrineHours = 0f;

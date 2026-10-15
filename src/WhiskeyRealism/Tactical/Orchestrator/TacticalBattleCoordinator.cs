@@ -153,6 +153,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>
+        /// Content hash of the command-node intents feeding the operations ledger
+        /// (node, source, role, axis, sector, support priority, depth, aggression). The
+        /// allocator returns a fresh list on every observe, so the ledger change gate
+        /// compares this hash instead of references.
+        /// </summary>
+        internal static int CommandNodeIntentsHash(IReadOnlyList<CommandNodeIntent> intents)
+        {
+            if (intents == null) return 0;
+            unchecked
+            {
+                int h = 17 + intents.Count;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    var intent = intents[i];
+                    h = h * 31 + StableHash(intent.NodeId);
+                    h = h * 31 + StableHash(intent.SourceNodeId);
+                    h = h * 31 + (int)intent.Role;
+                    h = h * 31 + (int)intent.Axis;
+                    h = h * 31 + intent.PrimarySector;
+                    h = h * 31 + intent.SupportPriority;
+                    h = h * 31 + intent.Depth;
+                    h = h * 31 + intent.AggressionBias01.GetHashCode();
+                }
+                return h;
+            }
+        }
+
         private static int StableHash(string value)
         {
             if (string.IsNullOrEmpty(value)) return 0;

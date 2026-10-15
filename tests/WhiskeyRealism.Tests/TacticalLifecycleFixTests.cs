@@ -47,6 +47,8 @@ internal static class TacticalLifecycleFixTests
         Pass("perf ledger ticks after clock rewind", PerfLedgerTicksAfterClockRewind);
         Pass("perf command tree hash sees parent change", PerfCommandTreeHashSeesParentChange);
         Pass("perf frame cache hits within one frame only", PerfFrameCacheHitsWithinOneFrame);
+        Pass("perf intents hash equal for reallocated identical intents", PerfIntentsHashEqualForReallocatedIntents);
+        Pass("perf intents hash sees role change", PerfIntentsHashSeesRoleChange);
     }
 
     private static void Pass(string name, Action test)
@@ -419,5 +421,32 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertFalse(cache.TryGet(10, 8, out _), "other unit");
         TestHarness.AssertFalse(cache.TryGet(11, 7, out _), "next frame");
         TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "previous frame entries dropped");
+    }
+
+    private static CommandNodeIntent[] Intents(DirectChildRole role)
+    {
+        return new[]
+        {
+            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold,
+                primarySector: 1, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
+            new CommandNodeIntent("node-2", "node-1", DirectChildRole.Reserve, DirectChildAxis.Hold,
+                primarySector: 2, supportPriority: 10, aggressionBias01: 0.2f, depth: 2),
+        };
+    }
+
+    private static void PerfIntentsHashEqualForReallocatedIntents()
+    {
+        // ArmyOrchestrator.ObserveDirectChildEvidenceWithZones reallocates the list
+        // every call; the ledger gate must compare content, not references.
+        TestHarness.AssertEqual(
+            TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.Main)),
+            TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.Main)), "same content");
+    }
+
+    private static void PerfIntentsHashSeesRoleChange()
+    {
+        TestHarness.AssertTrue(
+            TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.Main))
+            != TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.SupportMain)), "role");
     }
 }
