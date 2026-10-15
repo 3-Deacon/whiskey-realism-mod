@@ -127,6 +127,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
+        public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
@@ -890,6 +891,10 @@ namespace WhiskeyRealism
             EnableConfiscationSupplyFlowFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
                 "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
+            // Armament vanilla bug fixes (docs/bug-fixes/vanilla-armament.md).
+            EnableAutoresolveStandardGunFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Autoresolve Standard Gun Fix", true,
+                "Default ON. In vanilla autoresolve a battery armed with weapon id 0, the 6-pounder Field Gun that every campaign issues as its standard artillery, inflicts no casualties: Autocalc.FightUnit only counts weapon ids above 0. A narrow IL rewrite (left as vanilla if the code pattern is not found) counts id 0 as armed, for every side including the W&L player; this flag switches it live. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +

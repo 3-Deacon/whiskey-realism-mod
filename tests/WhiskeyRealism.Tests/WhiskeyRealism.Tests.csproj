@@ -132,6 +132,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ConfiscationSupplyFlow.cs" Link="BugFixes\ConfiscationSupplyFlow.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\FoggedModelRule.cs" Link="BugFixes\FoggedModelRule.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\OffensiveWeaponTrimIl.cs" Link="BugFixes\OffensiveWeaponTrimIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\AutoresolveWeaponGateIl.cs" Link="BugFixes\AutoresolveWeaponGateIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RaidSupplyThreshold.cs" Link="BugFixes\RaidSupplyThreshold.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RandomPickRangeIl.cs" Link="BugFixes\RandomPickRangeIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\SubordinateStrengthSelector.cs" Link="BugFixes\SubordinateStrengthSelector.cs" />
