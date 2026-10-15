@@ -8,13 +8,18 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AICampaign.CheckPerkSelection randomly assigns campaign army and
-    // fleet perks. This Prefix mirrors vanilla eligibility, chooses a
-    // role-aware perk, then still delegates assignment to Regiment.ChoosePerk.
+    // Vanilla AICampaign.CheckPerkSelection (decompile 11871-11891, job 14) calls
+    // Regiment.ChoosePerk(Random.Range(0, Length/3 - 1)) for every own unit and fleet;
+    // ChoosePerk (123381) fills the first open slot unless the perk is already owned.
+    // This Prefix mirrors vanilla eligibility and candidate window (last perk id never
+    // drawn), chooses a role-aware perk with a weighted-random tiebreak among near-equal
+    // scores, then still delegates assignment to Regiment.ChoosePerk.
     [HarmonyPatch(typeof(AICampaign), "CheckPerkSelection")]
     internal static class PerkSelectionPatch
     {
         private static readonly HashSet<string> _loggedChoices = new HashSet<string>();
+        private static readonly Dictionary<string, System.Reflection.FieldInfo> _factionFields =
+            new Dictionary<string, System.Reflection.FieldInfo>();
 
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
@@ -87,7 +92,7 @@ namespace WhiskeyRealism.Patches
                 ? cic.Effective(era)
                 : default(PersonalityVector);
             var role = ResolveArmyRole(alliance, unit, meta);
-            int selected = PerkSelectionScorer.SelectArmyPerk(alliance, meta.Theater, role, personality, available);
+            int selected = PerkSelectionScorer.SelectArmyPerk(alliance, meta.Theater, role, personality, available, UnityEngine.Random.value);
             if (selected < 0) return;
 
             unit.ChoosePerk(selected);
@@ -102,7 +107,7 @@ namespace WhiskeyRealism.Patches
             var cic = StrategicCoordinator.Instance.CICs[alliance];
             var meta = CurrentObjectiveMetadata(cic);
             var role = ResolveFleetRole(alliance, meta);
-            int selected = PerkSelectionScorer.SelectFleetPerk(alliance, role, available);
+            int selected = PerkSelectionScorer.SelectFleetPerk(alliance, role, available, UnityEngine.Random.value);
             if (selected < 0) return;
 
             fleet.ChoosePerk(selected);
@@ -196,24 +201,32 @@ namespace WhiskeyRealism.Patches
 
             if (!hasOpenSlot) return available;
 
-            for (int perkId = 0; perkId < perkCount; perkId++)
+            int limit = PerkSelectionScorer.VanillaCandidateLimit(perkCount);
+            for (int perkId = 0; perkId < limit; perkId++)
                 if (!existing.Contains(perkId))
                     available.Add(perkId);
 
             return available;
         }
 
+        // AIFaction is a single private type; field lookups are cached by name.
         private static IList ReadList(object obj, string fieldName)
         {
-            try { return AccessTools.Field(obj.GetType(), fieldName)?.GetValue(obj) as IList; }
+            try
+            {
+                if (!_factionFields.TryGetValue(fieldName, out var field))
+                {
+                    field = AccessTools.Field(obj.GetType(), fieldName);
+                    _factionFields[fieldName] = field;
+                }
+                return field?.GetValue(obj) as IList;
+            }
             catch { return null; }
         }
 
         private static object GetFaction(int aifactionIndex)
         {
-            var list = AccessTools.Field(typeof(AICampaign), "aifaction")?.GetValue(null) as IList;
-            if (list == null || aifactionIndex < 0 || aifactionIndex >= list.Count) return null;
-            return list[aifactionIndex];
+            return AICampaignReflect.GetFaction(aifactionIndex);
         }
 
         private static string UnitKey(Regiment unit)

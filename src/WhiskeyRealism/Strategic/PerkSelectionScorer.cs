@@ -27,41 +27,72 @@ namespace WhiskeyRealism.Strategic
 
     internal static class PerkSelectionScorer
     {
+        // Candidates within this score margin of the best are drawn weighted-random, so a
+        // faction's armies do not all take the same perk sequence.
+        internal const float NearTieMargin = 0.35f;
+
+        // Vanilla AICampaign.CheckPerkSelection (decompile 11881/11888) draws
+        // Random.Range(0, Length / LevelsPerPerk - 1): int overload, exclusive upper
+        // bound, so the AI never receives the last perk id. Returns that exclusive
+        // upper bound (Random.Range(0, 0) yields 0, hence a single-perk table keeps id 0).
+        internal static int VanillaCandidateLimit(int perkCount)
+        {
+            if (perkCount <= 0) return 0;
+            return perkCount == 1 ? 1 : perkCount - 1;
+        }
+
+        // roll in [0, 1): 0 = always the best-scoring perk.
         internal static int SelectArmyPerk(
             int allianceId,
             Theater theater,
             ArmyPerkRole role,
             PersonalityVector personality,
-            IEnumerable<int> availablePerks)
+            IEnumerable<int> availablePerks,
+            float roll = 0f)
         {
-            return SelectBest(availablePerks, perk => ArmyScore(allianceId, theater, role, personality, perk));
+            return SelectWeighted(availablePerks, perk => ArmyScore(allianceId, theater, role, personality, perk), roll);
         }
 
         internal static int SelectFleetPerk(
             int allianceId,
             FleetPerkRole role,
-            IEnumerable<int> availablePerks)
+            IEnumerable<int> availablePerks,
+            float roll = 0f)
         {
-            return SelectBest(availablePerks, perk => FleetScore(allianceId, role, perk));
+            return SelectWeighted(availablePerks, perk => FleetScore(allianceId, role, perk), roll);
         }
 
-        private static int SelectBest(IEnumerable<int> availablePerks, Func<int, float> scorer)
+        private static int SelectWeighted(IEnumerable<int> availablePerks, Func<int, float> scorer, float roll)
         {
             if (availablePerks == null) return -1;
 
-            int best = -1;
-            float bestScore = float.MinValue;
+            var scored = new List<KeyValuePair<int, float>>();
+            float best = float.MinValue;
             foreach (int perk in availablePerks)
             {
                 float score = scorer(perk);
-                if (score > bestScore || (Math.Abs(score - bestScore) < 0.0001f && perk < best))
-                {
-                    best = perk;
-                    bestScore = score;
-                }
+                scored.Add(new KeyValuePair<int, float>(perk, score));
+                if (score > best) best = score;
             }
+            if (scored.Count == 0) return -1;
 
-            return best;
+            float floor = best - NearTieMargin;
+            var near = scored.FindAll(kv => kv.Value > floor);
+            near.Sort((a, b) => a.Value != b.Value ? b.Value.CompareTo(a.Value) : a.Key.CompareTo(b.Key));
+
+            float total = 0f;
+            foreach (var kv in near) total += kv.Value - floor;
+            if (float.IsNaN(roll) || roll < 0f) roll = 0f;
+            if (roll >= 1f) roll = 0.9999f;
+
+            float target = roll * total;
+            float cumulative = 0f;
+            foreach (var kv in near)
+            {
+                cumulative += kv.Value - floor;
+                if (target < cumulative) return kv.Key;
+            }
+            return near[near.Count - 1].Key;
         }
 
         private static float ArmyScore(

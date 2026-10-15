@@ -45,6 +45,12 @@ namespace WhiskeyRealism.Strategic
         {
             intent = intent ?? new RecruitmentIntent();
 
+            // No plan theater and no threatened capital area: nothing strategic to steer
+            // toward, so vanilla's pool x distance choice (AIArea.GetBestRecruitingState,
+            // decompile 10722) stands.
+            if (intent.PreferredTheater == Theater.Unknown && !HasThreatenedProtectedArea(intent))
+                return Keep(vanillaStateId);
+
             RecruitmentStateCandidate best = null;
             float bestScore = float.MinValue;
             bool bestUsesDrafts = false;
@@ -161,6 +167,10 @@ namespace WhiskeyRealism.Strategic
             if (candidate.Drafts >= needed)
             {
                 usesDrafts = true;
+                // Vanilla ZoneRecruiting (decompile 12605-12609) aborts the whole pass when
+                // strengthRatio > 1 and the chosen state must draft (volunteers < size).
+                // Never steer into that abort, conscription or not.
+                if (intent.StrengthRatio > 1f) return false;
                 return intent.AllowDraftReplacement || intent.StrengthRatio < 1f;
             }
 

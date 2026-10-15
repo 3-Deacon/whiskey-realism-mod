@@ -240,9 +240,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // No active plan / TargetObjectiveId == -1 => Unknown, which makes the ledger keep
+        // vanilla's state unless the capital area is threatened.
         private static Theater DefaultRecruitmentTheater(int alliance)
         {
-            return Theater.East;
+            return Theater.Unknown;
         }
 
         private static Theater StateTheater(int stateId)

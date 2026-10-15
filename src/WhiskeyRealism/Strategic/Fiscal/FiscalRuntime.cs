@@ -33,6 +33,10 @@ namespace WhiskeyRealism.Strategic.Fiscal
             input.WeaponFailureRating = RatingFailureFromFraction(GamePrefs.minimumratingforweaponorders, input.RatingNotches);
 
             CopyArray(SafeTaxes(alliance), input.Taxes);
+            // Daily review only (StrategicCoordinator.UpdateFiscalIntentCore): roll the
+            // stress tax-floor anchor forward from the previous review's posture.
+            input.Memory.TaxFloorAnchor = FiscalIntentLedger.NextTaxFloorAnchor(
+                input.Memory.PreviousPosture, input.Memory.TaxFloorAnchor, input.Taxes);
             CopyArray(SafeTaxCaps(alliance), input.TaxCaps);
             CopyArray(SafeSubsidies(alliance), input.Subsidies);
             CopyArray(SafeSubsidyFocus(alliance), input.SubsidyFocus);
@@ -181,6 +185,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
                     input.TopSupplyTheater = sector.Theater.ToString();
             }
 
+            input.SectorCount = sectors;
             input.SupplyPressure = sectors > 0 ? supplyStress / sectors : 0f;
             input.TransportPressure = input.SupplyPressure;
             input.AmmoPressure = input.SupplyPressure * 0.5f;

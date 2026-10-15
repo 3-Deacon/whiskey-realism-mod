@@ -9,12 +9,18 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AICampaign.Update computes floor(sqrt(GameVars.gamespeed)) and
-    // runs that many private UpdateUnitAI passes in one Unity frame. At 20x/50x
-    // this is 4/7 full campaign-AI passes, and still at least one pass when
-    // gamespeed is 0. This Prefix preserves vanilla initialization and
-    // construction side effects while capping high-speed UpdateUnitAI passes
-    // behind config and skipping post-initialization paused updates.
+    // Vanilla AICampaign.Update (decompile 11159-11202) runs floor(sqrt(gamespeed))
+    // private UpdateUnitAI passes per frame (11195-11199; 4 at 20x, 7 at 50x, still 1 at
+    // speed 0), then UpdateCompanyFoundationList + CBuilding.WorkDownConstructionWishes.
+    // Each UpdateUnitAI pass advances one CheckOffensiveMovements unit (11319-11337) and
+    // one job of the per-faction job table (11372-11629).
+    //
+    // At >= 20x this Prefix replaces the pass loop with a backlog scheduler: it owes
+    // vanilla's passes every frame and pays them with smoothing (guaranteed passes, frame
+    // budget, forced catch-up beyond MaxBacklogFrames), so job-cycle progression never
+    // falls behind vanilla. Once nothing is owed it runs the Fast Forward AI catch-up
+    // extras itself (FastForwardAiCatchUpPatch stands down while the governor is on).
+    // Paused post-initialization updates are skipped.
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class CampaignAiUpdateGovernorPatch
     {
@@ -37,9 +43,11 @@ namespace WhiskeyRealism.Patches
                         return false;
                     }
 
-                    if (!plugin.CampaignAiGovernorEnabled.Value) return true;
-                    if (GameVars.gamespeed < 20f) return true;
-                    if (GameVars.debug_showcampaignaimapvalues) return true;
+                    if (!plugin.CampaignAiGovernorEnabled.Value || GameVars.gamespeed < 20f || GameVars.debug_showcampaignaimapvalues)
+                    {
+                        _owedPasses = 0f;
+                        return true;
+                    }
 
                     if (!initialized)
                     {
@@ -62,32 +70,64 @@ namespace WhiskeyRealism.Patches
                     var options = BuildOptions(plugin);
                     var watch = Stopwatch.StartNew();
                     int executedPasses = 0;
+                    _owedPasses = FastForwardAiScheduler.AccrueOwedPasses(_owedPasses, gameSpeed);
 
                     while (FastForwardAiScheduler.ShouldRunGovernedPass(
                                executedPasses,
                                (float)watch.Elapsed.TotalMilliseconds,
+                               _owedPasses,
                                gameSpeed,
                                options))
                     {
-                        updateUnitAi.Invoke(__instance, null);
+                        _owedPasses -= 1f;
                         executedPasses++;
+                        updateUnitAi.Invoke(__instance, null);
+                    }
+
+                    int extraPasses = 0;
+                    int unityFrame = Time.frameCount;
+                    var catchUp = BuildCatchUpOptions(plugin);
+                    if (FastForwardAiScheduler.ShouldThrottleAfterFrame((float)watch.Elapsed.TotalMilliseconds, 0f, catchUp))
+                        _catchUpCooldownUntilFrame = FastForwardAiScheduler.CooldownUntilFrame(unityFrame, catchUp);
+                    var catchUpWatch = Stopwatch.StartNew();
+                    while (FastForwardAiScheduler.ShouldRunCatchUpPass(
+                               extraPasses,
+                               (float)watch.Elapsed.TotalMilliseconds,
+                               (float)catchUpWatch.Elapsed.TotalMilliseconds,
+                               _owedPasses,
+                               gameSpeed,
+                               options,
+                               catchUp,
+                               unityFrame,
+                               _catchUpCooldownUntilFrame))
+                    {
+                        long passStart = Stopwatch.GetTimestamp();
+                        extraPasses++;
+                        updateUnitAi.Invoke(__instance, null);
+                        float passMs = (float)((Stopwatch.GetTimestamp() - passStart) * 1000d / Stopwatch.Frequency);
+                        if (FastForwardAiScheduler.ShouldThrottleAfterFrame(0f, passMs, catchUp))
+                            _catchUpCooldownUntilFrame = FastForwardAiScheduler.CooldownUntilFrame(unityFrame, catchUp);
                     }
 
                     updateCompanyFoundationList.Invoke(__instance, null);
                     workDownConstructionWishes.Invoke(null, null);
                     watch.Stop();
 
-                    LogSample(gameSpeed, desiredPasses, executedPasses, options, watch.Elapsed.TotalMilliseconds);
+                    LogSample(gameSpeed, desiredPasses, executedPasses, extraPasses, options, watch.Elapsed.TotalMilliseconds);
                     return false;
                 }
                 catch (Exception ex)
                 {
                     OnceLog.Warning("campaign-ai-governor:prefix", "[Patch:CampaignAIGovernor] prefix failed: " + ex.Message);
+                    _owedPasses = 0f;
                     return true;
                 }
             }
         }
 
+        // Vanilla passes owed but not yet run (bounded by MaxBacklogFrames x vanilla).
+        private static float _owedPasses;
+        private static int _catchUpCooldownUntilFrame;
         private static FieldInfo _initializedField;
         private static MethodInfo _initializeAiMethod;
         private static MethodInfo _updateUnitAiMethod;
@@ -103,6 +143,21 @@ namespace WhiskeyRealism.Patches
                 MaxPassesAt20x = Math.Max(1, plugin.CampaignAiGovernorMaxPasses20x.Value),
                 MaxPassesAt50x = Math.Max(1, plugin.CampaignAiGovernorMaxPasses50x.Value),
                 FrameBudgetMs = Math.Max(0.1f, plugin.CampaignAiGovernorFrameBudgetMs.Value)
+            };
+        }
+
+        // Fast Forward AI catch-up runs inside the governor (only when no vanilla work is
+        // owed), so extras never displace vanilla's own job progression.
+        private static FastForwardAiOptions BuildCatchUpOptions(Plugin plugin)
+        {
+            return new FastForwardAiOptions
+            {
+                Enabled = plugin.FastForwardAiCatchUp.Value,
+                FrameBudgetMs = Math.Max(0f, plugin.FastForwardAiFrameBudgetMs.Value),
+                MaxExtraPassesAt20x = plugin.FastForwardAi20xExtraPasses.Value,
+                MaxExtraPassesAt50x = plugin.FastForwardAi50xExtraPasses.Value,
+                SlowFrameThresholdMs = Math.Max(0.1f, plugin.FastForwardAiSlowFrameThresholdMs.Value),
+                SlowFrameCooldownFrames = Math.Max(0, plugin.FastForwardAiSlowFrameCooldownFrames.Value)
             };
         }
 
@@ -156,20 +211,21 @@ namespace WhiskeyRealism.Patches
 
         private static void LogSample(
             float gameSpeed,
-            int desiredPasses,
+            int vanillaPasses,
             int executedPasses,
+            int extraPasses,
             CampaignAiGovernorOptions options,
             double elapsedMs)
         {
-            bool capped = executedPasses < desiredPasses;
+            bool behind = _owedPasses >= 1f;
             bool budget = elapsedMs >= options.FrameBudgetMs;
-            string signature = ((int)Math.Round(gameSpeed)) + "x:" + desiredPasses + ":" + executedPasses + ":" + (budget ? "budget" : "cap");
-            if (!capped && !budget) return;
+            if (!behind && !budget) return;
+            string signature = ((int)Math.Round(gameSpeed)) + "x:" + vanillaPasses + ":" + (behind ? "behind" : "budget");
             if (!_logGate.ShouldLog(signature)) return;
             TelemetryRouter.LegacyInfo(
-                $"[DailyOps:Perf] source=CampaignAIGovernor speed={gameSpeed:F0} vanilla={desiredPasses} " +
-                $"executed={executedPasses} budgetMs={options.FrameBudgetMs:F2} elapsedMs={elapsedMs:F2} " +
-                $"limit={(budget ? "budget" : "cap")}",
+                $"[DailyOps:Perf] source=CampaignAIGovernor speed={gameSpeed:F0} vanilla={vanillaPasses} " +
+                $"executed={executedPasses} extra={extraPasses} owed={_owedPasses:F1} budgetMs={options.FrameBudgetMs:F2} " +
+                $"elapsedMs={elapsedMs:F2} limit={(behind ? "backlog" : "budget")}",
                 TelemetryLayer.Campaign);
         }
     }
