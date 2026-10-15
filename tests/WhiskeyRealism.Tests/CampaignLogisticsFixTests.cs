@@ -27,7 +27,6 @@ internal static class CampaignLogisticsFixTests
             ("logistics area membership prunes destroyed members", AreaMembershipPrunesDestroyedMembers),
             ("logistics winter offensive roll uses offensive modifier", WinterOffensiveRollUsesOffensiveModifier),
             ("logistics winter months match vanilla bounds", WinterMonthsMatchVanillaBounds),
-            ("logistics only own or allied depots are supply sources", OnlyOwnOrAlliedDepotsAreSupplySources),
             ("logistics only finished own-started depots are masked", OnlyFinishedOwnStartedDepotsAreMasked),
             ("logistics depot builders must stand in bugle range", DepotBuildersMustStandInBugleRange),
             ("logistics depot keeps its smallest builder only", DepotKeepsItsSmallestBuilderOnly),
@@ -171,17 +170,6 @@ internal static class CampaignLogisticsFixTests
         AssertFalse(WinterOperationsModifier.IsWinterMonth(10, 3, 11), "October");
         AssertTrue(WinterOperationsModifier.IsWinterMonth(11, 3, 11), "November is winter (>= from)");
         AssertTrue(WinterOperationsModifier.IsWinterMonth(1, 3, 11), "January");
-    }
-
-    // CheckSupplyDepotConstruction (14738-14761) admits a depot when it is own, allied,
-    // or merely has no enemy units in range (14740). Regiment.UpdateIIPSupplyLink
-    // (114296-114306) draws only from own or allied depots.
-    private static void OnlyOwnOrAlliedDepotsAreSupplySources()
-    {
-        AssertTrue(SupplyDepotAiRules.IsFriendlySupplySource(1, 1, false), "own depot");
-        AssertTrue(SupplyDepotAiRules.IsFriendlySupplySource(2, 1, true), "allied depot");
-        AssertFalse(SupplyDepotAiRules.IsFriendlySupplySource(0, 1, false), "enemy depot, defended or not");
-        AssertFalse(SupplyDepotAiRules.IsFriendlySupplySource(-1, 1, false), "unowned depot");
     }
 
     // The builder loop (14690-14713) sets the skip flag for any depot the alliance

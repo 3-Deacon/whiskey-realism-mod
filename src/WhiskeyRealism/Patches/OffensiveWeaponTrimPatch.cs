@@ -30,24 +30,22 @@ namespace WhiskeyRealism.Patches
         [HarmonyTranspiler]
         internal static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
-            var original = instructions.ToList();
+            var vanilla = instructions.ToList();
             try
             {
-                var code = original.Select(ci => ci.Clone()).ToList();
                 var hook = AccessTools.Method(typeof(OffensiveWeaponTrimPatch), nameof(TrimLeftOperand));
-                int matches = OffensiveWeaponTrimIl.Rewrite(code, OffensiveWeaponTrimIl.ResolveWeaponStrengthFactor(), OffensiveWeaponTrimIl.ResolveInfluenceField(), hook);
-                if (matches != OffensiveWeaponTrimIl.ExpectedSites)
-                {
+                var result = OffensiveWeaponTrimIl.Transpile(vanilla, OffensiveWeaponTrimIl.ResolveWeaponStrengthFactor(),
+                    OffensiveWeaponTrimIl.ResolveInfluenceField(), hook, out int matches);
+                if (ReferenceEquals(result, vanilla))
                     OnceLog.Warning("offensive-weapon-trim:pattern", "[Patch:OffensiveWeaponTrim] trim IL pattern found " + matches + " times (expected 1); CheckOffensiveMovements left as vanilla");
-                    return original;
-                }
-                OnceLog.Info("offensive-weapon-trim:applied", "[Patch:OffensiveWeaponTrim] CheckOffensiveMovements trim loop now uses the blended weapon factor");
-                return code;
+                else
+                    OnceLog.Info("offensive-weapon-trim:applied", "[Patch:OffensiveWeaponTrim] CheckOffensiveMovements trim loop now uses the blended weapon factor");
+                return result;
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("offensive-weapon-trim:transpiler", "[Patch:OffensiveWeaponTrim] transpiler failed; CheckOffensiveMovements left as vanilla: " + ex.Message);
-                return original;
+                return vanilla;
             }
         }
 

@@ -49,27 +49,16 @@ namespace WhiskeyRealism.Patches
             var vanilla = instructions.ToList();
             try
             {
-                string name = original != null ? original.Name : string.Empty;
-                int expected = -1;
-                string anchor = null;
-                foreach (var site in RandomPickRangeIl.Sites)
-                {
-                    if (site.Method != name) continue;
-                    expected = site.Expected;
-                    anchor = site.Anchor;
-                }
-                if (expected < 0) return vanilla;
-
-                var code = vanilla.Select(ci => ci.Clone()).ToList();
                 var hook = AccessTools.Method(typeof(RandomCandidatePickPatch), nameof(UpperOffset));
-                int matches = RandomPickRangeIl.Rewrite(code, RandomPickRangeIl.ResolveRandomRangeInt(), hook, expected);
-                if (matches != expected)
-                {
-                    OnceLog.Warning("random-candidate-pick:pattern:" + name, "[Patch:RandomPick] " + name + " (" + anchor + "): found " + matches + " Count - 1 picks, expected " + expected + "; left as vanilla");
-                    return vanilla;
-                }
-                OnceLog.Info("random-candidate-pick:applied:" + name, "[Patch:RandomPick] " + name + " candidate pick now includes the last candidate");
-                return code;
+                var result = RandomPickRangeIl.Transpile(vanilla, original != null ? original.Name : string.Empty,
+                    RandomPickRangeIl.ResolveRandomRangeInt(), hook, out var site, out int matches);
+                if (site == null) return vanilla;
+                var s = site.Value;
+                if (ReferenceEquals(result, vanilla))
+                    OnceLog.Warning(s.PatternKey, "[Patch:RandomPick] " + s.Method + " (" + s.Anchor + "): found " + matches + " Count - 1 picks, expected " + s.Expected + "; left as vanilla");
+                else
+                    OnceLog.Info(s.AppliedKey, "[Patch:RandomPick] " + s.Method + " candidate pick now includes the last candidate");
+                return result;
             }
             catch (Exception ex)
             {

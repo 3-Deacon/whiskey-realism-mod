@@ -25,19 +25,43 @@ namespace WhiskeyRealism.Strategic.BugFixes
             internal string Method;
             internal int Expected;
             internal string Anchor;
+            // Static OnceLog keys, one pair per site.
+            internal string AppliedKey;
+            internal string PatternKey;
         }
 
         // Decompile anchors (build 14703111).
         internal static readonly Site[] Sites =
         {
-            new Site { Method = "RaiseFleet", Expected = 1, Anchor = "12146 port to raise a new fleet at" },
-            new Site { Method = "GrabFleet", Expected = 1, Anchor = "12241 fleet weighted by free ship slots" },
-            new Site { Method = "GrabShipType", Expected = 1, Anchor = "12302 ship type to build" },
-            new Site { Method = "GrabExistingGroup", Expected = 2, Anchor = "12793 division / 12801 corps for a recruit" },
-            new Site { Method = "GetClosestIIPPositionOfZone", Expected = 1, Anchor = "12928 IIP of a recruiting zone" },
-            new Site { Method = "RaiseNewCampaignGroup", Expected = 1, Anchor = "13040 army weighted for a new group" },
-            new Site { Method = "CheckCreationOfRaidForces", Expected = 1, Anchor = "17611 frontline town for a raid force" },
+            new Site { Method = "RaiseFleet", Expected = 1, Anchor = "12146 port to raise a new fleet at", AppliedKey = "random-candidate-pick:applied:raise-fleet", PatternKey = "random-candidate-pick:pattern:raise-fleet" },
+            new Site { Method = "GrabFleet", Expected = 1, Anchor = "12241 fleet weighted by free ship slots", AppliedKey = "random-candidate-pick:applied:grab-fleet", PatternKey = "random-candidate-pick:pattern:grab-fleet" },
+            new Site { Method = "GrabShipType", Expected = 1, Anchor = "12302 ship type to build", AppliedKey = "random-candidate-pick:applied:grab-ship-type", PatternKey = "random-candidate-pick:pattern:grab-ship-type" },
+            new Site { Method = "GrabExistingGroup", Expected = 2, Anchor = "12793 division / 12801 corps for a recruit", AppliedKey = "random-candidate-pick:applied:grab-existing-group", PatternKey = "random-candidate-pick:pattern:grab-existing-group" },
+            new Site { Method = "GetClosestIIPPositionOfZone", Expected = 1, Anchor = "12928 IIP of a recruiting zone", AppliedKey = "random-candidate-pick:applied:zone-iip", PatternKey = "random-candidate-pick:pattern:zone-iip" },
+            new Site { Method = "RaiseNewCampaignGroup", Expected = 1, Anchor = "13040 army weighted for a new group", AppliedKey = "random-candidate-pick:applied:raise-new-group", PatternKey = "random-candidate-pick:pattern:raise-new-group" },
+            new Site { Method = "CheckCreationOfRaidForces", Expected = 1, Anchor = "17611 frontline town for a raid force", AppliedKey = "random-candidate-pick:applied:raid-town", PatternKey = "random-candidate-pick:pattern:raid-town" },
         };
+
+        // The transpiler's whole decision. Returns the list Harmony should emit: the
+        // rewritten copy when the method is a known site and its count matches, otherwise
+        // the vanilla list itself (same instance). `site` is the matched site or null.
+        internal static List<CodeInstruction> Transpile(List<CodeInstruction> vanilla, string methodName,
+            MethodInfo randomRangeInt, MethodInfo upperOffsetHook, out Site? site, out int matches)
+        {
+            site = null;
+            matches = 0;
+            if (vanilla == null) return vanilla;
+            foreach (var candidate in Sites)
+            {
+                if (candidate.Method != methodName) continue;
+                site = candidate;
+                var code = new List<CodeInstruction>(vanilla.Count);
+                foreach (var ci in vanilla) code.Add(ci.Clone());
+                matches = Rewrite(code, randomRangeInt, upperOffsetHook, candidate.Expected);
+                return matches == candidate.Expected ? code : vanilla;
+            }
+            return vanilla;
+        }
 
         internal static int UpperOffset(bool fixEnabled)
         {

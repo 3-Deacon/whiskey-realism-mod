@@ -24,7 +24,7 @@ namespace WhiskeyRealism.Patches
     // a camp model would reveal the unit.
     //
     // For a fogged AI land unit on the campaign map the Prefix clears iswithinfog for the
-    // call and swaps sound_objectref for an empty array (vanilla plays the "army encamps"
+    // call and swaps sound_objectref for an empty array (UnitFogFlip) (vanilla plays the "army encamps"
     // bugle only when sound_objectref.Length != 0, 115411-115414; nothing else in the method
     // reads it); the Finalizer restores both, even if vanilla throws, then deactivates the
     // camp and entrenchment GameObjects while the unit stays hidden from the player and
@@ -38,24 +38,24 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(Regiment), "UpdateCampsAndEntrenchments")]
     internal static class FoggedCampPatch
     {
-        internal struct Flip
-        {
-            internal bool Active;
-            internal int[] Sounds;
-        }
-
         private static readonly int[] NoSounds = new int[0];
         // NavMesh area ids; -1 until the campaign navmesh resolves them.
         private static int _riverArea = -1;
         private static int _seaArea = -1;
 
+        private static readonly UnitFogFlip<Regiment, int[]> Flip = new UnitFogFlip<Regiment, int[]>(
+            unit => unit.iswithinfog,
+            (unit, fog) => unit.iswithinfog = fog,
+            unit => unit.sound_objectref,
+            (unit, sounds) => unit.sound_objectref = sounds,
+            NoSounds);
+
         [HarmonyPrefix]
-        internal static void Prefix(Regiment __instance, ref Flip __state)
+        internal static void Prefix(Regiment __instance)
         {
             using (TelemetryPerf.Scope("campaign.patch.fogged-camp.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.fogged-camp.prefix");
-                __state = default(Flip);
                 try
                 {
                     if (__instance == null || !__instance.iswithinfog) return;
@@ -69,11 +69,7 @@ namespace WhiskeyRealism.Patches
                     {
                         return;
                     }
-
-                    __state.Active = true;
-                    __state.Sounds = __instance.sound_objectref;
-                    __instance.iswithinfog = false;
-                    __instance.sound_objectref = NoSounds;
+                    Flip.Apply(__instance);
                 }
                 catch (Exception ex)
                 {
@@ -83,27 +79,25 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyFinalizer]
-        internal static void Finalizer(Regiment __instance, Flip __state)
+        internal static void Finalizer(Regiment __instance)
         {
             using (TelemetryPerf.Scope("campaign.patch.fogged-camp.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.fogged-camp.finalizer");
                 try
                 {
+                    bool flipped = Flip.Active;
+                    string failure = Flip.Restore(vanillaRecomputedFog: false);
+                    if (failure != null)
+                        OnceLog.Warning("fogged-camp:restore", "[Patch:FoggedCamp] restoring the fog flag failed: " + failure);
                     if (__instance == null) return;
-                    if (__state.Active)
-                    {
-                        __instance.iswithinfog = true;
-                        __instance.sound_objectref = __state.Sounds;
-                        if ((UnityEngine.Object)__instance.campbuilding != null)
-                            OnceLog.Info("fogged-camp:kept", "[Patch:FoggedCamp] a fogged AI unit kept its camp (model hidden from the player)");
-                    }
+                    if (flipped && (UnityEngine.Object)__instance.campbuilding != null)
+                        OnceLog.Info("fogged-camp:kept", "[Patch:FoggedCamp] a fogged AI unit kept its camp (model hidden from the player)");
 
                     bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
                     if (isPlayerAlliance) return;
-                    bool hide = FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog);
-                    SetModelActive(__instance.campbuilding, !hide);
-                    SetModelActive(__instance.entrenchment, !hide);
+                    bool active = !FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog);
+                    Report(SyncModel(__instance.campbuilding, active) + SyncModel(__instance.entrenchment, active));
                 }
                 catch (Exception ex)
                 {
@@ -112,15 +106,21 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void SetModelActive(CBuilding building, bool active)
+        private static int SyncModel(CBuilding building, bool active)
         {
-            if ((UnityEngine.Object)building == null) return;
-            var go = ((Component)building).gameObject;
-            if (go.activeSelf == active) return;
-            go.SetActive(active);
-            if (!active)
+            return ModelActiveSync.Apply(
+                building,
+                b => (UnityEngine.Object)b == null,
+                b => ((Component)b).gameObject.activeSelf,
+                (b, on) => ((Component)b).gameObject.SetActive(on),
+                active);
+        }
+
+        private static void Report(int change)
+        {
+            if (change < 0)
                 OnceLog.Info("fogged-camp:hidden", "[Patch:FoggedCamp] hid a camp or entrenchment model of an AI unit the player cannot see");
-            else
+            else if (change > 0)
                 OnceLog.Info("fogged-camp:shown", "[Patch:FoggedCamp] re-showed a camp or entrenchment model of an AI unit the player now sees");
         }
 

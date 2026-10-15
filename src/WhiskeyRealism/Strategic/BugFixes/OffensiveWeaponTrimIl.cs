@@ -56,6 +56,19 @@ namespace WhiskeyRealism.Strategic.BugFixes
             return prefs == null ? null : AccessTools.Field(prefs, "influenceweaponsonoffensives");
         }
 
+        // The transpiler's whole decision: the rewritten copy when exactly ExpectedSites
+        // match, otherwise the vanilla list itself (same instance).
+        internal static List<CodeInstruction> Transpile(List<CodeInstruction> vanilla, MethodInfo weaponStrengthFactor,
+            FieldInfo influence, MethodInfo leftOperandHook, out int matches)
+        {
+            matches = 0;
+            if (vanilla == null) return vanilla;
+            var code = new List<CodeInstruction>(vanilla.Count);
+            foreach (var ci in vanilla) code.Add(ci.Clone());
+            matches = Rewrite(code, weaponStrengthFactor, influence, leftOperandHook);
+            return matches == ExpectedSites ? code : vanilla;
+        }
+
         // Returns the number of matching sites. The code is changed only when exactly
         // ExpectedSites match; any other count leaves it untouched (fail safe).
         internal static int Rewrite(List<CodeInstruction> code, MethodInfo weaponStrengthFactor, FieldInfo influence, MethodInfo leftOperandHook)

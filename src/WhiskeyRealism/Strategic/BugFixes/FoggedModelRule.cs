@@ -49,6 +49,24 @@ namespace WhiskeyRealism.Strategic.BugFixes
             return fixEnabled && calledFromCampaign && useFogOfWar && !isPlayerAlliance && isWithinFog && !isFleet;
         }
 
+        // CheckModelReplacement's removal branch destroys the model and re-runs
+        // CheckRegimentVisibility (116463-116467), which recomputes iswithinfog; that fresh
+        // value stands and the Finalizer must not overwrite it.
+        internal static bool VanillaRecomputedFog(bool hadModelBefore, bool hasModelAfter)
+        {
+            return hadModelBefore && !hasModelAfter;
+        }
+
+        // Ship.Initialize (141255) adds 20 ship-firing SoundObjects per transport model to
+        // SoundEngine lists that never shrink (AddPurposeArray 146747-146756), but only a
+        // fleet vessel's model ever fires them (AnimateFire callers 19058/19283/19672 use
+        // singlevesselshipref, 18230). While the fix creates a fogged AI land unit's model,
+        // those models share one array instead of adding 20 each.
+        internal static bool ShouldShareFiringSounds(bool creatingFoggedLandModel, int purposeId, int shipFiringPurpose)
+        {
+            return creatingFoggedLandModel && purposeId == shipFiringPurpose;
+        }
+
         // Camp, entrenchment and transport models of a unit the player cannot see stay
         // hidden; any other unit shows them as vanilla does. Player-alliance units are never
         // touched.

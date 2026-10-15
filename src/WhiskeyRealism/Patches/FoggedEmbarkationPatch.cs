@@ -20,81 +20,142 @@ namespace WhiskeyRealism.Patches
     // Vanilla gates the model on fog because it would reveal the unit.
     //
     // For a fogged AI land unit on the campaign map the Prefix clears iswithinfog for the
-    // call and the Finalizer restores it (even if vanilla throws), then deactivates the
-    // transport model while the player cannot see the unit and reactivates it once the
-    // unit is visible. The model's Ship.Update only follows the unit's position (141265,
-    // 141358); Ship.Initialize registers a firing sound array but plays nothing (141228).
+    // call (UnitFogFlip); the Finalizer sets it again, even if vanilla throws, unless the
+    // removal branch re-ran CheckRegimentVisibility (116463-116467) and so recomputed it.
+    // It then deactivates the transport model while the player cannot see the unit and
+    // reactivates it once the unit is visible. The model's Ship.Update only follows the
+    // unit's position (141265, 141358); Ship.Initialize plays nothing (141228-141262).
     // A fleet (unittyp 17) and player-alliance units are never touched (FoggedModelRule).
+    //
+    // SharedFiringSounds: Ship.Initialize adds 20 ship-firing SoundObjects per model to
+    // SoundEngine lists that never shrink (141255 -> AddPurposeArray 146747-146756). A land
+    // unit's transport never fires (AnimateFire's callers 19058/19283/19672 use fleet
+    // vessels' models, 18230), so while this patch creates a fogged unit's model the Prefix
+    // returns one remembered array index per SoundEngine instead of adding another 20
+    // (a Prefix that skips vanilla, limited to that purpose inside this patch's call).
     // Rollback: Campaign Bug Fixes / Enable Fogged AI Embarkation Fix (models are still
     // re-shown for visible units when the flag is off).
-    [HarmonyPatch(typeof(Regiment), "CheckModelReplacement")]
     internal static class FoggedEmbarkationPatch
     {
-        [HarmonyPrefix]
-        internal static void Prefix(Regiment __instance, ref bool __state)
-        {
-            using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
-            {
-                PatchFirstFire.Mark("campaign.patch.fogged-embarkation.prefix");
-                __state = false;
-                try
-                {
-                    if (__instance == null || !__instance.iswithinfog) return;
-                    if (!FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(
-                            Enabled(),
-                            __instance.calledfromcampaign,
-                            GameVars.usefow,
-                            __instance.alliance == GameVars.playeralliance,
-                            __instance.iswithinfog,
-                            __instance.unittyp == 17))
-                    {
-                        return;
-                    }
+        private static readonly UnitFogFlip<Regiment, object> Flip = new UnitFogFlip<Regiment, object>(
+            unit => unit.iswithinfog,
+            (unit, fog) => unit.iswithinfog = fog);
 
-                    __state = true;
-                    __instance.iswithinfog = false;
-                }
-                catch (Exception ex)
+        private static readonly SharedArrayIndex FiringSounds = new SharedArrayIndex();
+
+        [HarmonyPatch(typeof(Regiment), "CheckModelReplacement")]
+        internal static class ModelReplacement
+        {
+            [HarmonyPrefix]
+            internal static void Prefix(Regiment __instance, ref bool __state)
+            {
+                using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    OnceLog.Warning("fogged-embarkation:prefix", "[Patch:FoggedEmbarkation] prefix failed (vanilla runs unchanged): " + ex.Message);
+                    PatchFirstFire.Mark("campaign.patch.fogged-embarkation.prefix");
+                    __state = false;
+                    try
+                    {
+                        if (__instance == null || !__instance.iswithinfog) return;
+                        if (!FoggedModelRule.ShouldTreatAsVisibleForEmbarkation(
+                                Enabled(),
+                                __instance.calledfromcampaign,
+                                GameVars.usefow,
+                                __instance.alliance == GameVars.playeralliance,
+                                __instance.iswithinfog,
+                                __instance.unittyp == 17))
+                        {
+                            return;
+                        }
+                        __state = (UnityEngine.Object)__instance.shownmodel != null;
+                        Flip.Apply(__instance);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnceLog.Warning("fogged-embarkation:prefix", "[Patch:FoggedEmbarkation] prefix failed (vanilla runs unchanged): " + ex.Message);
+                    }
+                }
+            }
+
+            [HarmonyFinalizer]
+            internal static void Finalizer(Regiment __instance, bool __state)
+            {
+                using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    PatchFirstFire.Mark("campaign.patch.fogged-embarkation.finalizer");
+                    try
+                    {
+                        bool flipped = Flip.Active;
+                        bool hasModel = __instance != null && (UnityEngine.Object)__instance.shownmodel != null;
+                        string failure = Flip.Restore(FoggedModelRule.VanillaRecomputedFog(__state, hasModel));
+                        if (failure != null)
+                            OnceLog.Warning("fogged-embarkation:restore", "[Patch:FoggedEmbarkation] restoring the fog flag failed: " + failure);
+                        if (__instance == null) return;
+                        if (flipped && hasModel)
+                            OnceLog.Info("fogged-embarkation:kept", "[Patch:FoggedEmbarkation] a fogged AI unit is embarked (transport model hidden from the player)");
+
+                        bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
+                        if (isPlayerAlliance || __instance.unittyp == 17) return;
+                        int change = ModelActiveSync.Apply(
+                            __instance.shownmodel,
+                            m => (UnityEngine.Object)m == null,
+                            m => ((Component)m).gameObject.activeSelf,
+                            (m, on) => ((Component)m).gameObject.SetActive(on),
+                            !FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog));
+                        if (change < 0)
+                            OnceLog.Info("fogged-embarkation:hidden", "[Patch:FoggedEmbarkation] hid the transport model of an AI unit the player cannot see");
+                        else if (change > 0)
+                            OnceLog.Info("fogged-embarkation:shown", "[Patch:FoggedEmbarkation] re-showed the transport model of an AI unit the player now sees");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnceLog.Warning("fogged-embarkation:finalizer", "[Patch:FoggedEmbarkation] finalizer failed: " + ex.Message);
+                    }
                 }
             }
         }
 
-        [HarmonyFinalizer]
-        internal static void Finalizer(Regiment __instance, bool __state)
+        [HarmonyPatch(typeof(SoundEngine), "AddPurposeArray")]
+        internal static class SharedFiringSounds
         {
-            using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            [HarmonyPrefix]
+            internal static bool Prefix(SoundEngine __instance, int soundpurposeid, ref int __result)
             {
-                PatchFirstFire.Mark("campaign.patch.fogged-embarkation.finalizer");
-                try
+                using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.shared-sounds.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    if (__instance == null) return;
-                    // The removal branch may re-run CheckRegimentVisibility (116467), which
-                    // recomputes iswithinfog; the snapshot value is restored either way.
-                    if (__state)
+                    PatchFirstFire.Mark("campaign.patch.fogged-embarkation.shared-sounds.prefix");
+                    try
                     {
-                        __instance.iswithinfog = true;
-                        if ((UnityEngine.Object)__instance.shownmodel != null)
-                            OnceLog.Info("fogged-embarkation:kept", "[Patch:FoggedEmbarkation] a fogged AI unit is embarked (transport model hidden from the player)");
+                        if (!FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring)) return true;
+                        if (!FiringSounds.TryGet(__instance, out int index)) return true;
+                        __result = index;
+                        OnceLog.Info("fogged-embarkation:shared-sounds", "[Patch:FoggedEmbarkation] a hidden AI transport model reuses one ship-firing sound array");
+                        return false;
                     }
-
-                    bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
-                    if (isPlayerAlliance || __instance.unittyp == 17) return;
-                    var model = __instance.shownmodel;
-                    if ((UnityEngine.Object)model == null) return;
-                    bool active = !FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog);
-                    var go = ((Component)model).gameObject;
-                    if (go.activeSelf == active) return;
-                    go.SetActive(active);
-                    if (!active)
-                        OnceLog.Info("fogged-embarkation:hidden", "[Patch:FoggedEmbarkation] hid the transport model of an AI unit the player cannot see");
-                    else
-                        OnceLog.Info("fogged-embarkation:shown", "[Patch:FoggedEmbarkation] re-showed the transport model of an AI unit the player now sees");
+                    catch (Exception ex)
+                    {
+                        OnceLog.Warning("fogged-embarkation:shared-sounds-failed", "[Patch:FoggedEmbarkation] sound sharing failed (vanilla adds its array): " + ex.Message);
+                        return true;
+                    }
                 }
-                catch (Exception ex)
+            }
+
+            [HarmonyPostfix]
+            // After the Prefix skipped vanilla, __result is the remembered index already;
+            // remembering it again is a no-op.
+            internal static void Postfix(SoundEngine __instance, int soundpurposeid, int __result)
+            {
+                using (TelemetryPerf.Scope("campaign.patch.fogged-embarkation.shared-sounds.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    OnceLog.Warning("fogged-embarkation:finalizer", "[Patch:FoggedEmbarkation] finalizer failed: " + ex.Message);
+                    PatchFirstFire.Mark("campaign.patch.fogged-embarkation.shared-sounds.postfix");
+                    try
+                    {
+                        if (FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring))
+                            FiringSounds.Remember(__instance, __result);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnceLog.Warning("fogged-embarkation:shared-sounds-remember", "[Patch:FoggedEmbarkation] remembering the sound array failed: " + ex.Message);
+                    }
                 }
             }
         }

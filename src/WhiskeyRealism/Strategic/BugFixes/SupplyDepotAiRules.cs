@@ -5,12 +5,6 @@ namespace WhiskeyRealism.Strategic.BugFixes
 {
     // AICampaign.CheckSupplyDepotConstruction (decompile 14659-14779), job 19.
     //
-    // BUG-LOG-005: the resupply search admits a depot when it is own, allied, or merely
-    // has no enemy units in range (14740), so an undefended enemy depot becomes the
-    // "installation" a starving unit walks to or waits beside (flag3, 14745-14753) and
-    // blocks its depot wish (flag2, 14757-14760). Regiment.UpdateIIPSupplyLink only draws
-    // from own or allied depots (114296-114306).
-    //
     // BUG-LOG-006: the builder loop (14690-14713) sets the skip flag for any depot the
     // alliance started within commander range, finished or not (14697), so a unit next
     // to its own finished, empty or captured depot neither moves nor wishes a depot.
@@ -20,6 +14,11 @@ namespace WhiskeyRealism.Strategic.BugFixes
     // starting alliance stands within its own bugle range (96626-96655); and the
     // replace-by-smaller dedupe adds the new unit even when it is not smaller
     // (14706-14711), pinning several units to one depot.
+    //
+    // Not a bug (BUG-LOG-005): the installation test at 14740 also admits an undefended
+    // enemy depot, which the unit captures by walking up (frontline 87208-87250 ->
+    // CheckNewOwner 95810 -> ChangeOwnership 95402-95452 keeps the stock) and then draws
+    // from (UpdateIIPSupplyLink 114296-114306).
     internal static class SupplyDepotAiRules
     {
         internal struct BuilderUnit
@@ -39,11 +38,6 @@ namespace WhiskeyRealism.Strategic.BugFixes
             internal float Z;
             // Started by this alliance and still under construction (14695, 14698).
             internal bool UnderConstruction;
-        }
-
-        internal static bool IsFriendlySupplySource(int depotOwner, int alliance, bool depotOwnerAllied)
-        {
-            return depotOwner == alliance || depotOwnerAllied;
         }
 
         // A finished depot the alliance started is hidden from the builder loop for the

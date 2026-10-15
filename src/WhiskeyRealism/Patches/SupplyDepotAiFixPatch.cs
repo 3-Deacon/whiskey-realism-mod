@@ -14,17 +14,7 @@ namespace WhiskeyRealism.Patches
     // depots the alliance started (14690-14713) and sets a skip flag, then a stationary
     // unit with GetGroupSupplyState < supplystatedepotconstruction walks to the nearest
     // own town or depot (14719-14768) or wishes a depot at its position (14770-14776).
-    // This file fixes three faults in that job, for every AI faction alike; vanilla's own
-    // W&L guard on the move (14765) and its order-10 dispatch stay as they are.
-    //
-    // BUG-LOG-005 (Enable Supply Depot Friendly Source Fix): the depot search admits a
-    // depot that is own, allied, OR merely has no enemy units in range (14740), so an
-    // undefended enemy depot, which never supplies the unit (UpdateIIPSupplyLink draws
-    // only from own or allied depots, 114296-114306), becomes the place a starving unit
-    // walks to or waits beside (flag3, 14745-14753) and blocks its depot wish (flag2,
-    // 14757-14760). Inside the job, EnemyHeldDepot makes CBuilding.EnemyUnitsInRange
-    // (98023-98045, called in the job only at 14740) answer true for a depot that is
-    // neither own nor allied, so only friendly depots pass the test.
+    // Vanilla's own W&L guard on the move (14765) and its order-10 dispatch stay as they are.
     //
     // BUG-LOG-006 and BUG-LOG-007 (Enable Supply Depot Builder Fix): the skip flag is set
     // for any depot the alliance started within commander range, finished or not
@@ -33,43 +23,43 @@ namespace WhiskeyRealism.Patches
     // CBuilding.IncreaseCondition advances construction only with a unit of the starting
     // alliance inside its own bugle range (96626-96655), and the replace-by-smaller dedupe
     // adds the new unit even when it is not smaller (14706-14711). The Prefix hides
-    // finished own-started depots from the builder loop for the call (allianceconstruction-
-    // started = -1; nothing else in the job reads it) and the Finalizer restores them even
-    // if vanilla throws; the Postfix rebuilds unitsconstructingsupplydepots with the bugle
-    // range and one builder, the smallest, per depot (SupplyDepotAiRules.SelectBuilders).
-    // Depot placement (14770-14775) is left to the stage G planner.
+    // finished own-started depots from the builder loop for the call (FieldMask on
+    // allianceconstructionstarted = -1; nothing else in the job reads it) and the
+    // Finalizer restores them even if vanilla throws; the Postfix rebuilds
+    // unitsconstructingsupplydepots with the bugle range and one builder per depot, the
+    // smallest (SupplyDepotAiRules.SelectBuilders, ListContents.ReplaceIfDifferent).
+    //
+    // Not changed: the installation test at 14740 (own, allied, or no enemy units in range)
+    // admits an undefended enemy depot on purpose, as a capture-for-supply target
+    // (BUG-LOG-005); depot placement (14770-14775) is left to the stage G planner.
     internal static class SupplyDepotAiFixPatch
     {
-        private static int _depth;
-        private static bool _friendlySourceOnly;
-
-        internal sealed class Scope
-        {
-            internal bool Entered;
-            internal int Alliance = -1;
-            internal readonly List<CBuilding> Masked = new List<CBuilding>();
-            internal readonly List<int> MaskedStartedBy = new List<int>();
-        }
+        private static readonly FieldMask<CBuilding, int> FinishedOwnDepots = new FieldMask<CBuilding, int>(
+            depot => depot.allianceconstructionstarted,
+            (depot, startedBy) => depot.allianceconstructionstarted = startedBy,
+            -1);
 
         [HarmonyPatch(typeof(AICampaign), "CheckSupplyDepotConstruction")]
         internal static class DepotJob
         {
             [HarmonyPrefix]
-            internal static void Prefix(int _aifaction, ref Scope __state)
+            internal static void Prefix(int _aifaction, ref int __state)
             {
                 using (TelemetryPerf.Scope("campaign.patch.supply-depot-fix.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.supply-depot-fix.prefix");
-                    __state = null;
+                    __state = -1;
                     try
                     {
-                        if (!MasterEnabled()) return;
+                        if (!Enabled()) return;
                         int alliance = AICampaignReflect.GetAllianceId(_aifaction);
                         if (alliance < 0) return;
-                        __state = new Scope { Entered = true, Alliance = alliance };
-                        _depth++;
-                        _friendlySourceOnly = FriendlySourceFixEnabled();
-                        if (BuilderFixEnabled()) MaskFinishedOwnDepots(alliance, __state);
+                        __state = alliance;
+                        int masked = FinishedOwnDepots.Mask(BattleUnits.supplydepot,
+                            depot => (UnityEngine.Object)depot != null
+                                && SupplyDepotAiRules.ShouldMaskFinishedOwnDepot(depot.allianceconstructionstarted, alliance, depot.constructiontimer));
+                        if (masked > 0)
+                            OnceLog.Info("supply-depot-fix:masked", "[Patch:SupplyDepotFix] finished own depots no longer stop a nearby low-supply unit from resupplying");
                     }
                     catch (Exception ex)
                     {
@@ -79,15 +69,15 @@ namespace WhiskeyRealism.Patches
             }
 
             [HarmonyPostfix]
-            internal static void Postfix(int _aifaction, Scope __state)
+            internal static void Postfix(int _aifaction, int __state)
             {
                 using (TelemetryPerf.Scope("campaign.patch.supply-depot-fix.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.supply-depot-fix.postfix");
-                    if (__state == null || !BuilderFixEnabled()) return;
+                    if (__state < 0) return;
                     try
                     {
-                        RebuildBuilders(_aifaction, __state.Alliance);
+                        RebuildBuilders(_aifaction, __state);
                     }
                     catch (Exception ex)
                     {
@@ -97,66 +87,23 @@ namespace WhiskeyRealism.Patches
             }
 
             [HarmonyFinalizer]
-            internal static void Finalizer(Scope __state)
+            internal static void Finalizer()
             {
                 using (TelemetryPerf.Scope("campaign.patch.supply-depot-fix.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("campaign.patch.supply-depot-fix.finalizer");
-                    if (__state == null || !__state.Entered) return;
-                    _depth = Math.Max(0, _depth - 1);
-                    if (_depth == 0) _friendlySourceOnly = false;
-                    for (int i = 0; i < __state.Masked.Count; i++)
-                    {
-                        var depot = __state.Masked[i];
-                        if ((UnityEngine.Object)depot != null) depot.allianceconstructionstarted = __state.MaskedStartedBy[i];
-                    }
-                }
-            }
-        }
-
-        [HarmonyPatch(typeof(CBuilding), "EnemyUnitsInRange")]
-        internal static class EnemyHeldDepot
-        {
-            [HarmonyPostfix]
-            internal static void Postfix(CBuilding __instance, int alliancecalling, ref bool __result)
-            {
-                using (TelemetryPerf.Scope("campaign.patch.supply-depot-fix.enemy-held", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
-                {
-                    PatchFirstFire.Mark("campaign.patch.supply-depot-fix.enemy-held");
-                    if (_depth <= 0 || !_friendlySourceOnly || __result) return;
                     try
                     {
-                        if ((UnityEngine.Object)__instance == null || __instance.BuildingType != CBuilding.id_supplydepot) return;
-                        if (GameVars.alliance == null || alliancecalling < 0 || alliancecalling >= GameVars.alliance.Length) return;
-                        int owner = __instance.Owner;
-                        bool allied = owner >= 0 && owner < GameVars.alliance.Length && GameVars.alliance[alliancecalling].IsInAllianceWith(owner);
-                        if (SupplyDepotAiRules.IsFriendlySupplySource(owner, alliancecalling, allied)) return;
-                        __result = true;
-                        OnceLog.Info("supply-depot-fix:enemy-depot", "[Patch:SupplyDepotFix] an enemy depot was not taken as a resupply installation");
+                        string failure = FinishedOwnDepots.Restore(depot => (UnityEngine.Object)depot == null);
+                        if (failure != null)
+                            OnceLog.Warning("supply-depot-fix:restore", "[Patch:SupplyDepotFix] restoring a depot's starting alliance failed: " + failure);
                     }
                     catch (Exception ex)
                     {
-                        OnceLog.Warning("supply-depot-fix:enemy-held", "[Patch:SupplyDepotFix] enemy-depot test failed (vanilla answer kept): " + ex.Message);
+                        OnceLog.Warning("supply-depot-fix:finalizer", "[Patch:SupplyDepotFix] finalizer failed: " + ex.Message);
                     }
                 }
             }
-        }
-
-        private static void MaskFinishedOwnDepots(int alliance, Scope scope)
-        {
-            var depots = BattleUnits.supplydepot;
-            if (depots == null) return;
-            for (int i = 0; i < depots.Count; i++)
-            {
-                var depot = depots[i];
-                if ((UnityEngine.Object)depot == null) continue;
-                if (!SupplyDepotAiRules.ShouldMaskFinishedOwnDepot(depot.allianceconstructionstarted, alliance, depot.constructiontimer)) continue;
-                scope.Masked.Add(depot);
-                scope.MaskedStartedBy.Add(depot.allianceconstructionstarted);
-                depot.allianceconstructionstarted = -1;
-            }
-            if (scope.Masked.Count > 0)
-                OnceLog.Info("supply-depot-fix:masked", "[Patch:SupplyDepotFix] finished own depots no longer stop a nearby low-supply unit from resupplying");
         }
 
         private static void RebuildBuilders(int aifactionIndex, int alliance)
@@ -198,32 +145,21 @@ namespace WhiskeyRealism.Patches
             }
 
             var selected = SupplyDepotAiRules.SelectBuilders(units, sites);
-            bool same = selected.Count == builders.Count;
-            for (int k = 0; same && k < selected.Count; k++)
-                same = builders.Contains(ownUnits[selected[k]]);
-            if (same) return;
-
-            builders.Clear();
+            var desired = new List<Regiment>(selected.Count);
             for (int k = 0; k < selected.Count; k++)
-                builders.Add(ownUnits[selected[k]]);
-            OnceLog.Info("supply-depot-fix:builders", "[Patch:SupplyDepotFix] depot builders limited to one unit per depot inside its bugle range");
+                desired.Add(ownUnits[selected[k]]);
+            if (ListContents.ReplaceIfDifferent(builders, desired))
+                OnceLog.Info("supply-depot-fix:builders", "[Patch:SupplyDepotFix] depot builders limited to one unit per depot inside its bugle range");
         }
 
-        private static bool MasterEnabled()
+        private static bool Enabled()
         {
-            try { return Plugin.Instance != null && Plugin.Instance.Enabled.Value; }
-            catch { return false; }
-        }
-
-        private static bool FriendlySourceFixEnabled()
-        {
-            try { return Plugin.EnableSupplyDepotFriendlySourceFix != null && Plugin.EnableSupplyDepotFriendlySourceFix.Value; }
-            catch { return false; }
-        }
-
-        private static bool BuilderFixEnabled()
-        {
-            try { return Plugin.EnableSupplyDepotBuilderFix != null && Plugin.EnableSupplyDepotBuilderFix.Value; }
+            try
+            {
+                return Plugin.Instance != null && Plugin.Instance.Enabled.Value
+                    && Plugin.EnableSupplyDepotBuilderFix != null
+                    && Plugin.EnableSupplyDepotBuilderFix.Value;
+            }
             catch { return false; }
         }
     }

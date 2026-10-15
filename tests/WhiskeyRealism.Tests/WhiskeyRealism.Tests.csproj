@@ -125,6 +125,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\LogisticsSwaps.cs" Link="Patches\LogisticsSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\AIAreaMembership.cs" Link="BugFixes\AIAreaMembership.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ConfiscationSupplyFlow.cs" Link="BugFixes\ConfiscationSupplyFlow.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\FoggedModelRule.cs" Link="BugFixes\FoggedModelRule.cs" />

@@ -12,6 +12,15 @@ namespace WhiskeyRealism.Strategic.BugFixes
         // Both terms of GetGroupSupplyState are multiplied by this.
         internal const float GroupSupplyStateScale = 0.5f;
 
+        // Vanilla only raises raid forces for factions its job machine runs
+        // (CheckCreationOfRaidForces 17568, job 11573); a W&L CIC player's faction is skipped
+        // (11620-11628), and every unit of it is dlcw_isundercommander. A raid group under the
+        // W&L player's command keeps vanilla's gate: the fix never sets it moving on its own.
+        internal static bool ShouldRescale(bool fixEnabled, bool hasRaidGroup, bool wlScenarioActive, bool underPlayerCommand)
+        {
+            return fixEnabled && hasRaidGroup && !(wlScenarioActive && underPlayerCommand);
+        }
+
         internal static float ThresholdOnGroupSupplyScale(float configuredThreshold)
         {
             return configuredThreshold * GroupSupplyStateScale;
