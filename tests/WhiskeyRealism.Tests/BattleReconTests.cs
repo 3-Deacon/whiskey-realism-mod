@@ -1,0 +1,786 @@
+using System;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
+using static TestHarness;
+
+// BC9: reconnaissance and probing (plan § "BC9 — reconnaissance and probing").
+// The pure recon planner over a BattleSnapshot fixture, the contact ledger's
+// where-to-look reads, the skirmisher screen push and the doctrine fixes the slice
+// folds in (director no-contact scouting, GT recon, cavalry follow, facing Entry).
+internal static class BattleReconTests
+{
+    public static void Run()
+    {
+        RunAll(new (string, Action)[]
+        {
+            ("recon scout is a standing AI cavalry regiment", ScoutIsStandingAiCavalryRegiment),
+            ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
+            ("recon scout's brigade must be settled and not moved by posture this tick", ScoutParentMustBeSettled),
+            ("recon stale entry point beats stale band and forward", StaleEntryPointPickedFirst),
+            ("recon stale band when every entry point is watched", StaleBandPickedNext),
+            ("recon forward only before any contact", ForwardOnlyBeforeContact),
+            ("recon no mission above the gate without stale ground", NoMissionAboveGateWithoutStaleGround),
+            ("recon stand point refused near a visible superior enemy", StandPointRefusedNearSuperiorEnemy),
+            ("recon stand point refused when the path passes a superior enemy", StandPointRefusedOnCorridor),
+            ("recon weaker visible enemy does not block the stand point", WeakerEnemyDoesNotBlock),
+            ("recon mission starts bounded per doctrine hour", MissionStartsBoundedPerHour),
+            ("recon repeat target suppressed within the hour", RepeatTargetSuppressed),
+            ("recon mission ends when the executor did not issue the move", MissionEndsWithoutExecutorIssue),
+            ("recon mission continues on an executor issued move", MissionContinuesOnIssuedMove),
+            ("recon outbound stops and observes on first sight", OutboundStopsOnFirstSight),
+            ("recon superior contact sends the scout back", SuperiorContactReturns),
+            ("recon observe dwells then returns to the brigade", ObserveDwellsThenReturns),
+            ("recon recalled when another source moves the scout", RecalledByAnotherSource),
+            ("recon mission times out", MissionTimesOut),
+            ("probe nominates one group per empty band in the probe phase", ProbeNominatesPerEmptyBand),
+            ("probe never for a defender or outside the probe phase", ProbeNeverForDefenderOrOtherPhase),
+            ("probe skips linked groups and player subtrees", ProbeSkipsLinkedAndPlayerSubtree),
+            ("probe one start per band per doctrine hour", ProbeBoundedPerBandPerHour),
+            ("probe ends on visible contact with one stop", ProbeEndsOnContactWithStop),
+            ("look point is one infantry sight depth along the axis", LookPointIsOneSightDepth),
+            ("look point refused toward a visible superior enemy", LookPointRefusedTowardSuperior),
+            ("look point toward the objective, capped at it, before the axis has a target", LookPointTowardObjectiveBeforeContact),
+            ("recon planner allocates nothing after warm-up", PlanAllocatesNothingAfterWarmup),
+            ("ledger entry point stamps keep the last watched hour", LedgerEntryStampsKeepLastWatched),
+            ("ledger stalest band is the lowest recency band", LedgerStalestBand),
+            ("skirmisher push in screen stance out of contact", SkirmisherPushInScreen),
+            ("skirmisher push off in contact, defend, player-owned or for a non-company", SkirmisherPushRefusals),
+            ("skirmisher push while an attack-stance group moves", SkirmisherPushWhileAttackMoves),
+            ("director: no enemy contact selects scouting, never a commit", DirectorNoContactScouts),
+            ("doctrine: scouting without contact gives probe and screen tasks", ScoutingWithoutContactTasks),
+            ("doctrine: a defensive network is not sent probing", DefensiveNetworkNotProbing),
+            ("gt recon: cavalry in the subtree no longer turns a group into a scout", GtReconNoCavalryScoutBranch),
+            ("cavalry follow: a target in square or a command group is no raid target", CavalryFollowSquareAndOfficer),
+            ("facing: an unwatched entry point faces a screen, never urgently", FacingEntryIsNotUrgent),
+            ("facing: the stalest unwatched entry point is the screen's bearing", EntryBearingPicksStalest),
+        });
+    }
+
+    // ------------------------------------------------------------------ fixture
+
+    private const int CavBrigade = 100, CavA = 101, CavB = 102, Company = 103;
+    private const int InfBrigade = 200, InfA = 201, InfDivision = 300;
+    private const int EnemyId = 900;
+    private static long _tick;
+
+    private static ReconSettings Settings(bool enabled = true) =>
+        new ReconSettings(enabled, cavalrySight: 250f, infantrySight: 200f, standOff: 150f, interruptMeters: 100f, minMorale: 0.5f);
+
+    // Own line on z = -1000 facing +z; cavalry brigade at x = 0 (regiments at -40 / +40),
+    // infantry brigade at x = 400 under a division at x = 200. Front axis forward +z.
+    private static BattleSnapshot Field(double hours, Action<BattleSnapshot> extra = null)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, ++_tick, hours);
+        s.SetSliceCount(20);
+        AddGroup(s, InfDivision, TacticalUnitType.BattleGroupDivision, 200f);
+        AddGroup(s, CavBrigade, TacticalUnitType.BattleGroupBrigade, 0f);
+        AddUnit(s, CavA, TacticalUnitType.Cavalry, -40f, UnitFlags.IsCavalry);
+        AddUnit(s, CavB, TacticalUnitType.Cavalry, 40f, UnitFlags.IsCavalry);
+        AddGroup(s, InfBrigade, TacticalUnitType.BattleGroupBrigade, 400f);
+        AddUnit(s, InfA, TacticalUnitType.Infantry, 400f, UnitFlags.IsInfantry);
+        extra?.Invoke(s);
+        for (int i = 0; i < s.OwnCount; i++)
+        {
+            int id = s.Own[i].InstanceId;
+            if (id == CavA || id == CavB || id == Company) s.Own[i].ParentIndex = s.IndexOfOwn(CavBrigade);
+            else if (id == InfA) s.Own[i].ParentIndex = s.IndexOfOwn(InfBrigade);
+            else if (id == InfBrigade) s.Own[i].ParentIndex = s.IndexOfOwn(InfDivision);
+        }
+        s.IndexCommandTree(null);
+        s.SetFrontAxis(TacticalFrontAxis.FromCentroids(150f, -1000f, 150f, 0f).WithOwnExtent(-200f, 300f));
+        return s;
+    }
+
+    private static void AddGroup(BattleSnapshot s, int id, int typ, float x)
+    {
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = id, UnitTyp = typ, X = x, Z = -1000f, AiStance = 1, AiStanceOrdered = 1,
+            Strength = 1200, GroupStrengthAiGroup = 1200, Morale = 0.9f,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup,
+        });
+    }
+
+    private static void AddUnit(BattleSnapshot s, int id, int typ, float x, UnitFlags kind)
+    {
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = id, UnitTyp = typ, X = x, Z = -1000f, Strength = 400, Morale = 0.9f, RotationY = 0f,
+            Flags = UnitFlags.Alive | UnitFlags.Active | kind,
+        });
+    }
+
+    private static void SeeEnemy(BattleSnapshot s, float x, float z, float strength, double hours)
+    {
+        s.AddObservation(new EnemyObservation
+        {
+            InstanceId = EnemyId + s.ObservationCount, UnitTyp = TacticalUnitType.Infantry, X = x, Z = z, Strength = strength,
+            State = ObservationState.Visible, Confidence01 = 1f, LastSeenHours = hours,
+        });
+    }
+
+    private static ref UnitRecord Own(BattleSnapshot s, int id) => ref s.Own[s.IndexOfOwn(id)];
+
+    private static ReconPicture Picture(BattleSnapshot s, float confidence = 0.1f, bool hadContact = true,
+        BattlePhase phase = BattlePhase.MainEffort, bool defending = false)
+    {
+        var p = new ReconPicture();
+        p.BeginTick(s.OwnCount);
+        p.IntelConfidence = confidence;
+        p.HadContact = hadContact;
+        p.Phase = phase;
+        p.SideDefending = defending;
+        for (int i = 0; i < s.OwnCount; i++)
+            if ((s.Own[i].Flags & UnitFlags.IsGroup) != 0 && s.Own[i].InstanceId != InfDivision) p.AiPool[i] = true;
+        return p;
+    }
+
+    private sealed class Sink : IIntentSink
+    {
+        public readonly BattleOrderIntent[] Items = new BattleOrderIntent[32];
+        public int Count;
+        public void Submit(in BattleOrderIntent intent) { if (Count < Items.Length) Items[Count++] = intent; }
+        public void Clear() { Count = 0; }
+
+        public bool TryFind(int id, OrderChannel channel, out BattleOrderIntent intent)
+        {
+            for (int i = 0; i < Count; i++)
+                if (Items[i].GroupId == id && Items[i].Channel == channel) { intent = Items[i]; return true; }
+            intent = default(BattleOrderIntent);
+            return false;
+        }
+
+        public int CountOf(OrderChannel channel)
+        {
+            int n = 0;
+            for (int i = 0; i < Count; i++) if (Items[i].Channel == channel) n++;
+            return n;
+        }
+    }
+
+    private sealed class Rig
+    {
+        public readonly ReconMemory Memory = new ReconMemory();
+        public readonly OrderExecutor Executor = new OrderExecutor();
+        public readonly Sink Sink = new Sink();
+        public ReconTickResult Last;
+
+        public ReconTickResult Plan(BattleSnapshot s, ReconPicture p, ReconSettings? settings = null)
+        {
+            Sink.Clear();
+            Last = BattleRecon.Plan(s, settings ?? Settings(), p, Memory, Executor, Sink);
+            return Last;
+        }
+
+        // What the executor records when it issues an intent (RecordIssued: LastOutcome Issued).
+        public void Issue(in BattleOrderIntent intent, double hours)
+        {
+            Executor.RecordIssued(intent, hours, Array.Empty<IssuedTarget>(), 0, Array.Empty<UnitWaypoint>(), 0, 0, 1);
+        }
+
+        public void IssueAll(double hours)
+        {
+            for (int i = 0; i < Sink.Count; i++) Issue(Sink.Items[i], hours);
+        }
+    }
+
+    private static ReconPicture WithEntry(ReconPicture p, float x, float z, double watchedHours)
+    {
+        p.AddEntry(x, z, watchedHours);
+        return p;
+    }
+
+    // ------------------------------------------------------------------ scout
+
+    private static void ScoutIsStandingAiCavalryRegiment()
+    {
+        var s = Field(1.0);
+        var p = Picture(s);
+        AssertTrue(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(CavA), Settings(), p), "standing cavalry regiment");
+        AssertFalse(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(InfA), Settings(), p), "infantry is no scout");
+        AssertFalse(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(CavBrigade), Settings(), p), "a group is no scout");
+        Own(s, CavA).RegimentPaths = 1;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(CavA), Settings(), p), "a moving regiment is busy");
+        Own(s, CavA).RegimentPaths = 0;
+        Own(s, CavA).QueuedOrders = 1;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(CavA), Settings(), p), "an order in flight");
+    }
+
+    private static void ScoutFilterRefusals()
+    {
+        var s = Field(1.0, f => AddUnit(f, Company, TacticalUnitType.Cavalry, 0f, UnitFlags.IsCavalry | UnitFlags.DetachedCompany));
+        var p = Picture(s);
+        AssertFalse(BattleRecon.IsScoutCandidate(s, s.IndexOfOwn(Company), Settings(), p), "a detached company is vanilla's");
+        int a = s.IndexOfOwn(CavA);
+        UnitFlags[] refuse = { UnitFlags.PlayerOwned, UnitFlags.Feud, UnitFlags.Routed, UnitFlags.MarkedForRout, UnitFlags.OnRetreat,
+            UnitFlags.InMelee, UnitFlags.Garrisoned, UnitFlags.PermanentlyDetached };
+        foreach (UnitFlags flag in refuse)
+        {
+            s.Own[a].Flags |= flag;
+            AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "refused: " + flag);
+            s.Own[a].Flags &= ~flag;
+        }
+        s.Own[a].Morale = 0.4f;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "below vanilla's morale bar to send men out");
+        s.Own[a].Morale = 0.9f;
+        SeeEnemy(s, -40f, -880f, 100f, 1.0);
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a visible enemy within the stand-off");
+    }
+
+    private static void ScoutParentMustBeSettled()
+    {
+        var s = Field(1.0);
+        var p = Picture(s);
+        int a = s.IndexOfOwn(CavA);
+        int brigade = s.IndexOfOwn(CavBrigade);
+        p.PostureMoved[brigade] = true;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade got a posture move this tick");
+        p.PostureMoved[brigade] = false;
+        s.Own[brigade].RegimentPaths = 1;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade moving");
+        s.Own[brigade].RegimentPaths = 0;
+        s.Own[brigade].QueuedOrders = 1;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade has an order in flight");
+        s.Own[brigade].QueuedOrders = 0;
+        s.Own[brigade].AiStanceOrdered = 4;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade ordered to assault");
+        s.Own[brigade].AiStanceOrdered = 1;
+        s.Own[brigade].Flags |= UnitFlags.PlayerOwned;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade is the player's");
+    }
+
+    // ------------------------------------------------------------------ targets
+
+    private static void StaleEntryPointPickedFirst()
+    {
+        var s = Field(3.0);
+        var p = WithEntry(Picture(s), 0f, -200f, -1.0);
+        p.HasStaleBand = true; p.StaleBandLateral = -150f; p.StaleBandRecency = 0.1f; p.FrameHeading = 0f;
+        var rig = new Rig();
+        rig.Plan(s, p);
+        AssertEqual(ReconTargetKind.EntryPoint, rig.Memory.Kind, "entry point first");
+        AssertTrue(rig.Sink.TryFind(CavA, OrderChannel.Move, out BattleOrderIntent move) || rig.Sink.TryFind(CavB, OrderChannel.Move, out move), "a scout moves");
+        AssertNear(0f, move.TargetX, 60f, "toward the entry point");
+        AssertNear(-350f, move.TargetZ, 1f, "stand-off 150 m short of it on the line from the scout");
+        AssertEqual(IntentPriority.Support, move.Priority, "support priority");
+        AssertEqual(IntentSource.Recon, move.Source, "recon source");
+        AssertEqual(CommandTaskType.Scout, move.Task, "scout task");
+        AssertTrue((move.Flags & IntentFlags.UseOrderDelay) != 0, "by courier like vanilla AI moves");
+        AssertTrue((rig.Last.Events & ReconEvents.MissionStarted) != 0, "mission started event");
+    }
+
+    private static void StaleBandPickedNext()
+    {
+        var s = Field(3.0);
+        var p = WithEntry(Picture(s), 0f, -200f, 2.9); // watched 0.1 h ago
+        p.HasStaleBand = true; p.StaleBandLateral = -150f; p.StaleBandRecency = 0.1f; p.FrameHeading = 0f;
+        var rig = new Rig();
+        rig.Plan(s, p);
+        AssertEqual(ReconTargetKind.StaleBand, rig.Memory.Kind, "band next");
+        // Heading 0: right = (1, 0), so lateral -150 is x = -150 at the own line's depth.
+        AssertNear(-150f, rig.Memory.TargetX, 0.5f, "band lateral centre");
+        AssertNear(-1000f, rig.Memory.TargetZ, 0.5f, "own line depth");
+        AssertTrue(rig.Sink.TryFind(CavA, OrderChannel.Move, out _), "the scout nearest the band rides");
+    }
+
+    private static void ForwardOnlyBeforeContact()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0f, hadContact: false));
+        AssertEqual(ReconTargetKind.Forward, rig.Memory.Kind, "forward without contact");
+        AssertNear(-500f, rig.Memory.TargetZ, 0.5f, "own line depth plus two cavalry sight depths");
+        var rig2 = new Rig();
+        rig2.Plan(s, Picture(s, confidence: 0.1f, hadContact: true));
+        AssertEqual(ReconLeg.None, rig2.Memory.Leg, "after contact, low confidence alone sends nobody forward blind");
+    }
+
+    private static void NoMissionAboveGateWithoutStaleGround()
+    {
+        var s = Field(3.0);
+        var p = WithEntry(Picture(s, confidence: 0.6f), 0f, -200f, 2.9);
+        var rig = new Rig();
+        rig.Plan(s, p);
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "confident and nothing stale");
+        AssertEqual(0, rig.Sink.Count, "no intent");
+        p.HasStaleBand = true; p.StaleBandLateral = -150f; p.StaleBandRecency = 0.2f;
+        rig.Plan(s, p);
+        AssertEqual(ReconTargetKind.StaleBand, rig.Memory.Kind, "stale ground is looked at even above the gate");
+    }
+
+    private static void StandPointRefusedNearSuperiorEnemy()
+    {
+        var s = Field(3.0, f => { });
+        SeeEnemy(s, 0f, -260f, 2000f, 3.0);
+        var rig = new Rig();
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "superior enemy at the stand point");
+        AssertFalse(BattleRecon.StandPointSafe(s, 0f, -1000f, 0f, -350f, 400f, Settings()), "unsafe stand point");
+    }
+
+    private static void StandPointRefusedOnCorridor()
+    {
+        var s = Field(3.0);
+        SeeEnemy(s, 60f, -700f, 2000f, 3.0); // 60 m off the straight path, far from the stand point
+        AssertFalse(BattleRecon.StandPointSafe(s, 0f, -1000f, 0f, -350f, 400f, Settings()), "superior enemy within 100 m of the path");
+    }
+
+    private static void WeakerEnemyDoesNotBlock()
+    {
+        var s = Field(3.0);
+        SeeEnemy(s, 60f, -700f, 100f, 3.0);
+        AssertTrue(BattleRecon.StandPointSafe(s, 0f, -1000f, 0f, -350f, 400f, Settings()), "a weaker picket does not block");
+    }
+
+    // ------------------------------------------------------------------ missions
+
+    // Ends the running mission the way the runtime does when the executor issued
+    // nothing for it (fail closed): a tick with nothing new to look at.
+    private static void EndMission(Rig rig, double hours)
+    {
+        var s = Field(hours);
+        rig.Plan(s, Picture(s, confidence: 0.6f));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "mission ended");
+    }
+
+    private static void MissionStartsBoundedPerHour()
+    {
+        var rig = new Rig();
+        double h = 3.0;
+        for (int k = 0; k < ReconSettings.MaxMissionStartsPerHour; k++)
+        {
+            var s = Field(h);
+            rig.Plan(s, WithEntry(Picture(s), -400f + 200f * k, -200f, -1.0));
+            AssertTrue(rig.Memory.Leg == ReconLeg.Outbound, "start " + k);
+            EndMission(rig, h + 0.01);
+            h += 0.05;
+        }
+        var t = Field(h);
+        rig.Plan(t, WithEntry(Picture(t), 600f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "fifth start inside the hour refused");
+        var u = Field(4.01);
+        rig.Plan(u, WithEntry(Picture(u), 600f, -200f, -1.0));
+        AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "allowed again an hour after the first start");
+    }
+
+    private static void RepeatTargetSuppressed()
+    {
+        var rig = new Rig();
+        var s = Field(3.0);
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        EndMission(rig, 3.01);
+        var t = Field(3.2);
+        rig.Plan(t, WithEntry(Picture(t), 30f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "same entry point inside the hour");
+        var u = Field(4.1);
+        rig.Plan(u, WithEntry(Picture(u), 30f, -200f, -1.0));
+        AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "after the hour");
+    }
+
+    private static Rig Outbound(out int scout)
+    {
+        var rig = new Rig();
+        var s = Field(3.0);
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        scout = rig.Memory.ScoutId;
+        return rig;
+    }
+
+    private static void MissionEndsWithoutExecutorIssue()
+    {
+        var rig = Outbound(out int scout);
+        var s = Field(3.01);
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "fail closed: nothing issued");
+        AssertEqual("not-issued", rig.Last.EndReason, "reason");
+        AssertTrue((rig.Last.Events & ReconEvents.MissionEnded) != 0, "ended event");
+    }
+
+    private static void MissionContinuesOnIssuedMove()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.01, f => { });
+        Own(s, scout).RegimentPaths = 1;
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "still outbound");
+        AssertTrue(rig.Memory.Confirmed, "confirmed by the executor's Issued outcome");
+        AssertTrue(rig.Sink.TryFind(scout, OrderChannel.Move, out _), "move re-submitted to hold the claim");
+    }
+
+    private static void OutboundStopsOnFirstSight()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.02);
+        Own(s, scout).Z = -600f;
+        Own(s, scout).RegimentPaths = 1;
+        SeeEnemy(s, Own(s, scout).X, -480f, 100f, 3.02); // 120 m ahead, weaker
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Observe, rig.Memory.Leg, "observe on first sight");
+        AssertTrue(rig.Sink.TryFind(scout, OrderChannel.Stop, out BattleOrderIntent stop), "a stop: a screen does not stop itself");
+        AssertEqual(IntentSource.Recon, stop.Source, "recon stop");
+    }
+
+    private static void SuperiorContactReturns()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.02);
+        Own(s, scout).Z = -600f;
+        Own(s, scout).RegimentPaths = 1;
+        SeeEnemy(s, Own(s, scout).X, -520f, 3000f, 3.02); // 80 m, superior
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Return, rig.Memory.Leg, "back on superior contact");
+        AssertTrue(rig.Sink.TryFind(scout, OrderChannel.Move, out BattleOrderIntent back), "return move");
+        AssertTrue(back.TargetZ < -600f, "back toward the own line");
+    }
+
+    private static void ObserveDwellsThenReturns()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.05);
+        Own(s, scout).Z = -350f; // arrived
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Observe, rig.Memory.Leg, "arrived: observe");
+        AssertEqual(0, rig.Sink.CountOf(OrderChannel.Move), "no move while observing");
+        var t = Field(3.05 + ReconSettings.ObserveDwellHours + 0.001);
+        Own(t, scout).Z = -350f;
+        rig.Plan(t, WithEntry(Picture(t), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Return, rig.Memory.Leg, "dwell over: return");
+        AssertTrue(rig.Sink.TryFind(scout, OrderChannel.Move, out BattleOrderIntent back), "return move");
+        AssertNear(0f, back.TargetX, 0.5f, "to its brigade");
+        AssertNear(-1000f, back.TargetZ, 0.5f, "to its brigade");
+        rig.IssueAll(t.DoctrineHours);
+        var u = Field(3.2);
+        Own(u, scout).Z = -980f;
+        rig.Plan(u, WithEntry(Picture(u), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "home: mission over");
+        AssertEqual("returned", rig.Last.EndReason, "reason");
+    }
+
+    private static void RecalledByAnotherSource()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        rig.Issue(new BattleOrderIntent { GroupId = scout, Channel = OrderChannel.Move, Source = IntentSource.Withdrawal, Priority = IntentPriority.Safety }, 3.01);
+        var s = Field(3.02);
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "withdrawal took the scout");
+        AssertEqual("recalled", rig.Last.EndReason, "reason");
+    }
+
+    private static void MissionTimesOut()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.0 + ReconSettings.MaxMissionHours + 0.01);
+        Own(s, scout).RegimentPaths = 1;
+        rig.Plan(s, WithEntry(Picture(s), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.None, rig.Memory.Leg, "timed out");
+        AssertEqual("timeout", rig.Last.EndReason, "reason");
+    }
+
+    // ------------------------------------------------------------------ probe
+
+    private static void ProbeNominatesPerEmptyBand()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(CavBrigade, out float x, out float z), "cavalry brigade's band probes");
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out float ix, out float iz), "infantry brigade's band probes");
+        AssertNear(-800f, iz, 0.5f, "one infantry sight depth (200 m) forward");
+        AssertNear(400f, ix, 0.5f, "straight ahead");
+        AssertFalse(rig.Memory.TryGetProbe(InfDivision, out _, out _), "the division is not in the AI pool");
+        AssertTrue((rig.Last.Events & ReconEvents.ProbeNominated) != 0, "nomination event");
+        AssertEqual(0, rig.Sink.CountOf(OrderChannel.Move), "the probe move is the posture producer's");
+    }
+
+    private static void ProbeNeverForDefenderOrOtherPhase()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe, defending: true));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "a defender never probes");
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.MainEffort));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "only in the probe phase");
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "probe phase");
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.MainEffort));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "nomination ends with the probe phase");
+    }
+
+    private static void ProbeSkipsLinkedAndPlayerSubtree()
+    {
+        var s = Field(3.0);
+        Own(s, InfBrigade).Flags |= UnitFlags.Linked;
+        Own(s, CavB).Flags |= UnitFlags.PlayerOwned;
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "vanilla's link would re-lay a linked group");
+        AssertFalse(rig.Memory.TryGetProbe(CavBrigade, out _, out _), "a player-owned unit in the subtree");
+    }
+
+    private static void ProbeBoundedPerBandPerHour()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        var t = Field(3.1);
+        Own(t, InfBrigade).Z = -800f; // arrived
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "arrived: nomination ends");
+        var u = Field(3.5);
+        rig.Plan(u, Picture(u, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "band probed inside the hour");
+        var v = Field(4.05);
+        rig.Plan(v, Picture(v, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "band probed again after the hour");
+    }
+
+    private static void ProbeEndsOnContactWithStop()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        var t = Field(3.05);
+        Own(t, InfBrigade).Z = -900f;
+        Own(t, InfBrigade).RegimentPaths = 1;
+        SeeEnemy(t, 400f, -720f, 500f, 3.05); // 180 m: inside infantry sight
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "contact made: nomination ends");
+        AssertTrue(rig.Sink.TryFind(InfBrigade, OrderChannel.Stop, out BattleOrderIntent stop), "one stop");
+        AssertEqual(IntentPriority.Support, stop.Priority, "support stop");
+        AssertTrue((rig.Last.Events & ReconEvents.ProbeEnded) != 0, "probe ended event");
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertEqual(0, rig.Sink.CountOf(OrderChannel.Stop), "the stop is sent once");
+    }
+
+    private static void LookPointIsOneSightDepth()
+    {
+        var s = Field(3.0);
+        AssertTrue(BattleRecon.LookPoint(s, s.IndexOfOwn(InfBrigade), Settings(), Picture(s), out float x, out float z), "look point");
+        AssertNear(400f, x, 0.5f, "x");
+        AssertNear(-800f, z, 0.5f, "z");
+    }
+
+    private static void LookPointRefusedTowardSuperior()
+    {
+        var s = Field(3.0);
+        SeeEnemy(s, 400f, -760f, 5000f, 3.0);
+        AssertFalse(BattleRecon.LookPoint(s, s.IndexOfOwn(InfBrigade), Settings(), Picture(s), out _, out _), "never into a visible superior enemy");
+    }
+
+    private static void LookPointTowardObjectiveBeforeContact()
+    {
+        var s = Field(3.0);
+        s.SetFrontAxis(TacticalFrontAxis.FromCentroids(150f, -1000f, 150f, -1000f).WithOwnExtent(-200f, 300f)); // no target: +z by default
+        var p = Picture(s);
+        AssertFalse(BattleRecon.LookPoint(s, s.IndexOfOwn(InfBrigade), Settings(), p, out _, out _), "no axis target and no objective: nowhere to look");
+        p.HasObjective = true; p.ObjectiveX = 400f + 120f; p.ObjectiveZ = -1000f; // 120 m east
+        AssertTrue(BattleRecon.LookPoint(s, s.IndexOfOwn(InfBrigade), Settings(), p, out float x, out float z), "toward the objective");
+        AssertNear(520f, x, 0.5f, "capped at the objective (120 m < 200 m)");
+        AssertNear(-1000f, z, 0.5f, "east, not the default +z");
+    }
+
+    private static void PlanAllocatesNothingAfterWarmup()
+    {
+        var rig = Outbound(out int scout);
+        rig.IssueAll(3.0);
+        var s = Field(3.01);
+        Own(s, scout).RegimentPaths = 1;
+        var p = WithEntry(Picture(s, phase: BattlePhase.Probe), 0f, -200f, -1.0);
+        var settings = Settings();
+        rig.Sink.Clear();
+        BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
+        rig.Sink.Clear();
+        BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        rig.Sink.Clear();
+        BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
+        long after = GC.GetAllocatedBytesForCurrentThread();
+        AssertEqual(0L, after - before, "zero allocation after warm-up");
+    }
+
+    // ------------------------------------------------------------------ ledger
+
+    private static void LedgerEntryStampsKeepLastWatched()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        int[] ids = { 7, 8 };
+        float[] xs = { 10f, 20f };
+        float[] zs = { -10f, -20f };
+        bool[] watched = { true, false };
+        ledger.ObserveEntryPoints(1f, ids, xs, zs, watched, 2);
+        AssertEqual(2, ledger.EntryPointCount, "two enemy entry points");
+        AssertTrue(ledger.TryGetEntryPoint(0, out float x0, out float z0, out float w0), "first");
+        AssertEqual(10f, x0, "x");
+        AssertEqual(1f, w0, "watched now");
+        AssertTrue(ledger.TryGetEntryPoint(1, out _, out _, out float w1), "second");
+        AssertEqual(-1f, w1, "never watched");
+        watched[0] = false;
+        ledger.ObserveEntryPoints(2f, ids, xs, zs, watched, 2);
+        ledger.TryGetEntryPoint(0, out _, out _, out w0);
+        AssertEqual(1f, w0, "keeps the last watched hour");
+        ledger.Reset();
+        AssertEqual(0, ledger.EntryPointCount, "reset");
+    }
+
+    private static void LedgerStalestBand()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        float[] min = { -100f, 0f };
+        float[] max = { 0f, 100f };
+        ledger.ObserveCoverage(1f, min, max, new[] { true, true }, 2, 0, 0, 0f);
+        ledger.ObserveCoverage(2f, min, max, new[] { false, true }, 2, 0, 0, 0f);
+        AssertTrue(ledger.TryStalestBand(2f, out float lateral, out float recency), "a band");
+        AssertNear(-50f, lateral, 0.01f, "the left band was seen an hour earlier");
+        AssertNear(0.5f, recency, 0.01f, "recency 1 - 1 h / 2 h");
+        AssertNear(0f, ledger.FrameHeading, 0.01f, "frame heading");
+    }
+
+    // ------------------------------------------------------------------ skirmisher push
+
+    private static BattleSnapshot Skirmish(double hours, int groupStance, bool groupMoving = false)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, ++_tick, hours);
+        s.SetSliceCount(20);
+        AddGroup(s, InfBrigade, TacticalUnitType.BattleGroupBrigade, 0f);
+        s.Own[0].AiStance = groupStance;
+        s.Own[0].RegimentPaths = groupMoving ? 1 : 0;
+        AddUnit(s, InfA, TacticalUnitType.Infantry, 0f, UnitFlags.IsInfantry);
+        AddUnit(s, Company, TacticalUnitType.Skirmisher, 0f, UnitFlags.DetachedCompany);
+        s.Own[2].ParentRegimentId = InfA;
+        s.Own[1].ParentIndex = 0;
+        s.Own[2].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private static void SkirmisherPushInScreen()
+    {
+        var s = Skirmish(1.0, groupStance: 1);
+        float extra = BattleRecon.SkirmisherPushMeters(s, s.IndexOfOwn(Company), vanillaLinkMeters: 30f, pushMeters: 100f, cancelMeters: 150f);
+        AssertNear(70f, extra, 0.01f, "from vanilla's 30 m to the 100 m interruption distance");
+    }
+
+    private static void SkirmisherPushRefusals()
+    {
+        var s = Skirmish(1.0, groupStance: 1);
+        int c = s.IndexOfOwn(Company);
+        Own(s, Company).FirstEnemyInRangeId = 55;
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(s, c, 30f, 100f, 150f), "own range list not empty: vanilla's 30 m");
+        Own(s, Company).FirstEnemyInRangeId = 0;
+        SeeEnemy(s, 0f, -800f, 50f, 1.0); // 200 m < 150 + 100
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(s, c, 30f, 100f, 150f), "visible enemy too close to push");
+        var d = Skirmish(1.0, groupStance: 2);
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(d, d.IndexOfOwn(Company), 30f, 100f, 150f), "defend stance keeps vanilla's");
+        var p = Skirmish(1.0, groupStance: 1);
+        Own(p, Company).Flags |= UnitFlags.PlayerOwned;
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(p, p.IndexOfOwn(Company), 30f, 100f, 150f), "W&L player's company");
+        var r = Skirmish(1.0, groupStance: 1);
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(r, r.IndexOfOwn(InfA), 30f, 100f, 150f), "not a company");
+        Own(r, Company).Flags |= UnitFlags.InMelee;
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(r, r.IndexOfOwn(Company), 30f, 100f, 150f), "in melee");
+    }
+
+    private static void SkirmisherPushWhileAttackMoves()
+    {
+        var still = Skirmish(1.0, groupStance: 3);
+        AssertEqual(0f, BattleRecon.SkirmisherPushMeters(still, still.IndexOfOwn(Company), 30f, 100f, 150f), "attack stance standing");
+        var moving = Skirmish(1.0, groupStance: 3, groupMoving: true);
+        AssertNear(70f, BattleRecon.SkirmisherPushMeters(moving, moving.IndexOfOwn(Company), 30f, 100f, 150f), 0.01f, "attack stance approaching");
+    }
+
+    // ------------------------------------------------------------------ doctrine fixes
+
+    private static BattlefieldObjectiveEstimate NoEnemyObjective(float confidence) =>
+        new BattlefieldObjectiveEstimate("obj-1", TacticalObjectiveType.VictoryPoint, 0f, confidence, false, 0.8f, 0f, 0f, 0f, 0f);
+
+    private static void DirectorNoContactScouts()
+    {
+        var input = TacticalOperationDirectorInput.ForTest(OperationRecord.Noop, 100f, 20000f, 0.3f, 0.5f, 0.5f,
+            new[] { NoEnemyObjective(0.4f) });
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        AssertEqual(TacticalOperationPhase.Scouting, decision.Operation.Phase, "no contact: scout, not commit on own / 0");
+        AssertEqual("no-contact-scout", decision.Reason, "reason");
+    }
+
+    private static CommandDoctrineOrder[] Orders(TacticalOperationShape shape, params CommandNodeRole[] roles)
+    {
+        var nodes = new CommandNodeOperationalState[roles.Length];
+        for (int i = 0; i < roles.Length; i++)
+            nodes[i] = new CommandNodeOperationalState("node-" + (i + 1), CommandEchelonKind.DivisionLike, roles[i], CommandTaskType.FormUp, CommandTaskState.Planning);
+        var operation = new OperationRecord(shape, TacticalOperationPhase.Scouting, "obj-1", 500f);
+        var picture = new BattlefieldPictureSnapshot(new[] { NoEnemyObjective(0.4f) });
+        return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f);
+    }
+
+    private static void ScoutingWithoutContactTasks()
+    {
+        CommandDoctrineOrder[] orders = Orders(TacticalOperationShape.SingleMainEffort, CommandNodeRole.MainEffort, CommandNodeRole.ScreeningForce);
+        AssertEqual(CommandTaskType.Probe, orders[0].Task, "main effort probes");
+        AssertEqual(CommandTaskType.Screen, orders[1].Task, "screen screens");
+    }
+
+    private static void DefensiveNetworkNotProbing()
+    {
+        CommandDoctrineOrder[] orders = Orders(TacticalOperationShape.DefensiveNetwork, CommandNodeRole.MainEffort);
+        AssertTrue(orders[0].Task != CommandTaskType.Probe, "a defender is not sent forward");
+    }
+
+    private static void GtReconNoCavalryScoutBranch()
+    {
+        TacticalGrandTacticianReconDecision d = TacticalGrandTacticianReconDoctrine.Decide(
+            new TacticalGrandTacticianReconInput(CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, hasFowVisibleEnemy: false, underRecentFire: false));
+        AssertEqual(CommandTaskType.Probe, d.Task, "no visible enemy: probe by bounds, cavalry or not");
+        TacticalGrandTacticianReconDecision screen = TacticalGrandTacticianReconDoctrine.Decide(
+            new TacticalGrandTacticianReconInput(CommandNodeRole.ScreeningForce, CommandTaskType.Screen, hasFowVisibleEnemy: false, underRecentFire: false));
+        AssertEqual(CommandTaskType.Screen, screen.Task, "screens stay screens");
+    }
+
+    private static TacticalCavalryFollowInput Raid(bool inSquare, bool isOfficer) =>
+        new TacticalCavalryFollowInput(TacticalCavalryFollowMode.Raid, hasFollowTarget: true, targetIsOfficer: isOfficer,
+            targetInFort: false, targetInSquare: inSquare, targetHasInfantryOrArtillerySupport: false, canChargeTarget: true,
+            fearAdvantage01: 0.9f, enemyClose: true, enemyDistance: 80f, longRange: 300f);
+
+    private static void CavalryFollowSquareAndOfficer()
+    {
+        AssertEqual(TacticalCavalryFollowAction.ChargeRaidTarget, TacticalCavalryFollowDoctrine.Decide(Raid(false, false)).Action, "open target");
+        AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, TacticalCavalryFollowDoctrine.Decide(Raid(true, false)).Action, "square");
+        AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, TacticalCavalryFollowDoctrine.Decide(Raid(false, true)).Action, "officer");
+        AssertTrue(BattleRecon.IsSquare(TacticalUnitType.Infantry, 4), "regiment formation 4 is the square");
+        AssertFalse(BattleRecon.IsSquare(TacticalUnitType.BattleGroupBrigade, 4), "a group's formation 4 is march column");
+        AssertTrue(BattleRecon.IsOfficerTarget(TacticalUnitType.BattleGroupBrigade), "a command group");
+        AssertTrue(BattleRecon.IsOfficerTarget(TacticalUnitType.Courier), "a courier");
+        AssertFalse(BattleRecon.IsOfficerTarget(TacticalUnitType.Scout), "a scout company is no officer");
+    }
+
+    private static void FacingEntryIsNotUrgent()
+    {
+        TacticalFacingPulseDecision d = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Brigade, CommandTaskType.Screen, 0, 0, 0f, 90f, true, TacticalFacingThreatSource.Entry,
+            false, false, false, false, false, false, false, 15f));
+        AssertEqual(TacticalFacingPulseAction.CorrectFacing, d.Action, "faces the unwatched entry point");
+        AssertFalse(d.Urgent, "never urgent");
+    }
+
+    private static void EntryBearingPicksStalest()
+    {
+        var s = Field(3.0);
+        var p = Picture(s);
+        p.AddEntry(400f, -1000f + 500f, 2.5);  // north of the infantry brigade, watched half an hour ago
+        p.AddEntry(900f, -1000f, -1.0);        // east, never watched
+        AssertTrue(BattleRecon.TryEntryBearing(s, s.IndexOfOwn(InfBrigade), p, out float heading), "a bearing");
+        AssertNear(90f, heading, 0.5f, "the never-watched entry point to the east");
+        var q = Picture(s);
+        q.AddEntry(900f, -1000f, 2.99);
+        AssertFalse(BattleRecon.TryEntryBearing(s, s.IndexOfOwn(InfBrigade), q, out _), "a watched entry point is no threat bearing");
+    }
+}

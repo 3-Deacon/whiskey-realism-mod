@@ -34,6 +34,14 @@ namespace WhiskeyRealism.Tactical.Battle
         // layout (groupposition.unitoffsetposition, 78378; the layout group is the
         // plan-D5 parent).
         HasLayoutSlot = 524288,
+        // BC9, additive. A skirmisher (3) or scout (4) company DetachCompany split off a
+        // regiment (parentregiment set, 90430-90515; UnitRecord.ParentRegimentId).
+        DetachedCompany = 1048576,
+        // Vanilla mounted >= 1 (111066): a mounted cavalry regiment.
+        Mounted = 2097152,
+        // Vanilla unitlinkedto != null (111136): UpdateUnitLink re-lays the unit to its
+        // link slot (124396-124500), so a move of it lasts only until the next link cycle.
+        Linked = 4194304,
     }
 
     public struct UnitRecord
@@ -87,6 +95,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // groupaiobject (110820) instance id, 0 = none: the unit's vanilla AI group, the
         // group AddUnitToPool(overwriteaigroups) assigns to every descendant (7637-7648).
         public int AiGroupId;
+        // BC9: a detached company's source regiment (parentregiment 111132, instance id);
+        // 0 for every other unit.
+        public int ParentRegimentId;
         public int ParentIndex;         // -1 = root
         public int FirstEnemyInRangeId; // enemyinrangereg[0], or 0
         public UnitFlags Flags;
@@ -173,6 +184,7 @@ namespace WhiskeyRealism.Tactical.Battle
         ChargeDemotion,
         ChargeDoctrine,
         FeudReplay,
+        Recon, // BC9: the recon producer's scout moves and stops
     }
 
     [System.Flags]

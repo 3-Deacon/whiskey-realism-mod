@@ -10,12 +10,13 @@ namespace WhiskeyRealism.Tactical.Operations
         Regiment
     }
 
+    // Visible: the closest visible enemy. Entry (BC9): with none visible, a screen
+    // faces the stalest unwatched enemy-side entry point (BattleRecon.TryEntryBearing),
+    // where unseen enemies come from; never urgent.
     public enum TacticalFacingThreatSource
     {
         None,
         Visible,
-        RecentFire,
-        Objective,
         Entry
     }
 
@@ -163,7 +164,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "routed");
             if (!input.HasValidTargetFacing || input.ThreatSource == TacticalFacingThreatSource.None)
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "no-threat-bearing");
-            if (!CommandFormationCorrection.ShouldFaceThreat(input.Task) && !input.CloseEngaged && !input.FlankRisk)
+            if (!CommandFormationCorrection.ShouldFaceThreat(input.Task) && !input.CloseEngaged && !input.FlankRisk &&
+                !(input.ThreatSource == TacticalFacingThreatSource.Entry && WatchesEntry(input.Task)))
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "task-does-not-face-threat");
             if (input.Scope == TacticalFacingPulseScope.Regiment)
             {
@@ -201,6 +203,15 @@ namespace WhiskeyRealism.Tactical.Operations
             if (needsFormation)
                 return new TacticalFacingPulseDecision(TacticalFacingPulseAction.CorrectFormationAndFacing, input.TargetFormation, input.TargetFacingDegrees, urgent, "formation");
             return new TacticalFacingPulseDecision(TacticalFacingPulseAction.CorrectFacing, input.TargetFormation, input.TargetFacingDegrees, urgent, "facing");
+        }
+
+        // Tasks that watch ground rather than a seen enemy: a screen, a probe and a
+        // flank guard face the unwatched entry point when nothing is visible.
+        private static bool WatchesEntry(CommandTaskType task)
+        {
+            return task == CommandTaskType.Screen ||
+                task == CommandTaskType.Probe ||
+                task == CommandTaskType.GuardFlank;
         }
     }
 }

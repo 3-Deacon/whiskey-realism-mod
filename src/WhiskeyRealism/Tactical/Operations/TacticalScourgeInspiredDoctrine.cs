@@ -266,49 +266,40 @@ namespace WhiskeyRealism.Tactical.Operations
         public TacticalCavalryFollowInput(
             TacticalCavalryFollowMode mode,
             bool hasFollowTarget,
-            bool targetHidden,
             bool targetIsOfficer,
             bool targetInFort,
             bool targetInSquare,
             bool targetHasInfantryOrArtillerySupport,
             bool canChargeTarget,
-            bool leaderAllowsCharge,
             float fearAdvantage01,
             bool enemyClose,
             float enemyDistance,
-            float longRange,
-            bool atFollowLocation)
+            float longRange)
         {
             Mode = mode;
             HasFollowTarget = hasFollowTarget;
-            TargetHidden = targetHidden;
             TargetIsOfficer = targetIsOfficer;
             TargetInFort = targetInFort;
             TargetInSquare = targetInSquare;
             TargetHasInfantryOrArtillerySupport = targetHasInfantryOrArtillerySupport;
             CanChargeTarget = canChargeTarget;
-            LeaderAllowsCharge = leaderAllowsCharge;
             FearAdvantage01 = Clamp01(fearAdvantage01);
             EnemyClose = enemyClose;
             EnemyDistance = SanitizeNonNegative(enemyDistance);
             LongRange = SanitizePositive(longRange, 300f);
-            AtFollowLocation = atFollowLocation;
         }
 
         public TacticalCavalryFollowMode Mode { get; }
         public bool HasFollowTarget { get; }
-        public bool TargetHidden { get; }
         public bool TargetIsOfficer { get; }
         public bool TargetInFort { get; }
         public bool TargetInSquare { get; }
         public bool TargetHasInfantryOrArtillerySupport { get; }
         public bool CanChargeTarget { get; }
-        public bool LeaderAllowsCharge { get; }
         public float FearAdvantage01 { get; }
         public bool EnemyClose { get; }
         public float EnemyDistance { get; }
         public float LongRange { get; }
-        public bool AtFollowLocation { get; }
 
         private static float Clamp01(float value)
         {
@@ -348,21 +339,12 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public static TacticalCavalryFollowDecision Decide(TacticalCavalryFollowInput input)
         {
-            if (input.HasFollowTarget &&
-                input.TargetHidden &&
-                input.Mode != TacticalCavalryFollowMode.Guard)
-            {
-                return new TacticalCavalryFollowDecision(
-                    TacticalCavalryFollowAction.ClearFollowTarget,
-                    "follow-target-hidden");
-            }
-
             switch (input.Mode)
             {
                 case TacticalCavalryFollowMode.Guard:
                     if (!input.HasFollowTarget)
                         return new TacticalCavalryFollowDecision(TacticalCavalryFollowAction.RequestScoutLocation, "guard-needs-target");
-                    if (input.EnemyClose && input.CanChargeTarget && input.LeaderAllowsCharge)
+                    if (input.EnemyClose && input.CanChargeTarget)
                         return new TacticalCavalryFollowDecision(TacticalCavalryFollowAction.ChargeRaidTarget, "guard-charge-attacker");
                     return new TacticalCavalryFollowDecision(TacticalCavalryFollowAction.MoveBehindTarget, "guard-behind-target");
                 case TacticalCavalryFollowMode.Scout:
@@ -384,11 +366,11 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static bool RaidTargetAllowed(TacticalCavalryFollowInput input)
         {
-            if (input.TargetHidden || input.TargetIsOfficer || input.TargetInFort || input.TargetInSquare)
+            if (input.TargetIsOfficer || input.TargetInFort || input.TargetInSquare)
                 return false;
             if (input.TargetHasInfantryOrArtillerySupport)
                 return false;
-            if (!input.CanChargeTarget || !input.LeaderAllowsCharge)
+            if (!input.CanChargeTarget)
                 return false;
             return input.FearAdvantage01 >= 0.50f;
         }
@@ -399,20 +381,17 @@ namespace WhiskeyRealism.Tactical.Operations
         public TacticalGrandTacticianReconInput(
             CommandNodeRole role,
             CommandTaskType task,
-            bool hasCavalryCapability,
             bool hasFowVisibleEnemy,
             bool underRecentFire)
         {
             Role = role;
             Task = task;
-            HasCavalryCapability = hasCavalryCapability;
             HasFowVisibleEnemy = hasFowVisibleEnemy;
             UnderRecentFire = underRecentFire;
         }
 
         public CommandNodeRole Role { get; }
         public CommandTaskType Task { get; }
-        public bool HasCavalryCapability { get; }
         public bool HasFowVisibleEnemy { get; }
         public bool UnderRecentFire { get; }
     }
@@ -439,14 +418,9 @@ namespace WhiskeyRealism.Tactical.Operations
             if (input.HasFowVisibleEnemy || input.UnderRecentFire)
                 return new TacticalGrandTacticianReconDecision(input.Task, "contact-confirmed");
 
-            if (input.HasCavalryCapability)
-            {
-                if (IsScreenRole(input.Role) || input.Task == CommandTaskType.Screen)
-                    return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "cavalry-screen-fow");
-
-                return new TacticalGrandTacticianReconDecision(CommandTaskType.Scout, "cavalry-scout-fow");
-            }
-
+            // BC9: no cavalry branch. A group with one cavalry regiment is no scout;
+            // regiment scouting is the recon producer's (Battle/BattleRecon), and the
+            // Probe target is BattleRecon.LookPoint, a bounded advance.
             if (IsScreenRole(input.Role) || input.Task == CommandTaskType.Screen)
                 return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "infantry-screen-by-bounds");
 

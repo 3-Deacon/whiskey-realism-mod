@@ -412,6 +412,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // CommandPostureExecutor.Decide and the target, as intents.
     internal static class PosturePipeline
     {
+        internal const string ProbeReason = "probe-nomination";
+
         internal static bool Run(
             BattleSnapshot s,
             PostureTick.State t,
@@ -438,15 +440,25 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
             bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
 
+            // BC9 reconnaissance in force: the recon planner nominated this group as its
+            // band's probe in the Probe phase (BattleRecon.ProbeTick). The role is
+            // assigned here, by the rewrite: the allocator's DirectChildRole has no Probe.
+            bool probe = recordTick && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
+            if (probe)
+            {
+                state = WithRoleAndTask(state, CommandNodeRole.Probe, CommandTaskType.Probe);
+                if (hasOrder) order = order.WithTask(CommandTaskType.Probe, ProbeReason);
+            }
+
             TacticalGrandTacticianReconDecision recon = TacticalGrandTacticianReconDoctrine.Decide(
-                new TacticalGrandTacticianReconInput(state.Role, state.Task, hasCavalry, visibleEnemy, underRecentFire: closeEngaged));
+                new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged));
             if (recon.Task != state.Task)
             {
                 state = WithRoleAndTask(state, state.Role, recon.Task);
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
-            if (hasCavalry && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
+            if (hasCavalry && !probe && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
                 state = WithRoleAndTask(state, state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
@@ -598,21 +610,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             EnemyObservation[] obs = s.Observations;
             bool hasTarget = target >= 0;
             float fear = Mathf.Clamp01(s.Own[i].Morale + (flankRisk ? -0.25f : 0f));
+            // The target is the closest VISIBLE enemy, so it is never hidden; its square
+            // and its kind are read from its own record (BC6b precedent).
             TacticalCavalryFollowDecision follow = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
                 mode,
                 hasFollowTarget: hasTarget,
-                targetHidden: false,
-                targetIsOfficer: hasTarget && obs[target].UnitTyp == TacticalUnitType.Officer,
+                targetIsOfficer: hasTarget && BattleRecon.IsOfficerTarget(obs[target].UnitTyp),
                 targetInFort: hasTarget && TargetGarrisoned(s, t, obs[target].InstanceId),
-                targetInSquare: false,
+                targetInSquare: hasTarget && TargetInSquare(s, t, obs[target].InstanceId),
                 targetHasInfantryOrArtillerySupport: hasTarget && TargetHasCloseSupport(s, target),
                 canChargeTarget: hasTarget && distance <= 350f,
-                leaderAllowsCharge: true,
                 fearAdvantage01: fear,
                 enemyClose: hasTarget && distance > 0f && distance <= 350f,
                 enemyDistance: hasTarget ? distance : 0f,
-                longRange: 300f,
-                atFollowLocation: false));
+                longRange: 300f));
 
             switch (follow.Action)
             {
@@ -632,6 +643,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static bool TargetGarrisoned(BattleSnapshot s, PostureTick.State t, int enemyId)
         {
             return t.EnemyIndexById.TryGetValue(enemyId, out int e) && (s.EnemyRecords[e].Flags & UnitFlags.Garrisoned) != 0;
+        }
+
+        // Regiment formation 4 is the square (118174).
+        private static bool TargetInSquare(BattleSnapshot s, PostureTick.State t, int enemyId)
+        {
+            return t.EnemyIndexById.TryGetValue(enemyId, out int e) &&
+                BattleRecon.IsSquare(s.EnemyRecords[e].UnitTyp, s.EnemyRecords[e].Formation);
         }
 
         // A visible infantry or artillery enemy within close contact of the target.
@@ -682,6 +700,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             t.NavDeferred = false;
+            // BC9: a Scout or Probe task looks where the recon planner says (its probe
+            // nomination, else BattleRecon.LookPoint), not at an objective stand-off.
+            if ((state.Task == CommandTaskType.Scout || state.Task == CommandTaskType.Probe) &&
+                ReconIntentProducer.TryLookTarget(s, i, out x, out z))
+                return PostureSense.IsMoveAway(s.Own[i], x, z);
             bool resolved;
             switch (kind)
             {
@@ -792,29 +815,38 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // Regiment.currentsetobjective, which the snapshot does not carry.)
         private static bool TryPrimaryObjectivePoint(BattleSnapshot s, int i, TacticalBattleOrchestrator side, out float x, out float z)
         {
-            x = 0f;
-            z = 0f;
-            var objectives = side?.OperationsLedger?.CurrentObjectives;
-            if (objectives != null && objectives.Count > 0)
-            {
-                string primary = side.Army != null ? side.Army.CurrentOperation.PrimaryObjectiveId : "objective-unknown";
-                for (int k = 0; k < objectives.Count; k++)
-                {
-                    if (!string.Equals(objectives[k].Observation.ObjectiveId, primary, StringComparison.Ordinal)) continue;
-                    x = objectives[k].Observation.Location.X;
-                    z = objectives[k].Observation.Location.Z;
-                    return PostureSense.HasPoint(x, z);
-                }
-                x = objectives[0].Observation.Location.X;
-                z = objectives[0].Observation.Location.Z;
-                return PostureSense.HasPoint(x, z);
-            }
+            if (TryOperationObjective(side, out x, out z, out bool listed) || listed) return PostureSense.HasPoint(x, z);
 
             ref UnitRecord rec = ref s.Own[i];
             x = rec.LastWaypointX;
             z = rec.LastWaypointZ;
             return PostureSense.HasPoint(x, z) &&
                 PostureSense.Distance(rec.X, rec.Z, x, z) >= PostureSense.MinWaypointMeters;
+        }
+
+        /// <summary>
+        /// The operation's primary objective from the ledger, else its first objective.
+        /// <paramref name="listed"/> is true when the ledger lists any objective.
+        /// </summary>
+        internal static bool TryOperationObjective(TacticalBattleOrchestrator side, out float x, out float z, out bool listed)
+        {
+            x = 0f;
+            z = 0f;
+            listed = false;
+            var objectives = side?.OperationsLedger?.CurrentObjectives;
+            if (objectives == null || objectives.Count == 0) return false;
+            listed = true;
+            string primary = side.Army != null ? side.Army.CurrentOperation.PrimaryObjectiveId : "objective-unknown";
+            int pick = 0;
+            for (int k = 0; k < objectives.Count; k++)
+            {
+                if (!string.Equals(objectives[k].Observation.ObjectiveId, primary, StringComparison.Ordinal)) continue;
+                pick = k;
+                break;
+            }
+            x = objectives[pick].Observation.Location.X;
+            z = objectives[pick].Observation.Location.Z;
+            return PostureSense.HasPoint(x, z);
         }
 
         private static bool TryNavPlan(BattleSnapshot s, PostureTick.State t, int i, CommandNodeOperationalState state,
@@ -1012,7 +1044,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // BattleUnits keeps the scene's BattlefieldSetup in a private static (set at
         // 79055/79132, nulled on destroy at 79230).
-        private static BattlefieldSetup Bfs()
+        internal static BattlefieldSetup Bfs()
         {
             if (!_bfsResolved)
             {
@@ -1229,6 +1261,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             int k = s.ClosestVisibleEnemy(u, out float distance);
             bool hasThreat = k >= 0;
             float heading = hasThreat ? PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z) : -1f;
+            TacticalFacingThreatSource source = hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
+            // BC9: with nothing visible, a screen faces where unseen enemies come from.
+            if (!hasThreat && ReconIntentProducer.TryEntryBearing(s, u, out float entryHeading))
+            {
+                heading = entryHeading;
+                source = TacticalFacingThreatSource.Entry;
+            }
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[u]);
             bool recent = scope == TacticalFacingPulseScope.Regiment
                 ? PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Facing, IntentSource.FacingPulse, s.DoctrineHours, RegimentCooldownHours)
@@ -1240,8 +1279,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 targetFormation,
                 rec.RotationY,
                 heading,
-                hasThreat,
-                hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None,
+                source != TacticalFacingThreatSource.None,
+                source,
                 closeEngaged,
                 flankRisk,
                 (rec.Flags & UnitFlags.PlayerOwned) != 0,
@@ -1332,7 +1371,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             TacticalFireControlDecision decision = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
                 typ,
-                mounted: false,
+                mounted: (f & UnitFlags.Mounted) != 0,
                 state.Task,
                 state.Role,
                 hasTarget && distance > 0f,

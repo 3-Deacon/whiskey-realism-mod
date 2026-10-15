@@ -159,6 +159,24 @@ namespace WhiskeyRealism.Tactical.Operations
                 operationStrength,
                 input.ReserveFraction);
 
+            // BC9: no enemy seen at a newly selected objective means scouting, never a
+            // commit on own / max(1, 0) odds: the fog-honest AI does not know the
+            // objective is empty, so the recon producer and the Probe task go and look.
+            // An operation already active on that objective keeps the shipped rules
+            // (a committed advance on an empty known map objective continues,
+            // ShouldCancelCommittedContact).
+            if (primary.EnemyStrength <= 0f &&
+                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId)))
+            {
+                return new TacticalOperationDirectorDecision(
+                    new OperationRecord(
+                        TacticalOperationShape.FixAndFlank,
+                        TacticalOperationPhase.Scouting,
+                        primary.ObjectiveId,
+                        input.CurrentTimeSeconds + 420f),
+                    "no-contact-scout");
+            }
+
             if (objectiveGate == TacticalObjectiveGate.ReconnaissanceContact)
             {
                 return new TacticalOperationDirectorDecision(

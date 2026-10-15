@@ -138,7 +138,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // sideinformation.totalactiveforce, which the side cannot know.
                 // Blended from unknown (1) toward the observed ratio by the
                 // ledger's coverage-based confidence (KnownEnemyOdds).
-                float odds = KnownEnemyOdds(ownActive, ContactLedger(allianceId), DoctrineHours());
+                float odds = KnownEnemyOdds(ownActive, ContactLedgerFor(allianceId), DoctrineHours());
                 // Default main effort = the center band of the front.
                 var ownEvidence = new ArmyEvidence(odds, BattlefieldTerrain(allianceId, enemyVisible.FrontAxis),
                     defaultMainEffortSector: DefaultMainEffortSector(enemyVisible.FrontAxis));
@@ -210,6 +210,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalEnemyContactLedger[] _contactLedgers =
             { new TacticalEnemyContactLedger(), new TacticalEnemyContactLedger() };
         private static readonly HashSet<int> _watchedEntryBuffer = new HashSet<int>();
+        // Pooled entry list and the ledger's per-entry arrays (BC9: no per-build List).
+        private static readonly List<EntrySample> _entryBuffer = new List<EntrySample>();
+        private static int[] _entryIds = new int[8];
+        private static float[] _entryXs = new float[8];
+        private static float[] _entryZs = new float[8];
+        private static bool[] _entryWatched = new bool[8];
         private static System.WeakReference<BattleUnits> _battleOwner;
 
         // Scratch buffers for BuildEnemyVisibleState. Main-thread only and not
@@ -311,7 +317,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static TacticalEnemyContactLedger ContactLedger(int allianceId)
+        /// <summary>
+        /// The side's contact ledger (read-only to readers outside the evidence build:
+        /// the BC9 recon producer reads its confidence, stalest band and entry stamps).
+        /// </summary>
+        internal static TacticalEnemyContactLedger ContactLedgerFor(int allianceId)
             => allianceId >= 0 && allianceId <= 1 ? _contactLedgers[allianceId] : null;
 
         /// <summary>Doctrine time in battle hours (TacticalDoctrineTime).</summary>
@@ -393,7 +403,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         private static List<EntrySample> EnemyEntryPoints(BattleUnits bunits, int enemyAllianceId)
         {
-            var list = new List<EntrySample>();
+            var list = _entryBuffer;
+            list.Clear();
             try
             {
                 var points = bunits.entrypoints;
@@ -408,6 +419,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             catch { }
             return list;
+        }
+
+        // Hands the ledger each enemy-side entry point and whether it is watched now,
+        // so it can keep per-point watch stamps (BC9 recon targets).
+        private static void ObserveEntryPoints(TacticalEnemyContactLedger ledger, float nowHours, List<EntrySample> entries, HashSet<int> watched)
+        {
+            int n = entries.Count;
+            if (_entryIds.Length < n)
+            {
+                int size = Math.Max(n, _entryIds.Length * 2);
+                _entryIds = new int[size];
+                _entryXs = new float[size];
+                _entryZs = new float[size];
+                _entryWatched = new bool[size];
+            }
+            for (int k = 0; k < n; k++)
+            {
+                _entryIds[k] = entries[k].Id;
+                _entryXs[k] = entries[k].X;
+                _entryZs[k] = entries[k].Z;
+                _entryWatched[k] = watched.Contains(entries[k].Id);
+            }
+            ledger.ObserveEntryPoints(nowHours, _entryIds, _entryXs, _entryZs, _entryWatched, n);
         }
 
         /// <summary>
@@ -502,7 +536,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         continue;
                     }
 
-                    if (u.UnitTyp > TacticalUnitType.MaxCombat || u.UnitTyp == TacticalUnitType.Excluded) continue;
+                    if (u.UnitTyp > TacticalUnitType.MaxCombat || u.UnitTyp == TacticalUnitType.Courier) continue;
                     if (!IsAliveCombatUnit(u.Strength, (u.Flags & UnitFlags.Active) != 0, routed)) continue;
 
                     Regiment live = BattleSnapshotBuilder.UnitAt(s, i, enemy: false);
@@ -539,7 +573,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (enemyVisible[i].RecentFire) engagedStrength += enemyVisible[i].Strength;
                 }
                 float nowHours = (float)s.DoctrineHours;
-                var ledger = ContactLedger(ownAllianceId);
+                var ledger = ContactLedgerFor(ownAllianceId);
                 float enemyReserveCommitFraction = TacticalEnemyContactLedger.UnknownReserveCommitFraction;
                 bool contactBroken = false;
                 float intelConfidence = 0f;
@@ -555,6 +589,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         axis, ownCombat, _knownEnemyBuffer, _ownBandBuffer, _bandMinBuffer, _bandMaxBuffer);
                     ledger.ObserveCoverage(nowHours, _bandMinBuffer, _bandMaxBuffer, _ownBandBuffer, bandCount,
                         visibleEntries.Count, enemyEntries.Count, axis.HeadingDegrees);
+                    ObserveEntryPoints(ledger, nowHours, enemyEntries, visibleEntries);
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
                     intelConfidence = ledger.Confidence(nowHours);
@@ -1040,7 +1075,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // this read is cheap. Own arrivals come from the side's own
                 // scheduledarrival entries — the side knows its own schedule.
                 EnsureBattleOwner(bunits);
-                ForceBalanceIntel(ContactLedger(allianceId), DoctrineHours(), out float enemyDeployed, out float intelConfidence);
+                ForceBalanceIntel(ContactLedgerFor(allianceId), DoctrineHours(), out float enemyDeployed, out float intelConfidence);
 
                 var ownArrivals = BuildArrivalsForSide(bunits, side);
 

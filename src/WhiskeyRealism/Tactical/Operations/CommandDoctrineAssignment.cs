@@ -181,8 +181,13 @@ namespace WhiskeyRealism.Tactical.Operations
             if (role == CommandNodeRole.Reserve) return CommandTaskType.ReserveWait;
             if (!objectiveMatched) return CommandTaskType.FormUp;
 
+            // Scouting: on reconnaissance contact, and (BC9) with no contact at all,
+            // the recon tasks (Probe / Screen) go and look. A defensive shape is not
+            // sent forward.
             if (operation.Phase == TacticalOperationPhase.Scouting &&
-                TacticalDecisionDoctrine.IsReconnaissanceContact(objective))
+                (TacticalDecisionDoctrine.IsReconnaissanceContact(objective) || objective.EnemyStrength <= 0f) &&
+                operation.Shape != TacticalOperationShape.DefensiveNetwork &&
+                operation.Shape != TacticalOperationShape.DelayAndFallback)
             {
                 return TacticalDecisionDoctrine.ReconnaissanceTaskFor(role);
             }
