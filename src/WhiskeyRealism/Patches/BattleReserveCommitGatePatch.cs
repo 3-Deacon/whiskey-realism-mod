@@ -39,6 +39,7 @@ namespace WhiskeyRealism.Patches
         internal sealed class ReserveCommitState
         {
             public CommandIntentResolution Resolution;
+            public bool ReserveReleased;
             public UnitState[] Units = Array.Empty<UnitState>();
         }
 
@@ -310,12 +311,13 @@ namespace WhiskeyRealism.Patches
                     if (!VanillaMayCommitReserve(aigroup)) return;
                     if (!TacticalWriteGuard.CanWrite(aigroup)) return;
 
-                    CommandIntentResolution resolution = ResolveIntent(aigroup);
+                    CommandIntentResolution resolution = ResolveIntent(aigroup, out CommandIntentResolution allocator);
                     if (!resolution.Found || resolution.Intent.Role != DirectChildRole.Reserve) return;
 
                     __state = new ReserveCommitState
                     {
                         Resolution = resolution,
+                        ReserveReleased = TacticalReserveCommitGate.ReleasedByAllocator(resolution, allocator),
                         Units = SnapshotReserveCandidates(aigroup)
                     };
                 }
@@ -349,7 +351,8 @@ namespace WhiskeyRealism.Patches
                         playerControlled: TacticalWriteGuard.IsPlayerProtected(aigroup),
                         committedUnitAlreadyEngaged: AnyAlreadyEngaged(changed),
                         ownStrengthRatio: OwnStrengthRatio(aigroup),
-                        localOdds: LocalOdds(aigroup));
+                        localOdds: LocalOdds(aigroup),
+                        reserveReleased: __state.ReserveReleased);
 
                     TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
                     if (decision.Action == TacticalReserveCommitGate.Action.Deny)
@@ -802,8 +805,11 @@ namespace WhiskeyRealism.Patches
             catch { return default(Vector3); }
         }
 
-        private static CommandIntentResolution ResolveIntent(Regiment group)
+        // Ledger command state first, then the command-node intent; allocator is
+        // always the command-node intent (the direct-child allocator's current view).
+        private static CommandIntentResolution ResolveIntent(Regiment group, out CommandIntentResolution allocator)
         {
+            allocator = new CommandIntentResolution(false, default, "unresolved");
             try
             {
                 if (group == null)
@@ -815,10 +821,11 @@ namespace WhiskeyRealism.Patches
 
                 int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
                 int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                allocator = side.Army.ResolveCommandIntentForGroup(componentInstanceId, gameObjectInstanceId);
                 if (TryResolveLedgerState(side.Army, componentInstanceId, gameObjectInstanceId, out CommandNodeOperationalState state))
                     return LedgerResolution(gameObjectInstanceId != 0 ? gameObjectInstanceId : componentInstanceId, state);
 
-                return side.Army.ResolveCommandIntentForGroup(componentInstanceId, gameObjectInstanceId);
+                return allocator;
             }
             catch (Exception ex)
             {

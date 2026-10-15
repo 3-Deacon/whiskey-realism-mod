@@ -11,6 +11,11 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class OperationalProbeRuntime
     {
+        static OperationalProbeRuntime()
+        {
+            CampaignScope.Register("operational-probe", ResetForNewCampaign);
+        }
+
         // Static, bounded keys only (alliance id / fixed strings).
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
 

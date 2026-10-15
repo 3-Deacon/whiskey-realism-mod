@@ -19,6 +19,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleGroupStancePatch
     {
+        static BattleGroupStancePatch()
+        {
+            BattleScope.Register("group-stance", ResetForBattleEnd);
+        }
+
         private static readonly Dictionary<string, float> _lastLoggedAt = new Dictionary<string, float>();
         private static FieldInfo _macroAiField;
         private static FieldInfo _sideOfAiField;
@@ -132,18 +137,18 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Resets between battles. Called from TacticalBattleCoordinatorRuntime.OnBattleEnd.
-        internal static void ResetRegimentalControlForBattleEnd()
+        // Battle end (BattleScope).
+        internal static void ResetForBattleEnd()
         {
             _artilleryLastActionHours.Clear();
             _lastApplyRealtimeSeconds.Clear();
+            _lastLoggedAt.Clear();
         }
 
-        // Artillery audit state (2026-05-21). Per-instance battle time
-        // (GameVars.currenttimefromstart, hours) of the last accepted
+        // Artillery audit state (2026-05-21). Per-instance doctrine time
+        // (TacticalBattleCoordinator.DoctrineBattleHours) of the last accepted
         // artillery action. Reused across BGS Apply calls for
-        // the same battle (cleared on OnBattleEnd via
-        // ResetRegimentalControlForBattleEnd). Min-hold gating prevents
+        // the same battle (cleared at battle end, ResetForBattleEnd). Min-hold gating prevents
         // thrash when doctrine output oscillates near thresholds (e.g.
         // Retreat ↔ Fire when enemy is at panic boundary).
         private static readonly Dictionary<int, float> _artilleryLastActionHours = new Dictionary<int, float>();
@@ -173,8 +178,8 @@ namespace WhiskeyRealism.Patches
             var allUnits = BattleUnits.completeunitlist as System.Collections.IList;
             if (allUnits == null) return;
 
-            // Hold on battle time; the config value is seconds at 1x.
-            float nowHours = GameVars.currenttimefromstart;
+            // Hold on doctrine time; the config value is seconds at 1x.
+            float nowHours = (float)TacticalBattleCoordinator.DoctrineBattleHours;
             float minHoldHours = TacticalBattleClock.RealSecondsAtOneXToHours(
                 Plugin.ArtilleryAuditMinHoldSeconds != null
                     ? Plugin.ArtilleryAuditMinHoldSeconds.Value
@@ -793,7 +798,6 @@ namespace WhiskeyRealism.Patches
             var decision = TacticalWlActionGuard.Decide(
                 true,
                 DLC_WL.dlc_scenarioactive,
-                TacticalWlGuardAction.FeudMovement,
                 group != null && group.dlcw_isundercommander,
                 group != null && group.dlcw_isundercommander,
                 AttachedUnitUnderPlayerCommander(group));

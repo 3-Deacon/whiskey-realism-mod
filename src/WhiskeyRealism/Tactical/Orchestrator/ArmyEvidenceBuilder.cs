@@ -13,6 +13,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     internal static partial class ArmyEvidenceBuilder
     {
+        static ArmyEvidenceBuilder()
+        {
+            BattleScope.Register("army-evidence", ResetForBattleEnd);
+        }
+
         // Between ArmyIntentInference reserve thresholds: not committed, not uncommitted.
         private const float UnknownReserveCommitFraction = 0.35f;
         private static FieldInfo _bunitsFieldCache;
@@ -369,8 +374,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Clears every per-battle cache (front axes, contact ledgers,
-        /// remembered enemy positions, terrain, force-balance start time). Called on battle
-        /// teardown (wired by the coordinator); also runs when the BattleUnits
+        /// remembered enemy positions, terrain, force-balance start time). Battle end
+        /// (BattleScope); also runs when the BattleUnits
         /// instance changes.
         /// </summary>
         internal static void ResetForBattleEnd()
@@ -473,6 +478,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return idx >= 0 ? all[idx] : null;
             }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// The AIBattle that plays <paramref name="allianceId"/>'s side: vanilla
+        /// assigns aibattle[1] to the player's side, aibattle[0] to the other and
+        /// aibattle[2] to the feud instance on side 0 (85203-85212, SetSide 3408).
+        /// Each instance's objectivechain / macroai belong to its own side only, so
+        /// per-side reads use this, never whichever AIBattle fired the tick.
+        /// <paramref name="fallback"/> when it cannot be resolved.
+        /// </summary>
+        internal static AIBattle ResolveAiBattleForAlliance(AIBattle fallback, int allianceId)
+        {
+            try
+            {
+                var bunits = ResolveBattleUnits(fallback);
+                if (bunits == null) return fallback;
+                int side = ResolveSideFromAlliance(bunits, allianceId);
+                if (side < 0) return fallback;
+                return ResolveOwnAiBattle(bunits, side) ?? fallback;
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        /// <summary>
+        /// Lateral band of a world point on the front axis last fitted for
+        /// <paramref name="allianceId"/> by <see cref="Build"/>; -1 before the first
+        /// fit or for alliances other than 0/1.
+        /// </summary>
+        internal static int SectorOfPoint(int allianceId, float x, float z)
+        {
+            if (allianceId < 0 || allianceId > 1) return -1;
+            return BandOfPoint(_lastFittedAxis[allianceId], x, z);
         }
 
         private readonly struct EntrySample

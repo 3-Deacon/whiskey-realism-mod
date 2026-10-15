@@ -215,8 +215,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private bool suspended;
 
-        public bool IsSuspended => suspended;
-
         public EndOfDayPhase Observe(int eodcycle)
         {
             if (eodcycle != 0)

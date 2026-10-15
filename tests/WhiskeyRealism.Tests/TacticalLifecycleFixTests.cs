@@ -39,7 +39,6 @@ internal static class TacticalLifecycleFixTests
 
         Pass("t15 released reserve lets vanilla commit", T15ReleasedReserveAllowsVanillaCommit);
         Pass("t15 unreleased reserve still held", T15UnreleasedReserveStillHeld);
-        Pass("t15 released reserve permits reserve list bias", T15ReleasedReservePermitsListBias);
 
         Pass("perf ledger ticks on new snapshot", PerfLedgerTicksOnNewSnapshot);
         Pass("perf ledger skips unchanged snapshot within interval", PerfLedgerSkipsUnchangedSnapshot);
@@ -58,6 +57,8 @@ internal static class TacticalLifecycleFixTests
 
         Pass("t9 feud instance never drives the orchestrator", FeudInstanceNeverDrivesOrchestrator);
         Pass("t9 coordinator doctrine clock exposed, frozen overnight, reset at battle end", CoordinatorDoctrineClockExposed);
+        Pass("doctrine clock getter advances without a Tick, once per frame", DoctrineClockGetterAdvancesWithoutTick);
+        Pass("doctrine clock ignores the campaign map and restarts on a new battle", DoctrineClockFollowsBattleIdentity);
 
         Pass("perf command node id parse covers node child synth ids", PerfCommandNodeIdParse);
         Pass("perf command node id parse does not allocate", PerfCommandNodeIdParseDoesNotAllocate);
@@ -378,11 +379,6 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Deny, TacticalReserveCommitGate.Decide(input).Action, "deny");
     }
 
-    private static void T15ReleasedReservePermitsListBias()
-    {
-        TestHarness.AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution()), "held");
-        TestHarness.AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution(), reserveReleased: true), "released");
-    }
 
     // ---- Coordinator perf ----
 
@@ -510,30 +506,58 @@ internal static class TacticalLifecycleFixTests
 
     private static void CoordinatorDoctrineClockExposed()
     {
-        TacticalBattleCoordinator.ResetDoctrineClock();
-        TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "zero before first tick");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "not suspended before first tick");
+        using (var clock = new FakeBattleClock())
+        {
+            TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "zero before the first sample");
+            TestHarness.AssertEqual(8.0, clock.At(8.0), "start");
+            TestHarness.AssertEqual(10.0, clock.At(10.0), "day");
 
-        TestHarness.AssertEqual(EndOfDayPhase.Fighting, TacticalBattleCoordinator.AdvanceDoctrineClock(8.0, 0), "start");
-        TacticalBattleCoordinator.AdvanceDoctrineClock(10.0, 0);
-        TestHarness.AssertEqual(10.0, TacticalBattleCoordinator.DoctrineBattleHours, "day");
+            // eodcycle 1..6 (CheckTimeIssues 86369-86470): doctrine paused, clock frozen.
+            TestHarness.AssertEqual(EndOfDayPhase.Fighting, TacticalBattleCoordinator.ObserveEndOfDay(0), "fighting");
+            clock.At(20.0, eod: 1);
+            TestHarness.AssertEqual(EndOfDayPhase.Suspended, TacticalBattleCoordinator.ObserveEndOfDay(1), "evening");
+            clock.At(23.9, eod: 2);
+            // Hour wraps before battlepasseddays++ (86382-86384): raw clock drops ~24h.
+            clock.At(0.2, eod: 2);
+            TestHarness.AssertEqual(10.0, clock.At(31.0, eod: 5), "frozen overnight");
 
-        // eodcycle 1..6 (CheckTimeIssues 86369-86470): doctrine paused, clock frozen.
-        TestHarness.AssertEqual(EndOfDayPhase.Suspended, TacticalBattleCoordinator.AdvanceDoctrineClock(20.0, 1), "evening");
-        TestHarness.AssertTrue(TacticalBattleCoordinator.IsEndOfDaySuspended, "suspended");
-        TacticalBattleCoordinator.AdvanceDoctrineClock(23.9, 2);
-        // Hour wraps before battlepasseddays++ (86382-86384): raw clock drops ~24h.
-        TacticalBattleCoordinator.AdvanceDoctrineClock(0.2, 2);
-        TacticalBattleCoordinator.AdvanceDoctrineClock(31.0, 5);
-        TestHarness.AssertEqual(10.0, TacticalBattleCoordinator.DoctrineBattleHours, "frozen overnight");
+            TestHarness.AssertEqual(10.5, clock.At(31.5), "resumes without a jump");
+            TestHarness.AssertEqual(EndOfDayPhase.Resumed, TacticalBattleCoordinator.ObserveEndOfDay(0), "morning edge belongs to the Tick");
 
-        TestHarness.AssertEqual(EndOfDayPhase.Resumed, TacticalBattleCoordinator.AdvanceDoctrineClock(31.5, 0), "morning");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "fighting again");
-        TestHarness.AssertEqual(10.5, TacticalBattleCoordinator.DoctrineBattleHours, "resumes without a jump");
-
-        TacticalBattleCoordinator.ResetDoctrineClock();
+            TacticalBattleCoordinator.ResetDoctrineClock();
+            TestHarness.AssertEqual(EndOfDayPhase.Fighting, TacticalBattleCoordinator.ObserveEndOfDay(0), "reset clears suspension");
+        }
         TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "reset at battle end");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "reset clears suspension");
+    }
+
+    private static void DoctrineClockGetterAdvancesWithoutTick()
+    {
+        using (var clock = new FakeBattleClock())
+        {
+            // Only reads, no coordinator Tick: each read samples the vanilla clock.
+            clock.At(9.0);
+            clock.Frame++;
+            clock.Raw = 9.5;
+            TestHarness.AssertEqual(9.5, TacticalBattleCoordinator.DoctrineBattleHours, "next frame: read advances");
+            clock.Raw = 9.75;
+            TestHarness.AssertEqual(9.5, TacticalBattleCoordinator.DoctrineBattleHours, "same frame: sampled once");
+            clock.Frame++;
+            TestHarness.AssertEqual(9.75, TacticalBattleCoordinator.DoctrineBattleHours, "next frame");
+        }
+    }
+
+    private static void DoctrineClockFollowsBattleIdentity()
+    {
+        using (var clock = new FakeBattleClock())
+        {
+            clock.At(14.0);
+            clock.At(15.0);
+            clock.BattleKey = 0;
+            TestHarness.AssertEqual(15.0, clock.At(2.4), "campaign map (no battle): clock left alone");
+            clock.BattleKey = 99;
+            TestHarness.AssertEqual(7.0, clock.At(7.0), "a new battle restarts the clock even with no teardown");
+            TestHarness.AssertEqual(7.5, clock.At(7.5), "and follows it");
+        }
     }
 
     private static void PerfCommandNodeIdParse()
@@ -592,5 +616,41 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertEqual(0f, army.PlanAgeSeconds, "re-planned");
         var expected = ArmyIntentInference.Build(evidence, visible);
         TestHarness.AssertEqual(expected.PrimaryIntent, army.CurrentIntentModel.PrimaryIntent, "intent from the morning's evidence");
+    }
+}
+
+/// <summary>
+/// Test stand-in for the runtime doctrine clock sources (Unity frame counter and
+/// vanilla battle clock). Each At() is one new frame. Dispose uninstalls it and
+/// resets the clock.
+/// </summary>
+internal sealed class FakeBattleClock : IDisposable
+{
+    public int Frame;
+    public int BattleKey = 7;
+    public double Raw;
+    public int Eod;
+
+    public FakeBattleClock()
+    {
+        TacticalBattleCoordinator.ResetDoctrineClock();
+        TacticalBattleCoordinator.DoctrineClockFrameSource = () => Frame;
+        TacticalBattleCoordinator.DoctrineClockSampler =
+            () => new TacticalBattleCoordinator.DoctrineClockSample(BattleKey, Raw, Eod);
+    }
+
+    public double At(double raw, int eod = 0)
+    {
+        Frame++;
+        Raw = raw;
+        Eod = eod;
+        return TacticalBattleCoordinator.DoctrineBattleHours;
+    }
+
+    public void Dispose()
+    {
+        TacticalBattleCoordinator.DoctrineClockFrameSource = null;
+        TacticalBattleCoordinator.DoctrineClockSampler = null;
+        TacticalBattleCoordinator.ResetDoctrineClock();
     }
 }

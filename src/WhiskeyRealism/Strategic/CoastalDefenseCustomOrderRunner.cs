@@ -30,6 +30,11 @@ namespace WhiskeyRealism.Strategic
     // vanilla's end of operation (RemoveOrder, StopRegiment, remove).
     internal static class CoastalDefenseCustomOrderRunner
     {
+        static CoastalDefenseCustomOrderRunner()
+        {
+            CampaignScope.Register("coastal-defense", ResetForNewCampaign);
+        }
+
         // Per-alliance dedup of "first assignment per (threat, unit) tuple"
         // log lines — keys are "<allianceId>|<threatSignature>|<unitInstanceId>".
         private static readonly HashSet<string> _firstAssignmentLogged = new HashSet<string>();
@@ -38,11 +43,19 @@ namespace WhiskeyRealism.Strategic
         // prior tick. Used to detect when a threat signature disappears from the current
         // tick's output and release the previously-assigned units from defensiveoperations.
         // Key: allianceId → threatSignature → set of UnitInstanceIds.
-        // Cross-campaign bleed is accepted as a known limitation (same as _firstAssignmentLogged).
+        // Cleared per campaign (CampaignScope).
         private static readonly Dictionary<int, Dictionary<string, HashSet<int>>> _assignedByThreat =
             new Dictionary<int, Dictionary<string, HashSet<int>>>();
         private static readonly HashSet<string> _wlCurrentOrderAttempts = new HashSet<string>();
         private static readonly HashSet<string> _logOnceKeys = new HashSet<string>();
+
+        internal static void ResetForNewCampaign()
+        {
+            _firstAssignmentLogged.Clear();
+            _assignedByThreat.Clear();
+            _wlCurrentOrderAttempts.Clear();
+            _logOnceKeys.Clear();
+        }
 
         // True while this runner holds `unitInstanceId` on a custom defensive
         // order for any live threat signature of `allianceId`. Other steering

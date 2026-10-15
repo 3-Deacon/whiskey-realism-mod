@@ -215,10 +215,10 @@ internal static class PostureStanceFixTests
         // Vanilla 4264: re-evaluates when lastaistancechangetime < now + updatetimeforresettingofaistance.
         float reset = 1.0f; // Config/battleprefs.txt "Time (game hrs) to wait for resetting of new ai stances" = 1
         float stamp = TacticalStanceOwnership.VanillaHoldStamp(10f, TacticalStanceOwnership.HoldHours, reset);
-        AssertFalse(TacticalStanceOwnership.VanillaWouldReevaluate(stamp, 10f, reset), "held at write time");
-        AssertFalse(TacticalStanceOwnership.VanillaWouldReevaluate(stamp, 10f + TacticalStanceOwnership.HoldHours * 0.9f, reset), "held inside hold");
-        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(stamp, 10f + TacticalStanceOwnership.HoldHours * 1.1f, reset), "vanilla resumes after hold");
-        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(10f, 10f, reset), "vanilla's own stamp never holds (inverted compare)");
+        AssertFalse(TestFixtures.VanillaWouldReevaluateStance(stamp, 10f, reset), "held at write time");
+        AssertFalse(TestFixtures.VanillaWouldReevaluateStance(stamp, 10f + TacticalStanceOwnership.HoldHours * 0.9f, reset), "held inside hold");
+        AssertTrue(TestFixtures.VanillaWouldReevaluateStance(stamp, 10f + TacticalStanceOwnership.HoldHours * 1.1f, reset), "vanilla resumes after hold");
+        AssertTrue(TestFixtures.VanillaWouldReevaluateStance(10f, 10f, reset), "vanilla's own stamp never holds (inverted compare)");
         float negativeReset = TacticalStanceOwnership.VanillaHoldStamp(10f, 0.25f, -5f);
         AssertEqual(10.25f, negativeReset, "negative reset clamps to 0");
     }
@@ -361,7 +361,7 @@ internal static class PostureStanceFixTests
 
     private static void DivisionPlayKeepsLedgerHoldTasks()
     {
-        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", new[]
         {
             Sub("holder", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.HoldObjective),
             Sub("attacker", CommandNodeRole.SupportingAttack, true, 300f, CommandTaskType.AttackObjective),
@@ -376,7 +376,7 @@ internal static class PostureStanceFixTests
 
     private static void DivisionPlayStandsDownForDefender()
     {
-        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", new[]
         {
             Sub("a", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.AttackObjective),
             Sub("b", CommandNodeRole.SupportingAttack, false, 0f, CommandTaskType.SupportAttack),
@@ -898,7 +898,7 @@ internal static class PostureStanceFixTests
     {
         float now = 3f;
         float release = TacticalStanceOwnership.ReleaseStamp(now);
-        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(release, now, 1f), "vanilla screens the retreating army next cycle (4258)");
-        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(release, now, 0f), "even with a zero reset pref");
+        AssertTrue(TestFixtures.VanillaWouldReevaluateStance(release, now, 1f), "vanilla screens the retreating army next cycle (4258)");
+        AssertTrue(TestFixtures.VanillaWouldReevaluateStance(release, now, 0f), "even with a zero reset pref");
     }
 }

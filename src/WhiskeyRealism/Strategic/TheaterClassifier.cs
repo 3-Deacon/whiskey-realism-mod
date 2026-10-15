@@ -2,11 +2,6 @@ namespace WhiskeyRealism.Strategic
 {
     public static class TheaterClassifier
     {
-        public static Theater FromStateNameOrPosition(string stateName, float x, float z)
-        {
-            var fromState = FromStateName(stateName);
-            return fromState == Theater.Unknown ? FromPosition(x, z) : fromState;
-        }
 
         public static Theater FromStateName(string stateName)
         {

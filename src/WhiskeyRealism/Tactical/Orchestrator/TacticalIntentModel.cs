@@ -20,10 +20,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ReserveUncommitted,
         ContactSpotted,
         ContactBroken,
-        ReceivingFire,
-        ForceImbalanceDownward,
-        ForceImbalanceUpward,
-        FlankExposure
+        ReceivingFire
     }
 
     /// <summary>

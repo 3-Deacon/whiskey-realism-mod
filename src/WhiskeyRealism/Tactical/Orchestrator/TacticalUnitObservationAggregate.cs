@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -16,6 +17,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public sealed partial class TacticalUnitObservationAggregate : IObservationSource
     {
+        static TacticalUnitObservationAggregate()
+        {
+            BattleScope.Register("observation-aggregate", () => _shared.ClearForBattleEnd());
+        }
+
         private static readonly TacticalUnitObservationAggregate _shared = new TacticalUnitObservationAggregate();
 
         private readonly List<TacticalUnitObservation> _units = new List<TacticalUnitObservation>(512);
@@ -54,9 +60,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Clears the aggregate. Called from
-        /// <c>TacticalBattleCoordinator.ResetRuntimeTickState</c> on
-        /// battle end so the next battle's first capture starts clean.
+        /// Clears the aggregate at battle end (BattleScope) so the next
+        /// battle's first capture starts clean.
         /// </summary>
         public void ClearForBattleEnd()
         {

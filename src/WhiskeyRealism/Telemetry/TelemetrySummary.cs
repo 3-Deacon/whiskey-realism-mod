@@ -177,30 +177,6 @@ namespace WhiskeyRealism.Telemetry
             return builder.ToString();
         }
 
-        internal static string WriteIssueBundleManifest(string sessionDirectory, string sessionId, string note)
-        {
-            if (string.IsNullOrWhiteSpace(sessionDirectory))
-                throw new ArgumentException("Session directory is required.", nameof(sessionDirectory));
-            if (!Directory.Exists(sessionDirectory))
-                throw new DirectoryNotFoundException(sessionDirectory);
-
-            var files = new List<string>();
-            foreach (string file in Directory.GetFiles(sessionDirectory))
-            {
-                if (TelemetryIssueBundle.IsTelemetryOwnedFile(file, sessionDirectory))
-                    files.Add(file);
-            }
-
-            files.Sort(StringComparer.OrdinalIgnoreCase);
-            string safeNote = string.IsNullOrWhiteSpace(note)
-                ? "Telemetry issue bundle manifest generated for session " + TelemetryEvent.Safe(sessionId) + "."
-                : note;
-            string json = TelemetryIssueBundle.CreateManifest(sessionId, sessionDirectory, files, safeNote).ToJson();
-            string outputPath = Path.Combine(sessionDirectory, "issue-bundle.json");
-            File.WriteAllText(outputPath, json);
-            return outputPath;
-        }
-
         private void ReadManifest(string manifestPath)
         {
             if (!File.Exists(manifestPath))

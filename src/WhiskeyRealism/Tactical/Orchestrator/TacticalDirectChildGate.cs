@@ -21,7 +21,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class TacticalDirectChildGate
     {
-        public const float OnAxisToleranceRadians = (float)(Math.PI / 3.0); // ±60°
         public const float FixDistanceRatio = 0.7f;
         public const float FallbackAwayToleranceRadians = (float)(Math.PI / 2.0); // ±90°
 
@@ -65,12 +64,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float NearestEnemyBearingFromGroupRadians { get; }
             public float FeudMaxDistance { get; }
             public int IntendedTargetSector { get; }
-
-            public Input WithIntendedTargetSector(int sector) => new Input(
-                GateEnabled, SideIsAi, Role, AxisSector, PrimarySector,
-                IntendedTargetBearingFromGroupRadians,
-                IntendedTargetDistanceFromGroup, NearestEnemyBearingFromGroupRadians,
-                FeudMaxDistance, sector);
         }
 
         public static DirectChildGateDecision Decide(Input input)
@@ -109,12 +102,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // orchestrator-allocated main-effort axis sector OR the child's own primary
             // sector. The first arm covers Main child movement toward the army's axis;
             // the second arm gives SupportMain children freedom to reinforce their own
-            // frontage instead of being forced into the AxisSector lane. When a position-→
-            // sector resolver isn't wired, ResolveTargetSector returns -1 and the Input
-            // ctor coerces IntendedTargetSector to PrimarySector — so the second arm
-            // always matches and SupportMain reinforcement degrades to "always allow."
-            // That's correct for the placeholder; the deny path tightens once the
-            // resolver lands.
+            // frontage instead of being forced into the AxisSector lane. The caller
+            // bands the target on the side's front axis (ArmyEvidenceBuilder.
+            // SectorOfPoint); before the first axis fit it passes -1 and the Input ctor
+            // coerces IntendedTargetSector to PrimarySector (allow).
             if (input.IntendedTargetSector == input.AxisSector || input.IntendedTargetSector == input.PrimarySector)
                 return new DirectChildGateDecision(true, "on-axis", input.Role);
             return new DirectChildGateDecision(false, "off-axis", input.Role);

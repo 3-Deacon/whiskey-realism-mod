@@ -18,6 +18,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class TacticalMapKnowledgeDiagnosticsPatch
     {
+        static TacticalMapKnowledgeDiagnosticsPatch()
+        {
+            BattleScope.Register("map-knowledge-diagnostics", Reset);
+        }
+
         private const int MaxUnitRowsPerBattle = 1000;
         private const float MinSecondsBetweenUnitSamples = 2.0f;
         private const float ThreatSearchMeters = 2500f;

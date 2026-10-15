@@ -56,7 +56,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalIntent", TelemetryCategory.Decision);
             AddTactical("TacticalLocalReaction", TelemetryCategory.Decision);
             AddTactical("TacticalReplan", TelemetryCategory.Decision);
-            AddTactical("TacticalCascade", TelemetryCategory.Trace);
             AddTactical("TacticalMacro", TelemetryCategory.State);
             AddTactical("TacticalMacroDecision", TelemetryCategory.Decision);
             AddTactical("TacticalGroup", TelemetryCategory.State);
@@ -83,25 +82,17 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalReserveOrderDelayGuard", TelemetryCategory.Gate);
             AddTactical("TacticalChargeDeny", TelemetryCategory.Gate);
             AddTactical("TacticalChargePreserved", TelemetryCategory.Gate);
-            AddTactical("TacticalChargeGuard", TelemetryCategory.Gate);
-            AddTactical("TacticalDoctrineCharge", TelemetryCategory.Gate);
             AddTactical("TacticalFeud", TelemetryCategory.Gate);
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
             AddTactical("TacticalDirectChildIntent", TelemetryCategory.Decision);
             AddTactical("TacticalPlayExecution", TelemetryCategory.Decision);
-            AddTactical("TacticalMacroAiOverride", TelemetryCategory.Write);
             AddTactical("TacticalDirectChildGate", TelemetryCategory.Gate);
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);
             AddTactical("TacticalRegimentDiagnostics", TelemetryCategory.Trace);
             AddTactical("TacticalRegimentTrace", TelemetryCategory.Trace);
             AddTactical("TacticalMapKnowledge", TelemetryCategory.Trace);
             AddTactical("TacticalLeafCascade", TelemetryCategory.Decision);
-            AddTactical("TacticalRegimentalIntel", TelemetryCategory.Decision);
-            AddTactical("TacticalRegimentalControl", TelemetryCategory.Decision);
-            AddTactical("TacticalRegimentalGate", TelemetryCategory.Trace);
-            AddTactical("TacticalFriendlyPathBlocked", TelemetryCategory.Gate);
-            AddTactical("TacticalFriendlyFireBlocked", TelemetryCategory.Gate);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can
@@ -113,13 +104,9 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalArtilleryWaypointVeto", TelemetryCategory.Gate);
             AddTactical("TacticalReinforcementOpportunity", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
-            AddTactical("TacticalPlaybookFactionBias", TelemetryCategory.Decision);
             AddTactical("TacticalPlayerProtected", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
-            AddTactical("TacticalObjectiveRecordsParityMismatch", TelemetryCategory.Gate);
-            AddTactical("TacticalOrchestratorParityMismatch", TelemetryCategory.Gate);
-            AddTactical("TacticalOrchestratorWorkerFault", TelemetryCategory.Health);
             AddTactical("TacticalOrchestrator", TelemetryCategory.State);
             AddTactical("TacticalPathfinderDiscipline", TelemetryCategory.Gate);
             AddTactical("TacticalHqLinkGuard", TelemetryCategory.Gate);
@@ -149,7 +136,6 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Director:trace", TelemetryCategory.Trace);
             AddCampaign("OperationalProbe", TelemetryCategory.Decision);
             AddCampaign("CoordinatedOps", TelemetryCategory.Write);
-            AddCampaign("CoordinatedOps:Perf", TelemetryCategory.Performance);
             AddCampaign("ProjectDoctrine", TelemetryCategory.Decision);
             AddCampaign("ProjectAppointed", TelemetryCategory.State);
             AddCampaign("ProjectUnlock", TelemetryCategory.State);

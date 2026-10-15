@@ -20,7 +20,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     ///                    BattleUnits, builds roster, calls BuildAndActivate, attaches
     ///                    ArmyOrchestrator per non-suppressed side, picks initial plan,
     ///                    emits bootstrap + plan telemetry.
-    ///   OnBattleEnd    — clears inter-battle ledger state, tears down orchestrators.
+    ///   OnBattleEnd    — BattleScope.ResetAll (every per-battle static), tears down orchestrators.
     ///   Tick           — cascades to per-side orchestrators; emits first-tick once-marker.
     ///
     /// All methods are try/catch guarded — this code runs inside or adjacent to Harmony
@@ -57,11 +57,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // ============================================================
     public static partial class TacticalBattleCoordinator
     {
-        private const float MaxTickDeltaSeconds = 5f;
-
         // Cached AIBattle.bunits FieldInfo — avoids reflection cost on every battle bootstrap.
+        // The field is static (decompile 3306), so it also serves the doctrine clock
+        // sampler without an AIBattle instance.
         private static FieldInfo _bunitsFieldCache;
-        private static float _lastTickTimeSeconds;
+
+        static TacticalBattleCoordinator()
+        {
+            DoctrineClockFrameSource = () => UnityEngine.Time.frameCount;
+            DoctrineClockSampler = SampleVanillaBattleClock;
+            BattleScope.Register("doctrine-clock", ResetDoctrineClock);
+            BattleScope.Register("coordinator-tick-state", ResetRuntimeTickState);
+        }
+
+        /// <summary>
+        /// Raw battle clock for DoctrineBattleHours: GameVars.currenttimefromstart
+        /// (SetTimeVariables 93545) and eodcycle of the battle's BattleUnits, read from
+        /// the static AIBattle.bunits (assigned from GameController in AIBattle.Start,
+        /// 3354). The campaign map's BattleUnits (IsCampaign, 78782) or a destroyed one
+        /// is "no battle" (key 0); there currenttimefromstart is in years (30171).
+        /// </summary>
+        private static DoctrineClockSample SampleVanillaBattleClock()
+        {
+            if (_bunitsFieldCache == null)
+                _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
+            var bunits = _bunitsFieldCache?.GetValue(null) as BattleUnits;
+            if ((UnityEngine.Object)bunits == null || bunits.IsCampaign) return default(DoctrineClockSample);
+            return new DoctrineClockSample(bunits.GetInstanceID(), GameVars.currenttimefromstart, bunits.eodcycle);
+        }
+        // Per-session battle counter for lifecycle log lines; never reset.
         private static int _battleSequence;
         private static int _playerAllianceId = -1;
         private static int _activeBattleUnitsId;
@@ -76,11 +100,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<int, float> _lastProcessedSideStatUpdateByBunitsId = new Dictionary<int, float>();
         private static readonly float[] _lastHeavyReviewHours = { 0f, 0f };
         private static readonly float[] _lastHeavyReviewRealtimeSeconds = { 0f, 0f };
-        // Per-side last-seen battle hours (game-clock time, scales with
-        // 2x/5x/20x compression). Used to derive a battle-time delta for
-        // phase progression so phase budgets track commander pace, not
-        // wallclock pace. Distinct from _lastHeavyReviewHours (the heavy-
-        // throttle gate's last review time).
+        // Per-side doctrine hours at the side's last tick (scales with
+        // 2x/5x/20x compression); ComputeCompressionAdjustedCycle's battle-time
+        // source. Distinct from _lastHeavyReviewHours (the heavy-throttle
+        // gate's last review time).
         private static readonly float[] _lastTickBattleHours = { -1f, -1f };
         private static readonly bool[] _replanAfterNight = { false, false };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
@@ -150,17 +173,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static int _heavyTickParity = 0;
 
         /// <summary>
-        /// Per-session battle counter, incremented on each successful OnBattleStart and
-        /// never reset (so a value never identifies two battles). Still read by
-        /// BattleGroupStancePatch's worker-snapshot check, which is dead since the
-        /// worker thread was removed and goes away with it at integration.
-        /// </summary>
-        public static int BattleSequenceForParity
-        {
-            get { return _battleSequence; }
-        }
-
-        /// <summary>
         /// "Cheap per-group" cache lookup. Returns the pre-resolved
         /// doctrine/ledger/charge decision for a Regiment when the most
         /// recent heavy-gate fire pre-computed one for the given alliance.
@@ -212,7 +224,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // routes through HistoricalFigureRegistry.Resolve(commanderObj, allianceId, nameHint)
                 // so registered figures pick up their personality vector.
                 var roster = TacticalCommanderRoster.BuildFromVanilla(commanders);
-                StartDoctrineClock(SafeCurrentBattleHours());
                 BuildAndActivate(suppressedAllianceId, roster);
                 _playerAllianceId = playerAllianceId;
                 _battleSequence++;
@@ -221,10 +232,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     AttachArmyIfActive(side0, battle);
                     AttachArmyIfActive(side1, battle);
-                    AttachDirectChildrenIfReady(side0, battle);
-                    AttachDirectChildrenIfReady(side1, battle);
-                    AttachCommandTreeIfReady(side0, battle);
-                    AttachCommandTreeIfReady(side1, battle);
+                    AttachDirectChildrenIfReady(side0);
+                    AttachDirectChildrenIfReady(side1);
+                    AttachCommandTreeIfReady(side0);
+                    AttachCommandTreeIfReady(side1);
                 }
 
                 int suppressed = (suppressedAllianceId == 0 || suppressedAllianceId == 1) ? 1 : 0;
@@ -254,8 +265,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             // A failed bootstrap leaves the coordinator inactive; do not populate battle
-            // caches nothing will consume (and nothing would clear on OnBattleEnd, which
-            // early-outs while inactive).
+            // caches nothing will consume.
             if (!active) return;
 
             // Stage A perf cache (2026-05-21): populate battle-lifetime scene-scan cache
@@ -284,63 +294,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>
+        /// Battle teardown: every registered per-battle static (BattleScope) is reset
+        /// — caches, ledgers, clocks, telemetry dedupe — then the orchestrators are
+        /// dropped. Runs even when the coordinator never activated, so state patches
+        /// filled during a battle whose bootstrap failed is still released.
+        /// </summary>
         public static void OnBattleEnd()
         {
-            if (!active) return;
-            try
-            {
-
-                ClearLedgersBetweenBattles();
-                ResetRuntimeTickState();
-                _directChildDeferLogged.Clear();
-                _commandTreeTelemetrySignatures.Clear();
-
-                // Stage A perf cache (2026-05-21): clear battle-lifetime scene-scan
-                // cache so the next battle starts with a fresh state. Idempotent if
-                // cache wasn't populated.
-                try { TacticalStableSceneCache.Clear(); }
-                catch (Exception sce)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache clear threw: "
-                        + sce.GetType().Name + " " + sce.Message);
-                }
-
-                // Stage B perf cache (2026-05-21): invalidate command tree cache. Next
-                // battle's first Snapshot() will rebuild from a fresh roster.
-                try { CommandTreeRuntime.InvalidateAll(); }
-                catch (Exception cte)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] command-tree-cache clear threw: "
-                        + cte.GetType().Name + " " + cte.Message);
-                }
-
-                // Stage D (2026-05-21): reset validator counters so the next battle
-                // starts fresh and the next validation cycle isn't skipped due to a
-                // stale lastValidationRealtimeSeconds value.
-                try { TacticalCacheValidator.ResetForBattleEnd(); } catch { }
-                try { DirectChildDiscovery.ResetForBattleEnd(); } catch { }
-
-                // Regimental control state (2026-05-22, Scope B): claim-set
-                // tracking removed. Reset now only clears the artillery-action
-                // timestamp dictionary so next battle starts with fresh hold
-                // windows. Doctrine writes via vanilla ChangeStance — no
-                // mod-owned state to release.
-                try { WhiskeyRealism.Patches.BattleGroupStancePatch.ResetRegimentalControlForBattleEnd(); } catch { }
-                try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.ResetTaskHoldForBattleEnd(); } catch { }
-
-                side0 = null;
-                side1 = null;
-                _playerAllianceId = -1;
-                _activeBattleUnitsId = 0;
-                active = false;
+            bool wasActive = active;
+            BattleScope.ResetAll();
+            side0 = null;
+            side1 = null;
+            _playerAllianceId = -1;
+            _activeBattleUnitsId = 0;
+            active = false;
+            if (wasActive)
                 TelemetryRouter.LegacyInfo("[TacticalOrchestrator] teardown battle=" + _battleSequence, TelemetryLayer.Tactical);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] OnBattleEnd partial: "
-                    + e.GetType().Name + " " + e.Message);
-                ClearForFailure();
-            }
         }
 
         public static void Tick(AIBattle battle)
@@ -366,7 +336,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
 
                     OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
-                    EndOfDayPhase dayPhase = AdvanceDoctrineClock(SafeCurrentBattleHours(), SafeEodCycle(battle));
+                    EndOfDayPhase dayPhase = ObserveEndOfDay(SafeEodCycle(battle));
+                    SampleDoctrineClock();
                     if (dayPhase == EndOfDayPhase.Suspended)
                     {
                         MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
@@ -375,12 +346,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (dayPhase == EndOfDayPhase.Resumed) PrepareForNewBattleDay();
                     unchecked { _tickSerial++; }
                     bool aiVsAi = SafeAiVsAi();
-                    float deltaSeconds = ComputeTickDeltaSeconds();
 
                     // Drive each side; the heavy-gate publishes into
                     // _lastPublishedSnapshots[s] when it fires.
-                    DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
-                    DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
+                    DriveTacticalCommanderSide(side0, battle, aiVsAi);
+                    DriveTacticalCommanderSide(side1, battle, aiVsAi);
 
                     // Plan F (2026-05-20): flip the heavy-build parity so the
                     // NEXT vanilla side-stat cycle's Tick alternates which side
@@ -475,48 +445,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static void DriveTacticalCommanderSide(
             TacticalBattleOrchestrator side,
             AIBattle battle,
-            bool aiVsAi,
-            float deltaSeconds)
+            bool aiVsAi)
         {
             if (side == null) return;
             if (!ShouldRunTacticalCommanderForSide(side.AllianceId, _playerAllianceId, aiVsAi)) return;
 
-            side.Tick();
+            // Every per-side read (snapshot, objective records, objectivechain,
+            // macroai) uses this side's own AIBattle, not whichever instance fired
+            // the tick: each AIBattle's objectivechain holds only its own side's
+            // groups (aibattle[] assignment 85203-85212, SetSide 3408).
+            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
 
             if (Plugin.EnableTacticalOrchestratorIntentInference != null
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
-                DriveTickCycle(side, battle, deltaSeconds);
-                AttachDirectChildrenIfReady(side, battle);
-                AttachCommandTreeIfReady(side, battle);
-                DriveDirectChildCycle(side, battle);
+                DriveTickCycle(side, sideBattle);
+                AttachDirectChildrenIfReady(side);
+                AttachCommandTreeIfReady(side);
+                DriveDirectChildCycle(side, sideBattle);
             }
 
-            DriveOperationsLedger(side, battle);
+            RefreshPostureInputs(side, sideBattle);
+            DriveOperationsLedger(side, sideBattle);
         }
 
-        private static float ComputeTickDeltaSeconds()
+        /// <summary>
+        /// #61's orchestrator inputs (leaf brigade map, live commander initiative,
+        /// reinforcement opportunity), once per side per tick, ahead of that side's
+        /// next AIBattle.UpdateAITasks.
+        /// </summary>
+        private static void RefreshPostureInputs(TacticalBattleOrchestrator side, AIBattle sideBattle)
         {
-            try
+            if (side.Army == null) return;
+            var bunits = ResolveBattleUnits(sideBattle);
+            if (bunits == null || bunits.alliance == null) return;
+            for (int s = 0; s < 2 && s < bunits.alliance.Length; s++)
             {
-                float now = UnityEngine.Time.realtimeSinceStartup;
-                float delta = _lastTickTimeSeconds <= 0f ? 1f : Math.Max(0f, now - _lastTickTimeSeconds);
-                _lastTickTimeSeconds = now;
-                return SanitizeDelta(delta);
-            }
-            catch
-            {
-                return 1f;
+                if (bunits.alliance[s] != side.AllianceId) continue;
+                ArmyPostureInputsRuntime.Refresh(sideBattle, bunits, s, side.Army);
+                return;
             }
         }
 
-        private static float SanitizeDelta(float deltaSeconds)
-        {
-            if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return 0f;
-            return Math.Min(deltaSeconds, MaxTickDeltaSeconds);
-        }
-
-        private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle, float deltaSeconds)
+        private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle)
         {
             try
             {
@@ -539,30 +510,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ? Plugin.TacticalOrchestratorMinReplanSeconds.Value
                     : 60;
 
-                // Battle-time delta: compute from GameVars.currenttimefromstart
-                // diff vs last tick. At 2x/5x/20x compression, this advances
-                // proportionally faster than wallclock deltaSeconds. Drives
-                // phase progression budgets so commander decisions track
-                // battle pace, not wallclock pace. Hours→seconds conversion.
+                // Last doctrine hours this side ticked at; the heavy gate's
+                // compression estimate (ComputeCompressionAdjustedCycle) reads it.
                 float nowBattleHours = (float)DoctrineBattleHours;
-                float lastBattleHours = _lastTickBattleHours[sideIdx];
-                float battleDeltaSeconds;
-                if (lastBattleHours < 0f)
-                {
-                    battleDeltaSeconds = 0f;  // first tick — no prior reference
-                }
-                else
-                {
-                    float deltaHours = nowBattleHours - lastBattleHours;
-                    if (deltaHours < 0f) deltaHours = 0f;          // battle reset / clock rollback
-                    if (deltaHours > 1f) deltaHours = 1f;          // cap at 1 battle hour per tick
-                    battleDeltaSeconds = deltaHours * 3600f;
-                }
                 _lastTickBattleHours[sideIdx] = nowBattleHours;
 
                 if (step == TickReplanStep.NightReplan)
                 {
                     ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible);
+                    // The night replan counts against "Min Replan Seconds" like any other.
+                    ArmyTickCycle.RecordReplan(side.AllianceId);
                     // Cleared only once the replan has run; a throw retries next tick.
                     _replanAfterNight[sideIdx] = false;
                     TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
@@ -571,9 +528,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
+                // Plan age, phase age and the replan cooldown run on doctrine
+                // time; the wall-clock delta is unused when it is supplied.
                 var trigger = ArmyTickCycle.MaybeReplan(
                     side.Army,
-                    deltaSeconds: deltaSeconds,
+                    deltaSeconds: 0f,
                     ownEvidence: bundleForReplan.OwnEvidence,
                     enemyVisible: bundleForReplan.EnemyVisible,
                     ownMainEffortStrength: bundleForReplan.OwnMainEffortStrength,
@@ -585,7 +544,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownAvgAmmo01: bundleForReplan.OwnAvgAmmo01,
                     nearestReinforcementHours: bundleForReplan.NearestReinforcementHours,
                     nearestReinforcementStrength: bundleForReplan.NearestReinforcementStrength,
-                    battleDeltaSeconds: battleDeltaSeconds);
+                    doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds);
 
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
@@ -836,7 +795,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // decisions read by BattleGroupStancePatch tier-1.
                 using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    PopulateResolvedDecisionsForSide(side, battle);
+                    PopulateResolvedDecisionsForSide(side, battle, snap.EnemyVisible);
                 }
                 return snap;
             }
@@ -912,20 +871,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return false;
-            }
-        }
-
-        private static float SafeCurrentBattleHours()
-        {
-            try
-            {
-                float t = GameVars.currenttimefromstart;
-                if (float.IsNaN(t) || float.IsInfinity(t) || t < 0f) return 0f;
-                return t;
-            }
-            catch
-            {
-                return 0f;
             }
         }
 
@@ -1139,8 +1084,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (armyEntry == null) return;
             var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyEntry.PersonalityVector);
             side.AttachArmy(army);
-            var evidence = BuildArmyEvidenceForSide(side.AllianceId, battle);
-            army.PickInitialPlan(evidence);
+            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
+            army.PickInitialPlan(ArmyEvidenceBuilder.Build(sideBattle, side.AllianceId).OwnEvidence);
             if (army.HasPlan)
             {
                 TelemetryRouter.LegacyInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
@@ -1150,7 +1095,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side)
         {
             // Hot-path measurement scope (2026-05-19 hitch investigation).
             // Wraps the full discovery-snapshot + register flow so the tuning
@@ -1218,7 +1163,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return false;
         }
 
-        private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side)
         {
             // Hot-path measurement scope (2026-05-19). See AttachDirectChildrenIfReady for context.
             using (TelemetryPerf.Scope("tactical.attach-command-tree", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
@@ -1435,7 +1380,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
                 if (side.Army.CurrentDirectChildIntents.Count == 0)
                 {
-                    AttachDirectChildrenIfReady(side, battle);
+                    AttachDirectChildrenIfReady(side);
                     if (side.Army.CurrentDirectChildIntents.Count == 0) return;
                 }
 
@@ -1453,7 +1398,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var axis = enemyVisForChildren.FrontAxis;
                 IReadOnlyDictionary<int, int> instanceToSector = enemyVisForChildren.InstanceSectors;
                 if (instanceToSector == null || instanceToSector.Count == 0)
-                    instanceToSector = BuildInstanceToSectorIndexMap(battle, side.AllianceId);
+                    instanceToSector = ArmyEvidenceBuilder.MapOwnGroupsToSectors(side.AllianceId);
                 int fallbackSector = ArmyEvidenceBuilder.DefaultMainEffortSector(axis);
 
                 var primarySectors = new int[childCount];
@@ -1561,61 +1506,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
         // contract. Both partials see it via the shared `partial class` declaration.
 
-        // Own command group GameObject InstanceID → lateral band of the side's
-        // front axis (the axis ArmyEvidenceBuilder last fitted for this
-        // alliance). Same banding as EnemyVisibleState.InstanceSectors, so
-        // per-child primary sectors line up with the evidence sectors.
-        private static System.Collections.Generic.Dictionary<int, int> BuildInstanceToSectorIndexMap(AIBattle battle, int allianceId)
-        {
-            return ArmyEvidenceBuilder.MapOwnGroupsToSectors(allianceId);
-        }
-
-        private static ArmyEvidence BuildArmyEvidenceForSide(int allianceId, AIBattle battle)
-        {
-            var bunits = ResolveBattleUnits(battle);
-            int side = -1;
-            try
-            {
-                if (bunits != null && bunits.alliance != null)
-                {
-                    for (int s = 0; s < 2 && s < bunits.alliance.Length; s++)
-                        if (bunits.alliance[s] == allianceId) { side = s; break; }
-                }
-            }
-            catch { }
-
-            float own = 0f;
-            float enemyTotal = 0f;
-            try
-            {
-                if (bunits != null && bunits.sideinformation != null && side >= 0 && side < bunits.sideinformation.Length)
-                    own = System.Math.Max(1f, bunits.sideinformation[side].totalactiveforce);
-                if (bunits != null && bunits.sideinformation != null)
-                {
-                    for (int s = 0; s < 2 && s < bunits.sideinformation.Length; s++)
-                        if (s != side) enemyTotal += System.Math.Max(0f, bunits.sideinformation[s].totalactiveforce);
-                }
-            }
-            catch { }
-
-            float odds = enemyTotal <= 0f ? 1f : own / enemyTotal;
-            return new ArmyEvidence(odds, TerrainKind.Open, defaultMainEffortSector: 0);
-        }
-
-        private static void ClearLedgersBetweenBattles()
-        {
-            try { TacticalSectorLedger.ClearHelpRequests(); } catch { }
-            try { Plugin.MoraleSnapshotLedger?.Clear(); } catch { }
-            try { WhiskeyRealism.Patches.TacticalRegimentDiagnosticsPatch.Reset(); } catch { }
-            try { WhiskeyRealism.Patches.TacticalMapKnowledgeDiagnosticsPatch.Reset(); } catch { }
-            try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.Reset(); } catch { }
-        }
-
+        // The coordinator's own per-battle tick state (BattleScope "coordinator-tick-state").
         private static void ResetRuntimeTickState()
         {
-            try { ArmyTickCycle.Reset(); } catch { }
-            _lastTickTimeSeconds = 0f;
             _tickWarningKeys.Clear();
+            _directChildDeferLogged.Clear();
+            _commandTreeTelemetrySignatures.Clear();
             // Task 6: reset heavy gate + dedup state for new battle (per-battle via BattleUnits owner + per-side)
             try
             {
@@ -1651,13 +1547,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _battleInfoLogged.Clear();
                 _regimentByGameObjectId.Clear();
                 _countedUnitIds.Clear();
-                ResetDoctrineClock();
                 _replanAfterNight[0] = false;
                 _replanAfterNight[1] = false;
             }
             catch { }
-            // Clear the shared observation aggregate (global singleton) for the next battle.
-            try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
         }
 
         /// <summary>
@@ -1733,19 +1626,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // Failed bootstrap: same reset as a teardown, without the teardown line.
         private static void ClearForFailure()
         {
-            // ResetRuntimeTickState clears the resolved-decision caches; the battle-lifetime
-            // scene and command-tree caches are cleared here too because OnBattleEnd
-            // early-outs once active is false.
-            ResetRuntimeTickState();
-            try { TacticalStableSceneCache.Clear(); } catch { }
-            try { CommandTreeRuntime.InvalidateAll(); } catch { }
-            side0 = null;
-            side1 = null;
-            _playerAllianceId = -1;
-            _activeBattleUnitsId = 0;
             active = false;
+            OnBattleEnd();
         }
 
         // Stage C perf cache (2026-05-21): pre-populates _resolvedDecisionsBySide at
@@ -1811,7 +1696,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (counts[s] > 0)
                     {
                         OnceLog.Info(
-                            "tactical-resolved-cache:prepopulated",
+                            "tactical-resolved-cache:prepopulated:" + s,
                             "[TacticalResolvedCache] pre-populated alliance=" + s
                             + " count=" + counts[s]
                             + " — battle-start gap closed; tier-1 hits begin immediately");
@@ -1851,7 +1736,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // failure the per-group entry is skipped, and the patch falls
         // through to ApplyGroup for that Regiment.
 
-        private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle, EnemyVisibleState enemyVisible)
         {
             try
             {
@@ -1865,23 +1750,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var bunits = ResolveBattleUnits(battle);
                 if (bunits == null) return;
 
-                // Walk BattleUnits.completeunitlist filtered by alliance —
-                // NOT AIBattle.unitsused. Tick() is debounced per vanilla
-                // CalculateSideStats cycle and drives both side0 and side1
-                // with whichever AIBattle fired first. That AIBattle's
-                // unitsused only contains its own side's regiments. Using
-                // completeunitlist + alliance filter gives us the right
-                // Regiment population for whichever side we're populating
-                // regardless of which AIBattle triggered Tick (mirrors
-                // BuildInstanceToSectorIndexMap above).
+                // Walk BattleUnits.completeunitlist filtered by alliance, not
+                // AIBattle.unitsused, which holds only the groups in that AI's
+                // pool (85227-85262).
                 var units = BattleUnits.completeunitlist as IList;
                 if (units == null || units.Count == 0) return;
 
-                // Macro is per-side; AIBattle.macroai belongs to the
-                // AIBattle that fired Tick, which may not match the side
-                // we're pre-computing. Pull from bunits.sideinformation
-                // indexed by the side whose alliance == allianceId.
-                int macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
+                // The side's live macro is its own AIBattle.macroai (battle is
+                // the side's instance). sideinformation[side].macroai is only a
+                // scripted override, -1 unless set (CheckGlobalAIStrategy
+                // 6383-6386), so it never showed the army retreat (3).
+                int macro = SafeMacroAiOfOwnBattle(battle, bunits, allianceId);
 
                 bool chargeDenialOn = false;
                 bool localReactionsOn = false;
@@ -1901,7 +1780,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 catch { }
 
-                int sectorIndex = 0;
+                // Sector = the group's lateral band on the side's front axis
+                // (EnemyVisibleState.InstanceSectors, keyed by GameObject id), the
+                // same banding the direct-child allocator uses; the center band
+                // when the group was not banded.
+                int fallbackBand = ArmyEvidenceBuilder.DefaultMainEffortSector(enemyVisible.FrontAxis);
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
@@ -1936,12 +1819,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { vanillaOrdered = group.ai_stanceordered; }
                     catch { continue; }
 
-                    // sectorIndex is the post-filter index for this side
-                    // (mirrors BuildInstanceToSectorIndexMap's accounting).
-                    // It's used as TacticalSectorAssessment.SectorId; the
-                    // scorers ignore the value, it just shows up in logs.
-                    var sector = BuildSectorForGroup(group, sectorIndex);
-                    sectorIndex++;
+                    int band;
+                    try { band = enemyVisible.SectorForInstance(((Component)group).gameObject.GetInstanceID(), fallbackBand); }
+                    catch { band = fallbackBand; }
+                    var sector = BuildSectorForGroup(group, band);
 
                     // 1) Doctrine. When doctrine produces Allow/Deny, that's
                     //    the final answer for this Regiment — overrides
@@ -1979,7 +1860,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             reason: "doctrine-" + dReason,
                             fromDoctrine: true,
                             fromLedger: false,
-                            isChargeOverride: vanillaOrdered == 4,
+                            isChargeOverride: vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault,
                             chargeAction: chargeAction);
                         continue;
                     }
@@ -1988,7 +1869,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     //    freezes WHETHER to demote and to which stance
                     //    (FinalStance); Kind stays Skip so a group vanilla
                     //    takes out of assault before apply is left alone.
-                    if (vanillaOrdered == 4)
+                    if (vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault)
                     {
                         cache[instanceId] = new TacticalResolvedGroupDecision(
                             finalStance: ifAssault.DemoteStance,
@@ -2004,7 +1885,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // 3) Ledger task stance.
                     if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
                     {
-                        int lStance = StanceForLedgerTask(state.Task, sector);
+                        int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
+                            state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
                         // BattleGroupStancePatch.TryApplyLedgerTaskStance
                         // claims ownership whenever the ledger resolves
                         // (return true) — even when stance is invalid or
@@ -2013,7 +1895,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         // group as "ledger had an opinion, no write
                         // needed" and DOESN'T fall through to the default
                         // scorer.
-                        if (lStance < 0 || lStance > 3 || lStance == 4)
+                        if (lStance < 0)
                         {
                             cache[instanceId] = new TacticalResolvedGroupDecision(
                                 finalStance: -1,
@@ -2095,13 +1977,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static TacticalSectorAssessment BuildSectorForGroup(Regiment group, int index)
+        private static TacticalSectorAssessment BuildSectorForGroup(Regiment group, int band)
         {
             try
             {
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
-                    index,
+                    band,
                     group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
                     group != null ? group.groupenemiesinrange : 0f,
                     SumEnemyStrengthWithinAngleSafe(group),
@@ -2146,47 +2028,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch { return string.Empty; }
         }
 
-        private static int StanceForLedgerTask(CommandTaskType task, TacticalSectorAssessment sector)
-        {
-            // Mirrors BattleGroupStancePatch.StanceForTask. Returns -1 when
-            // the task has no stance opinion (default scorer would have
-            // been consulted in the legacy path, but ledger claims
-            // ownership when it resolves).
-            if ((task == CommandTaskType.HoldObjective ||
-                 task == CommandTaskType.HoldChoke ||
-                 task == CommandTaskType.FixEnemy) &&
-                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector))
-                return 3;
-
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.FallBackToLine:
-                    return 2;
-                default:
-                    return -1;
-            }
-        }
-
-        private static int SafeMacroAiForSideByAlliance(BattleUnits bunits, int allianceId)
+        // -1 when battle does not play allianceId (unresolved own instance).
+        private static int SafeMacroAiOfOwnBattle(AIBattle battle, BattleUnits bunits, int allianceId)
         {
             try
             {
-                if (bunits == null || bunits.alliance == null || bunits.sideinformation == null) return -1;
-                for (int side = 0; side < bunits.alliance.Length && side < bunits.sideinformation.Length; side++)
-                {
-                    if (bunits.alliance[side] != allianceId) continue;
-                    var info = bunits.sideinformation[side];
-                    if (info == null) return -1;
-                    return info.macroai;
-                }
-                return -1;
+                if (battle == null || bunits == null || bunits.alliance == null) return -1;
+                int side = battle.sideofai;
+                if (side < 0 || side >= bunits.alliance.Length || bunits.alliance[side] != allianceId) return -1;
+                return battle.macroai;
             }
             catch
             {

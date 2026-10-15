@@ -24,8 +24,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         DiscretionaryIndustry = 1,
         NewForceGrowth = 2,
         VanityNaval = 3,
-        TariffConflict = 4,
-        LowValueSubsidy = 5
+        TariffConflict = 4
     }
 
     public sealed class FiscalOptions

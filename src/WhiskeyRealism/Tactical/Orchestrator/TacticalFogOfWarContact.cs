@@ -56,14 +56,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static readonly TacticalFrameCache<NearestEnemy> _nearestByUnit = new TacticalFrameCache<NearestEnemy>();
 
-        public static bool AcceptContactEvidence(
-            bool inVanillaVisibleRange,
-            bool inVanillaFireRange,
-            bool receivedFire)
-        {
-            return receivedFire || inVanillaVisibleRange || inVanillaFireRange;
-        }
-
         public static Regiment ClosestVisibleEnemy(Regiment unit)
         {
             TryClosestVisibleEnemy(unit, out Regiment enemy, out _);

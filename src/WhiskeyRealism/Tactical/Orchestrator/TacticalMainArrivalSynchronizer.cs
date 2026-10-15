@@ -48,7 +48,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Maximum BATTLE time (seconds; 15 battle-minutes) Main will hold for
         /// supports before releasing regardless. Callers must measure the hold
-        /// on GameVars.currenttimefromstart (hours x 3600), not wall-clock time:
+        /// on the doctrine clock (TacticalDoctrineTime), not wall-clock time:
         /// the old 30 real seconds were 3 battle-minutes at 1x and 25 at 50x.
         /// </summary>
         public const float DefaultMaxHoldSeconds = 15f * 60f;

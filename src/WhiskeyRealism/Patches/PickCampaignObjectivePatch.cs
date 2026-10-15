@@ -24,6 +24,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "PickCampaignObjective")]
     internal static class PickCampaignObjectivePatch
     {
+        static PickCampaignObjectivePatch()
+        {
+            CampaignScope.Register("pick-objective", ResetForNewCampaign);
+        }
+
         private static FieldInfo _aifactionField;
         private static FieldInfo _allianceIdField;
         private static FieldInfo _followedField;
@@ -39,6 +44,7 @@ namespace WhiskeyRealism.Patches
         {
             LastWrittenByMod[0] = -1;
             LastWrittenByMod[1] = -1;
+            LastLoggedPlanObjective.Clear();
         }
 
         internal static int[] SnapshotWrittenByMod()

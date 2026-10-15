@@ -182,12 +182,17 @@ namespace WhiskeyRealism.Telemetry
             return Math.Max(64L * 1024L, Math.Min(twoPercent, 5L * 1024L * 1024L));
         }
 
+        // Low-priority cut order matches TelemetryQueue.Rank: Trace, Performance, State,
+        // Decision, then Gate/Write at the total cap. Performance summaries still land in
+        // the protected reserve (CanEmitLocked), so only per-sample perf rows go early.
         private static int CutPercent(TelemetryCategory category)
         {
             switch (category)
             {
                 case TelemetryCategory.Trace:
                     return 90;
+                case TelemetryCategory.Performance:
+                    return 93;
                 case TelemetryCategory.State:
                     return 95;
                 case TelemetryCategory.Decision:

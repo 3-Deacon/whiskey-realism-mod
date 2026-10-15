@@ -47,9 +47,6 @@ namespace WhiskeyRealism.Strategic
         public bool IsAttachedDivision =>
             UnitType == 14 && !IsTopUnit && !string.IsNullOrEmpty(ParentUnitKey);
 
-        public bool IsIndependentTopDivision =>
-            UnitType == 14 && IsTopUnit && !IsGarrisoned && GroupStrengthDirect > 1000f;
-
         public bool IsTopStrategicFormation =>
             !IsGarrisoned && IsTopUnit && UnitType >= 14 && UnitType <= 16;
 

@@ -186,10 +186,7 @@ namespace WhiskeyRealism.Strategic
             LastSeenMonth = -1;
             LastSeenYear = -1;
             Initialized = false;
-            PickCampaignObjectivePatch.ResetForNewCampaign();
-            MonthlyTickHookPatch.ResetCadence();
-            OperationalProbeRuntime.ResetForNewCampaign();
-            OnceLog.Reset();
+            CampaignScope.ResetAll();
             EmitCampaignInfoToMainLogIfAllowed("[Coordinator] strategic state reset (" + reason + ")");
         }
 

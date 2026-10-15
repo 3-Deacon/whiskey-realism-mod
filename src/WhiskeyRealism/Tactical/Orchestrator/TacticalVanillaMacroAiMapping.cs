@@ -3,7 +3,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// <summary>
     /// Maps Whiskey's <see cref="ReinforcementOpportunity"/> doctrine output to
     /// vanilla GTCW's per-side <c>BattleUnits.sideinformation[side].macroai</c>
-    /// state. Pure logic; consumed by <c>BattleMacroAIOverridePatch</c>.
+    /// state. Pure logic; consumed by <c>BattleMacroStrategyPatch</c> (#44) as the
+    /// fallback opinion when the operations ledger has none.
     ///
     /// Vanilla anchors (decompile / 2026-05-23):
     ///   <list type="bullet">
@@ -95,15 +96,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // ambiguous cases.
                     return null;
             }
-        }
-
-        /// <summary>
-        /// True when the macroai value is one Whiskey may write (0-2). Retreat
-        /// (3) is excluded: see <see cref="MapOpportunityToMacroAi"/>.
-        /// </summary>
-        public static bool IsLegalMacroAi(int value)
-        {
-            return value >= MacroAiFlankAttack && value <= MacroAiDefend;
         }
     }
 }

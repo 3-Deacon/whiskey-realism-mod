@@ -14,6 +14,12 @@ namespace WhiskeyRealism.Util
     // releases them at battle end so first-fire lines re-fire in the next battle.
     internal static class OnceLog
     {
+        static OnceLog()
+        {
+            BattleScope.Register("oncelog-tactical", ResetTactical);
+            CampaignScope.Register("oncelog", Reset);
+        }
+
         internal const int MaxKeys = 4096;
 
         private static readonly object Gate = new object();

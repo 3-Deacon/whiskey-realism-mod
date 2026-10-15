@@ -22,6 +22,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //     Enable Tactical Reinforcement Opportunity Doctrine).
     public static class ArmyPostureInputsRuntime
     {
+        static ArmyPostureInputsRuntime()
+        {
+            BattleScope.Register("posture-inputs", ResetForBattleEnd);
+        }
+
         private const float TelemetrySeconds = 30f;
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
         private static readonly Dictionary<int, CachedProbes> _probeCache = new Dictionary<int, CachedProbes>();
@@ -78,7 +83,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // Called on battle teardown (coordinator OnBattleEnd).
+        // Battle end (BattleScope).
         public static void ResetForBattleEnd()
         {
             _probeCache.Clear();

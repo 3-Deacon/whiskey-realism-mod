@@ -73,8 +73,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public static DoctrineReserveDecision DecideReserve(
             CommandDoctrineOrder order,
             float mainEffortOdds,
-            float reserveFraction,
-            float currentTimeSeconds)
+            float reserveFraction)
         {
             if (order.Task == CommandTaskType.FallBackToLine)
                 return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
@@ -93,13 +92,12 @@ namespace WhiskeyRealism.Tactical.Operations
                 assaultAuthorized: IsFinite(mainEffortOdds) && mainEffortOdds >= 1.60f,
                 fallbackPressure: false);
 
-            return DecideReserve(order, input, currentTimeSeconds);
+            return DecideReserve(order, input);
         }
 
         public static DoctrineReserveDecision DecideReserve(
             CommandDoctrineOrder order,
-            OperationalReserveInput reserveInput,
-            float currentTimeSeconds)
+            OperationalReserveInput reserveInput)
         {
             if (order.Task == CommandTaskType.FallBackToLine)
                 return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");

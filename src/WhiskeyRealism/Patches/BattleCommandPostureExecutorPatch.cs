@@ -19,8 +19,14 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCommandPostureExecutorPatch
     {
-        // Doctrine timers run on battle time (game hours, GameVars.currenttimefromstart).
-        // Former wall-clock values were tuned at 1x and convert 1:1 at 1x.
+        static BattleCommandPostureExecutorPatch()
+        {
+            BattleScope.Register("posture-executor", Reset);
+        }
+
+        // Doctrine timers run on the doctrine clock (TacticalBattleCoordinator.
+        // DoctrineBattleHours: battle hours, frozen overnight). Former wall-clock
+        // values were tuned at 1x and convert 1:1 at 1x.
         private static readonly float RecentOrderHours = TacticalBattleClock.RealSecondsAtOneXToHours(30f);
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
@@ -477,7 +483,7 @@ namespace WhiskeyRealism.Patches
                 bool defending = allianceByParent.TryGetValue(pair.Key, out int parentAlliance) &&
                     defendingByAlliance.TryGetValue(parentAlliance, out bool d) && d;
                 TacticalDivisionPlayDecision decision = TacticalDivisionPlayExecutor.Decide(
-                    new TacticalDivisionPlayInput(pair.Key, GameVars.currenttimefromstart, subordinates, defending));
+                    new TacticalDivisionPlayInput(pair.Key, subordinates, defending));
                 if (!decision.HasAnchor) continue;
 
                 for (int i = 0; i < decision.Orders.Count; i++)
@@ -1047,14 +1053,9 @@ namespace WhiskeyRealism.Patches
         // Brigade task-commitment state (2026-05-22). Per-instance (instanceId →
         // last task + timestamp). On SetWaypoint, if the proposed task matches
         // the last-written task within the hold window, suppress. Different
-        // task bypasses. Reset between battles via ResetTaskHoldForBattleEnd.
+        // task bypasses. Cleared at battle end (Reset).
         private static readonly Dictionary<int, (CommandTaskType task, float ts)> _brigadeTaskHoldState
             = new Dictionary<int, (CommandTaskType, float)>();
-
-        internal static void ResetTaskHoldForBattleEnd()
-        {
-            _brigadeTaskHoldState.Clear();
-        }
 
         // Returns true when the proposed task waypoint should be suppressed
         // because the brigade was given the SAME task recently. Hold window
@@ -2432,7 +2433,7 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < supportPositions.Count; i++)
                     supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(SafeDistance(supportPositions[i], mainPos)));
 
-                // Battle seconds on currenttimefromstart (hours x 3600).
+                // Battle seconds on the doctrine clock (hours x 3600).
                 float now = BattleHours();
                 float elapsedSeconds = MainArrivalHoldLatch.ElapsedBattleSeconds(latch, now);
                 var resolved = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
@@ -3408,12 +3409,12 @@ namespace WhiskeyRealism.Patches
             TacticalStanceWriter.EnsureStanceForTask(bunits, group, task, null, StanceWriteSource.Executor);
         }
 
-        // Battle clock (game hours since battle start). Every doctrine timer
-        // in this patch runs on it (plan Global Constraints: Clocks).
+        // Doctrine clock (battle hours, frozen across the night end-of-day
+        // cycle). Every doctrine timer in this patch runs on it; only
+        // comparisons against vanilla-stamped fields read the raw clock.
         private static float BattleHours()
         {
-            try { return GameVars.currenttimefromstart; }
-            catch { return 0f; }
+            return (float)TacticalBattleCoordinator.DoctrineBattleHours;
         }
 
         private static int SafeEodCycle(BattleUnits bunits)
@@ -3659,6 +3660,7 @@ namespace WhiskeyRealism.Patches
             _lastTelemetryAt.Clear();
             _mainArrivalHold.Clear();
             _supportMainPositionsByAlliance.Clear();
+            _lastPlayerProtectedTelemetryAt.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)

@@ -28,9 +28,7 @@ namespace WhiskeyRealism.Strategic.Construction
         VanillaInvalid = 1,
         EmergencyCreditFloor = 2,
         CsaRailDoctrineCap = 3,
-        DiscretionaryIndustryCreditDefense = 4,
-        NoSupportingUnit = 5,
-        UnsafeRear = 6
+        DiscretionaryIndustryCreditDefense = 4
     }
 
     public sealed class ConstructionOptions

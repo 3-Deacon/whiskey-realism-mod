@@ -104,9 +104,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public TacticalBattlePlan WithPhase(BattlePhase phase) =>
             new TacticalBattlePlan(PlanId, phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, 0f, JitterSeed);
 
-        public TacticalBattlePlan WithAge(float ageSeconds) =>
-            new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, ageSeconds, JitterSeed);
-
         public TacticalBattlePlan WithReserveCommitTriggerOdds(float reserveCommitTriggerOdds) =>
             new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, reserveCommitTriggerOdds, AgeSeconds, JitterSeed);
 

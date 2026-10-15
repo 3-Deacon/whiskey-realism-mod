@@ -50,7 +50,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Reinforcement window (hours): if relief arrives within this many
         // game-hours AND would push effective force above the attack ratio,
         // prefer HoldForReinforcements over PushDegraded.
-        public const float ReinforcementWaitHoursMid = 4f;
         public const float ReinforcementWaitHoursScale = 4f;
         public const float ReinforcementWaitHoursOffset = 6f;
 

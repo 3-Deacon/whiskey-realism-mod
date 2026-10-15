@@ -5,10 +5,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // #59 reserve commitment gate (decision half of BattleReserveCommitGatePatch on
     // vanilla AIBattle.CheckUseOfReserves). A Reserve-role group is held back unless
     // the orchestrator released it (T15, 2026-10-14): either its role is no longer
-    // Reserve (the allocator re-roled it) or the caller passes reserveReleased=true
-    // for the release conditions owned by the allocator/doctrine (Exploit start,
-    // reserve-commit trigger odds, neighbouring-sector crisis). Released reserves let
-    // vanilla's own reserve movement through, like any other committed role.
+    // Reserve, or the resolved role still says Reserve but the direct-child allocator
+    // (T1: Exploit start, reserve-commit trigger odds, neighbouring-sector crisis) has
+    // already re-roled it and the operations ledger has not caught up
+    // (ReleasedByAllocator). Released reserves let vanilla's own reserve movement
+    // through, like any other committed role.
     internal static class TacticalReserveCommitGate
     {
         public enum Action
@@ -100,16 +101,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        public static bool PermitReserveListBias(CommandIntentResolution resolution, bool reserveReleased = false)
+        /// <summary>
+        /// The reserve-release producer: <paramref name="held"/> (the resolution the
+        /// gate acts on, ledger state first) still says Reserve while
+        /// <paramref name="allocator"/> (the command-node intent the direct-child
+        /// allocator produced) has re-roled the group to a committed role.
+        /// </summary>
+        public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator)
         {
-            if (!resolution.Found) return true;
-            switch (resolution.Intent.Role)
-            {
-                case DirectChildRole.Reserve:
-                    return reserveReleased;
-                default:
-                    return true;
-            }
+            if (!held.Found || held.Intent.Role != DirectChildRole.Reserve) return false;
+            if (!allocator.Found) return false;
+            DirectChildRole role = allocator.Intent.Role;
+            return role != DirectChildRole.Reserve && role != DirectChildRole.Unknown;
         }
 
         private static Decision Observe(string reason, DirectChildRole role) =>

@@ -39,6 +39,11 @@ namespace WhiskeyRealism.Util
     // the stamp (see TacticalStanceOwnership).
     public static class TacticalStanceWriter
     {
+        static TacticalStanceWriter()
+        {
+            BattleScope.Register("stance-writer", ResetForBattleEnd);
+        }
+
         private static readonly Dictionary<int, StanceHoldRecord> _records = new Dictionary<int, StanceHoldRecord>();
         private static Func<AIBattle, Regiment, bool, bool, bool, bool, float> _groupStrength;
         private static bool _groupStrengthTried;
@@ -242,7 +247,7 @@ namespace WhiskeyRealism.Util
             }
         }
 
-        // Called on battle teardown (coordinator OnBattleEnd).
+        // Battle end (BattleScope).
         public static void ResetForBattleEnd()
         {
             _records.Clear();

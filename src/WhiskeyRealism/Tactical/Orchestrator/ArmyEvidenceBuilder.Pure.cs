@@ -87,6 +87,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static int DefaultMainEffortSector(TacticalFrontAxis axis)
             => axis.IsValid && axis.BandCount > 0 ? axis.CenterSector : TacticalFrontAxis.DefaultBandCount / 2;
 
+        /// <summary>Lateral band of a world point; -1 when the axis has no bands.</summary>
+        internal static int BandOfPoint(TacticalFrontAxis axis, float x, float z)
+            => axis.IsValid && axis.BandCount > 0 ? axis.SectorOf(x, z) : -1;
+
         /// <summary>
         /// Index into <c>BattleUnits.aibattle[]</c> of the AIBattle that plays
         /// <paramref name="side"/>: <c>sideofai == side</c> and not the feud

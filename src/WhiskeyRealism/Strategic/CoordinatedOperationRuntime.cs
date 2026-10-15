@@ -13,6 +13,11 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class CoordinatedOperationRuntime
     {
+        static CoordinatedOperationRuntime()
+        {
+            WhiskeyRealism.Util.CampaignScope.Register("coordinated-operation-locks", () => _packageLockByUnitId.Clear());
+        }
+
         private sealed class UnitCommitPlan
         {
             internal int StableUnitId;

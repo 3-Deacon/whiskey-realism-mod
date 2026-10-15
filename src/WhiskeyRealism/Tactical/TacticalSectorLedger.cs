@@ -146,28 +146,5 @@ namespace WhiskeyRealism.Tactical
             float minimum = Math.Max(500f, sector.OwnStrength * 0.05f);
             return sector.EnemyStrength >= minimum;
         }
-
-        private static readonly System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision> helpRequests
-            = new System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision>();
-
-        public static void SetHelpRequest(int sectorId, TacticalHelpRequest.Decision decision)
-        {
-            helpRequests[sectorId] = decision;
-        }
-
-        public static TacticalHelpRequest.Decision GetHelpRequest(int sectorId)
-        {
-            return helpRequests.TryGetValue(sectorId, out var d) ? d : TacticalHelpRequest.Decision.NoRequest;
-        }
-
-        /// <summary>
-        /// Clears all queued help requests. Called by TacticalBattleCoordinator on battle end
-        /// to prevent stale requests from carrying over to the next engagement.
-        /// Idempotent — safe to call on an already-empty table.
-        /// </summary>
-        public static void ClearHelpRequests()
-        {
-            helpRequests.Clear();
-        }
     }
 }

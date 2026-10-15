@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Operations;
 
 /// <summary>
 /// WS T1 (2026-10-14 remediation) regression tests: orchestrator evidence,
@@ -73,6 +74,7 @@ internal static class TacticalEvidenceFixTests
         Run("replan cooldown is the configured battle seconds, no hidden floor", ReplanCooldownIsConfiguredValue);
         Run("a paused night leaves phase budgets unchanged", PausedNightLeavesPhaseBudgets);
         Run("a paused night leaves contact-ledger decay unchanged", PausedNightLeavesLedgerDecay);
+        Run("a 9 h raw night jump leaves every doctrine timer unchanged", RawNightJumpLeavesDoctrineTimers);
         Run("army odds blend from unknown toward the observed ratio with confidence", ArmyOddsBlendWithConfidence);
         Run("a fully observed weak enemy gives an attack opportunity", FullyObservedWeakEnemyGivesAttack);
         Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
@@ -376,7 +378,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void PicketDoesNotZeroMainEffortOdds()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
         // Main band (2) faces only a 40-man picket; the army as a whole has 1.3x.
         var sectors = new[] { new EnemyVisibleSector(2, 6000f, 40f, false) };
@@ -477,7 +479,7 @@ internal static class TacticalEvidenceFixTests
     {
         // The #61 patch calls UpdateLeafBrigadeMap(tree) without an axis; the
         // orchestrator must cascade with the axis the tick cycle observed.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
         var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f).WithOwnExtent(-400f, 400f, 5);
         var enemy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, frontAxis: axis);
@@ -670,7 +672,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void ReplanPreservesPhaseNoThrash()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         var first = Tick(orch, morale: 0.3f, QuietFront);
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, first, "morale break replans once");
@@ -685,7 +687,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void MainEffortSectorLossFromBandHistory()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 5000f, false) }, 0.5f, true, false));
         var trigger = Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false));
@@ -728,7 +730,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void PlanDeadlineRunsOnBattleTime()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
         var realOnly = ArmyTickCycle.MaybeReplan(orch, 5000f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
             6000f, 1f, 0.5f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 0f);
@@ -773,7 +775,6 @@ internal static class TacticalEvidenceFixTests
             var m = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(o, 3f, 0.5f);
             TestHarness.AssertTrue(!m.HasValue || m.Value != 3, o + " must never map to macroai 3 (no startoffallback stamp, 6355/6362)");
         }
-        TestHarness.AssertFalse(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is not a legal Whiskey write");
     }
 
     private static TacticalForceBalanceEvidence Stanced(float own, float enemy, BattleStance stance)
@@ -943,7 +944,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void ReplanCooldownIsConfiguredValue()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
         var first = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 10f);
@@ -961,7 +962,7 @@ internal static class TacticalEvidenceFixTests
     // raw clock's ~9 h overnight jump never reaches the doctrine timers.
     private static void PausedNightLeavesPhaseBudgets()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
         double evening = 18 * 3600.0;
         DoctrineTick(orch, evening);
@@ -985,6 +986,53 @@ internal static class TacticalEvidenceFixTests
         ledger.Observe(evening, 4000f, 1000f);
         ledger.Observe(evening, 0f, 0f); // frozen doctrine hours across the night
         TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "no decay across the frozen night");
+    }
+
+    // Fixture: the raw clock jumps ~9 h across vanilla's end-of-day cycle
+    // (CheckTimeIssues 86368-86490) while eodcycle != 0. Every doctrine timer
+    // reads TacticalDoctrineTime, so none of them sees the jump.
+    private static void RawNightJumpLeavesDoctrineTimers()
+    {
+        using (var clock = new FakeBattleClock())
+        {
+            ArmyTickCycle.Reset();
+            var probing = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+            var fighting = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+            var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+            var ledger = new TacticalEnemyContactLedger();
+
+            clock.At(18.0);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            var hold = MainArrivalHoldLatch.Next(default(MainArrivalHoldLatch.State), (float)TacticalDoctrineTime.NowBattleHours, holding: true);
+            clock.At(18.0 + 600.0 / 3600.0);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            ledger.Observe((float)TacticalDoctrineTime.NowBattleHours, 4000f, 1000f);
+            ArmyTickCycle.RecordReplan(fighting.AllianceId);
+            float phaseBefore = probing.PhaseAgeSeconds;
+            float holdBefore = MainArrivalHoldLatch.ElapsedBattleSeconds(hold, (float)TacticalDoctrineTime.NowBattleHours);
+
+            // End of day: provisions, night fast-forward, midnight wrap, morning, deployment.
+            clock.At(18.2, eod: 1);
+            clock.At(23.9, eod: 2);
+            clock.At(0.3, eod: 2);
+            clock.At(24.3, eod: 3);
+            clock.At(27.0, eod: 4);
+            clock.At(27.1, eod: 5);
+            clock.At(27.1 + 30.0 / 3600.0);
+
+            TestHarness.AssertTrue(Math.Abs(TacticalDoctrineTime.NowBattleHours - (18.0 + 630.0 / 3600.0)) < 1e-6,
+                "doctrine time moved 30 s, not 9 h: " + TacticalDoctrineTime.NowBattleHours);
+            DoctrineTick(probing, TacticalDoctrineTime.NowBattleSeconds);
+            TestHarness.AssertTrue(Near(probing.PhaseAgeSeconds, phaseBefore + 30f), "phase budget burned 30 s, got " + probing.PhaseAgeSeconds);
+            var trigger = ArmyTickCycle.MaybeReplan(fighting, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
+                doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds);
+            TestHarness.AssertEqual(ReplanTrigger.None, trigger, "replan cooldown still running 30 s after the evening replan");
+            ledger.Observe((float)TacticalDoctrineTime.NowBattleHours, 0f, 0f);
+            TestHarness.AssertTrue(ledger.EstimatedEnemyStrength > 3990f, "contact estimate did not decay overnight: " + ledger.EstimatedEnemyStrength);
+            TestHarness.AssertFalse(ledger.ContactBroken((float)TacticalDoctrineTime.NowBattleHours, 0f), "contact not broken by the night");
+            float holdAfter = MainArrivalHoldLatch.ElapsedBattleSeconds(hold, (float)TacticalDoctrineTime.NowBattleHours);
+            TestHarness.AssertTrue(Math.Abs(holdAfter - holdBefore - 30f) < 0.5f, "arrival hold aged 30 s, got " + (holdAfter - holdBefore));
+        }
     }
 
     private static TacticalEnemyContactLedger Seen(float hours, float visible, float engaged,
@@ -1059,7 +1107,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void PicketOnlyContactKeepsProbe()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
         // Low coverage: one of five coverage bands observed, the enemy-side
         // entry point unwatched -> confidence 0.1.
@@ -1242,7 +1290,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void RecordedReplanRateLimits()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
         double dawn = 30 * 3600.0;
@@ -1258,7 +1306,7 @@ internal static class TacticalEvidenceFixTests
 
     private static void BackwardClockDoesNotLockReplan()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
         ArmyTickCycle.RecordReplan(orch.AllianceId, 30 * 3600.0);
@@ -1275,14 +1323,14 @@ internal static class TacticalEvidenceFixTests
     private static void RecordReplanWithSummedDeltas()
     {
         // Absolute stamp first, then summed-delta ticks.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         ArmyTickCycle.RecordReplan(orch.AllianceId, 108000.0);
         TestHarness.AssertEqual(ReplanTrigger.None, CasualtyTick(orch, 30f), "30 s after the recorded replan: rate-limited");
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, CasualtyTick(orch, 40f), "70 s after: replans");
 
         // Summed deltas first, then a recorded replan, then a delta.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch2 = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         var quiet = ArmyTickCycle.MaybeReplan(orch2, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
             6000f, 1f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 500f);
@@ -1305,7 +1353,7 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev).Reason != "intel-confidence-too-low",
             "the opportunity doctrine acts at 0.5");
 
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
         var front = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 2000f, false) },
             0.35f, true, false, intelConfidence01: conf);

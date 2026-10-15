@@ -103,13 +103,6 @@ namespace WhiskeyRealism.Telemetry
                 "tuning-logs");
         }
 
-        internal static string CreateSessionDirectory(string gameRoot, string sessionId)
-        {
-            string directory = SessionDirectory(gameRoot, sessionId);
-            Directory.CreateDirectory(directory);
-            return directory;
-        }
-
         internal static TelemetrySessionDirectory CreateUniqueSessionDirectory(string gameRoot, string baseSessionId)
         {
             string safeBase = SafeSessionDirectoryName(baseSessionId);

@@ -14,6 +14,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     internal static class CommandTreeRuntime
     {
+        static CommandTreeRuntime()
+        {
+            BattleScope.Register("command-tree", InvalidateAll);
+        }
+
         private static FieldInfo _commandHierarchyShiftField;
 
         // Stage B perf cache (2026-05-21), corrected 2026-10-14 (BR-H5). The tree
@@ -34,7 +39,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Invalidation surface:
         //   - Structural roster change / shift change: rebuild
         //   - Live-flag change: refresh
-        //   - Battle end: TacticalBattleCoordinator.OnBattleEnd -> InvalidateAll()
+        //   - Battle end: BattleScope -> InvalidateAll()
         //
         // Indexed by allianceId 0/1; index 2+ (Europe) is intentionally not cached
         // because the orchestrator has no role for alliance 2 anyway.
@@ -188,7 +193,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // Invalidates all alliance caches. Called from TacticalBattleCoordinator.OnBattleEnd
+        // Invalidates all alliance caches. Battle end (BattleScope),
         // so the next battle starts with a clean state. Counters reset for the next session.
         public static void InvalidateAll()
         {

@@ -353,12 +353,6 @@ namespace WhiskeyRealism.Tactical
             return nowHours + hold + reset;
         }
 
-        // Mirror of the vanilla 4264 guard.
-        public static bool VanillaWouldReevaluate(float lastStanceChangeHours, float nowHours, float vanillaResetHours)
-        {
-            return lastStanceChangeHours < nowHours + vanillaResetHours;
-        }
-
         private static bool IsInsideHold(StanceHoldRecord record, float nowHours)
         {
             float age = nowHours - record.WrittenAtHours;

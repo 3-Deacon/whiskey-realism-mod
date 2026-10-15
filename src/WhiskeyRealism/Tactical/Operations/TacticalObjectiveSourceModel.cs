@@ -21,15 +21,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 input.ApproachAvenue);
         }
 
-        public static bool CanDriveTypedOperationScoring(ObjectiveObservationInput input)
-        {
-            if (!input.TypeAnchorVerified) return false;
-
-            return IsSpecificPointOfInterest(input.Type) ||
-                input.Type == TacticalObjectiveType.EnemyLine ||
-                input.Type == TacticalObjectiveType.FriendlyLine;
-        }
-
         private static bool IsSpecificPointOfInterest(TacticalObjectiveType type)
         {
             return type == TacticalObjectiveType.VictoryPoint ||

@@ -46,7 +46,7 @@ namespace WhiskeyRealism.Patches
     // having an opinion vanilla's own value simply stays (handed back once).
     // The Prefix runs whatever the flags/mode, so turning Whiskey off hands
     // back. Saved values are keyed weakly per AIBattle instance and dropped
-    // at battle end (ClearShadows, called from the coordinator teardown).
+    // at battle end (ClearShadows, registered with BattleScope).
     // The former BattleMacroAIOverridePatch wrote the persisted
     // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
     // is consumed here as the fallback when the operations ledger has none.
@@ -64,8 +64,13 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
     internal static class BattleMacroStrategyPatch
     {
+        static BattleMacroStrategyPatch()
+        {
+            BattleScope.Register("macro-shadows", ClearShadows);
+        }
+
         private static readonly Dictionary<string, float> _lastLoggedAt = new Dictionary<string, float>();
-        private static readonly ConditionalWeakTable<AIBattle, MacroShadow> _shadows = new ConditionalWeakTable<AIBattle, MacroShadow>();
+        private static ConditionalWeakTable<AIBattle, MacroShadow> _shadows = new ConditionalWeakTable<AIBattle, MacroShadow>();
         private static FieldInfo _bunitsField;
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _receivedFireField;
@@ -73,8 +78,7 @@ namespace WhiskeyRealism.Patches
         // Battle-end reset of the per-AIBattle saved vanilla values.
         internal static void ClearShadows()
         {
-            try { _shadows.Clear(); }
-            catch (Exception ex) { OnceLog.Warning("tactical-macro:clear-failed", "Tactical macro shadow clear failed: " + ex.Message); }
+            _shadows = new ConditionalWeakTable<AIBattle, MacroShadow>();
         }
 
         private sealed class MacroShadow

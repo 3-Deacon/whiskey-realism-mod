@@ -249,12 +249,10 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public TacticalDivisionPlayInput(
             string parentNodeId,
-            float nowSeconds,
             IReadOnlyList<TacticalDivisionPlaySubordinate> subordinates,
             bool sideDefending = false)
         {
             ParentNodeId = string.IsNullOrWhiteSpace(parentNodeId) ? "parent-unknown" : parentNodeId.Trim();
-            NowSeconds = IsFinite(nowSeconds) && nowSeconds > 0f ? nowSeconds : 0f;
             Subordinates = subordinates ?? Array.Empty<TacticalDivisionPlaySubordinate>();
             SideDefending = sideDefending;
         }
@@ -263,13 +261,7 @@ namespace WhiskeyRealism.Tactical.Operations
         // Vanilla GetBattleType == 2 (defend, 86095): the side holds the
         // objectives, so division plays never convert its brigades to attacks.
         public bool SideDefending { get; }
-        public float NowSeconds { get; }
         public IReadOnlyList<TacticalDivisionPlaySubordinate> Subordinates { get; }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
     }
 
     public readonly struct TacticalDivisionPlayOrder
@@ -407,8 +399,7 @@ namespace WhiskeyRealism.Tactical.Operations
         MoveBehindTarget = 2,
         RequestScoutLocation = 3,
         GetAway = 4,
-        ChargeRaidTarget = 5,
-        MoveToFollowTarget = 6
+        ChargeRaidTarget = 5
     }
 
     public readonly struct TacticalCavalryFollowInput
@@ -630,8 +621,7 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         Unknown = 0,
         Limbered = 1,
-        Unlimbered = 2,
-        Unlimbering = 3
+        Unlimbered = 2
     }
 
     public enum TacticalArtilleryMicroAction
@@ -798,324 +788,6 @@ namespace WhiskeyRealism.Tactical.Operations
             if (input.TargetDistance <= input.MaxRange * 0.50f)
                 return TacticalArtilleryAmmoMission.Shell;
             return TacticalArtilleryAmmoMission.SolidShot;
-        }
-    }
-
-    public enum TacticalCloseCombatKind
-    {
-        Infantry = 0,
-        Cavalry = 1,
-        Artillery = 2,
-        Skirmisher = 3
-    }
-
-    public enum TacticalMeleeFearPosture
-    {
-        NoOpinion = 0,
-        Hold = 1,
-        ChargeAllowed = 2,
-        ChargeEncouraged = 3,
-        FallbackPressure = 4
-    }
-
-    public readonly struct TacticalMeleeFearInput
-    {
-        public TacticalMeleeFearInput(
-            TacticalCloseCombatKind ownKind,
-            TacticalCloseCombatKind enemyKind,
-            float ownMen,
-            float enemyMen,
-            float ownMorale01,
-            float enemyMorale01,
-            float leaderAggression01,
-            float flanking01,
-            float rearThreat01,
-            float ownHighGround01,
-            float enemyHighGround01,
-            float enemyDefensiveTerrain01,
-            float ownUnderFire01,
-            float enemyUnderFire01,
-            bool ownChargingOrRunning,
-            bool targetRouted)
-        {
-            OwnKind = ownKind;
-            EnemyKind = enemyKind;
-            OwnMen = SanitizeNonNegative(ownMen);
-            EnemyMen = SanitizeNonNegative(enemyMen);
-            OwnMorale01 = Clamp01(ownMorale01);
-            EnemyMorale01 = Clamp01(enemyMorale01);
-            LeaderAggression01 = Clamp01(leaderAggression01);
-            Flanking01 = Clamp01(flanking01);
-            RearThreat01 = Clamp01(rearThreat01);
-            OwnHighGround01 = Clamp01(ownHighGround01);
-            EnemyHighGround01 = Clamp01(enemyHighGround01);
-            EnemyDefensiveTerrain01 = Clamp01(enemyDefensiveTerrain01);
-            OwnUnderFire01 = Clamp01(ownUnderFire01);
-            EnemyUnderFire01 = Clamp01(enemyUnderFire01);
-            OwnChargingOrRunning = ownChargingOrRunning;
-            TargetRouted = targetRouted;
-        }
-
-        public TacticalCloseCombatKind OwnKind { get; }
-        public TacticalCloseCombatKind EnemyKind { get; }
-        public float OwnMen { get; }
-        public float EnemyMen { get; }
-        public float OwnMorale01 { get; }
-        public float EnemyMorale01 { get; }
-        public float LeaderAggression01 { get; }
-        public float Flanking01 { get; }
-        public float RearThreat01 { get; }
-        public float OwnHighGround01 { get; }
-        public float EnemyHighGround01 { get; }
-        public float EnemyDefensiveTerrain01 { get; }
-        public float OwnUnderFire01 { get; }
-        public float EnemyUnderFire01 { get; }
-        public bool OwnChargingOrRunning { get; }
-        public bool TargetRouted { get; }
-
-        private static float Clamp01(float value)
-        {
-            if (!IsFinite(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-
-        private static float SanitizeNonNegative(float value)
-        {
-            return IsFinite(value) && value > 0f ? value : 0f;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-    }
-
-    public readonly struct TacticalMeleeFearDecision
-    {
-        public TacticalMeleeFearDecision(
-            TacticalMeleeFearPosture posture,
-            float advantageRatio,
-            bool allowsCharge,
-            bool encouragesCharge,
-            bool requiresFallbackPressure,
-            string reason)
-        {
-            Posture = posture;
-            AdvantageRatio = IsFinite(advantageRatio) && advantageRatio > 0f ? advantageRatio : 0f;
-            AllowsCharge = allowsCharge;
-            EncouragesCharge = encouragesCharge;
-            RequiresFallbackPressure = requiresFallbackPressure;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "melee-fear" : reason.Trim();
-        }
-
-        public TacticalMeleeFearPosture Posture { get; }
-        public float AdvantageRatio { get; }
-        public bool AllowsCharge { get; }
-        public bool EncouragesCharge { get; }
-        public bool RequiresFallbackPressure { get; }
-        public string Reason { get; }
-        public bool HasOpinion { get { return Posture != TacticalMeleeFearPosture.NoOpinion; } }
-
-        public static TacticalMeleeFearDecision NoOpinion
-        {
-            get
-            {
-                return new TacticalMeleeFearDecision(
-                    TacticalMeleeFearPosture.NoOpinion,
-                    0f,
-                    false,
-                    false,
-                    false,
-                    "no-melee-fear-opinion");
-            }
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-    }
-
-    public static class TacticalMeleeFearDoctrine
-    {
-        public static TacticalMeleeFearDecision Decide(TacticalMeleeFearInput input)
-        {
-            if (input.OwnMen <= 0f || input.EnemyMen <= 0f)
-                return TacticalMeleeFearDecision.NoOpinion;
-
-            float own = input.OwnMen * KindWeight(input.OwnKind);
-            float enemy = input.EnemyMen * KindWeight(input.EnemyKind);
-            own *= 0.65f + input.OwnMorale01;
-            enemy *= 0.65f + input.EnemyMorale01;
-
-            own *= 1f + (input.LeaderAggression01 * 0.25f);
-            own *= 1f + (input.Flanking01 * 0.40f) + (input.RearThreat01 * 0.55f);
-            own *= 1f + (input.OwnHighGround01 * 0.25f);
-            own *= 1f - (input.OwnUnderFire01 * 0.25f);
-            if (input.OwnChargingOrRunning) own *= 1.12f;
-            if (input.TargetRouted) own *= 1.35f;
-
-            enemy *= 1f + (input.EnemyHighGround01 * 0.20f) + (input.EnemyDefensiveTerrain01 * 0.45f);
-            enemy *= 1f - (input.EnemyUnderFire01 * 0.20f);
-
-            own = Math.Max(1f, own);
-            enemy = Math.Max(1f, enemy);
-            float ratio = own / enemy;
-
-            if (ratio >= 1.90f)
-            {
-                return new TacticalMeleeFearDecision(
-                    TacticalMeleeFearPosture.ChargeEncouraged,
-                    ratio,
-                    true,
-                    true,
-                    false,
-                    "fear-overmatch");
-            }
-            if (ratio >= 1.25f)
-            {
-                return new TacticalMeleeFearDecision(
-                    TacticalMeleeFearPosture.ChargeAllowed,
-                    ratio,
-                    true,
-                    false,
-                    false,
-                    "fear-advantage");
-            }
-            if (ratio <= 0.75f)
-            {
-                return new TacticalMeleeFearDecision(
-                    TacticalMeleeFearPosture.FallbackPressure,
-                    ratio,
-                    false,
-                    false,
-                    true,
-                    "fear-disadvantage");
-            }
-
-            return new TacticalMeleeFearDecision(
-                TacticalMeleeFearPosture.Hold,
-                ratio,
-                false,
-                false,
-                false,
-                "fear-hold");
-        }
-
-        private static float KindWeight(TacticalCloseCombatKind kind)
-        {
-            switch (kind)
-            {
-                case TacticalCloseCombatKind.Cavalry:
-                    return 1.45f;
-                case TacticalCloseCombatKind.Artillery:
-                    return 0.25f;
-                case TacticalCloseCombatKind.Skirmisher:
-                    return 0.35f;
-                default:
-                    return 1f;
-            }
-        }
-    }
-
-    public enum TacticalSkirmisherAction
-    {
-        None = 0,
-        HoldScreen = 1,
-        RecallToParent = 2,
-        RetreatToParent = 3
-    }
-
-    public readonly struct TacticalSkirmisherInput
-    {
-        public TacticalSkirmisherInput(
-            bool hasParent,
-            bool parentMoving,
-            bool hasEnemyTarget,
-            float enemyDistance,
-            float parentDistance,
-            float maxParentDistance,
-            float ammo01,
-            float fatigue01,
-            float morale01,
-            bool underCloseThreat)
-        {
-            HasParent = hasParent;
-            ParentMoving = parentMoving;
-            HasEnemyTarget = hasEnemyTarget;
-            EnemyDistance = SanitizeNonNegative(enemyDistance);
-            ParentDistance = SanitizeNonNegative(parentDistance);
-            MaxParentDistance = SanitizePositive(maxParentDistance, 300f);
-            Ammo01 = Clamp01(ammo01);
-            Fatigue01 = Clamp01(fatigue01);
-            Morale01 = Clamp01(morale01);
-            UnderCloseThreat = underCloseThreat;
-        }
-
-        public bool HasParent { get; }
-        public bool ParentMoving { get; }
-        public bool HasEnemyTarget { get; }
-        public float EnemyDistance { get; }
-        public float ParentDistance { get; }
-        public float MaxParentDistance { get; }
-        public float Ammo01 { get; }
-        public float Fatigue01 { get; }
-        public float Morale01 { get; }
-        public bool UnderCloseThreat { get; }
-
-        private static float Clamp01(float value)
-        {
-            if (!IsFinite(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-
-        private static float SanitizeNonNegative(float value)
-        {
-            return IsFinite(value) && value > 0f ? value : 0f;
-        }
-
-        private static float SanitizePositive(float value, float fallback)
-        {
-            return IsFinite(value) && value > 0f ? value : fallback;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-    }
-
-    public readonly struct TacticalSkirmisherDecision
-    {
-        public TacticalSkirmisherDecision(TacticalSkirmisherAction action, string reason)
-        {
-            Action = action;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "skirmisher" : reason.Trim();
-        }
-
-        public TacticalSkirmisherAction Action { get; }
-        public string Reason { get; }
-    }
-
-    public static class TacticalSkirmisherDoctrine
-    {
-        public static TacticalSkirmisherDecision Decide(TacticalSkirmisherInput input)
-        {
-            if (!input.HasParent)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RetreatToParent, "missing-parent");
-            if (input.UnderCloseThreat || input.Morale01 < 0.30f)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RetreatToParent, "close-threat");
-            if (input.ParentDistance > input.MaxParentDistance)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RecallToParent, "parent-distance");
-            if (input.Ammo01 < 0.20f)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RecallToParent, "low-ammo");
-            if (input.Fatigue01 >= 0.75f)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RecallToParent, "fatigue");
-            if (input.ParentMoving && !input.HasEnemyTarget)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RecallToParent, "parent-moving");
-            if (!input.HasEnemyTarget)
-                return new TacticalSkirmisherDecision(TacticalSkirmisherAction.RecallToParent, "no-target");
-            return new TacticalSkirmisherDecision(TacticalSkirmisherAction.HoldScreen, "screen-hold");
         }
     }
 
@@ -1497,104 +1169,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 task == CommandTaskType.Probe ||
                 task == CommandTaskType.Delay ||
                 task == CommandTaskType.FallBackToLine;
-        }
-    }
-
-    public readonly struct TacticalBattlefieldAttributeInput
-    {
-        public TacticalBattlefieldAttributeInput(
-            float experience01,
-            float morale01,
-            float fatigue01,
-            float commanderAggression01)
-        {
-            Experience01 = Clamp01(experience01);
-            Morale01 = Clamp01(morale01);
-            Fatigue01 = Clamp01(fatigue01);
-            CommanderAggression01 = Clamp01(commanderAggression01);
-        }
-
-        public float Experience01 { get; }
-        public float Morale01 { get; }
-        public float Fatigue01 { get; }
-        public float CommanderAggression01 { get; }
-
-        private static float Clamp01(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-    }
-
-    public readonly struct TacticalBattlefieldAttributeDecision
-    {
-        public TacticalBattlefieldAttributeDecision(
-            float fallbackChance01,
-            float retreatChance01,
-            float fireModifier01,
-            float loadModifier01,
-            float meleeModifier01,
-            float supportDistanceMultiplier,
-            float chargeRangeMultiplier,
-            float artilleryPanicMultiplier)
-        {
-            FallbackChance01 = Clamp01(fallbackChance01);
-            RetreatChance01 = Clamp01(retreatChance01);
-            FireModifier01 = Clamp01(fireModifier01);
-            LoadModifier01 = Clamp01(loadModifier01);
-            MeleeModifier01 = Clamp01(meleeModifier01);
-            SupportDistanceMultiplier = ClampRange(supportDistanceMultiplier, 0.5f, 1.6f);
-            ChargeRangeMultiplier = ClampRange(chargeRangeMultiplier, 0.5f, 1.6f);
-            ArtilleryPanicMultiplier = ClampRange(artilleryPanicMultiplier, 0.5f, 1.8f);
-        }
-
-        public float FallbackChance01 { get; }
-        public float RetreatChance01 { get; }
-        public float FireModifier01 { get; }
-        public float LoadModifier01 { get; }
-        public float MeleeModifier01 { get; }
-        public float SupportDistanceMultiplier { get; }
-        public float ChargeRangeMultiplier { get; }
-        public float ArtilleryPanicMultiplier { get; }
-
-        private static float Clamp01(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-
-        private static float ClampRange(float value, float min, float max)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value)) return min;
-            if (value < min) return min;
-            return value > max ? max : value;
-        }
-    }
-
-    public static class TacticalBattlefieldAttributeMatrix
-    {
-        public static TacticalBattlefieldAttributeDecision Evaluate(TacticalBattlefieldAttributeInput input)
-        {
-            float brokenPressure = (1f - input.Morale01) * 0.55f + input.Fatigue01 * 0.35f + (1f - input.Experience01) * 0.20f;
-            float steadyCredit = input.Morale01 * 0.35f + input.Experience01 * 0.30f + (1f - input.Fatigue01) * 0.20f;
-            float fallback = brokenPressure - steadyCredit * 0.55f - input.CommanderAggression01 * 0.10f;
-            float retreat = fallback + (1f - input.Morale01) * 0.22f + input.Fatigue01 * 0.12f - input.CommanderAggression01 * 0.08f;
-            float fire = 0.25f + input.Experience01 * 0.45f + input.Morale01 * 0.25f - input.Fatigue01 * 0.25f;
-            float load = 0.25f + input.Experience01 * 0.40f + input.Morale01 * 0.20f - input.Fatigue01 * 0.30f;
-            float melee = 0.25f + input.Experience01 * 0.30f + input.Morale01 * 0.25f + input.CommanderAggression01 * 0.15f - input.Fatigue01 * 0.22f;
-            float support = 0.85f + input.Experience01 * 0.25f + input.CommanderAggression01 * 0.20f - input.Fatigue01 * 0.15f;
-            float charge = 0.80f + input.CommanderAggression01 * 0.35f + input.Morale01 * 0.20f - input.Fatigue01 * 0.22f;
-            float artyPanic = 1.25f - input.Morale01 * 0.30f - input.Experience01 * 0.20f + input.Fatigue01 * 0.25f;
-
-            return new TacticalBattlefieldAttributeDecision(
-                fallback,
-                retreat,
-                fire,
-                load,
-                melee,
-                support,
-                charge,
-                artyPanic);
         }
     }
 }

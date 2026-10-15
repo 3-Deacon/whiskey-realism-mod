@@ -7,9 +7,7 @@ namespace WhiskeyRealism.Tactical.Operations
         None = 0,
         HeldReserve = 1,
         FormingUp = 2,
-        WaitingForCommitWindow = 3,
         DefendingObjective = 4,
-        RecoveringAfterFallback = 5,
         PlayerProtected = 6
     }
 
@@ -105,27 +103,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 string.Empty,
                 900f,
                 reason);
-        }
-
-        public CommandDoctrineOrder WithAllowedIdle(DoctrineAllowedIdleReason reason)
-        {
-            return new CommandDoctrineOrder(
-                NodeId,
-                Role,
-                Task,
-                ObjectiveId,
-                PrimaryTarget,
-                SupportTarget,
-                FallbackTarget,
-                reason,
-                MinCommitUntilSeconds,
-                IssuedAtSeconds,
-                Confidence01,
-                Sop,
-                Delivery,
-                ParentNodeId,
-                CourierIntervalSeconds,
-                Reason);
         }
 
         public CommandDoctrineOrder WithSop(TacticalSopDecision sop)

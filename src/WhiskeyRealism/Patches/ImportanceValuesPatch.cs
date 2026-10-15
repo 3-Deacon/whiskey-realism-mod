@@ -33,6 +33,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class ImportanceValuesPatch
     {
+        static ImportanceValuesPatch()
+        {
+            CampaignScope.Register("importance-values", ResetForNewCampaign);
+        }
+
         private static bool _closestAreaDistanceResolved;
         private static Func<AICampaign.AIArea, AICampaign.AIArea, float> _closestAreaDistance;
         private static int _cachedObjectiveId = int.MinValue;
@@ -41,6 +46,14 @@ namespace WhiskeyRealism.Patches
         // Vanilla rewrites the pick on every AI-area pass, so the redirect repeats per
         // area per cycle; the verbose row is emitted only when the alliance's target changes.
         private static readonly Dictionary<int, int> LastLoggedTarget = new Dictionary<int, int>();
+
+        internal static void ResetForNewCampaign()
+        {
+            _cachedObjectiveId = int.MinValue;
+            _cachedAreaList = null;
+            _cachedTargetArea = null;
+            LastLoggedTarget.Clear();
+        }
 
         [HarmonyTargetMethod]
         internal static System.Reflection.MethodBase TargetMethod()

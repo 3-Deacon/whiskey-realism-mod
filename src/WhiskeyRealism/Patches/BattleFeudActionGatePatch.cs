@@ -87,7 +87,6 @@ namespace WhiskeyRealism.Patches
                         var wlDecision = TacticalWlActionGuard.Decide(
                             configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
                             dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                            action: TacticalWlGuardAction.FeudMovement,
                             unitUnderCommander: group.dlcw_isundercommander,
                             groupUnderCommander: group.dlcw_isundercommander,
                             attachedUnitUnderCommander: attachedUnderCommander);
@@ -305,7 +304,7 @@ namespace WhiskeyRealism.Patches
                     intendedTargetDistanceFromGroup: dist,
                     nearestEnemyBearingFromGroupRadians: enemyBearingFromGroup,
                     feudMaxDistance: GamePrefs.neededdistancefeudgroupmovement,
-                    intendedTargetSector: ResolveTargetSector(targetPos));
+                    intendedTargetSector: ArmyEvidenceBuilder.SectorOfPoint(sideOrch.AllianceId, targetPos.x, targetPos.z));
 
                 return TacticalDirectChildGate.Decide(input);
             }
@@ -352,16 +351,6 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
-        }
-
-        private static int ResolveTargetSector(Vector3 targetPos)
-        {
-            // TODO: O3.x — wire to TacticalSectorLedger when a position-→sector resolver lands.
-            // Return -1 so TacticalDirectChildGate.Input ctor coerces it to primarySector,
-            // making Screen/Refuse role decisions degrade to "always in-sector when we can't
-            // tell" (denial precision tightens after smoke calibration). Acceptable because
-            // Main/SupportMain/Fix/Reserve/Fallback decisions don't read this field.
-            return -1;
         }
 
         private static void LogDeniedOrch(Regiment group, DirectChildGateDecision decision)

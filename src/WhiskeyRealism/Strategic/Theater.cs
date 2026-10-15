@@ -16,7 +16,6 @@ namespace WhiskeyRealism.Strategic
         CapitalThreat      = 1,
         SupplyHub          = 2,
         ForeignRecognition = 3,
-        Attrition          = 4,
         RailroadCut        = 5,
         RiverControl       = 6
     }

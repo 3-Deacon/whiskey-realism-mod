@@ -24,6 +24,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// </summary>
     public static class PlayExecutorRuntime
     {
+        static PlayExecutorRuntime()
+        {
+            BattleScope.Register("play-executor", ResetCache);
+        }
+
         // ---- Per-side cache (skip recompute when input signature unchanged) ----
         private const int SideCount = 2;
         private static readonly string[] _lastSignature = new string[SideCount];
@@ -287,8 +292,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             catch { }
         }
 
-        /// <summary>Test seam: clears per-side caches.</summary>
-        public static void ResetCacheForTest()
+        /// <summary>Battle end: clears the per-side caches.</summary>
+        public static void ResetCache()
         {
             for (int i = 0; i < SideCount; i++)
             {
@@ -297,6 +302,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastComputeRealtimeSeconds[i] = -1f;
                 _lastComputePlan[i] = BattlePlanId.Unknown;
             }
+            _lastPlayExecutionTelemetryAt.Clear();
         }
     }
 }

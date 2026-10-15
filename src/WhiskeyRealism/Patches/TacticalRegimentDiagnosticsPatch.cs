@@ -17,7 +17,7 @@ namespace WhiskeyRealism.Patches
     // for that unit. Per-unit min-sample-interval prevents spam from rapid state churn.
     // Hard-capped at MaxLinesPerBattle to bound worst-case log size.
     //
-    // Reset between battles via TacticalBattleCoordinator.OnBattleEnd → ClearLedgersBetweenBattles,
+    // Reset between battles via BattleScope (coordinator teardown),
     // and independently whenever the AIBattle.bunits (BattleUnits) instance changes.
     //
     // Cost (WS P, P-regdiag): hosted on AIBattle.CheckGlobalAIStrategy (decompile 6314, the
@@ -28,6 +28,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class TacticalRegimentDiagnosticsPatch
     {
+        static TacticalRegimentDiagnosticsPatch()
+        {
+            BattleScope.Register("regiment-diagnostics", Reset);
+        }
+
         internal const int MaxLinesPerBattle = 2000;
         private const float MinSecondsBetweenSamples = 0.5f;
         private const float MoraleDeltaThreshold = 0.05f;

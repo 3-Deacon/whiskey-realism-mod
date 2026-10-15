@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -45,6 +46,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // both sides rebuild their snapshot and replan, keeping their orchestrators.
         private static TacticalEndOfDayGate _endOfDayGate = new TacticalEndOfDayGate();
         private static TacticalDoctrineClock _doctrineClock = new TacticalDoctrineClock();
+        private static bool _doctrineClockSampled;
+        private static int _doctrineClockSampleFrame;
+        private static int _doctrineClockBattleKey;
+
+        /// <summary>One raw reading of the battle clock. BattleKey is the battle's
+        /// BattleUnits instance id, 0 when no battle is loaded.</summary>
+        internal readonly struct DoctrineClockSample
+        {
+            public DoctrineClockSample(int battleKey, double rawBattleHours, int eodcycle)
+            {
+                BattleKey = battleKey;
+                RawBattleHours = rawBattleHours;
+                EodCycle = eodcycle;
+            }
+
+            public int BattleKey { get; }
+            public double RawBattleHours { get; }
+            public int EodCycle { get; }
+        }
+
+        // Installed by the runtime partial (Unity frame counter and vanilla battle
+        // state). Null in the test assembly unless a test installs a fake: the getter
+        // then returns the clock as last observed.
+        internal static Func<int> DoctrineClockFrameSource;
+        internal static Func<DoctrineClockSample> DoctrineClockSampler;
 
         /// <summary>
         /// THE doctrine clock for every tactical doctrine timer (phase budgets, commit
@@ -53,29 +79,64 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// BattleUnits.eodcycle != 0 (end-of-day sequence, CheckTimeIssues 86369-86470),
         /// never run backwards (midnight hour wrap before battlepasseddays++,
         /// 86382-86384 / SetTimeVariables 93545) and are 0 before the first observation
-        /// of a battle and after battle end. Do not read currenttimefromstart or
-        /// realtimeSinceStartup for doctrine timing.
+        /// of a battle and after battle end. Self-advancing: each read samples the
+        /// vanilla clock at most once per frame, so readers do not depend on the
+        /// orchestrator ticking. Do not read currenttimefromstart or realtimeSinceStartup
+        /// for doctrine timing.
         /// </summary>
-        public static double DoctrineBattleHours => _doctrineClock.Hours;
-
-        /// <summary>True while the end-of-day sequence runs (eodcycle != 0); doctrine
-        /// ticks are paused and DoctrineBattleHours is frozen.</summary>
-        public static bool IsEndOfDaySuspended => _endOfDayGate.IsSuspended;
-
-        /// <summary>Feeds one vanilla side-stat cycle into the end-of-day gate and the
-        /// doctrine clock. Called once per coordinator Tick.</summary>
-        internal static EndOfDayPhase AdvanceDoctrineClock(double rawBattleHours, int eodcycle)
+        public static double DoctrineBattleHours
         {
-            EndOfDayPhase phase = _endOfDayGate.Observe(eodcycle);
-            _doctrineClock.Advance(rawBattleHours, phase == EndOfDayPhase.Suspended);
-            return phase;
+            get
+            {
+                SampleDoctrineClock();
+                return _doctrineClock.Hours;
+            }
         }
 
-        /// <summary>Starts the doctrine clock at battle bootstrap (first sample, no
-        /// end-of-day observation).</summary>
-        internal static void StartDoctrineClock(double rawBattleHours)
+        /// <summary>Samples the vanilla battle clock through the installed sources, at
+        /// most once per frame. Never throws.</summary>
+        internal static void SampleDoctrineClock()
         {
-            _doctrineClock.Advance(rawBattleHours, suspended: false);
+            var frameSource = DoctrineClockFrameSource;
+            var sampler = DoctrineClockSampler;
+            if (frameSource == null || sampler == null) return;
+            try
+            {
+                int frame = frameSource();
+                if (_doctrineClockSampled && frame == _doctrineClockSampleFrame) return;
+                ObserveDoctrineClockSample(frame, sampler());
+            }
+            catch
+            {
+                // A failed sample leaves the clock where it was.
+            }
+        }
+
+        /// <summary>
+        /// Pure clock step for one frame: a second sample in the same frame is ignored,
+        /// no battle (key 0) leaves the clock alone, a different battle restarts it, and
+        /// otherwise it follows the raw clock unless eodcycle != 0. The end-of-day gate
+        /// is not touched here — its Resumed edge belongs to the coordinator Tick.
+        /// </summary>
+        internal static void ObserveDoctrineClockSample(int frame, DoctrineClockSample sample)
+        {
+            if (_doctrineClockSampled && frame == _doctrineClockSampleFrame) return;
+            _doctrineClockSampled = true;
+            _doctrineClockSampleFrame = frame;
+            if (sample.BattleKey == 0) return;
+            if (sample.BattleKey != _doctrineClockBattleKey)
+            {
+                _doctrineClock = new TacticalDoctrineClock();
+                _doctrineClockBattleKey = sample.BattleKey;
+            }
+            _doctrineClock.Advance(sample.RawBattleHours, suspended: sample.EodCycle != 0);
+        }
+
+        /// <summary>Feeds one vanilla side-stat cycle's eodcycle into the end-of-day
+        /// gate. Called once per coordinator Tick.</summary>
+        internal static EndOfDayPhase ObserveEndOfDay(int eodcycle)
+        {
+            return _endOfDayGate.Observe(eodcycle);
         }
 
         /// <summary>
@@ -108,6 +169,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             _endOfDayGate = new TacticalEndOfDayGate();
             _doctrineClock = new TacticalDoctrineClock();
+            _doctrineClockSampled = false;
+            _doctrineClockSampleFrame = 0;
+            _doctrineClockBattleKey = 0;
         }
 
         /// <summary>
@@ -139,14 +203,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (active) return;
             var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
             BuildAndActivate(suppressedAllianceId, roster);
-        }
-
-        public static void OnBattleEndForTest()
-        {
-            side0 = null;
-            side1 = null;
-            active = false;
-            ResetDoctrineClock();
         }
 
         // ---- Internal builder (used by both test and runtime paths) ----

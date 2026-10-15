@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -9,6 +10,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class ArmyTickCycle
     {
+        static ArmyTickCycle()
+        {
+            BattleScope.Register("army-tick-cycle", Reset);
+        }
+
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, double> _lastDoctrineNowByAlliance = new Dictionary<int, double>();
@@ -18,11 +24,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _lastReplanByAlliance.Clear();
             _clockByAlliance.Clear();
             _lastDoctrineNowByAlliance.Clear();
-        }
-
-        public static void ResetForTest()
-        {
-            Reset();
         }
 
         /// <summary>
@@ -89,12 +90,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // deltas drove the 180 s plan deadline before, so at 20x
             // compression a plan "expired" after ~10 battle-minutes and at 1x
             // every 3 wall-clock minutes. Callers pass
-            // TacticalDoctrineTime.NowBattleSeconds. A frozen value yields a
-            // zero delta; the night freeze itself comes from the
-            // coordinator's doctrine clock once NowBattleSeconds is pointed
-            // at it (integration). On this branch the seam reads the raw
-            // clock, which does not freeze. Legacy callers without a battle
-            // clock keep the single-clock behaviour.
+            // TacticalDoctrineTime.NowBattleSeconds, the coordinator's doctrine
+            // clock, which is frozen overnight; a frozen value yields a zero
+            // delta. Legacy callers without a battle clock keep the
+            // single-clock behaviour.
             bool doctrineClock = !double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds);
             if (doctrineClock)
             {
