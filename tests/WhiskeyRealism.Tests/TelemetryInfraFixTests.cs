@@ -16,6 +16,9 @@ internal static class TelemetryInfraFixTests
         NodeIdMatchesNegativeIds();
         NodeIdMatchesRejectsMalformedIds();
         NodeIdMatchesDoesNotAllocate();
+        OnceLogClaimReturnsTrueOnlyOnce();
+        OnceLogFiredKeySkipsMessageWork();
+        OnceLogBoundsFiredKeys();
     }
 
     private static void LogPass(string message)
@@ -73,5 +76,60 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertEqual(20000, hits, "hit count");
         TestHarness.AssertEqual(0L, allocated, "NodeIdMatches allocated bytes");
         LogPass("node id matching does not allocate");
+    }
+
+    // ---------------------------------------------------------------- OnceLog
+
+    private static void OnceLogClaimReturnsTrueOnlyOnce()
+    {
+        OnceLog.Reset();
+        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim"), "first claim wins");
+        TestHarness.AssertFalse(OnceLog.Claim("p-test:claim"), "second claim loses");
+        int infoBefore = WhiskeyRealism.Plugin.Log.InfoCount;
+        OnceLog.Info("p-test:claim", "[PTest] should not log; key already claimed");
+        TestHarness.AssertEqual(infoBefore, WhiskeyRealism.Plugin.Log.InfoCount, "claimed key suppresses Info");
+        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim-other"), "independent key claims");
+        OnceLog.Reset();
+        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim"), "reset releases claims");
+        OnceLog.Reset();
+        LogPass("oncelog claim returns true only once");
+    }
+
+    private static void OnceLogFiredKeySkipsMessageWork()
+    {
+        OnceLog.Reset();
+        const string key = "p-test:fired";
+        const string message = "[PTest] fired once";
+        OnceLog.Info(key, message);
+        OnceLog.Warning(key, message);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            OnceLog.Info(key, message);
+            OnceLog.Warning(key, message);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        TestHarness.AssertEqual(0L, allocated, "fired OnceLog key allocated bytes");
+        OnceLog.Reset();
+        LogPass("oncelog fired key skips message work");
+    }
+
+    private static void OnceLogBoundsFiredKeys()
+    {
+        OnceLog.Reset();
+        int warningsBefore = WhiskeyRealism.Plugin.Log.WarningCount;
+        for (int i = 0; i < OnceLog.MaxKeys; i++)
+            TestHarness.AssertTrue(OnceLog.Claim("p-test:bound:" + i.ToString(CultureInfo.InvariantCulture)), "claim under cap " + i.ToString(CultureInfo.InvariantCulture));
+        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "fired set at cap");
+        TestHarness.AssertFalse(OnceLog.Claim("p-test:bound:over"), "claim over cap refused");
+        int infoBefore = WhiskeyRealism.Plugin.Log.InfoCount;
+        OnceLog.Info("p-test:bound:over-info", "[PTest] over cap");
+        TestHarness.AssertEqual(infoBefore, WhiskeyRealism.Plugin.Log.InfoCount, "info over cap suppressed");
+        TestHarness.AssertEqual(OnceLog.MaxKeys, OnceLog.FiredCount, "fired set stays bounded");
+        TestHarness.AssertEqual(warningsBefore + 1, WhiskeyRealism.Plugin.Log.WarningCount, "cap reached warns exactly once");
+        TestHarness.AssertTrue(OnceLog.SuppressedOverCapCount >= 2, "over-cap suppressions counted");
+        OnceLog.Reset();
+        TestHarness.AssertEqual(0, OnceLog.FiredCount, "reset clears fired set");
+        LogPass("oncelog bounds fired keys");
     }
 }
