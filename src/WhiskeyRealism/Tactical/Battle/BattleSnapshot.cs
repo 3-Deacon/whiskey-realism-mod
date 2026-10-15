@@ -125,6 +125,12 @@ namespace WhiskeyRealism.Tactical.Battle
             return _flankPressure[ownIndex * FlankCount + flank];
         }
 
+        // True once SlicePressureBuilder.Build wrote the per-unit pressure and closest-visible
+        // rows for this snapshot's current observations; a later observation or a rebuild
+        // clears it. Readers that must equal a scan of the observations (BattleRecon) fall
+        // back to the scan while it is false.
+        public bool PressureCurrent { get; private set; }
+
         // Observation index of the closest visible enemy, or -1.
         public int ClosestVisibleEnemy(int ownIndex, out float distance)
         {
@@ -152,6 +158,7 @@ namespace WhiskeyRealism.Tactical.Battle
             OwnCount = 0;
             EnemyRecordCount = 0;
             ObservationCount = 0;
+            PressureCurrent = false;
             _ownIndexById.Clear();
             _visibleEnemyIds.Clear();
             PlayerCommandIndex = -1;
@@ -227,6 +234,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = n; i > 0; i--) _childStart[i] = _childStart[i - 1];
             _childStart[0] = 0;
 
+            PressureCurrent = false;
             if (_closestVisible.Length < n)
             {
                 int size = Math.Max(n, _closestVisible.Length * 2);
@@ -259,6 +267,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (ObservationCount == _observations.Length) Grow(ref _observations);
             _observations[ObservationCount++] = observation;
+            PressureCurrent = false;
             if (observation.State == ObservationState.Visible) _visibleEnemyIds.Add(observation.InstanceId);
         }
 
@@ -291,6 +300,11 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (ownIndex < 0 || ownIndex >= OwnCount || flank < 0 || flank >= FlankCount) return;
             _flankPressure[ownIndex * FlankCount + flank] = value;
+        }
+
+        internal void MarkPressureCurrent()
+        {
+            PressureCurrent = true;
         }
 
         internal void SetClosestVisibleEnemy(int ownIndex, int observationIndex, float distance)

@@ -87,6 +87,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public const double MaxMissionHours = 0.5;
         public const double MaxProbeHours = 0.25;
         public const double ProbeRepeatHours = 1.0;
+        // Perf slice B1: targets of one list (stale entry points, remembered enemies) tried
+        // per tick; a failed window moves on to the next ranks next tick.
+        public const int MaxTargetsPerTick = 8;
 
         public ReconSettings(bool enabled, float cavalrySight, float infantrySight, float standOff, float interruptMeters, float minMorale)
         {
@@ -239,6 +242,18 @@ namespace WhiskeyRealism.Tactical.Battle
         // Scratch (grow-only).
         internal UnitFlags[] Descendants = new UnitFlags[BattleSnapshot.InitialCapacity];
         internal int[] Moving = new int[BattleSnapshot.InitialCapacity];
+        // Mission search scratch (perf slice B1): this tick's scout candidates and visible
+        // (non-reinforcement) observations, both ascending; one candidate-target list.
+        internal int[] Scouts = new int[64];
+        internal int ScoutCount;
+        internal int[] Visible = new int[BattleSnapshot.InitialCapacity];
+        internal int VisibleCount;
+        internal int[] TargetOrder = new int[BattleSnapshot.InitialCapacity];
+        internal float[] TargetDistance = new float[BattleSnapshot.InitialCapacity];
+        // Rank window of the entry-point and remembered-enemy lists still to try after a
+        // capped search failed (ReconSettings.MaxTargetsPerTick); 0 after a start.
+        internal int EntryCursor;
+        internal int RememberedCursor;
 
         public ReconMemory()
         {
@@ -261,6 +276,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 _probeLastStart[b] = double.NegativeInfinity;
             }
             Array.Clear(_holdGroup, 0, _holdGroup.Length);
+            EntryCursor = 0;
+            RememberedCursor = 0;
         }
 
         /// <summary>The probe nomination of <paramref name="groupId"/>: its look point.</summary>
@@ -589,37 +606,48 @@ namespace WhiskeyRealism.Tactical.Battle
             r.Intents++;
         }
 
+        // Perf slice B1. The search is the shipped one with its loop-invariant work hoisted:
+        // the scout candidates (IsScoutCandidate does not depend on the target) and the
+        // visible observations are collected once per tick in ascending order, so
+        // NearestScout and StandPointSafe see the same units in the same order; with no
+        // candidate no target can start a mission, so the tick returns at once. The entry
+        // points and the remembered enemies are tried nearest first, at most
+        // ReconSettings.MaxTargetsPerTick per list per tick: within that cap the pick is
+        // the shipped one (the nearest feasible target, the lowest index on a tie); a list
+        // longer than the cap whose window all failed resumes at the next ranks next tick.
         private static void TryStartMission(BattleSnapshot s, in ReconSettings st, ReconPicture p, ReconMemory m, IIntentSink sink,
             double now, ref ReconTickResult r)
         {
             if ((r.Events & ReconEvents.MissionEnded) != 0 || !m.StartBudgetLeft(now)) return;
+            if (!CollectScouts(s, st, p, m)) return;
             if (!OwnLine(s, p.FrameHeading, out float centroidX, out float centroidZ, out float frameDepth, out float axisDepth)) return;
+            CollectVisible(s, m);
 
             int scout = -1;
             float lookX = 0f, lookZ = 0f, standX = 0f, standZ = 0f;
             ReconTargetKind kind = ReconTargetKind.None;
 
             // 1. The nearest stale enemy-side entry point.
-            float bestDistance = float.MaxValue;
+            int n = 0;
             for (int k = 0; k < p.EntryCount; k++)
             {
                 if (!p.EntryStale(k, now)) continue;
                 float ex = p.EntryX(k), ez = p.EntryZ(k);
                 if (m.RecentTarget(ex, ez, now)) continue;
-                float d = Distance(centroidX, centroidZ, ex, ez);
-                if (d >= bestDistance) continue;
-                int c = NearestScout(s, st, p, ex, ez);
-                if (c < 0 || !TryStandOff(s, st, c, ex, ez, out float sx, out float sz)) continue;
-                bestDistance = d;
+                AddTarget(m, ref n, k, Distance(centroidX, centroidZ, ex, ez));
+            }
+            int best = BestStandOffTarget(s, st, m, n, ref m.EntryCursor, entries: p, out int c, out float sx, out float sz);
+            if (best >= 0)
+            {
                 scout = c; kind = ReconTargetKind.EntryPoint;
-                lookX = ex; lookZ = ez; standX = sx; standZ = sz;
+                lookX = p.EntryX(best); lookZ = p.EntryZ(best); standX = sx; standZ = sz;
             }
 
             // 2. The stalest coverage band, at the own line's depth.
             if (scout < 0 && p.HasStaleBand && p.StaleBandRecency < ReconSettings.StaleBandRecency && !float.IsNaN(p.FrameHeading))
             {
                 BandWorldPoint(p.StaleBandLateral, p.FrameHeading, frameDepth, out float bx, out float bz);
-                if (!m.RecentTarget(bx, bz, now)) TryTarget(s, st, p, bx, bz, ReconTargetKind.StaleBand, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
+                if (!m.RecentTarget(bx, bz, now)) TryTarget(s, st, m, bx, bz, ReconTargetKind.StaleBand, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
             }
 
             // 3. Before any contact, below the action gate: straight ahead (along the
@@ -640,7 +668,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     fz = centroidZ + dz * advance;
                 }
                 else return;
-                if (!m.RecentTarget(fx, fz, now)) TryTarget(s, st, p, fx, fz, ReconTargetKind.Forward, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
+                if (!m.RecentTarget(fx, fz, now)) TryTarget(s, st, m, fx, fz, ReconTargetKind.Forward, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
             }
 
             // 4. After contact, below the action gate: look again at the nearest enemy
@@ -648,17 +676,18 @@ namespace WhiskeyRealism.Tactical.Battle
             if (scout < 0 && p.HadContact && p.IntelConfidence < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction)
             {
                 EnemyObservation[] obs = s.Observations;
-                float nearest = float.MaxValue;
+                n = 0;
                 for (int k = 0; k < s.ObservationCount; k++)
                 {
                     if (obs[k].State != ObservationState.Remembered || obs[k].IsReinforcement) continue;
-                    float d = Distance(centroidX, centroidZ, obs[k].X, obs[k].Z);
-                    if (d >= nearest || m.RecentTarget(obs[k].X, obs[k].Z, now)) continue;
-                    int c = NearestScout(s, st, p, obs[k].X, obs[k].Z);
-                    if (c < 0 || !TryStandOff(s, st, c, obs[k].X, obs[k].Z, out float sx, out float sz)) continue;
-                    nearest = d;
+                    if (m.RecentTarget(obs[k].X, obs[k].Z, now)) continue;
+                    AddTarget(m, ref n, k, Distance(centroidX, centroidZ, obs[k].X, obs[k].Z));
+                }
+                best = BestStandOffTarget(s, st, m, n, ref m.RememberedCursor, entries: null, out c, out sx, out sz);
+                if (best >= 0)
+                {
                     scout = c; kind = ReconTargetKind.RememberedEnemy;
-                    lookX = obs[k].X; lookZ = obs[k].Z; standX = sx; standZ = sz;
+                    lookX = obs[best].X; lookZ = obs[best].Z; standX = sx; standZ = sz;
                 }
             }
 
@@ -670,10 +699,100 @@ namespace WhiskeyRealism.Tactical.Battle
             r.StartedKind = kind;
         }
 
+        // This tick's scout candidates, ascending; false when there is none.
+        private static bool CollectScouts(BattleSnapshot s, in ReconSettings st, ReconPicture p, ReconMemory m)
+        {
+            m.ScoutCount = 0;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if (!IsScoutCandidate(s, i, st, p)) continue;
+                if (m.ScoutCount == m.Scouts.Length) Array.Resize(ref m.Scouts, m.Scouts.Length * 2);
+                m.Scouts[m.ScoutCount++] = i;
+            }
+            return m.ScoutCount > 0;
+        }
+
+        // This tick's visible, non-reinforcement observations, ascending (StandPointSafe's set).
+        private static void CollectVisible(BattleSnapshot s, ReconMemory m)
+        {
+            EnemyObservation[] obs = s.Observations;
+            if (m.Visible.Length < s.ObservationCount) m.Visible = new int[Math.Max(s.ObservationCount, m.Visible.Length * 2)];
+            m.VisibleCount = 0;
+            for (int k = 0; k < s.ObservationCount; k++)
+                if (obs[k].State == ObservationState.Visible && !obs[k].IsReinforcement) m.Visible[m.VisibleCount++] = k;
+        }
+
+        private static void AddTarget(ReconMemory m, ref int n, int source, float distance)
+        {
+            if (n == m.TargetOrder.Length)
+            {
+                Array.Resize(ref m.TargetOrder, n * 2);
+                Array.Resize(ref m.TargetDistance, n * 2);
+            }
+            m.TargetOrder[n] = source;
+            m.TargetDistance[n] = distance;
+            n++;
+        }
+
+        // The nearest target of the list (entry points when entries is set, else remembered
+        // observations) that has a scout and a safe stand-off point; -1 when none of this
+        // tick's window does. Ranks are by (distance, source index), the shipped loops' order.
+        private static int BestStandOffTarget(BattleSnapshot s, in ReconSettings st, ReconMemory m, int n, ref int cursor, ReconPicture entries,
+            out int scout, out float standX, out float standZ)
+        {
+            scout = -1;
+            standX = standZ = 0f;
+            if (n == 0) { cursor = 0; return -1; }
+            SortTargets(m.TargetDistance, m.TargetOrder, n);
+            int start = n <= ReconSettings.MaxTargetsPerTick ? 0 : cursor % n;
+            int tries = Math.Min(n, ReconSettings.MaxTargetsPerTick);
+            int best = -1;
+            float bestDistance = float.MaxValue;
+            EnemyObservation[] obs = s.Observations;
+            for (int t = 0; t < tries; t++)
+            {
+                int j = (start + t) % n;
+                int k = m.TargetOrder[j];
+                float d = m.TargetDistance[j];
+                if (best >= 0 && (d > bestDistance || (d == bestDistance && k > best))) continue;
+                float tx = entries != null ? entries.EntryX(k) : obs[k].X;
+                float tz = entries != null ? entries.EntryZ(k) : obs[k].Z;
+                int c = NearestScout(s, m, tx, tz);
+                if (c < 0 || !TryStandOff(s, st, m, c, tx, tz, out float sx, out float sz)) continue;
+                best = k;
+                bestDistance = d;
+                scout = c;
+                standX = sx;
+                standZ = sz;
+                if (start == 0) break; // an ascending window: the first feasible is the nearest
+            }
+            cursor = best >= 0 ? 0 : (start + tries) % n;
+            return best;
+        }
+
+        // Ascending by distance, then by source index (allocation-free).
+        private static void SortTargets(float[] distance, int[] order, int n)
+        {
+            if (n <= 1) return;
+            Array.Sort(distance, order, 0, n);
+            for (int i = 1; i < n; i++)
+            {
+                float d = distance[i];
+                int k = order[i];
+                int j = i - 1;
+                while (j >= 0 && distance[j] == d && order[j] > k)
+                {
+                    order[j + 1] = order[j];
+                    j--;
+                }
+                order[j + 1] = k;
+            }
+        }
+
         // The point ObservationStandOff short of a target on the line from the scout,
         // when the scout is farther than that (plus the 60 m move floor) and the point
         // is safe.
-        private static bool TryStandOff(BattleSnapshot s, in ReconSettings st, int scout, float tx, float tz, out float sx, out float sz)
+        private static bool TryStandOff(BattleSnapshot s, in ReconSettings st, ReconMemory m, int scout, float tx, float tz, out float sx, out float sz)
         {
             ref UnitRecord sr = ref s.Own[scout];
             sx = 0f;
@@ -682,29 +801,30 @@ namespace WhiskeyRealism.Tactical.Battle
             if (span <= st.ObservationStandOff + OrderArbiter.DedupeMeters) return false;
             sx = tx + (sr.X - tx) / span * st.ObservationStandOff;
             sz = tz + (sr.Z - tz) / span * st.ObservationStandOff;
-            return StandPointSafe(s, sr.X, sr.Z, sx, sz, Math.Max(1f, sr.Strength), st);
+            return StandPointSafe(s, m, sr.X, sr.Z, sx, sz, Math.Max(1f, sr.Strength), st);
         }
 
-        private static void TryTarget(BattleSnapshot s, in ReconSettings st, ReconPicture p, float x, float z, ReconTargetKind kind,
+        private static void TryTarget(BattleSnapshot s, in ReconSettings st, ReconMemory m, float x, float z, ReconTargetKind kind,
             ref int scout, ref ReconTargetKind chosen, ref float lookX, ref float lookZ, ref float standX, ref float standZ)
         {
-            int c = NearestScout(s, st, p, x, z);
+            int c = NearestScout(s, m, x, z);
             if (c < 0) return;
             ref UnitRecord sr = ref s.Own[c];
             if (!PostureSense.IsMoveAway(sr, x, z)) return;
-            if (!StandPointSafe(s, sr.X, sr.Z, x, z, Math.Max(1f, sr.Strength), st)) return;
+            if (!StandPointSafe(s, m, sr.X, sr.Z, x, z, Math.Max(1f, sr.Strength), st)) return;
             scout = c; chosen = kind;
             lookX = standX = x;
             lookZ = standZ = z;
         }
 
-        private static int NearestScout(BattleSnapshot s, in ReconSettings st, ReconPicture p, float x, float z)
+        // Over this tick's scout candidates (CollectScouts), ascending as the shipped scan.
+        private static int NearestScout(BattleSnapshot s, ReconMemory m, float x, float z)
         {
             int best = -1;
             float bestD = float.MaxValue;
-            for (int i = 0; i < s.OwnCount; i++)
+            for (int n = 0; n < m.ScoutCount; n++)
             {
-                if (!IsScoutCandidate(s, i, st, p)) continue;
+                int i = m.Scouts[n];
                 float d = Distance(s.Own[i].X, s.Own[i].Z, x, z);
                 if (d >= bestD) continue;
                 bestD = d;
@@ -727,15 +847,16 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((rec.Flags & ScoutRefusals) != 0) return false;
             if (rec.RegimentPaths > 0 || rec.QueuedOrders > 0 || rec.MovementMode != 0) return false;
             if (rec.Morale < st.MinMorale) return false;
-            if (NearestVisible(s, rec.X, rec.Z, out float d, out _) && d <= st.ObservationStandOff) return false;
 
+            // The cheap parent checks run before the enemy distance (all side-effect free).
             int parent = rec.ParentIndex;
             if (parent < 0 || parent >= s.OwnCount) return false;
             ref UnitRecord g = ref s.Own[parent];
             if ((g.Flags & UnitFlags.IsGroup) == 0 || (g.Flags & UnitFlags.Active) == 0) return false;
             if ((g.Flags & (UnitFlags.PlayerOwned | UnitFlags.Feud | UnitFlags.Routed)) != 0) return false;
             if (g.RegimentPaths > 0 || g.QueuedOrders > 0 || g.AiStanceOrdered == ChargeDoctrine.AssaultStance) return false;
-            return parent >= p.PostureMoved.Length || !p.PostureMoved[parent];
+            if (parent < p.PostureMoved.Length && p.PostureMoved[parent]) return false;
+            return !(NearestVisibleDistance(s, i, out float d) && d <= st.ObservationStandOff);
         }
 
         /// <summary>
@@ -750,6 +871,21 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int k = 0; k < s.ObservationCount; k++)
             {
                 if (obs[k].State != ObservationState.Visible || obs[k].IsReinforcement) continue;
+                if (obs[k].Strength < ownStrength) continue;
+                if (Distance(obs[k].X, obs[k].Z, x, z) <= st.ObservationStandOff) return false;
+                if (DistanceToSegment(obs[k].X, obs[k].Z, fromX, fromZ, x, z) <= st.CorridorMeters) return false;
+            }
+            return true;
+        }
+
+        // StandPointSafe over this tick's visible observations (CollectVisible): the same
+        // observations in the same order, so the same answer.
+        private static bool StandPointSafe(BattleSnapshot s, ReconMemory m, float fromX, float fromZ, float x, float z, float ownStrength, in ReconSettings st)
+        {
+            EnemyObservation[] obs = s.Observations;
+            for (int n = 0; n < m.VisibleCount; n++)
+            {
+                int k = m.Visible[n];
                 if (obs[k].Strength < ownStrength) continue;
                 if (Distance(obs[k].X, obs[k].Z, x, z) <= st.ObservationStandOff) return false;
                 if (DistanceToSegment(obs[k].X, obs[k].Z, fromX, fromZ, x, z) <= st.CorridorMeters) return false;
@@ -1017,7 +1153,7 @@ namespace WhiskeyRealism.Tactical.Battle
             bool screening = g.AiStance == TacticalCommandTaskToStanceMapper.StanceScreen;
             bool approaching = g.AiStance == TacticalCommandTaskToStanceMapper.StanceAttack && g.RegimentPaths > 0;
             if (!screening && !approaching) return 0f;
-            if (NearestVisible(s, rec.X, rec.Z, out float d, out _) && d <= cancelMeters + pushMeters) return 0f;
+            if (NearestVisibleDistance(s, i, out float d) && d <= cancelMeters + pushMeters) return 0f;
             float extra = pushMeters - vanillaLinkMeters;
             return extra > 0f ? extra : 0f;
         }
@@ -1062,6 +1198,15 @@ namespace WhiskeyRealism.Tactical.Battle
             frameDepth /= n;
             axisDepth /= n;
             return true;
+        }
+
+        // Distance from own unit i to the nearest visible enemy: the snapshot's precomputed
+        // closest-visible row (SlicePressureBuilder: the same minimum over the same
+        // observations) while it is current, else the scan.
+        private static bool NearestVisibleDistance(BattleSnapshot s, int i, out float distance)
+        {
+            if (s.PressureCurrent) return s.ClosestVisibleEnemy(i, out distance) >= 0;
+            return NearestVisible(s, s.Own[i].X, s.Own[i].Z, out distance, out _);
         }
 
         private static bool NearestVisible(BattleSnapshot s, float x, float z, out float distance, out float strength)

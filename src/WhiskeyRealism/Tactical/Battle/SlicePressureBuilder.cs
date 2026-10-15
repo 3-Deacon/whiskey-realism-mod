@@ -194,6 +194,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 s.SetFlankPressure(o, 2, rear);
                 s.SetClosestVisibleEnemy(o, closest, closest >= 0 ? (float)Math.Sqrt(closestSq) : 0f);
             }
+            s.MarkPressureCurrent();
         }
 
         // The full scan's closest visible enemy (first strictly nearest), from scratch.
