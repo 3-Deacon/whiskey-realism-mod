@@ -74,8 +74,9 @@ namespace WhiskeyRealism.Strategic
     //                  units): never moved, never stopped, never re-tasked by Whiskey.
     //   PlayerMapGroup the player's command is itself a map group (vanilla's flag2,
     //                  AIBattle.CheckCurrentOrderUpdate 8271-8274): order-only through
-    //                  a W&L dispatch, and an unreliable executor: never counted as a
-    //                  committed defender or the holder of a must-hold role.
+    //                  a W&L dispatch, and an unreliable executor: never pledged, packaged
+    //                  or given a must-hold role, yet counted toward the coverage of the
+    //                  area where its last waypoint lies (CountsTowardCoverage).
     //   CarryingGroup  the AI map group above a player whose command is below map-group
     //                  level: a movable AI asset, as vanilla moves it (8366 sends that
     //                  player no campaign order); #69 dispatches its march to him.
@@ -104,16 +105,22 @@ namespace WhiskeyRealism.Strategic
             return WlChainClass.None;
         }
 
-        // Moves, stops, operation-list changes, pledges and reverts.
+        // May Whiskey commit the unit: move, stop, re-task, pledge to the capital, put in a
+        // defense package or give a must-hold role. False for the map-group player: an
+        // unreliable executor whose command Whiskey never moves.
         public static bool MayMove(WlChainClass chain)
         {
             return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
         }
 
-        // Defense coverage (must-hold roles, committed defenders).
-        public static bool CountsAsCommittedDefender(WlChainClass chain)
+        // Does the unit count toward coverage that already exists where its last waypoint
+        // lies, as vanilla counts every own group at strength x morale (AICampaign.
+        // AssignUnitToDefendCapital 11733-11740, no player exclusion). The map-group player
+        // does, though MayMove is false for him: he is counted, never counted on. The
+        // units under his command are inside the group that is counted, and a CIC side stands down.
+        public static bool CountsTowardCoverage(WlChainClass chain)
         {
-            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup || chain == WlChainClass.PlayerMapGroup;
         }
 
         // A unit Whiskey still addresses, by a W&L dispatch.
