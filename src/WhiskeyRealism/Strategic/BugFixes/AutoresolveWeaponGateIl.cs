@@ -29,7 +29,7 @@ namespace WhiskeyRealism.Strategic.BugFixes
             matches = 0;
             if (vanilla == null) return vanilla;
             var code = new List<CodeInstruction>(vanilla.Count);
-            foreach (var ci in vanilla) code.Add(ci.Clone());
+            foreach (var ci in vanilla) code.Add(new CodeInstruction(ci));
             matches = Rewrite(code, weaponField, floorHook);
             return matches == ExpectedSites ? code : vanilla;
         }
