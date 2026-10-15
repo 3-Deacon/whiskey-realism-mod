@@ -81,6 +81,7 @@ internal static class PostureStanceFixTests
 
         // B-61state / perf: probe cache keyed on roster, not frame
         Pass("roster signature changes with roster not with frame", RosterSignatureChangesWithRosterOnly);
+        Pass("extended probes drop the W&L player's command subtree", ExtendedProbesDropPlayerCommandSubtree);
 
         // Perf
         Pass("friendly spatial grid matches brute-force front blocker", FriendlySpatialGridMatchesBruteForce);
@@ -623,6 +624,27 @@ internal static class PostureStanceFixTests
         AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 4, 7)), "unit routed");
         AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 3, 8)), "new battle (BattleUnits instance)");
         AssertFalse(a.Equals(new TacticalRosterSignature(0, 120, 3, 7)), "other alliance");
+    }
+
+    private static TacticalCommandTreeProbe.ExtendedProbe Probe(int id, int parent, int typ = 14)
+    {
+        return new TacticalCommandTreeProbe.ExtendedProbe(id, typ, "u" + id, true, parent, parent != 0, 0f, 0f, 1);
+    }
+
+    private static void ExtendedProbesDropPlayerCommandSubtree()
+    {
+        // AI corps 1 → AI brigades 2, 3 and the W&L player's brigade 4 with its
+        // regiments 5, 6 (AppointCommand 44269 / 45827 mark the whole subtree).
+        var probes = new[] { Probe(1, 0, 16), Probe(2, 1), Probe(3, 1), Probe(4, 1), Probe(5, 4, 0), Probe(6, 4, 0) };
+        var filtered = PlayerCommandProbeFilter.Without(probes, new System.Collections.Generic.HashSet<int> { 4, 5, 6 });
+        AssertEqual(3, filtered.Count, "player subtree removed");
+        var tree = TacticalCommandTreeProbe.BuildTree(filtered, 0);
+        AssertTrue(tree.ContainsKey(1), "AI parent kept (IsPlayerProtected would also flag it via the attached player brigade)");
+        AssertEqual(2, tree[1].ChildInstanceIds.Count, "AI parent keeps only its AI brigades");
+        AssertFalse(tree.ContainsKey(4), "player brigade gets no cascade role");
+
+        var none = PlayerCommandProbeFilter.Without(probes, new System.Collections.Generic.HashSet<int>());
+        AssertTrue(ReferenceEquals(probes, none), "nothing protected: same list, no copy");
     }
 
     // Reference: the pre-grid EstimateFriendlyFrontBlocker walk (corridor 30 m

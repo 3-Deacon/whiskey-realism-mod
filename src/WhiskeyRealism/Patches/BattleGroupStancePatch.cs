@@ -204,12 +204,9 @@ namespace WhiskeyRealism.Patches
                     continue;
                 }
 
-                // W&L player command: never override. Same contract as the
-                // regimental intelligence layer.
-                bool playerCommanded;
-                try { playerCommanded = unit.dlcw_isundercommander; }
-                catch { playerCommanded = true; }
-                if (playerCommanded) continue;
+                // Player-owned units, the W&L player's command and chain
+                // (dlcw_isundercommander) and DLC-taken-over units: never override.
+                if (TacticalWriteGuard.IsPlayerProtected(unit)) continue;
 
                 // Resolve current state and run doctrine.
                 Regiment closestEnemy;

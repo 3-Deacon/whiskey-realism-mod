@@ -435,6 +435,9 @@ namespace WhiskeyRealism.Patches
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
+                // A W&L-protected group neither receives a play order nor
+                // anchors one for its AI siblings.
+                if (IsPlayerProtected(group)) continue;
                 if (!TryResolveLedgerState(group, out CommandNodeOperationalState state, out _)) continue;
 
                 // Vanilla command parent; groups directly under the units root
@@ -2364,6 +2367,7 @@ namespace WhiskeyRealism.Patches
                     int id = TacticalPatchIds.GameObjectInstanceId(r);
                     if (id == 0 || !leafMap.TryGetValue(id, out var la)) continue;
                     if (la.LeafRole != DirectChildRole.SupportMain || SafeRouted(r)) continue;
+                    if (WhiskeyRealism.Tactical.TacticalWriteGuard.IsPlayerProtected(r)) continue;
                     positions.Add(SafePosition(r));
                 }
             }

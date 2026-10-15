@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -378,6 +380,28 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return ((AllianceId * 397 ^ UnitCount) * 397 ^ RoutedCount) * 397 ^ BattleKey;
             }
+        }
+    }
+
+    // W&L: the player's command is marked dlcw_isundercommander on the command
+    // and every attached unit (DLC_WL.AppointCommand 44269, 45827), so removing
+    // the marked probes removes a whole subtree. Filtering with
+    // TacticalWriteGuard.IsPlayerProtected instead would also drop the AI
+    // parents above the player (their allattachedunits hold the player's
+    // units) and orphan their AI brigades.
+    public static class PlayerCommandProbeFilter
+    {
+        public static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Without(
+            IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes,
+            ICollection<int> playerCommandIds)
+        {
+            if (probes == null || playerCommandIds == null || playerCommandIds.Count == 0) return probes;
+            var kept = new List<TacticalCommandTreeProbe.ExtendedProbe>(probes.Count);
+            for (int i = 0; i < probes.Count; i++)
+            {
+                if (!playerCommandIds.Contains(probes[i].InstanceId)) kept.Add(probes[i]);
+            }
+            return kept;
         }
     }
 

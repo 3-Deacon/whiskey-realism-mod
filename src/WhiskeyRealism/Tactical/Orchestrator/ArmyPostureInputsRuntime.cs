@@ -85,23 +85,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _lastTelemetryAt.Clear();
         }
 
+        // The W&L player's command subtree is left out of the probe tree, so
+        // the role cascade / leaf map never assigns it a role and no AI
+        // brigade waits on it as support (PlayerCommandProbeFilter).
         private static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> ExtendedProbes(BattleUnits bunits, int allianceId)
         {
-            TacticalRosterSignature signature = RosterSignature(bunits, allianceId);
+            var playerCommand = new HashSet<int>();
+            TacticalRosterSignature signature = RosterSignature(bunits, allianceId, playerCommand);
             if (_probeCache.TryGetValue(allianceId, out CachedProbes cached) &&
                 cached.Probes != null &&
                 cached.Signature.Equals(signature))
                 return cached.Probes;
 
-            var probes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
+            var probes = PlayerCommandProbeFilter.Without(
+                DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId),
+                playerCommand);
             _probeCache[allianceId] = new CachedProbes(signature, probes);
             return probes;
         }
 
-        private static TacticalRosterSignature RosterSignature(BattleUnits bunits, int allianceId)
+        // Counts only units outside the player's command, so a change in the
+        // W&L command set also invalidates the probe cache.
+        private static TacticalRosterSignature RosterSignature(BattleUnits bunits, int allianceId, ISet<int> playerCommand)
         {
             int count = 0;
             int routed = 0;
+            bool wl = DLC_WL.dlc_scenarioactive;
             var units = BattleUnits.completeunitlist as IList;
             if (units != null)
             {
@@ -109,6 +118,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     var unit = units[i] as Regiment;
                     if (unit == null || unit.alliance != allianceId) continue;
+                    if (wl && unit.dlcw_isundercommander)
+                    {
+                        playerCommand.Add(((Component)unit).gameObject.GetInstanceID());
+                        continue;
+                    }
                     count++;
                     if (unit.isrouted || unit.markedforrout) routed++;
                 }
