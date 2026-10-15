@@ -26,7 +26,9 @@ namespace WhiskeyRealism.Tactical.Battle
     // (Postfix on AdjustGroupFormations, 5870) reuses that object in the same
     // UpdateAITasks call (CalculateSideStatsAndUpdateAITasks runs aibattle[0..2]
     // in one frame, 84864-84869). Each side keeps two pooled instances: the
-    // builder's current one and a spare the next build fills.
+    // builder's current one and a spare the next build fills. Every build is
+    // followed by BattlePerceptionProbe.Probe (BC2a), so perception memory
+    // advances once per built snapshot.
     //
     // RunArbiter: producers (fixed order) → OrderArbiter.Resolve → outcomes of
     // the last tick's moves and their retries → OrderExecutor.Plan +
@@ -106,6 +108,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 _spare[alliance] = current;
                 unchecked { _tickId++; }
                 BattleSnapshot built = BattleSnapshotBuilder.Build(battle, alliance, reuse, _tickId, TacticalDoctrineTime.NowBattleHours);
+                if (built != null) BattlePerceptionProbe.Probe(built, battle);
                 _builtFrame[alliance] = frame;
                 _builtBattleKey[alliance] = battleKey;
                 return built;

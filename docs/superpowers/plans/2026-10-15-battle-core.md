@@ -248,21 +248,35 @@ public static class BattlePerception {
   public const float RememberedHalfLifeMinutes = 20f;
   public const float RememberedMaxMinutes = 90f;
   public const int HideConfirmTicks = 2;
-  public const float RememberedWeightFloor = 0.05f; // dropped below this confidence
+  public const float RememberedWeightFloor = 0.05f; // confidence floor until the 90-minute cap
   public static PerceptionMode DecideMode(bool configOn, bool useFow, bool hqInTheSaddleBattle, bool gridFirstRunFinished,
       double secondsSinceBattleStart, bool sideIsPlayerAlliance, out PerceptionFallbackReason reason);
-  public static void Update(EnemyObservation[] memory, ref int memoryCount, in PerceptionProbeResult probe, double nowHours); // visible→remembered after HideConfirmTicks, decay, drop
-  public static float Confidence(double sinceSeenHours); // 0.5^(minutes/20), 0 at ≥ 90
+  public static void Update(EnemyObservation[] memory, ref int memoryCount, in PerceptionProbeResult probe, double nowHours); // visible→remembered after HideConfirmTicks, decay, drop at 90 min
+  public static float Confidence(double sinceSeenHours); // max(0.05, 0.5^(minutes/20)), 0 at ≥ 90
+  public static void Publish(BattleSnapshot s, PerceptionMode mode, PerceptionFallbackReason reason,
+      EnemyObservation[] memory, int memoryCount, in PerceptionProbeResult probe); // BC1 setters: SetPerception, AddObservation, Set*Summary
+  public static string ModeLogKey(PerceptionMode mode);                       // "tactical.battle-perception:mode:<mode>"
+  public static float RangeOnlyReach(float lineOfSight, float cancelInterruptionDistance);
+  public static bool WithinAnyReach(float[] ownX, float[] ownZ, float[] reach, int count, float x, float z);
 }
-public struct PerceptionProbeResult { public int Count; public int[] EnemyIds; public bool[] Visible; public float[] X, Z, Strength; public int[] UnitTyp; public bool[] IsReinforcement; }
+public struct PerceptionProbeResult { public int Count; public int[] EnemyIds; public bool[] Visible; public float[] X, Z, Strength; public int[] UnitTyp;
+  public bool[] IsReinforcement; public bool[] Routed; public float[] ArrivalHours; }
+public struct SliceGeometry { public float MaxRangeMeters; public float FlankShiftMeters; } // aidefensivemaxrange, flankpositionshift; slices = s.SliceCount
 public static class SlicePressureBuilder {
-  public static void Build(BattleSnapshot s);  // fills slice/flank/closest-visible arrays from Visible + confidence-weighted Remembered
+  public static void Build(BattleSnapshot s, in SliceGeometry g);  // overwrites slice/flank/closest-visible rows from Visible + confidence-weighted Remembered
   public const float RememberedPressureWeight = 0.5f;
 }
 internal static class BattlePerceptionProbe { // runtime
-  internal static void Probe(BattleSnapshot s, AIBattle battle, ref PerceptionProbeResult result); // sets PerceptionMode on s
+  internal static void Probe(BattleSnapshot s, AIBattle battle); // once per build, after BattleSnapshotBuilder.Build; ends with RefitFrontAxis
 }
 ```
+**As built (BC2a, recorded):**
+- Enemy memory lives in a per-side `BattleScope` store in the probe, not in the snapshot: D1 alternates two pooled snapshots, so each tick receives a copy through `Publish`.
+- The probe walks `s.EnemyRecords` and takes the live `Regiment` from `BattleSnapshotBuilder.UnitAt` only for `UnitIsHidden`'s cover/regref arguments and `iswithinfog`.
+- `FlankPressure` slot 2 is the rear point. Vanilla's slot 2 is the line centre (122907), counts enemies as negative strength × morale and adds 9999999 per friendly (122812, 122816), so vanilla `flankstrength` thresholds do not port unchanged.
+- Slice bins follow 122732 literally: width and slot count are both `aidefensiveslices`, so with the shipped 20 only bins 0-17 fill.
+- A remembered enemy is dropped at exactly `RememberedMaxMinutes`; `RememberedWeightFloor` is the confidence floor until then.
+- Routed enemies: dropped when seen routing. In RangeOnly, where vanilla's lists skip routed units (122644), a routed enemy counts as seen when an own unit's list reach `max(maximumlineofsight[unittyp], distancetoenemytocancelinterruption)` (122508-122513, 122608) covers it.
 **Probe rule (R1), exact:**
 - AI side not the player alliance, mode FogGrid: an enemy is visible when `!own.fow.UnitIsHidden(enemy.GetPosition(), GameVars.commander[enemy.commander].GetCommanderCunning(), (float)enemy.strength / GamePrefs.unittypesize[enemy.unittyp], enemy.liedown, enemy.coverobject, enemy.covervalue, enemy.unittyp, enemy)`, OR `enemy.inmelee > 0`.
   - `own.fow` is taken from any live own unit (it is `fows[1]` per 116505).
@@ -291,7 +305,9 @@ internal static class BattlePerceptionProbe { // runtime
   - `ClosestVisibleEnemyIgnoresHidden`
   - `ReinforcementCountsOnlyWithVisibleEntry`
   - `PerceptionUpdateAllocatesNothingAfterWarmup`
-- [ ] Implement. Scope `tactical.perception` (2.0 ms) around probe + update + slice build. Emit telemetry row `[BattlePerception] alliance=<a> mode=<FogGrid|RangeOnly|OwnSideWithinFog> reason=<…> visible=<n> remembered=<n>` once per mode change per side. Use OnceLog key `battle-perception:mode:<mode>` with a static mode name; log the counts through the Decision telemetry row.
+- [ ] Implement. Scope `tactical.perception` (2.0 ms) around probe + update + slice build. Emit telemetry row `[BattlePerception] alliance=<a> mode=<FogGrid|RangeOnly|OwnSideWithinFog> reason=<…> visible=<n> remembered=<n>` once per mode change per side. Use OnceLog key `tactical.battle-perception:mode:<mode>` (static per mode; the `tactical` prefix lets `OnceLog.ResetTactical` re-arm it each battle); the per-side counts go through the `BattlePerception` Decision telemetry row.
+
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the console harness (`BattlePerceptionTests`, exit code 0; a failing assertion throws, exit 134): mode decision order, memory hide/remember/decay/drop at 90 min, routed and reinforcement handling, publish summaries, vanilla slice binning, flank and closest-visible pressure, the per-side painted-grid latch, and zero allocation over 300 own × 300 enemy after warm-up. Mutation evidence (verify r2): five plants each turned a named test red with exit 134 — the round-1 0.05-floor drop rule, `HideConfirmTicks = 1`, reinforcements counted in the enemy summary, full remembered pressure weight, and a closest-enemy search ignoring visibility. Runtime proof of `BattlePerceptionProbe.Probe` is the BC7 in-game smoke (the `[once:tactical.battle-perception:mode:…]` lines), because nothing calls the probe before BC4 wires it after `BattleSnapshotBuilder.Build` in `BattleCoreTick.EnsureSnapshot`.
 
 **Steps BC2b (after BC1 merges):**
 - [ ] Tests first:
@@ -726,7 +742,7 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
 - [ ] Expected telemetry in a 20× smoke battle (tuning sidecar plus LogOutput):
   - `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…`.
   - `[once:tactical-battle-core:arbiter-first-fire] [OrderArbiter] first vanilla order issued channel=<channel> source=<source>`.
-  - `[BattlePerception] … mode=FogGrid` for the enemy AI side after ≤ 5 battle-seconds. Before that, `mode=RangeOnly reason=GridNotPainted`. With HQ-in-the-saddle, `reason=HqInTheSaddle`.
+  - `[once:tactical.battle-perception:mode:RangeOnly] [BattlePerception] alliance=<a> mode=RangeOnly reason=GridNotPainted visible=<n> remembered=<n>` at the first perception tick, then `[once:tactical.battle-perception:mode:FogGrid] [BattlePerception] alliance=<a> mode=FogGrid reason=None visible=<n> remembered=<n>` for the enemy AI side within 5 battle-seconds of its first perception tick. With HQ-in-the-saddle, `… mode=RangeOnly reason=HqInTheSaddle …` and no FogGrid line. A W&L / `ai_vs_ai` player-alliance side logs `mode=OwnSideWithinFog reason=None`. Each line fires once per mode per battle; every per-side mode change is the `BattlePerception` Decision event in the tuning sidecar.
   - `[OrderArbiter]` rows with `moved > 0`, `failed/issued < 0.2`, and no `gaveUp` storm (≤ 5 per side per 30 s).
   - Perf: `tactical.snapshot.build` p95 ≤ 1.5 ms per side, `tactical.arbiter.resolve` p95 ≤ 0.5 ms, no `tactical.patch.battle-core-arbiter` row above 5 ms more than 1 % of calls.
   - A line starting `[once:tactical-battle-core:charge-first-fire]` in an infantry assault (message text set by BC6b).
