@@ -11,13 +11,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     public readonly struct EnemyVisibleSector
     {
         /// <summary>
-        /// Enemy strength below this share of the sector's own strength is a
-        /// picket, not a force: odds against it are not meaningful (a 50-man
-        /// screen in front of a corps used to read as 100:1 "decisive" odds).
-        /// Relative, never an absolute head count — GTCW battles run from
-        /// 1,500 to 60,000 a side.
+        /// Largest odds the evidence will report, here and army-wide
+        /// (ArmyEvidenceBuilder.KnownEnemyOdds). Beyond 10:1 the exact figure
+        /// changes no decision, and a 50-man screen in front of a corps no
+        /// longer reads as 100:1.
         /// </summary>
-        public const float MinMeaningfulEnemyFractionOfOwn = 0.10f;
+        public const float MaxKnowableOdds = 10f;
 
         public EnemyVisibleSector(int sectorId, float ownStrength, float enemyStrength, bool recentFire)
         {
@@ -32,10 +31,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float EnemyStrength { get; }
         public bool RecentFire { get; }
 
-        public bool HasMeaningfulEnemy =>
-            EnemyStrength > 0f && EnemyStrength >= OwnStrength * MinMeaningfulEnemyFractionOfOwn;
+        public bool HasEnemy => EnemyStrength > 0f;
 
-        public float Odds => !HasMeaningfulEnemy ? 0f : OwnStrength / Math.Max(1f, EnemyStrength);
+        /// <summary>Raw band odds, capped at <see cref="MaxKnowableOdds"/>; 0 with no enemy in the band.</summary>
+        public float Odds => !HasEnemy ? 0f : Math.Min(MaxKnowableOdds, OwnStrength / Math.Max(1f, EnemyStrength));
 
         private static float SanitizeStrength(float value)
         {
@@ -203,8 +202,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float enemyReinforcementStrength24h,
             TacticalFrontAxis frontAxis = default(TacticalFrontAxis),
             IReadOnlyDictionary<int, int> instanceSectors = null,
-            IReadOnlyDictionary<int, float> instanceFlankThreat = null)
+            IReadOnlyDictionary<int, float> instanceFlankThreat = null,
+            float intelConfidence01 = 1f)
         {
+            IntelConfidence01 = Clamp01(intelConfidence01);
             Sectors = CopySectors(sectors);
             EnemyReserveCommitFraction = Clamp01(enemyReserveCommitFraction);
             AnyContactSpotted = anyContactSpotted;
@@ -222,6 +223,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float EnemyReinforcementStrength24h { get; }
         public TacticalFrontAxis FrontAxis { get; }
         public IReadOnlyDictionary<int, int> InstanceSectors { get; }
+
+        /// <summary>
+        /// The contact ledger's confidence when this state was built
+        /// (TacticalEnemyContactLedger.Confidence). Band odds blend toward
+        /// unknown (1) by it, the same way army-wide odds do.
+        /// </summary>
+        public float IntelConfidence01 { get; }
+
+        /// <summary>
+        /// Band odds as the doctrine should read them: 1 + confidence × (raw − 1),
+        /// monotone in confidence with no cliff; 0 when the band has no enemy.
+        /// </summary>
+        public float SectorOdds(EnemyVisibleSector sector)
+            => !sector.HasEnemy ? 0f : 1f + IntelConfidence01 * (sector.Odds - 1f);
 
         /// <summary>Own command group instance id → mean outflanked weight of its regiments (0-4).</summary>
         public IReadOnlyDictionary<int, float> InstanceFlankThreat { get; }

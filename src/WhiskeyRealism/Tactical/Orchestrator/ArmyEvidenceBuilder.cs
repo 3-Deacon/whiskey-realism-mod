@@ -122,8 +122,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Odds against the enemy force this side has had in range
                 // (TacticalEnemyContactLedger), not the enemy's
                 // sideinformation.totalactiveforce, which the side cannot know.
-                // Unknown (1) until the ledger is confident and the seen force
-                // clears the meaningful-enemy floor (KnownEnemyOdds).
+                // Blended from unknown (1) toward the observed ratio by the
+                // ledger's coverage-based confidence (KnownEnemyOdds).
                 float odds = KnownEnemyOdds(ownActive, ContactLedger(allianceId), DoctrineHours());
                 // Default main effort = the center band of the front, not
                 // "whatever group is first in completeunitlist".
@@ -326,6 +326,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         private static int[] _outflankedBuffer = new int[64];
+        private static bool[] _ownBandBuffer = new bool[TacticalFrontAxis.DefaultBandCount];
 
         /// <summary>
         /// Mean vanilla outflanked weight over the group's combat regiments
@@ -671,11 +672,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var ledger = ContactLedger(ownAllianceId);
                 float enemyReserveCommitFraction = TacticalEnemyContactLedger.UnknownReserveCommitFraction;
                 bool contactBroken = false;
+                float intelConfidence = 0f;
                 if (ledger != null)
                 {
                     ledger.Observe(nowHours, visibleStrength, engagedStrength);
+                    // Coverage: bands holding own combat units (each sampled
+                    // above) and the enemy entry points an own unit watches.
+                    int bandCount = axis.IsValid && axis.BandCount > 0 ? axis.BandCount : 1;
+                    if (_ownBandBuffer.Length < bandCount) _ownBandBuffer = new bool[bandCount];
+                    Array.Clear(_ownBandBuffer, 0, _ownBandBuffer.Length);
+                    for (int i = 0; i < ownCombat.Count; i++)
+                    {
+                        int band = axis.SectorOf(ownCombat[i].X, ownCombat[i].Z);
+                        if (band >= 0 && band < bandCount) _ownBandBuffer[band] = true;
+                    }
+                    ledger.ObserveCoverage(nowHours, _ownBandBuffer, bandCount, visibleEntries.Count, enemyEntries.Count);
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
+                    intelConfidence = ledger.Confidence(nowHours);
                 }
                 float enemyReinforcements = SumVisibleEnemyArrivals(bunits, enemySide, visibleEntries, withinHours: 24f);
 
@@ -687,7 +701,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyReinforcements,
                     frontAxis: axis,
                     instanceSectors: instanceSectors,
-                    instanceFlankThreat: flankThreat);
+                    instanceFlankThreat: flankThreat,
+                    intelConfidence01: intelConfidence);
             }
             catch
             {
@@ -1257,9 +1272,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // watched entry points are refreshed by Build on the evidence
                 // cadence; this read is cheap.
                 EnsureBattleOwner(bunits);
-                var ledger = ContactLedger(allianceId);
-                float enemyDeployed = ledger == null ? 0f : ledger.EstimatedEnemyStrength;
-                float intelConfidence = ledger == null ? 0f : ledger.Confidence(DoctrineHours(), ownDeployed);
+                ForceBalanceIntel(ContactLedger(allianceId), DoctrineHours(), out float enemyDeployed, out float intelConfidence);
 
                 var ownArrivals = BuildArrivalsForSide(bunits, side);
                 var enemyArrivals = allianceId >= 0 && allianceId <= 1

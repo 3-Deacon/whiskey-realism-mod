@@ -176,14 +176,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    // Pickets (EnemyVisibleSector.HasMeaningfulEnemy) carry no
-                    // odds signal; they must not look like decisive sectors.
-                    if (!s.HasMeaningfulEnemy) continue;
+                    // Bands with no enemy carry no odds signal. Band odds are
+                    // capped and blended toward unknown by intel confidence
+                    // (EnemyVisibleState.SectorOdds), so a fully observed weak
+                    // point is a decisive-sector candidate and a picket seen
+                    // under low coverage is not.
+                    if (!s.HasEnemy) continue;
+                    float odds = enemyVisible.SectorOdds(s);
                     if (s.SectorId == preShiftMainEffortSector)
-                        preShiftMainEffortOdds = s.Odds;
-                    if (s.Odds > decisiveSectorOdds)
+                        preShiftMainEffortOdds = odds;
+                    if (odds > decisiveSectorOdds)
                     {
-                        decisiveSectorOdds = s.Odds;
+                        decisiveSectorOdds = odds;
                         decisiveSectorId = s.SectorId;
                     }
                 }
@@ -215,10 +219,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    if (s.SectorId == currentMainEffortSector && s.HasMeaningfulEnemy)
-                        currentMainEffortOdds = s.Odds;
-                    if (s.SectorId != currentMainEffortSector && s.Odds > bestNonMainEffortOdds)
-                        bestNonMainEffortOdds = s.Odds;
+                    if (!s.HasEnemy) continue;
+                    float odds = enemyVisible.SectorOdds(s);
+                    if (s.SectorId == currentMainEffortSector)
+                        currentMainEffortOdds = odds;
+                    else if (odds > bestNonMainEffortOdds)
+                        bestNonMainEffortOdds = odds;
                 }
             }
 
@@ -241,7 +247,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (s.SectorId != currentMainEffortSector) continue;
                     mainBandSeen = true;
                     mainBandOwn = s.OwnStrength;
-                    if (s.HasMeaningfulEnemy) mainBandOdds = s.Odds;
+                    if (s.HasEnemy) mainBandOdds = enemyVisible.SectorOdds(s);
                 }
             }
             var baseline = orchestrator.LastReplanBaseline;

@@ -30,11 +30,11 @@ internal static class TacticalEvidenceFixTests
         Run("band sectors dedupe enemies seen by several own units", BandSectorsDedupeEnemies);
         Run("band sectors aggregate own strength by lateral band", BandSectorsAggregateOwnByBand);
         Run("instance sector map is keyed by instance id and stable when a group routs", InstanceSectorMapStableAcrossRout);
-        Run("sector odds ignore pickets below the meaningful-enemy floor", SectorOddsIgnorePickets);
+        Run("sector odds are capped against small forces, no picket floor", SectorOddsCappedNoFloor);
         Run("enemy visible state carries axis and instance sectors", EnemyVisibleStateCarriesGeometry);
         Run("command tree children sort along the front axis", CommandTreeChildrenSortAlongFront);
         Run("default main effort is the center band", DefaultMainEffortIsCenterBand);
-        Run("picket in the main-effort band does not zero main-effort odds", PicketDoesNotZeroMainEffortOdds);
+        Run("a fully observed picket in the main-effort band reads capped odds and the probe commits", PicketDoesNotZeroMainEffortOdds);
         Run("leaf cascade refuses the flanks across the front when facing east", LeafCascadeRefusesAcrossFrontFacingEast);
         Run("leaf cascade feeds real flank exposure to cautious commanders", LeafCascadeUsesRealFlankExposure);
         Run("envelopment splits the army's corps into wings, not one corps's divisions", EnvelopmentSplitsArmyCorps);
@@ -42,7 +42,7 @@ internal static class TacticalEvidenceFixTests
         Run("contact ledger before contact is unknown and low confidence", ContactLedgerBeforeContact);
         Run("contact ledger tracks largest seen and engaged share", ContactLedgerTracksContact);
         Run("contact ledger reports broken contact then forgets it", ContactLedgerContactBroken);
-        Run("contact ledger picket gives low confidence", ContactLedgerPicketLowConfidence);
+        Run("contact ledger confidence is observation coverage, not enemy size", ContactLedgerConfidenceIsCoverage);
         Run("contact ledger resets when the battle clock runs backwards", ContactLedgerResetsOnClockRewind);
         Run("own aibattle resolves by sideofai and skips the feud instance", OwnAiBattleSkipsFeudInstance);
         Run("intent inference strength signal is relative to own force", IntentStrengthSignalRelative);
@@ -73,7 +73,8 @@ internal static class TacticalEvidenceFixTests
         Run("replan cooldown is the configured battle seconds, no hidden floor", ReplanCooldownIsConfiguredValue);
         Run("a paused night leaves phase budgets unchanged", PausedNightLeavesPhaseBudgets);
         Run("a paused night leaves contact-ledger decay unchanged", PausedNightLeavesLedgerDecay);
-        Run("army odds stay unknown while intel confidence is low", ArmyOddsUnknownUnderLowConfidence);
+        Run("army odds blend from unknown toward the observed ratio with confidence", ArmyOddsBlendWithConfidence);
+        Run("a fully observed weak enemy gives an attack opportunity", FullyObservedWeakEnemyGivesAttack);
         Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
         Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
         Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
@@ -296,17 +297,20 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(4, after[30], "right group keeps its sector");
     }
 
-    private static void SectorOddsIgnorePickets()
+    private static void SectorOddsCappedNoFloor()
     {
         var picket = new EnemyVisibleSector(0, 5000f, 50f, false);
-        TestHarness.AssertFalse(picket.HasMeaningfulEnemy, "50 vs 5000 is a picket");
-        TestHarness.AssertEqual(0f, picket.Odds, "picket odds not meaningful");
+        TestHarness.AssertTrue(picket.HasEnemy, "a picket is an enemy");
+        TestHarness.AssertEqual(EnemyVisibleSector.MaxKnowableOdds, picket.Odds, "100:1 caps at the knowable maximum");
         var real = new EnemyVisibleSector(1, 5000f, 1000f, true);
-        TestHarness.AssertTrue(real.HasMeaningfulEnemy, "1000 vs 5000 is a real force");
         TestHarness.AssertEqual(5f, real.Odds, "real odds");
         var outnumbered = new EnemyVisibleSector(2, 0f, 800f, true);
-        TestHarness.AssertTrue(outnumbered.HasMeaningfulEnemy, "enemy facing an empty band is meaningful");
+        TestHarness.AssertTrue(outnumbered.HasEnemy, "enemy facing an empty band");
         TestHarness.AssertEqual(0f, outnumbered.Odds, "no own force -> odds 0");
+        TestHarness.AssertFalse(new EnemyVisibleSector(3, 5000f, 0f, false).HasEnemy, "own-only band has no enemy");
+        var state = new EnemyVisibleState(new[] { picket }, 0.35f, true, false, 0f, intelConfidence01: 0.1f);
+        TestHarness.AssertTrue(Near(state.SectorOdds(picket), 1f + 0.1f * (EnemyVisibleSector.MaxKnowableOdds - 1f)),
+            "sector odds blend toward unknown with intel confidence");
     }
 
     private static void EnemyVisibleStateCarriesGeometry()
@@ -374,7 +378,7 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1.3f, TerrainKind.Open, 2), enemy,
             6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
         TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
-            "picket band falls back to global odds (1.3) and probe commits");
+            "a fully observed picket band is a weak point: probe commits");
     }
 
     private static TacticalCommandTreeProbe.ExtendedProbe P(int id, int typ, string name, int parent, float x, float z, int bucket = 2)
@@ -497,9 +501,10 @@ internal static class TacticalEvidenceFixTests
     {
         var ledger = new TacticalEnemyContactLedger();
         ledger.Observe(nowHours: 0.5f, visibleEnemyStrength: 0f, engagedEnemyStrength: 0f);
+        Cover(ledger, 0.5f);
         TestHarness.AssertEqual(0f, ledger.EstimatedEnemyStrength, "nothing seen");
         TestHarness.AssertEqual(TacticalEnemyContactLedger.UnknownReserveCommitFraction, ledger.ReserveCommitFraction(0f), "unknown reserve sentinel");
-        TestHarness.AssertTrue(ledger.Confidence(0.5f, ownStrength: 6000f) < 0.5f, "no contact -> below doctrine action gate");
+        TestHarness.AssertEqual(0f, ledger.Confidence(0.5f), "no contact -> nothing to be confident about");
         TestHarness.AssertFalse(ledger.ContactBroken(0.5f, 0f), "never had contact -> not broken");
     }
 
@@ -507,9 +512,10 @@ internal static class TacticalEvidenceFixTests
     {
         var ledger = new TacticalEnemyContactLedger();
         ledger.Observe(1f, 4000f, 1000f);
+        Cover(ledger, 1f);
         TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "largest seen");
         TestHarness.AssertTrue(Near(ledger.ReserveCommitFraction(1000f), 0.25f), "1000 of 4000 engaged");
-        TestHarness.AssertTrue(Near(ledger.Confidence(1f, 6000f), 1f), "large enemy in sight now -> full confidence");
+        TestHarness.AssertTrue(Near(ledger.Confidence(1f), 1f), "whole front observed now -> full confidence");
         ledger.Observe(1.1f, 2500f, 2500f);
         TestHarness.AssertTrue(ledger.EstimatedEnemyStrength > 3900f, "largest seen persists (decays slowly)");
     }
@@ -518,24 +524,43 @@ internal static class TacticalEvidenceFixTests
     {
         var ledger = new TacticalEnemyContactLedger();
         ledger.Observe(1f, 4000f, 1000f);
+        Cover(ledger, 1f);
         ledger.Observe(1.1f, 0f, 0f);
+        Cover(ledger, 1.1f);
         TestHarness.AssertFalse(ledger.ContactBroken(1.1f, 0f), "6 minutes is not broken yet");
         ledger.Observe(1.5f, 0f, 0f);
+        Cover(ledger, 1.5f);
         TestHarness.AssertTrue(ledger.ContactBroken(1.5f, 0f), "30 battle-minutes without contact -> broken");
         TestHarness.AssertTrue(ledger.EstimatedEnemyStrength < 4000f && ledger.EstimatedEnemyStrength > 3500f, "estimate decays");
-        float conf = ledger.Confidence(1.5f, 6000f);
+        float conf = ledger.Confidence(1.5f);
         TestHarness.AssertTrue(conf < 1f && conf > 0.5f, "stale but recent contact -> reduced confidence, got " + conf);
         ledger.Observe(4f, 0f, 0f);
+        Cover(ledger, 4f);
         TestHarness.AssertFalse(ledger.ContactBroken(4f, 0f), "contact memory expired");
-        TestHarness.AssertTrue(ledger.Confidence(4f, 6000f) < 0.5f, "old knowledge -> below action gate");
+        TestHarness.AssertEqual(0f, ledger.Confidence(4f), "old contact -> no confidence in the estimate");
         TestHarness.AssertFalse(ledger.ContactBroken(1.5f, 300f), "something in sight now -> not broken");
     }
 
-    private static void ContactLedgerPicketLowConfidence()
+    private static void ContactLedgerConfidenceIsCoverage()
     {
-        var ledger = new TacticalEnemyContactLedger();
-        ledger.Observe(1f, 500f, 500f);
-        TestHarness.AssertTrue(ledger.Confidence(1f, 10000f) < 0.5f, "a 500-man picket says little about a 10,000-man army's opponent");
+        // Same small enemy every time; only the observation changes.
+        var full = Seen(1f, 500f, 500f);
+        TestHarness.AssertTrue(Near(full.Confidence(1f), 1f), "a small enemy fully observed -> full confidence");
+        var unwatched = Seen(1f, 500f, 500f, bands: 5, watchedEntries: 0, totalEntries: 2);
+        TestHarness.AssertEqual(0f, unwatched.Confidence(1f), "enemy arrivals pending at unwatched entry points -> no confidence");
+        var halfEntries = Seen(1f, 500f, 500f, bands: 5, watchedEntries: 1, totalEntries: 2);
+        TestHarness.AssertTrue(Near(halfEntries.Confidence(1f), 0.5f), "half the entry points watched");
+        var threeBands = Seen(1f, 500f, 500f, bands: 3);
+        TestHarness.AssertTrue(Near(threeBands.Confidence(1f), 0.6f), "three of five bands observed");
+        // A band not re-observed fades over the contact memory.
+        var fading = Seen(1f, 500f, 500f);
+        fading.Observe(2f, 500f, 500f);
+        Cover(fading, 2f, bands: 1);
+        float c = fading.Confidence(2f);
+        TestHarness.AssertTrue(c > 0.55f && c < 0.65f, "four bands last seen an hour ago (recency 0.5) + one now -> 0.6, got " + c);
+        var none = new TacticalEnemyContactLedger();
+        none.Observe(1f, 500f, 500f);
+        TestHarness.AssertEqual(0f, none.Confidence(1f), "no coverage observed -> no confidence");
     }
 
     private static void ContactLedgerResetsOnClockRewind()
@@ -953,52 +978,80 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "no decay across the frozen night");
     }
 
-    private static TacticalEnemyContactLedger Seen(float hours, float visible, float engaged)
+    private static TacticalEnemyContactLedger Seen(float hours, float visible, float engaged,
+        int bands = 5, int watchedEntries = 0, int totalEntries = 0)
     {
         var l = new TacticalEnemyContactLedger();
         l.Observe(hours, visible, engaged);
+        Cover(l, hours, bands, watchedEntries, totalEntries);
         return l;
     }
 
-    private static void ArmyOddsUnknownUnderLowConfidence()
+    /// <summary>Own combat units sampled in the first <paramref name="bands"/> of five bands.</summary>
+    private static void Cover(TacticalEnemyContactLedger l, float hours, int bands = 5, int watchedEntries = 0, int totalEntries = 0)
     {
-        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f), 1f), "40-man vedette: odds unknown");
+        var mask = new bool[5];
+        for (int i = 0; i < bands && i < 5; i++) mask[i] = true;
+        l.ObserveCoverage(hours, mask, 5, watchedEntries, totalEntries);
+    }
+
+    private static void ArmyOddsBlendWithConfidence()
+    {
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, new TacticalEnemyContactLedger(), 1f), "no contact: unknown");
-        TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 4000f, 1000f), 1f), 1.5f), "real contact: own/seen");
-        // Confidence >= 0.5 needs a sighting of a quarter of own strength, so
-        // knowable odds top out at 4:1; 5:1 reads as unknown (by design).
-        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1200f, 1200f), 1f), "5:1 is past the knowable ceiling");
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f, watchedEntries: 0, totalEntries: 1), 1f),
+            "picket while enemy arrivals are unwatched: unknown");
+        TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 4000f, 1000f), 1f), 1.5f), "full coverage: own/seen");
+        TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1200f, 1200f), 1f), 5f),
+            "a small enemy fully observed reads its real odds (no size floor)");
+        TestHarness.AssertEqual(EnemyVisibleSector.MaxKnowableOdds, ArmyEvidenceBuilder.KnownEnemyOdds(60000f, Seen(1f, 100f, 100f), 1f),
+            "raw odds cap at the knowable maximum");
+        float low = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1500f, 0f, bands: 1), 1f);
+        float mid = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1500f, 0f, bands: 3), 1f);
+        float high = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1500f, 0f, bands: 5), 1f);
+        TestHarness.AssertTrue(1f < low && low < mid && mid < high && Near(high, 4f), "monotone in confidence: " + low + " " + mid + " " + high);
+        float under = ArmyEvidenceBuilder.KnownEnemyOdds(3000f, Seen(1f, 6000f, 0f, bands: 1), 1f);
+        TestHarness.AssertTrue(under > 0.5f && under < 1f, "outnumbered under low confidence is pulled toward 1 too, got " + under);
+    }
+
+    private static void FullyObservedWeakEnemyGivesAttack()
+    {
+        // 20,000 fully observing a lone 2,000-man brigade, meeting engagement.
+        var ledger = Seen(1f, 2000f, 2000f);
+        ArmyEvidenceBuilder.ForceBalanceIntel(ledger, 1f, out float enemyDeployed, out float confidence);
+        TestHarness.AssertEqual(2000f, enemyDeployed, "enemy estimate");
+        TestHarness.AssertTrue(Near(confidence, 1f), "fully observed");
+        var ev = new TacticalForceBalanceEvidence(20000f, enemyDeployed,
+            Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+            0.5f, 0.5f, confidence, stance: BattleStance.Meeting);
+        TestHarness.AssertEqual(ReinforcementOpportunity.AttackNow, TacticalReinforcementOpportunityDoctrine.Decide(ev).Opportunity,
+            "10:1 fully observed -> attack");
     }
 
     private static void PicketOnlyContactKeepsProbe()
     {
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
-        var ledger = Seen(1f, 40f, 40f);
+        // Low coverage: enemy reinforcements are due at an entry point no own unit watches.
+        var ledger = Seen(1f, 40f, 40f, watchedEntries: 0, totalEntries: 1);
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
         var picketFront = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 40f, true) },
-            ledger.ReserveCommitFraction(40f), true, false, 0f);
+            ledger.ReserveCommitFraction(40f), true, false, 0f, intelConfidence01: ledger.Confidence(1f));
         var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), picketFront,
             6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
-        TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "a picket is not a reason to commit the main effort");
-        TestHarness.AssertTrue(trigger != ReplanTrigger.ForceImbalanceShift, "no 150:1 force-imbalance replan");
+        TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "a picket under low coverage is not a reason to commit");
+        TestHarness.AssertTrue(trigger != ReplanTrigger.ForceImbalanceShift, "no force-imbalance replan on a picket");
     }
 
     private static void MorningOddsNotInflated()
     {
-        var ledger = new TacticalEnemyContactLedger();
-        float evening = 18f, morning = evening + 1f / 60f; // one doctrine minute later
-        ledger.Observe(evening, 4000f, 1000f);
+        var ledger = Seen(18f, 4000f, 1000f);
+        float morning = 18f + 1f / 60f; // one doctrine minute later
         ledger.Observe(morning, 0f, 0f);
+        Cover(ledger, morning);
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, morning);
         TestHarness.AssertTrue(odds > 1.45f && odds < 1.55f, "morning odds stay ~1.5, got " + odds);
     }
 
-    // Copied from GTCW Config/commanders.txt (build 14703111): the combined
-    // name (firstname + " " + name, decompile 59081) of every alliance-0
-    // (Union) and alliance-1 (CSA) commander whose surname the historical
-    // registry uses. A registry entry with a new surname must add that
-    // surname's vanilla names here, spelled exactly as the game spells them.
     private static readonly string[] VanillaUnionNamesForRegistrySurnames =
     {
             "Abner Doubleday", "Albert F. Thomas", "Albert L. Lee", "Alger M. Wheeler", "Ambrose E. Burnside",
