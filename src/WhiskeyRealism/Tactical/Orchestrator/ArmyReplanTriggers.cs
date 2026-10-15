@@ -93,10 +93,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float ArmyMoraleFloor { get; }
         public float ReservesCommittedFraction { get; }
         /// <summary>
-        /// Own reinforcement strength due within 24 h
-        /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
-        /// the enemy's schedule is not known; enemy arrivals count once in
-        /// range, through the contact ledger.
+        /// Own reinforcement strength due inside vanilla's retreat-decision window
+        /// (ArmyEvidenceBuilder.OwnReinforcementsArriving: own scheduled arrivals,
+        /// 84764-84767). Own side only: the enemy's schedule is not known; enemy
+        /// arrivals count once seen, through the contact ledger.
         /// </summary>
         public float OwnReinforcementsArriving { get; }
         public float EnemyMainEffortShiftConfidenceWeighted { get; }

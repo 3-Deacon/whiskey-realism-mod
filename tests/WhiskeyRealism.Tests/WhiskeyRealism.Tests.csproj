@@ -255,7 +255,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleStateSignature.cs" Link="Orchestrator\TacticalBattleStateSignature.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalHeavyPathGate.cs" Link="Orchestrator\TacticalHeavyPathGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalSideLogFormatter.cs" Link="Orchestrator\TacticalSideLogFormatter.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalFogOfWarContact.cs" Link="Orchestrator\TacticalFogOfWarContact.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalVisionRuntimeAdapter.cs" Link="Orchestrator\TacticalVisionRuntimeAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\MapObjectiveCapture.cs" Link="Orchestrator\MapObjectiveCapture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandTaskToStanceMapper.cs" Link="Tactical\TacticalCommandTaskToStanceMapper.cs" />
@@ -318,9 +317,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" Link="Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\DelayingDefensePlaybook.cs" Link="Orchestrator\Playbooks\DelayingDefensePlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\BuiltInPlaybooks.cs" Link="Orchestrator\BuiltInPlaybooks.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalUnitObservation.cs" Link="Orchestrator\TacticalUnitObservation.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\IObservationSource.cs" Link="Orchestrator\IObservationSource.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalUnitObservationAggregate.cs" Link="Orchestrator\TacticalUnitObservationAggregate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyEvidenceBuilder.Pure.cs" Link="Orchestrator\ArmyEvidenceBuilder.Pure.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalFrontAxis.cs" Link="Orchestrator\TacticalFrontAxis.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalEnemyContactLedger.cs" Link="Orchestrator\TacticalEnemyContactLedger.cs" />

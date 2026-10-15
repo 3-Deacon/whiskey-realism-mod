@@ -1,8 +1,8 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -13,7 +13,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Runtime-only adapter (Task 5). The single place responsible for performing
     /// expensive heavy-path construction of <see cref="TacticalBattleRuntimeSnapshot"/>
     /// (ArmyEvidence + full EnemyVisible sectors + TacticalVision objective records with
-    /// approach avenues + CommandTreeSnapshot + DirectChildSnapshots).
+    /// approach avenues + CommandTreeSnapshot + DirectChildSnapshots), all derived from the
+    /// side's per-tick <see cref="BattleSnapshot"/> (BC2b): enemy figures only from its
+    /// visible and remembered observations.
     ///
     /// Also supplies the cheap <see cref="TacticalBattleStateSignature"/> extractor used
     /// by the frequent tick path to feed <see cref="TacticalHeavyPathGate"/> without
@@ -24,10 +26,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// lives here. Pure DTOs / gate / signature live elsewhere and remain harness-testable.
     ///
     /// Integration: <see cref="TacticalBattleCoordinatorRuntime"/> (Task 6) will:
-    /// - compute currentSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(...) cheaply
+    /// - compute currentSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(snapshot, battle, hours) cheaply
     /// - read per-side lastHeavyHours, lastSig, hasPending, lastPublished
     /// - call TacticalHeavyPathGate.Decide(new Input(...))
-    /// - on Decision.ShouldRun: snapshot = TacticalBattleSnapshotBuilder.Build(battle, alliance, currentSig, currentHours)
+    /// - on Decision.ShouldRun: TacticalBattleSnapshotBuilder.Build(snapshot, battle, currentSig, currentHours)
     ///   then update lasts + publish
     /// - else: reuse lastPublished snapshot for DriveTickCycle / DriveDirectChildCycle / DriveOperationsLedger
     ///
@@ -47,19 +49,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _bunitsFieldCache;
 
         /// <summary>
-        /// Cheap signature extractor. Reads only coarse totals, macroai, eodcycle, limited
-        /// objective names for hash, a bounded scan for pathinterrupted flags, and time bucket.
-        /// Does NOT iterate for per-sector visible enemy strength or full objective+avenue records.
-        /// Safe to call every vanilla side-stat tick.
+        /// Cheap signature extractor over the side's battle snapshot (D1: built first in the
+        /// coordinator tick). Own side: its totalactiveforce and scripted macroai override
+        /// (sideinformation[snapshot.Side], CalculateSideStats 84700-84862). Enemy side: only
+        /// what is seen, the visible strength in buckets (the enemy's totalactiveforce and
+        /// macroai are not knowable). Plus eodcycle, the own objective chain hash, a contact
+        /// bucket over own units and the time bucket. Safe to call every side-stat tick.
         /// </summary>
         public static TacticalBattleStateSignature ExtractCurrentSignature(
+            BattleSnapshot snapshot,
             AIBattle battle,
             float currentBattleHours)
         {
             try
             {
                 var bunits = ResolveBattleUnits(battle);
-                if (bunits == null || bunits.sideinformation == null || bunits.sideinformation.Length < 2)
+                int side = snapshot != null ? snapshot.Side : -1;
+                if (bunits == null || bunits.sideinformation == null || side < 0 || side > 1 || side >= bunits.sideinformation.Length)
                 {
                     return new TacticalBattleStateSignature(
                         activeUnitCount: 0,
@@ -73,34 +79,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         battleHourBucket: ComputeHourBucket(currentBattleHours));
                 }
 
-                var s0 = bunits.sideinformation[0];
-                var s1 = bunits.sideinformation[1];
-
-                int side0Force = (int)Math.Max(0f, s0 != null ? s0.totalactiveforce : 0f);
-                int side1Force = (int)Math.Max(0f, s1 != null ? s1.totalactiveforce : 0f);
-                int activeUnits = side0Force + side1Force; // coarse proxy (sufficient for signature diff)
-
-                int macro0 = s0 != null ? s0.macroai : -1;
-                int macro1 = s1 != null ? s1.macroai : -1;
-
-                bool anyRetreatOrEod = (macro0 == 3 || macro1 == 3) || (bunits.eodcycle != 0);
-
-                int objHash = ComputeCheapObjectiveHash(battle);
-
-                int contactBucket = ComputeInterruptedContactBucket(bunits);
-
-                int bucket = ComputeHourBucket(currentBattleHours);
+                var own = bunits.sideinformation[side];
+                int ownForce = (int)Math.Max(0f, own != null ? own.totalactiveforce : 0f);
+                int ownMacro = own != null ? own.macroai : -1;
+                int enemyBucket = ArmyEvidenceBuilder.KnownEnemyStrengthBucket(snapshot.VisibleEnemyStrength);
 
                 return new TacticalBattleStateSignature(
-                    activeUnitCount: Math.Max(0, activeUnits),
-                    side0ActiveForce: Math.Max(0, side0Force),
-                    side1ActiveForce: Math.Max(0, side1Force),
-                    side0MacroAI: macro0,
-                    side1MacroAI: macro1,
-                    anySideInRetreatOrEOD: anyRetreatOrEod,
-                    majorObjectiveAnchorHash: objHash,
-                    interruptedContactBucket: contactBucket,
-                    battleHourBucket: bucket);
+                    activeUnitCount: ownForce + enemyBucket, // coarse proxy (sufficient for signature diff)
+                    side0ActiveForce: side == 0 ? ownForce : enemyBucket,
+                    side1ActiveForce: side == 1 ? ownForce : enemyBucket,
+                    side0MacroAI: side == 0 ? ownMacro : -1,
+                    side1MacroAI: side == 1 ? ownMacro : -1,
+                    anySideInRetreatOrEOD: ownMacro == 3 || bunits.eodcycle != 0,
+                    majorObjectiveAnchorHash: ComputeCheapObjectiveHash(battle),
+                    interruptedContactBucket: ArmyEvidenceBuilder.ContactBucket(snapshot),
+                    battleHourBucket: ComputeHourBucket(currentBattleHours));
             }
             catch (Exception e)
             {
@@ -114,40 +107,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Heavy snapshot builder. Invoked only when TacticalHeavyPathGate returns Run.
-        /// Gathers the full expensive data once and returns an immutable snapshot for reuse
-        /// across DriveTickCycle (replan), DriveDirectChildCycle, DriveOperationsLedger,
-        /// CommandDoctrineAssignment, etc.
+        /// Derives the expensive data once from the side's battle snapshot and returns an
+        /// immutable snapshot for reuse across DriveTickCycle (replan), DriveDirectChildCycle,
+        /// DriveOperationsLedger, CommandDoctrineAssignment, etc.
         /// </summary>
         public static TacticalBattleRuntimeSnapshot Build(
+            BattleSnapshot snapshot,
             AIBattle battle,
-            int allianceId,
             TacticalBattleStateSignature signatureAtBuild,
             float buildBattleHours)
         {
+            int allianceId = snapshot != null ? snapshot.Alliance : -1;
             try
             {
-                // Expensive calls — this is the throttled path. Per-sub-call
-                // scopes (added 2026-05-19 hot-path diagnostic) split the cost
-                // so the tuning sidecar shows which inner walk dominates the
-                // 5-16ms p99 Build wall time.
+                if (snapshot == null) return TacticalBattleRuntimeSnapshot.Empty;
+
+                // Per-sub-call scopes split the cost so the tuning sidecar shows which inner
+                // derivation dominates the Build wall time.
                 ArmyEvidenceBuilder.Bundle bundle;
                 using (TelemetryPerf.Scope("tactical.snapshot-build.evidence-bundle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                    bundle = ArmyEvidenceBuilder.Build(snapshot, battle);
                 }
 
                 ObjectiveRecord[] objectives;
                 using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    objectives = BuildObjectiveRecords(battle, allianceId);
+                    objectives = BuildObjectiveRecords(snapshot, battle);
                 }
 
                 var commandTree = CommandTreeRuntime.Snapshot(allianceId);
-
-                // Direct children discovery for THIS side (completeunitlist filtered by
-                // alliance + GetAttachedUnitsReg). Snapshot(battle) resolved the alliance
-                // from the AIBattle that fired the Tick, which drives both sides, so the
-                // other side's snapshot carried the wrong army's children.
                 IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(allianceId);
 
                 // The snapshot performs its own defensive copies. Readiness
@@ -181,35 +170,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // Reused per build (main thread only).
+        private static readonly List<TacticalVisionRuntimeAdapter.OwnSetObjective> _ownObjectives =
+            new List<TacticalVisionRuntimeAdapter.OwnSetObjective>();
+
         /// <summary>
-        /// EnableSinglePassObjectiveRecords ON: single pass over the shared observation
-        /// aggregate. OFF (rollback): legacy per-unit walk. The legacy-vs-aggregate parity
-        /// comparator (budget 0 since 2026-05-21, never in window) was removed.
+        /// Objective records over the side's snapshot (plan D11). The one live read is each own
+        /// unit's Regiment.currentsetobjective, taken through the snapshot's own index
+        /// (BattleSnapshotBuilder.UnitAt) because the snapshot does not carry it.
         /// </summary>
-        private static ObjectiveRecord[] BuildObjectiveRecords(AIBattle battle, int allianceId)
+        internal static ObjectiveRecord[] BuildObjectiveRecords(BattleSnapshot snapshot, AIBattle battle)
         {
-            bool singlePass = Plugin.Instance != null
-                && Plugin.EnableSinglePassObjectiveRecords != null
-                && Plugin.EnableSinglePassObjectiveRecords.Value;
-
-            if (!singlePass)
+            if (snapshot == null) return Array.Empty<ObjectiveRecord>();
+            _ownObjectives.Clear();
+            for (int i = 0; i < snapshot.OwnCount; i++)
             {
-                using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.legacy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                {
-                    return TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
-                }
+                Regiment unit = BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
+                if ((UnityEngine.Object)unit == null) continue;
+                object objective = TacticalVisionRuntimeAdapter.SafeCurrentSetObjective(unit);
+                if (objective == null) continue;
+                _ownObjectives.Add(new TacticalVisionRuntimeAdapter.OwnSetObjective(i,
+                    TacticalVisionRuntimeAdapter.SafeObjectiveName(objective),
+                    TacticalVisionRuntimeAdapter.SafeObjectivePoint(objective)));
             }
-
-            IObservationSource source;
-            using (TelemetryPerf.Scope("tactical.snapshot-build.aggregate-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-            {
-                source = TacticalUnitObservationAggregate.Shared.Capture(allianceId);
-            }
-
-            using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.aggregate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-            {
-                return TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(source, battle, allianceId);
-            }
+            return TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(snapshot, _ownObjectives, battle, snapshot.Alliance);
         }
 
         // ---- Internal cheap helpers (no heavy vision / sector iteration) ----
@@ -260,49 +244,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
                 }
                 return hash;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static int ComputeInterruptedContactBucket(BattleUnits bunits)
-        {
-            // Replaces ComputeAnyPathInterruptedOrNewContact (2026-05-22). The
-            // prior bool flipped on every cycle once contact was made because
-            // groupenemiesinrange oscillates as units enter/exit fire range —
-            // causing heavy-gate signature mismatches and re-fires every cycle.
-            //
-            // New form: count units matching the condition, bucket into discrete
-            // ranges so signature only changes on meaningful shifts:
-            //   0  → 0 contacts
-            //   1  → 1-3 contacts
-            //   2  → 4-10 contacts
-            //   3  → 11+ contacts
-            //
-            // Same bounded scan (first 40 units) to keep the signature computation
-            // cheap on every vanilla side-stat tick.
-            try
-            {
-                if (bunits == null) return 0;
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return 0;
-
-                int limit = Math.Min(units.Count, 40);
-                int count = 0;
-                for (int i = 0; i < limit; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg != null && (reg.pathinterrupted || reg.groupenemiesinrange > 0))
-                    {
-                        count++;
-                    }
-                }
-                if (count <= 0) return 0;
-                if (count <= 3) return 1;
-                if (count <= 10) return 2;
-                return 3;
             }
             catch
             {

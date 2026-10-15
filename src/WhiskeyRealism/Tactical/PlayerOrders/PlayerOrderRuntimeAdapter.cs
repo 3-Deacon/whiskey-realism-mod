@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
@@ -521,16 +522,17 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
         }
 
+        // The command's closest enemy its side sees (battle snapshot, BC2a fog; true XZ
+        // distance), not vanilla's unfiltered unitrange.closest-enemy pick.
         private static PlayerOrderPoint ClosestVisibleEnemyPoint(Regiment current)
         {
             try
             {
-                Regiment enemy = current != null && current.unitrange != null
-                    ? current.unitrange.closestenemyunitfarreg
-                    : null;
-                if (enemy == null) return default(PlayerOrderPoint);
-                Vector3 position = enemy.GetPosition();
-                return new PlayerOrderPoint(position.x, position.z);
+                if (current == null || !BattleCore.TryGetSnapshot(current.alliance, out BattleSnapshot snapshot))
+                    return default(PlayerOrderPoint);
+                int k = snapshot.ClosestVisibleEnemy(snapshot.IndexOfOwn(current.gameObject.GetInstanceID()), out _);
+                if (k < 0) return default(PlayerOrderPoint);
+                return new PlayerOrderPoint(snapshot.Observations[k].X, snapshot.Observations[k].Z);
             }
             catch (Exception ex)
             {
