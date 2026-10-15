@@ -87,7 +87,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _cacheValid[allianceId] = true;
                     _cacheMisses[allianceId]++;
                     OnceLog.Info(
-                        "tactical-command-tree-cache:populated:" + allianceId,
+                        "tactical-command-tree-cache:populated",
                         "[TacticalCommandTreeCache] populated alliance=" + allianceId
                         + " shift=" + commandHierarchyShift
                         + " — reads served from cache until the roster signature changes");
@@ -96,7 +96,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             catch (Exception e)
             {
-                OnceLog.Warning("tactical-command-tree:snapshot-failed:" + allianceId,
+                OnceLog.Warning("tactical-command-tree:snapshot-failed",
                     "[TacticalCommandTree] snapshot failed side=" + allianceId
                     + ": " + e.GetType().Name + " " + e.Message);
                 return CommandTreeSnapshot.Empty;
@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (wasValid)
             {
                 OnceLog.Info(
-                    "tactical-command-tree-cache:invalidated:" + allianceId,
+                    "tactical-command-tree-cache:invalidated",
                     "[TacticalCommandTreeCache] invalidated alliance=" + allianceId
                     + " — next Snapshot() will rebuild");
             }

@@ -671,7 +671,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         var unit = units[u];
                         if (unit == null || unit.unittyp > TacticalUnitType.MaxCombat) continue;
-                        if (unit.unittyp == 3 || unit.unittyp == 4 || unit.permanentlydetached) continue;
+                        // unittyp 5 is dropped from completeunitlist by UpdateUnitList (79984).
+                        if (unit.unittyp == 3 || unit.unittyp == 4 || unit.unittyp == 5 || unit.permanentlydetached) continue;
                         if (unit.isrouted || unit.markedforrout || !unit.gameObject.activeInHierarchy) continue;
                         if (!counted.Add(unit.GetInstanceID())) continue;
                         total += Math.Max(0f, unit.strength);
@@ -1456,8 +1457,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     var dci = side.Army.CurrentDirectChildIntents[i];
                     if (dci.Role == DirectChildRole.Unknown) continue;
-                    OnceLog.Info("o3-direct-child-intent:" + _battleSequence + ":" + side.AllianceId + ":" + dci.ChildId + ":" + dci.Role,
-                        "[TacticalDirectChildIntent] " + SideLogContext(side.AllianceId)
+                    // Per-battle dedupe on (alliance, child, role); OnceLog keys must be static.
+                    long childKey = (2L << 62) ^ ((long)side.AllianceId << 56) ^ ((long)(int)dci.Role << 40)
+                        ^ (uint)ParseInstanceIdFromChildId(dci.ChildId);
+                    if (!_battleInfoLogged.Add(childKey)) continue;
+                    TelemetryRouter.LegacyInfo("[TacticalDirectChildIntent] " + SideLogContext(side.AllianceId)
                         + " child=" + dci.ChildId
                         + " childName=" + SafeLog(dci.DisplayName)
                         + " raw=" + dci.RawUnitTyp
@@ -1466,7 +1470,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         + " sector=" + dci.PrimarySector
                         + " support=" + dci.SupportPriority01.ToString("0.00")
                         + " enemyIntent=" + dci.EnemyIntent.PrimaryIntent
-                        + " confidence=" + dci.EnemyIntent.Confidence01.ToString("0.00"));
+                        + " confidence=" + dci.EnemyIntent.Confidence01.ToString("0.00"), TelemetryLayer.Tactical);
                 }
             }
             catch (Exception e)
@@ -1743,7 +1747,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (counts[s] > 0)
                     {
                         OnceLog.Info(
-                            "tactical-resolved-cache:prepopulated:" + s,
+                            "tactical-resolved-cache:prepopulated",
                             "[TacticalResolvedCache] pre-populated alliance=" + s
                             + " count=" + counts[s]
                             + " — battle-start gap closed; tier-1 hits begin immediately");
