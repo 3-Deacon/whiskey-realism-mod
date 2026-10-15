@@ -514,7 +514,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-deployment-terrain:" + fieldName,
+                    "tactical-deployment-terrain:read-field",
                     "Failed reading BattleUnits." + fieldName + ": " + ex.GetType().Name);
                 return 0;
             }

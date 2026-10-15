@@ -1126,7 +1126,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-reserve-commit-gate:read-private:" + fieldName,
+                    "tactical-reserve-commit-gate:read-private",
                     "[TacticalReserveCommitGate] failed reading Regiment." + fieldName + ": " + ex.Message);
             }
 
@@ -1155,7 +1155,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-reserve-commit-gate:read-private:" + fieldName,
+                    "tactical-reserve-commit-gate:read-private",
                     "[TacticalReserveCommitGate] failed reading Regiment." + fieldName + ": " + ex.Message);
             }
 
@@ -1177,7 +1177,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-reserve-commit-gate:write-private:" + fieldName,
+                    "tactical-reserve-commit-gate:write-private",
                     "[TacticalReserveCommitGate] failed restoring Regiment." + fieldName + ": " + ex.Message);
             }
         }
@@ -1197,7 +1197,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-reserve-commit-gate:write-private:" + fieldName,
+                    "tactical-reserve-commit-gate:write-private",
                     "[TacticalReserveCommitGate] failed restoring Regiment." + fieldName + ": " + ex.Message);
             }
         }
@@ -1212,7 +1212,7 @@ namespace WhiskeyRealism.Patches
             {
                 missingLogged = true;
                 OnceLog.Warning(
-                    "tactical-reserve-commit-gate:missing-private:" + fieldName,
+                    "tactical-reserve-commit-gate:missing-private",
                     "[TacticalReserveCommitGate] missing Regiment." + fieldName + " anchor; restore will skip that field.");
             }
 

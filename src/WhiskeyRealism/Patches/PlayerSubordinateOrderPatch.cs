@@ -49,7 +49,7 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    Warn("prefix", ex);
+                    Warn("player-order-patch:prefix", "prefix", ex);
                 }
             }
         }
@@ -135,7 +135,7 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
-                Warn("postfix", ex);
+                Warn("player-order-patch:postfix", "postfix", ex);
             }
             } // end using TelemetryPerf.Scope
         }
@@ -229,13 +229,13 @@ namespace WhiskeyRealism.Patches
             return candidate.TargetPoint.X.ToString("F0") + "," + candidate.TargetPoint.Z.ToString("F0");
         }
 
-        private static void Warn(string key, Exception ex)
+        private static void Warn(string onceKey, string stage, Exception ex)
         {
             try
             {
                 OnceLog.Warning(
-                    "player-order-patch:" + key,
-                    "[PlayerOrderIntent] patch " + key + " failed: " + ex.GetType().Name + " " + ex.Message);
+                    onceKey,
+                    "[PlayerOrderIntent] patch " + stage + " failed: " + ex.GetType().Name + " " + ex.Message);
             }
             catch { }
         }

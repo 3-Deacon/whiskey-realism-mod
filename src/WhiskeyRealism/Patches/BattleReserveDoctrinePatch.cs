@@ -24,6 +24,8 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _lineGroupRightUnitsField;
         private static FieldInfo _sideOfAiField;
         private static bool _missingAnchorLogged;
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastDriftLoggedAt =
+            new System.Collections.Generic.Dictionary<string, float>();
 
         [HarmonyPostfix]
         [HarmonyPriority(Priority.LowerThanNormal)]
@@ -35,9 +37,6 @@ namespace WhiskeyRealism.Patches
 
                 int side = SafeIntField(__instance, ref _sideOfAiField, "sideofai", -1);
                 if (side < 0) return;
-
-                if (!BattleCommanderIntentObserverPatch.RefreshRuntimeState(__instance, emitTelemetry: false))
-                    return;
 
                 IList chain = ObjectiveChain(__instance);
                 if (chain == null || chain.Count == 0) return;
@@ -80,8 +79,11 @@ namespace WhiskeyRealism.Patches
             if (!TryResolveLedgerCommandState(group, out CommandNodeOperationalState state)) return;
             if (!IsLedgerCommandStateProtectedReserve(state)) return;
 
-            OnceLog.Info(
-                "tactical-reserve-drift:assign-reserves-linegroup:" + side + ":" + chainIndex + ":" + slot + ":" + slotIndex + ":" + SafeInstanceId(group),
+            string signature = side + "|" + chainIndex + "|" + slot + "|" + state.Role + "|" + state.Task;
+            if (!TacticalTelemetry.ShouldEmit(_lastDriftLoggedAt, "assign-reserves-drift", signature, UnityEngine.Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            TelemetryRouter.LegacyInfo(
                 "[TacticalReserveDrift] surface=AssignReserves side=" + side +
                 " chain=" + chainIndex +
                 " slot=" + slot +
@@ -90,7 +92,8 @@ namespace WhiskeyRealism.Patches
                 " ledgerRole=" + state.Role +
                 " ledgerTask=" + state.Task +
                 " assignmentSource=ledger-command-state" +
-                " reason=ledger-command-state-protected-line-assignment");
+                " reason=ledger-command-state-protected-line-assignment",
+                TelemetryLayer.Tactical);
         }
 
         private static bool IsLedgerCommandStateProtectedReserve(CommandNodeOperationalState state)
@@ -211,7 +214,7 @@ namespace WhiskeyRealism.Patches
             if (_missingAnchorLogged) return;
             _missingAnchorLogged = true;
             OnceLog.Warning(
-                "tactical-reserve-doctrine:missing-anchor:" + anchor,
+                "tactical-reserve-doctrine:missing-anchor",
                 "BattleReserveDoctrinePatch missing required anchor " + anchor + "; running inert");
         }
 
@@ -220,11 +223,8 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalObserver.Value &&
-                Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value &&
-                ((Plugin.Instance.EnableTacticalReserveIntentTelemetry != null &&
-                  Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value) ||
-                 (Plugin.Instance.EnableTacticalReserveListMutation != null &&
-                  Plugin.Instance.EnableTacticalReserveListMutation.Value));
+                Plugin.Instance.EnableTacticalReserveIntentTelemetry != null &&
+                Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value;
         }
     }
 }

@@ -937,7 +937,7 @@ namespace WhiskeyRealism.Patches
         {
             if (_missingRequiredAnchorLogged) return;
             _missingRequiredAnchorLogged = true;
-            OnceLog.Warning("tactical-charge-guard:missing-anchor:" + anchor, "BattleChargeGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla.");
+            OnceLog.Warning("tactical-charge-guard:missing-anchor", "BattleChargeGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla.");
         }
 
         private static string SafeName(Regiment unit)

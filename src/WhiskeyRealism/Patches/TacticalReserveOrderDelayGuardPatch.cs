@@ -11,10 +11,18 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AIBattle.CheckUseOfReserves issues reserve support movement with a
-    // direct RegimentSetPath at decompile line 6170. When order delays are
-    // enabled, this Postfix removes the immediate path and reissues the same
-    // target through BattleUnits.SetWaypoint(useorderdelay: true).
+    // #56 — Vanilla AIBattle.CheckUseOfReserves (6062) issues reserve support
+    // movement with a direct RegimentSetPath at decompile line 6170 (the AI is
+    // immune to order delay there). When order delays are enabled, this Postfix
+    // removes the immediate path and reissues the same target through
+    // BattleUnits.SetWaypoint(useorderdelay: true) (91232, courier queue
+    // 91455-91487). It also re-issues a stalled doctrine fallback for the group.
+    // No stance is written: the reserve is an attached sub-unit (ChangeStance
+    // 90772 would set permanentlydetached), and vanilla's own group retreat
+    // (CheckIfOutflanked 6235) moves without a stance change either.
+    // Writes go through TacticalWriteGuard.CanWrite (Commander Mode Active,
+    // W&L/player protection); the snapshot is taken only when vanilla can
+    // commit a reserve this call (CheckUseOfReserves 6084-6113).
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     internal static class TacticalReserveOrderDelayGuardPatch
     {
@@ -47,13 +55,13 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled())
-                {
-                    __state = null;
-                    return;
-                }
+                __state = null;
+                if (!Enabled()) return;
+                if (!TacticalWriteGuard.CanWrite(aigroup)) return;
 
-                __state = Snapshot(aigroup);
+                __state = BattleReserveCommitGatePatch.VanillaMayCommitReserve(aigroup)
+                    ? Snapshot(aigroup)
+                    : new ReserveState { Units = Array.Empty<UnitState>() };
                 if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder order))
                 {
                     __state.HasDoctrineDecision = true;
@@ -61,7 +69,7 @@ namespace WhiskeyRealism.Patches
                     __state.DoctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                         order,
                         BuildOperationalReserveInput(aigroup),
-                        SafeCurrentTimeSeconds());
+                        BattleTimeSeconds());
                 }
             }
         }
@@ -113,12 +121,6 @@ namespace WhiskeyRealism.Patches
                     float rotation = SafeTargetAngle(unit, target);
                     RemoveAddedPaths(unit, before.Paths, afterPaths);
 
-                    // Scope B alignment (2026-05-22): reserve commitment =
-                    // attack intent (unit moving forward to engagement zone
-                    // double-quick). Stance 3 gives vanilla micro-AI proper
-                    // context for the committed reserve.
-                    WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
-                        battleUnits, unit, 3, contextTag: "reserve-delay-guard:commit:" + SafeUnitName(unit));
                     battleUnits.SetWaypoint(
                         unit,
                         target,
@@ -138,7 +140,7 @@ namespace WhiskeyRealism.Patches
                     unit.doublequick = true;
 
                     OnceLog.Info(
-                        "tactical-reserve-delay-guard:" + SafeUnitName(unit),
+                        "tactical-reserve-delay-guard:converted",
                         "[TacticalReserveOrderDelayGuard] converted direct reserve path to delayed order unit=" +
                         SafeUnitName(unit) +
                         " group=" + SafeUnitName(aigroup) +
@@ -172,10 +174,6 @@ namespace WhiskeyRealism.Patches
                 Vector3 target = new Vector3(order.FallbackTarget.X, 0f, order.FallbackTarget.Z);
                 if (!IsSafeTarget(group, target)) return;
 
-                // Scope B alignment (2026-05-22): stalled-fallback recovery is
-                // defensive — unit retreating to fallback target. Stance 2.
-                WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
-                    battleUnits, group, 2, contextTag: "reserve-delay-guard:fallback:" + SafeUnitName(group));
                 battleUnits.SetWaypoint(
                     group,
                     target,
@@ -194,7 +192,7 @@ namespace WhiskeyRealism.Patches
                     clearinterruptionpaths: true);
 
                 OnceLog.Info(
-                    "tactical-reserve-delay-guard:fallback-clear:" + SafeUnitName(group),
+                    "tactical-reserve-delay-guard:fallback-clear",
                     "[TacticalReserveOrderDelayGuard] cleared stalled fallback order reason=fallback-relief group=" +
                     SafeUnitName(group));
             }
@@ -222,14 +220,18 @@ namespace WhiskeyRealism.Patches
                 if (group == null || group.allattachedunits == null)
                     return new ReserveState { Units = Array.Empty<UnitState>() };
 
-                UnitState[] units = new UnitState[group.allattachedunits.Length];
+                var units = new System.Collections.Generic.List<UnitState>();
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
                     Regiment unit = group.allattachedunits[i];
-                    units[i] = new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit));
+                    if ((UnityEngine.Object)unit == null) continue;
+                    if (!BattleWriterPolicy.IsReserveSupportCandidate(
+                            unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.inengagement))
+                        continue;
+                    units.Add(new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit)));
                 }
 
-                return new ReserveState { Units = units };
+                return new ReserveState { Units = units.ToArray() };
             }
             catch
             {
@@ -522,9 +524,10 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static float SafeCurrentTimeSeconds()
+        // Doctrine clocks run on battle time (game-hours -> seconds).
+        private static float BattleTimeSeconds()
         {
-            try { return Time.realtimeSinceStartup; }
+            try { return GameVars.currenttimefromstart * 3600f; }
             catch { return 0f; }
         }
 

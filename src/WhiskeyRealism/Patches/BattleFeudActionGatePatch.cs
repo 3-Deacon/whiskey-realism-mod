@@ -231,7 +231,7 @@ namespace WhiskeyRealism.Patches
         {
             if (_missingRequiredAnchorLogged) return;
             _missingRequiredAnchorLogged = true;
-            OnceLog.Warning("tactical-feud-guard:missing-anchor:" + anchor, "BattleFeudActionGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla before movement ownership when possible.");
+            OnceLog.Warning("tactical-feud-guard:missing-anchor", "BattleFeudActionGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla before movement ownership when possible.");
         }
 
         private static string SafeName(Regiment unit)
