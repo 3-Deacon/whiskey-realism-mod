@@ -30,6 +30,8 @@ campaign.patch.wl-action-once-effects              # DLC_WL.UpdateCumulativeEffe
 campaign.patch.wl-staff-panel-scope.*              # CampaignArmyPanel.UpdateStats: only while a campaign group panel is open
 campaign.patch.cic-faction-ai-guard.is-cic         # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
 campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
+campaign.patch.wl-morale-scope.*                   # UpdateMoraleCampaign: returns before its scope outside a W&L career (perf L3)
+campaign.patch.wl-unit-stats-scope.*               # UpdateCampaignUnitStats: returns before its scope outside a W&L career (perf L3)
 campaign.patch.wl-unit-name-read.hook             # BattleUnits.IsUnitUnderCommander: the name read sits past its W&L-career early return
 
 # Campaign events that need not happen in a short session.

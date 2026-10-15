@@ -40,8 +40,23 @@ namespace WhiskeyRealism.Patches
         private const int FrontLink = 0;
         private const int RiverTerrain = 4;
 
+        // LinkedUnitData's fields as compiled accessors, resolved once (perf slice B2): no
+        // FieldInfo.GetValue/SetValue and no boxing per pushed company.
         private static bool _resolved;
-        private static FieldInfo _targetArea, _rotation, _distance, _sollDistance, _onWater, _distanceToWpTarget, _distanceLastWp;
+        private static Func<object, Vector3> _getTargetArea;
+        private static Func<object, float> _getRotation, _getSollDistance;
+        private static Action<object, Vector3> _setTargetArea;
+        private static Action<object, float> _setDistance, _setSollDistance, _setDistanceToWpTarget, _setDistanceLastWp;
+        private static Action<object, bool> _setOnWater;
+
+        // The first push of a battle is logged once (the OnceLog key re-arms per battle);
+        // a static latch skips the OnceLog lock on every later push.
+        private static bool _firstPushLogged;
+
+        static SkirmisherScreenDistancePatch()
+        {
+            BattleScope.Register("skirmisher-screen-first-push", () => _firstPushLogged = false);
+        }
 
         [HarmonyPostfix]
         internal static void Postfix(Regiment __instance, object __result)
@@ -66,9 +81,13 @@ namespace WhiskeyRealism.Patches
                         GamePrefs.distancetoenemytocancelinterruption);
                     if (extra <= 0f || !TacticalWriteGuard.CanWrite(__instance) || !Resolve()) return;
                     Push(__instance, __result, extra);
-                    OnceLog.Info("tactical-battle-core:skirmisher-screen-first-fire",
-                        "[BattleRecon] first skirmisher screen pushed out: an AI skirmisher company of a screening line stands at " +
-                        "vanilla's contact distance (distancetoenemyforinterruption) ahead of its regiment instead of the 30 m link");
+                    if (!_firstPushLogged)
+                    {
+                        _firstPushLogged = true;
+                        OnceLog.Info("tactical-battle-core:skirmisher-screen-first-fire",
+                            "[BattleRecon] first skirmisher screen pushed out: an AI skirmisher company of a screening line stands at " +
+                            "vanilla's contact distance (distancetoenemyforinterruption) ahead of its regiment instead of the 30 m link");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -80,8 +99,8 @@ namespace WhiskeyRealism.Patches
 
         private static void Push(Regiment unit, object data, float extra)
         {
-            Vector3 target = (Vector3)_targetArea.GetValue(data);
-            float rotation = (float)_rotation.GetValue(data);
+            Vector3 target = _getTargetArea(data);
+            float rotation = _getRotation(data);
             // GetAngleTerrainPosStatic's step (26891-26905): forward of angle a is
             // (sin a, cos a); the height is the terrain's at the new point.
             double a = rotation * Math.PI / 180.0;
@@ -96,46 +115,52 @@ namespace WhiskeyRealism.Patches
             Vector3 start = unit.lastsetwaypointposition == default(Vector3) || unit.regimentpaths == 0
                 ? block
                 : unit.lastsetwaypointposition;
-            _targetArea.SetValue(data, pushed);
-            _distance.SetValue(data, XZ(start, pushed));
-            _distanceToWpTarget.SetValue(data, XZ(block, pushed));
-            _distanceLastWp.SetValue(data, XZ(unit.GetLastTransmittedPathPos(ignoreorderdelay: true), pushed));
-            _onWater.SetValue(data, BattlefieldSetup.GetCurrentTerrainOnPos(pushed) == RiverTerrain);
-            _sollDistance.SetValue(data, (float)_sollDistance.GetValue(data) + extra);
+            _setTargetArea(data, pushed);
+            _setDistance(data, XZ(start, pushed));
+            _setDistanceToWpTarget(data, XZ(block, pushed));
+            _setDistanceLastWp(data, XZ(unit.GetLastTransmittedPathPos(ignoreorderdelay: true), pushed));
+            _setOnWater(data, BattlefieldSetup.GetCurrentTerrainOnPos(pushed) == RiverTerrain);
+            _setSollDistance(data, _getSollDistance(data) + extra);
         }
 
         private static bool Resolve()
         {
-            if (_resolved) return _targetArea != null;
+            if (_resolved) return _setTargetArea != null;
             _resolved = true;
             try
             {
                 Type data = AccessTools.Inner(typeof(Regiment), "LinkedUnitData");
                 if (data != null)
                 {
-                    _targetArea = AccessTools.Field(data, "targetarea");
-                    _rotation = AccessTools.Field(data, "rotationtarget");
-                    _distance = AccessTools.Field(data, "distance");
-                    _sollDistance = AccessTools.Field(data, "solldistance");
-                    _onWater = AccessTools.Field(data, "onwater");
-                    _distanceToWpTarget = AccessTools.Field(data, "distancetowptarget");
-                    _distanceLastWp = AccessTools.Field(data, "distancelastwp");
+                    FieldInfo targetArea = AccessTools.Field(data, "targetarea");
+                    FieldInfo rotation = AccessTools.Field(data, "rotationtarget");
+                    FieldInfo sollDistance = AccessTools.Field(data, "solldistance");
+                    _getTargetArea = CompiledFieldGetter.Build<Vector3>(targetArea);
+                    _getRotation = CompiledFieldGetter.Build<float>(rotation);
+                    _getSollDistance = CompiledFieldGetter.Build<float>(sollDistance);
+                    _setTargetArea = CompiledFieldSetter.Build<Vector3>(targetArea);
+                    _setSollDistance = CompiledFieldSetter.Build<float>(sollDistance);
+                    _setDistance = CompiledFieldSetter.Build<float>(AccessTools.Field(data, "distance"));
+                    _setOnWater = CompiledFieldSetter.Build<bool>(AccessTools.Field(data, "onwater"));
+                    _setDistanceToWpTarget = CompiledFieldSetter.Build<float>(AccessTools.Field(data, "distancetowptarget"));
+                    _setDistanceLastWp = CompiledFieldSetter.Build<float>(AccessTools.Field(data, "distancelastwp"));
                 }
-                if (_targetArea == null || _rotation == null || _distance == null || _sollDistance == null ||
-                    _onWater == null || _distanceToWpTarget == null || _distanceLastWp == null)
+                if (_getTargetArea == null || _getRotation == null || _getSollDistance == null || _setTargetArea == null ||
+                    _setSollDistance == null || _setDistance == null || _setOnWater == null || _setDistanceToWpTarget == null ||
+                    _setDistanceLastWp == null)
                 {
-                    _targetArea = null;
+                    _setTargetArea = null;
                     OnceLog.Warning("tactical-battle-core:skirmisher-screen-fields",
                         "[BattleRecon] Regiment.LinkedUnitData fields not found; skirmisher screen stays vanilla's");
                 }
             }
             catch (Exception ex)
             {
-                _targetArea = null;
+                _setTargetArea = null;
                 OnceLog.Warning("tactical-battle-core:skirmisher-screen-fields",
                     "[BattleRecon] Regiment.LinkedUnitData reflection failed; skirmisher screen stays vanilla's: " + ex.Message);
             }
-            return _targetArea != null;
+            return _setTargetArea != null;
         }
 
         private static float XZ(Vector3 a, Vector3 b)

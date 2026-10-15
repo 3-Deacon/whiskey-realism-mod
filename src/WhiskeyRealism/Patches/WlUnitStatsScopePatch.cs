@@ -66,13 +66,16 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance, Regiment groupunit, out Snapshot __state)
         {
+            __state = default;
+            // Outside a W&L career the patch has nothing to do: return before the scope, so
+            // the per-regiment hook costs one static read in every other campaign (perf L3).
+            if (!DLC_WL.dlc_scenarioactive) return;
             using (TelemetryPerf.Scope("campaign.patch.wl-unit-stats-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-unit-stats-scope.prefix");
-                __state = default;
                 try
                 {
-                    if (!DLC_WL.dlc_scenarioactive || (UnityEngine.Object)groupunit == null || (UnityEngine.Object)__instance == null) return;
+                    if ((UnityEngine.Object)groupunit == null || (UnityEngine.Object)__instance == null) return;
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
 
                     bool groupOwned = groupunit.dlcw_isundercommander;
@@ -112,6 +115,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyFinalizer]
         internal static void Finalizer(Snapshot __state)
         {
+            // Nothing stored and no W&L career: nothing to restore (perf L3).
+            if (!__state.Group.Active && !__state.Attrition.Active && !DLC_WL.dlc_scenarioactive) return;
             using (TelemetryPerf.Scope("campaign.patch.wl-unit-stats-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-unit-stats-scope.finalizer");
