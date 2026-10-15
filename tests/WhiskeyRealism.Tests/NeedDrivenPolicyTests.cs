@@ -912,7 +912,7 @@ internal static class NeedDrivenPolicyTests
     {
         var calm = Needs((NeedKind.Manpower, 0.2f), (NeedKind.Treasury, 0.5f));
         var list = new List<int>(UnionHistorical);
-        var held = PolicyListOverride.HeldIdsToRemove(calm, list);
+        var held = PolicyListOverride.HeldIdsToRemove(calm, list, 1);
         AssertSequence(new[] { 33, 39, 40 }, held, "held acts in list order, each once");
         PolicyListOverride.Remove(list, held, out _);
         var expected = new List<int>();
@@ -920,20 +920,20 @@ internal static class NeedDrivenPolicyTests
             if (id != 33 && id != 39 && id != 40) expected.Add(id);
         AssertSequence(expected, list, "every occurrence removed, vanilla order kept");
 
-        AssertSequence(new[] { 139, 140 }, PolicyListOverride.HeldIdsToRemove(calm, CsaHistorical), "CSA conscription acts held");
+        AssertSequence(new[] { 139, 140 }, PolicyListOverride.HeldIdsToRemove(calm, CsaHistorical, 1), "CSA conscription acts held");
 
         var crisis = Needs((NeedKind.Manpower, 0.9f));
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(crisis, UnionHistorical).Count, "a manpower crisis opens the gate: vanilla walks its own list");
-        AssertSequence(new[] { 144, 130 }, PolicyListOverride.HeldIdsToRemove(crisis, new List<int> { 144, 143, 130 }), "recognition acts stay held in a manpower crisis");
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, new List<int> { 22, 35, 41 }).Count, "nothing irreversible listed: untouched");
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, null).Count, "null list");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(crisis, UnionHistorical, 1).Count, "a manpower crisis opens the gate: vanilla walks its own list");
+        AssertSequence(new[] { 144, 130 }, PolicyListOverride.HeldIdsToRemove(crisis, new List<int> { 144, 143, 130 }, 1), "recognition acts stay held in a manpower crisis");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, new List<int> { 22, 35, 41 }, 1).Count, "nothing irreversible listed: untouched");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, null, 1).Count, "null list");
     }
 
     private static void FallbackHoldRestoreIsExact()
     {
         var calm = Needs((NeedKind.Manpower, 0.2f));
         var list = new List<int>(UnionHistorical);
-        PolicyListOverride.Remove(list, PolicyListOverride.HeldIdsToRemove(calm, list), out var snapshot);
+        PolicyListOverride.Remove(list, PolicyListOverride.HeldIdsToRemove(calm, list, 1), out var snapshot);
         AssertTrue(list.Count < UnionHistorical.Length, "filtered for the call");
         AssertSequence(UnionHistorical, snapshot.Original, "snapshot taken before the edit");
         AssertEqual(UnionHistorical.Length, PolicyListOverride.Restore(snapshot), "restored length");
@@ -942,7 +942,7 @@ internal static class NeedDrivenPolicyTests
 
     private static void FallbackHoldNeedsPlan()
     {
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(null, UnionHistorical).Count, "no plan (no need vector yet): nothing held");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(null, UnionHistorical, 1).Count, "no plan (no need vector yet): nothing held");
     }
 
     // ---------------------------------------------------------------- call decision

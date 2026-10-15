@@ -38,6 +38,10 @@ internal static class ChapterFixTests
             ("chapter wait treats only a negative chapter as unknown", ChapterKnownOnlyAfterVanillaUpdate),
             ("chapter wait gates the cadence hook before it consumes a notify", HookWaitsForVanillaChapterBeforeNotifying),
             ("chapter wait replaces whiskey's own chapter update call", WhiskeyNoLongerRunsTheChapterUpdate),
+            ("chapter militia act one is the scripted war start while the chapter is pre-war", ScriptedWarStartIsPreWarOnly),
+            ("chapter militia act one leaves vanilla's fallback walk with or without a need vector", WarStartLeavesTheFallbackWalk),
+            ("chapter militia act one hold follows the selection flag and never an emergency", WarStartHoldFollowsTheFlag),
+            ("chapter militia act one pick filter and fallback hold share one predicate", WarStartPredicateIsShared),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -336,5 +340,78 @@ internal static class ChapterFixTests
         string coordinator = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         AssertFalse(coordinator.Contains("CheckForChapterUpdate\")"), "no reflection call into vanilla's chapter update");
         AssertFalse(coordinator.Contains("ForceChapterUpdate"), "the helper is gone");
+    }
+
+    // ---- Militia Act I (policy 36) before the war ----
+
+    // Union personalities 4 (Militaristic) and 7 (Abolitionist) list 36 (Campaigns/001/A/aipersonalities.dat).
+    private static readonly int[] UnionListWith36 = { 22, 35, 36, 41, 33 };
+
+    private static void ScriptedWarStartIsPreWarOnly()
+    {
+        AssertTrue(PolicyEligibility.IsScriptedWarStart(36, -1), "unknown chapter");
+        AssertTrue(PolicyEligibility.IsScriptedWarStart(36, 0), "pre-war chapter 0");
+        AssertFalse(PolicyEligibility.IsScriptedWarStart(36, 1), "war started");
+        AssertFalse(PolicyEligibility.IsScriptedWarStart(136, 0), "CSA Militia Act I is not scripted");
+        AssertFalse(PolicyEligibility.IsScriptedWarStart(37, 0), "Militia Act II");
+        AssertTrue(PolicyEligibility.HoldsScriptedWarStart(0), "chapter 0");
+        AssertFalse(PolicyEligibility.HoldsScriptedWarStart(2), "chapter 2");
+    }
+
+    private static void WarStartLeavesTheFallbackWalk()
+    {
+        var calm = new NeedVector();
+        var list = new System.Collections.Generic.List<int>(UnionListWith36);
+        var held = PolicyListOverride.HeldIdsToRemove(calm, list, 0);
+        AssertTrue(held.Contains(36), "pre-war: vanilla's gate (ReferedChapter 0 <= 0) would pick it, Whiskey's pick filter will not");
+        AssertTrue(held.Contains(33), "the need-held irreversible act still leaves");
+        AssertEqual(36, held[0], "list order: 36 comes before 33 in the personality list");
+        AssertSequence(new[] { 36 }, PolicyListOverride.HeldIdsToRemove(null, list, 0), "no need vector yet: the war start is still held");
+        AssertSequence(new int[0], PolicyListOverride.HeldIdsToRemove(null, list, 1), "after the war starts nothing is held without a need vector");
+        AssertFalse(PolicyListOverride.HeldIdsToRemove(calm, list, 1).Contains(36), "chapter 1: 36 is a normal act");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(null, null, 0).Count, "null list");
+    }
+
+    private static void AssertSequence(int[] expected, System.Collections.Generic.IList<int> actual, string label)
+    {
+        AssertEqual(expected.Length, actual.Count, label + " count");
+        for (int i = 0; i < expected.Length; i++)
+            AssertEqual(expected[i], actual[i], label + " [" + i + "]");
+    }
+
+    private static PolicyCallFacts WarFacts(bool warStartHeld, bool need = false, bool selection = true, bool emergency = false, bool research = false)
+    {
+        return new PolicyCallFacts
+        {
+            Emergency = emergency,
+            ResearchInProgress = research,
+            SelectionEnabled = selection,
+            HasNeed = need,
+            WarStartHeld = warStartHeld
+        };
+    }
+
+    private static void WarStartHoldFollowsTheFlag()
+    {
+        Func<int> noPick = () => -1;
+        Func<int, bool> neverStarts = id => false;
+        AssertEqual(PolicyCallAction.HoldFallback, PolicyListOverride.Decide(WarFacts(true), noPick, neverStarts), "pre-war, no need vector: hold the war start");
+        AssertEqual(PolicyCallAction.Vanilla, PolicyListOverride.Decide(WarFacts(false), noPick, neverStarts), "after the war starts and no need vector: vanilla");
+        AssertEqual(PolicyCallAction.HoldFallback, PolicyListOverride.Decide(WarFacts(false, need: true), noPick, neverStarts), "need vector: hold as before");
+        AssertEqual(PolicyCallAction.Vanilla, PolicyListOverride.Decide(WarFacts(true, selection: false), noPick, neverStarts), "selection off is the rollback to vanilla");
+        AssertEqual(PolicyCallAction.Vanilla, PolicyListOverride.Decide(WarFacts(true, emergency: true), noPick, neverStarts), "an emergency never holds");
+        AssertEqual(PolicyCallAction.Vanilla, PolicyListOverride.Decide(WarFacts(true, research: true), noPick, neverStarts), "research in progress: vanilla returns at 211061");
+        AssertEqual(PolicyCallAction.Pick, PolicyListOverride.Decide(WarFacts(true), () => 22, id => true), "a started pick skips the hold");
+    }
+
+    private static void WarStartPredicateIsShared()
+    {
+        string eligibility = Flat("src/WhiskeyRealism/Strategic/Policies/PolicyEligibility.cs");
+        AssertContains(eligibility, "if (IsScriptedWarStart(f.PolicyId, f.CurrentChapter))", "the pick filter uses the predicate");
+        string overrides = Flat("src/WhiskeyRealism/Strategic/Policies/PolicyListOverride.cs");
+        AssertContains(overrides, "PolicyEligibility.IsScriptedWarStart(id, chapter)", "the fallback hold uses the same predicate");
+        string patch = Flat("src/WhiskeyRealism/Patches/PolicySelectionPatch.cs");
+        AssertContains(patch, "WarStartHeld = PolicyEligibility.HoldsScriptedWarStart(Policy.CurrentChapter)", "the call facts carry the chapter");
+        AssertContains(patch, "PolicyListOverride.HeldIdsToRemove(need, personality.policies, Policy.CurrentChapter)", "the hold removes the war start");
     }
 }
