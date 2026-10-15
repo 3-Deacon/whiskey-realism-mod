@@ -21,9 +21,13 @@ namespace WhiskeyRealism.Tactical.Battle
     //   (8643: same type for type > 0, within 110 m for type 0; 12 never replaces an
     //   attack; 15 terminal; 13 sticky); bumps givenorderssession (8651) except for a
     //   type-11 refresh (flag4); shows the panel (8653-8664).
-    // Vanilla already dedupes; this emitter's 110 m record skips the call (string
-    // building, terrain sample, debug log) only while the player still holds the
-    // order the last dispatch produced (PlayerOrderDedupeState.IsDuplicateDispatch).
+    // Vanilla already dedupes, more strictly: 8643 rejects any repeat of the same
+    // type > 0 whatever the distance. This emitter's 110 m record skips the call
+    // only while the player still holds the order the last dispatch produced
+    // (PlayerOrderDedupeState.IsDuplicateDispatch). A call vanilla rejects costs its
+    // tooltip lookups and a terrain sample, not a Debug.Log (only on accept, 8666).
+    // Today only #62 calls Emit, bounded by its signature check and 120-tick
+    // throttle; a per-tick caller needs its own throttle.
     internal static class TacticalPlayerDispatchRuntime
     {
         internal static readonly PlayerOrderDedupeState Dedupe = new PlayerOrderDedupeState();
