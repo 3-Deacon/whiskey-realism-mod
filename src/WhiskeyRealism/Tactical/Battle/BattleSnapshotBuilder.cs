@@ -44,6 +44,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //     player-alliance unit). PlayerOwnership.Compute turns them into PlayerOwned /
     //     Feud per unit, and ApplyChainFlags marks the player's command and its
     //     ancestors once the parent map is assembled.
+    //   - Troop quality (BC8): Experience() (140114, pure) for a regiment, groupexperience
+    //     for a group (UpdateGroupStrength 120508).
     //   - Leaf-slot inputs (BC5a): lastsetwaypointrotation (stored with the group's
     //     waypoint, SetGroupFormation 92067-92068), groupposition.groupwidth /
     //     groupdepth and each group's layout entries attachedunitid[k] /
@@ -250,12 +252,14 @@ namespace WhiskeyRealism.Tactical.Battle
             record.BattleStartMorale = reg.battlestartmorale;
             record.Ammo01 = ArmyEvidenceBuilder.NormalizeAmmo01(reg.ammo, reg.unittyp, 0.9f);
             record.Fatigue = reg.fatigue;
+            bool group = reg.unittyp > TacticalUnitType.MaxCombat;
+            // BC8: Experience() is a pure getter (140114).
+            record.Experience = group ? reg.groupexperience : reg.Experience();
             record.RegimentPaths = reg.regimentpaths;
             record.QueuedOrders = QueuedOrders(reg);
             record.MovementMode = reg.movementmode;
             record.AiStance = reg.ai_stance;
             record.AiStanceOrdered = reg.ai_stanceordered;
-            bool group = reg.unittyp > TacticalUnitType.MaxCombat;
             // A group's own formation is groupformation (0-4, the value group
             // formation intents carry); formation is the regiment's.
             record.Formation = group ? reg.groupformation : reg.formation;

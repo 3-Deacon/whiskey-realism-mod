@@ -1,0 +1,354 @@
+using System;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Orchestrator;
+using static TestHarness;
+using static TestFixtures;
+
+// Battle-core BC8 (plan § "BC8 — experience and drill"): the mod's replacement decisions
+// weigh troop quality where vanilla's do. Vanilla anchors in the plan section.
+internal static class TroopQualityTests
+{
+    public static void Run()
+    {
+        RunAll(new (string, Action)[]
+        {
+            ("troop-quality PerceivedExperienceIsTheStarMidpoint", PerceivedExperienceIsTheStarMidpoint),
+            ("troop-quality ProbeCarriesExperienceOnlyWhenVisible", ProbeCarriesExperienceOnlyWhenVisible),
+            ("troop-quality RememberedKeepsLastSeenExperience", RememberedKeepsLastSeenExperience),
+            ("troop-quality PerceivedQualityWeightsRememberedByConfidence", PerceivedQualityWeightsRememberedByConfidence),
+            ("troop-quality ReinforcementRowsHaveNoQuality", ReinforcementRowsHaveNoQuality),
+            ("troop-quality BeginBuildClearsPerceivedQuality", BeginBuildClearsPerceivedQuality),
+            ("troop-quality OwnQualityMeansAliveCombatRegiments", OwnQualityMeansAliveCombatRegiments),
+            ("troop-quality SnapshotQualityAllocatesNothingAfterWarmup", SnapshotQualityAllocatesNothingAfterWarmup),
+            ("troop-quality ForceBalanceFactorMatchesVanillaShape", ForceBalanceFactorMatchesVanillaShape),
+            ("troop-quality CurrentRatioUsesQualityFactor", CurrentRatioUsesQualityFactor),
+            ("troop-quality VeteranOutnumberedAttacks", VeteranOutnumberedAttacks),
+            ("troop-quality GreenEarlyWarHolds", GreenEarlyWarHolds),
+            ("troop-quality AttackThresholdDividedByInitiative", AttackThresholdDividedByInitiative),
+            ("troop-quality DefenderStillNeverAttacks", DefenderStillNeverAttacks),
+            ("troop-quality FlagOffIsHeadcountOnly", FlagOffIsHeadcountOnly),
+        });
+    }
+
+    private const double Minute = 1.0 / 60.0;
+
+    // ---------------------------------------------------------------- B: snapshot + fog
+
+    // UpdateUnitIcon draws floor(Experience() * 5) stars for a visible regiment
+    // (121832-121852); the AI sees the bucket midpoint, capped at 1.
+    private static void PerceivedExperienceIsTheStarMidpoint()
+    {
+        AssertNear(0.1f, TroopQuality.PerceivedExperience(0f), 1e-5f, "0 stars");
+        AssertNear(0.1f, TroopQuality.PerceivedExperience(0.19f), 1e-5f, "still 0 stars");
+        AssertNear(0.3f, TroopQuality.PerceivedExperience(0.2f), 1e-5f, "1 star");
+        AssertNear(0.7f, TroopQuality.PerceivedExperience(0.65f), 1e-5f, "3 stars");
+        AssertNear(0.9f, TroopQuality.PerceivedExperience(0.99f), 1e-5f, "4 stars");
+        AssertNear(1f, TroopQuality.PerceivedExperience(1f), 1e-5f, "5 stars is the cap");
+        AssertNear(1f, TroopQuality.PerceivedExperience(1.6f), 1e-5f, "above 1 still 5 stars");
+        AssertNear(0.1f, TroopQuality.PerceivedExperience(-0.3f), 1e-5f, "negative clamps to 0 stars");
+        AssertNear(0.1f, TroopQuality.PerceivedExperience(float.NaN), 1e-5f, "NaN reads as 0 stars");
+    }
+
+    private static PerceptionProbeResult Probe(int capacity)
+    {
+        return PerceptionProbeResult.Create(capacity);
+    }
+
+    private static void Row(ref PerceptionProbeResult p, int id, bool visible, float experience, float morale,
+        bool reinforcement = false)
+    {
+        int i = p.Count++;
+        p.EnemyIds[i] = id;
+        p.Visible[i] = visible;
+        p.X[i] = 100f * i;
+        p.Z[i] = -500f;
+        p.Strength[i] = 400f;
+        p.UnitTyp[i] = 0;
+        p.Routed[i] = false;
+        p.IsReinforcement[i] = reinforcement;
+        p.ArrivalHours[i] = reinforcement ? 1f : 0f;
+        p.Experience[i] = experience;
+        p.Morale[i] = morale;
+    }
+
+    private static int Find(EnemyObservation[] memory, int count, int id)
+    {
+        for (int i = 0; i < count; i++)
+            if (memory[i].InstanceId == id) return i;
+        return -1;
+    }
+
+    private static void ProbeCarriesExperienceOnlyWhenVisible()
+    {
+        var memory = new EnemyObservation[8];
+        int count = 0;
+        var p = Probe(4);
+        Row(ref p, 11, visible: false, experience: 0.9f, morale: 0.9f);
+        Row(ref p, 12, visible: true, experience: 0.65f, morale: 0.55f);
+        BattlePerception.Update(memory, ref count, in p, 1.0);
+        AssertEqual(-1, Find(memory, count, 11), "a hidden enemy never seen leaves no observation (and no experience)");
+        int seen = Find(memory, count, 12);
+        AssertTrue(seen >= 0, "visible enemy observed");
+        AssertNear(0.7f, memory[seen].Experience, 1e-5f, "visible enemy carries its star experience");
+        AssertNear(0.55f, memory[seen].Morale, 1e-5f, "visible enemy carries its morale");
+    }
+
+    private static void RememberedKeepsLastSeenExperience()
+    {
+        var memory = new EnemyObservation[8];
+        int count = 0;
+        var p = Probe(4);
+        Row(ref p, 21, visible: true, experience: 0.65f, morale: 0.6f);
+        BattlePerception.Update(memory, ref count, in p, 1.0);
+        // Hidden for HideConfirmTicks; the unit meanwhile gained experience and lost morale.
+        for (int t = 1; t <= BattlePerception.HideConfirmTicks; t++)
+        {
+            p.Count = 0;
+            Row(ref p, 21, visible: false, experience: 0.95f, morale: 0.2f);
+            BattlePerception.Update(memory, ref count, in p, 1.0 + t * Minute);
+        }
+        int i = Find(memory, count, 21);
+        AssertTrue(i >= 0, "still remembered");
+        AssertEqual(ObservationState.Remembered, memory[i].State, "remembered");
+        AssertNear(0.7f, memory[i].Experience, 1e-5f, "remembered keeps the last seen stars");
+        AssertNear(0.6f, memory[i].Morale, 1e-5f, "remembered keeps the last seen morale");
+    }
+
+    private static BattleSnapshot Begin(double hours = 1.0)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, hours);
+        s.SetSliceCount(20);
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private static EnemyObservation Obs(int id, float experience, float morale, bool remembered = false,
+        float confidence = 1f, bool reinforcement = false, float strength = 500f)
+    {
+        return new EnemyObservation
+        {
+            InstanceId = id,
+            UnitTyp = 0,
+            X = 0f,
+            Z = -400f,
+            Strength = strength,
+            State = remembered ? ObservationState.Remembered : ObservationState.Visible,
+            LastSeenHours = 1.0,
+            Confidence01 = confidence,
+            IsReinforcement = reinforcement,
+            Experience = experience,
+            Morale = morale,
+        };
+    }
+
+    private static void PerceivedQualityWeightsRememberedByConfidence()
+    {
+        var memory = new[]
+        {
+            Obs(1, 0.3f, 0.8f),
+            Obs(2, 0.9f, 0.4f, remembered: true, confidence: 0.5f),
+        };
+        var s = Begin();
+        BattlePerception.Publish(s, PerceptionMode.FogGrid, PerceptionFallbackReason.None, memory, memory.Length, PerceptionProbeResult.Create(1));
+        SideQuality q = s.PerceivedEnemyQuality;
+        AssertTrue(q.Known, "quality known with observations");
+        AssertNear((0.3f + 0.9f * 0.5f) / 1.5f, q.Experience, 1e-5f, "experience: visible 1, remembered by confidence");
+        AssertNear((0.8f + 0.4f * 0.5f) / 1.5f, q.Morale, 1e-5f, "morale: visible 1, remembered by confidence");
+    }
+
+    private static void ReinforcementRowsHaveNoQuality()
+    {
+        var memory = new[] { Obs(1, 0.9f, 0.9f, reinforcement: true) };
+        var s = Begin();
+        BattlePerception.Publish(s, PerceptionMode.FogGrid, PerceptionFallbackReason.None, memory, memory.Length, PerceptionProbeResult.Create(1));
+        AssertFalse(s.PerceivedEnemyQuality.Known, "a reinforcement column alone gives no quality");
+
+        memory = new[] { Obs(1, 0.9f, 0.9f, reinforcement: true), Obs(2, 0.1f, 0.5f) };
+        s = Begin();
+        BattlePerception.Publish(s, PerceptionMode.FogGrid, PerceptionFallbackReason.None, memory, memory.Length, PerceptionProbeResult.Create(1));
+        AssertNear(0.1f, s.PerceivedEnemyQuality.Experience, 1e-5f, "column excluded from the mean");
+    }
+
+    private static void BeginBuildClearsPerceivedQuality()
+    {
+        var memory = new[] { Obs(1, 0.5f, 0.5f) };
+        var s = Begin();
+        BattlePerception.Publish(s, PerceptionMode.FogGrid, PerceptionFallbackReason.None, memory, memory.Length, PerceptionProbeResult.Create(1));
+        AssertTrue(s.PerceivedEnemyQuality.Known, "known after publish");
+        s.BeginBuild(1, 0, 0, 2, 2.0);
+        AssertFalse(s.PerceivedEnemyQuality.Known, "a rebuild forgets last tick's quality");
+    }
+
+    private static UnitRecord Regiment(int id, int unitTyp, float morale, float experience, int strength = 400,
+        UnitFlags extra = UnitFlags.None)
+    {
+        return new UnitRecord
+        {
+            InstanceId = id,
+            UnitTyp = unitTyp,
+            Strength = strength,
+            Morale = morale,
+            Experience = experience,
+            ParentIndex = -1,
+            Flags = UnitFlags.Alive | UnitFlags.Active | extra,
+        };
+    }
+
+    private static void OwnQualityMeansAliveCombatRegiments()
+    {
+        var own = new[]
+        {
+            Regiment(1, 0, 0.8f, 0.6f),
+            Regiment(2, 1, 0.6f, 0.2f),
+            Regiment(3, 0, 0.1f, 0.0f, extra: UnitFlags.Routed),     // routed: out
+            Regiment(4, 0, 0.1f, 0.0f, strength: 0),                 // destroyed: out
+            Regiment(5, 16, 0.1f, 0.0f, extra: UnitFlags.IsGroup),   // group: out (its regiments count)
+            new UnitRecord { InstanceId = 6, UnitTyp = 0, Strength = 400, Morale = 0.1f, Flags = UnitFlags.Alive }, // inactive
+        };
+        SideQuality q = TroopQuality.OwnQuality(own, own.Length);
+        AssertTrue(q.Known, "two regiments sampled");
+        AssertNear(0.7f, q.Morale, 1e-5f, "mean morale of the two");
+        AssertNear(0.4f, q.Experience, 1e-5f, "mean experience of the two");
+        AssertFalse(TroopQuality.OwnQuality(own, 0).Known, "nothing sampled is unknown");
+    }
+
+    private static void SnapshotQualityAllocatesNothingAfterWarmup()
+    {
+        const int enemies = 300;
+        var memory = new EnemyObservation[enemies * 2];
+        int memoryCount = 0;
+        var probe = PerceptionProbeResult.Create(enemies);
+        var own = new UnitRecord[300];
+        for (int i = 0; i < own.Length; i++) own[i] = Regiment(1000 + i, i % 2, 0.7f, (i % 10) / 10f);
+        var s = new BattleSnapshot();
+
+        void Tick(int tick)
+        {
+            probe.Count = 0;
+            for (int i = 0; i < enemies; i++)
+                Row(ref probe, 5000 + i, ((i + tick) % 3) != 0, (i % 10) / 10f, 0.6f, reinforcement: i >= enemies - 5);
+            double now = 10.0 + tick * Minute;
+            s.BeginBuild(1, 0, 0, tick, now);
+            s.SetSliceCount(20);
+            for (int i = 0; i < own.Length; i++) s.AddOwn(in own[i]);
+            s.IndexCommandTree(null);
+            BattlePerception.Update(memory, ref memoryCount, in probe, now);
+            BattlePerception.Publish(s, PerceptionMode.FogGrid, PerceptionFallbackReason.None, memory, memoryCount, in probe);
+            TroopQuality.OwnQuality(s.Own, s.OwnCount);
+        }
+
+        Tick(0);
+        Tick(1);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int t = 2; t < 6; t++) Tick(t);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        AssertTrue(s.PerceivedEnemyQuality.Known, "quality published");
+        AssertEqual(0L, allocated, "quality path allocated bytes after warm-up");
+    }
+
+    // ---------------------------------------------------------------- C: force balance
+
+    // CalculateSideStatsAndUpdateAITasks 84862: ratio × (1 + Δmorale) × (1 + Δexperience).
+    private static void ForceBalanceFactorMatchesVanillaShape()
+    {
+        var own = new SideQuality(0.8f, 0.5f);
+        var enemy = new SideQuality(0.6f, 0.2f);
+        AssertNear(1.2f * 1.3f, TroopQuality.ForceBalanceFactor(own, enemy), 1e-5f, "(1 + 0.2)(1 + 0.3)");
+        AssertNear(0.8f * 0.7f, TroopQuality.ForceBalanceFactor(enemy, own), 1e-5f, "mirror side");
+        AssertNear(1f, TroopQuality.ForceBalanceFactor(own, own), 1e-5f, "equal quality is neutral");
+        AssertNear(1f, TroopQuality.ForceBalanceFactor(own, SideQuality.Unknown), 1e-5f, "unknown enemy is neutral");
+        AssertNear(1f, TroopQuality.ForceBalanceFactor(SideQuality.Unknown, enemy), 1e-5f, "unknown own is neutral");
+        // Two terms below -1 must not multiply into a positive factor.
+        AssertNear(0f, TroopQuality.ForceBalanceFactor(new SideQuality(0f, 0f), new SideQuality(1.5f, 1.5f)), 1e-5f,
+            "each term floors at 0");
+    }
+
+    private static TacticalForceBalanceEvidence Evidence(float own, float enemy, SideQuality ownQ, SideQuality enemyQ,
+        float initiative = 0.5f, float influence = 0.7f, float aggression = 0.5f, BattleStance stance = BattleStance.Meeting)
+    {
+        return new TacticalForceBalanceEvidence(own, enemy, Array.Empty<ReinforcementArrival>(),
+            initiative, aggression, 0.8f, stance: stance,
+            ownQuality: ownQ, enemyQuality: enemyQ, initiativeTriggerInfluence: influence);
+    }
+
+    private static void CurrentRatioUsesQualityFactor()
+    {
+        var ev = Evidence(9000f, 10000f, new SideQuality(0.8f, 0.5f), new SideQuality(0.6f, 0.2f));
+        AssertNear(0.9f * 1.56f, ev.CurrentRatio, 1e-4f, "headcount 0.9 × quality 1.56");
+        AssertNear(10000f / 1.56f, ev.EffectiveEnemyStrength, 0.5f, "enemy in own-equivalent men");
+        AssertNear(0.9f, MakeForceBalance(9000f, 10000f).CurrentRatio, 1e-4f, "no quality input keeps the headcount ratio");
+        var noEnemy = Evidence(9000f, 0f, new SideQuality(0.8f, 0.5f), new SideQuality(0.6f, 0.2f));
+        AssertNear(10f, noEnemy.CurrentRatio, 1e-5f, "no enemy keeps its sentinel");
+    }
+
+    // A veteran army slightly outnumbered by a green one attacks.
+    private static void VeteranOutnumberedAttacks()
+    {
+        var ev = Evidence(9000f, 10000f, new SideQuality(0.75f, 0.7f), new SideQuality(0.7f, 0.2f));
+        var decision = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, decision.Opportunity, "veterans attack a larger green army: " + decision.Reason);
+        var headcount = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(9000f, 10000f));
+        AssertTrue(headcount.Opportunity != ReinforcementOpportunity.AttackNow, "headcount alone would not attack");
+    }
+
+    // A green early-war army facing veterans holds instead of attacking on numbers.
+    private static void GreenEarlyWarHolds()
+    {
+        var ev = Evidence(11000f, 10000f, new SideQuality(0.7f, 0.1f), new SideQuality(0.7f, 0.6f));
+        var decision = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, decision.Opportunity, "green army holds: " + decision.Reason);
+        var headcount = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(11000f, 10000f));
+        AssertEqual(ReinforcementOpportunity.AttackNow, headcount.Opportunity, "headcount alone would attack");
+    }
+
+    // CheckGlobalAIStrategy 6396-6430: trigger / (1 + initiative × influence), influence 0.7.
+    private static void AttackThresholdDividedByInitiative()
+    {
+        AssertNear(1f / 1.35f, TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Meeting, 0.5f, 0.7f), 1e-5f,
+            "mid initiative: parity cap then / 1.35");
+        AssertNear(1f / 1.7f, TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Attacker, 1f, 0.7f), 1e-5f,
+            "full initiative: / 1.7");
+        AssertNear(1f, TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Meeting, 0f, 0.7f), 1e-5f,
+            "no initiative: unchanged");
+        AssertNear(1f, TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Meeting, 0.5f, 0f), 1e-5f,
+            "no influence: unchanged");
+        AssertNear(1.32f / 1.35f, TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Defender, 0.5f, 0.7f), 1e-4f,
+            "defender: personality threshold / 1.35");
+        // Through Decide: a 0.8 ratio whose own arrivals restore parity inside the attack
+        // window attacks at mid initiative with the vanilla influence; without it, it waits.
+        var arrivals = new[] { new ReinforcementArrival(0.5f, 2500f) };
+        var withInfluence = new TacticalForceBalanceEvidence(8000f, 10000f, arrivals, 0.5f, 0.5f, 0.8f,
+            initiativeTriggerInfluence: 0.7f);
+        var withoutInfluence = new TacticalForceBalanceEvidence(8000f, 10000f, arrivals, 0.5f, 0.5f, 0.8f);
+        AssertEqual(ReinforcementOpportunity.AttackNow, TacticalReinforcementOpportunityDoctrine.Decide(withInfluence).Opportunity, "0.8 >= 0.74");
+        AssertEqual(ReinforcementOpportunity.WaitAndConsolidate, TacticalReinforcementOpportunityDoctrine.Decide(withoutInfluence).Opportunity, "0.8 < 1");
+    }
+
+    private static void DefenderStillNeverAttacks()
+    {
+        var ev = Evidence(10000f, 4000f, new SideQuality(0.9f, 0.9f), new SideQuality(0.4f, 0.1f),
+            initiative: 1f, stance: BattleStance.Defender);
+        AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev).Opportunity != ReinforcementOpportunity.AttackNow,
+            "a defender never attacks, whatever the quality and initiative");
+    }
+
+    // Rollback: Enable Experience And Drill AI Weighting = false gives the neutral prefs.
+    private static void FlagOffIsHeadcountOnly()
+    {
+        var vanilla = new TroopQualityPrefs
+        {
+            Enabled = true,
+            ExpInfluenceOnAiDecisions = 0.25f,
+            InitiativeTriggerInfluence = 0.7f,
+        };
+        AssertNear(0.25f, vanilla.ExpInfluence, 1e-6f, "on: vanilla exp influence");
+        AssertNear(0.7f, vanilla.InitiativeInfluence, 1e-6f, "on: vanilla initiative influence");
+        var off = vanilla;
+        off.Enabled = false;
+        AssertNear(0f, off.ExpInfluence, 1e-6f, "off: no exp influence");
+        AssertNear(0f, off.InitiativeInfluence, 1e-6f, "off: no initiative influence");
+        AssertFalse(off.Quality(new SideQuality(0.8f, 0.8f)).Known, "off: side quality unknown (factor 1)");
+        AssertTrue(vanilla.Quality(new SideQuality(0.8f, 0.8f)).Known, "on: side quality passes");
+    }
+}

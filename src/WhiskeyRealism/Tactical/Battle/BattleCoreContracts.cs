@@ -46,6 +46,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Strength;
         public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
         public float Morale, BattleStartMorale, Ammo01, Fatigue;
+        // BC8 troop quality: a regiment's Experience() (140114, W&L player-unit effects
+        // applied), a group's groupexperience (UpdateGroupStrength 120508, divided 120674).
+        public float Experience;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
         // BC5a, additive (the leaf slot, shipped #61 TryFormationSlot): a group's
@@ -111,6 +114,12 @@ namespace WhiskeyRealism.Tactical.Battle
         public float Confidence01;
         public int HiddenTicks;
         public bool IsReinforcement;
+        // BC8, last seen while Visible (a Remembered entry keeps them): the star experience
+        // the player sees (TroopQuality.PerceivedExperience, UpdateUnitIcon 121832-121852)
+        // and the regiment's morale (BC6b precedent: a visible target's morale is read).
+        // Reinforcement columns carry neither.
+        public float Experience;
+        public float Morale;
     }
 
     public enum OrderChannel

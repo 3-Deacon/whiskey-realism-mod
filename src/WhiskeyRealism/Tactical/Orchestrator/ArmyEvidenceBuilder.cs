@@ -1057,6 +1057,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // diverge from vanilla's scenario-determined posture.
                 BattleStance stance = ReadBattleStance(bunits, allianceId);
 
+                // Troop quality (BC8): own regiments' mean morale / experience against the
+                // perceived enemy's (stars of visible regiments, remembered by confidence),
+                // turning the ratio into vanilla's force balance (84862); and vanilla's
+                // initiative division of the attack trigger (6396-6430). The rollback flag
+                // makes both neutral (TroopQualityPrefs).
+                TroopQualityPrefs quality = TroopQualityRuntime.Prefs;
+                SideQuality ownQuality = SideQuality.Unknown, enemyQuality = SideQuality.Unknown;
+                if (BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot snapshot))
+                {
+                    ownQuality = quality.Quality(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount));
+                    enemyQuality = quality.Quality(snapshot.PerceivedEnemyQuality);
+                }
+
                 return new TacticalForceBalanceEvidence(
                     ownDeployed,
                     enemyDeployed,
@@ -1067,7 +1080,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownCasualtyRatio01: ownCasualtyRatio,
                     ownRoutedFraction01: ownRoutedRatio,
                     battleHoursElapsed: battleHours,
-                    stance: stance);
+                    stance: stance,
+                    ownQuality: ownQuality,
+                    enemyQuality: enemyQuality,
+                    initiativeTriggerInfluence: quality.InitiativeInfluence);
             }
             catch (Exception e)
             {

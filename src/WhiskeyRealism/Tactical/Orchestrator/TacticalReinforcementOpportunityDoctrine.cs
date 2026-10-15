@@ -163,7 +163,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
         {
-            float attackThreshold = EffectiveAttackThreshold(ev.CommanderAggression01, ev.Stance);
+            float attackThreshold = EffectiveAttackThreshold(ev.CommanderAggression01, ev.Stance,
+                ev.CommanderInitiative01, ev.InitiativeTriggerInfluence);
             float attackWindowHours = ComputeAttackWindowHours(ev.CommanderAggression01);
             float maxWaitHours = ComputeMaxWaitHours(ev.CommanderAggression01);
 
@@ -208,7 +209,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool ratioAndForceOk = currentRatio >= attackThreshold;
             bool enemyNotGrowing = parityForEnemy >= 999f;
             bool parityHoldsThroughWindow = ev.Stance != BattleStance.Defender &&
-                ev.EnemyDeployedStrength <= ev.OwnStrengthAtHour(attackWindowHours);
+                ev.EffectiveEnemyStrength <= ev.OwnStrengthAtHour(attackWindowHours);
             if (stanceAllowsAttack && ratioAndForceOk && (enemyNotGrowing || parityHoldsThroughWindow))
             {
                 string reason = enemyNotGrowing ? "advantage-and-enemy-static" : "parity-holds-through-attack-window";
@@ -391,6 +392,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float t = ComputeAttackThreshold(commanderAggression01);
             if (stance != BattleStance.Defender && t > 1f) t = 1f;
             return t;
+        }
+
+        /// <summary>
+        /// The stance threshold divided as vanilla divides its attack/defend/assault triggers
+        /// (CheckGlobalAIStrategy 6396-6430): / (1 + live initiative ×
+        /// influenceofcommanderinitiativeonattackdefendtrigger), after the parity cap. With
+        /// the shipped 0.7 a mid-initiative commander's Meeting/Attacker threshold is 1 / 1.35
+        /// ≈ 0.74 (vanilla's own attack trigger is 0.80 / 1.35 ≈ 0.59). Influence 0 is the
+        /// undivided threshold (BC8 rollback).
+        /// </summary>
+        public static float EffectiveAttackThreshold(float commanderAggression01, BattleStance stance,
+            float commanderInitiative01, float initiativeTriggerInfluence)
+        {
+            float divisor = 1f + Clamp01(commanderInitiative01) * Math.Max(0f, initiativeTriggerInfluence);
+            if (float.IsNaN(divisor) || float.IsInfinity(divisor)) divisor = 1f;
+            return EffectiveAttackThreshold(commanderAggression01, stance) / divisor;
         }
 
         public static float ComputeAttackWindowHours(float commanderAggression01)

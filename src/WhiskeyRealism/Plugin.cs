@@ -81,6 +81,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
+        public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -605,6 +606,15 @@ namespace WhiskeyRealism
                 "charge mode whose brigade is out of assault is taken out of it. Never on W&L player-owned or feud units; orders go through the " +
                 "battle-core order executor (Tactical Commander Mode = Active). Off: arms nothing, hands back what it armed and stops the " +
                 "restored cancel; AI infantry then reaches melee only by contact, as in vanilla.");
+            EnableExperienceAndDrillAiWeighting = Config.Bind(
+                "Tactical",
+                "Enable Experience And Drill AI Weighting",
+                true,
+                "Default ON. Whiskey's battle decisions weigh troop quality the way vanilla's own do. Army attack/hold (reinforcement " +
+                "opportunity doctrine, #44's macro opinion): vanilla's force balance, the strength ratio x (1 + own - enemy mean morale) x " +
+                "(1 + own - enemy mean experience), with the attack threshold divided by 1 + commander initiative x vanilla's initiative " +
+                "influence (0.7 shipped). Enemy experience is what the player sees: the experience stars of enemy regiments while they are " +
+                "visible, remembered after they drop out of sight. Reads only. Off: headcount ratios and undivided thresholds.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
