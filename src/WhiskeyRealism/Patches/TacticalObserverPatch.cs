@@ -277,10 +277,13 @@ namespace WhiskeyRealism.Patches
                 // (UpdateAITasks 5857 from CalculateSideStatsAndUpdateAITasks 84864). The end
                 // of a battle is observed by BattleUnitsOnDestroyPostfix below; the identity /
                 // clock checks here catch a new battle or reload when that end was missed.
+                // The detector runs whatever the orchestrator flag says: battle teardown
+                // (OnBattleEnd -> BattleScope.ResetAll) releases per-battle state that
+                // other patches fill too. OnBattleStart itself honors the flag, and Tick
+                // only runs once a start activated the coordinator.
                 try
                 {
-                    if (Plugin.EnableTacticalBattleOrchestrator.Value
-                        && __instance != null
+                    if (__instance != null
                         && TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud))
                     {
                         var decision = _lifecycleDetector.Observe(BuildLifecycleObservation(__instance));
