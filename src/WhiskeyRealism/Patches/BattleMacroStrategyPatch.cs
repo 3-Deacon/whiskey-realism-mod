@@ -31,13 +31,22 @@ namespace WhiskeyRealism.Patches
     // The instance macroai is not persisted (only sideinformation.macroai is,
     // sideinfo.dat 74819/74689), so re-asserting it each cycle leaves no trace
     // in saves.
-    // Shadow (BattleWriterPolicy.MacroAiRestoreBeforeVanilla): when the
-    // Postfix overwrites macroai it records vanilla's own value per AIBattle;
-    // the Prefix puts that value back before vanilla runs, so vanilla's
-    // 6388/6438 timer logic only ever sees its own state - no per-cycle revert
-    // (and ungated Debug.Log) of Whiskey's 1/2, no assault-0 lock - and when
-    // Whiskey stops having an opinion vanilla's own value simply stays. The
-    // Prefix runs whatever the flags/mode, so turning Whiskey off hands back.
+    // Deliberate exception to the Postfix-only rule: a non-blocking, void,
+    // value-restoring Prefix (it never skips vanilla). Shadow
+    // (BattleWriterPolicy.MacroAiRestoreBeforeVanilla): when the Postfix
+    // overwrites macroai it records vanilla's own value per AIBattle; the
+    // Prefix puts that value back before vanilla runs, unless something else
+    // wrote macroai in between (e.g. the debug panel, 189257). Without it:
+    //   6388  newmacroaitoset != macroai && timer expired reverts Whiskey's
+    //         1/2 every cycle, logging through the ungated Debug.Log in
+    //         GameVars.DebugOwnLog (66964);
+    //   6438  newmacroaitoset >= 0 && macroai <= 0 re-stamps the timer every
+    //         cycle, so a Whiskey 0 would lock the side in assault.
+    // With it vanilla's timers only see vanilla state, and when Whiskey stops
+    // having an opinion vanilla's own value simply stays (handed back once).
+    // The Prefix runs whatever the flags/mode, so turning Whiskey off hands
+    // back. Saved values are keyed weakly per AIBattle instance and dropped
+    // at battle end (ClearShadows, called from the coordinator teardown).
     // The former BattleMacroAIOverridePatch wrote the persisted
     // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
     // is consumed here as the fallback when the operations ledger has none.
@@ -60,6 +69,13 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _bunitsField;
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _receivedFireField;
+
+        // Battle-end reset of the per-AIBattle saved vanilla values.
+        internal static void ClearShadows()
+        {
+            try { _shadows.Clear(); }
+            catch (Exception ex) { OnceLog.Warning("tactical-macro:clear-failed", "Tactical macro shadow clear failed: " + ex.Message); }
+        }
 
         private sealed class MacroShadow
         {
