@@ -20,7 +20,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     ///                    BattleUnits, builds roster, calls BuildAndActivate, attaches
     ///                    ArmyOrchestrator per non-suppressed side, picks initial plan,
     ///                    emits bootstrap + plan telemetry.
-    ///   OnBattleEnd    — clears inter-battle ledger state, tears down orchestrators.
+    ///   OnBattleEnd    — BattleScope.ResetAll (every per-battle static), tears down orchestrators.
     ///   Tick           — cascades to per-side orchestrators; emits first-tick once-marker.
     ///
     /// All methods are try/catch guarded — this code runs inside or adjacent to Harmony
@@ -66,6 +66,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             DoctrineClockFrameSource = () => UnityEngine.Time.frameCount;
             DoctrineClockSampler = SampleVanillaBattleClock;
+            BattleScope.Register("doctrine-clock", ResetDoctrineClock);
+            BattleScope.Register("coordinator-tick-state", ResetRuntimeTickState);
         }
 
         /// <summary>
@@ -273,8 +275,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             // A failed bootstrap leaves the coordinator inactive; do not populate battle
-            // caches nothing will consume (and nothing would clear on OnBattleEnd, which
-            // early-outs while inactive).
+            // caches nothing will consume.
             if (!active) return;
 
             // Stage A perf cache (2026-05-21): populate battle-lifetime scene-scan cache
@@ -303,63 +304,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>
+        /// Battle teardown: every registered per-battle static (BattleScope) is reset
+        /// — caches, ledgers, clocks, telemetry dedupe — then the orchestrators are
+        /// dropped. Runs even when the coordinator never activated, so state patches
+        /// filled during a battle whose bootstrap failed is still released.
+        /// </summary>
         public static void OnBattleEnd()
         {
-            if (!active) return;
-            try
-            {
-
-                ClearLedgersBetweenBattles();
-                ResetRuntimeTickState();
-                _directChildDeferLogged.Clear();
-                _commandTreeTelemetrySignatures.Clear();
-
-                // Stage A perf cache (2026-05-21): clear battle-lifetime scene-scan
-                // cache so the next battle starts with a fresh state. Idempotent if
-                // cache wasn't populated.
-                try { TacticalStableSceneCache.Clear(); }
-                catch (Exception sce)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache clear threw: "
-                        + sce.GetType().Name + " " + sce.Message);
-                }
-
-                // Stage B perf cache (2026-05-21): invalidate command tree cache. Next
-                // battle's first Snapshot() will rebuild from a fresh roster.
-                try { CommandTreeRuntime.InvalidateAll(); }
-                catch (Exception cte)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] command-tree-cache clear threw: "
-                        + cte.GetType().Name + " " + cte.Message);
-                }
-
-                // Stage D (2026-05-21): reset validator counters so the next battle
-                // starts fresh and the next validation cycle isn't skipped due to a
-                // stale lastValidationRealtimeSeconds value.
-                try { TacticalCacheValidator.ResetForBattleEnd(); } catch { }
-                try { DirectChildDiscovery.ResetForBattleEnd(); } catch { }
-
-                // Regimental control state (2026-05-22, Scope B): claim-set
-                // tracking removed. Reset now only clears the artillery-action
-                // timestamp dictionary so next battle starts with fresh hold
-                // windows. Doctrine writes via vanilla ChangeStance — no
-                // mod-owned state to release.
-                try { WhiskeyRealism.Patches.BattleGroupStancePatch.ResetRegimentalControlForBattleEnd(); } catch { }
-                try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.ResetTaskHoldForBattleEnd(); } catch { }
-
-                side0 = null;
-                side1 = null;
-                _playerAllianceId = -1;
-                _activeBattleUnitsId = 0;
-                active = false;
+            bool wasActive = active;
+            BattleScope.ResetAll();
+            side0 = null;
+            side1 = null;
+            _playerAllianceId = -1;
+            _activeBattleUnitsId = 0;
+            active = false;
+            if (wasActive)
                 TelemetryRouter.LegacyInfo("[TacticalOrchestrator] teardown battle=" + _battleSequence, TelemetryLayer.Tactical);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] OnBattleEnd partial: "
-                    + e.GetType().Name + " " + e.Message);
-                ClearForFailure();
-            }
         }
 
         public static void Tick(AIBattle battle)
@@ -1557,19 +1518,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
         // contract. Both partials see it via the shared `partial class` declaration.
 
-        private static void ClearLedgersBetweenBattles()
-        {
-            try { TacticalSectorLedger.ClearHelpRequests(); } catch { }
-            try { Plugin.MoraleSnapshotLedger?.Clear(); } catch { }
-            try { WhiskeyRealism.Patches.TacticalRegimentDiagnosticsPatch.Reset(); } catch { }
-            try { WhiskeyRealism.Patches.TacticalMapKnowledgeDiagnosticsPatch.Reset(); } catch { }
-            try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.Reset(); } catch { }
-        }
-
+        // The coordinator's own per-battle tick state (BattleScope "coordinator-tick-state").
         private static void ResetRuntimeTickState()
         {
-            try { ArmyTickCycle.Reset(); } catch { }
             _tickWarningKeys.Clear();
+            _directChildDeferLogged.Clear();
+            _commandTreeTelemetrySignatures.Clear();
             // Task 6: reset heavy gate + dedup state for new battle (per-battle via BattleUnits owner + per-side)
             try
             {
@@ -1605,13 +1559,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _battleInfoLogged.Clear();
                 _regimentByGameObjectId.Clear();
                 _countedUnitIds.Clear();
-                ResetDoctrineClock();
                 _replanAfterNight[0] = false;
                 _replanAfterNight[1] = false;
             }
             catch { }
-            // Clear the shared observation aggregate (global singleton) for the next battle.
-            try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
         }
 
         /// <summary>
@@ -1687,19 +1638,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // Failed bootstrap: same reset as a teardown, without the teardown line.
         private static void ClearForFailure()
         {
-            // ResetRuntimeTickState clears the resolved-decision caches; the battle-lifetime
-            // scene and command-tree caches are cleared here too because OnBattleEnd
-            // early-outs once active is false.
-            ResetRuntimeTickState();
-            try { TacticalStableSceneCache.Clear(); } catch { }
-            try { CommandTreeRuntime.InvalidateAll(); } catch { }
-            side0 = null;
-            side1 = null;
-            _playerAllianceId = -1;
-            _activeBattleUnitsId = 0;
             active = false;
+            OnBattleEnd();
         }
 
         // Stage C perf cache (2026-05-21): pre-populates _resolvedDecisionsBySide at

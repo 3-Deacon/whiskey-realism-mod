@@ -28,10 +28,21 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {
+        static TransferOfUnitsPatch()
+        {
+            CampaignScope.Register("transfer-of-units", ResetForNewCampaign);
+        }
+
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
         private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
         // Verbose transfer-steer rows are emitted only when the alliance's steer signature changes.
         private static readonly Dictionary<int, string> LastLoggedSteer = new Dictionary<int, string>();
+
+        internal static void ResetForNewCampaign()
+        {
+            LogOnceKeys.Clear();
+            LastLoggedSteer.Clear();
+        }
 
         private sealed class TransferSteerState
         {

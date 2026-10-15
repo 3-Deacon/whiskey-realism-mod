@@ -18,6 +18,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class TacticalObserverPatch
     {
+        static TacticalObserverPatch()
+        {
+            BattleScope.Register("observer-telemetry", ResetOperationsTelemetry);
+        }
+
         private static readonly Dictionary<string, float> _lastEmittedAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _operationsTelemetrySignatures = new Dictionary<string, string>();
         private static readonly Dictionary<string, string> _operationsPendingTelemetrySignatures = new Dictionary<string, string>();
@@ -281,19 +286,16 @@ namespace WhiskeyRealism.Patches
                         switch (decision.Transition)
                         {
                             case BattleLifecycleTransition.Start:
-                                ResetOperationsTelemetry();
                                 TacticalBattleCoordinator.OnBattleStart(__instance);
                                 break;
                             case BattleLifecycleTransition.End:
                                 TacticalBattleCoordinator.OnBattleEnd();
-                                ResetOperationsTelemetry();
                                 break;
                             case BattleLifecycleTransition.Restart:
                                 // One line per detected restart (bounded by the detector's identity changes).
                                 TelemetryRouter.LegacyInfo("[TacticalOrchestrator] battle restart detected reason="
                                     + decision.Reason, TelemetryLayer.Tactical);
                                 TacticalBattleCoordinator.OnBattleEnd();
-                                ResetOperationsTelemetry();
                                 TacticalBattleCoordinator.OnBattleStart(__instance);
                                 break;
                         }
@@ -315,7 +317,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Per-battle dedupe state; cleared at every battle start/end/restart so the
+        // Per-battle dedupe state; cleared at battle end (BattleScope) so the
         // signature-keyed dictionaries (which embed instance ids) never grow across battles.
         private static void ResetOperationsTelemetry()
         {
@@ -348,7 +350,6 @@ namespace WhiskeyRealism.Patches
                     var decision = _lifecycleDetector.NotifyBattleUnitsDestroyed(id);
                     if (decision.Transition != BattleLifecycleTransition.End) return;
                     TacticalBattleCoordinator.OnBattleEnd();
-                    ResetOperationsTelemetry();
                 }
                 catch (Exception e)
                 {

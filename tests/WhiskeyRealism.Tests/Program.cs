@@ -24383,7 +24383,7 @@ static class Program
         // doctrine now reads per-sector odds — if you have 1.3x globally
         // but stalemate in the main effort sector, doctrine correctly keeps
         // probing.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
@@ -24429,7 +24429,7 @@ static class Program
         // arrives in 2h (within 4h mid window) → future effective 17100 vs
         // enemy 15400 = ratio 1.11 > 1.10 → readiness HoldForReinforcements
         // → phase stays in Probe even though global odds favor commit.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var midCommander = new PersonalityVector(0.0f, 0.0f, 0.0f, 0.5f, 0.4f);  // mid
         var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), midCommander);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
@@ -24455,7 +24455,7 @@ static class Program
         // aggression-based press/hold branch is reached) AND aggressive
         // commander (Hood-tier, aggression 0.95) AND NO relief → readiness
         // PushDegraded → commits to MainEffort.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var hood = new PersonalityVector(0.9f, -0.8f, 0.7f, 0.5f, 0.0f);  // aggressive
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), hood);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
@@ -24481,7 +24481,7 @@ static class Program
         // but cautious commander (McClellan-tier, aggression ~0.2) AND NO
         // relief → readiness HoldFatigued (cautious below
         // PressVsHoldAggressionThreshold 0.55) → stays in Probe.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var mcc = new PersonalityVector(-0.6f, 0.8f, -0.7f, 0.7f, 0.4f);  // cautious
         var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), mcc);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
@@ -24506,7 +24506,7 @@ static class Program
         // values → PushReady → fresh-army-favorable-odds behavior. Confirms
         // existing call sites that haven't been updated still get the
         // pre-readiness commit behavior.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
@@ -24530,7 +24530,7 @@ static class Program
         // must call ConsiderMainEffortShift, swapping plan.MainEffortSector
         // from 0 to 2. Confirms the tick driver is actually wiring the
         // sector-shift slice end-to-end.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, defaultMainEffortSector: 0);
@@ -24609,7 +24609,7 @@ static class Program
         // with cautious-odds + push-degraded to NOT trigger the favorable-
         // odds commit path. Then verify phase age has advanced 30s and
         // matches the battle delta, not the real delta.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var hood = new PersonalityVector(0.9f, -0.8f, 0.7f, 0.5f, 0.0f);  // aggressive
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), hood);
         orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
@@ -24642,7 +24642,7 @@ static class Program
         // sector matches the high-odds sector — no off-axis competitor to
         // override. anyContactSpotted=false suppresses EnemyIntentShift
         // replan so the offensive trigger is the one that fires.
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var evidence = new ArmyEvidence(1.1f, TerrainKind.Open, defaultMainEffortSector: 0);
@@ -25679,7 +25679,7 @@ static class Program
 
     private static void ArmyTickCycleNoTriggerWhenAllConditionsNormal()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
@@ -25702,7 +25702,7 @@ static class Program
 
     private static void ArmyTickCyclePhaseDeadlineFires()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
@@ -25726,7 +25726,7 @@ static class Program
 
     private static void ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
@@ -25761,7 +25761,7 @@ static class Program
 
     private static void ArmyTickCycleRateLimitIsPerAllianceClock()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         // Test verifies the rate-limit CLOCK is per-alliance — needs TWO
         // distinct allianceIds. The "lee" personality vector is just a
         // fixture; with faction-affinity bias, Union side (alliance 0) gets
@@ -25788,7 +25788,7 @@ static class Program
 
     private static void ArmyTickCycleResetClearsBattleLifetimeRateLimit()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var firstBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
@@ -25809,7 +25809,7 @@ static class Program
 
     private static void ArmyTickCycleUpdatesObservedIntentWithoutReplan()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
@@ -25832,7 +25832,7 @@ static class Program
 
     private static void ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
@@ -25865,7 +25865,7 @@ static class Program
 
     private static void ArmyTickCycleNoReplanIfOrchestratorHasNoPlan()
     {
-        ArmyTickCycle.ResetForTest();
+        ArmyTickCycle.Reset();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
 

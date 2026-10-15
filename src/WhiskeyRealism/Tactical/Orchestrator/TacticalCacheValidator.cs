@@ -33,6 +33,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // found). Emits TacticalCacheValidationFailure as Warning on mismatch.
     internal static class TacticalCacheValidator
     {
+        static TacticalCacheValidator()
+        {
+            BattleScope.Register("cache-validator", ResetForBattleEnd);
+        }
+
         private const float ValidationIntervalSeconds = 30f;
         private static float _lastValidationRealtimeSeconds;
         private static long _validationsRun;

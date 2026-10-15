@@ -788,6 +788,7 @@ namespace WhiskeyRealism
             StrategicCoordinator.Bootstrap();
 
             MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
+            Util.BattleScope.Register("morale-snapshots", () => MoraleSnapshotLedger?.Clear());
 
             StartTelemetryRuntime();
 

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Util;
 
 // Cross-branch integration wiring (Stage B). Pure seams the coordinator and
 // patches now feed from live state.
@@ -11,6 +14,9 @@ internal static class IntegrationWiringTests
         Pass("reserve released by the allocator while the ledger still holds it", ReserveReleasedByAllocator);
         Pass("feud gate bands the target on the front axis", FeudGateBandsTarget);
         Pass("support-main adjacency is one front band", SupportMainAdjacencyIsOneBand);
+        Pass("scoped reset runs every registered reset despite a failure", ScopedResetRunsEveryReset);
+        Pass("battle scope resets its registered owners", BattleScopeResetsRegisteredOwners);
+        Pass("campaign scope holds the campaign owners", CampaignScopeHoldsCampaignOwners);
     }
 
     private static void Pass(string name, Action test)
@@ -97,6 +103,62 @@ internal static class IntegrationWiringTests
         TestHarness.AssertEqual(2, near.AxisSector, "toward the crisis band");
         TestHarness.AssertEqual(DirectChildRole.Reserve, far.Role, "reserve two bands away stays");
     }
+
+    private static void ScopedResetRunsEveryReset()
+    {
+        var registry = new ResetRegistry("test");
+        int a = 0, b = 0, c = 0;
+        registry.Register("a", () => a++);
+        registry.Register("b", () => { b++; throw new InvalidOperationException("boom"); });
+        registry.Register("c", () => c++);
+        registry.Register("a", () => a += 10);
+        TestHarness.AssertEqual(3, registry.Names.Count, "re-registering a name replaces it");
+        registry.ResetAll();
+        TestHarness.AssertEqual(10, a, "replacement reset ran once");
+        TestHarness.AssertEqual(1, b, "throwing reset ran");
+        TestHarness.AssertEqual(1, c, "reset after a failure still ran");
+    }
+
+    private static void BattleScopeResetsRegisteredOwners()
+    {
+        var orch = TacticalEvidenceFixTests.OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        ArmyTickCycle.Reset();
+        ArmyTickCycle.RecordReplan(orch.AllianceId, 1000.0);
+        TacticalReactionContext.Shared.SetReaction(42,
+            new TacticalLocalReactionDecision(LocalReaction.DenyCharge, true, 1f, "test"));
+
+        var names = BattleScope.RegisteredNames;
+        foreach (string name in new[] { "army-tick-cycle", "reaction-context", "oncelog-tactical" })
+            TestHarness.AssertTrue(Contains(names, name), "registered: " + name);
+
+        BattleScope.ResetAll();
+
+        TestHarness.AssertEqual("no-decision", TacticalReactionContext.Shared.GetReaction(42).Reason, "reaction context cleared");
+        var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), Quiet(), 6000f, 0.3f, 0.5f, 0f, 60,
+            0.2f, 0.9f, 0f, 0f, doctrineNowSeconds: 1010.0);
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, trigger, "replan stamp cleared: no cooldown left");
+    }
+
+    private static void CampaignScopeHoldsCampaignOwners()
+    {
+        CoordinatedOperationRuntime.MarkPackageLocked(5, "pkg");
+        OnceLog.Info("integration-wiring-test", "campaign scope test");
+        var names = CampaignScope.RegisteredNames;
+        TestHarness.AssertTrue(Contains(names, "coordinated-operation-locks"), "package locks registered");
+        TestHarness.AssertTrue(Contains(names, "oncelog"), "once-log registered");
+        long before = OnceLog.FiredCount;
+        CampaignScope.ResetAll();
+        TestHarness.AssertTrue(OnceLog.FiredCount < before, "once-log keys cleared");
+    }
+
+    private static bool Contains(IReadOnlyList<string> names, string name)
+    {
+        for (int i = 0; i < names.Count; i++) if (names[i] == name) return true;
+        return false;
+    }
+
+    private static EnemyVisibleState Quiet() => new EnemyVisibleState(
+        new[] { new EnemyVisibleSector(2, 6000f, 6000f, false) }, 0.5f, true, false);
 
     private static DirectChildSnapshot Snap(string id) => new DirectChildSnapshot(id, "army", 15, 0, id, true);
 

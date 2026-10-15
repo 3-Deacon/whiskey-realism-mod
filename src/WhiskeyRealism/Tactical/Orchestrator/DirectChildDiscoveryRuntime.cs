@@ -19,6 +19,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static partial class DirectChildDiscovery
     {
+        static DirectChildDiscovery()
+        {
+            BattleScope.Register("direct-child-discovery", ResetForBattleEnd);
+        }
+
         private static FieldInfo _commandHierarchyShiftField;
 
         public static IReadOnlyList<DirectChildSnapshot> Snapshot(int allianceId)

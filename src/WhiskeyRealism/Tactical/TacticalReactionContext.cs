@@ -1,9 +1,15 @@
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical
 {
     public sealed class TacticalReactionContext
     {
+        static TacticalReactionContext()
+        {
+            BattleScope.Register("reaction-context", () => Shared.Clear());
+        }
+
         public static readonly TacticalReactionContext Shared = new TacticalReactionContext();
 
         private readonly Dictionary<int, TacticalLocalReactionDecision> reactions =

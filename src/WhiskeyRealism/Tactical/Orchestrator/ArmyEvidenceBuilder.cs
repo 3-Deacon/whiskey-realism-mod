@@ -13,6 +13,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     internal static partial class ArmyEvidenceBuilder
     {
+        static ArmyEvidenceBuilder()
+        {
+            BattleScope.Register("army-evidence", ResetForBattleEnd);
+        }
+
         // Between ArmyIntentInference reserve thresholds: not committed, not uncommitted.
         private const float UnknownReserveCommitFraction = 0.35f;
         private static FieldInfo _bunitsFieldCache;
@@ -369,8 +374,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Clears every per-battle cache (front axes, contact ledgers,
-        /// remembered enemy positions, terrain, force-balance start time). Called on battle
-        /// teardown (wired by the coordinator); also runs when the BattleUnits
+        /// remembered enemy positions, terrain, force-balance start time). Battle end
+        /// (BattleScope); also runs when the BattleUnits
         /// instance changes.
         /// </summary>
         internal static void ResetForBattleEnd()

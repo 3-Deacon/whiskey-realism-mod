@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -9,6 +10,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class ArmyTickCycle
     {
+        static ArmyTickCycle()
+        {
+            BattleScope.Register("army-tick-cycle", Reset);
+        }
+
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, double> _lastDoctrineNowByAlliance = new Dictionary<int, double>();
@@ -18,11 +24,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _lastReplanByAlliance.Clear();
             _clockByAlliance.Clear();
             _lastDoctrineNowByAlliance.Clear();
-        }
-
-        public static void ResetForTest()
-        {
-            Reset();
         }
 
         /// <summary>

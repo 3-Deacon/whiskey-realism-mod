@@ -9,6 +9,11 @@ namespace WhiskeyRealism.Strategic.Construction
 {
     public static class TelegraphConstructionRuntime
     {
+        static TelegraphConstructionRuntime()
+        {
+            CampaignScope.Register("telegraph-construction", ResetForNewCampaign);
+        }
+
         private const float MinimumSupportingStrength = 1000f;
         private const float ConnectionRangeFactor = 0.85f;
         private const float SupportRangeFactor = 0.85f;
@@ -16,6 +21,13 @@ namespace WhiskeyRealism.Strategic.Construction
         private const float PlacementSearchEpsilon = 0.5f;
         private static readonly Dictionary<CBuilding, PendingTelegraph> PendingTelegraphs = new Dictionary<CBuilding, PendingTelegraph>();
         private static readonly HashSet<string> InfoLogOnceKeys = new HashSet<string>();
+
+        // Pending placements hold the previous campaign's buildings.
+        internal static void ResetForNewCampaign()
+        {
+            PendingTelegraphs.Clear();
+            InfoLogOnceKeys.Clear();
+        }
 
         public static bool TryStartTelegraph(int alliance, ConstructionOutput construction)
         {

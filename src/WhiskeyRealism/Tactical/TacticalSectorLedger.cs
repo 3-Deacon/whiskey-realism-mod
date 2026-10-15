@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -94,6 +95,11 @@ namespace WhiskeyRealism.Tactical
 
     public static class TacticalSectorLedger
     {
+        static TacticalSectorLedger()
+        {
+            BattleScope.Register("sector-help-requests", ClearHelpRequests);
+        }
+
         public static TacticalSectorLedgerResult Evaluate(IEnumerable<TacticalSectorAssessment> rawSectors)
         {
             var sectors = (rawSectors ?? Array.Empty<TacticalSectorAssessment>()).ToArray();

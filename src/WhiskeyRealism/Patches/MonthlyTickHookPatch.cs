@@ -10,6 +10,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class MonthlyTickHookPatch
     {
+        static MonthlyTickHookPatch()
+        {
+            CampaignScope.Register("monthly-cadence", ResetCadence);
+        }
+
         [HarmonyPostfix]
         internal static void Postfix(AICampaign __instance)
         {

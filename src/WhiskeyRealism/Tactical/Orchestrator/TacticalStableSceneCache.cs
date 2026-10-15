@@ -23,12 +23,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //             Any change rebuilds the array.
     //   BattleUnits reference is kept from Populate instead of FindObjectOfType per scan.
     //
-    // Lifecycle: Populate() from TacticalBattleCoordinator.OnBattleStart, Clear() from
-    // OnBattleEnd. When not populated every read falls back to a live scan.
+    // Lifecycle: Populate() from TacticalBattleCoordinator.OnBattleStart, Clear() at
+    // battle end (BattleScope). When not populated every read falls back to a live scan.
     //
     // Thread safety: main thread only (live reads touch Unity objects).
     internal static class TacticalStableSceneCache
     {
+        static TacticalStableSceneCache()
+        {
+            BattleScope.Register("stable-scene-cache", Clear);
+        }
+
         private static Objectives[] _objectiveRefs;
         private static string[] _objectiveIds;
         private static TacticalMapPoint[] _objectivePoints;

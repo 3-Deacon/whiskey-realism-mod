@@ -19,6 +19,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCommandPostureExecutorPatch
     {
+        static BattleCommandPostureExecutorPatch()
+        {
+            BattleScope.Register("posture-executor", Reset);
+        }
+
         // Doctrine timers run on the doctrine clock (TacticalBattleCoordinator.
         // DoctrineBattleHours: battle hours, frozen overnight). Former wall-clock
         // values were tuned at 1x and convert 1:1 at 1x.
@@ -1048,14 +1053,9 @@ namespace WhiskeyRealism.Patches
         // Brigade task-commitment state (2026-05-22). Per-instance (instanceId →
         // last task + timestamp). On SetWaypoint, if the proposed task matches
         // the last-written task within the hold window, suppress. Different
-        // task bypasses. Reset between battles via ResetTaskHoldForBattleEnd.
+        // task bypasses. Cleared at battle end (Reset).
         private static readonly Dictionary<int, (CommandTaskType task, float ts)> _brigadeTaskHoldState
             = new Dictionary<int, (CommandTaskType, float)>();
-
-        internal static void ResetTaskHoldForBattleEnd()
-        {
-            _brigadeTaskHoldState.Clear();
-        }
 
         // Returns true when the proposed task waypoint should be suppressed
         // because the brigade was given the SAME task recently. Hold window
@@ -3660,6 +3660,7 @@ namespace WhiskeyRealism.Patches
             _lastTelemetryAt.Clear();
             _mainArrivalHold.Clear();
             _supportMainPositionsByAlliance.Clear();
+            _lastPlayerProtectedTelemetryAt.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
