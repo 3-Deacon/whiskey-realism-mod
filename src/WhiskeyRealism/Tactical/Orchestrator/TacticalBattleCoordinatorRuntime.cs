@@ -772,17 +772,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // Command node ids are "node-<GameObject InstanceID>" (CommandTreeBuilder) or a
-        // direct-child id ("child-<id>" / "synth-army-<id>").
-        private static int ParseCommandNodeInstanceId(string nodeId)
-        {
-            if (string.IsNullOrEmpty(nodeId)) return 0;
-            const string prefix = "node-";
-            if (nodeId.StartsWith(prefix, StringComparison.Ordinal))
-                return int.TryParse(nodeId.Substring(prefix.Length), out int id) ? id : 0;
-            return ParseInstanceIdFromChildId(nodeId);
-        }
-
         /// <summary>
         /// The side's runtime snapshot for the current Tick. The heavy gate (cheap
         /// signature extract + Decide + telemetry) is evaluated once per side per Tick

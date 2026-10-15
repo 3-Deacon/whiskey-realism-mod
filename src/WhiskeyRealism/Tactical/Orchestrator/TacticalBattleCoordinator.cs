@@ -318,14 +318,47 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static int ParseInstanceIdFromChildId(string childId)
         {
             if (string.IsNullOrEmpty(childId)) return 0;
-            string suffix;
             if (childId.StartsWith(DirectChildSynthArmyIdPrefix, System.StringComparison.Ordinal))
-                suffix = childId.Substring(DirectChildSynthArmyIdPrefix.Length);
-            else if (childId.StartsWith(DirectChildIdPrefix, System.StringComparison.Ordinal))
-                suffix = childId.Substring(DirectChildIdPrefix.Length);
-            else
-                return 0;
-            return int.TryParse(suffix, out int id) ? id : 0;
+                return ParseInt32Suffix(childId, DirectChildSynthArmyIdPrefix.Length);
+            if (childId.StartsWith(DirectChildIdPrefix, System.StringComparison.Ordinal))
+                return ParseInt32Suffix(childId, DirectChildIdPrefix.Length);
+            return 0;
+        }
+
+        internal const string CommandNodeIdPrefix = "node-";
+
+        /// <summary>
+        /// GameObject InstanceID of a command node id: "node-{id}" (CommandTreeBuilder)
+        /// or a direct-child id ("child-{id}" / "synth-army-{id}"). 0 when unparseable.
+        /// Runs per tasked node every ledger tick, so it parses in place (no Substring).
+        /// </summary>
+        internal static int ParseCommandNodeInstanceId(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return 0;
+            if (nodeId.StartsWith(CommandNodeIdPrefix, System.StringComparison.Ordinal))
+                return ParseInt32Suffix(nodeId, CommandNodeIdPrefix.Length);
+            return ParseInstanceIdFromChildId(nodeId);
+        }
+
+        // Optional '-' then decimal digits to the end of the string; 0 on any other
+        // character, an empty suffix or Int32 overflow.
+        private static int ParseInt32Suffix(string s, int start)
+        {
+            int i = start;
+            bool negative = i < s.Length && s[i] == '-';
+            if (negative) i++;
+            if (i >= s.Length) return 0;
+            long value = 0;
+            for (; i < s.Length; i++)
+            {
+                int digit = s[i] - '0';
+                if (digit < 0 || digit > 9) return 0;
+                value = value * 10 + digit;
+                if (value > 2147483648L) return 0;
+            }
+            if (negative) value = -value;
+            if (value > int.MaxValue) return 0;
+            return (int)value;
         }
     }
 }

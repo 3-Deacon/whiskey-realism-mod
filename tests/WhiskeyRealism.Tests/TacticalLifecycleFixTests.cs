@@ -58,6 +58,9 @@ internal static class TacticalLifecycleFixTests
 
         Pass("t9 feud instance never drives the orchestrator", FeudInstanceNeverDrivesOrchestrator);
         Pass("t9 coordinator doctrine clock exposed, frozen overnight, reset at battle end", CoordinatorDoctrineClockExposed);
+
+        Pass("perf command node id parse covers node child synth ids", PerfCommandNodeIdParse);
+        Pass("perf command node id parse does not allocate", PerfCommandNodeIdParseDoesNotAllocate);
     }
 
     private static void Pass(string name, Action test)
@@ -528,5 +531,37 @@ internal static class TacticalLifecycleFixTests
         TacticalBattleCoordinator.ResetDoctrineClock();
         TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "reset at battle end");
         TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "reset clears suspension");
+    }
+
+    private static void PerfCommandNodeIdParse()
+    {
+        TestHarness.AssertEqual(42, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node-42"), "node");
+        // Unity GameObject InstanceIDs are routinely negative.
+        TestHarness.AssertEqual(-26786, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node--26786"), "negative node");
+        TestHarness.AssertEqual(int.MinValue, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node--2147483648"), "min");
+        TestHarness.AssertEqual(7, TacticalBattleCoordinator.ParseCommandNodeInstanceId("child-7"), "child");
+        TestHarness.AssertEqual(-5, TacticalBattleCoordinator.ParseCommandNodeInstanceId("synth-army--5"), "synth");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node-"), "empty suffix");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node--"), "sign only");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node-12x"), "trailing junk");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId("node-2147483648"), "overflow");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId("corps-3"), "unknown prefix");
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ParseCommandNodeInstanceId(null), "null");
+    }
+
+    private static void PerfCommandNodeIdParseDoesNotAllocate()
+    {
+        string node = "node--26786", child = "child-12345", synth = "synth-army-98765";
+        TacticalBattleCoordinator.ParseCommandNodeInstanceId(node); // JIT warm-up
+        TacticalBattleCoordinator.ParseCommandNodeInstanceId(child);
+        TacticalBattleCoordinator.ParseCommandNodeInstanceId(synth);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long sum = 0;
+        for (int i = 0; i < 1000; i++)
+            sum += TacticalBattleCoordinator.ParseCommandNodeInstanceId(node)
+                + TacticalBattleCoordinator.ParseCommandNodeInstanceId(child)
+                + TacticalBattleCoordinator.ParseCommandNodeInstanceId(synth);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        TestHarness.AssertEqual(0L, allocated, "allocated bytes (sum " + sum + ")");
     }
 }
