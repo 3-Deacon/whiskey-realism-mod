@@ -629,7 +629,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers {           // runtime, not i
 }
 namespace WhiskeyRealism.Tactical.Operations {                // pure, CommandPostureExecutor.cs
   public static class PostureSense { CloseContactMeters = 250; AggregateDescendants; CloseEngaged; FlankRisk; Routed; ActiveMove; PendingOrder;
-    Physical; HeadingTo; NormalizeHeading; EnemyStrengthInRange; SubtreeAcceptsGroupFacing; CollectRotatableRegiments; }
+    Physical; PathInterrupted; InCover; RefuseFor; IsMoveAway; IsFireControlUnit; HeadingTo; NormalizeHeading; SubtreeAcceptsGroupFacing; CollectRotatableRegiments; }
   public struct PostureIntentRequest { ... }  public static class PostureIntentPlan { Submit; LeafMove; FacingPulse; FacingPulseFormation; FireControl; IssuedWithin; }
   public static class LeafSlotTarget { TryResolve(IBattleUnitView, leafIndex, out parent, out x, out z); }
   public static class PostureProbeFilter { WithoutPlayerOwned(probes, IBattleUnitView); }   // replaces PlayerCommandProbeFilter
@@ -638,8 +638,8 @@ namespace WhiskeyRealism.Tactical.Operations {                // pure, CommandPo
 }
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays { public static class PlayAnchor { MinRecomputeHours; RecomputeDue; EnemyAnchor; CollectOwn; } } // pure, new file
 // ArmyPostureInputsRuntime: InAiPool(alliance, id) (AIBattle.unitsused captured on the coordinator tick), SideDefending(alliance) (GetBattleType == 2).
-// OrderExecutorRuntime (F7): Formation/Facing feed CommandFormationWritePolicy PostureSense.EnemyStrengthInRange(snapshot, target,
-//   max(maximumlineofsight[0..3], distancetoenemytocancelinterruption)) instead of live groupenemiesinrange.
+// OrderExecutorRuntime (F7): Formation/Facing feed CommandFormationWritePolicy BattleWriterPolicy.SnapshotEnemyStrengthInRange(snapshot,
+//   group, max(maximumlineofsight[0..3], distancetoenemytocancelinterruption)) - the group's own reach (120558/120563) - instead of live groupenemiesinrange.
 ```
 - No "Play" producer: the geometric play (PlayExecutorRuntime) is not a mover — it feeds the allocator's zone roles, which reach the battle as ledger tasks the Posture producer executes. The ProducerOrder slot stays.
 - The group pass covers the side's AI pool (vanilla `unitsused`, captured in `ArmyPostureInputsRuntime.Refresh`), the leaf pass the leaf-map brigades outside it, as #61 did; producers read no live unit field (`PostureSense` proxies).
@@ -648,7 +648,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays { public static class PlayA
 - Refused flank: `BattleOrderIntent.Refuse` (`RefuseFlank` None/Left/Right, additive BC0 contract) from `PostureSense.RefuseFor` (#61 ResolveRefusedFlank); the executor passes it to SetGroupFormation's refuseflank (92095-92097) on the wheel of both the Formation and Facing paths, and a refuse is never a duplicate.
 - Doctrine cooldowns (facing pulse 12/5 s at 1x, fire control 45 s at 1x) read the executor's Issued outcome for that source (`PostureIntentPlan.IssuedWithin`), not producer stamps.
 - `LeafFormationSlot` is deleted (the snapshot carries no `groupposition` layout or `lastsetwaypointrotation`; `LeafSlotTarget` re-applies the leaf's current offset at the parent's last waypoint).
-- `TacticalBattleClock` and `CommandWaypointWritePolicy` forwarders stay in `CommandPostureExecutor.cs` while `BattleGroupStancePatch` (BC5b), `TacticalObserverPatch:2369` and `TacticalCommandTests` name them; BC7 deletes them.
+- The `TacticalBattleClock` forwarder is deleted (its last caller, `BattleGroupStancePatch`, went with BC5b). The `CommandWaypointWritePolicy` forwarder stays in `CommandPostureExecutor.cs` while `TacticalObserverPatch:2369` and `TacticalCommandTests` name it; BC7 deletes it.
+- PathInterrupted and cover (BC5c's `UnitFlags.PathInterrupted`, `UnitRecord.CoverValue`/`CoverObject`) feed `PostureSense`: an interrupted path is no active move, `Physical.PathInterrupted` drives Decide's recovery branches, the settlement gate reads it, and fire control's in-cover input uses vanilla's no-cover rule (covervalue <= 0 or coverobject 3, 5167; #61 used > 0.05).
 
 PROVE-MODE: harness. Per-slice proof is `PostureMigrationTests` (26 tests: per-channel recent-order windows and their per-source overrides, refused flank on the intent and from the threat side, the rotation walk under a nested detached node, group-vs-per-regiment facing, intent mapping per decision, leaf target from the parent map, R5 area costs, facing/fire-control channel and priority, D8 against the real arbiter, fog-honest play anchor and doctrine-clock gate, PlayerOwned probe filter, BlockedMovingOrder replaced by a plain move with a Skipped outcome, detached-subtree exclusion, snapshot proxies incl. a moving subordinate, the 60 m move floor (leaf at its slot), fire control never on batteries, fog-honest enemies-in-range, executor-outcome cooldowns). Runtime proof is the BC7 in-game smoke: `[BattleCore] producers count=… order=…Posture,FacingPulse,FireControl,DivisionPlay…`, `[OrderArbiter]` rows with issued/moved for alliance 0/1, `TacticalCommandPosture`/`TacticalLeafCascade` rows with `writeResult=submitted`, and no W&L player unit moved.
 

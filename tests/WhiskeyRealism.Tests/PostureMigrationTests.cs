@@ -38,6 +38,8 @@ internal static class PostureMigrationTests
             ("bc5a FireControlNeverTargetsArtillery", FireControlNeverTargetsArtillery),
             ("bc5a RecentOrderCooldownIsPerChannelWithShippedValues", RecentOrderCooldownIsPerChannelWithShippedValues),
             ("bc5a RecentOrderCooldownOverridesForSelfHoldingSources", RecentOrderCooldownOverridesForSelfHoldingSources),
+            ("bc5a PathInterruptedAndCoverFromTheSnapshot", PathInterruptedAndCoverFromTheSnapshot),
+            ("bc5a LadderChargeDemotionAndReserveReleaseVsPosture", LadderChargeDemotionAndReserveReleaseVsPosture),
             ("bc5a RefusedFlankTravelsOnTheIntentAndBypassesDedupe", RefusedFlankTravelsOnTheIntentAndBypassesDedupe),
             ("bc5a PostureRefusesTheThreatenedFlankInContact", PostureRefusesTheThreatenedFlankInContact),
             ("bc5a RotationWalkSkipsEveryUnitUnderADetachedNode", RotationWalkSkipsEveryUnitUnderADetachedNode),
@@ -460,7 +462,7 @@ internal static class PostureMigrationTests
         AssertTrue(PostureSense.FlankRisk(s, 2), "rear pressure is flank risk");
 
         CommandPhysicalState physical = PostureSense.Physical(s.Own[2], moving[2]);
-        AssertFalse(physical.PathInterrupted, "the snapshot carries no pathinterrupted");
+        AssertFalse(physical.PathInterrupted, "no PathInterrupted flag");
         AssertTrue(physical.ActiveMove, "active move proxy");
         AssertNear(0f, PostureSense.HeadingTo(0f, 0f, 0f, 10f), 0.001f, "north is 0");
         AssertNear(90f, PostureSense.HeadingTo(0f, 0f, 10f, 0f), 0.001f, "east is 90");
@@ -469,16 +471,19 @@ internal static class PostureMigrationTests
 
     private static void EnemyStrengthInRangeIsFogHonest()
     {
+        // F7: the formation policy's enemies-in-range is the group's own reach
+        // (vanilla groupenemiesinrange = the HQ's unitrange.enemiesinrange,
+        // 120558/120563), from what the side perceives — not the descendants' union.
         var own = new[] { Group(1, 0f, -1000f), Regiment(2, 600f, -1000f) };
         var s = Snapshot(own, new[] { -1, 0 });
         s.AddObservation(Enemy(10, 0f, -1300f, ObservationState.Visible, strength: 400f));
-        s.AddObservation(Enemy(11, 900f, -1000f, ObservationState.Remembered, strength: 400f, confidence: 0.5f));
-        s.AddObservation(Enemy(12, 0f, -2000f, ObservationState.Visible, strength: 9000f));
+        s.AddObservation(Enemy(11, 0f, -800f, ObservationState.Remembered, strength: 400f, confidence: 0.5f));
+        s.AddObservation(Enemy(12, 900f, -1000f, ObservationState.Visible, strength: 9000f));
         s.AddObservation(Enemy(13, 0f, -1100f, ObservationState.Visible, strength: 9000f, reinforcement: true));
-        AssertNear(400f + 200f, PostureSense.EnemyStrengthInRange(s, 0, 350f), 0.01f,
-            "visible + confidence-weighted remembered, within range of the group or a descendant; far and off-map excluded");
-        AssertNear(0f, PostureSense.EnemyStrengthInRange(s, 0, 100f), 0.01f, "nothing that close");
-        AssertNear(0f, PostureSense.EnemyStrengthInRange(s, 7, 350f), 0.01f, "bad index reads 0");
+        AssertNear(400f + 200f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 0, 350f), 0.01f,
+            "visible + confidence-weighted remembered near the HQ; near a descendant only, and off-map, excluded");
+        AssertNear(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 0, 100f), 0.01f, "nothing that close");
+        AssertNear(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 7, 350f), 0.01f, "bad index reads 0");
     }
 
     private static void DivisionPlayInputFromTheSnapshot()
@@ -732,5 +737,105 @@ internal static class PostureMigrationTests
         AssertTrue(IssuesAfter(charge, Regiment(1, 0f, -1000f), 1f), "a charge revert one second later is not held");
         BattleOrderIntent fire = PostureIntentPlan.FireControl(1, TacticalFireControlDoctrine.InfantryShort);
         AssertFalse(IssuesAfter(fire, Regiment(1, 0f, -1000f), 1f), "fire control is held");
+    }
+
+    private static void PathInterruptedAndCoverFromTheSnapshot()
+    {
+        // BC5c carries pathinterrupted (UnitFlags.PathInterrupted) and cover:
+        // Decide's interrupted branches work again (#61 BuildPhysicalState).
+        var own = new[] { Group(1, 0f, -1000f, typ: 14, flags: UnitFlags.PathInterrupted), Regiment(2, 0f, -1000f) };
+        own[0].LastWaypointX = 0f;
+        own[0].LastWaypointZ = -1500f;
+        own[1].RegimentPaths = 1;
+        own[1].MovementMode = 1;
+        var s = Snapshot(own, new[] { -1, 0 });
+        UnitFlags[] desc = null;
+        int[] moving = null;
+        PostureSense.AggregateDescendants(s, ref desc, ref moving);
+        AssertTrue(PostureSense.PathInterrupted(s.Own[0]), "flag read");
+        AssertFalse(PostureSense.ActiveMove(s.Own[0], moving[0]), "an interrupted path is no active move (IsExecutorMovementActive)");
+        CommandPhysicalState physical = PostureSense.Physical(s.Own[0], moving[0]);
+        AssertTrue(physical.PathInterrupted, "physical carries it");
+        var state = new CommandNodeOperationalState("node-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective, CommandTaskState.Committed);
+        PostureExecutionDecision decision = CommandPostureExecutor.Decide(state, physical,
+            new WriteEligibilitySnapshot(true, false, false, false, false));
+        AssertEqual(PostureExecutionAction.RecoverInterruptedOrder, decision.Action, "interrupted and idle: recover");
+        AssertEqual("illegal-idle-path-interrupted", decision.Reason, "decide's interrupted branch");
+        AssertFalse(PostureSense.PendingOrder(s.Own[0], activeMove: false, allowStaleQueuedBypass: false), "no queued order");
+
+        UnitRecord covered = Regiment(3, 0f, -10f);
+        covered.CoverValue = 0.4f;
+        covered.CoverObject = 1;
+        AssertTrue(PostureSense.InCover(covered), "cover value on a cover object");
+        covered.CoverObject = 3;
+        AssertFalse(PostureSense.InCover(covered), "coverobject 3 is no cover (5167)");
+        covered.CoverObject = 1;
+        covered.CoverValue = 0f;
+        AssertFalse(PostureSense.InCover(covered), "covervalue <= 0 is no cover (5167)");
+    }
+
+    private static void LadderChargeDemotionAndReserveReleaseVsPosture()
+    {
+        // Charge demotion (BC5b, Safety) beats the posture executor's assault
+        // stance on the Stance channel; the posture's move is untouched.
+        UnitRecord assault = Group(7, 0f, -1000f, typ: 14);
+        assault.AiStanceOrdered = TacticalCommandTaskToStanceMapper.StanceAssault;
+        var resolved = new TacticalResolvedGroupDecision(2, default(TacticalDoctrineDecisionKind), "test", true, false, true,
+            ChargeOverrideAction.DemoteToHold);
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(assault, resolved, out BattleOrderIntent demotion), "demotion planned");
+
+        var posture = new Sink();
+        PostureIntentPlan.Submit(posture, Request(PostureExecutionAction.SetFormationAndWaypoint, CommandTaskType.AttackObjective));
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        for (int i = 0; i < posture.Items.Count; i++) arbiter.Submit(posture.Items[i]);
+        arbiter.Submit(demotion);
+        arbiter.Resolve(new BattleOrderIntent[16]);
+        AssertTrue(arbiter.TryGetClaim(7, OrderChannel.Stance, out BattleOrderIntent stance), "stance claim");
+        AssertEqual(IntentSource.ChargeDemotion, stance.Source, "Safety demotion beats the Executor stance");
+        AssertEqual(2, stance.Value, "demoted stance");
+        AssertTrue(arbiter.TryGetClaim(7, OrderChannel.Move, out BattleOrderIntent move), "move claim");
+        AssertEqual(IntentSource.PostureExecutor, move.Source, "the posture move stands");
+
+        // A reserve at its place (ReserveWait, valid idle) gets only the posture's
+        // formation hold, so the reserve release (BC5c, Support) owns the Move
+        // channel. A reserve the posture is still walking to its reserve area
+        // keeps the Executor move (ladder Executor > Support).
+        var state = new CommandNodeOperationalState("node-7", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve,
+            CommandTaskType.ReserveWait, CommandTaskState.Committed);
+        var physical = new CommandPhysicalState(false, false, false, 0, false, 0);
+        PostureExecutionDecision atPlace = CommandPostureExecutor.Decide(state, physical,
+            new WriteEligibilitySnapshot(true, false, false, false, false, atAssignedLocation: true));
+        AssertEqual(PostureExecutionAction.SetFormation, atPlace.Action, "reserve hold: formation only");
+        var release = new BattleOrderIntent
+        {
+            GroupId = 7, Channel = OrderChannel.Move, TargetX = 500f, TargetZ = -500f, Heading = -1f,
+            Priority = IntentPriority.Support, Source = IntentSource.ReserveRelease,
+            Flags = IntentFlags.UseOrderDelay | IntentFlags.ReliefOrSupport, Task = CommandTaskType.ReleaseReserve, Reason = "test",
+        };
+
+        var reserveHold = new Sink();
+        PostureIntentRequest hold = Request(atPlace.Action, CommandTaskType.ReserveWait);
+        hold.TargetFormation = 0;
+        PostureIntentPlan.Submit(reserveHold, hold);
+        arbiter.BeginTick();
+        for (int i = 0; i < reserveHold.Items.Count; i++) arbiter.Submit(reserveHold.Items[i]);
+        arbiter.Submit(release);
+        arbiter.Resolve(new BattleOrderIntent[16]);
+        AssertTrue(arbiter.TryGetClaim(7, OrderChannel.Move, out BattleOrderIntent released), "release move claim");
+        AssertEqual(IntentSource.ReserveRelease, released.Source, "the release moves a reserve the posture only holds in formation");
+
+        PostureExecutionDecision away = CommandPostureExecutor.Decide(state, physical,
+            new WriteEligibilitySnapshot(true, false, false, false, false, atAssignedLocation: false));
+        AssertEqual(PostureExecutionAction.SetWaypoint, away.Action, "reserve not at its area: posture moves it");
+        var walking = new Sink();
+        PostureIntentPlan.Submit(walking, Request(away.Action, CommandTaskType.ReserveWait));
+        arbiter.BeginTick();
+        for (int i = 0; i < walking.Items.Count; i++) arbiter.Submit(walking.Items[i]);
+        arbiter.Submit(release);
+        arbiter.Resolve(new BattleOrderIntent[16]);
+        AssertTrue(arbiter.TryGetClaim(7, OrderChannel.Move, out BattleOrderIntent walk), "move claim");
+        AssertEqual(IntentSource.PostureExecutor, walk.Source, "Executor beats Support on the same channel");
     }
 }

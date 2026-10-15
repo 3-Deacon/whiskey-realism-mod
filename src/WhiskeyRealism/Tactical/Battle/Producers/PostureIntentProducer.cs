@@ -1348,7 +1348,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 unit.Ammo01,
                 unit.Morale,
                 unit.Fatigue,
-                inCover: false,
+                inCover: PostureSense.InCover(unit),
                 enemyAdvancing: hasTarget && EnemyAdvancing(s, t, target.InstanceId),
                 friendlyBlockedAhead: hasTarget && t.Friendly.EstimateFrontBlocker(unit.InstanceId, unit.X, unit.Z, target.X, target.Z) > FriendlyBlockerThreshold,
                 alignedToTarget: !hasTarget || Aligned(unit, target),

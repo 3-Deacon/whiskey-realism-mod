@@ -380,19 +380,6 @@ namespace WhiskeyRealism.Tactical.Operations
     }
 
     // Moved to Tactical/Battle/OrderExecutor.cs (BC4). This forwarder stays
-    // while BattleGroupStancePatch (#45, deleted by BC5b) and the T4 tests
-    // still name it in this namespace; BC7 deletes it.
-    public static class TacticalBattleClock
-    {
-        public const float RealSecondsPerBattleHourAtOneX = Battle.TacticalBattleClock.RealSecondsPerBattleHourAtOneX;
-        public const float BattleSecondsPerHour = Battle.TacticalBattleClock.BattleSecondsPerHour;
-
-        public static float HoursToBattleSeconds(float hours) => Battle.TacticalBattleClock.HoursToBattleSeconds(hours);
-
-        public static float RealSecondsAtOneXToHours(float seconds) => Battle.TacticalBattleClock.RealSecondsAtOneXToHours(seconds);
-    }
-
-    // Moved to Tactical/Battle/OrderExecutor.cs (BC4). This forwarder stays
     // while TacticalObserverPatch (outside BC5a's region) and
     // TacticalCommandTests still name it in this namespace; BC7 deletes it.
     public static class CommandWaypointWritePolicy
@@ -826,8 +813,11 @@ namespace WhiskeyRealism.Tactical.Operations
     //   orderqueue / orderstate → UnitRecord.QueuedOrders (own queue + move
     //     orders in flight to the unit or a descendant, 124998/124878);
     //   groupsubordinatesmoving → moving descendants (regimentpaths > 0);
-    //   pathinterrupted → not carried: the PathInterrupted branches of Decide
-    //     do not fire from the producers;
+    //   pathinterrupted → UnitFlags.PathInterrupted (111012; contact stopped
+    //     the move, 117330), so Decide's interrupted/recovery branches fire;
+    //   covervalue / coverobject → UnitRecord.CoverValue / CoverObject with
+    //     vanilla's no-cover rule (covervalue <= 0 or coverobject 3,
+    //     CheckLineFallbacks 5167);
     //   receivedfire → close engagement;
     //   ClosestVisibleEnemy (TacticalFogOfWarContact) → the snapshot's
     //     fog-honest closest visible observation.
@@ -889,10 +879,23 @@ namespace WhiskeyRealism.Tactical.Operations
             return (unit.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0;
         }
 
+        public static bool PathInterrupted(in UnitRecord unit)
+        {
+            return (unit.Flags & UnitFlags.PathInterrupted) != 0;
+        }
+
+        /// <summary>In cover by vanilla's rule: not (covervalue &lt;= 0 or coverobject 3) (5167).</summary>
+        public static bool InCover(in UnitRecord unit)
+        {
+            return unit.CoverValue > 0f && unit.CoverObject != 3;
+        }
+
         // #61 HasActiveMoveMakingProgress over the snapshot (the movement-flag
-        // input groupsubordinatesmoving is the moving-descendant count here).
+        // input groupsubordinatesmoving is the moving-descendant count here). An
+        // interrupted path is no active move (IsExecutorMovementActive).
         public static bool ActiveMove(in UnitRecord unit, int movingUnits)
         {
+            if (PathInterrupted(unit)) return false;
             if (movingUnits <= 0) return false;
             if (unit.MovementMode > 0) return true;
             // #61 read groupsubordinatesmoving > 0.05: a moving subordinate counts.
@@ -901,8 +904,8 @@ namespace WhiskeyRealism.Tactical.Operations
             return Distance(unit.X, unit.Z, unit.LastWaypointX, unit.LastWaypointZ) > MinWaypointMeters;
         }
 
-        // #61 HasPendingOrder: the settlement gate over the queued orders the
-        // snapshot carries (orderstate is not carried).
+        // #61 HasPendingOrder: the settlement gate over the queued orders and the
+        // interrupted path the snapshot carries (orderstate is not carried).
         public static bool PendingOrder(in UnitRecord unit, bool activeMove, bool allowStaleQueuedBypass)
         {
             return TacticalOrderSettlementGate.HasBlockingPendingOrder(new TacticalOrderSettlementGate.Input
@@ -910,7 +913,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 OrderQueueCount = unit.QueuedOrders,
                 OrderState = 0,
                 RegimentPaths = unit.RegimentPaths,
-                PathInterrupted = false,
+                PathInterrupted = PathInterrupted(unit),
                 MovementMode = unit.MovementMode,
                 ActiveMove = activeMove,
                 AllowStaleQueuedBypass = allowStaleQueuedBypass,
@@ -972,7 +975,7 @@ namespace WhiskeyRealism.Tactical.Operations
             return new CommandPhysicalState(
                 routed: Routed(unit),
                 playerProtected: (unit.Flags & UnitFlags.PlayerOwned) != 0,
-                pathInterrupted: false,
+                pathInterrupted: PathInterrupted(unit),
                 paths: unit.RegimentPaths,
                 activeMove: ActiveMove(unit, movingUnits),
                 formation: unit.Formation);
@@ -990,45 +993,6 @@ namespace WhiskeyRealism.Tactical.Operations
             float d = degrees % 360f;
             return d < 0f ? d + 360f : d;
         }
-
-        /// <summary>
-        /// Fog-honest replacement for vanilla groupenemiesinrange (the max of the
-        /// subordinates' unitrange.enemiesinrange, 120558-120563: enemy strength
-        /// within the line-of-sight range, 122650-122655, which vanilla does not
-        /// fog-filter for the AI side): the strength of the enemies this side
-        /// perceives within rangeMeters of the unit or a descendant. Visible
-        /// counts in full, remembered by confidence; off-map reinforcements never.
-        /// </summary>
-        public static float EnemyStrengthInRange(IBattleUnitView s, int index, float rangeMeters)
-        {
-            if (s == null || index < 0 || index >= s.OwnCount || rangeMeters <= 0f) return 0f;
-            UnitRecord[] own = s.Own;
-            // The unit and its descendants, once (a regiment is just itself).
-            if (_subtree.Length < s.OwnCount) _subtree = new int[Math.Max(s.OwnCount, _subtree.Length * 2)];
-            int members = 0;
-            for (int j = 0; j < s.OwnCount; j++)
-                if (j == index || s.IsAncestorOf(index, j)) _subtree[members++] = j;
-
-            EnemyObservation[] obs = s.Observations;
-            float r2 = rangeMeters * rangeMeters;
-            float total = 0f;
-            for (int k = 0; k < s.ObservationCount; k++)
-            {
-                if (obs[k].IsReinforcement) continue;
-                for (int m = 0; m < members; m++)
-                {
-                    float dx = obs[k].X - own[_subtree[m]].X;
-                    float dz = obs[k].Z - own[_subtree[m]].Z;
-                    if (dx * dx + dz * dz > r2) continue;
-                    total += obs[k].State == ObservationState.Visible ? obs[k].Strength : obs[k].Strength * obs[k].Confidence01;
-                    break;
-                }
-            }
-            return total;
-        }
-
-        // Main-thread scratch for EnemyStrengthInRange (grow-only).
-        private static int[] _subtree = new int[64];
 
         /// <summary>
         /// A group Facing order may go to the group itself only when no descendant

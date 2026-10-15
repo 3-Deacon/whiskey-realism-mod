@@ -5,6 +5,7 @@ using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
 using VanillaMapBounds = WhiskeyRealism.Tactical.Battle.VanillaMapBounds;
 using VanillaPathAreaCosts = WhiskeyRealism.Tactical.Battle.VanillaPathAreaCosts;
+using TacticalBattleClock = WhiskeyRealism.Tactical.Battle.TacticalBattleClock;
 
 // WS T4 (2026-10-14 remediation): #61 posture executor + single ai_stance owner.
 internal static class PostureStanceFixTests
