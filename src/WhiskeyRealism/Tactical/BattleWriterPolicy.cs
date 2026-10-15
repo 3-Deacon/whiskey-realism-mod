@@ -162,8 +162,8 @@ namespace WhiskeyRealism.Tactical
         // 1-4 per pool group; Whiskey writes only 1-3 and never over a vanilla
         // assault (4): an assault is either kept or demoted by the Safety
         // charge-demotion intent (TacticalChargeDenial.TryDemotionIntent). The
-        // group must be settled — no path (regimentpaths) and no courier order in
-        // flight — as the #45 order-friction gate required
+        // group must be settled to CHANGE stance — no path (regimentpaths) and no
+        // courier order in flight — as the #45 order-friction gate required
         // (TacticalOrderSettlementGate: a marching or still-ordered group is not
         // changed). Priority Scorer: every other stance source outranks it.
         public static bool TryGroupStanceIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
@@ -172,9 +172,11 @@ namespace WhiskeyRealism.Tactical
             if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
             if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
             if (group.AiStanceOrdered == TacticalCommandTaskToStanceMapper.StanceAssault) return false;
-            if (group.RegimentPaths > 0 || group.QueuedOrders > 0) return false;
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return false;
             if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return false;
+            // Agreeing with the ordered stance is a hold refresh (#45 re-stamped it
+            // before its friction gate); only a change waits for a settled group.
+            if (group.AiStanceOrdered != resolved.FinalStance && (group.RegimentPaths > 0 || group.QueuedOrders > 0)) return false;
 
             intent = new BattleOrderIntent
             {

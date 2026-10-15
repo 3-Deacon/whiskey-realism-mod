@@ -18,6 +18,7 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core GroupStanceLeavesVanillaAssaultAndUnsettledGroups", GroupStanceLeavesVanillaAssaultAndUnsettledGroups),
             ("battle-core ChargeDemotionIsSafetyStance", ChargeDemotionIsSafetyStance),
             ("battle-core ChargeDemotionBeatsExecutorAssault", ChargeDemotionBeatsExecutorAssault),
+            ("battle-core HeldStanceRefreshReachesTheWriter", HeldStanceRefreshReachesTheWriter),
             ("battle-core FeudReplayNeverEntersTheArbiter", FeudReplayNeverEntersTheArbiter),
             ("battle-core FeudReplayUsesInlineExecutor", FeudReplayUsesInlineExecutor),
             ("battle-core FeudReplayRefusedForPlayerOwned", FeudReplayRefusedForPlayerOwned),
@@ -78,6 +79,7 @@ internal static class StanceArtilleryMigrationTests
         UnitRecord queued = Group(11, Brigade, 2);
         queued.QueuedOrders = 1;
         AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(queued, Apply(3), out _), "a courier order in flight is not settled");
+        AssertTrue(BattleWriterPolicy.TryGroupStanceIntent(marching, Apply(2), out _), "agreement on a marching group still refreshes the hold");
         UnitRecord owned = Group(11, Brigade, 2);
         owned.Flags |= UnitFlags.PlayerOwned;
         AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(owned, Apply(3), out _), "player-owned group");
@@ -393,6 +395,50 @@ internal static class StanceArtilleryMigrationTests
         public bool IsWaterOrFence(float x, float z) => z > _z;
         public bool LineCrossesWater(float x0, float z0, float x1, float z1) => z1 > _z;
         public bool StepBackFromRiver(float x0, float z0, ref float x1, ref float z1) => false;
+    }
+
+    // ------------------------------------------------------------------ stance hold refresh
+
+    // Vanilla 4264 re-decides a pool group once lastaistancechangetime lapses.
+    // #45 re-stamped it on every pass where Whiskey agreed with the ordered
+    // stance; on the arbiter that agreement must still reach
+    // TacticalStanceWriter (not dropped as Duplicate, not held back by the
+    // recent-order cooldown, which is for new orders), whose cheap path skips a
+    // live stamp and whose full pass claims and re-stamps a lapsed one.
+    private static void HeldStanceRefreshReachesTheWriter()
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.AddOwn(Group(71, Brigade, aiStanceOrdered: 3));
+        s.IndexCommandTree(null);
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        var held = new BattleOrderIntent { GroupId = 71, Channel = OrderChannel.Stance, Value = 3, Heading = -1f, Priority = IntentPriority.Scorer, Source = IntentSource.GroupStanceScorer, Reason = "test" };
+
+        AssertTrue(executor.Plan(s, held, 1.0).Execute, "an already-ordered stance goes to the writer (hold refresh)");
+        executor.RecordIssued(held, 1.0, null, 0, null, 0, 0, 0);
+        double soon = 1.0 + 10.0 / 3600.0;
+        AssertTrue(executor.Plan(s, held, soon).Execute, "a refresh is not a new order: no recent-order cooldown");
+        BattleOrderIntent change = held;
+        change.Value = 2;
+        AssertEqual(SkipReason.Cooldown, executor.Plan(s, change, soon).Skip, "a stance change still waits out the cooldown");
+
+        // Writer side: the record is fresh (0.05 h) but vanilla's raw stamp lapsed
+        // (night jump), so the full pass runs, claims and re-stamps well before
+        // HoldHours (0.25 h) pass.
+        const float reset = 1f;
+        var record = new StanceHoldRecord(3, 10.00f, StanceWriteSource.Scorer);
+        float lapsedStamp = TacticalStanceOwnership.VanillaHoldStamp(30.0f, TacticalStanceOwnership.HoldHours, reset);
+        float vanillaNow = 39.5f;
+        AssertFalse(TacticalStanceOwnership.SteadyStateHolds(record, 3, StanceWriteSource.Scorer, 3, 10.05f, lapsedStamp, vanillaNow, reset),
+            "lapsed stamp: no cheap skip");
+        var input = new StanceWriteInput(true, 3, 3, 1, 10.05f, record, StanceWriteSource.Scorer, vanillaGroupStance: 3, vanillaNowHours: vanillaNow);
+        StanceWriteDecision decision = TacticalStanceOwnership.Decide(input);
+        AssertEqual(StanceWriteAction.Claim, decision.Action, "agreement is a claim, not a ChangeStance");
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(decision, input), "the claim re-stamps");
+        float stamp = TacticalStanceOwnership.VanillaHoldStamp(input, reset);
+        AssertTrue(TacticalStanceOwnership.SteadyStateHolds(TacticalStanceOwnership.Next(decision, input), 3, StanceWriteSource.Scorer, 3, 10.06f, stamp, vanillaNow + 0.01f, reset),
+            "the re-stamped hold is live again");
     }
 
     // ------------------------------------------------------------------ #42 feud replay
