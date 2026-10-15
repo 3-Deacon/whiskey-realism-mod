@@ -74,6 +74,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float OwnMainEffortStrength { get; }
             public float OwnArmyMorale { get; }
             public float OwnReservesCommittedFraction { get; }
+            /// <summary>
+            /// Own reinforcement strength due within 24 h
+            /// (sideinformation.reinforcementarrivalswithin24hrs). The enemy's
+            /// schedule is not known; enemy arrivals count once in range.
+            /// </summary>
             public float ReinforcementsArrivingDelta { get; }
             // Readiness fields (added 2026-05-19 for fresh-troops decision).
             // Army-wide averages, not sector-specific — first cut. Future
@@ -141,8 +146,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ResolveOwnAiBattle(bunits, side) ?? battle, bunits, side, ownActive);
                 float ownReinforcements = SanitizeNonNegative(
                     SafeSideInfoFloat(bunits, side, "reinforcementarrivalswithin24hrs"));
-                // Enemy reinforcements only once their entry point is in sight.
-                float enemyReinforcements = enemyVisible.EnemyReinforcementStrength24h;
 
                 // Readiness data: army-wide avg fatigue + ammo (for now; future
                 // refinement will aggregate per-sector) + nearest reinforcement
@@ -155,7 +158,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Math.Max(1f, ownActive),
                     ownMorale,
                     ownReservesCommitted,
-                    ownReinforcements - enemyReinforcements,
+                    ownReinforcements,
                     ownAvgFatigue01: ownAvgFatigue,
                     ownAvgAmmo01: ownAvgAmmo,
                     nearestReinforcementHours: nearestHours,
@@ -289,7 +292,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             return new Bundle(
                 new ArmyEvidence(1f, TerrainKind.Open, defaultMainEffortSector: DefaultMainEffortSector(TacticalFrontAxis.None)),
-                new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+                new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, intelConfidence01: 0f),
                 ownMainEffortStrength: 1f,
                 ownArmyMorale: 1f,
                 ownReservesCommittedFraction: 0f,
@@ -304,7 +307,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalFrontAxis[] _lastFittedAxis = new TacticalFrontAxis[2];
         private static readonly TacticalEnemyContactLedger[] _contactLedgers =
             { new TacticalEnemyContactLedger(), new TacticalEnemyContactLedger() };
-        private static readonly HashSet<int>[] _visibleEnemyEntryPoints = { new HashSet<int>(), new HashSet<int>() };
+        private static readonly HashSet<int> _watchedEntryBuffer = new HashSet<int>();
         private static System.WeakReference<BattleUnits> _battleOwner;
 
         // Build result per side for the current frame (shared by every call
@@ -362,8 +365,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Clears every per-battle cache (front axes, contact ledgers, visible
-        /// entry points, terrain, force-balance start time). Called on battle
+        /// Clears every per-battle cache (front axes, contact ledgers,
+        /// remembered enemy positions, terrain, force-balance start time). Called on battle
         /// teardown (wired by the coordinator); also runs when the BattleUnits
         /// instance changes.
         /// </summary>
@@ -374,7 +377,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _lastBareAxis[i] = TacticalFrontAxis.None;
                 _lastFittedAxis[i] = TacticalFrontAxis.None;
                 _contactLedgers[i].Reset();
-                _visibleEnemyEntryPoints[i] = new HashSet<int>();
                 _rememberedEnemy[i].Clear();
                 _terrainByAlliance[i] = null;
             }
@@ -574,41 +576,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static float SumVisibleEnemyArrivals(BattleUnits bunits, int enemySide, HashSet<int> visibleEntries, float withinHours)
-        {
-            float total = 0f;
-            foreach (var a in VisibleArrivalsForSide(bunits, enemySide, visibleEntries))
-            {
-                if (a.HoursUntilArrival <= withinHours) total += a.EstimatedStrength;
-            }
-            return total;
-        }
-
-        private static IReadOnlyList<ReinforcementArrival> VisibleArrivalsForSide(BattleUnits bunits, int side, HashSet<int> visibleEntries)
-        {
-            var result = new List<ReinforcementArrival>();
-            if (visibleEntries == null || visibleEntries.Count == 0) return result;
-            try
-            {
-                int sideAlliance = SafeAlliance(bunits, side);
-                var arrivals = bunits.scheduledarrival;
-                if (sideAlliance < 0 || arrivals == null) return result;
-                for (int i = 0; i < arrivals.Count; i++)
-                {
-                    var a = arrivals[i];
-                    var regiment = a?.regimentrefreg;
-                    if (regiment == null || a.entrypoint == null) continue;
-                    if (regiment.alliance != sideAlliance) continue;
-                    if (!visibleEntries.Contains(a.entrypoint.GetInstanceID())) continue;
-                    float strength = ArrivalStrength(regiment.groupstrength, regiment.groupstrengthaigroup);
-                    if (strength <= 0f) continue;
-                    result.Add(new ReinforcementArrival(ArrivalHoursFromDurationLeft(a.durationleft), strength));
-                }
-            }
-            catch { }
-            return result;
-        }
-
         /// <summary>
         /// Builds the per-band own/enemy picture for one side.
         ///
@@ -649,11 +616,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 bool anyRecentFire = false;
                 EnsureBattleOwner(bunits);
                 var enemyEntries = EnemyEntryPoints(bunits, SafeAlliance(bunits, enemySide));
-                // The watched-entry set is kept per alliance for BuildForceBalance;
-                // refill it in place.
-                var visibleEntries = ownAllianceId >= 0 && ownAllianceId <= 1
-                    ? _visibleEnemyEntryPoints[ownAllianceId]
-                    : new HashSet<int>();
+                // Enemy-side entry points an own unit watches (coverage only).
+                var visibleEntries = _watchedEntryBuffer;
                 visibleEntries.Clear();
                 bool entryPointsChecked = enemyEntries.Count == 0;
 
@@ -731,14 +695,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
                     intelConfidence = ledger.Confidence(nowHours);
                 }
-                float enemyReinforcements = SumVisibleEnemyArrivals(bunits, enemySide, visibleEntries, withinHours: 24f);
 
                 return new EnemyVisibleState(
                     sectors,
                     enemyReserveCommitFraction,
                     anyContactSpotted: enemyVisible.Count > 0 || anyRecentFire,
                     anyContactBroken: contactBroken,
-                    enemyReinforcements,
                     frontAxis: axis,
                     instanceSectors: instanceSectors,
                     instanceFlankThreat: flankThreat,
@@ -914,7 +876,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static EnemyVisibleState EmptyEnemyVisible()
         {
-            return new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f);
+            return new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, intelConfidence01: 0f);
         }
 
         private static BattleUnits ResolveBattleUnits(AIBattle battle)
@@ -1285,8 +1247,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Builds TacticalForceBalanceEvidence for the given alliance by reading
-        /// vanilla BattleUnits.sideinformation (current strength), BattleUnits.scheduledarrival
-        /// (per-arrival timing + strength), and commander personality fields. Returns null
+        /// vanilla BattleUnits.sideinformation (own strength), the OWN side's
+        /// BattleUnits.scheduledarrival entries (own arrival timing + strength),
+        /// the contact ledger (enemy estimate, confidence) and commander
+        /// personality fields. Returns null
         /// on any failure so callers can fall through to existing behavior.
         /// </summary>
         internal static TacticalForceBalanceEvidence? BuildForceBalance(
@@ -1301,23 +1265,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (bunits == null) return null;
                 int side = ResolveSideFromAlliance(bunits, allianceId);
                 if (side < 0) return null;
-                int enemySide = OppositeSide(side);
 
                 float ownDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
 
                 // In-range enemy picture (T11): the enemy force this side has had
-                // in range (largest sighting, decaying), arrivals only through an
-                // entry point our units can see, and confidence from contact
-                // coverage/recency instead of a fixed 0.8. The ledger and the
-                // watched entry points are refreshed by Build on the evidence
-                // cadence; this read is cheap.
+                // in range (largest sighting, decaying) and the ledger's
+                // coverage-based confidence. No enemy schedule is read: enemy
+                // reinforcements count once they are on the map and in range.
+                // The ledger is refreshed by Build on the evidence cadence;
+                // this read is cheap. Own arrivals come from the side's own
+                // scheduledarrival entries — the side knows its own schedule.
                 EnsureBattleOwner(bunits);
                 ForceBalanceIntel(ContactLedger(allianceId), DoctrineHours(), out float enemyDeployed, out float intelConfidence);
 
                 var ownArrivals = BuildArrivalsForSide(bunits, side);
-                var enemyArrivals = allianceId >= 0 && allianceId <= 1
-                    ? VisibleArrivalsForSide(bunits, enemySide, _visibleEnemyEntryPoints[allianceId])
-                    : (IReadOnlyList<ReinforcementArrival>)Array.Empty<ReinforcementArrival>();
 
                 // Casualty escalation inputs (2026-05-23 / J). Read from vanilla
                 // BattleUnits.sideinformation. casualtyratio: 0..1; routedratio:
@@ -1336,7 +1297,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownDeployed,
                     enemyDeployed,
                     ownArrivals,
-                    enemyArrivals,
                     commanderInitiative01,
                     commanderAggression01,
                     intelConfidence,

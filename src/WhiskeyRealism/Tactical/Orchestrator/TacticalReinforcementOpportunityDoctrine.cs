@@ -62,8 +62,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
-    /// Pure logic that decides whether the army should attack now (defeat-
-    /// in-detail before enemy reinforcements arrive), wait for own
+    /// Pure logic that decides whether the army should attack now (clear
+    /// advantage over the enemy it has had in range), wait for own
     /// reinforcements, dig in defensively, or withdraw to fight later.
     ///
     /// Personality-modulated: aggressive commanders (Hood, Jackson, Grant
@@ -73,7 +73,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// before committing.
     ///
     /// Better than SoW's AttackEnemy (campai.cpp:1030) because:
-    /// - Considers reinforcement timing (SoW only looks at currently-present)
+    /// - Considers own reinforcement timing (SoW only looks at currently-present)
     /// - Uses actual strength (SoW counts divisions)
     /// - Personality scales decision thresholds (SoW is one-size-fits-all)
     /// - Five posture outcomes (SoW is binary attack/retreat)
@@ -181,15 +181,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     attackThreshold, attackWindowHours);
             }
 
-            // ATTACK NOW: two valid sub-cases, both require ratio clears
-            // threshold AND absolute force is sufficient:
-            //   (a) defeat-in-detail window: enemy IS growing within 24h but
-            //       not so soon we cannot finish before parity arrives.
-            //   (b) standing advantage with static enemy: enemy will not
-            //       reach parity at all (parityForEnemy >= 999 sentinel).
-            //       SoW's AttackEnemy attacks on ratio alone here; we mirror
-            //       that — there's no urgency but there's also no reason to
-            //       sit on a 1.5×+ advantage and wait for it to erode.
+            // ATTACK NOW: the ratio clears the threshold AND either
+            //   (a) the known enemy is below us and will not catch up
+            //       (parityForEnemy >= 999 sentinel) — SoW's AttackEnemy
+            //       attacks on ratio alone here; no reason to sit on an
+            //       advantage and wait for it to erode — or
+            //   (b) Meeting/Attacker at parity: vanilla attacks (6400-6408)
+            //       as long as the known enemy does not outnumber what we
+            //       will have when the attack lands.
+            // There is no defeat-in-detail window: the side cannot see the
+            // enemy's arrival schedule; enemy reinforcements count once they
+            // are in range (contact ledger).
             // Scale-invariant: only the ratio matters. Whether you have a 500-
             // man cavalry detachment or a 60,000-man field army, the question
             // is "do I have a clear advantage right now."
@@ -203,20 +205,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             bool ratioAndForceOk = currentRatio >= attackThreshold;
             bool enemyNotGrowing = parityForEnemy >= 999f;
-            bool defeatInDetailWindowOpen =
-                parityForEnemy <= 24f &&
-                parityForEnemy >= attackWindowHours;
-            // (c) Meeting/Attacker at parity or better: vanilla attacks
-            //     (6400-6408) as long as the enemy does not overtake us before
-            //     the attack can land (exact parity makes ParityHoursForEnemy 0,
-            //     which neither (a) nor (b) accepts).
             bool parityHoldsThroughWindow = ev.Stance != BattleStance.Defender &&
-                ev.EnemyStrengthAtHour(attackWindowHours) <= ev.OwnStrengthAtHour(attackWindowHours);
-            if (stanceAllowsAttack && ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing || parityHoldsThroughWindow))
+                ev.EnemyDeployedStrength <= ev.OwnStrengthAtHour(attackWindowHours);
+            if (stanceAllowsAttack && ratioAndForceOk && (enemyNotGrowing || parityHoldsThroughWindow))
             {
-                string reason = enemyNotGrowing
-                    ? "advantage-and-enemy-static"
-                    : defeatInDetailWindowOpen ? "defeat-in-detail-window-open" : "parity-holds-through-attack-window";
+                string reason = enemyNotGrowing ? "advantage-and-enemy-static" : "parity-holds-through-attack-window";
                 return new ReinforcementOpportunityDecision(
                     ReinforcementOpportunity.AttackNow,
                     reason,

@@ -233,7 +233,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyReserveCommitFraction: enemy.EnemyReserveCommitFraction,
                     anyContactSpotted: enemy.AnyContactSpotted,
                     anyContactBroken: enemy.AnyContactBroken,
-                    enemyReinforcementStrength24h: enemy.EnemyReinforcementStrength24h);
+                    intelConfidence01: enemy.IntelConfidence01);
             }
             TacticalIntentModel intent = ArmyIntentInference.Build(
                 bundle.OwnEvidence,

@@ -83,7 +83,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             default(TacticalBattleStateSignature),
             0f,
             default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, intelConfidence01: 0f),
             0f,
             0f,
             0f,

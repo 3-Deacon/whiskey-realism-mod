@@ -235,7 +235,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float enemyReserveCommitFraction,
             bool anyContactSpotted,
             bool anyContactBroken,
-            float enemyReinforcementStrength24h,
             TacticalFrontAxis frontAxis = default(TacticalFrontAxis),
             IReadOnlyDictionary<int, int> instanceSectors = null,
             IReadOnlyDictionary<int, float> instanceFlankThreat = null,
@@ -246,7 +245,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             EnemyReserveCommitFraction = Clamp01(enemyReserveCommitFraction);
             AnyContactSpotted = anyContactSpotted;
             AnyContactBroken = anyContactBroken;
-            EnemyReinforcementStrength24h = SanitizeStrength(enemyReinforcementStrength24h);
             FrontAxis = frontAxis;
             InstanceSectors = CopyMap(instanceSectors);
             InstanceFlankThreat = CopyThreat(instanceFlankThreat);
@@ -256,7 +254,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float EnemyReserveCommitFraction { get; }
         public bool AnyContactSpotted { get; }
         public bool AnyContactBroken { get; }
-        public float EnemyReinforcementStrength24h { get; }
         public TacticalFrontAxis FrontAxis { get; }
         public IReadOnlyDictionary<int, int> InstanceSectors { get; }
 

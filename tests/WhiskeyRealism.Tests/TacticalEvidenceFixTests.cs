@@ -87,6 +87,7 @@ internal static class TacticalEvidenceFixTests
         Run("early battle with unwatched entry points still acts at half confidence", EarlyBattleUnwatchedEntriesActs);
         Run("coverage bands span own and known enemy ground", CoverageBandsSpanKnownEnemy);
         Run("probe commits only on enough intel", ProbeCommitNeedsIntel);
+        Run("enemy reinforcements count only once sighted", EnemyReinforcementsCountOnSighting);
     }
 
     private static void Run(string name, Action test)
@@ -312,7 +313,7 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertTrue(outnumbered.HasEnemy, "enemy facing an empty band");
         TestHarness.AssertEqual(0f, outnumbered.Odds, "no own force -> odds 0");
         TestHarness.AssertFalse(new EnemyVisibleSector(3, 5000f, 0f, false).HasEnemy, "own-only band has no enemy");
-        var state = new EnemyVisibleState(new[] { picket }, 0.35f, true, false, 0f, intelConfidence01: 0.1f);
+        var state = new EnemyVisibleState(new[] { picket }, 0.35f, true, false, intelConfidence01: 0.1f);
         TestHarness.AssertTrue(Near(state.SectorOdds(picket), 1f + 0.1f * (EnemyVisibleSector.MaxKnowableOdds - 1f)),
             "sector odds blend toward unknown with intel confidence");
     }
@@ -322,7 +323,7 @@ internal static class TacticalEvidenceFixTests
         var axis = Banded(0f, 0f, 0f, 500f);
         var map = new Dictionary<int, int> { { 10, 0 }, { 20, 4 } };
         var threat = new Dictionary<int, float> { { 20, 3f } };
-        var state = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f,
+        var state = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false,
             frontAxis: axis, instanceSectors: map, instanceFlankThreat: threat);
         TestHarness.AssertEqual(3f, state.FlankThreatForInstance(20), "group flank threat carried");
         TestHarness.AssertEqual(0f, state.FlankThreatForInstance(10), "missing threat reads 0");
@@ -331,7 +332,7 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(0, state.SectorForInstance(10, -1), "copied map");
         TestHarness.AssertEqual(4, state.SectorForInstance(20, -1), "copied map right");
         TestHarness.AssertEqual(-1, state.SectorForInstance(99, -1), "unknown id -> fallback");
-        var legacy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f);
+        var legacy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false);
         TestHarness.AssertFalse(legacy.FrontAxis.IsValid, "legacy ctor has no axis");
         TestHarness.AssertEqual(7, legacy.SectorForInstance(10, 7), "legacy ctor falls back");
     }
@@ -378,7 +379,7 @@ internal static class TacticalEvidenceFixTests
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
         // Main band (2) faces only a 40-man picket; the army as a whole has 1.3x.
         var sectors = new[] { new EnemyVisibleSector(2, 6000f, 40f, false) };
-        var enemy = new EnemyVisibleState(sectors, 0.35f, true, false, 0f);
+        var enemy = new EnemyVisibleState(sectors, 0.35f, true, false);
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1.3f, TerrainKind.Open, 2), enemy,
             6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
         TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
@@ -478,7 +479,7 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
         var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f).WithOwnExtent(-400f, 400f, 5);
-        var enemy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f, frontAxis: axis);
+        var enemy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, frontAxis: axis);
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), enemy,
             6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
         orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("child-2", "army", 15, 0, "corps", true) });
@@ -599,12 +600,12 @@ internal static class TacticalEvidenceFixTests
         {
             new EnemyVisibleSector(1, 500f, 600f, true),
             new EnemyVisibleSector(3, 500f, 0f, false),
-        }, 0.5f, true, false, 0f);
+        }, 0.5f, true, false);
         var big = new EnemyVisibleState(new[]
         {
             new EnemyVisibleSector(1, 20000f, 600f, true),
             new EnemyVisibleSector(3, 20000f, 0f, false),
-        }, 0.5f, true, false, 0f);
+        }, 0.5f, true, false);
         var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
         float cSmall = ArmyIntentInference.Build(ev, small).Confidence01;
         float cBig = ArmyIntentInference.Build(ev, big).Confidence01;
@@ -660,7 +661,7 @@ internal static class TacticalEvidenceFixTests
     }
 
     private static readonly EnemyVisibleState QuietFront = new EnemyVisibleState(
-        new[] { new EnemyVisibleSector(2, 6000f, 6000f, false) }, 0.5f, true, false, 0f);
+        new[] { new EnemyVisibleSector(2, 6000f, 6000f, false) }, 0.5f, true, false);
 
     private static ReplanTrigger Tick(ArmyOrchestrator orch, float morale, EnemyVisibleState enemy, float battleSeconds = 600f, float odds = 1f)
         => ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), enemy,
@@ -685,8 +686,8 @@ internal static class TacticalEvidenceFixTests
     {
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
-        Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 5000f, false) }, 0.5f, true, false, 0f));
-        var trigger = Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false, 0f));
+        Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 5000f, false) }, 0.5f, true, false));
+        var trigger = Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false));
         TestHarness.AssertEqual(ReplanTrigger.MainEffortSectorLoss, trigger, "main band lost two thirds of its strength");
     }
 
@@ -737,7 +738,7 @@ internal static class TacticalEvidenceFixTests
     }
 
     private static TacticalForceBalanceEvidence Balance(float own, float enemy)
-        => new TacticalForceBalanceEvidence(own, enemy, null, null, 0.5f, 0.5f, 1f);
+        => new TacticalForceBalanceEvidence(own, enemy, null, 0.5f, 0.5f, 1f);
 
     private static void OpportunityHysteresisOnBattleTime()
     {
@@ -775,7 +776,7 @@ internal static class TacticalEvidenceFixTests
     }
 
     private static TacticalForceBalanceEvidence Stanced(float own, float enemy, BattleStance stance)
-        => new TacticalForceBalanceEvidence(own, enemy, null, null, 0.5f, 0.5f, 1f, stance: stance);
+        => new TacticalForceBalanceEvidence(own, enemy, null, 0.5f, 0.5f, 1f, stance: stance);
 
     private static void DoctrineAttacksAtParityForMeetingAndAttacker()
     {
@@ -1028,7 +1029,7 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(2000f, enemyDeployed, "enemy estimate");
         TestHarness.AssertTrue(Near(confidence, 1f), "fully observed");
         var ev = new TacticalForceBalanceEvidence(20000f, enemyDeployed,
-            Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+            Array.Empty<ReinforcementArrival>(),
             0.5f, 0.5f, confidence, stance: BattleStance.Meeting);
         TestHarness.AssertEqual(ReinforcementOpportunity.AttackNow, TacticalReinforcementOpportunityDoctrine.Decide(ev).Opportunity,
             "10:1 fully observed -> attack");
@@ -1044,7 +1045,7 @@ internal static class TacticalEvidenceFixTests
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
         TestHarness.AssertTrue(odds < 2f, "blended odds stay low, got " + odds);
         var picketFront = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 40f, true) },
-            ledger.ReserveCommitFraction(40f), true, false, 0f, intelConfidence01: ledger.Confidence(1f));
+            ledger.ReserveCommitFraction(40f), true, false, intelConfidence01: ledger.Confidence(1f));
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), picketFront,
             6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
         TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase,
@@ -1277,7 +1278,7 @@ internal static class TacticalEvidenceFixTests
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
         TestHarness.AssertTrue(Near(odds, 2f), "3:1 blended halfway -> 2, got " + odds);
         ArmyEvidenceBuilder.ForceBalanceIntel(ledger, 1f, out float enemy, out float conf);
-        var ev = new TacticalForceBalanceEvidence(6000f, enemy, Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+        var ev = new TacticalForceBalanceEvidence(6000f, enemy, Array.Empty<ReinforcementArrival>(),
             0.5f, 0.5f, conf, stance: BattleStance.Meeting);
         TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev).Reason != "intel-confidence-too-low",
             "the opportunity doctrine acts at 0.5");
@@ -1285,7 +1286,7 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
         var front = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 2000f, false) },
-            0.35f, true, false, 0f, intelConfidence01: conf);
+            0.35f, true, false, intelConfidence01: conf);
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), front,
             6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
         TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase, "the probe commits at half confidence");
@@ -1294,7 +1295,7 @@ internal static class TacticalEvidenceFixTests
         var oneBandShort = Seen(1f, 2000f, 0f, bands: 4, watchedEntries: 0, totalEntries: 3);
         TestHarness.AssertTrue(Near(oneBandShort.Confidence(1f), 0.4f), "0.4 confidence");
         ArmyEvidenceBuilder.ForceBalanceIntel(oneBandShort, 1f, out float enemy4, out float conf4);
-        var ev4 = new TacticalForceBalanceEvidence(6000f, enemy4, Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+        var ev4 = new TacticalForceBalanceEvidence(6000f, enemy4, Array.Empty<ReinforcementArrival>(),
             0.5f, 0.5f, conf4, stance: BattleStance.Meeting);
         TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev4).Reason != "intel-confidence-too-low",
             "the opportunity doctrine acts at 0.4");
@@ -1340,5 +1341,25 @@ internal static class TacticalEvidenceFixTests
             "one band of five unobserved as well (0.4) commits");
         TestHarness.AssertEqual(TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction,
             TacticalPhaseProgressionDoctrine.ProbeCommitMinIntelConfidence, "one intel gate for both doctrines");
+    }
+
+    private static void EnemyReinforcementsCountOnSighting()
+    {
+        // A fresh enemy corps reaches the field and comes into range: the
+        // ledger estimate grows with the sighting, not with any schedule.
+        var ledger = Seen(1f, 4000f, 1000f);
+        ledger.Observe(1.1f, 6000f, 1500f);
+        Cover(ledger, 1.1f);
+        TestHarness.AssertEqual(6000f, ledger.EstimatedEnemyStrength, "arrivals counted on sighting");
+
+        // Force balance carries own arrivals only; the known enemy never
+        // grows on a schedule, so its parity is now or never.
+        ArmyEvidenceBuilder.ForceBalanceIntel(ledger, 1.1f, out float enemy, out float conf);
+        var own = new[] { new ReinforcementArrival(2f, 3000f) };
+        var ahead = new TacticalForceBalanceEvidence(9000f, enemy, own, 0.5f, 0.5f, conf);
+        TestHarness.AssertEqual(999f, ahead.ParityHoursForEnemy(), "own ahead: the enemy never reaches parity");
+        var behind = new TacticalForceBalanceEvidence(5000f, enemy, own, 0.5f, 0.5f, conf);
+        TestHarness.AssertEqual(0f, behind.ParityHoursForEnemy(), "enemy already ahead: parity now");
+        TestHarness.AssertEqual(2f, behind.ParityHoursForOwn(), "own relief at 2 h catches the known enemy");
     }
 }

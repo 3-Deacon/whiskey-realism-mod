@@ -78,7 +78,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (enemy.AnyContactSpotted) evidence.Add(EvidenceTag.ContactSpotted);
             if (enemy.AnyContactBroken) evidence.Add(EvidenceTag.ContactBroken);
             if (recentFireSectorCount > 0) evidence.Add(EvidenceTag.ReceivingFire);
-            if (enemy.EnemyReinforcementStrength24h > 1f) evidence.Add(EvidenceTag.ReinforcementsArriving);
 
             InferredIntent intent;
             if (hardWithdrawSignal)
@@ -143,7 +142,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 enemyReserveCommitFraction: enemy.EnemyReserveCommitFraction,
                 anyContactSpotted: enemy.AnyContactSpotted,
                 anyContactBroken: enemy.AnyContactBroken,
-                enemyReinforcementStrength24h: enemy.EnemyReinforcementStrength24h);
+                intelConfidence01: enemy.IntelConfidence01);
 
             float syntheticOwnStrength = Math.Max(matched.Value.OwnStrength, ownStrengthBucket * 1000f);
             var ownEvidence = new ArmyEvidence(

@@ -1278,10 +1278,10 @@ static class Program
             ("army tick cycle 20x compression burns probe budget in battle time", ArmyTickCycle20xCompressionBurnsProbeInBattleTime),
             ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
             ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h mid commander withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h aggressive attacks now", ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h cautious withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws),
-            ("reinforcement opportunity 10k vs 15k enemy growing cautious delays defensively", ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively),
+            ("reinforcement opportunity 15k own vs 13k enemy mid commander holds as defender", ReinforcementOpportunity15kVs13kMidHoldsAsDefender),
+            ("reinforcement opportunity 15k own vs 13k enemy aggressive attacks now", ReinforcementOpportunity15kVs13kAggressiveAttacks),
+            ("reinforcement opportunity 15k own vs 13k enemy cautious holds as defender", ReinforcementOpportunity15kVs13kCautiousHoldsAsDefender),
+            ("reinforcement opportunity 10k vs 15k cautious delays defensively", ReinforcementOpportunity10kVs15kCautiousDelaysDefensively),
             ("reinforcement opportunity severely outnumbered withdraws", ReinforcementOpportunitySeverelyOutnumberedWithdraws),
             ("reinforcement opportunity aggressive commander refuses withdraw at moderate disadvantage", ReinforcementOpportunityAggressiveCommanderRefusesToWithdrawAtModerateDisadvantage),
             ("compute withdrawal ratio threshold personality scale", ComputeWithdrawalRatioThresholdPersonalityScale),
@@ -1299,9 +1299,9 @@ static class Program
             ("playbook catalog stance hard filter defender rejects offensive", PlaybookCatalogStanceHardFilterDefenderRejectsOffensive),
             ("playbook catalog stance hard filter attacker rejects defensive", PlaybookCatalogStanceHardFilterAttackerRejectsDefensive),
             ("playbook catalog stance of classifies archetypes correctly", PlaybookCatalogStanceOfClassifiesArchetypesCorrectly),
-            ("reinforcement opportunity 15k own vs 10k enemy +5k in 8h attack window open", ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen),
+            ("reinforcement opportunity 15k own vs 10k enemy attacks on the advantage", ReinforcementOpportunity15kVs10kAttacksOnAdvantage),
             ("reinforcement opportunity 12k own +5k in 6h vs 13k enemy waits to consolidate", ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate),
-            ("reinforcement opportunity 13k vs 13k both reinforcing defensive hold", ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold),
+            ("reinforcement opportunity 13k vs 13k own relief too far defensive hold", ReinforcementOpportunity13kVs13kOwnReliefTooFarDefensiveHold),
             ("reinforcement opportunity intel confidence floor falls through to no opportunity", ReinforcementOpportunityIntelConfidenceFloorFallsThrough),
             ("reinforcement opportunity small cavalry brigade can attack at favorable ratio", ReinforcementOpportunitySmallCavalryCanAttack),
             ("reinforcement opportunity picket clash below 500 men does not attack", ReinforcementOpportunityPicketClashDoesNotAttack),
@@ -22720,8 +22720,7 @@ static class Program
             sectors,
             enemyReserveCommitFraction: 0.4f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 2000f);
+            anyContactBroken: false);
 
         AssertEqual(2, state.Sectors.Length, "sector count");
         AssertEqual(0, state.Sectors[0].SectorId, "sector 0 id");
@@ -22730,7 +22729,6 @@ static class Program
         AssertNear(0.4f, state.EnemyReserveCommitFraction, 1e-5f, "enemy reserve commit fraction");
         AssertTrue(state.AnyContactSpotted, "any contact spotted");
         AssertFalse(state.AnyContactBroken, "any contact broken");
-        AssertNear(2000f, state.EnemyReinforcementStrength24h, 1e-5f, "enemy reinforcement strength 24h");
     }
 
     private static void EnemyVisibleStateClampsAndCoercesNullSectors()
@@ -22739,18 +22737,16 @@ static class Program
             sectors: null,
             enemyReserveCommitFraction: 1.5f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: float.NaN);
+            anyContactBroken: false);
 
         AssertEqual(0, state.Sectors.Length, "null sectors become empty");
         AssertNear(1.0f, state.EnemyReserveCommitFraction, 1e-5f, "reserve fraction clamps to 1");
-        AssertNear(0f, state.EnemyReinforcementStrength24h, 1e-5f, "NaN reinforcement strength becomes 0");
     }
 
     private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()
     {
         var ownEvidence = new ArmyEvidence(currentOdds: 1.0f, terrain: TerrainKind.Open, defaultMainEffortSector: 0);
-        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f);
+        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22771,8 +22767,7 @@ static class Program
             },
             0.7f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22791,8 +22786,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 7000f, false) },
             0.7f,
             true,
-            false,
-            1500f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22801,7 +22795,6 @@ static class Program
         AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "single sector confidence reaches floor");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "single sector evidence includes reserve committed");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "single sector evidence includes contact spotted");
-        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReinforcementsArriving) >= 0, "single sector evidence includes reinforcements");
     }
 
     private static void ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe()
@@ -22816,8 +22809,7 @@ static class Program
             },
             0.1f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22832,8 +22824,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 1000f, false) },
             0f,
             false,
-            true,
-            0f);
+            true);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22853,8 +22844,7 @@ static class Program
             },
             0.6f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22869,8 +22859,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 100f, false) },
             0f,
             false,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22889,8 +22878,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.5f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy, ownStrengthBucket: 1);
         AssertTrue(intent.PrimaryIntent != InferredIntent.Unknown,
@@ -22904,8 +22892,7 @@ static class Program
             sectors: new[] { new EnemyVisibleSector(0, 100f, 100f, false) },
             enemyReserveCommitFraction: 0f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
         var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy, ownStrengthBucket: 0);
         AssertEqual(InferredIntent.Unknown, intent.PrimaryIntent);
     }
@@ -24768,7 +24755,7 @@ static class Program
         // and we observe pure phase progression.
         var visible = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 6000f, 4000f, false) },  // 1.5x local, no recent fire
-            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+            0.5f, anyContactSpotted: false, anyContactBroken: false);
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence, visible,
             ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
@@ -24791,7 +24778,7 @@ static class Program
     {
         return new EnemyVisibleState(
             new[] { new EnemyVisibleSector(sectorId, ownStrength, enemyStrength, false) },
-            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+            0.5f, anyContactSpotted: false, anyContactBroken: false);
     }
 
     private static void ArmyTickCycleExhaustedWithReliefHoldsInProbe()
@@ -24919,7 +24906,7 @@ static class Program
             new EnemyVisibleSector(sectorId: 1, ownStrength: 3000f, enemyStrength: 5000f, recentFire: false),
             new EnemyVisibleSector(sectorId: 2, ownStrength: 5000f, enemyStrength: 2000f, recentFire: false), // decisive
         };
-        var visible = new EnemyVisibleState(sectors, 0.4f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+        var visible = new EnemyVisibleState(sectors, 0.4f, anyContactSpotted: false, anyContactBroken: false);
 
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 5f, evidence, visible,
@@ -25387,7 +25374,6 @@ static class Program
     private static TacticalForceBalanceEvidence MakeForceBalance(
         float own, float enemy,
         ReinforcementArrival[] ownArrivals = null,
-        ReinforcementArrival[] enemyArrivals = null,
         float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f,
         float ownCasualtyRatio = 0f, float ownRoutedFraction = 0f,
         float battleHoursElapsed = 0f,
@@ -25396,7 +25382,6 @@ static class Program
         return new TacticalForceBalanceEvidence(
             own, enemy,
             ownArrivals ?? System.Array.Empty<ReinforcementArrival>(),
-            enemyArrivals ?? System.Array.Empty<ReinforcementArrival>(),
             initiative, aggression, intel,
             ownCasualtyRatio01: ownCasualtyRatio,
             ownRoutedFraction01: ownRoutedFraction,
@@ -25404,46 +25389,41 @@ static class Program
             stance: stance);
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws()
+    private static void ReinforcementOpportunity15kVs13kMidHoldsAsDefender()
     {
-        // User's example #1 (per their explicit quote: "may be better to continue
-        // holding if reinforcements bring them to 20,000 in 12 hours"):
-        //   15K own vs 13K enemy now, enemy +7K in 12h, mid commander
+        // 15K own vs 13K known enemy, mid commander. The enemy's schedule is
+        // not an input (enemy reinforcements count once in range).
         // CurrentRatio = 1.15 (below mid-band threshold ~1.32)
         // OwnParity = 0 (already ahead) → fails WaitAndConsolidate's > 0 check
         // CurrentRatio above WithdrawalRatioThreshold (0.85) → not Withdraw
-        // → DefensiveHold (own ahead now, future worse, no own relief, hold ground)
+        // → DefensiveHold as Defender.
         // BR-H1 (2026-10-14): only a Defender holds here. In a meeting
         // engagement vanilla attacks regardless of force balance
         // (CheckGlobalAIStrategy 6400-6408), so Meeting/Attacker cap the attack
-        // threshold at parity and this becomes a defeat-in-detail attack.
+        // threshold at parity and attack on the advantage.
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
             aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
-            "mid commander holds when current advantage thin and future worse without own relief, got reason=" + d.Reason);
-        var meeting = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) }, aggression: 0.5f));
-        AssertEqual(ReinforcementOpportunity.AttackNow, meeting.Opportunity, "meeting engagement strikes before the enemy concentrates");
+            "mid defender holds a thin advantage, got reason=" + d.Reason);
+        var meeting = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(15000f, 13000f, aggression: 0.5f));
+        AssertEqual(ReinforcementOpportunity.AttackNow, meeting.Opportunity, "meeting engagement attacks on the advantage");
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks()
+    private static void ReinforcementOpportunity15kVs13kAggressiveAttacks()
     {
         // Same numbers, aggression=0.85 (Hood-style)
         // AttackThreshold drops to ~1.20 * (1.30 - 0.85*0.40) = ~1.15
-        // CurrentRatio 1.15 now meets threshold
-        // ParityForEnemy = 12h, AttackWindow ~0.5h → window exists
-        // Decision: AttackNow
+        // CurrentRatio 1.15 now meets threshold, known enemy below us
+        // Decision: AttackNow (advantage-and-enemy-static)
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
             aggression: 0.85f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
-            "aggressive commander strikes the defeat-in-detail window, got reason=" + d.Reason);
+            "aggressive commander attacks a thin advantage, got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws()
+    private static void ReinforcementOpportunity15kVs13kCautiousHoldsAsDefender()
     {
         // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
         // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
@@ -25454,14 +25434,13 @@ static class Program
         // → DefensiveHold (cautious commander never attacks the unequal odds AND
         //   doesn't withdraw from a position where own > enemy currently)
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
             aggression: 0.10f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
             "cautious commander holds defensively (not attack, not withdraw with own ahead now), got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively()
+    private static void ReinforcementOpportunity10kVs15kCautiousDelaysDefensively()
     {
         // 10K vs 15K = ratio 0.67. With 2026-05-23 personality-modulated
         // withdrawal threshold, cautious commander (aggression 0.10) threshold
@@ -25469,7 +25448,6 @@ static class Program
         // DelayingDefense (outnumbered but defensible, no near parity).
         // Historical CW pattern: Johnston Atlanta-campaign-style Fabian delay.
         var ev = MakeForceBalance(10000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.10f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
@@ -25481,7 +25459,6 @@ static class Program
         // 5K vs 15K = ratio 0.33. Cautious commander threshold 0.52,
         // ratio 0.33 < 0.52 → WithdrawalToFightLater fires (severe overmatch).
         var ev = MakeForceBalance(5000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.10f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
@@ -25494,7 +25471,6 @@ static class Program
         // 0.55 - 0.95*0.30 = 0.27. Ratio 0.40 > 0.27 → does NOT withdraw.
         // Jackson at Chancellorsville pattern: hold ground even at 2.5:1 odds.
         var ev = MakeForceBalance(6000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.95f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
@@ -25715,24 +25691,21 @@ static class Program
             1e-6f, "cautious threshold");
     }
 
-    private static void ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen()
+    private static void ReinforcementOpportunity15kVs10kAttacksOnAdvantage()
     {
-        // 15K vs 10K now, enemy +5K in 8h, mid commander
+        // 15K vs 10K known enemy, mid commander
         // CurrentRatio = 1.5 (above threshold 1.20)
-        // EnemyAt 8h = 15K, OwnAt 8h = 15K → parity at 8h
-        // Window 1h required, parity 8h away → window comfortably open
-        // Decision: AttackNow
+        // Decision: AttackNow (advantage-and-enemy-static)
         var ev = MakeForceBalance(15000f, 10000f,
-            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
             aggression: 0.5f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
-            "clear-advantage + parity in 8h → AttackNow, got reason=" + d.Reason);
+            "clear advantage → AttackNow, got reason=" + d.Reason);
     }
 
     private static void ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate()
     {
-        // 12K own +5K in 6h vs 13K enemy now (no enemy arrivals)
+        // 12K own +5K in 6h vs 13K known enemy
         // CurrentRatio = 0.92 (below threshold)
         // OwnParity = 6h (own 17K vs enemy 13K = 1.31)
         // EnemyParity = never (own > enemy after own arrival)
@@ -25746,19 +25719,15 @@ static class Program
             "own reinforcement arriving in time → WaitAndConsolidate, got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold()
+    private static void ReinforcementOpportunity13kVs13kOwnReliefTooFarDefensiveHold()
     {
         // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
         // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
-        // 13K vs 13K now, both reinforcing — enemy +8K in 14h, own +3K in 12h
-        // CurrentRatio = 1.0 (below threshold)
-        // OwnAt 12h = 16K, EnemyAt 12h = 13K → own briefly ahead 12-14h
-        // OwnAt 14h = 16K, EnemyAt 14h = 21K → enemy decisive
-        // Mid-band MaxWaitHours = 7.5h, OwnParity 12h is BEYOND that
-        // Decision: DefensiveHold (not WaitAndConsolidate because relief is too far)
+        // 13K vs 13K known enemy, own +3K in 12h
+        // CurrentRatio = 1.0 (below threshold), OwnParity 0 (already level)
+        // Decision: DefensiveHold as Defender
         var ev = MakeForceBalance(13000f, 13000f,
             ownArrivals: new[] { new ReinforcementArrival(12f, 3000f) },
-            enemyArrivals: new[] { new ReinforcementArrival(14f, 8000f) },
             aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         // CurrentRatio 1.0 is below WithdrawalRatioThreshold(0.85)? No, 1.0 >= 0.85.
@@ -25772,7 +25741,6 @@ static class Program
         // Same scenario as attack-window-open but with intel confidence 0.3
         // (below the 0.35 floor for action) → falls through to NoOpportunity
         var ev = MakeForceBalance(15000f, 10000f,
-            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
             aggression: 0.5f, intel: 0.3f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.NoOpportunity, d.Opportunity,
@@ -25925,13 +25893,10 @@ static class Program
     private static void ReinforcementOpportunityStrengthAtHourAccumulatesArrivals()
     {
         var ev = MakeForceBalance(10000f, 5000f,
-            ownArrivals: new[] { new ReinforcementArrival(2f, 1500f), new ReinforcementArrival(6f, 1000f) },
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 2000f) });
+            ownArrivals: new[] { new ReinforcementArrival(2f, 1500f), new ReinforcementArrival(6f, 1000f) });
         AssertEqual(10000f, ev.OwnStrengthAtHour(1f), "no arrivals yet at hour 1");
         AssertEqual(11500f, ev.OwnStrengthAtHour(3f), "first arrival counted at hour 3");
         AssertEqual(12500f, ev.OwnStrengthAtHour(8f), "both arrivals counted at hour 8");
-        AssertEqual(5000f, ev.EnemyStrengthAtHour(2f), "enemy arrival not yet at hour 2");
-        AssertEqual(7000f, ev.EnemyStrengthAtHour(5f), "enemy arrival counted at hour 5");
     }
 
     private static void ReinforcementOpportunityParityHoursForOwnShortCircuitsWhenAlreadyAhead()
@@ -26242,8 +26207,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.8f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var trigger = ArmyTickCycle.MaybeReplan(
             orch,
@@ -26285,8 +26249,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 5000f, false) },
             enemyReserveCommitFraction: 0.5f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
     }
 
     private static void DirectChildDiscoveryProbeHandlesEmptyUnitsused()
@@ -26379,8 +26342,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.4f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             snapshots: new[]
@@ -26401,7 +26363,7 @@ static class Program
     {
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(2, 500f, 500f, recentFire: true) },
-            0.3f, true, false, 0f);
+            0.3f, true, false);
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
             new[] { 2 },
@@ -26414,7 +26376,7 @@ static class Program
     {
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 1000f, 0f, false) },
-            0f, false, false, 0f);
+            0f, false, false);
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
             new[] { 99 /* sector not present in EnemyVisibleState */ },
@@ -26788,7 +26750,7 @@ static class Program
     {
         var sig = new TacticalBattleStateSignature(50, 8000, 7500, 1, 2, true, 12345, 0, 5);
         var ev = new ArmyEvidence(1.2f, TerrainKind.Open, 3);
-        var vis = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.4f, true, false, 1200f);
+        var vis = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.4f, true, false);
         var objs = new ObjectiveRecord[0];
         var tree = CommandTreeSnapshot.Empty;
         var children = Array.Empty<DirectChildSnapshot>();
@@ -26807,7 +26769,7 @@ static class Program
         var list = new List<ObjectiveRecord>();
         // Note: ObjectiveRecord ctor requires valid Observation; use default for test (sanitized inside)
         var snap = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 10f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             100f, 0.9f, 0.1f, 0f, list, CommandTreeSnapshot.Empty, Array.Empty<DirectChildSnapshot>());
         // mutate original
         // (list is empty, but test demonstrates copy contract even if non-empty in real use)
@@ -26819,7 +26781,7 @@ static class Program
     {
         var children = new DirectChildSnapshot[0];
         var snap = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 2f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             50f, 0.8f, 0.2f, 0f, Array.Empty<ObjectiveRecord>(), CommandTreeSnapshot.Empty, children);
         AssertEqual(0, snap.DirectChildSnapshots.Count, "stores copy of direct child list");
     }
@@ -26831,7 +26793,7 @@ static class Program
 
         // minimal with objectives count >0 would set HasData true (ctor accepts)
         var snapWithObj = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 1f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             10f, 0.5f, 0.1f, 0f, new[] { default(ObjectiveRecord) }, CommandTreeSnapshot.Empty, Array.Empty<DirectChildSnapshot>());
         AssertTrue(snapWithObj.HasData, "snapshot with objectives has data");
     }
