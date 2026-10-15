@@ -40,6 +40,13 @@ internal static class CampaignEconomyFixTests
         GovernorGuaranteedPassesIgnoreBudget();
         GovernorRepaysBacklogOnCheapFramesUpToTwiceVanilla();
         GovernorRunsNothingWhenNothingOwed();
+
+        FortGovernorSkipsScoringWhenFactionAlreadyBuilding();
+        FortGovernorSkipsScoringForIneligibleUnit();
+        FortGovernorScoresEligibleUnit();
+        FortSiteCacheReusesDecisionsWithinJobCycle();
+        FortSiteCacheInvalidatesOnNewCycleOrWorldChange();
+        FortGovernorLetsHighThreatExceedSoftCap();
     }
 
     private static void LogPass(string message)
@@ -489,5 +496,93 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertFalse(FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 0.5f, 50f, Governor), "nothing owed");
         TestHarness.AssertEqual(7f, FastForwardAiScheduler.AccrueOwedPasses(-3f, 50f), "negative owed clamps before accrual");
         LogPass("c2b governor runs nothing when nothing owed");
+    }
+
+    // ---------------------------------------------------------------- C-FortGov
+    // Vanilla AICampaign.CheckFortConstruction (decompile 16347-16405) is job 21
+    // (11520-11527), called once per own unit per pass (currentfortconstructionunitrunthrough).
+    // It returns before touching sites when bfs/bunits are null (16360-16367), when the
+    // faction already has a fort order (16368, IsFactionAlreadyConstructingFort 9694), or
+    // when the current unit fails the idle/supply/op gates (16373-16381).
+
+    private static FortConstructionCallGate OpenGate()
+    {
+        return new FortConstructionCallGate
+        {
+            HasBattlefieldSetup = true,
+            HasBattleUnits = true,
+            FactionAlreadyConstructing = false,
+            UnitPresent = true,
+            UnitEligible = true
+        };
+    }
+
+    private static void FortGovernorSkipsScoringWhenFactionAlreadyBuilding()
+    {
+        var gate = OpenGate();
+        gate.FactionAlreadyConstructing = true;
+        TestHarness.AssertFalse(FortConstructionGovernor.ShouldEvaluateSites(gate), "one active order per faction");
+        LogPass("c2b fort governor skips scoring when faction already building");
+    }
+
+    private static void FortGovernorSkipsScoringForIneligibleUnit()
+    {
+        var gate = OpenGate();
+        gate.UnitEligible = false;
+        TestHarness.AssertFalse(FortConstructionGovernor.ShouldEvaluateSites(gate), "ineligible unit");
+        gate = OpenGate();
+        gate.UnitPresent = false;
+        TestHarness.AssertFalse(FortConstructionGovernor.ShouldEvaluateSites(gate), "runthrough index past ownunits");
+        gate = OpenGate();
+        gate.HasBattlefieldSetup = false;
+        TestHarness.AssertFalse(FortConstructionGovernor.ShouldEvaluateSites(gate), "no bfs");
+        LogPass("c2b fort governor skips scoring for ineligible unit");
+    }
+
+    private static void FortGovernorScoresEligibleUnit()
+    {
+        TestHarness.AssertTrue(FortConstructionGovernor.ShouldEvaluateSites(OpenGate()), "vanilla would scan sites");
+        LogPass("c2b fort governor scores eligible unit");
+    }
+
+    private static void FortSiteCacheReusesDecisionsWithinJobCycle()
+    {
+        var cache = new FortSiteDecisionCache();
+        long sig = FortSiteDecisionCache.Signature(siteCount: 40, fortCount: 12, orderCount: 0);
+        cache.BeginCall(newCycle: true, signature: sig);
+        cache.Store(3, new FortConstructionGovernorDecision { Allow = false, Reason = "hard-cap" });
+        cache.BeginCall(newCycle: false, signature: sig);
+        TestHarness.AssertTrue(cache.TryGet(3, out var d) && d.Reason == "hard-cap", "same cycle reuses site decision");
+        TestHarness.AssertFalse(cache.TryGet(4, out _), "unscored site misses");
+        LogPass("c2b fort site cache reuses decisions within job cycle");
+    }
+
+    private static void FortSiteCacheInvalidatesOnNewCycleOrWorldChange()
+    {
+        var cache = new FortSiteDecisionCache();
+        long sig = FortSiteDecisionCache.Signature(40, 12, 0);
+        cache.BeginCall(true, sig);
+        cache.Store(3, new FortConstructionGovernorDecision { Allow = true, Reason = "allowed" });
+        cache.BeginCall(false, FortSiteDecisionCache.Signature(40, 13, 0));
+        TestHarness.AssertFalse(cache.TryGet(3, out _), "new fort built => rescore");
+        cache.Store(3, new FortConstructionGovernorDecision { Allow = true, Reason = "allowed" });
+        cache.BeginCall(true, FortSiteDecisionCache.Signature(40, 13, 0));
+        TestHarness.AssertFalse(cache.TryGet(3, out _), "new job-21 cycle => rescore");
+        LogPass("c2b fort site cache invalidates on new cycle or world change");
+    }
+
+    // The soft cap binds only under low threat (Decide): a threatened local area may
+    // build past it up to the hard cap. Regression guard for the plan item.
+    private static void FortGovernorLetsHighThreatExceedSoftCap()
+    {
+        var d = FortConstructionGovernor.Decide(new FortConstructionSiteContext
+        {
+            ExistingFortCount = 3,
+            ActiveOrderCount = 0,
+            NearCapital = false,
+            ThreatRatio = 0.9f
+        });
+        TestHarness.AssertTrue(d.Allow, "threatened local area above soft cap 2, below hard cap 4");
+        LogPass("c2b fort governor lets high threat exceed soft cap");
     }
 }
