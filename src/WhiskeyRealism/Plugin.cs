@@ -149,9 +149,6 @@ namespace WhiskeyRealism
         internal TacticalCommanderMode TacticalCommanderModeValue =>
             _cachedTacticalCommanderMode ?? (_cachedTacticalCommanderMode = ResolveTacticalCommanderMode()).Value;
 
-        internal bool TacticalOperationsLedgerEnabled =>
-            TacticalCommanderModePolicy.RunsLedger(TacticalCommanderModeValue);
-
         internal bool TacticalOperationsLedgerAllowsWrites =>
             TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
 
