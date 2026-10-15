@@ -7,10 +7,13 @@
 //     transform-descendants (91203), units whose detachment parent is under the
 //     player (91207-91216), take-overs (IsUnitTakenOver 45840), every unit of the
 //     alliance for a CIC player (91187) and the player's army group (91191).
-//     The result is cached in Regiment.dlcw_isundercommander on the slow tick
-//     (112240) — ungated on the career, and with checkfordlc it returns
-//     "alliance == player alliance" outside a career (91170-91176). So the
-//     cached flag only means ownership while W&L is active.
+//     The result is cached in Regiment.dlcw_isundercommander. In battle it is set
+//     by Regiment initialize (113065), the appoint-command refresh
+//     (UpdateUnitUnderCommanderAll, 198824-198825) and take-over (45827); the
+//     slow-tick refresh at 112240 is inside the campaign-only branch (112203).
+//     Initialize is ungated on the career, and with checkfordlc
+//     IsUnitUnderCommander returns "alliance == player alliance" outside one
+//     (91170-91176). So the cached flag only means ownership while W&L is active.
 //   AIBattle.SetSide 3408: the player-side AIBattle runs the macro AI only under
 //     ai_vs_ai / debug_allarmiesai; otherwise the player alliance is the human's.
 //   Regiment.ai_feudstance: −1 = no feud (112841, 116559); CalculateFeud sets
@@ -55,7 +58,8 @@ namespace WhiskeyRealism.Tactical.Battle
             bool owned;
             if (input.WlActive)
             {
-                // The CIC bit covers the slow-tick lag of the cached dlcw flag (91187).
+                // The CIC bit covers a cached dlcw flag not yet refreshed after the player
+                // became CIC (91187).
                 owned = dlcwUnderCommander || takenOver ||
                     (input.PlayerIsCic && alliance == input.PlayerAlliance);
             }
