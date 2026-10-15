@@ -25,8 +25,8 @@
 // So the doctrine only writes behavior 3 into the 122214 gate on a regiment (never the group: cycle
 // 6 re-orders a group whose combatbehaviorordered != 2), adds Whiskey's margins on top, and leaves
 // vanilla's odds check as the final word: Decide has no strength input and never writes mode 6.
-// Revert writes behavior 2 and, in mode 3, also disarms (RevertRequiresDisarm), because behavior
-// alone does not leave charge mode.
+// A revert in mode 3 is Disarm (behavior 2 plus SetMovementMode(0)), because behavior alone does not
+// leave charge mode; a revert in mode 6 defers the disarm until vanilla returns 6 -> 3.
 
 using System;
 
@@ -55,6 +55,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool ChargeResolved;
         public int CurrentBehaviorOrdered;     // combatbehaviorordered; 3 means the doctrine armed it
         public bool IsLeading;                 // IsLeading over the group's per-regiment target distances
+        // Producer flag: the doctrine reverted a regiment it armed while in mode 6 and has not yet
+        // disarmed it (PendingDisarmAfter).
+        public bool WhiskeyArmedPendingDisarm;
     }
 
     public enum ChargeAction
@@ -62,6 +65,7 @@ namespace WhiskeyRealism.Tactical.Battle
         None,
         Charge,
         Revert,
+        Disarm,
     }
 
     public static class ChargeDoctrine
@@ -81,20 +85,27 @@ namespace WhiskeyRealism.Tactical.Battle
         // Phased on who armed the regiment and its movement mode:
         // - not armed by the doctrine: Charge only at movementmode 0 while moving (the 122214 gate)
         //   with every condition met; a mode 3/6 the doctrine did not arm is vanilla's own.
-        // - armed, any mode: Revert on a resolved cycle or a demoted stance (charge denial wins).
+        // - armed, any mode: revert on a resolved cycle or a demoted stance (charge denial wins).
         // - armed, mode 6: hold; vanilla's odds check already passed and the assault resolves itself.
         // - armed, mode 0 (courier carrying the order) or 3 (armed, including the stationary volley
-        //   pause): hold while the conditions still hold, otherwise Revert.
-        // - armed, any other mode (retreat, march): Revert.
+        //   pause): hold while the conditions still hold, otherwise revert.
+        // - armed, any other mode (retreat, march): revert.
+        // A revert is Disarm in mode 3 (behavior 2 alone leaves charge mode armed) and Revert
+        // elsewhere; a Revert in mode 6 never aborts the assault, and the producer's
+        // WhiskeyArmedPendingDisarm (PendingDisarmAfter) turns it into a Disarm once vanilla
+        // returns 6 -> 3. Config off still releases what the doctrine armed.
         // Player-owned units are never touched, not even reverted: the player UI sets 3 itself.
         public static ChargeAction Decide(in ChargeInput input)
         {
             if (input.PlayerOwned || !input.IsInfantryRegiment)
                 return ChargeAction.None;
 
+            if (input.WhiskeyArmedPendingDisarm)
+                return input.MovementMode == ArmedMovementMode ? ChargeAction.Disarm : ChargeAction.None;
+
             bool armed = input.CurrentBehaviorOrdered == ChargeBehavior;
             if (!input.ConfigOn)
-                return armed ? ChargeAction.Revert : ChargeAction.None;
+                return armed ? RevertAt(input.MovementMode) : ChargeAction.None;
 
             if (!armed)
             {
@@ -105,7 +116,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             if (input.ChargeResolved || input.GroupAiStance != AssaultStance)
-                return ChargeAction.Revert;
+                return RevertAt(input.MovementMode);
 
             switch (input.MovementMode)
             {
@@ -113,10 +124,17 @@ namespace WhiskeyRealism.Tactical.Battle
                     return ChargeAction.None;
                 case NormalMovementMode:
                 case ArmedMovementMode:
-                    return ConditionsHold(in input) ? ChargeAction.None : ChargeAction.Revert;
+                    return ConditionsHold(in input) ? ChargeAction.None : RevertAt(input.MovementMode);
                 default:
                     return ChargeAction.Revert;
             }
+        }
+
+        // Disarm = behavior 2 plus SetMovementMode(0), mirroring vanilla's own unreachable disarm
+        // at 4922-4924 (mode 3 only; mode 6 resolves through 122298-122326).
+        private static ChargeAction RevertAt(int movementMode)
+        {
+            return movementMode == ArmedMovementMode ? ChargeAction.Disarm : ChargeAction.Revert;
         }
 
         private static bool ConditionsHold(in ChargeInput input)
@@ -146,11 +164,16 @@ namespace WhiskeyRealism.Tactical.Battle
                 && movementMode != AssaultMovementMode;
         }
 
-        // Revert must also SetMovementMode(0) when the regiment sits in mode 3, mirroring vanilla's
-        // own unreachable disarm at 4922-4924 (mode 3 only; mode 6 resolves through 122318-122326).
-        public static bool RevertRequiresDisarm(int movementMode)
+        // The producer's per-regiment WhiskeyArmedPendingDisarm after this tick's action: set by a
+        // Revert issued in mode 6 (the assault ends 6 -> 3 and mode 3 keeps charging, 122226 ->
+        // 122286, although behavior is 2), cleared by the Disarm or once the regiment leaves 3/6.
+        public static bool PendingDisarmAfter(bool pending, ChargeAction action, int movementMode)
         {
-            return movementMode == ArmedMovementMode;
+            if (action == ChargeAction.Disarm)
+                return false;
+            if (action == ChargeAction.Revert && movementMode == AssaultMovementMode)
+                return true;
+            return pending && (movementMode == ArmedMovementMode || movementMode == AssaultMovementMode);
         }
 
         // The leading regiments are the MaxLeadingRegimentsPerGroup closest to their own target

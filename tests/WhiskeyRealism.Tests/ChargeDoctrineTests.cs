@@ -30,7 +30,9 @@ internal static class ChargeDoctrineTests
             ("charge doctrine reverts an armed regiment when conditions fail", RevertWhenArmedConditionsFail),
             ("charge doctrine reverts after the charge resolves", RevertAfterChargeResolves),
             ("charge doctrine charge cycle ends on the vanilla mode transitions", ChargeCycleEndsOnVanillaTransitions),
-            ("charge doctrine revert disarms movement mode 3 only", RevertDisarmsArmedModeOnly),
+            ("charge doctrine revert in mode 3 disarms in the same action", RevertInArmedModeDisarms),
+            ("charge doctrine revert during an assault disarms once vanilla returns to mode 3", DeferredDisarmAfterAssault),
+            ("charge doctrine pending disarm flag follows the action and the mode", PendingDisarmFlagTransitions),
             ("charge doctrine reverts when the group stance is demoted", RevertWhenStanceDemoted),
             ("charge doctrine stance denial beats a charge in every movement mode", DenialPrecedenceOverCharge),
             ("charge doctrine arms only the two leading regiments", OnlyTwoLeadingRegimentsCharge),
@@ -64,6 +66,7 @@ internal static class ChargeDoctrineTests
             ChargeResolved = false,
             CurrentBehaviorOrdered = ChargeDoctrine.RevertBehavior,
             IsLeading = true,
+            WhiskeyArmedPendingDisarm = false,
         };
     }
 
@@ -77,6 +80,11 @@ internal static class ChargeDoctrineTests
     }
 
     private static ChargeAction Decide(ChargeInput input) => ChargeDoctrine.Decide(in input);
+
+    // A doctrine revert leaves charge mode 3 in the same action (Disarm); elsewhere it only
+    // writes behavior 2 (Revert).
+    private static ChargeAction RevertAt(int movementMode) =>
+        movementMode == ChargeDoctrine.ArmedMovementMode ? ChargeAction.Disarm : ChargeAction.Revert;
 
     private static void ChargeFiresOnWeakerVisibleTargetInRadius()
     {
@@ -186,6 +194,12 @@ internal static class ChargeDoctrineTests
         playerArmed.GroupAiStance = 1;
         playerArmed.ChargeResolved = true;
         AssertEqual(ChargeAction.None, Decide(playerArmed), "player-owned behavior 3 never reverted");
+
+        var playerPending = Ready();
+        playerPending.PlayerOwned = true;
+        playerPending.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        playerPending.WhiskeyArmedPendingDisarm = true;
+        AssertEqual(ChargeAction.None, Decide(playerPending), "player-owned never disarmed");
     }
 
     private static void NoChargeOutsideInfantryAssault()
@@ -278,15 +292,15 @@ internal static class ChargeDoctrineTests
     {
         var hidden = Armed(ChargeDoctrine.ArmedMovementMode);
         hidden.TargetVisible = false;
-        AssertEqual(ChargeAction.Revert, Decide(hidden), "armed, target hidden");
+        AssertEqual(ChargeAction.Disarm, Decide(hidden), "armed, target hidden");
 
         var tired = Armed(ChargeDoctrine.ArmedMovementMode);
         tired.OwnFatigue = 0.9f;
-        AssertEqual(ChargeAction.Revert, Decide(tired), "armed, fatigued");
+        AssertEqual(ChargeAction.Disarm, Decide(tired), "armed, fatigued");
 
         var notLeading = Armed(ChargeDoctrine.ArmedMovementMode);
         notLeading.IsLeading = false;
-        AssertEqual(ChargeAction.Revert, Decide(notLeading), "armed, no longer leading");
+        AssertEqual(ChargeAction.Disarm, Decide(notLeading), "armed, no longer leading");
 
         var pendingBlocked = Armed(ChargeDoctrine.NormalMovementMode);
         pendingBlocked.LaneBlockedByFriendly = true;
@@ -302,7 +316,7 @@ internal static class ChargeDoctrineTests
         {
             var input = Armed(mode);
             input.ChargeResolved = true;
-            AssertEqual(ChargeAction.Revert, Decide(input), "resolved at movement mode " + mode);
+            AssertEqual(RevertAt(mode), Decide(input), "resolved at movement mode " + mode);
         }
     }
 
@@ -323,24 +337,74 @@ internal static class ChargeDoctrineTests
         AssertFalse(ChargeDoctrine.ChargeCycleEnded(0, 0), "0 steady");
     }
 
-    private static void RevertDisarmsArmedModeOnly()
+    // Behavior 2 alone leaves movementmode 3, and the 122226 evaluation runs on mode 3
+    // regardless of combat behavior. Vanilla's own disarm (4922-4924, movementmode == 3 &&
+    // stance != 4 -> SetMovementMode()) is unreachable behind the dead 4910 compare, so a
+    // doctrine revert in mode 3 is a Disarm: behavior 2 plus SetMovementMode(0).
+    private static void RevertInArmedModeDisarms()
     {
-        // Revert to behavior 2 alone leaves movementmode 3, and the 122226 evaluation runs on
-        // mode 3 regardless of combat behavior. Vanilla's own disarm (4922-4924,
-        // movementmode == 3 && stance != 4 -> SetMovementMode()) is unreachable behind the
-        // dead 4910 compare, so the doctrine's revert disarms mode 3 itself. Mode 6 is left
-        // to vanilla's assault resolution, like 4922.
-        AssertTrue(ChargeDoctrine.RevertRequiresDisarm(ChargeDoctrine.ArmedMovementMode), "mode 3 disarmed");
-        AssertFalse(ChargeDoctrine.RevertRequiresDisarm(ChargeDoctrine.AssaultMovementMode), "mode 6 left to vanilla");
-        AssertFalse(ChargeDoctrine.RevertRequiresDisarm(ChargeDoctrine.NormalMovementMode), "mode 0 already disarmed");
-        AssertFalse(ChargeDoctrine.RevertRequiresDisarm(4), "retreat untouched");
+        var input = Armed(ChargeDoctrine.ArmedMovementMode);
+        input.GroupAiStance = 2;
+        AssertEqual(ChargeAction.Disarm, Decide(input), "armed mode 3 revert");
+
+        var pendingCourier = Armed(ChargeDoctrine.NormalMovementMode);
+        pendingCourier.GroupAiStance = 2;
+        AssertEqual(ChargeAction.Revert, Decide(pendingCourier), "mode 0 has nothing to disarm");
+    }
+
+    // Denial during an assault: Revert writes behavior 2 but never aborts mode 6. Vanilla then
+    // ends the assault 6 -> 3 (122302 / 122326) and mode 3 keeps re-evaluating charges
+    // (122226 -> 122286) although behavior is 2, so the producer's pending flag drives a
+    // Disarm on the first tick back in mode 3.
+    private static void DeferredDisarmAfterAssault()
+    {
+        var assault = Armed(ChargeDoctrine.AssaultMovementMode);
+        assault.GroupAiStance = 2;
+        var action = Decide(assault);
+        AssertEqual(ChargeAction.Revert, action, "denied mid-assault: revert, no abort");
+        bool pending = ChargeDoctrine.PendingDisarmAfter(false, action, assault.MovementMode);
+        AssertTrue(pending, "pending disarm set by a mode-6 revert");
+
+        var stillAssaulting = Ready();
+        stillAssaulting.GroupAiStance = 2;
+        stillAssaulting.MovementMode = ChargeDoctrine.AssaultMovementMode;
+        stillAssaulting.WhiskeyArmedPendingDisarm = pending;
+        action = Decide(stillAssaulting);
+        AssertEqual(ChargeAction.None, action, "assault still running: wait");
+        pending = ChargeDoctrine.PendingDisarmAfter(pending, action, stillAssaulting.MovementMode);
+        AssertTrue(pending, "still pending in mode 6");
+
+        var backToArmed = stillAssaulting;
+        backToArmed.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        action = Decide(backToArmed);
+        AssertEqual(ChargeAction.Disarm, action, "6 -> 3 with the pending flag: disarm");
+        pending = ChargeDoctrine.PendingDisarmAfter(pending, action, backToArmed.MovementMode);
+        AssertFalse(pending, "cleared by the disarm");
+
+        // Even with stance restored and every charge condition met, the pending disarm wins.
+        var conditionsBack = Ready();
+        conditionsBack.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        conditionsBack.WhiskeyArmedPendingDisarm = true;
+        AssertEqual(ChargeAction.Disarm, Decide(conditionsBack), "pending disarm beats a fresh charge");
+    }
+
+    private static void PendingDisarmFlagTransitions()
+    {
+        AssertTrue(ChargeDoctrine.PendingDisarmAfter(false, ChargeAction.Revert, ChargeDoctrine.AssaultMovementMode), "revert in 6 sets");
+        AssertFalse(ChargeDoctrine.PendingDisarmAfter(false, ChargeAction.Revert, ChargeDoctrine.NormalMovementMode), "revert in 0 does not");
+        AssertFalse(ChargeDoctrine.PendingDisarmAfter(false, ChargeAction.Disarm, ChargeDoctrine.ArmedMovementMode), "disarm in 3 does not");
+        AssertFalse(ChargeDoctrine.PendingDisarmAfter(true, ChargeAction.Disarm, ChargeDoctrine.ArmedMovementMode), "disarm clears");
+        AssertFalse(ChargeDoctrine.PendingDisarmAfter(true, ChargeAction.None, ChargeDoctrine.NormalMovementMode), "left 3/6 to 0 clears");
+        AssertFalse(ChargeDoctrine.PendingDisarmAfter(true, ChargeAction.None, 4), "left 3/6 to retreat clears");
+        AssertTrue(ChargeDoctrine.PendingDisarmAfter(true, ChargeAction.None, ChargeDoctrine.AssaultMovementMode), "kept in 6");
+        AssertTrue(ChargeDoctrine.PendingDisarmAfter(true, ChargeAction.None, ChargeDoctrine.ArmedMovementMode), "kept in 3 until disarmed");
     }
 
     private static void RevertWhenStanceDemoted()
     {
         var input = Armed(ChargeDoctrine.ArmedMovementMode);
         input.GroupAiStance = 3;
-        AssertEqual(ChargeAction.Revert, Decide(input), "stance 4 -> 3");
+        AssertEqual(ChargeAction.Disarm, Decide(input), "stance 4 -> 3");
     }
 
     // Pure half of DenialPrecedenceOverCharge. ChargeDemotion (Safety, Stance channel) wins
@@ -354,7 +418,7 @@ internal static class ChargeDoctrineTests
         {
             var input = Armed(mode);
             input.GroupAiStance = 2;
-            AssertEqual(ChargeAction.Revert, Decide(input), "denied at movement mode " + mode);
+            AssertEqual(RevertAt(mode), Decide(input), "denied at movement mode " + mode);
         }
 
         var unarmed = Ready();
@@ -399,7 +463,13 @@ internal static class ChargeDoctrineTests
         // OFF = vanilla: an AI regiment the doctrine armed is handed back.
         var armed = Armed(ChargeDoctrine.ArmedMovementMode);
         armed.ConfigOn = false;
-        AssertEqual(ChargeAction.Revert, Decide(armed), "config off, armed");
+        AssertEqual(ChargeAction.Disarm, Decide(armed), "config off, armed in mode 3");
+
+        var pending = Ready();
+        pending.ConfigOn = false;
+        pending.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        pending.WhiskeyArmedPendingDisarm = true;
+        AssertEqual(ChargeAction.Disarm, Decide(pending), "config off, pending disarm after an assault");
     }
 
     private static void DecideAndLeadingDoNotAllocate()
