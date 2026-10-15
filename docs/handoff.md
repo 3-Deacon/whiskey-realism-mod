@@ -13,7 +13,7 @@
 | **Build** | `./build.sh` — 0 warnings, 0 errors at `08f4a3c`. |
 | **Harness** | 1680 PASS / 0 FAIL at `08f4a3c`. The harness restructure (auto-discovered `*Tests.Run()`, `Program.cs` split) is in flight on `fix/integ-tests` and may change the count. |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 102 entries) and `python3 -I tools/orphan-sweep.py . [--include-test-only]` (0 findings). See AGENTS.md § Testing. |
-| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15**; `BepInEx/plugins/` is empty — **no Whiskey DLL is deployed**, no `config/` or `LogOutput.log` exists yet. First launch after deploy writes a fresh cfg with the C# defaults (all on). |
+| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` (checkpoint tag `checkpoint-2026-10-15`): `WhiskeyRealism.dll` 1,593,856 bytes, SHA-256 `0831547f9835e3f084953e64bed7cd049c26c68f96ce22c2a0134c35fee17638` (dist and plugins match); harness 1688 PASS / 0 FAIL. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
 
 ### What the remediation shipped
@@ -39,7 +39,7 @@ Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found alon
 
 - Harness auto-discovery / `Program.cs` split (roadmap B.4) — in flight on `fix/integ-tests`.
 - Patch first-fire registry + session-log smoke check (roadmap B.7) — not started.
-- No in-game smoke of the remediated DLL yet (nothing deployed).
+- No in-game smoke of the remediated DLL yet (deployed 2026-10-15, awaiting smoke: `python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"`).
 
 ## Next stages
 
