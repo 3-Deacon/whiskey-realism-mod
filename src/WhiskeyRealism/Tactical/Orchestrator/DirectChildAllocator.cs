@@ -125,6 +125,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < snapshots.Count; i++)
                 {
                     if (snapshots[i].ChildId == null) continue;
+                    // BC10: a deployed reserve keeps the Reserve role; a play's rect does not claim it
+                    // (it would draw Main from a wing) until the child is released.
+                    if (evidence[i].DeployedReserve) continue;
                     if (zoneByChildId.TryGetValue(snapshots[i].ChildId, out var za))
                     {
                         roles[i] = PlayCorpsAssignment.RoleForRectKind(za.RectKind);
@@ -167,17 +170,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (roles[i] != DirectChildRole.Unknown) continue;
                 var ev = evidence[i];
 
-                // BC10: a child the executor placed as a deployment reserve stays one until
-                // ReleaseReserves (crisis, Exploit, odds) changes it, or another source moves it.
-                if (ev.DeployedReserve)
-                {
-                    roles[i] = DirectChildRole.Reserve;
-                    continue;
-                }
-
                 if (ShouldFallbackUnderSevereOvermatch(ev, perChildEnemyIntent[i]))
                 {
                     roles[i] = DirectChildRole.Fallback;
+                    continue;
+                }
+
+                // BC10: a child the executor placed as a deployment reserve stays one until
+                // ReleaseReserves (crisis, Exploit, odds) changes it, or another source moves it.
+                // The safety check above still comes first.
+                if (ev.DeployedReserve)
+                {
+                    roles[i] = DirectChildRole.Reserve;
                     continue;
                 }
 

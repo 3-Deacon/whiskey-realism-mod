@@ -59,6 +59,26 @@ namespace WhiskeyRealism.Tactical.Battle
             return count;
         }
 
+        /// <summary>
+        /// BuildPoints that grows the output buffers instead of truncating: a full list is rebuilt
+        /// into doubled buffers up to <paramref name="maxCapacity"/>. <paramref name="truncated"/> is
+        /// true when the list still fills the buffers at the ceiling (points may have been cut).
+        /// </summary>
+        public static int BuildPointsGrowing(IBattleUnitView s, BattleTerrainGrid grid, ref float[] xs, ref float[] zs,
+            int maxCapacity, out int crossingPoints, out bool truncated)
+        {
+            int n = BuildPoints(s, grid, xs, zs, out crossingPoints);
+            while (n > 0 && n == Math.Min(xs.Length, zs.Length) && n < maxCapacity)
+            {
+                int size = Math.Min(maxCapacity, Math.Max(8, n * 2));
+                xs = new float[size];
+                zs = new float[size];
+                n = BuildPoints(s, grid, xs, zs, out crossingPoints);
+            }
+            truncated = n > 0 && n == Math.Min(xs.Length, zs.Length) && n >= maxCapacity;
+            return n;
+        }
+
         private static bool Perceived(in EnemyObservation o)
         {
             if (o.IsReinforcement || o.UnitTyp == TacticalUnitType.Artillery || o.UnitTyp > TacticalUnitType.MaxCombat) return false;

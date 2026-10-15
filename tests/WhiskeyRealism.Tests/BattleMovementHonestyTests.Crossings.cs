@@ -194,6 +194,31 @@ internal static partial class BattleMovementHonestyTests
             if (StripComments(System.IO.File.ReadAllText(path)).Contains("blockedcrossings")) readers.Add(System.IO.Path.GetFileName(path));
         AssertEqual("", string.Join(",", readers), "files that read vanilla's blockedcrossings");
         string exec = Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs");
-        AssertTrue(exec.Contains("CoveredCrossings.BuildPoints("), "the executor builds the perceived list");
+        AssertTrue(exec.Contains("CoveredCrossings.BuildPointsGrowing("), "the executor builds the perceived list");
+    }
+
+    // 300 standing enemies in cover each add a distinct fire point: the output buffers grow instead of
+    // truncating the list, up to the caller's ceiling, and say so when the ceiling cuts it.
+    private static void CoveredPointBuffersGrowInsteadOfTruncating()
+    {
+        BattleTerrainGrid grid = CrossingGrid((100f, -100f, Bridge));
+        var obs = new EnemyObservation[300];
+        for (int i = 0; i < obs.Length; i++)
+            obs[i] = Obs(i + 1, 80f + i * 2f, -140f, 0f, 30f, coverValue: 0.3f, coverObject: 1);
+        BattleSnapshot s = SnapshotWith(obs);
+        var xs = new float[64];
+        var zs = new float[64];
+        int n = CoveredCrossings.BuildPointsGrowing(s, grid, ref xs, ref zs, 1024, out _, out bool truncated);
+        AssertTrue(n > 64, "more than the starting 64 points were kept: " + n);
+        AssertFalse(truncated, "under the ceiling nothing is cut");
+        AssertTrue(xs.Length >= n && zs.Length >= n, "the buffers grew");
+
+        var small = new float[8];
+        var smallZ = new float[8];
+        n = CoveredCrossings.BuildPointsGrowing(s, grid, ref small, ref smallZ, 16, out _, out truncated);
+        AssertEqual(16, n, "the ceiling bounds the list");
+        AssertTrue(truncated, "and the cut is reported");
+        string exec = Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs");
+        AssertTrue(exec.Contains("CoveredCrossings.BuildPointsGrowing(") && exec.Contains("covered-crossings-truncated"), "the runtime grows the buffer and logs a cut once");
     }
 }

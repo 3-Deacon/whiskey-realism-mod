@@ -1534,8 +1534,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         active: true);
                 }
 
-                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren,
-                    DeployedReserveFlags(side.AllianceId, childInstanceIds));
+                bool[] deployedReserve = DeployedReserveFlags(side.AllianceId, childInstanceIds);
+                DeployedReserveMemory.Shared.Apply(deployedReserve, childInstanceIds);
+                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren, deployedReserve);
                 // Stage 2 / G: geometric play layer. Compute corps→rect
                 // assignments from the current plan's template. When zone
                 // assignments are available, the allocator uses them in
@@ -1557,6 +1558,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
+                var allocatedRoles = new DirectChildRole[side.Army.CurrentDirectChildIntents.Count];
+                for (int r = 0; r < allocatedRoles.Length; r++) allocatedRoles[r] = side.Army.CurrentDirectChildIntents[r].Role;
+                DeployedReserveMemory.Shared.NoteRoles(deployedReserve, childInstanceIds, allocatedRoles);
 
                 for (int i = 0; i < side.Army.CurrentDirectChildIntents.Count; i++)
                 {

@@ -755,16 +755,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         internal enum Outcome { NoRoute, Routed, ColumnWait, Deferred }
 
-        private const float CacheHours = 0.25f;
         private const float TargetBucketMeters = 50f;
 
-        private struct CachedRoute
-        {
-            public RoadRoute Route;
-            public double AtHours;
-        }
-
-        private static readonly Dictionary<long, CachedRoute> _cache = new Dictionary<long, CachedRoute>(64);
+        private static readonly RoutePlanCache _cache = new RoutePlanCache();
         // The doctrine hour each group first waited for march column.
         private static readonly Dictionary<int, double> _columnSince = new Dictionary<int, double>(64);
         private static float[] _pathX = new float[64];
@@ -886,11 +879,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             int bz = (int)Math.Floor(z / TargetBucketMeters);
             long key = ((long)rec.InstanceId << 32) ^ (uint)(((bx & 0xFFFF) << 16) | (bz & 0xFFFF));
             double now = s.DoctrineHours;
-            if (_cache.TryGetValue(key, out CachedRoute cached) && now - cached.AtHours >= 0.0 && now - cached.AtHours < CacheHours)
-            {
-                route = cached.Route;
-                return true;
-            }
+            if (_cache.TryGet(key, now, out route)) return true;
             if (!t.RouteBudget.TryConsume())
             {
                 route = default(RoadRoute);
@@ -930,7 +919,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         "[PostureProducer] road route plan failed, the move goes unrouted: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
-            _cache[key] = new CachedRoute { Route = route, AtHours = now };
+            _cache.Put(key, in route, now);
             return true;
         }
 

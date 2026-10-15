@@ -807,9 +807,11 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Deployment Terrain Discipline",
                 true,
-                "Default ON. #60: after vanilla AI deployment, moves AI groups standing in water or outside the deployment zone to the best nearby " +
-                "safe point through SetGroupFormation. Visible enemy bearing only adds a facing bonus to candidate points. Fortification-line " +
-                "placements and the player's side are left alone.");
+                "Default ON. #60: after vanilla AI deployment, moves AI groups that vanilla placed in this pass and that stand in water or outside " +
+                "the deployment zone to the best nearby safe point (an immediate placement through the battle core's order executor). The assumed " +
+                "enemy bearing (what the side sees, else the nearest enemy entry point) only adds a facing bonus to candidate points. Fortification-line " +
+                "placements, the player's side and the W&L command's AI group are left alone. Independent of Enable Deployment And March Doctrine, " +
+                "which governs the fog-honest re-placement and the reserve echelon.");
             TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Correction Meters",

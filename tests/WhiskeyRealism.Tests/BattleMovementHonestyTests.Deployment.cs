@@ -215,10 +215,11 @@ internal static partial class BattleMovementHonestyTests
         AssertNear(-100f, qz, 0.01f, "same z");
     }
 
-    // CheckForSimilarPositions compares against the groups vanilla RE-deployed in this call (list5);
-    // a group whose placement stood is not in that list. A front within half a spacing radius of
-    // a re-deployed group is moved a radius away; one beside a kept group is not.
-    private static void SpacingCountsOnlyRedeployedGroups()
+    // CheckForSimilarPositions compares against list5, every group placed earlier in the call
+    // (85870): vanilla's list holds each objective-path group it placed, whether or not Whiskey
+    // later agrees with the spot. A front within half a spacing radius (12.5 m) of any earlier
+    // placement, Kept, Locked or Replaced, is moved a radius away.
+    private static void SpacingCountsEveryGroupPlacedInTheCall()
     {
         BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
         var objectives = new[]
@@ -230,16 +231,42 @@ internal static partial class BattleMovementHonestyTests
         // Both groups start far away, so both are re-placed; the second front is 8 m (< 12.5 m) from the first.
         DeploymentPlan both = Plan(s, new[] { Placed(1, 0f, -500f, 90f), Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out int replaced);
         AssertEqual(2, replaced, "both re-placed");
-        float gap = Dist(both.Placements[0].X, both.Placements[0].Z, both.Placements[1].X, both.Placements[1].Z);
-        AssertTrue(gap >= 24f, "the second group stands a spacing radius (25 m) from the first: " + gap);
+        AssertTrue(Dist(both.Placements[0].X, both.Placements[0].Z, both.Placements[1].X, both.Placements[1].Z) >= 24f,
+            "the second group stands a spacing radius (25 m) from the first");
 
-        // The first group already stands on its objective facing the enemy: it is kept, so it is not
-        // in vanilla's list and the second group is placed on its own objective.
-        DeploymentPlan kept = Plan(s, new[] { Placed(1, 300f, -100f, 90f), Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out replaced);
-        AssertEqual(1, replaced, "only the second is re-placed");
-        // (group 1 took the objective nearest the enemy, x 308, and is kept; group 2 takes the other one)
+        // The first group already stands on the objective nearest the enemy (x 308) facing it: it is kept,
+        // but it is still in vanilla's list, so the second group (objective x 300, 8 m away) is spaced from it.
+        DeploymentPlan kept = Plan(s, new[] { Placed(1, 308f, -100f, 90f), Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out replaced);
         AssertEqual(PlacementKind.Kept, kept.Placements[0].Kind, "group 1 is kept");
-        AssertNear(300f, kept.Placements[1].X, 0.001f, "group 2 stands on its objective, 8 m from the kept group, undisplaced");
+        AssertEqual(1, replaced, "only the second is re-placed");
+        AssertTrue(Dist(kept.Placements[0].X, kept.Placements[0].Z, kept.Placements[1].X, kept.Placements[1].Z) >= 24f,
+            "a kept neighbour counts: the second group is a spacing radius away from it");
+
+        // A locked group is placed by vanilla too.
+        DeploymentGroup locked = Placed(1, 308f, -100f, 270f);
+        locked.Locked = true;
+        DeploymentPlan lockedPlan = Plan(s, new[] { locked, Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out _);
+        AssertTrue(Dist(lockedPlan.Placements[0].X, lockedPlan.Placements[0].Z, lockedPlan.Placements[1].X, lockedPlan.Placements[1].Z) >= 24f,
+            "a locked neighbour counts too");
+    }
+
+    // The discipline loop and the planner share one rule for the groups the pass must not touch.
+    private static void LockedGroupRuleCoversWlParentAndPlayerFlags()
+    {
+        const UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
+        AssertFalse(DeploymentDoctrine.IsLockedGroup(10, 99, true, live), "an ordinary AI group");
+        AssertTrue(DeploymentDoctrine.IsLockedGroup(99, 99, true, live), "the W&L command's AI group");
+        AssertTrue(DeploymentDoctrine.IsLockedGroup(10, 99, true, live | UnitFlags.PlayerOwned), "player-owned");
+        AssertTrue(DeploymentDoctrine.IsLockedGroup(10, 99, true, live | UnitFlags.PlayerCommand), "the player's command");
+        AssertTrue(DeploymentDoctrine.IsLockedGroup(10, 99, true, live | UnitFlags.AncestorOfPlayerCommand), "an ancestor of the player's command");
+        AssertTrue(DeploymentDoctrine.IsLockedGroup(10, 99, false, live), "a group the snapshot does not list cannot be written");
+        AssertFalse(DeploymentDoctrine.IsLockedGroup(10, 0, true, live), "no W&L group (0) matches no group");
+        // The patch's terrain loop consults the rule before correcting a group.
+        string patch = Code("src/WhiskeyRealism/Patches/TacticalDeploymentTerrainDisciplinePatch.cs");
+        string plan = Code("src/WhiskeyRealism/Tactical/Battle/DeploymentPlanRuntime.cs");
+        AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(patch, @"DeploymentPlanRuntime\.IsLocked\([^;]*\)\s*\)?\s*continue;|if \(!DeploymentPlanRuntime\.IsLocked\("),
+            "the terrain loop skips locked groups");
+        AssertTrue(plan.Contains("DeploymentDoctrine.IsLockedGroup("), "and shares the rule with the planner");
     }
 
     // ------------------------------------------------------------------ reserve echelon
@@ -670,6 +697,8 @@ internal static partial class BattleMovementHonestyTests
                    patch.Contains("PatchFirstFire.Mark(\"tactical.patch.deployment-terrain.postfix\")"), "the Postfix scope and first-fire id");
         AssertTrue(patch.Contains("DeploymentDoctrineEnabled()") && patch.Contains("DeploymentPlanRuntime.Run("), "the doctrine flag gates the re-placement");
         AssertFalse(patch.Contains("GetVisibleEnemyBearing"), "the range-only visible bearing is gone");
+        AssertTrue(patch.Contains("TerrainDisciplineEnabled() || DeploymentDoctrineEnabled()"), "the patch runs while either flag is on");
+        AssertTrue(patch.Contains("if (!TerrainDisciplineEnabled()) return;"), "the terrain correction needs its own flag, the doctrine does not");
         string probe = Code("src/WhiskeyRealism/Tactical/TacticalTerrainProbe.cs");
         AssertFalse(probe.Contains("GetVisibleEnemyBearing") || probe.Contains("enemyinrangereg"), "the probe reads no enemy unit list");
         string observer = Code("src/WhiskeyRealism/Patches/TacticalDeploymentObserverPatch.cs");
@@ -680,8 +709,12 @@ internal static partial class BattleMovementHonestyTests
     {
         string coordinator = Code("src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleCoordinatorRuntime.cs");
         AssertTrue(coordinator.Contains("DeploymentDoctrine.IsDeployedReserve("), "the evidence reads the executor's outcome");
-        AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(coordinator,
-            @"DirectChildEvidenceBuilder\.BuildAll\([^;]*DeployedReserveFlags\(side\.AllianceId, childInstanceIds\)"), "and hands the flags to the builder");
+        AssertTrue(coordinator.Contains("DeployedReserveFlags(side.AllianceId, childInstanceIds)") &&
+                   coordinator.Contains("DeployedReserveMemory.Shared.Apply(deployedReserve, childInstanceIds)") &&
+                   System.Text.RegularExpressions.Regex.IsMatch(coordinator, @"DirectChildEvidenceBuilder\.BuildAll\([^;]*deployedReserve\)"),
+            "the flags pass the release memory and reach the builder");
+        AssertTrue(coordinator.Contains("DeployedReserveMemory.Shared.NoteRoles(deployedReserve, childInstanceIds, allocatedRoles)"),
+            "and the allocated roles feed the memory after the allocation");
     }
 
     // A terrain correction of a reserve group is issued with source Deployment; its outcome would
@@ -705,5 +738,90 @@ internal static partial class BattleMovementHonestyTests
         AssertTrue(plan.Contains("DeploymentDoctrine.PlacementSource("), "every placement goes through the source rule");
         AssertEqual(425f, DeploymentDoctrine.ReserveDepthMeters, "the ledger's reserve stand-off");
         AssertEqual(90f, DeploymentDoctrine.ReserveLaneMeters, "and lane");
+    }
+
+    private static void OrderedAt(OrderExecutor executor, int unitId, IntentSource source, double hours)
+    {
+        _issued[0] = new IssuedTarget { InstanceId = unitId, X = 500f, Z = -500f };
+        var intent = new BattleOrderIntent
+        {
+            GroupId = unitId, Channel = OrderChannel.Move, TargetX = 500f, TargetZ = -500f, Heading = -1f,
+            Priority = IntentPriority.Executor, Source = source, Task = CommandTaskType.None, Reason = "test",
+        };
+        executor.RecordIssued(intent, hours, _issued, 1, null, 0, 0, 1);
+    }
+
+    // The release producer moves the direct-child node, not the placed AI groups under it: the groups'
+    // last outcome is still DeploymentReserve, but a later Move by another source anywhere in the child's
+    // subtree ends the deployed reserve.
+    private static void DeployedReserveClearsWhenAnotherSourceMovesTheChild()
+    {
+        BattleSnapshot s = ArrivalFixture(out int[] ix);   // child Top(100) -> SubGroup(110) -> Mem2, Mem3
+        var executor = new OrderExecutor();
+        OrderedAt(executor, SubGroup, IntentSource.DeploymentReserve, 1.0);
+        AssertTrue(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "placed as a reserve");
+        OrderedAt(executor, Top, IntentSource.ReserveRelease, 2.0);
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "the release producer moved the child node: released");
+
+        var posture = new OrderExecutor();
+        OrderedAt(posture, SubGroup, IntentSource.DeploymentReserve, 1.0);
+        OrderedAt(posture, Mem3, IntentSource.PostureExecutor, 1.5);
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, posture, ix[0]), "a posture move of a descendant releases it too");
+
+        var earlier = new OrderExecutor();
+        OrderedAt(earlier, Top, IntentSource.PostureExecutor, 0.5);
+        OrderedAt(earlier, SubGroup, IntentSource.DeploymentReserve, 1.0);
+        AssertTrue(DeploymentDoctrine.IsDeployedReserve(s, earlier, ix[0]), "an older move of another source does not count");
+    }
+
+    // ReleaseReserves is an allocator role change that issues no Move, so the outcome alone would let the
+    // child fall back into Reserve when the crisis passes. The memory keeps a released child released.
+    private static void ReleasedDeployedReserveDoesNotFlipBack()
+    {
+        var memory = new DeployedReserveMemory();
+        int[] ids = { 11, 12, 13 };
+        bool[] flags = { true, true, false };
+        memory.Apply(flags, ids);
+        AssertTrue(flags[0] && flags[1], "nothing released yet");
+        DirectChildRole[] roles = { DirectChildRole.Reserve, DirectChildRole.Fix, DirectChildRole.Main };
+        memory.NoteRoles(new[] { true, true, false }, ids, roles);
+
+        bool[] later = { true, true, false };
+        memory.Apply(later, ids);
+        AssertTrue(later[0], "a child still in Reserve stays a deployed reserve");
+        AssertFalse(later[1], "the child released into Fix does not flip back when the crisis passes");
+        memory.Clear();
+        later = new[] { false, true, false };
+        memory.Apply(later, ids);
+        AssertTrue(later[1], "the memory is per battle");
+    }
+
+    private static void DeployedReserveOutranksZoneRolesButNotTheFallbackCheck()
+    {
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        DirectChildEvidence[] evidence =
+        {
+            new DirectChildEvidence(2, 1, false, 2, 0, 0.7f),
+            new DirectChildEvidence(4, 1, false, 2, 0, 0.7f, deployedReserve: true),
+            new DirectChildEvidence(2, 1, false, 1, 0, 0.7f),
+        };
+        var zones = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsAssignment("c1", WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftWing, 0, 0f, 0f, 0f),
+        };
+        var intents = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), evidence, null, zones);
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role, "a zone row for a deployed reserve (a wing would be Main) does not override the reserve");
+
+        // Severe overmatch still beats the reserve: the safety check stays first.
+        var overmatched = new[]
+        {
+            evidence[0],
+            new DirectChildEvidence(1, 4, true, 2, 0, 0.7f, deployedReserve: true),
+            evidence[2],
+        };
+        var attack = new TacticalIntentModel(InferredIntent.Attack, 2, 0.9f, 0f, new EvidenceTag[0]);
+        var enemyIntent = new[] { attack, attack, attack };
+        var fell = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), overmatched, enemyIntent, null);
+        AssertEqual(DirectChildRole.Fallback, fell[1].Role, "a deployed reserve in contact and overmatched falls back");
     }
 }

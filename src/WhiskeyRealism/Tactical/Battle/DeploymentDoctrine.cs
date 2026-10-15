@@ -387,24 +387,47 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// Whether the executor's last Move of the direct child or of any unit under it is a
-        /// deployment-reserve placement it issued (Issued or Moved). The outcome table is
-        /// executor bookkeeping (battle-core spec D4); the allocator gives such a child
-        /// the Reserve role on its first allocation.
+        /// Whether the direct child (or any unit under it) holds a deployment-reserve placement the
+        /// executor issued (Issued or Moved) that no later Move of another source has replaced anywhere
+        /// in the child's subtree. The release producer moves the child node while the placed AI groups
+        /// under it keep their old outcome, so the whole subtree is read. The outcome table is executor
+        /// bookkeeping (battle-core spec D4); the allocator gives such a child the Reserve role.
         /// </summary>
         public static bool IsDeployedReserve(BattleSnapshot s, OrderExecutor executor, int childIndex)
         {
             if (s == null || executor == null || childIndex < 0 || childIndex >= s.OwnCount) return false;
             UnitRecord[] own = s.Own;
+            bool reserved = false;
+            double reservedAt = double.MinValue, otherAt = double.MinValue;
             for (int i = 0; i < s.OwnCount; i++)
             {
                 if (i != childIndex && !s.IsAncestorOf(childIndex, i)) continue;
-                if (executor.TryGetLastOutcome(own[i].InstanceId, OrderChannel.Move, out OrderOutcome o) &&
-                    o.Source == IntentSource.DeploymentReserve &&
-                    (o.Kind == OrderOutcomeKind.Issued || o.Kind == OrderOutcomeKind.Moved))
-                    return true;
+                if (!executor.TryGetLastOutcome(own[i].InstanceId, OrderChannel.Move, out OrderOutcome o)) continue;
+                if (o.Kind != OrderOutcomeKind.Issued && o.Kind != OrderOutcomeKind.Moved) continue;
+                if (o.Source == IntentSource.DeploymentReserve)
+                {
+                    reserved = true;
+                    if (o.AtHours > reservedAt) reservedAt = o.AtHours;
+                }
+                else if (o.Source != IntentSource.Deployment && o.AtHours > otherAt)
+                {
+                    otherAt = o.AtHours;
+                }
             }
-            return false;
+            return reserved && !(otherAt > reservedAt);
+        }
+
+        /// <summary>
+        /// Groups the deployment pass must not touch: the W&amp;L command's AI group, anything the
+        /// snapshot flags as the player's (own, command, ancestor of the command), and a group the
+        /// snapshot does not list (the executor cannot write it). One rule for the planner and the
+        /// terrain discipline.
+        /// </summary>
+        public static bool IsLockedGroup(int groupInstanceId, int wlGroupInstance, bool inSnapshot, UnitFlags flags)
+        {
+            if (!inSnapshot) return true;
+            if (wlGroupInstance != 0 && groupInstanceId == wlGroupInstance) return true;
+            return (flags & (UnitFlags.PlayerOwned | UnitFlags.PlayerCommand | UnitFlags.AncestorOfPlayerCommand)) != 0;
         }
 
         /// <summary>
@@ -506,10 +529,10 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static bool Occupied(DeploymentPlan plan, int placed, float x, float z, float radius)
         {
-            // CheckAIGroupInRange over list5: only the groups this call re-deployed.
+            // CheckAIGroupInRange over list5: every group placed earlier in the call (vanilla adds
+            // each objective-path group it placed, whatever Whiskey later decides about it).
             for (int p = 0; p < placed; p++)
-                if (plan.Placements[p].Kind == PlacementKind.Replaced &&
-                    Distance(plan.Placements[p].X, plan.Placements[p].Z, x, z) < radius) return true;
+                if (Distance(plan.Placements[p].X, plan.Placements[p].Z, x, z) < radius) return true;
             return false;
         }
 

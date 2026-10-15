@@ -91,7 +91,10 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // The perceived covered points per side (CoveredCrossings), rebuilt at most once per
         // snapshot (TickId) and only when a move carries AvoidCoveredCrossings. Pooled.
+        // The buffers start at 64 points and grow to the ceiling (a long battle line of standing enemies
+        // in cover can list hundreds); a list the ceiling cuts is logged once.
         private const int CoveredPointCapacity = 64;
+        private const int CoveredPointCeiling = 1024;
         private static readonly float[][] _coveredX = { new float[CoveredPointCapacity], new float[CoveredPointCapacity] };
         private static readonly float[][] _coveredZ = { new float[CoveredPointCapacity], new float[CoveredPointCapacity] };
         private static readonly List<Vector3>[] _covered = { new List<Vector3>(CoveredPointCapacity), new List<Vector3>(CoveredPointCapacity) };
@@ -729,7 +732,11 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 try
                 {
-                    int count = CoveredCrossings.BuildPoints(view, BattleTerrainGridRuntime.Get(), _coveredX[side], _coveredZ[side], out int crossingPoints);
+                    int count = CoveredCrossings.BuildPointsGrowing(view, BattleTerrainGridRuntime.Get(), ref _coveredX[side], ref _coveredZ[side],
+                        CoveredPointCeiling, out int crossingPoints, out bool truncated);
+                    if (truncated)
+                        OnceLog.Warning("tactical-battle-core:covered-crossings-truncated",
+                            "[OrderExecutor] the perceived covered-point list reached its " + CoveredPointCeiling + "-point ceiling; later points were cut");
                     for (int i = 0; i < count; i++)
                         list.Add(TacticalTerrainProbe.WithTerrainHeight(new Vector3(_coveredX[side][i], 0f, _coveredZ[side][i])));
                     if (count > 0 && !_coveredLogged)

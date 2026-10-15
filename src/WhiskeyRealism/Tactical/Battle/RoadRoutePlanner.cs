@@ -11,6 +11,64 @@ namespace WhiskeyRealism.Tactical.Battle
         public float RouteCost, VanillaCost;
     }
 
+    /// <summary>
+    /// Planned routes by key (group, 50 m target bucket), each served for LifetimeHours of doctrine time.
+    /// Expired entries are dropped when the cache reaches PruneAt and the cache never holds more than
+    /// MaxEntries, so a long battle does not keep every key it ever saw.
+    /// </summary>
+    public sealed class RoutePlanCache
+    {
+        public const double LifetimeHours = 0.25;
+        public const int PruneAt = 128;
+        public const int MaxEntries = 1024;
+
+        private struct Entry
+        {
+            public RoadRoute Route;
+            public double AtHours;
+        }
+
+        private readonly System.Collections.Generic.Dictionary<long, Entry> _entries = new System.Collections.Generic.Dictionary<long, Entry>(64);
+        private readonly System.Collections.Generic.List<long> _scratch = new System.Collections.Generic.List<long>(64);
+
+        public int Count => _entries.Count;
+
+        public bool TryGet(long key, double nowHours, out RoadRoute route)
+        {
+            if (_entries.TryGetValue(key, out Entry e) && nowHours - e.AtHours >= 0.0 && nowHours - e.AtHours < LifetimeHours)
+            {
+                route = e.Route;
+                return true;
+            }
+            route = default(RoadRoute);
+            return false;
+        }
+
+        public void Put(long key, in RoadRoute route, double nowHours)
+        {
+            if (_entries.Count >= PruneAt && !_entries.ContainsKey(key)) Prune(nowHours);
+            _entries[key] = new Entry { Route = route, AtHours = nowHours };
+        }
+
+        public void Clear()
+        {
+            _entries.Clear();
+        }
+
+        private void Prune(double nowHours)
+        {
+            _scratch.Clear();
+            foreach (var pair in _entries)
+            {
+                double age = nowHours - pair.Value.AtHours;
+                if (age < 0.0 || age >= LifetimeHours) _scratch.Add(pair.Key);
+            }
+            for (int i = 0; i < _scratch.Count; i++) _entries.Remove(_scratch[i]);
+            // Still full of live entries: drop everything rather than grow past the ceiling.
+            if (_entries.Count >= MaxEntries) _entries.Clear();
+        }
+    }
+
     /// <summary>What the posture pipeline does with a planned route, given the group's formation.</summary>
     public enum ColumnDecision
     {

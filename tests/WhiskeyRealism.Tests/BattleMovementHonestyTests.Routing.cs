@@ -358,4 +358,23 @@ internal static partial class BattleMovementHonestyTests
         float dx = ax - bx, dz = az - bz;
         return (float)Math.Sqrt(dx * dx + dz * dz);
     }
+
+    // The route cache is keyed by (group, 50 m target bucket) and entries live 0.25 doctrine-h; a long
+    // battle must not keep every key it ever saw. Expired entries go when the cache fills, and a hard
+    // ceiling bounds it within one hour of doctrine time.
+    private static void RouteCacheIsPrunedDuringABattle()
+    {
+        var cache = new RoutePlanCache();
+        var route = new RoadRoute { Use = true, ViaCount = 1 };
+        for (int k = 0; k < 400; k++) cache.Put(k, in route, 1.0);
+        AssertTrue(cache.TryGet(5, 1.1, out _), "a fresh entry is served");
+        AssertFalse(cache.TryGet(5, 1.0 + RoutePlanCache.LifetimeHours, out _), "an expired entry is not served");
+        AssertFalse(cache.TryGet(5, 0.5, out _), "nor one stamped in the future of the clock (a new battle)");
+        cache.Put(1000, in route, 2.0);   // the cache is over its prune size: the expired 400 go
+        AssertTrue(cache.Count < 10, "expired entries were pruned: " + cache.Count);
+        for (int k = 0; k < 5000; k++) cache.Put(10000 + k, in route, 3.0);
+        AssertTrue(cache.Count <= RoutePlanCache.MaxEntries, "the ceiling holds within one instant: " + cache.Count);
+        string posture = Code("src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs");
+        AssertTrue(posture.Contains("RoutePlanCache") && !posture.Contains("Dictionary<long, CachedRoute>"), "the posture routes use the pruned cache");
+    }
 }

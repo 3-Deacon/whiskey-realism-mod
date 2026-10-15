@@ -248,8 +248,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 bool tainted = ownIndex >= 0 && ChildHoldsPlayerUnit(s, child);
                 bool cavalryOnly = false, artilleryOnly = false;
                 if (ownIndex >= 0) LeafKinds(s, ownIndex, out cavalryOnly, out artilleryOnly);
-                bool locked = id == pass.WlGroupInstance || ownIndex < 0 ||
-                    (own[ownIndex].Flags & (UnitFlags.PlayerOwned | UnitFlags.PlayerCommand | UnitFlags.AncestorOfPlayerCommand)) != 0;
+                bool locked = DeploymentDoctrine.IsLockedGroup(id, pass.WlGroupInstance, ownIndex >= 0, ownIndex >= 0 ? own[ownIndex].Flags : UnitFlags.None);
 
                 _groups[n] = new DeploymentGroup
                 {
@@ -310,6 +309,20 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             cavalryOnly = cavalry > 0 && artillery == 0 && other == 0;
             artilleryOnly = artillery > 0 && cavalry == 0 && other == 0;
+        }
+
+        /// <summary>
+        /// Whether the pass must not touch this group (the W&amp;L command's AI group, the player's chain, a
+        /// group the side's snapshot does not list): the planner's Locked rule, also applied by the
+        /// terrain discipline.
+        /// </summary>
+        internal static bool IsLocked(int alliance, DeploymentPass pass, Regiment regiment)
+        {
+            if (pass == null || (UnityEngine.Object)regiment == null) return true;
+            if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot s) || s == null) return true;
+            int id = regiment.gameObject.GetInstanceID();
+            int index = s.IndexOfOwn(id);
+            return DeploymentDoctrine.IsLockedGroup(id, pass.WlGroupInstance, index >= 0, index >= 0 ? s.Own[index].Flags : UnitFlags.None);
         }
 
         /// <summary>The enemy-owned entry points (public scenario data) into the pooled arrays; how many.</summary>

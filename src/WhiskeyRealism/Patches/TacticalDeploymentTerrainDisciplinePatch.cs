@@ -32,7 +32,8 @@ namespace WhiskeyRealism.Patches
     // Every write is an immediate-placement Move through the battle core's order executor
     // (OrderExecutorRuntime.TryPlanInline / ExecutePlannedInline); this patch calls no vanilla
     // writer. Fog-honest re-placement and the reserve are gated by Enable Deployment And March
-    // Doctrine; the terrain discipline by Enable Tactical Deployment Terrain Discipline.
+    // Doctrine; the terrain discipline by Enable Tactical Deployment Terrain Discipline. The two
+    // flags are independent (the patch runs while either is on).
     //
     // Vanilla rules (WS T3):
     //   - SetGroupFormation's targetpos is the LINE FRONT; vanilla puts the HQ at
@@ -147,9 +148,13 @@ namespace WhiskeyRealism.Patches
                     if (DeploymentDoctrineEnabled())
                         DeploymentPlanRuntime.Run(__instance, foralliance, __state, candidate, initialDeployment);
 
+                    if (!TerrainDisciplineEnabled()) return;
                     for (int i = 0; i < groups.Length; i++)
                     {
-                        if (candidate[i]) TryDisciplineGroup(__instance, groups[i], groups[i].regref, phase);
+                        // The W&L command's AI group and the player's chain are never corrected: the
+                        // command and its parent stay together where vanilla placed them.
+                        if (!candidate[i] || DeploymentPlanRuntime.IsLocked(foralliance, __state, groups[i].regref)) continue;
+                        TryDisciplineGroup(__instance, groups[i], groups[i].regref, phase);
                     }
                 }
                 catch (Exception ex)
@@ -184,12 +189,20 @@ namespace WhiskeyRealism.Patches
             return Plugin.EnableDeploymentAndMarchDoctrine != null && Plugin.EnableDeploymentAndMarchDoctrine.Value;
         }
 
+        // The patch runs when the mod is on and either of its two behaviours is: the fog-honest
+        // re-placement and reserve (Enable Deployment And March Doctrine) and the terrain correction
+        // (Enable Tactical Deployment Terrain Discipline) are independent of each other.
         private static bool Enabled()
         {
             return Plugin.Instance != null &&
                    Plugin.Instance.Enabled != null &&
                    Plugin.Instance.Enabled.Value &&
-                   Plugin.EnableTacticalDeploymentTerrainDiscipline != null &&
+                   (TerrainDisciplineEnabled() || DeploymentDoctrineEnabled());
+        }
+
+        private static bool TerrainDisciplineEnabled()
+        {
+            return Plugin.EnableTacticalDeploymentTerrainDiscipline != null &&
                    Plugin.EnableTacticalDeploymentTerrainDiscipline.Value;
         }
 
