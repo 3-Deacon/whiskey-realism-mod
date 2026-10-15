@@ -64,12 +64,6 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
-        public static IEnumerable<string> ProfileIds()
-        {
-            for (int i = 0; i < Profiles.Length; i++)
-                yield return Profiles[i].OperationId;
-        }
-
         public static bool TryGetById(string operationId, out HistoricalOperationProfile profile)
         {
             profile = null;

@@ -428,11 +428,12 @@ internal static class CampaignLifecycleFixTests
 
     private static IEnumerable<HistoricalOperationProfile> AllProfiles()
     {
-        foreach (var id in HistoricalOperationCatalog.ProfileIds())
-        {
-            TestHarness.AssertTrue(HistoricalOperationCatalog.TryGetById(id, out var profile), "profile " + id);
+        // The catalog has no runtime need to enumerate profiles; read the private table so the
+        // .dat validation covers every profile, including ones added later.
+        var field = typeof(HistoricalOperationCatalog).GetField("Profiles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        TestHarness.AssertTrue(field != null, "HistoricalOperationCatalog.Profiles table");
+        foreach (var profile in (HistoricalOperationProfile[])field.GetValue(null))
             yield return profile;
-        }
     }
 
     private static void R5EveryProfileTargetExistsForAllianceChapterAndDate()
