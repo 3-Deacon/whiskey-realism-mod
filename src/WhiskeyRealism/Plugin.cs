@@ -77,16 +77,13 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
-        public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
         public static ConfigEntry<bool> EnableVanillaMacroAiSync;
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
-        public static ConfigEntry<float> BattleGroupStanceMinIntervalSeconds;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
-        public static ConfigEntry<bool> EnableArtilleryWaypointVeto;
         public static ConfigEntry<float> ArtilleryAuditMinHoldSeconds;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
@@ -148,9 +145,6 @@ namespace WhiskeyRealism
 
         internal TacticalCommanderMode TacticalCommanderModeValue =>
             _cachedTacticalCommanderMode ?? (_cachedTacticalCommanderMode = ResolveTacticalCommanderMode()).Value;
-
-        internal bool TacticalOperationsLedgerAllowsWrites =>
-            TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
 
         public float HeavyReviewCycleHours => TacticalHeavyReviewCycleHours?.Value ?? 0.003f;
         public float HeavyReviewMinRealtimeSeconds => TacticalHeavyReviewMinRealtimeSeconds?.Value ?? 2.0f;
@@ -331,15 +325,20 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Reserve Order Delay Guard",
                 true,
-                "Default ON. Converts vanilla reserve support moves that were issued by direct RegimentSetPath into normal delayed SetWaypoint orders after removing the immediate path.");
+                "Default ON. #56: with order delays on, a reserve support move vanilla issues by direct RegimentSetPath (CheckUseOfReserves 6170, " +
+                "no courier) is re-issued through the battle-core order executor as a courier order (SetWaypoint with order delay and double " +
+                "quick). Vanilla's immediate path is removed only when that executor plan executes; any refusal (W&L player-owned or feud unit, " +
+                "a higher-priority claim, an invalid target, dedupe, cooldown) keeps vanilla's own move. Writes need Tactical Commander Mode = Active.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
                 true,
-                "Default ON. #42: Whiskey runs its own copy of vanilla AIBattle.CheckForFeudGroupActions: feud moves target only the nearest " +
-                "visible enemy within vanilla's feud distance, W&L player-subordinate groups never feud-move, and the orchestrator direct-child " +
-                "gate is applied. Needs Tactical Commander Mode = Active. Off: vanilla feud movement runs unmodified and the direct-child gate is " +
-                "skipped too. (The old charge and objective-chain guards were removed; the key name is kept for existing cfg files.)");
+                "Default ON. #42: Whiskey replays vanilla AIBattle.CheckForFeudGroupActions with vanilla's eligibility and initiative roll, but the " +
+                "target is the nearest visible enemy within vanilla's feud distance and the move is a feud-replay order through the battle-core " +
+                "order executor (ownership, chain, waypoint validation, dedupe, cooldown; refused under a higher-priority claim), so W&L " +
+                "player-owned groups never feud-move. The orchestrator direct-child gate may deny the move. Without a battle snapshot for the " +
+                "side it fails closed: vanilla's move goes out directly only where the write guard allows it. Needs Tactical Commander Mode = " +
+                "Active. Off: vanilla feud movement runs unmodified and the direct-child gate is skipped. (The key name is kept for existing cfg files.)");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -400,24 +399,32 @@ namespace WhiskeyRealism
                 "Tactical Doctrine",
                 "Enable Tactical Artillery Doctrine",
                 true,
-                "Default ON. B7: Postfix on AIBattle.CheckAIBombardment. For AI batteries in groups at ai_stance 3/4, applies the artillery " +
-                "micro-doctrine (limber/unlimber, rotate, fallback) and rewrites combatbehaviorordered: bombard 9 to counter-battery 8 or cancel to " +
-                "7; also releases counter-battery 8 to 7 once no enemy battery is in range. Needs Tactical Commander Mode = Active; W&L/player " +
-                "units are protected.");
+                "Default ON. Battle-core artillery producer, doctrine half: each arbiter tick, an AI battery bombarding (combat behavior 9) may be " +
+                "switched to counter-battery (8) or told to cease (7, resetting bombardstarttime as vanilla does) from its group's doctrine order " +
+                "and the support screen, and a counter-battery battery with no visible enemy battery in fire range is released to 7 (vanilla's own " +
+                "release is unreachable). Every group stance, not only vanilla CheckAIBombardment's 3/4. Orders go through the battle-core order " +
+                "executor. This flag or Enable Artillery All-Stance Audit also runs the point-blank watchdog: a battery vanilla sends to within " +
+                "60 m of a visible enemy is pulled back. W&L/player units protected; writes need Tactical Commander Mode = Active.");
             EnableTacticalWithdrawalDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Withdrawal Doctrine",
                 true,
-                "Default ON. B8: in AIBattle.CheckUseOfReserves, attached AI infantry/cavalry that the withdrawal doctrine marks for fallback or " +
-                "retreat get vanilla's own tactical fallback move (RegimentSetPath along the retreat angle plus SetMovementMode 2); never " +
-                "Regiment.SetWithdrawal. Needs Tactical Commander Mode = Active; W&L/player units are protected. Off: no fallback writes; the " +
-                "reserve doctrine-deny rollback still runs.");
+                "Default ON. Battle-core withdrawal producer: each arbiter tick, attached AI infantry/cavalry regiments the withdrawal doctrine " +
+                "marks for fallback or retreat (morale pressure, rear threat, fatigue, friendly routs, cover) get vanilla's own fallback shape as a " +
+                "top-priority order through the battle-core order executor: an immediate, terrain-checked move away from the closest visible enemy " +
+                "(else from the side's front) by vanilla's standard fallback or retreat distance, ending in movement mode 2, plus combat behavior 2 " +
+                "for a fallback. A group whose ledger FallBackToLine move stalled is re-ordered by courier. Never Regiment.SetWithdrawal. W&L " +
+                "player-owned and feud units are never written; writes need Tactical Commander Mode = Active. Off: no withdrawal orders.");
             TacticalCommanderModeRaw = Config.Bind(
                 "Tactical Orchestrator",
                 "Tactical Commander Mode",
                 // User-approved default for the full doctrine feature: Active. Existing config files still take precedence over this default.
                 "Active",
-                "Default Active. Values: Off, MonitorOnly, Active (case-insensitive). Off disables every Whiskey battle write (full tactical rollback); MonitorOnly runs vision/ledger/tasks/monitor without any vanilla writes; Active runs the full tactical command system for AI-controlled units. Unrecognized values log a warning and fall back to Active.");
+                "Default Active. Values: Off, MonitorOnly, Active (case-insensitive). Active runs the full tactical command system for AI-controlled " +
+                "units: every Whiskey battle order goes through the battle-core order executor (the arbiter's producers and the #42/#56 inline " +
+                "paths), plus the #59 reserve rollback, #44 macroai and #60 deployment corrections. MonitorOnly keeps the battle snapshot, " +
+                "perception, orchestrator, operations ledger and telemetry but writes nothing to vanilla (the arbiter stands down). Off also stops " +
+                "the operations ledger: full tactical rollback. Unrecognized values log a warning and fall back to Active.");
             TacticalCommanderModeRaw.SettingChanged += (_, __) =>
             {
                 _cachedTacticalCommanderMode = null;
@@ -480,44 +487,30 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Reserve Commit Gate",
                 true,
-                "Default ON. AIBattle.CheckUseOfReserves consults the command-node intent for the calling command group and rolls back new vanilla " +
-                "reserve support paths when the group resolves to a Reserve role. Allowed vanilla reserve movement remains eligible for the " +
-                "separate order-delay guard. Requires Enable Tactical Battle Orchestrator.");
-            EnableSinglePassObjectiveRecords = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Single-Pass Objective Records",
-                true,
-                "Default ON. Builds objective records in one walk of BattleUnits.completeunitlist instead of six. Set false to fall back to the " +
-                "per-walk builder.");
-            BattleGroupStanceMinIntervalSeconds = Config.Bind(
-                "Tactical Orchestrator",
-                "Battle Group Stance Min Interval Seconds",
-                1.5f,
-                "Wall-clock cooldown, per AI battle side, between BattleGroupStancePatch passes over the side's groups (at 20x/50x vanilla calls " +
-                "AdjustGroupAIStance many times per real second). Default 1.5. 0 disables the cooldown.");
-            EnableArtilleryWaypointVeto = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Artillery Waypoint Veto",
-                true,
-                "Default ON. Postfix on BattleUnits.SetWaypoint: when vanilla AI orders an AI battery to within 60 m of a visible enemy, cancels " +
-                "the order, limbers and pulls it back along its retreat angle by vanilla's artillery fallback distance (200 m if that is unset). " +
-                "Player orders are never touched. Set false for rollback.");
+                "Default ON. #59: when vanilla AIBattle.CheckUseOfReserves commits a reserve regiment (direct RegimentSetPath) for a command group " +
+                "whose role is Reserve (operations-ledger state first, then the command-node intent), the new path is rolled back unless the " +
+                "direct-child allocator has already released the group; commits touching W&L player-owned units are only observed. A released " +
+                "group also gets a courier move to stand behind its own line in the sector the allocator gave it (reserve-release producer, " +
+                "through the battle-core order executor). Allowed commits stay eligible for the Reserve Order Delay Guard. Requires Enable " +
+                "Tactical Battle Orchestrator; writes need Tactical Commander Mode = Active.");
             EnableArtilleryAllStanceAudit = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Artillery All-Stance Audit",
                 true,
-                "Default ON. Each BattleGroupStancePatch pass (at most every Battle Group Stance Min Interval Seconds per side) walks the side's " +
-                "AI batteries in every group stance (vanilla CheckAIBombardment only covers stances 3/4) and applies the artillery micro-doctrine " +
-                "through vanilla calls: limber or retreat when the enemy is within 60 m, or within 100 m with no interposed infantry/cavalry and group " +
-                "morale below 0.6 (idle batteries only); unlimber and face an enemy in fire range; turn toward a visible enemy beyond range (only when off by vanilla's " +
-                "turn trigger); cancel bombardment below 10% ammo (mean of the three ammo slots). A battery is left alone for Artillery Audit Min " +
-                "Hold Seconds after a write. AI batteries only (W&L/player units protected); writes need Tactical Commander Mode = Active.");
+                "Default ON. Battle-core artillery producer, micro half: each arbiter tick, every AI battery in any group stance (vanilla " +
+                "CheckAIBombardment only covers stances 3/4) may limber or retreat when a visible enemy is within 60 m, or within 100 m with no " +
+                "interposed infantry/cavalry and group morale below 0.6 (idle batteries only); unlimber and face a visible enemy in fire range; wheel " +
+                "toward the strongest visible threat (only when off by vanilla's turn trigger); cease bombardment below 10% ammo (mean of the three " +
+                "ammo slots). Orders go through the battle-core order executor, and a battery is left alone for Artillery Audit Min Hold Seconds " +
+                "after one. This flag or Enable Tactical Artillery Doctrine also runs the point-blank watchdog. AI batteries only (W&L/player " +
+                "units protected); writes need Tactical Commander Mode = Active.");
             ArtilleryAuditMinHoldSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Artillery Audit Min Hold Seconds",
                 3.0f,
-                "Per-battery hold after an All-Stance Audit write before the next one. Battle seconds on the battle clock, 1x-equivalent (600 per " +
-                "battle hour, so 3 = 18 battle seconds), the same span at any time compression. Default 3.");
+                "Per-battery hold after the order executor issued an artillery doctrine or micro order to a battery (combat behavior, formation, " +
+                "facing or move) before the next one. Battle seconds on the doctrine clock (frozen overnight), 1x-equivalent (600 per battle " +
+                "hour, so 3 = 18 battle seconds), the same span at any time compression. The point-blank watchdog is not held. Default 3.");
             BrigadeTaskHoldSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Brigade Task Hold Seconds",
@@ -558,10 +551,11 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Contact Facing Pulse",
                 true,
-                "Default ON. The active operations-ledger posture executor may run a bounded division/brigade/regiment contact-facing pulse after " +
-                "vanilla formation adjustment. Division scope only publishes/logs axis intent; brigade scope may correct command-group frontage; " +
-                "regiment scope may rotate attached combat regiments in place to face visible contact. Disable for rollback without turning off " +
-                "Tactical Commander Mode.");
+                "Default ON. Battle-core facing-pulse producer (lowest priority) for AI command groups the posture producer left without an order " +
+                "this tick: division scope only logs its axis intent; a brigade may get a frontage (formation) correction and, on a holding task " +
+                "with no detached or player-owned subordinate, a group facing toward the closest visible enemy; up to 4 of its regiments in " +
+                "contact may be rotated in place to face visible contact. Orders go through the battle-core order executor. Disable for rollback " +
+                "without turning off Tactical Commander Mode.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",
@@ -589,16 +583,26 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Battle Fog-Honest Perception",
                 true,
-                "Default ON. AI battle perception uses vanilla's own AI-side fog grid (FogOfWar.UnitIsHidden, the arguments vanilla uses at " +
-                "127225); hidden enemies are remembered and decay. OFF = vanilla range-only perception. " +
-                "(battle-core slice; active once the perception workstream lands)");
+                "Default ON. The battle core's AI perception: an enemy is seen when vanilla's own AI-side fog grid shows it (FogOfWar.UnitIsHidden " +
+                "with the arguments vanilla uses at 127225) or it is in melee; a W&L / AI-vs-AI player-alliance side uses vanilla's iswithinfog. " +
+                "An enemy that drops out of sight is remembered at its last position with fading weight (halved every 20 battle minutes, dropped " +
+                "after 90). Every Whiskey battle reader (evidence, plays, posture, artillery, charge, feud targets) sees only seen or remembered " +
+                "enemies, and reinforcements only once their entry point is seen. Falls back to vanilla's range lists while fog of war is off, " +
+                "with HQ in the saddle, or before vanilla has painted the grid. Off = vanilla range-only perception for every side. Reads only.");
             EnableInfantryChargeDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Infantry Charge Doctrine",
                 true,
-                "Default ON. AI infantry in assault may charge (combat behavior 3) a visible, weaker or disordered target inside vanilla's charge " +
-                "radius. Never on W&L player-owned units. OFF = vanilla (AI infantry reaches melee only by contact). " +
-                "(battle-core slice; active once the charge workstream lands)");
+                "Default ON. Fills vanilla's dead AI infantry charge (MicroAICheckForCharges never fires): in an AI brigade in assault stance (4), " +
+                "the two moving regiments closest to their target get combat behavior 3 when their own first range-list enemy is visible, within " +
+                "vanilla's charge radius of the brigade HQ (maxchargeradius, 50 m shipped, so charges are rare), and weaker in morale by 0.15, " +
+                "disordered or flanked; own morale at least 0.5, fatigue at most 0.6, no friendly in the lane, and (vanilla's unread pref No Micro " +
+                "AI Charge If Outflanked) not while outflanked or under flanking fire. Vanilla's own odds check still decides the charge. Reverts " +
+                "to behavior 2 when the charge resolves, the conditions fail or the brigade leaves assault, waits out vanilla's renew interval " +
+                "(at least 120 battle seconds) after a refused charge, and restores vanilla's intended cancel: an AI infantry regiment left in " +
+                "charge mode whose brigade is out of assault is taken out of it. Never on W&L player-owned or feud units; orders go through the " +
+                "battle-core order executor (Tactical Commander Mode = Active). Off: arms nothing, hands back what it armed and stops the " +
+                "restored cancel; AI infantry then reaches melee only by contact, as in vanilla.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
