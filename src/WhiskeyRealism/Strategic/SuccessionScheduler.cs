@@ -50,12 +50,23 @@ namespace WhiskeyRealism.Strategic
         // CommanderReplacementPatch. Persisted so we don't re-apply on reload.
         internal HashSet<int> AppliedEventIds = new HashSet<int>();
 
+        // The fired set as of the last completed daily review. CommanderReplacementPatch applies
+        // only published events, so a swap never lands while that day's review is still
+        // running across frames (StrategicCoordinator publishes at the end of each review).
+        private readonly HashSet<int> _publishedFiredEventIds = new HashSet<int>();
+
+        internal void PublishFired()
+        {
+            _publishedFiredEventIds.Clear();
+            _publishedFiredEventIds.UnionWith(FiredEventIds);
+        }
+
         internal IEnumerable<Event> GetPendingApplications(int allianceId)
         {
             foreach (var e in _events)
             {
                 if (e.AllianceId != allianceId) continue;
-                if (!FiredEventIds.Contains(e.Id)) continue;
+                if (!_publishedFiredEventIds.Contains(e.Id)) continue;
                 if (AppliedEventIds.Contains(e.Id)) continue;
                 yield return e;
             }

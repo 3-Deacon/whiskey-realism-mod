@@ -139,6 +139,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> FastForwardAi50xExtraPasses;
         internal ConfigEntry<float> FastForwardAiSlowFrameThresholdMs;
         internal ConfigEntry<int> FastForwardAiSlowFrameCooldownFrames;
+        internal ConfigEntry<bool> TimeSliceDailyReview;
+        internal ConfigEntry<float> DailyReviewFrameBudgetMs;
         internal ConfigEntry<bool> CampaignAiGovernorEnabled;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses20x;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
@@ -933,6 +935,17 @@ namespace WhiskeyRealism
             FastForwardAiSlowFrameCooldownFrames = Config.Bind(
                 "Performance", "Fast Forward AI Slow Frame Cooldown Frames", 180,
                 "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
+            TimeSliceDailyReview = Config.Bind(
+                "Performance", "Time-Slice Daily Review", true,
+                "Default ON. Spreads the daily strategic review (campaign map, then per alliance the CIC review and every ledger) over a few " +
+                "frames as an ordered job list, using at most Daily Review Frame Budget Ms plus one job per frame, instead of running it all " +
+                "on the frame the date changes. Jobs keep their order and inputs; vanilla state they read (unit positions, strengths, " +
+                "treasury) is read when each job runs, a few frames after the date change. Patches keep seeing the previous day's complete " +
+                "results until the whole review finishes, then the new day is published at once. Set false for rollback to the single-frame review.");
+            DailyReviewFrameBudgetMs = Config.Bind(
+                "Performance", "Daily Review Frame Budget Ms", 4f,
+                "Wall-clock milliseconds per frame the time-sliced daily strategic review may use before it continues on the next frame; " +
+                "every frame runs at least one review job. Default 4.");
             CampaignAiGovernorEnabled = Config.Bind(
                 "Performance", "Campaign AI Governor Enabled", true,
                 "Default ON. Replaces vanilla AICampaign.Update high-speed pass scheduling with a bounded wrapper that preserves vanilla side effects.");

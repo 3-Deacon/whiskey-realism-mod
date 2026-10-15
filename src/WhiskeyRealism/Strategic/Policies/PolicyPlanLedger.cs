@@ -84,6 +84,14 @@ namespace WhiskeyRealism.Strategic.Policies
             return sb.ToString();
         }
 
+        // Copy for StrategicLedgerSet.PublishFrom (PolicyScore is a struct).
+        public PolicyPlanLedger Clone()
+        {
+            var copy = new PolicyPlanLedger { CurrentPick = CurrentPick };
+            copy._ranked.AddRange(_ranked);
+            return copy;
+        }
+
         public void Restore(int currentPick)
         {
             CurrentPick = currentPick >= 0 ? currentPick : -1;
