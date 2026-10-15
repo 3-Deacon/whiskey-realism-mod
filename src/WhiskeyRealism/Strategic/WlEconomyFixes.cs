@@ -21,7 +21,10 @@ namespace WhiskeyRealism.Strategic
     {
         // Effect ids (DLC_WL constants, DC:43023-43093; effectdescriptions.dat).
         internal const int EffectSupplyEfficiency = 9;
+        internal const int EffectIncidentChance = 4;
         internal const int EffectFoodSupplies = 10;
+        internal const int EffectBattleOrderDelays = 12;
+        internal const int EffectCampaignOrderDelays = 13;
         internal const int EffectAmmunition = 11;
         internal const int EffectReinforcementSpeed = 14;
         internal const int EffectMorale = 16;
@@ -49,9 +52,12 @@ namespace WhiskeyRealism.Strategic
         // method that runs for every regiment (DC:120260, 120409). Medical,
         // training and readiness scope their effects by the campaign group's
         // ownership (DC:115107, 115243, 115276); attrition gets the same rule.
-        internal static bool NeutralizeAttritionBonus(bool careerActive, bool groupOwned)
+        // The player's own regiments (unitOwned, the per-unit rule of the attrition
+        // tooltip DC:173552) always keep the bonus vanilla gave them, whether or not
+        // the staff-scope fix raised their group.
+        internal static bool NeutralizeAttritionBonus(bool careerActive, bool groupOwned, bool unitOwned)
         {
-            return careerActive && !groupOwned;
+            return careerActive && !groupOwned && !unitOwned;
         }
 
         // A Prefix that overwrote a cumulative-effect slot restores it only if the
@@ -141,6 +147,8 @@ namespace WhiskeyRealism.Strategic
         // on effects that are only ever read from the running multiplier, so the
         // bonus their text promises never applies (actions.dat):
         //   9  supply efficiency  28 Logistics Corps, 50 Not Yet Ready (DC:114348)
+        //   12 battle order delays, 13 campaign order delays (type 2: "-")
+        //                         29 Signal Corps "Decreases order delays in your unit" (DC:125136, 125069)
         //   17 fighting spirit    31 High Spirits "improve morale in your unit" (DC:116687, 116738)
         //   19 contract renewal   36/37 Recruitment Campaign, 46 Camp Pleasures, 64 Uncle Sam,
         //                         65 Irish Legion "re-sign their contracts" (DC:113593)
@@ -150,10 +158,54 @@ namespace WhiskeyRealism.Strategic
         // Not folded: 22 (actions 40/41/49: texts never mention attrition and "+"
         // would raise it), 0 (item qualities whose texts promise other things) and
         // 3 (companion type-0 data, rank progression never promised).
+        // The sweep covered every quality type (1-4, and 0) of every action, item,
+        // companion, injury, staff and career-event record against every
+        // EffectMultiplier reader (running readers: 0-3, 5-34; once readers: 4, 5,
+        // 20, 24-26, 34, 35).
         internal static bool FoldsOnceEffect(int effectId)
         {
-            return effectId == EffectSupplyEfficiency || effectId == EffectFightingSpirit || effectId == EffectContractRenewal
+            return effectId == EffectSupplyEfficiency || effectId == EffectBattleOrderDelays || effectId == EffectCampaignOrderDelays
+                || effectId == EffectFightingSpirit || effectId == EffectContractRenewal
                 || effectId == EffectEngineering || effectId == EffectStaffEfficiency;
+        }
+
+        // The reverse case: action 20 "Gamble" (4, type 3, 0.05: "too much gambling
+        // may get you into all kinds of trouble") multiplies running[4], but
+        // incident chance is read only as 1 + once[4] (DC:46139), the hidden cost
+        // the other companion actions carry as (4, type 1). The running deviation
+        // is added to the once value: x1.05 becomes +0.05.
+        internal static bool FoldsRunningEffect(int effectId)
+        {
+            return effectId == EffectIncidentChance;
+        }
+
+        internal static float FoldRunningIntoOnce(float once, float running)
+        {
+            return once + (running - 1f);
+        }
+
+        // Applies both folds over the arrays UpdateCumulativeEffects just rebuilt.
+        // Effect 9 only with the sign fix on (OnceFoldNeedsSignFix). Returns the
+        // number of slots changed.
+        internal static int FoldEffects(float[] running, float[] once, bool signFixOn)
+        {
+            if (running == null || once == null) return 0;
+            int folded = 0;
+            int count = Math.Min(running.Length, once.Length);
+            for (int id = 0; id < count; id++)
+            {
+                if (FoldsOnceEffect(id) && once[id] != 0f && (signFixOn || !OnceFoldNeedsSignFix(id)))
+                {
+                    running[id] = FoldOnceIntoRunning(running[id], once[id]);
+                    folded++;
+                }
+                else if (FoldsRunningEffect(id) && running[id] != 1f)
+                {
+                    once[id] = FoldRunningIntoOnce(once[id], running[id]);
+                    folded++;
+                }
+            }
+            return folded;
         }
 
         internal static float FoldOnceIntoRunning(float running, float once)
@@ -167,6 +219,13 @@ namespace WhiskeyRealism.Strategic
         internal static int TransferAddedCount(int before, int staleBefore, int after)
         {
             return Math.Max(0, after - (before - staleBefore));
+        }
+
+        // Vanilla's purge (DC:17257) drops every entry whose transfertime <= 0,
+        // reading the field off any Regiment reference, Unity-destroyed or not.
+        internal static bool CountsAsStaleTransfer(bool isEntry, float transferTime)
+        {
+            return isEntry && transferTime <= 0f;
         }
 
         internal static WlTransferOutcome ClassifyTransfer(bool transitStarted, bool careerActive)

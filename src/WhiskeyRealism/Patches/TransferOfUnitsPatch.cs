@@ -234,7 +234,7 @@ namespace WhiskeyRealism.Patches
                 for (int i = Math.Max(0, after - added); i < after; i++)
                 {
                     var unit = list[i] as Regiment;
-                    bool transit = (UnityEngine.Object)(object)unit != null && unit.transfertime > 0f;
+                    bool transit = !ReferenceEquals(unit, null) && unit.transfertime > 0f;
                     var outcome = WlEconomyFixes.ClassifyTransfer(transit, career);
                     EmitPlanTransferOutcome(state, outcome);
                     if (outcome == WlTransferOutcome.BlockedByCareerGuard)
@@ -306,7 +306,8 @@ namespace WhiskeyRealism.Patches
             return list?.Count ?? 0;
         }
 
-        // Entries vanilla's purge will drop at the start of the call (DC:17257).
+        // Entries vanilla's purge will drop at the start of the call (DC:17257),
+        // counted exactly as the purge counts them.
         private static int StaleTransferCount(object faction)
         {
             var list = VanillaFieldCache.List(faction, "unitstobetransfered");
@@ -314,8 +315,10 @@ namespace WhiskeyRealism.Patches
             int stale = 0;
             for (int i = 0; i < list.Count; i++)
             {
+                // A C# reference test, not Unity's ==: vanilla's purge reads the field
+                // off a destroyed unit too.
                 var unit = list[i] as Regiment;
-                if ((UnityEngine.Object)(object)unit != null && unit.transfertime <= 0f) stale++;
+                if (WlEconomyFixes.CountsAsStaleTransfer(!ReferenceEquals(unit, null), ReferenceEquals(unit, null) ? 0f : unit.transfertime)) stale++;
             }
             return stale;
         }

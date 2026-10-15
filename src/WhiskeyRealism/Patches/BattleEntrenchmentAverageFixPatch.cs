@@ -21,11 +21,19 @@ namespace WhiskeyRealism.Patches
     // over its own count. A derived aggregate on BattleUnits, not a battle order
     // (no movement, stance, formation, facing or combat behavior), so it does not
     // go through the battle-core executor and does not depend on Tactical
-    // Commander Mode; no per-battle state. Rollback: Tactical / Enable Battle
-    // Entrenchment Average Fix.
+    // Commander Mode; its only static state is the first-log flag (BattleScope).
+    // Rollback: Tactical / Enable Battle Entrenchment Average Fix.
     [HarmonyPatch(typeof(BattleUnits), "CalculateAllUnitsOfAlliance")]
     internal static class BattleEntrenchmentAverageFixPatch
     {
+        // The first-fire message is formatted once per battle, not per call.
+        private static bool _logged;
+
+        static BattleEntrenchmentAverageFixPatch()
+        {
+            BattleScope.Register("entrenchment-average-fix-log", () => _logged = false);
+        }
+
         [HarmonyPostfix]
         internal static void Postfix(BattleUnits __instance)
         {
@@ -54,6 +62,8 @@ namespace WhiskeyRealism.Patches
                     float vanilla = __instance.enemyentrenchmentlevel;
                     if (corrected == vanilla) return;
                     __instance.enemyentrenchmentlevel = corrected;
+                    if (_logged) return;
+                    _logged = true;
                     OnceLog.Info("tactical.entrenchment-average-fix:first",
                         "[Patch:EntrenchmentAverage] AI-side entrenchment level averaged over its own groups: vanilla=" + vanilla.ToString("0.###")
                         + " corrected=" + corrected.ToString("0.###") + " aiGroups=" + count);

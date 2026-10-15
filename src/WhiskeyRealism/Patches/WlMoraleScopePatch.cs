@@ -18,19 +18,30 @@ namespace WhiskeyRealism.Patches
     //
     // While vanilla works on one of the player's own regiments inside the map
     // group carrying the player's command (WlPlayerMapGroup), the non-skipping
-    // Prefix sets that group's dlcw_isundercommander for the call; the Finalizer
-    // clears it even if vanilla throws. AI peers in the group keep vanilla
+    // Prefix stores the group in __state and then sets its dlcw_isundercommander
+    // for the call (Patches/WlEffectSwaps OwnershipRaise); the Finalizer clears
+    // it unconditionally, even if vanilla throws. AI peers in the group keep vanilla
     // values. Rollback: W&L / Enable W&L Staff Scope Fix.
     [HarmonyPatch(typeof(Regiment), "UpdateMoraleCampaign")]
     internal static class WlMoraleScopePatch
     {
+        private static readonly Action<Regiment, bool> SetOwned = (unit, owned) => unit.dlcw_isundercommander = owned;
+
+        // The first-fire message is formatted once per campaign, not per call.
+        private static bool _scopeLogged;
+
+        static WlMoraleScopePatch()
+        {
+            CampaignScope.Register("wl-morale-scope-log", () => _scopeLogged = false);
+        }
+
         [HarmonyPrefix]
-        internal static void Prefix(Regiment __instance, Regiment parentcampaignunit, out Regiment __state)
+        internal static void Prefix(Regiment __instance, Regiment parentcampaignunit, out OwnershipRaise<Regiment> __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-morale-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-morale-scope.prefix");
-                __state = null;
+                __state = default;
                 try
                 {
                     if (!DLC_WL.dlc_scenarioactive || (UnityEngine.Object)parentcampaignunit == null || (UnityEngine.Object)__instance == null) return;
@@ -38,10 +49,14 @@ namespace WhiskeyRealism.Patches
                     if (!WlEconomyFixes.RaiseGroupForPlayerUnit(true, parentcampaignunit.dlcw_isundercommander,
                             __instance.dlcw_isundercommander, WlPlayerMapGroup.Is(parentcampaignunit))) return;
 
-                    parentcampaignunit.dlcw_isundercommander = true;
-                    __state = parentcampaignunit;
-                    OnceLog.Info("wl-morale-scope:first",
-                        "[Patch:WlMoraleScope] player's morale effect applied to the player's regiment inside group=" + parentcampaignunit.name);
+                    __state = OwnershipRaise<Regiment>.Prepare(parentcampaignunit);
+                    __state.Commit(SetOwned);
+                    if (!_scopeLogged)
+                    {
+                        _scopeLogged = true;
+                        OnceLog.Info("wl-morale-scope:first",
+                            "[Patch:WlMoraleScope] player's morale effect applied to the player's regiment inside group=" + parentcampaignunit.name);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -51,15 +66,14 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyFinalizer]
-        internal static void Finalizer(Regiment __state)
+        internal static void Finalizer(OwnershipRaise<Regiment> __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-morale-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-morale-scope.finalizer");
                 try
                 {
-                    if ((UnityEngine.Object)__state != null)
-                        __state.dlcw_isundercommander = false;
+                    __state.Restore(SetOwned);
                 }
                 catch (Exception ex)
                 {

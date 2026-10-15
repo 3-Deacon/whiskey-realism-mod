@@ -26,11 +26,20 @@ namespace WhiskeyRealism.Patches
     // vanilla's own loop does. Men are untouched. A stat correction on the
     // battle's units, applied equally to both sides and to the W&L player's
     // units like vanilla's own pass; not an order, so it does not go through the
-    // battle-core executor; no per-battle static state (__state only).
+    // battle-core executor; state travels in __state, and the only static is
+    // the first-log flag (BattleScope).
     // Rollback: Tactical / Enable Battle HQ Condition Fix.
     [HarmonyPatch(typeof(BattleUnits), "AssignConditionToSubordinates")]
     internal static class BattleHqConditionFixPatch
     {
+        // The first-fire message is formatted once per battle, not per call.
+        private static bool _logged;
+
+        static BattleHqConditionFixPatch()
+        {
+            BattleScope.Register("hq-condition-fix-log", () => _logged = false);
+        }
+
         internal sealed class Snapshot
         {
             public readonly List<Regiment> Hqs = new List<Regiment>();
@@ -120,6 +129,8 @@ namespace WhiskeyRealism.Patches
                     if (corrected == 0) return;
 
                     RecomputeSideGunCondition(__instance);
+                    if (_logged) return;
+                    _logged = true;
                     OnceLog.Info("tactical.hq-condition-fix:first",
                         "[Patch:HqCondition] group HQ horse/gun condition taken from the horse/gun clamp, not the men clamp: hqsCorrected=" + corrected);
                 }

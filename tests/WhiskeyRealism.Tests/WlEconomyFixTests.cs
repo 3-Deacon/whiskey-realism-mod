@@ -29,14 +29,19 @@ internal static class WlEconomyFixTests
             ("wl supply scope never carries vanilla's inverted efficiency", SupplyScopeNeverCarriesInvertedEfficiency),
             ("wl army panel shows player staff effects only on the player's groups", PanelShowsStaffEffectsOnlyOnPlayerGroups),
             ("wl once effect fold covers the promised morale, renewal and staff effects", OnceEffectFoldPromisedEffects),
+            ("wl once effect fold covers signal corps order delays", OnceEffectFoldSignalCorps),
+            ("wl running effect fold covers gamble's incident chance", RunningEffectFoldGamble),
+            ("wl effect folds run over whole arrays with the sign coupling", EffectFoldsOverArrays),
+            ("wl attrition bonus stays on the player's own regiments without the staff scope", AttritionStaysOnPlayerRegiments),
+            ("wl transfer stale count matches vanilla's purge", TransferStaleMatchesVanillaPurge),
         });
     }
 
     private static void AttritionNeutralisedOnlyOutsidePlayerGroups()
     {
-        AssertTrue(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: false), "AI or enemy group in a career");
-        AssertFalse(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: true), "player's group keeps the bonus");
-        AssertFalse(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: false, groupOwned: false), "no career: vanilla already returns 1");
+        AssertTrue(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: false, unitOwned: false), "AI or enemy group in a career");
+        AssertFalse(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: true, unitOwned: false), "player's group keeps the bonus");
+        AssertFalse(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: false, groupOwned: false, unitOwned: false), "no career: vanilla already returns 1");
     }
 
     private static void SnapshotRestoresOnlyOwnUntouchedWrite()
@@ -185,5 +190,55 @@ internal static class WlEconomyFixTests
         AssertTrue(WlEconomyFixes.FoldsOnceEffect(27), "staff efficiency (actions 30/66)");
         AssertTrue(WlEconomyFixes.OnceFoldNeedsSignFix(9), "supply efficiency needs the sign fix");
         AssertFalse(WlEconomyFixes.OnceFoldNeedsSignFix(17), "fighting spirit points the right way in vanilla");
+    }
+
+    private static void OnceEffectFoldSignalCorps()
+    {
+        // Action 29 "Signal Corps": (12, type 2, 0.2) and (13, type 2, 0.2), "Decreases order delays in your unit".
+        AssertTrue(WlEconomyFixes.FoldsOnceEffect(12), "battle order delays (DC:125136)");
+        AssertTrue(WlEconomyFixes.FoldsOnceEffect(13), "campaign order delays (DC:125069)");
+        AssertNear(0.8f, WlEconomyFixes.FoldOnceIntoRunning(running: 1f, once: -0.2f), 1e-6f, "type 2 shortens the delay");
+    }
+
+    private static void RunningEffectFoldGamble()
+    {
+        // Action 20 "Gamble": (4, type 3, 0.05); incident chance is read only as once (DC:46139 1 + EM(4, 0)).
+        AssertTrue(WlEconomyFixes.FoldsRunningEffect(4), "incident chance");
+        AssertFalse(WlEconomyFixes.FoldsRunningEffect(9), "supply efficiency has a running reader");
+        AssertNear(0.1f, WlEconomyFixes.FoldRunningIntoOnce(once: 0.05f, running: 1.05f), 1e-6f, "x1.05 adds +0.05 to 1 + once");
+        AssertNear(0.05f, WlEconomyFixes.FoldRunningIntoOnce(once: 0.05f, running: 1f), 1e-6f, "neutral running adds nothing");
+    }
+
+    private static void EffectFoldsOverArrays()
+    {
+        float[] running = { 1f, 1f, 1f, 1f, 1.05f, 1f, 1f, 1f, 1f, 1.25f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+        float[] once = new float[running.Length];
+        once[9] = 0.2f; once[12] = -0.2f; once[22] = 0.2f; once[4] = 0.05f;
+        int folded = WlEconomyFixes.FoldEffects(running, once, signFixOn: false);
+        AssertNear(1.25f, running[9], 1e-6f, "sign fix off: effect 9 not folded");
+        AssertNear(0.8f, running[12], 1e-6f, "order delay folded");
+        AssertNear(1f, running[22], 1e-6f, "attrition left vanilla");
+        AssertNear(0.1f, once[4], 1e-6f, "incident chance folded into once");
+        AssertEqual(2, folded, "two slots folded");
+        float[] running2 = (float[])running.Clone();
+        running2[9] = 1.25f;
+        WlEconomyFixes.FoldEffects(running2, once, signFixOn: true);
+        AssertNear(1.5f, running2[9], 1e-6f, "sign fix on: effect 9 folded");
+        AssertEqual(0, WlEconomyFixes.FoldEffects(null, once, signFixOn: true), "missing array");
+    }
+
+    private static void AttritionStaysOnPlayerRegiments()
+    {
+        // Vanilla gave the bonus to every unit; the player's own regiments keep it whatever the staff-scope flag says.
+        AssertFalse(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: false, unitOwned: true), "player's regiment inside an AI parent group");
+        AssertTrue(WlEconomyFixes.NeutralizeAttritionBonus(careerActive: true, groupOwned: false, unitOwned: false), "AI peer in the same group");
+    }
+
+    private static void TransferStaleMatchesVanillaPurge()
+    {
+        // Vanilla's purge reads transfertime off every entry (DC:17257): a Unity-destroyed unit is still an entry.
+        AssertTrue(WlEconomyFixes.CountsAsStaleTransfer(isEntry: true, transferTime: 0f), "arrived or never started");
+        AssertFalse(WlEconomyFixes.CountsAsStaleTransfer(isEntry: true, transferTime: 2f), "in transit");
+        AssertFalse(WlEconomyFixes.CountsAsStaleTransfer(isEntry: false, transferTime: 0f), "not a regiment reference");
     }
 }

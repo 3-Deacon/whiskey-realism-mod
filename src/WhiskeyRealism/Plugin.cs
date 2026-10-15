@@ -373,7 +373,8 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. W&L career only. Vanilla Regiment.UpdateCampaignUnitStats applies the player's attrition effect (Camp Rules, " +
                 "Provost Marshal) to the sickness and desertion of every regiment in the game, enemies included. With this on it applies only " +
-                "where vanilla scopes medical care, training and readiness: regiments of a campaign group the player owns. Off: vanilla.");
+                "where vanilla scopes medical care, training and readiness: regiments of a campaign group the player owns, and the player's " +
+                "own regiments, which always keep it whether or not Enable W&L Staff Scope Fix is on. Off: vanilla.");
             EnableWlBuySuppliesFix = Config.Bind(
                 "W&L",
                 "Enable W&L Buy Supplies Fix",
@@ -410,12 +411,16 @@ namespace WhiskeyRealism
                 "W&L",
                 "Enable W&L Action Once-Effects Fix",
                 true,
-                "Default ON. W&L career only. Several actions store their bonus where vanilla never reads it: Logistics Corps and Not Yet " +
-                "Ready (supply efficiency), High Spirits (fighting spirit), Recruitment Campaign, Organize Recruitment, Camp Pleasures, Uncle " +
-                "Sam and Irish Legion (contract renewals), Engineer Corps (engineering points), Staff Standards and Examine Details (staff " +
-                "efficiency, the rate at which staff skills grow toward yours). With this on that bonus multiplies the running effect, " +
-                "x(1 + value). The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow " +
-                "resupply). The attrition values of Harsh Punishments, Ample Rewards and Purge stay vanilla (intent unclear). Off: vanilla.");
+                "Default ON. W&L career only. A sweep of every quality of every type (actions, items, companions, injuries, staff, career " +
+                "events) against what vanilla reads found paid actions whose bonus lands where vanilla never reads it: Logistics Corps and " +
+                "Not Yet Ready (supply efficiency), Signal Corps (battle and campaign order delays), High Spirits (fighting spirit), " +
+                "Recruitment Campaign, Organize Recruitment, Camp Pleasures, Uncle Sam and Irish Legion (contract renewals), Engineer Corps " +
+                "(engineering points), Staff Standards and Examine Details (staff efficiency, the rate at which staff skills grow toward " +
+                "yours), and Gamble (its incident-chance cost). With this on each applies where vanilla reads it, in the direction the " +
+                "action states. The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow " +
+                "resupply). Left vanilla because their texts promise something else: the attrition values of Harsh Punishments, Ample " +
+                "Rewards and Purge, and the prestige values on items, injuries and one career event; three companions' rank values use a " +
+                "quality type vanilla has no meaning for. Off: vanilla.");
             EnableBattleEntrenchmentAverageFix = Config.Bind(
                 "Tactical",
                 "Enable Battle Entrenchment Average Fix",

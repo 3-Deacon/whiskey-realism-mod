@@ -19,21 +19,19 @@ namespace WhiskeyRealism.Patches
     // For a group that is neither the player's nor the map group carrying the
     // player's command (WlPlayerMapGroup), the non-skipping Prefix sets those six
     // running effects to 1 for the call - the value EffectMultiplier returns for
-    // a unit that is not the player's - so vanilla omits the lines; the Finalizer
-    // restores every slot it wrote and nothing rewrote. Display only. Rollback:
+    // a unit that is not the player's - so vanilla omits the lines. The state
+    // is stored in __state before the write (Patches/WlEffectSwaps
+    // EffectSlotSet); the Finalizer restores unconditionally every slot it
+    // wrote and nothing rewrote. The UI method is not re-entrant, so one slot
+    // set is reused (no allocation per call). Display only. Rollback:
     // W&L / Enable W&L Staff Panel Scope Fix.
     [HarmonyPatch(typeof(CampaignArmyPanel), "UpdateStats")]
     internal static class WlStaffPanelScopePatch
     {
-        internal sealed class Snapshot
-        {
-            public float[] Array;
-            public readonly float[] Saved = new float[WlEconomyFixes.PanelStaffEffects.Length];
-            public readonly bool[] Written = new bool[WlEconomyFixes.PanelStaffEffects.Length];
-        }
+        private static readonly EffectSlotSet Slots = new EffectSlotSet(WlEconomyFixes.PanelStaffEffects);
 
         [HarmonyPrefix]
-        internal static void Prefix(Regiment reg, out Snapshot __state)
+        internal static void Prefix(Regiment reg, out EffectSlotSet __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-staff-panel-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
@@ -45,20 +43,10 @@ namespace WhiskeyRealism.Patches
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value || !Flag()) return;
                     if (!WlEconomyFixes.HidePlayerStaffEffectsOnPanel(true, reg.dlcw_isundercommander, WlPlayerMapGroup.Is(reg))) return;
 
-                    float[] running = WlEffectArrays.Running();
-                    if (running == null) return;
-                    Snapshot state = null;
-                    int[] ids = WlEconomyFixes.PanelStaffEffects;
-                    for (int i = 0; i < ids.Length; i++)
-                    {
-                        if (!WlEffectArrays.TryGet(running, ids[i], out float value) || value == 1f) continue;
-                        if (state == null) state = new Snapshot { Array = running };
-                        state.Saved[i] = value;
-                        state.Written[i] = true;
-                        running[ids[i]] = 1f;
-                    }
-                    __state = state;
-                    if (state != null)
+                    __state = Slots;
+                    __state.Prepare(WlEffectArrays.Running(), 1f);
+                    __state.Commit();
+                    if (__state.Active)
                         OnceLog.Info("wl-staff-panel-scope:first", "[Patch:WlStaffPanelScope] player's staff effects hidden on a group panel that is not the player's");
                 }
                 catch (Exception ex)
@@ -69,23 +57,14 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyFinalizer]
-        internal static void Finalizer(Snapshot __state)
+        internal static void Finalizer(EffectSlotSet __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-staff-panel-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-staff-panel-scope.finalizer");
-                if (__state == null) return;
                 try
                 {
-                    float[] running = WlEffectArrays.Running();
-                    bool same = ReferenceEquals(running, __state.Array);
-                    int[] ids = WlEconomyFixes.PanelStaffEffects;
-                    for (int i = 0; i < ids.Length; i++)
-                    {
-                        if (!__state.Written[i]) continue;
-                        if (WlEconomyFixes.ShouldRestore(same, same ? running[ids[i]] : float.NaN, 1f))
-                            running[ids[i]] = __state.Saved[i];
-                    }
+                    __state?.Restore(WlEffectArrays.Running());
                 }
                 catch (Exception ex)
                 {
