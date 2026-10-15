@@ -1045,12 +1045,29 @@ internal static class TacticalEvidenceFixTests
 
     private static void MorningOddsNotInflated()
     {
-        var ledger = Seen(18f, 4000f, 1000f);
-        float morning = 18f + 1f / 60f; // one doctrine minute later
-        ledger.Observe(morning, 0f, 0f);
-        Cover(ledger, morning);
-        float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, morning);
-        TestHarness.AssertTrue(odds > 1.45f && odds < 1.55f, "morning odds stay ~1.5, got " + odds);
+        // Production: the coordinator freezes doctrine time through the night,
+        // so every overnight evidence build sees the same evening hour.
+        var frozen = Seen(18f, 4000f, 1000f);
+        for (int tick = 0; tick < 3; tick++)
+        {
+            frozen.Observe(18f, 0f, 0f);
+            Cover(frozen, 18f);
+        }
+        float morning = 18f + 1f / 60f; // first doctrine minute of the day
+        frozen.Observe(morning, 0f, 0f);
+        Cover(frozen, morning);
+        float frozenOdds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, frozen, morning);
+        TestHarness.AssertTrue(frozenOdds > 1.45f && frozenOdds < 1.55f, "frozen night: morning odds stay ~1.5, got " + frozenOdds);
+
+        // Raw clock (no freeze): 9 h pass; the estimate decays 90% while the
+        // army, still deployed, observes every band. The stale sighting must
+        // carry no confidence, so the decayed estimate cannot inflate odds.
+        var raw = Seen(18f, 4000f, 1000f);
+        raw.Observe(27f, 0f, 0f);
+        Cover(raw, 27f);
+        TestHarness.AssertTrue(raw.EstimatedEnemyStrength < 500f, "estimate decayed over 9 h");
+        float rawOdds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, raw, 27f);
+        TestHarness.AssertTrue(rawOdds <= 1.5f, "raw 9 h jump: odds not inflated by the decayed estimate, got " + rawOdds);
     }
 
     private static readonly string[] VanillaUnionNamesForRegistrySurnames =
