@@ -25,7 +25,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 each SectorPlan.HoldNeed, never recomputed: G3 verify F9), less what G3 released
     //                 into the mass, plus the remainder (below).
     //   Recover       a movable formation below RecoverSupplyBelow raw supply or the movement morale
-    //                 minimum (spec C21), walked toward the nearest supply source; withheld.
+    //                 minimum (spec C21: ReserveRules.Recovers), walked toward the nearest supply
+    //                 source; withheld. It counts 0 toward its sector's hold (it is leaving).
     //   DepotBuilder  the smallest fighting formation in a depot task's sector; withheld.
     //   Recon         ReconPlanner.PickFormation per recon task, highest priority first; the Recon
     //                 assignment copies the task's SectorId and hold point so ReconMissionLedger.Sync
@@ -334,8 +335,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (_done[i] || _inMass[i]) continue;
                     var f = _s.Own[i];
-                    if (!WlChainRules.MayMove(f.Chain)) continue;
-                    if (f.Supply01 >= TheaterPlanner.RecoverSupplyBelow && f.Morale >= _s.MinMoraleForMovement) continue;
+                    if (!ReserveRules.Recovers(f, _s.MinMoraleForMovement)) continue;
                     if (!LogisticsGate.NearestSource(_s, f.X, f.Z, out float sx, out float sz))
                     {
                         sx = f.X;

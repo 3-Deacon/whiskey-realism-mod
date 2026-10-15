@@ -48,6 +48,9 @@ internal static class ForceAllocatorTests
             ("MapGroupPlayerNeverSoleMustHold", MapGroupPlayerNeverSoleMustHold),
             ("MapGroupPlayerNeverCountsInAHoldSum", MapGroupPlayerNeverCountsInAHoldSum),
             ("PlayerPresenceNeverReleasesTheSectorsHolders", PlayerPresenceNeverReleasesTheSectorsHolders),
+            ("RecoveringFormationsDoNotHoldTheirSector", RecoveringFormationsDoNotHoldTheirSector),
+            ("ReserveRulesHoldIgnoresRecoveringFormations", ReserveRulesHoldIgnoresRecoveringFormations),
+            ("StarvedMapGroupPlayerIsNeverRecover", StarvedMapGroupPlayerIsNeverRecover),
             ("SectorHeldOnlyByThePlayerReportsAShortfall", SectorHeldOnlyByThePlayerReportsAShortfall),
             ("MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted", MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted),
             ("PlannerDoesNotCountThePlayersFormationAsHolding", PlannerDoesNotCountThePlayersFormationAsHolding),
@@ -727,6 +730,91 @@ internal static class ForceAllocatorTests
             AssertEqual(ForceAllocator.ReasonHoldReserve, x.Reason, "withPlayer " + withPlayer + ": reason");
             if (withPlayer) AssertFalse(Of(a, 5).Withheld, "his own formation is never withheld");
         }
+    }
+
+    // N2 (G4 verify r2, integrator decision): a formation assigned Recover is leaving for supply, so it does
+    // not hold its sector. Two starved corps standing in a threatened sector no longer release the healthy
+    // corps that should hold it (verify r2 seed 6: sector need 15842 "held" by Recover corps of 16974 and
+    // 29399 while the four healthy corps massed). Through the real planner.
+    private static void RecoveringFormationsDoNotHoldTheirSector()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(4, 560f, 8000f));
+        var starved = Corps(6, 555f, 16974f);
+        starved.Supply01 = 0.1f;
+        var demoralised = Corps(7, 565f, 29399f);
+        demoralised.Morale = 0.1f; // below aiminimummoraleformovement (0.3)
+        s.Own.Add(starved);
+        s.Own.Add(demoralised);
+        s.Beliefs.Add(Belief(600f, 0f, 10000f));
+        var plan = PlanOf(s);
+        var a = Alloc(plan, s);
+        AssertEqual(FormationRole.Recover, Of(a, 6).Role, "the starved corps recovers");
+        AssertEqual(FormationRole.Recover, Of(a, 7).Role, "so does the demoralised one");
+        AssertFalse(plan.MassInstanceIds.Contains(4), "the planner keeps the healthy corps out of the mass: the recovering ones do not hold the sector");
+        var holder = Of(a, 4);
+        AssertEqual(FormationRole.Hold, holder.Role, "the healthy corps holds");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, holder.Reason, "as the sector's hold reserve");
+        AssertTrue(holder.Withheld, "and is withheld");
+
+        // Too weak a holder: the sector reports its shortfall at the healthy corps, whatever walks away to recover.
+        var weak = Wide();
+        weak.Own.Add(Corps(1, 200f, 20000f));
+        weak.Own.Add(Corps(4, 560f, 3000f));
+        weak.Own.Add(starved);
+        weak.Own.Add(demoralised);
+        weak.Beliefs.Add(Belief(600f, 0f, 30000f));
+        var weakAllocation = Alloc(PlanOf(weak), weak);
+        AssertEqual(FormationRole.Hold, Of(weakAllocation, 4).Role, "the weak healthy corps still holds");
+        AssertTrue(weakAllocation.Shortfalls.Contains(4), "and the sector reports its shortfall there");
+        AssertFalse(weakAllocation.Shortfalls.Contains(6) || weakAllocation.Shortfalls.Contains(7), "never at a corps that is leaving");
+    }
+
+    // The AI cannot walk the map-group player's group to a depot: starved or demoralised he keeps his sector's
+    // order (Hold in place), never Recover (spec C4, plan G4 rules).
+    private static void StarvedMapGroupPlayerIsNeverRecover()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var player = Corps(5, 550f, 20000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        player.Supply01 = 0.1f;
+        player.Morale = 0.1f;
+        s.Own.Add(player);
+        var a = Alloc(ManualPlan(s), s);
+        AssertEqual(FormationRole.Hold, Of(a, 5).Role, "the starved player stays Hold");
+        AssertFalse(Of(a, 5).Withheld, "and is not withheld");
+    }
+
+    // The rule itself, on ReserveRules.Hold: a formation below the supply or morale floor does not count
+    // toward what holds a sector anyway; a busy formation of the same strength still does (it stays).
+    private static void ReserveRulesHoldIgnoresRecoveringFormations()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(4, 560f, 8000f));
+        var starved = Corps(6, 555f, 20000f);
+        starved.Supply01 = 0.1f;
+        s.Own.Add(starved);
+        var busy = WithFlags(Corps(7, 565f, 20000f), TheaterPlanner.Busy);
+        busy.Supply01 = 0.1f; // starved but in battle: it cannot walk away, so it still holds
+        var sectors = Sectors(s);
+        int k = sectors.SectorAt(560f, 0f);
+        var need = new float[sectors.Count];
+        var nearX = new float[sectors.Count];
+        var nearZ = new float[sectors.Count];
+        need[k] = 15000f;
+        nearX[k] = 600f;
+        var reserved = new bool[s.Own.Count];
+        var holdReserved = new int[s.Own.Count];
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
+        AssertEqual(k, holdReserved[0], "the starved corps' 20000 does not count: the healthy corps is reserved");
+
+        s.Own.Add(busy);
+        reserved = new bool[s.Own.Count];
+        holdReserved = new int[s.Own.Count];
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
+        AssertEqual(-1, holdReserved[0], "a busy formation stays, starved or not, and does count: nothing more is reserved");
     }
 
     // A threatened sector only the player stands in is Screen for the planner (nothing committed holds it) and
