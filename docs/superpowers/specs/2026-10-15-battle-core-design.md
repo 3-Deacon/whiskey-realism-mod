@@ -16,7 +16,8 @@ per doctrine tick (TacticalDoctrineClock), main thread, per AI-run side:
   BattleSnapshotBuilder.Build(battle, side) ─► BattleSnapshot (pooled, immutable for the tick)
       ├─ own units, command tree (vanilla allattachedunits parent map), ownership flags
       ├─ enemy observations: Visible (fog grid) | Remembered (last-seen, decaying) 
-      ├─ derived: front axis + bands, slice/flank pressure from VISIBLE enemies, terrain grid (cached per battle)
+      ├─ derived: front axis + bands, slice/flank pressure from VISIBLE enemies
+  public terrain (outside the snapshot, cached per battle): BattleTerrainGrid (plan BC10) and TerrainPicture (plan BC12)
   doctrine (orchestrator, ledgers, executors, plays, artillery, reserves, fallback) reads BattleSnapshot only
       └─ submits BattleOrderIntent(s) to OrderArbiter
   OrderArbiter.Resolve(snapshot) ─► per group: one winning intent per channel
@@ -64,6 +65,13 @@ Vanilla AI infantry never charges on its own: `MicroAICheckForCharges` (4905/491
 ### 5. Migration (no dead code)
 
 Each mover is rewritten to submit intents; its private guard/dedupe/cooldown/waypoint code is deleted: `BattleCommandPostureExecutorPatch`/`CommandPostureExecutor` (incl. the `transform.parent` leaf target at :2946 → command-parent map), `PlayExecutorRuntime`, division play, `B8CheckLineFallbacksObserverPatch` fallback, `TacticalArtilleryApplier`, `B7CheckAIBombardmentPatch`, `ArtillerySetWaypointVetoPatch` (becomes an arbiter Safety intent + validation; its SetWaypoint Prefix is removed if the arbiter covers it), #59 `TacticalReserveCommitGate` release, #46 replay, #56 `TacticalReserveOrderDelayGuardPatch`. Every remaining Prefix-skip or snapshot/restore battle patch is listed in the plan with keep/replace and the vanilla reason; target: only patches that steer vanilla's own inputs remain.
+
+### 6. Follow-up slices (BC10-BC12, plan § BC10-BC12)
+
+The battle core as built (BC0-BC9) still left findings from the 2026-10-15 deployment, flanking and terrain research. They are planned as three slices on the same write path (producers submit intents; the executor writes; terrain is public, enemies only as perceived; a Defender never gets attack doctrine):
+- **BC10, deployment and movement honesty:** a per-battle `BattleTerrainGrid` over vanilla's 1 m terrain-id grid; covered crossings and outflanking computed from perceived enemies; a non-mutating NavMesh probe with honest road, bridge and dead-ground scores; road march routing around woods and swamp; fog-honest AI deployment and a deployment reserve echelon (#60, now through the executor); an arrival guard against vanilla's entry re-path, sized by smoke first; honest avenue flags; two vanilla setup bug fixes.
+- **BC11, flank response and envelopment:** facing toward the most-pressured perceived side; the refused flank reaching vanilla (wheel out of combat, in-place wing rotation in combat); a reserve released to a threatened wing; envelopment plays executed as timed flank marches that face inward and attack, with vanilla `FlankMove`'s river and high-ground checks; vanilla's `flanksthreated` tally fixed.
+- **BC12, terrain picture:** crests, cover lines, river lines, crossings, junctions and towns built once per battle; objective types and terrain strength fed to the planners' terrain branches; defensive terrain lines and anchored flanks; terrain in enemy-intent inference; crest-based `ReverseSlopeDefense`.
 
 ## Config (all default ON)
 

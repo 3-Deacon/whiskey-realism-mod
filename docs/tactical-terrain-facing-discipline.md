@@ -73,7 +73,7 @@ Confirmed against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 | `Regiment.RegimentSetPath` 131211-131260 | Final waypoint rotation uses manual rotation if supplied, otherwise `GetLastWaypointAngle()`. |
 | `Regiment.SetNewPosition` 131303-131358 | Position/facing setter used by vanilla formation placement. |
 | `Regiment.CheckIfPositionIsOnWater*` 131432-131556 | Vanilla water correction mainly checks terrain id `4`. |
-| `BattlefieldSetup.CheckTerrainLine` 27638 | Runtime probe checks terrain lines for water crossing evidence. |
+| `BattlefieldSetup.CheckTerrainLine` 27638 | Not used by #60 or `TacticalTerrainProbe` (the probe's call was deleted in `93cab34`); the only Whiskey caller is `WaypointValidatorRuntime` (in-contact withdrawal line, `{4, 8}`, 2 m steps). |
 | `Regiment.UpdateUnitRangeFast` 122545-122935 | Builds the per-regiment enemy lists; see [`docs/vanilla-vision-and-movement.md`](vanilla-vision-and-movement.md) for what they do and do not filter. |
 | `Regiment.UpdateFlanking` 122959 | Filters out scouts/cavalry/melee-style contacts for comparable flank/enemy reasoning. |
 | `BattleUnits.Grp.IsApplicableForDeployment` 78275 | Vanilla deployment eligibility check consulted by #60. |
@@ -82,7 +82,7 @@ Confirmed against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 
 - `TacticalTerrainFacingDiscipline` — pure scorer/decision model.
 - `TacticalTerrainFacingTelemetry` — bounded `[TacDeployTerrain]` row formatter and sanitizer.
-- `TacticalTerrainProbe` — Unity/vanilla adapter for terrain id, deployment-zone, footprint, water-line, height, and visible-enemy bearing evidence.
+- `TacticalTerrainProbe` — Unity/vanilla adapter for terrain id (river id 4 as water), deployment-zone, footprint, height, and visible-enemy bearing evidence. It has no terrain-line (water-crossing) probe.
 - `BattleWriterPolicy` — pure line-front conversion, fortified-path and eligibility rules.
 - `TacticalDeploymentObserverPatch` — read-only terrain/facing evidence extension around large deployment moves.
 - `TacticalDeploymentTerrainDisciplinePatch` — the #60 behavior patch.

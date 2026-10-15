@@ -119,7 +119,7 @@ These anchors back #53 pathfinder discipline, #58 deployment terrain/facing tele
 | `Regiment.RegimentSetPath` | 131211 | Final waypoint rotation uses supplied `manualfinalrotation`, otherwise `GetLastWaypointAngle()`. |
 | `Regiment.SetNewPosition` | 131303 | Position/facing setter called by vanilla formation placement. |
 | `Regiment.CheckIfPositionIsOnWater*` | 131432 | Vanilla water correction primarily checks terrain id `4`. |
-| `BattlefieldSetup.CheckTerrainLine` | 27638 | Runtime probe checks water-crossing evidence along candidate lines. |
+| `BattlefieldSetup.CheckTerrainLine` | 27638 | Terrain-id line test; Whiskey's only caller is `WaypointValidatorRuntime` (in-contact withdrawal line, `{4, 8}`, 2 m steps). |
 | `Regiment.UpdateUnitRangeFast` | 122545 | Visible enemy lists are fog-checked; closest-enemy fields alone are not enough for Whiskey facing. |
 | `Regiment.UpdateFlanking` | 122989 | Filters scouts/cavalry/melee-style contacts for comparable enemy/flank reasoning. |
 | `BattleUnits.Grp.IsApplicableForDeployment` | 78275 | Vanilla deployment eligibility guard mirrored by #60. |

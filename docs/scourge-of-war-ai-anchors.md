@@ -430,6 +430,6 @@ The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetyp
 #44 `BattleMacroStrategyPatch` (Postfix on `AIBattle.CheckGlobalAIStrategy`, line 6314, plus a value-restoring Prefix) is the single owner of the AIBattle instance `macroai`. Vanilla's `AdjustGroupAIStance` (4221) then drives per-group `ai_stance` for brigades Whiskey has no explicit role for, so the line of battle forms through vanilla's own cascade. The 2026-05-23 `BattleMacroAIOverridePatch` Prefix that wrote the persisted `sideinformation[side].macroai` was removed on 2026-10-15; its reinforcement-opportunity opinion is now #44's fallback when the operations ledger has none.
 
 Reinforcement-opportunity mapping (`TacticalVanillaMacroAiMapping`):
-- `AttackNow` + ratio ≥ envelopment threshold → macroai 0 (flank attack); below it → 1 (frontal attack)
+- `AttackNow` + ratio ≥ envelopment threshold → macroai 0 (assault: by the battleprefs parse order 54685-54700, index 0 is assault, the macro stance with the lowest flank-order trigger 1.0, not a separate flank mode); below it → 1 (frontal attack)
 - `WaitAndConsolidate` / `DelayingDefense` / `WithdrawalToFightLater` → 2 (defend). Whiskey never writes 3: a Whiskey-written retreat with `startoffallback == 0` ends the battle on the next cycle (6362).
 - `DefensiveHold` / `NoOpportunity` → no opinion (vanilla's own value stands)
