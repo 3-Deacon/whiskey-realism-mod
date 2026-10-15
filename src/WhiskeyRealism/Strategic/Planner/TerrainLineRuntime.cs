@@ -6,39 +6,44 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // The planner's terrain and movement inputs from vanilla (G3; runtime, not in the test csproj).
-    // Reads only.
-    //   Blocks     vanilla's engagement line test exactly as CheckIfUnitIsWithinModifiedRange
-    //              (80511-80517) runs it for EstablishCampaignBattle (80683-80687):
-    //              bfs.CountTerrainLine(start, Tools.GetAngle(start, end) + 180f, distance,
-    //              GameVars.terrainrestrictions_combat) < distance. CountTerrainLine (27695) steps one
-    //              map unit at a time, each step a GetCurrentTerrainOnPos (26727) and a
-    //              GetAngleTerrainPos with a Terrain.SampleHeight (26891-26935), so a probe costs
-    //              `distance` steps. The terrain-spec grid does not change during a campaign, so
-    //              results are memoized for the campaign (CampaignScope) on endpoints snapped to an
-    //              8-unit grid (the probe runs between the snapped points), bounded to
-    //              MaxMemoEntries; new probes are capped at MaxLineStepsPerReview map units per
-    //              review. Lines between static points (targets, centroids, the capital) fill the
-    //              memo once; a believed army moves tens of units a day, so its lines re-key daily
-    //              and the budget is the steady daily spend. Past the budget a line reads as clear
-    //              (the straight distance, the no-river answer) for this review and one static-key
-    //              warning is logged.
-    //   RiverNear  BattlefieldSetup.GetCurrentTerrainOnPos at the point and 8 points on each of two
-    //              rings (half and full range) for terrain 3/4/5 (small river, river, river
-    //              crossing: the cells River Expedition speeds, 133482-133491); memoized the same
-    //              way, at most MaxRiverProbesPerReview new points per review.
+    // Reads only. The terrain source of ReviewTerrain (ITerrainLineSource): TryLine/TryRiver answer
+    // from the campaign memo for free; ProbeLine/ProbeRiver run vanilla's lookups within this
+    // review's budget and return false, leaving the answer unknown, once it is spent.
+    //   Lines   vanilla's engagement line test exactly as CheckIfUnitIsWithinModifiedRange
+    //           (80511-80517) runs it for EstablishCampaignBattle (80683-80687):
+    //           bfs.CountTerrainLine(start, Tools.GetAngle(start, end) + 180f, distance,
+    //           GameVars.terrainrestrictions_combat) < distance. CountTerrainLine (27695) steps one map
+    //           unit at a time, each step a GetCurrentTerrainOnPos (26727) and a GetAngleTerrainPos
+    //           with a Terrain.SampleHeight (26891-26935), so a probe costs `distance` steps.
+    //   Rivers  BattlefieldSetup.GetCurrentTerrainOnPos at the point and 8 points on each of two
+    //           rings (half and full range) for terrain 3/4/5 (small river, river, river crossing:
+    //           the cells River Expedition speeds, 133482-133491).
+    // The terrain-spec grid does not change during a campaign, so answers are memoized for the
+    // campaign (CampaignScope) on endpoints snapped to a 16-unit grid (the probe runs between the
+    // snapped points; the coarse grid keeps a slowly moving army's lines on the same keys), bounded
+    // to MaxMemoEntries. Per review: at most MaxLineStepsPerReview map units of lines,
+    // MaxRiverProbesPerReview river points, and MaxProbeMillisPerReview of wall clock spent probing (a
+    // CPU budget, AGENTS.md § Clocks; after the review's first probe a line is not started when its
+    // length times the measured cost per step would overrun it; the first probe always runs, so
+    // a review's probing costs at most the budget or one line of ReviewTerrain.MaxProbedLine steps). A refused probe changes no answer the planner uses: ReviewTerrain scores
+    // a review with no river term until every question is known (G3 verify F3).
     //   ReadMarchSpeed  the campaign speed terms of the march-time estimate (MarchSpeedInputs).
-    internal sealed class TerrainLineRuntime : ITerrainLineProbe
+    internal sealed class TerrainLineRuntime : ITerrainLineSource
     {
-        internal const float MaxLineStepsPerReview = 1500f; // map units of CountTerrainLine per review (about five 300-unit lines)
+        internal const float MaxLineStepsPerReview = 1500f; // map units of CountTerrainLine per review
         internal const int MaxRiverProbesPerReview = 128;
-        internal const int MaxMemoEntries = 20000;
-        private const float Snap = 8f;
+        internal const double MaxProbeMillisPerReview = 1.0;
+        internal const int MaxMemoEntries = 50000;
+        private const float Snap = 16f;
         private const int RingPoints = 8;
 
         private static readonly TerrainLineRuntime Instance = new TerrainLineRuntime();
         private static readonly Dictionary<long, bool> LineMemo = new Dictionary<long, bool>();
         private static readonly Dictionary<long, bool> RiverMemo = new Dictionary<long, bool>();
+        private static readonly System.Diagnostics.Stopwatch Clock = new System.Diagnostics.Stopwatch();
         private static float _lineSteps;
+        private static double _millisPerStep = 0.003; // learned from the probes this session (starts at 3 us)
+        private static double _probeMillis;            // time spent probing this review
         private static int _riverProbes;
         private static BattlefieldSetup _bfs;
 
@@ -53,65 +58,106 @@ namespace WhiskeyRealism.Strategic.Planner
             RiverMemo.Clear();
             _lineSteps = 0f;
             _riverProbes = 0;
+            _millisPerStep = 0.003;
             _bfs = null;
         }
 
-        // The probe for one review: the memo lives for the campaign, the budgets for this review.
+        // The source for one review: the memo lives for the campaign, the budgets for this review.
         internal static TerrainLineRuntime ForReview()
         {
             _lineSteps = 0f;
             _riverProbes = 0;
+            _probeMillis = 0.0;
             return Instance;
         }
 
-        public bool Blocks(float ax, float az, float bx, float bz)
+        public bool TryLine(float ax, float az, float bx, float bz, out bool blocked)
         {
-            int sax = Cell(ax), saz = Cell(az), sbx = Cell(bx), sbz = Cell(bz);
-            var start = new Vector3(sax * Snap, 0f, saz * Snap);
-            var end = new Vector3(sbx * Snap, 0f, sbz * Snap);
-            float distance = Tools.GetXZDistance(start, end);
-            if (distance < 1f) return false;
-            long key = Key(sax, saz, sbx, sbz);
-            if (LineMemo.TryGetValue(key, out bool known)) return known;
-            if (_lineSteps + distance > MaxLineStepsPerReview)
-            {
-                OnceLog.Warning("campaign-planner:terrain-probe-cap", "[CampaignPlanner] river-line probe budget reached this review; further lines read as clear");
-                return false;
-            }
+            blocked = false;
+            if (LineDistance(ax, az, bx, bz, out _, out _) < 1f) return true;
+            return LineMemo.TryGetValue(LineKey(ax, az, bx, bz), out blocked);
+        }
+
+        public bool TryRiver(float x, float z, float range, out bool river)
+        {
+            return RiverMemo.TryGetValue(RiverKey(x, z, range), out river);
+        }
+
+        public bool ProbeLine(float ax, float az, float bx, float bz)
+        {
+            float distance = LineDistance(ax, az, bx, bz, out Vector3 start, out Vector3 end);
+            if (distance < 1f) return true;
+            if (_lineSteps + distance > MaxLineStepsPerReview || OverTime()) return Refused();
+            if (ProbedThisReview() && _probeMillis + distance * _millisPerStep > MaxProbeMillisPerReview) return Refused();
             var bfs = ResolveBattlefieldSetup();
             if ((UnityEngine.Object)bfs == null) return false;
             _lineSteps += distance;
+            Clock.Restart();
             float angle = Tools.GetAngle(start, end) + 180f;
             bool blocked = bfs.CountTerrainLine(start, angle, distance, GameVars.terrainrestrictions_combat) < distance;
-            Remember(LineMemo, key, blocked);
-            return blocked;
+            double spent = Clock.Elapsed.TotalMilliseconds;
+            _probeMillis += spent;
+            _millisPerStep = 0.8 * _millisPerStep + 0.2 * (spent / distance);
+            Remember(LineMemo, LineKey(ax, az, bx, bz), blocked);
+            return true;
         }
 
-        public bool RiverNear(float x, float z, float range)
+        public bool ProbeRiver(float x, float z, float range)
         {
-            int cx = Cell(x), cz = Cell(z);
-            long key = Key(cx, cz, Mathf.RoundToInt(range), int.MinValue);
-            if (RiverMemo.TryGetValue(key, out bool known)) return known;
-            x = cx * Snap;
-            z = cz * Snap;
-            if (_riverProbes >= MaxRiverProbesPerReview)
-            {
-                OnceLog.Warning("campaign-planner:terrain-probe-cap", "[CampaignPlanner] river-line probe budget reached this review; further lines read as clear");
-                return false;
-            }
+            if (_riverProbes >= MaxRiverProbesPerReview || OverTime()) return Refused();
             _riverProbes++;
-            bool river = IsRiver(BattlefieldSetup.GetCurrentTerrainOnPos(new Vector3(x, 0f, z)));
+            Clock.Restart();
+            float px = Cell(x) * Snap, pz = Cell(z) * Snap;
+            bool river = IsRiver(BattlefieldSetup.GetCurrentTerrainOnPos(new Vector3(px, 0f, pz)));
             for (int ring = 1; ring <= 2 && !river; ring++)
             {
                 float radius = range * ring * 0.5f;
                 for (int k = 0; k < RingPoints && !river; k++)
                 {
                     double a = 2.0 * Math.PI * k / RingPoints;
-                    river = IsRiver(BattlefieldSetup.GetCurrentTerrainOnPos(new Vector3(x + radius * (float)Math.Cos(a), 0f, z + radius * (float)Math.Sin(a))));
+                    river = IsRiver(BattlefieldSetup.GetCurrentTerrainOnPos(new Vector3(px + radius * (float)Math.Cos(a), 0f, pz + radius * (float)Math.Sin(a))));
                 }
             }
-            Remember(RiverMemo, key, river);
-            return river;
+            _probeMillis += Clock.Elapsed.TotalMilliseconds;
+            Remember(RiverMemo, RiverKey(x, z, range), river);
+            return true;
+        }
+
+        // The first probe of a review always runs (a line within MaxProbedLine fits the step budget),
+        // so the memo makes progress every review whatever a step costs: refusing a line on its
+        // estimated cost alone would refuse the head of the fixed order every review, forever.
+        private static bool ProbedThisReview()
+        {
+            return _lineSteps > 0f || _riverProbes > 0;
+        }
+
+        private static bool OverTime()
+        {
+            return _probeMillis > MaxProbeMillisPerReview;
+        }
+
+        // Over budget: nothing is probed or remembered; the question stays unknown.
+        private static bool Refused()
+        {
+            OnceLog.Warning("campaign-planner:terrain-probe-cap", "[CampaignPlanner] river-line probe budget reached this review; the memo fills on later reviews");
+            return false;
+        }
+
+        private static float LineDistance(float ax, float az, float bx, float bz, out Vector3 start, out Vector3 end)
+        {
+            start = new Vector3(Cell(ax) * Snap, 0f, Cell(az) * Snap);
+            end = new Vector3(Cell(bx) * Snap, 0f, Cell(bz) * Snap);
+            return Tools.GetXZDistance(start, end);
+        }
+
+        private static long LineKey(float ax, float az, float bx, float bz)
+        {
+            return Key(Cell(ax), Cell(az), Cell(bx), Cell(bz));
+        }
+
+        private static long RiverKey(float x, float z, float range)
+        {
+            return Key(Cell(x), Cell(z), Mathf.RoundToInt(range), int.MinValue);
         }
 
         private static int Cell(float v)

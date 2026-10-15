@@ -5,7 +5,9 @@ using System.Text;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // One alliance's main-effort memory across reviews (plan P4/P5): the current main effort, the
-    // challenger the hysteresis is counting, the decision serial and the campaign seed. Written
+    // challenger the hysteresis is counting, the reviews the current main effort has spent just
+    // below its required odds (the odds deadband), the capital-threat latch (the trigger fires on
+    // onset only), the decision serial and the campaign seed. Written
     // only by TheaterPlanner.Plan inside the daily review; persisted by the sidecar (G6, through
     // Restore). CampaignSeed 0 means "not computed yet": the first review computes it.
     public sealed class PlannerState
@@ -16,9 +18,14 @@ namespace WhiskeyRealism.Strategic.Planner
         public int ChallengerDays;
         public int DecisionSerial;
         public long CampaignSeed;
+        public int BelowOddsDays;
+        public bool CapitalThreatLatched;
 
-        public void Restore(int mainSector, int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed)
+        public void Restore(int mainSector, int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
+                            int belowOddsDays = 0, bool capitalThreatLatched = false)
         {
+            BelowOddsDays = belowOddsDays;
+            CapitalThreatLatched = capitalThreatLatched;
             CurrentMainSector = mainSector;
             CurrentMainObjective = mainObjective;
             ChallengerObjective = challengerObjective;
@@ -54,10 +61,13 @@ namespace WhiskeyRealism.Strategic.Planner
     // no winner) through CampaignPlannerRuntime.OnBattleRecorded. As the R4 rule it replaces
     // (DirtyPlanIfBattleInvalidates for AllianceWon and LosingAlliance), a battle concerns the
     // alliances that fought it: it is queued for each participant of 0 and 1 (Alliance[], the
-    // winner and the loser) and each review takes only its own queue.
+    // winner and the loser) and each review takes only its own queue. A queue is not drained while
+    // the planner pauses (W&L hierarchy -1) or stands down, so Take drops every battle older than
+    // MaxBattleAgeDays instead of judging it against today's main effort.
     public sealed class BattleInbox
     {
         public const int MaxPending = 16;
+        public const int MaxBattleAgeDays = 7;
         private readonly List<BattleHistoryRecord>[] _pending = { new List<BattleHistoryRecord>(), new List<BattleHistoryRecord>() };
 
         internal void Add(BattleHistoryRecord record)
@@ -79,13 +89,19 @@ namespace WhiskeyRealism.Strategic.Planner
             return sides != null && Array.IndexOf(sides, alliance) >= 0;
         }
 
-        // The alliance's pending battles, moved into `into` (cleared first); the queue empties.
-        internal void Take(int alliance, List<BattleHistoryRecord> into)
+        // The alliance's pending battles no older than MaxBattleAgeDays at daySerial
+        // (ReviewCadenceCatchUp.DaySerial), moved into `into` (cleared first); the queue empties.
+        internal void Take(int alliance, int daySerial, List<BattleHistoryRecord> into)
         {
             into.Clear();
             if (alliance < 0 || alliance >= _pending.Length) return;
-            into.AddRange(_pending[alliance]);
-            _pending[alliance].Clear();
+            var list = _pending[alliance];
+            for (int i = 0; i < list.Count; i++)
+            {
+                var r = list[i];
+                if (daySerial - ReviewCadenceCatchUp.DaySerial(r.Day, r.Month, r.Year) <= MaxBattleAgeDays) into.Add(r);
+            }
+            list.Clear();
         }
 
         internal void Clear()

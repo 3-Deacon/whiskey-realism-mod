@@ -57,6 +57,26 @@ internal static class TheaterPlannerTests
             ("TerrainProbeMirrorsVanillaEngagementLine", TerrainProbeMirrorsVanillaEngagementLine),
             ("PlannerPlanStepPinned", PlannerPlanStepPinned),
             ("BattleForwardFollowsHistoryAdd", BattleForwardFollowsHistoryAdd),
+            ("StaleBattlesAfterAPauseAreDropped", StaleBattlesAfterAPauseAreDropped),
+            ("OddsDeadbandHoldsTheMainEffort", OddsDeadbandHoldsTheMainEffort),
+            ("OddsDropBelowDeadbandOrAfterSwitchDays", OddsDropBelowDeadbandOrAfterSwitchDays),
+            ("StandingCapitalThreatDoesNotFlap", StandingCapitalThreatDoesNotFlap),
+            ("CapitalLatchRearmsBelowRelease", CapitalLatchRearmsBelowRelease),
+            ("TriggerKeepsCurrentWithinEpsilon", TriggerKeepsCurrentWithinEpsilon),
+            ("EligibilityCountsMassableStrength", EligibilityCountsMassableStrength),
+            ("MassExcludesHoldsBusyAndMapGroupPlayer", MassExcludesHoldsBusyAndMapGroupPlayer),
+            ("MassOnlyWithinMarchHorizon", MassOnlyWithinMarchHorizon),
+            ("RiverDiscountIsOrderIndependent", RiverDiscountIsOrderIndependent),
+            ("ReviewTerrainRecordsEachUnknownOnce", ReviewTerrainRecordsEachUnknownOnce),
+            ("BusyFormationNeverTheCandidateForce", BusyFormationNeverTheCandidateForce),
+            ("CandidateForceIsTheMainBody", CandidateForceIsTheMainBody),
+            ("SeedFoldsDecisionSerialAndAlliance", SeedFoldsDecisionSerialAndAlliance),
+            ("EqualChallengersBreakTiesOnLowerObjectiveId", EqualChallengersBreakTiesOnLowerObjectiveId),
+            ("UnoccupiedThreatenedSectorIsScreen", UnoccupiedThreatenedSectorIsScreen),
+            ("LowMoraleSectorRecovers", LowMoraleSectorRecovers),
+            ("SupportFollowsTheMainAxis", SupportFollowsTheMainAxis),
+            ("ExposureLowersTheScore", ExposureLowersTheScore),
+            ("SnapshotReadsGroupSpeed", SnapshotReadsGroupSpeed),
         });
     }
 
@@ -220,8 +240,10 @@ internal static class TheaterPlannerTests
     {
         // Current 99 (x 300) leads 98 (x 100) by 0.015. A believed army 100 from the own capital
         // (x 0) with no own force near it: threat 1, and 98's closeness to the capital (0.67) adds
-        // 0.067: 98 now leads by 0.05, below SwitchMargin, but the trigger switches at once.
+        // 0.067: 98 now leads by 0.05, below SwitchMargin, but the trigger switches at once. A second
+        // corps beside the first: the capital reserve (nearest the capital) takes one of them.
         var s = TwoTargets(0.5f, 0.6f);
+        s.Own.Add(Corps(2, 200f, 20000f));
         s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
         var state = StateOn(99);
         var plan = Plan(s, state);
@@ -641,58 +663,95 @@ internal static class TheaterPlannerTests
     private static void BattleInboxDeliversToBothSides()
     {
         var inbox = new BattleInbox();
-        var record = new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 1, Alliance = new[] { 0, 1 } };
+        var record = Battle(1, new[] { 0, 1 }, 15, 6, 1861);
         inbox.Add(record);
         var taken = new List<BattleHistoryRecord>();
-        inbox.Take(0, taken);
+        inbox.Take(0, Day, taken);
         AssertEqual(1, taken.Count, "alliance 0 sees the battle");
-        inbox.Take(0, taken);
+        inbox.Take(0, Day, taken);
         AssertEqual(0, taken.Count, "taken once");
-        inbox.Take(1, taken);
+        inbox.Take(1, Day, taken);
         AssertEqual(1, taken.Count, "alliance 1 still sees it");
         inbox.Add(record);
-        inbox.Take(2, taken);
+        inbox.Take(2, Day, taken);
         AssertEqual(0, taken.Count, "no queue beyond alliance 1");
         for (int i = 0; i < BattleInbox.MaxPending + 5; i++) inbox.Add(record);
-        inbox.Take(1, taken);
+        inbox.Take(1, Day, taken);
         AssertEqual(BattleInbox.MaxPending, taken.Count, "queue bounded");
         inbox.Clear();
-        inbox.Take(0, taken);
+        inbox.Take(0, Day, taken);
         AssertEqual(0, taken.Count, "cleared");
 
         // CSA vs a European power: the Union did not fight it and never judges it.
-        inbox.Add(new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 2, Alliance = new[] { 1, 2 } });
-        inbox.Take(0, taken);
+        inbox.Add(Battle(2, new[] { 1, 2 }, 15, 6, 1861));
+        inbox.Take(0, Day, taken);
         AssertEqual(0, taken.Count, "a battle without alliance 0 is not alliance 0's");
-        inbox.Take(1, taken);
+        inbox.Take(1, Day, taken);
         AssertEqual(1, taken.Count, "the CSA fought it");
+    }
+
+    // G3 verify F7: after a W&L pause the queue is not judged wholesale against today's main effort.
+    private static void StaleBattlesAfterAPauseAreDropped()
+    {
+        var inbox = new BattleInbox();
+        inbox.Add(Battle(1, new[] { 0, 1 }, 1, 5, 1861));   // 45 days before Day
+        inbox.Add(Battle(1, new[] { 0, 1 }, 8, 6, 1861));   // exactly MaxBattleAgeDays before
+        inbox.Add(Battle(1, new[] { 0, 1 }, 14, 6, 1861));
+        var taken = new List<BattleHistoryRecord>();
+        inbox.Take(0, Day, taken);
+        AssertEqual(2, taken.Count, "only battles within MaxBattleAgeDays are judged");
+        inbox.Take(0, Day, taken);
+        AssertEqual(0, taken.Count, "the stale one is dropped, not kept for later");
+
+        var state = StateOn(99);
+        var plan = TheaterPlanner.Plan(TwoTargets(0.5f, 0.1f), Sectors(TwoTargets(0.5f, 0.1f)), null, state,
+            Queued(Battle(1, new[] { 0, 1 }, 1, 5, 1861, 300f)), null, Speed(), out _);
+        AssertEqual(99, plan.MainObjectiveId, "a stale decisive battle at the target triggers nothing");
     }
 
     private static void PlannerStateRestoreRoundTrips()
     {
         var state = new PlannerState();
-        state.Restore(4, 31, 32, 2, 7, 123456789L);
+        state.Restore(4, 31, 32, 2, 7, 123456789L, 2, true);
         AssertEqual(4, state.CurrentMainSector, "sector");
         AssertEqual(31, state.CurrentMainObjective, "objective");
         AssertEqual(32, state.ChallengerObjective, "challenger");
         AssertEqual(2, state.ChallengerDays, "days");
         AssertEqual(7, state.DecisionSerial, "serial");
         AssertEqual(123456789L, state.CampaignSeed, "seed");
+        AssertEqual(2, state.BelowOddsDays, "odds days");
+        AssertTrue(state.CapitalThreatLatched, "capital latch");
     }
 
     // The runtime probe replicates CheckIfUnitIsWithinModifiedRange (80511-80517) and is bounded.
     private static void TerrainProbeMirrorsVanillaEngagementLine()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TerrainLineRuntime.cs");
-        string blocks = MethodBody(src, "public bool Blocks(");
-        AssertContains(blocks, "Tools.GetAngle(start, end) + 180f", "vanilla's angle convention");
-        AssertContains(blocks, ".CountTerrainLine(start, angle, distance, GameVars.terrainrestrictions_combat) < distance", "vanilla's < distance test");
-        AssertContains(blocks, "LineMemo", "memoized for the campaign (static terrain grid)");
-        AssertContains(blocks, "MaxLineStepsPerReview", "step budget per review");
-        AssertContains(blocks, "\"campaign-planner:terrain-probe-cap\"", "cap logged once with a static key");
-        string river = MethodBody(src, "public bool RiverNear(");
+        string probe = MethodBody(src, "public bool ProbeLine(");
+        AssertContains(probe, "Tools.GetAngle(start, end) + 180f", "vanilla's angle convention");
+        AssertContains(probe, ".CountTerrainLine(start, angle, distance, GameVars.terrainrestrictions_combat) < distance", "vanilla's < distance test");
+        AssertContains(probe, "Remember(LineMemo,", "memoized for the campaign (static terrain grid)");
+        // P01: over budget the question stays unknown (no probe, no memo write, return false).
+        AssertContains(probe, "if (_lineSteps + distance > MaxLineStepsPerReview || OverTime()) return Refused();", "line budget refusal");
+        AssertContains(probe, "if (ProbedThisReview() && _probeMillis + distance * _millisPerStep > MaxProbeMillisPerReview) return Refused();", "the estimated cost never refuses a review's first probe");
+        AssertContains(MethodBody(src, "private static bool ProbedThisReview("), "return _lineSteps > 0f || _riverProbes > 0;", "first probe of the review");
+        AssertContains(src, "internal const float MaxLineStepsPerReview = 1500f;", "step budget");
+        AssertTrue(ReviewTerrain.MaxProbedLine <= 1500f, "every probed line fits the step budget");
+        AssertTrue(probe.IndexOf("return Refused();", StringComparison.Ordinal) < probe.IndexOf("Remember(LineMemo,", StringComparison.Ordinal), "refused before anything is remembered");
+        string refused = MethodBody(src, "private static bool Refused(");
+        AssertContains(refused, "\"campaign-planner:terrain-probe-cap\"", "cap logged once with a static key");
+        AssertContains(refused, "return false;", "a refused probe answers unknown");
+        AssertContains(MethodBody(src, "public bool TryLine("), "LineMemo.TryGetValue(", "a memo lookup is free");
+        string river = MethodBody(src, "public bool ProbeRiver(");
+        AssertContains(river, "if (_riverProbes >= MaxRiverProbesPerReview || OverTime()) return Refused();", "river budget refusal");
         AssertContains(river, "BattlefieldSetup.GetCurrentTerrainOnPos(", "terrain lookup 26727");
-        AssertContains(river, "RiverMemo", "memoized");
+        AssertContains(river, "Remember(RiverMemo,", "memoized");
+        // P17: every review starts with a fresh budget.
+        string review = MethodBody(src, "internal static TerrainLineRuntime ForReview(");
+        AssertContains(review, "_lineSteps = 0f;", "line budget reset per review");
+        AssertContains(review, "_riverProbes = 0;", "river budget reset per review");
+        AssertContains(review, "_probeMillis = 0.0;", "CPU budget reset per review");
+        AssertContains(MethodBody(src, "private static bool OverTime("), "_probeMillis > MaxProbeMillisPerReview", "only probing time is charged");
         AssertContains(src, "CampaignScope.Register(\"campaign-planner-terrain-probe\"", "per-campaign reset");
     }
 
@@ -709,7 +768,7 @@ internal static class TheaterPlannerTests
         AssertContains(review, "plan = TheaterPlanner.Plan(snapshot, sectors, SectorProfileUntilG2, state, PendingBattles,", "the plan step's inputs");
         AssertContains(review, "CampaignPlanStore.Publish(alliance, plan,", "the planner's plan is what is published");
         AssertContains(review, "EmitPlan(plan, trace,", "[CampaignPlan] row from the published plan");
-        AssertContains(review, "Battles.Take(alliance,", "each review takes only its own battles");
+        AssertContains(review, "Battles.Take(alliance, snapshot.DaySerial,", "each review takes only its own, recent battles");
         int seams = src.Split(new[] { "// G2 SEAM" }, StringSplitOptions.None).Length - 1;
         AssertEqual(1, seams, "exactly one G2 seam line");
         string forward = MethodBody(src, "internal static void OnBattleRecorded(");
@@ -725,15 +784,417 @@ internal static class TheaterPlannerTests
         AssertTrue(add >= 0 && forward > add, "the planner hears a battle right after BattleHistory.Add");
     }
 
+
+    // ---- G3 verify r1 (F1-F5) ----
+
+    // F1 / D1: odds hovering at RequiredRatio (1.111 / 1.087 against 1.1) never drop the main effort.
+    private static void OddsDeadbandHoldsTheMainEffort()
+    {
+        var state = new PlannerState { CampaignSeed = 1234L };
+        for (int day = 0; day < 6; day++)
+        {
+            var s = Line();
+            s.Supply.Add(Iip(504, 400f, 0));
+            s.Objectives.Add(Target(99, 300f, 1f));
+            s.Own.Add(Corps(1, 200f, 20000f));
+            s.Beliefs.Add(Belief(300f, 0f, day % 2 == 0 ? 18000f : 18400f, 1f));
+            var plan = Plan(s, state);
+            AssertEqual(99, plan.MainObjectiveId, "main effort kept, review " + day);
+            AssertEqual(day == 0 ? "initial" : "hold", plan.SwitchReason, "no re-decision, review " + day);
+            AssertEqual(1, state.DecisionSerial, "one decision only, review " + day);
+        }
+    }
+
+    private static TheaterPlan OddsReview(PlannerState state, float enemyAt99)
+    {
+        var s = Line();
+        s.Objectives.Add(Target(98, 100f, 0f));
+        s.Objectives.Add(Target(99, 300f, 1f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Beliefs.Add(Belief(300f, 0f, enemyAt99, 1f));
+        return Plan(s, state);
+    }
+
+    private static void OddsDropBelowDeadbandOrAfterSwitchDays()
+    {
+        var sharp = new PlannerState { CampaignSeed = 7L };
+        AssertEqual(99, OddsReview(sharp, 18000f).MainObjectiveId, "99 first");
+        var dropped = OddsReview(sharp, 21000f); // 0.95 < 1.1 - 0.10
+        AssertEqual(98, dropped.MainObjectiveId, "below the deadband: dropped at once");
+        AssertEqual("odds", dropped.SwitchReason, "reason odds");
+
+        var slow = new PlannerState { CampaignSeed = 7L };
+        OddsReview(slow, 18000f);
+        for (int day = 1; day < TheaterPlanner.SwitchDays; day++)
+        {
+            var kept = OddsReview(slow, 18400f); // 1.087: inside the deadband
+            AssertEqual(99, kept.MainObjectiveId, "inside the deadband, review " + day);
+            AssertEqual(day, slow.BelowOddsDays, "below-odds days counted");
+        }
+        var third = OddsReview(slow, 18400f);
+        AssertEqual(98, third.MainObjectiveId, "dropped after SwitchDays below the required odds");
+        AssertEqual("odds", third.SwitchReason, "reason odds");
+        AssertEqual(0, slow.BelowOddsDays, "count reset with the new main effort");
+    }
+
+    // F2 / D2: under a standing capital threat the scores alternate by 0.053; one switch at onset.
+    private static void StandingCapitalThreatDoesNotFlap()
+    {
+        var state = StateOn(99);
+        int changes = 0, last = 99;
+        for (int day = 0; day < 6; day++)
+        {
+            bool even = day % 2 == 0;
+            var s = TwoTargets(even ? 0.9f : 0.1f, even ? 0.1f : 0.9f);
+            s.Own.Add(Corps(2, 200f, 20000f));
+            s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+            var plan = Plan(s, state);
+            if (plan.MainObjectiveId != last) changes++;
+            last = plan.MainObjectiveId;
+            AssertEqual(day == 0 ? "capital-threat" : "hold", plan.SwitchReason, "trigger on onset only, review " + day);
+        }
+        AssertEqual(1, changes, "one switch in six reviews");
+        AssertEqual(1, state.DecisionSerial, "one decision");
+        AssertTrue(state.CapitalThreatLatched, "latched while the threat stands");
+    }
+
+    private static void CapitalLatchRearmsBelowRelease()
+    {
+        var state = StateOn(99);
+        var threatened = TwoTargets(0.5f, 0.6f);
+        threatened.Own.Add(Corps(2, 200f, 20000f));
+        threatened.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+        AssertEqual("capital-threat", Plan(threatened, state).SwitchReason, "onset");
+        state.Restore(0, 99, -1, 0, state.DecisionSerial, state.CampaignSeed, 0, state.CapitalThreatLatched);
+        AssertEqual("hold", Plan(threatened, state).SwitchReason, "standing threat: no trigger");
+
+        var calm = TwoTargets(0.5f, 0.6f);
+        calm.Own.Add(Corps(2, 0f, 20000f)); // capital held: threat 0.06 < CapitalThreatRelease
+        calm.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+        Plan(calm, state);
+        AssertFalse(state.CapitalThreatLatched, "released below CapitalThreatRelease");
+        AssertEqual("capital-threat", Plan(threatened, state).SwitchReason, "a new onset triggers again");
+    }
+
+    // P02: a trigger keeps the current main effort while it is within Epsilon of the best (98 leads
+    // by 0.029 at the capital-threat onset); no seed may switch it.
+    private static void TriggerKeepsCurrentWithinEpsilon()
+    {
+        for (long seed = 1; seed <= 30; seed++)
+        {
+            var s = TwoTargets(0.5f, 0.75f);
+            s.Own.Add(Corps(2, 200f, 20000f));
+            s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+            var state = new PlannerState();
+            state.Restore(0, 99, -1, 0, 0, seed);
+            var plan = Plan(s, state);
+            AssertEqual(99, plan.MainObjectiveId, "current kept within Epsilon, seed " + seed);
+            AssertEqual(0, state.DecisionSerial, "no decision, seed " + seed);
+        }
+    }
+
+    // F4 / D3: two corps of 25000 together reach 1.25 x a believed 40000; G4 masses exactly them.
+    private static void EligibilityCountsMassableStrength()
+    {
+        var s = Line();
+        s.Supply.Add(Iip(504, 400f, 0));
+        s.Objectives.Add(Target(99, 400f, 1f));
+        s.Own.Add(Corps(1, 200f, 25000f));
+        s.Own.Add(Corps(2, 100f, 25000f));
+        s.Beliefs.Add(Belief(400f, 0f, 40000f, 1f));
+        var plan = PlanOnce(s);
+        AssertEqual(99, plan.MainObjectiveId, "massed odds 1.25 >= 1.10");
+        AssertNear(50000f, plan.MassStrength, 0.01f, "mass strength published");
+        AssertEqual("1,2", string.Join(",", plan.MassInstanceIds), "the massable set G4 assigns MainEffort to");
+    }
+
+    // Seven areas: 98 at x 100 (sector 0), 97 at x 500 (sector 2). Sector 2 faces a believed 10000 at
+    // x 600 and holds it with corps 4; a map-group player corps and a corps in battle never mass.
+    private static void MassExcludesHoldsBusyAndMapGroupPlayer()
+    {
+        var s = Line(0, 7);
+        s.Supply.Add(Iip(505, 500f, 0));
+        s.Objectives.Add(Target(98, 100f, 1f));
+        s.Objectives.Add(Target(97, 500f, 0f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var player = Corps(2, 150f, 20000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        var fighting = Corps(3, 200f, 20000f);
+        fighting.Flags |= FormationFlags.InBattle;
+        s.Own.Add(fighting);
+        s.Own.Add(Corps(4, 550f, 8000f));
+        s.Beliefs.Add(Belief(600f, 0f, 10000f, 1f));
+        AssertNear(20000f, Candidate(s, null, 98).Mass, 0.01f, "sector 2's hold, the player's map group and the busy corps stay out");
+        AssertNear(28000f, Candidate(s, null, 97).Mass, 0.01f, "attacking sector 2's own threat releases its hold");
+        var plan = PlanOnce(s);
+        AssertEqual(98, plan.MainObjectiveId, "main effort 98");
+        AssertEqual("1", string.Join(",", plan.MassInstanceIds), "only corps 1 is massed");
+        AssertNear(6000f, HoldNeedOf(plan, Sectors(s).SectorAt(550f, 0f)), 0.01f, "HoldNeed published (0.6 x 10000)");
+    }
+
+    private static void MassOnlyWithinMarchHorizon()
+    {
+        var s = Line();
+        s.Objectives.Add(Target(99, 300f, 1f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var far = Corps(2, 3300f, 20000f); // 3000 / 82.1 a day = 36.5 days > 30
+        far.UseRails = false;
+        s.Own.Add(far);
+        AssertNear(20000f, Candidate(s, null, 99).Mass, 0.01f, "beyond MarchHorizonDays: not massable");
+    }
+
+    // F3 / D4: two mirror candidates whose defenders sit behind a river crossed only far away. With a
+    // per-review probe budget the plan is the same whatever order the objectives come in, no
+    // candidate gets a river discount the other lacks, and once the memo is complete both do.
+    private static void RiverDiscountIsOrderIndependent()
+    {
+        var forward = new MemoRiverAtZ(60f, 3);
+        var reversed = new MemoRiverAtZ(60f, 3);
+        var stateA = new PlannerState { CampaignSeed = 1L };
+        var stateB = new PlannerState { CampaignSeed = 1L };
+        bool complete = false;
+        for (int review = 0; review < 8 && !complete; review++)
+        {
+            forward.NewReview();
+            reversed.NewReview();
+            var a = TheaterPlanner.Plan(Mirror(false), Sectors(Mirror(false)), null, stateA, null, forward, Speed(), out string traceA);
+            var b = TheaterPlanner.Plan(Mirror(true), Sectors(Mirror(true)), null, stateB, null, reversed, Speed(), out string traceB);
+            AssertEqual(traceA, traceB, "same plan in both orders, review " + review);
+            AssertEqual(a.MainObjectiveId, b.MainObjectiveId, "same main effort, review " + review);
+            AssertEqual(forward.Known(), reversed.Known(), "the same lines probed first, review " + review);
+            complete = traceA.EndsWith("terrain=complete");
+            if (!complete) AssertEqual(-1, a.MainObjectiveId, "no partial discount: both at even odds, review " + review);
+        }
+        AssertTrue(complete, "the memo completes within a few reviews");
+        var final = TheaterPlanner.Plan(Mirror(false), Sectors(Mirror(false)), null, new PlannerState { CampaignSeed = 1L }, null, forward, Speed(), out _);
+        AssertTrue(final.MainObjectiveId == 98 || final.MainObjectiveId == 99, "with the memo complete both are discounted and eligible");
+    }
+
+    // The trace's unknown count is the number of distinct questions: a line asked from two points
+    // of the same areas, or twice, is one question, and so is a river point.
+    private static void ReviewTerrainRecordsEachUnknownOnce()
+    {
+        var areas = new List<AreaRecord>
+        {
+            new AreaRecord { Index = 0, X = 0f, Z = 0f, EdgeX = new[] { 0f }, EdgeZ = new[] { 0f } },
+            new AreaRecord { Index = 1, X = 200f, Z = 0f, EdgeX = new[] { 200f }, EdgeZ = new[] { 0f } },
+        };
+        var source = new MemoRiverAtZ(60f, 0);
+        var view = new ReviewTerrain(source, areas);
+        view.Blocks(0f, 0f, 200f, 0f);
+        view.Blocks(10f, 5f, 190f, -5f);
+        view.Blocks(200f, 0f, 0f, 0f);
+        AssertEqual(1, view.Unknown, "one line question per area pair");
+        source.Budget = 1;
+        source.NewReview();
+        AssertEqual(1, view.ProbeUnknown(), "probed once");
+        AssertTrue(source.TryLine(0f, 0f, 200f, 0f, out _), "known after the probe");
+    }
+
+    private static CampaignSnapshot Mirror(bool reversed)
+    {
+        var s = Line();
+        s.HasCapital = false;
+        var a = Target(98, 100f, 0.5f);
+        var b = Target(99, 300f, 0.5f);
+        if (reversed) { s.Objectives.Add(b); s.Objectives.Add(a); }
+        else { s.Objectives.Add(a); s.Objectives.Add(b); }
+        s.Own.Add(Corps(1, 200f, 20000f));
+        // The defenders stand in areas of their own (terrain questions are asked between area centres).
+        s.Areas.Add(new AreaRecord { Index = 20, X = 100f, Z = 140f, EdgeX = new[] { 100f }, EdgeZ = new[] { 140f }, Importance = 1f, SupplyCapacity = 100f });
+        s.Areas.Add(new AreaRecord { Index = 21, X = 300f, Z = 140f, EdgeX = new[] { 300f }, EdgeZ = new[] { 140f }, Importance = 1f, SupplyCapacity = 100f });
+        s.Beliefs.Add(Belief(100f, 140f, 20000f, 1f));
+        s.Beliefs.Add(Belief(300f, 140f, 20000f, 1f));
+        s.Crossings.Add(new CrossingRecord { X = 200f, Z = 1000f });
+        return s;
+    }
+
+    // F5 / P25: a busy formation is never the candidate force, whatever keeps it busy.
+    private static void BusyFormationNeverTheCandidateForce()
+    {
+        foreach (var busy in new[] { FormationFlags.InBattle, FormationFlags.OnRetreat, FormationFlags.Embarked, FormationFlags.VanillaDepotBuilder,
+                                     FormationFlags.FortBuilder, FormationFlags.InTransfer, FormationFlags.RaidForce, FormationFlags.SeaInvasion })
+        {
+            var s = Line();
+            s.Objectives.Add(Target(99, 300f, 1f));
+            var near = Corps(1, 250f, 30000f);
+            near.Flags |= busy;
+            s.Own.Add(near);
+            s.Own.Add(Corps(2, 0f, 15000f));
+            var c = Candidate(s, null, 99);
+            AssertEqual(1, c.Force, "the free corps is the force, not the one " + busy);
+            AssertNear(15000f, c.Mass, 0.01f, busy + " formation never masses");
+        }
+    }
+
+    // P24: the force is the nearest formation of at least MainBodyShare of the largest, not the nearest.
+    private static void CandidateForceIsTheMainBody()
+    {
+        var s = Line();
+        s.Objectives.Add(Target(99, 300f, 1f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(2, 290f, 5000f));
+        AssertEqual(0, Candidate(s, null, 99).Force, "the main body, not the nearer small corps");
+    }
+
+    // P08 / P09: the draw's seed folds the decision serial and the alliance.
+    private static void SeedFoldsDecisionSerialAndAlliance()
+    {
+        var bySerial = new HashSet<int>();
+        for (int serial = 0; serial < 64; serial++)
+        {
+            var state = new PlannerState();
+            state.Restore(-1, -1, -1, 0, serial, 99L);
+            bySerial.Add(Plan(TwoTargets(0.5f, 0.5f), state).MainObjectiveId);
+        }
+        AssertTrue(bySerial.Contains(98) && bySerial.Contains(99), "the decision serial changes the draw");
+
+        bool differs = false;
+        for (long seed = 1; seed <= 64 && !differs; seed++)
+        {
+            int zero = Plan(TwoTargets(0.5f, 0.5f), new PlannerState { CampaignSeed = seed }).MainObjectiveId;
+            int one = Plan(AllianceOneTwoTargets(), new PlannerState { CampaignSeed = seed }).MainObjectiveId;
+            differs = zero != one;
+        }
+        AssertTrue(differs, "the alliance changes the draw");
+    }
+
+    private static CampaignSnapshot AllianceOneTwoTargets()
+    {
+        var s = Line(1);
+        var a = Target(98, 100f, 0.5f);
+        var b = Target(99, 300f, 0.5f);
+        a.HolderAlliance = b.HolderAlliance = 0;
+        s.Objectives.Add(a);
+        s.Objectives.Add(b);
+        s.Own.Add(Corps(1, 200f, 20000f));
+        return s;
+    }
+
+    // P10: two equal challengers above the margin: the lower objective id is counted, in either order.
+    private static void EqualChallengersBreakTiesOnLowerObjectiveId()
+    {
+        foreach (bool reversed in new[] { false, true })
+        {
+            var s = Line();
+            var low = Target(97, 0f, 0f);
+            var a = Target(98, 100f, 0.5f);
+            var b = Target(99, 300f, 0.5f);
+            if (reversed) { s.Objectives.Add(b); s.Objectives.Add(a); s.Objectives.Add(low); }
+            else { s.Objectives.Add(low); s.Objectives.Add(a); s.Objectives.Add(b); }
+            s.Own.Add(Corps(1, 200f, 20000f));
+            var state = StateOn(97);
+            Plan(s, state);
+            AssertEqual(98, state.ChallengerObjective, "lower id first, reversed=" + reversed);
+        }
+    }
+
+    // P11: a sector with a believed army and no own formation is a Screen sector.
+    private static void UnoccupiedThreatenedSectorIsScreen()
+    {
+        var s = Wide();
+        s.Beliefs.Add(Belief(350f, 0f, 10000f, 1f));
+        var plan = PlanOnce(s);
+        AssertEqual(TheaterPosture.Screen, PostureOf(plan, Sectors(s).SectorAt(350f, 0f)), "unoccupied threatened sector screens");
+    }
+
+    // P13: average morale below aiminimummoraleformovement is Recover, supply full.
+    private static void LowMoraleSectorRecovers()
+    {
+        AssertEqual(TheaterPosture.Recover, PostureOfFarSector(1f, 0.2f), "morale 0.2 < 0.3");
+    }
+
+    // P20: an unthreatened sector within relocation range of the main axis supports it.
+    private static void SupportFollowsTheMainAxis()
+    {
+        AssertEqual(TheaterPosture.Support, PostureOfFarSector(1f), "centroid 150 from the axis");
+    }
+
+    // P14: an army on the axis flank lowers the candidate's score.
+    private static void ExposureLowersTheScore()
+    {
+        var open = Line();
+        open.Own.Add(Corps(1, 0f, 20000f));
+        float clear = Candidate(open, null, 99).Score;
+        var flank = Line();
+        flank.Own.Add(Corps(1, 0f, 20000f));
+        var boat = Belief(150f, 50f, 20000f, 1f);
+        boat.Traits = EnemyTraits.Embarked;
+        flank.Beliefs.Add(boat);
+        AssertTrue(Candidate(flank, null, 99).Score < clear, "exposure costs score");
+    }
+
+    // P05b: the march-time GroupSpeed is the formation's own (Regiment.groupspeed, 120438-120440).
+    private static void SnapshotReadsGroupSpeed()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
+        AssertContains(src, "GroupSpeed = reg.groupspeed", "read from the regiment");
+    }
+
+    private static float HoldNeedOf(TheaterPlan plan, int sectorId)
+    {
+        foreach (var sp in plan.Sectors)
+            if (sp.SectorId == sectorId) return sp.HoldNeed;
+        throw new Exception("no plan for sector " + sectorId);
+    }
+
     // ---- fixtures ----
 
-    private sealed class RiverAtX : ITerrainLineProbe
+    // A north-south river at x, every answer known (as a complete memo).
+    private sealed class RiverAtX : ITerrainLineProbe, ITerrainLineSource
     {
         private readonly float _x;
         public bool RiverEverywhere;
         public RiverAtX(float x) { _x = x; }
         public bool Blocks(float ax, float az, float bx, float bz) => (ax - _x) * (bx - _x) < 0f;
         public bool RiverNear(float x, float z, float range) => RiverEverywhere || Math.Abs(x - _x) <= range;
+        public bool TryLine(float ax, float az, float bx, float bz, out bool blocked) { blocked = Blocks(ax, az, bx, bz); return true; }
+        public bool TryRiver(float x, float z, float range, out bool river) { river = RiverNear(x, z, range); return true; }
+        public bool ProbeLine(float ax, float az, float bx, float bz) => true;
+        public bool ProbeRiver(float x, float z, float range) => true;
+    }
+
+    // An east-west river at z behind a memo that starts empty and fills only by probing within a
+    // per-review budget of questions (TerrainLineRuntime's shape).
+    private sealed class MemoRiverAtZ : ITerrainLineSource
+    {
+        private readonly float _z;
+        private readonly Dictionary<string, bool> _memo = new Dictionary<string, bool>();
+        public int Budget, Left;
+        public MemoRiverAtZ(float z, int budget) { _z = z; Budget = budget; }
+        public void NewReview() => Left = Budget;
+        public string Known()
+        {
+            var keys = new List<string>(_memo.Keys);
+            keys.Sort(StringComparer.Ordinal);
+            return string.Join(";", keys);
+        }
+        private static string Key(float a, float b, float c, float d) => a + "," + b + "," + c + "," + d;
+        public bool TryLine(float ax, float az, float bx, float bz, out bool blocked) => _memo.TryGetValue(Key(ax, az, bx, bz), out blocked);
+        public bool TryRiver(float x, float z, float range, out bool river) { river = false; return true; }
+        public bool ProbeLine(float ax, float az, float bx, float bz)
+        {
+            if (Left <= 0) return false;
+            Left--;
+            _memo[Key(ax, az, bx, bz)] = (az - _z) * (bz - _z) < 0f;
+            return true;
+        }
+        public bool ProbeRiver(float x, float z, float range) => true;
+    }
+
+    private static BattleHistoryRecord Battle(int won, int[] sides, int day, int month, int year, float x = 0f)
+    {
+        return new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = won, Alliance = sides, Day = day, Month = month, Year = year, PositionX = x };
+    }
+
+    private static List<BattleHistoryRecord> Queued(BattleHistoryRecord record)
+    {
+        var inbox = new BattleInbox();
+        inbox.Add(record);
+        var list = new List<BattleHistoryRecord>();
+        inbox.Take(0, Day, list);
+        return list;
     }
 
     private static CampaignSnapshot Fresh(int alliance)
@@ -886,11 +1347,12 @@ internal static class TheaterPlannerTests
 
     // The far sector {300, 400} holds a formation at x 400 with the given raw supply; the main
     // effort is objective 98 at x 100.
-    private static TheaterPosture PostureOfFarSector(float supply01)
+    private static TheaterPosture PostureOfFarSector(float supply01, float morale = 1f)
     {
         var s = TwoTargets(1f, 0f);
         var tired = Corps(2, 400f, 5000f);
         tired.Supply01 = supply01;
+        tired.Morale = morale;
         s.Own.Add(tired);
         var plan = PlanOnce(s);
         AssertEqual(98, plan.MainObjectiveId, "main effort at x 100");
@@ -898,7 +1360,7 @@ internal static class TheaterPlannerTests
     }
 
     // The sector {500, 600} (centroid 550) with own strength at x 550 and a believed land army.
-    private static TheaterPosture PostureAt550(float own, float enemy, ITerrainLineProbe probe, float enemyX = 600f, params CrossingRecord[] crossings)
+    private static TheaterPosture PostureAt550(float own, float enemy, ITerrainLineSource probe, float enemyX = 600f, params CrossingRecord[] crossings)
     {
         var s = Wide();
         s.Own.Add(Corps(3, 550f, own));

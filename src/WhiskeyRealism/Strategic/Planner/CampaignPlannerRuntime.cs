@@ -68,7 +68,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     var state = States[alliance];
                     if (state.CampaignSeed == 0L)
                         state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
-                    Battles.Take(alliance, PendingBattles);
+                    Battles.Take(alliance, snapshot.DaySerial, PendingBattles);
                     TheaterPlan plan;
                     string trace;
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))

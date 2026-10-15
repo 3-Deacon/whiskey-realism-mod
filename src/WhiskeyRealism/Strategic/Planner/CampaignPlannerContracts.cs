@@ -259,6 +259,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public int TargetObjectiveId;
         public float TargetX, TargetZ;
         public float RequiredRatio;
+        // (HoldRatio + Tempo.MinimumHoldRatioModifier) x the sector's river-weighted believed land
+        // threat (TheaterPlanner.SectorThreat): G4's hold need is this value, never recomputed (F9).
+        public float HoldNeed;
     }
 
     public sealed class DepotTask
@@ -280,6 +283,11 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<DepotTask> DepotTasks = new List<DepotTask>();
         public string SwitchReason;
         public string PriorId;
+        // The massable set the main effort's odds were judged on (TheaterPlanner.MassFor): own movable
+        // committed formations within MarchHorizonDays of the main target, net of the capital floor
+        // and of every other sector's hold. G4 assigns MainEffort to exactly these instance ids.
+        public List<int> MassInstanceIds = new List<int>();
+        public float MassStrength;
     }
 
     public struct CommanderProfile
