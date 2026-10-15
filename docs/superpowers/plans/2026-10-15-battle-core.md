@@ -408,7 +408,8 @@ public sealed class OrderExecutor {
   public const float RetryBearingDegrees = 30f; public const int MaxRetries = 1;
   // task hold reads Plugin.BrigadeTaskHoldSeconds (existing, default 12) via TacticalBattleClock.RealSecondsAtOneXToHours
   public ExecutionPlan Plan(BattleSnapshot s, in BattleOrderIntent winner, double nowHours);   // pure: guard→chain→validate→precheck→dedupe→cooldown
-  public void RecordIssued(in BattleOrderIntent i, double nowHours, int queuedBefore, int pathsBefore);
+  public void RecordIssued(in BattleOrderIntent i, double nowHours, IssuedTarget[] targets, int targetCount,
+      int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter); // targets: unit id, its target, its waypoint before the call
   public void ObserveOutcomes(BattleSnapshot s, double nowHours, OrderOutcome[] outcomes, out int count); // Pending/Moved/Failed/Retry/GaveUp
   public static OrderExecutor ForAlliance(int alliance);
 }
@@ -447,7 +448,7 @@ internal static class OrderExecutorRuntime {
    - Stance runs before Move, and Move before Formation (#61 L768-774, L976-988).
    - Group `SetWaypoint(showmovementoptions:false, useorderdelay:intent has UseOrderDelay && !InContactWithdrawal)`.
    - `PerRegiment` combat behavior goes through `TacticalCombatBehaviorWriter.EnsureBehavior` per regiment.
-8. Outcome next tick (D6): `Failed` → one retry at ±30° (first +30°, then −30° if the +30° target fails validation) → `GaveUp`, reported to the source through `OrderExecutor.LastOutcome(groupId, channel)`.
+8. Outcome next tick (D6): `Moved` also when vanilla took the target — a target unit's or a descendant's last waypoint moved onto it within `DedupeMeters` (SetGroupFormation stamps it, 92067; RegimentSetPath 131254/131258) — because a redirected moving group keeps its moving-unit count and `AddToOrderQueue` skips a same-type in-flight order (91490/91502). A waypoint already on the target before the call is ignored. `Failed` → one retry at ±30° (first +30°, then −30° if the +30° target fails validation) → `GaveUp`, reported to the source through `OrderExecutor.LastOutcome(groupId, channel)`.
 9. W&L dispatch: when `PlayerShareNeedsDispatch`, and the plan executed for an ancestor, and `TacticalDispatchTypeMapper.Map(...) != None`, call `TacticalPlayerDispatchRuntime.Emit(ancestor, type, x, z, heading, name)`.
 
 **Steps:**

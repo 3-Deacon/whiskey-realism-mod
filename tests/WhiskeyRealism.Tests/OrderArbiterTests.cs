@@ -33,6 +33,8 @@ internal static class OrderArbiterTests
             ("battle-core QueuedOrderIsPendingNotFailed", QueuedOrderIsPendingNotFailed),
             ("battle-core PendingTimesOutToFailed", PendingTimesOutToFailed),
             ("battle-core FailedRetriesOnceRotatedThenGivesUp", FailedRetriesOnceRotatedThenGivesUp),
+            ("battle-core RedirectOfMovingGroupIsMoved", RedirectOfMovingGroupIsMoved),
+            ("battle-core StaleWaypointNearTargetIsNotATake", StaleWaypointNearTargetIsNotATake),
             ("battle-core PlayerOwnedNeverExecuted", PlayerOwnedNeverExecuted),
             ("battle-core FeudNeverExecuted", FeudNeverExecuted),
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
@@ -224,7 +226,7 @@ internal static class OrderArbiterTests
 
         var first = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
         AssertTrue(executor.Plan(view, first, t).Execute, "first order");
-        executor.RecordIssued(first, t, queuedBefore: 0, pathsBefore: 0, queuedAfter: 0, pathsAfter: 1);
+        Record(executor, first, t, queuedBefore: 0, pathsBefore: 0, queuedAfter: 0, pathsAfter: 1);
         view.Own[g].LastWaypointX = 500f;
         view.Own[g].LastWaypointZ = -500f;
         view.Own[g].RegimentPaths = 1;
@@ -257,7 +259,7 @@ internal static class OrderArbiterTests
         double t = 3.0;
 
         var attack = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.AttackObjective);
-        executor.RecordIssued(attack, t, 0, 0, 0, 1);
+        Record(executor, attack, t, 0, 0, 0, 1);
         view.Own[g].RegimentPaths = 1;
         view.Own[g].LastWaypointX = 500f;
         view.Own[g].LastWaypointZ = -500f;
@@ -405,7 +407,7 @@ internal static class OrderArbiterTests
         var outcomes = new OrderOutcome[8];
         var order = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
         order.Flags = IntentFlags.UseOrderDelay;
-        executor.RecordIssued(order, 1.0, queuedBefore: 0, pathsBefore: 0, queuedAfter: 1, pathsAfter: 0);
+        Record(executor, order, 1.0, queuedBefore: 0, pathsBefore: 0, queuedAfter: 1, pathsAfter: 0);
 
         executor.ObserveOutcomes(view, 1.1, outcomes, out int n);
         AssertEqual(1, n, "one outcome");
@@ -427,7 +429,7 @@ internal static class OrderArbiterTests
         var executor = NewExecutor();
         var outcomes = new OrderOutcome[8];
         var order = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
-        executor.RecordIssued(order, 1.0, 0, 0, 1, 0);
+        Record(executor, order, 1.0, 0, 0, 1, 0);
 
         executor.ObserveOutcomes(view, 1.0 + OrderExecutor.PendingCourierTimeoutHours + 0.01, outcomes, out int n);
         AssertTrue(n >= 1, "an outcome");
@@ -435,7 +437,7 @@ internal static class OrderArbiterTests
 
         var direct = new OrderExecutor();
         direct.Bind(new FixtureGuard(), new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
-        direct.RecordIssued(Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0, 0, 0, 0, 0);
+        Record(direct, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0, 0, 0, 0, 0);
         direct.ObserveOutcomes(view, 1.001, outcomes, out n);
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "neither queue nor paths rose: Failed at once (silent vanilla exit)");
     }
@@ -452,7 +454,7 @@ internal static class OrderArbiterTests
         view.Own[g].X = 500f;
         order.TargetX = 500f;
 
-        executor.RecordIssued(order, 1.0, 0, 0, 0, 0);
+        Record(executor, order, 1.0, 0, 0, 0, 0);
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
         AssertEqual(2, n, "Failed then Retried");
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "first failure");
@@ -471,7 +473,7 @@ internal static class OrderArbiterTests
         AssertTrue(retryPlan.Execute, "a retry bypasses the failed-write backoff");
         AssertEqual(SkipReason.Cooldown, executor.Plan(view, order, 1.012).Skip, "the producer's own re-issue is backed off");
 
-        executor.RecordIssued(retries[0], 1.012, 0, 0, 0, 0);
+        Record(executor, retries[0], 1.012, 0, 0, 0, 0);
         executor.ObserveOutcomes(view, 1.02, outcomes, out n);
         AssertEqual(2, n, "Failed then GaveUp");
         AssertEqual(OrderOutcomeKind.GaveUp, outcomes[1].Kind, "MaxRetries = 1");
@@ -479,6 +481,67 @@ internal static class OrderArbiterTests
         AssertTrue(executor.TryGetLastOutcome(1, OrderChannel.Move, out OrderOutcome last), "reported to the source");
         AssertEqual(OrderOutcomeKind.GaveUp, last.Kind, "LastOutcome is GaveUp");
         AssertEqual(IntentSource.PostureExecutor, last.Source, "LastOutcome names the source");
+    }
+
+    // A group already on the move keeps its moving-unit count when redirected, so
+    // the take shows as its waypoint: SetGroupFormation stamps
+    // lastsetwaypointposition = target (92067) on every group move, courier or
+    // not (91559 runs with newpath:false under useorderdelay). A silent vanilla
+    // exit returns before that and leaves the old waypoint.
+    private static void RedirectOfMovingGroupIsMoved()
+    {
+        var outcomes = new OrderOutcome[8];
+        foreach (bool courier in new[] { false, true })
+        {
+            var view = new FixtureBattleView();
+            int g = view.AddGroup(1, 100f, -100f);
+            int child = view.AddGroup(2, 90f, -110f, parentIndex: g);
+            view.Own[g].RegimentPaths = 1;
+            view.Own[child].RegimentPaths = 1;
+            view.Own[g].LastWaypointX = 300f;
+            view.Own[g].LastWaypointZ = -300f;
+            var executor = NewExecutor();
+            var order = Move(1, 800f, -800f, IntentPriority.Executor, IntentSource.PostureExecutor);
+            if (courier) order.Flags = IntentFlags.UseOrderDelay;
+
+            Record(executor, order, 1.0, queuedBefore: 0, pathsBefore: 2, queuedAfter: courier ? 1 : 0, pathsAfter: 2,
+                waypointBeforeX: 300f, waypointBeforeZ: -300f);
+            view.Own[g].LastWaypointX = 800f;
+            view.Own[g].LastWaypointZ = -800f;
+            executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+            AssertEqual(1, n, "one outcome, courier=" + courier);
+            AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "redirected moving group took the order, courier=" + courier);
+
+            Record(executor, Move(1, 200f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.02,
+                0, 2, courier ? 1 : 0, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
+            view.Own[child].LastWaypointX = 210f;
+            view.Own[child].LastWaypointZ = -880f;
+            executor.ObserveOutcomes(view, 1.03, outcomes, out n);
+            AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "a descendant's waypoint on the target counts, courier=" + courier);
+
+            Record(executor, Move(1, 900f, -200f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.04,
+                0, 2, 0, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
+            view.Own[child].LastWaypointX = 0f;
+            view.Own[child].LastWaypointZ = 0f;
+            executor.ObserveOutcomes(view, 1.05, outcomes, out n);
+            AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "old waypoint kept: a genuine non-take still fails, courier=" + courier);
+        }
+    }
+
+    private static void StaleWaypointNearTargetIsNotATake()
+    {
+        // Idle group that stopped 500 m short of its old waypoint: the order goes
+        // out (not a duplicate), vanilla drops it, the waypoint is unchanged.
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 100f, -100f);
+        view.Own[g].LastWaypointX = 790f;
+        view.Own[g].LastWaypointZ = -790f;
+        var executor = NewExecutor();
+        var outcomes = new OrderOutcome[8];
+        Record(executor, Move(1, 800f, -800f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0,
+            0, 0, 0, 0, waypointBeforeX: 790f, waypointBeforeZ: -790f);
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "a waypoint already on the target before the call is no evidence");
     }
 
     // ---------------------------------------------------------------- ownership
@@ -636,6 +699,21 @@ internal static class OrderArbiterTests
         executor.Bind(new FixtureGuard(), new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
         executor.SetMapSize(1000f, 1000f);
         return executor;
+    }
+
+    private static readonly IssuedTarget[] _issued = new IssuedTarget[1];
+
+    // A Move issued to the group itself (self-only chain) at the intent's target.
+    private static void Record(OrderExecutor executor, in BattleOrderIntent intent, double now,
+        int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter,
+        float waypointBeforeX = 0f, float waypointBeforeZ = 0f)
+    {
+        _issued[0] = new IssuedTarget
+        {
+            InstanceId = intent.GroupId, X = intent.TargetX, Z = intent.TargetZ,
+            WaypointBeforeX = waypointBeforeX, WaypointBeforeZ = waypointBeforeZ,
+        };
+        executor.RecordIssued(intent, now, _issued, 1, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
     }
 
     private static BattleOrderIntent Move(int group, float x, float z, IntentPriority priority, IntentSource source,

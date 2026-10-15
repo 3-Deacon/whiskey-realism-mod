@@ -345,6 +345,15 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
+    // One unit a Move went to: its target (a fanned-out child keeps its offset)
+    // and its lastsetwaypointposition read just before the vanilla call.
+    public struct IssuedTarget
+    {
+        public int InstanceId;
+        public float X, Z;
+        public float WaypointBeforeX, WaypointBeforeZ;
+    }
+
     public struct ExecutionPlan
     {
         public bool Execute;
@@ -366,11 +375,19 @@ namespace WhiskeyRealism.Tactical.Battle
     // AddToOrderQueue (91483-91510) and regimentpaths stays 0 until the courier
     // arrives, so a move whose queue rose is Pending; it becomes Moved once the
     // group or a descendant has paths, and Failed after PendingCourierTimeoutHours.
-    // A move where neither rose hit a silent vanilla exit (SetWaypoint 91232-91640;
-    // AddToOrderQueue is also skipped while an order of that type is active,
-    // 91490/91502) and is Failed at the next observation. A failure retries once
-    // with the bearing rotated +30°, else −30° when +30° fails validation, then
-    // gives up; the source reads TryGetLastOutcome.
+    // A group that was already moving keeps its count when redirected, and
+    // AddToOrderQueue is skipped while an order of that type is in flight
+    // (91490/91502), so a move is also Moved once vanilla took the target: a
+    // target unit's (or a descendant's) last waypoint moved onto it within
+    // DedupeMeters. SetGroupFormation stamps lastsetwaypointposition = target on
+    // every group move (92067; 91559 runs with newpath:false under the courier
+    // delay too), RegimentSetPath on a regiment (131254/131258). That is "taken",
+    // not "delivered". A waypoint already on the target before the call proves
+    // nothing and is ignored. A move with none of these hit a silent vanilla exit
+    // (SetWaypoint 91232-91640, which returns before the stamp) and is Failed at
+    // the next observation. A failure retries once with the bearing rotated +30°,
+    // else −30° when +30° fails validation, then gives up; the source reads
+    // TryGetLastOutcome.
     public sealed class OrderExecutor
     {
         // = #61 RecentOrderHours, RealSecondsAtOneXToHours(30) = 0.05 h
@@ -409,6 +426,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly Dictionary<int, double> _backoffUntil = new Dictionary<int, double>(128);
         private readonly Dictionary<long, OrderOutcome> _lastOutcome = new Dictionary<long, OrderOutcome>(256);
         private PendingMove[] _pending = new PendingMove[32];
+        // Parallel to _pending: the units each pending move went to (pooled per slot).
+        private IssuedTarget[][] _pendingTargets = new IssuedTarget[32][];
         private int _pendingCount;
         private RetryTicket[] _tickets = new RetryTicket[8];
         private int _ticketCount;
@@ -514,11 +533,13 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// Bookkeeping after the vanilla call. The counts are the group's queued
-        /// orders and moving units (group or descendants with regimentpaths &gt; 0)
-        /// read live just before and after the call; they matter for Move only.
+        /// Bookkeeping after the vanilla call. For Move, <paramref name="targets"/>
+        /// holds the units the call reached, and the counts are their queued orders
+        /// and moving units (unit or descendants with regimentpaths &gt; 0) summed
+        /// live just before and after the calls.
         /// </summary>
-        public void RecordIssued(in BattleOrderIntent i, double nowHours, int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter)
+        public void RecordIssued(in BattleOrderIntent i, double nowHours, IssuedTarget[] targets, int targetCount,
+            int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter)
         {
             long key = Key(i.GroupId, i.Channel);
             _lastOrderAt[key] = nowHours;
@@ -538,12 +559,23 @@ namespace WhiskeyRealism.Tactical.Battle
             int p = FindPending(i.GroupId);
             if (p < 0)
             {
-                if (_pendingCount == _pending.Length) Array.Resize(ref _pending, _pending.Length * 2);
+                if (_pendingCount == _pending.Length)
+                {
+                    Array.Resize(ref _pending, _pending.Length * 2);
+                    Array.Resize(ref _pendingTargets, _pending.Length);
+                }
                 p = _pendingCount++;
             }
+
+            int count = targets != null ? Math.Min(Math.Max(targetCount, 0), targets.Length) : 0;
+            IssuedTarget[] slot = _pendingTargets[p];
+            if (slot == null || slot.Length < count)
+                _pendingTargets[p] = slot = new IssuedTarget[Math.Max(count, 4)];
+            if (count > 0) Array.Copy(targets, slot, count);
             _pending[p] = new PendingMove
             {
                 Intent = i, IssuedAtHours = nowHours, PathsBefore = pathsBefore, State = state, Retries = retries,
+                TargetCount = count,
             };
         }
 
@@ -575,7 +607,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     continue;
                 }
 
-                if (pm.State == MoveState.Moving || MovingUnits(s, idx) > pm.PathsBefore)
+                if (pm.State == MoveState.Moving || MovingUnits(s, idx) > pm.PathsBefore || TargetTaken(s, _pendingTargets[p], pm.TargetCount))
                 {
                     Emit(outcomes, ref count, pm, OrderOutcomeKind.Moved, SkipReason.None, nowHours, pm.Retries);
                     RemovePending(p);
@@ -744,6 +776,31 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        // Vanilla took a target when the unit's or a descendant's last waypoint is
+        // now within DedupeMeters of it, and the unit's own was not already there.
+        private static bool TargetTaken(IBattleUnitView s, IssuedTarget[] targets, int count)
+        {
+            float r2 = OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
+            UnitRecord[] own = s.Own;
+            for (int t = 0; t < count; t++)
+            {
+                ref IssuedTarget target = ref targets[t];
+                if (HasPoint(target.WaypointBeforeX, target.WaypointBeforeZ) &&
+                    DistSq(target.WaypointBeforeX, target.WaypointBeforeZ, target.X, target.Z) <= r2)
+                    continue;
+                int idx = s.IndexOfOwn(target.InstanceId);
+                if (idx < 0) continue;
+                for (int j = 0; j < s.OwnCount; j++)
+                {
+                    if (j != idx && !s.IsAncestorOf(idx, j)) continue;
+                    if (HasPoint(own[j].LastWaypointX, own[j].LastWaypointZ) &&
+                        DistSq(own[j].LastWaypointX, own[j].LastWaypointZ, target.X, target.Z) <= r2)
+                        return true;
+                }
+            }
+            return false;
+        }
+
         private static int MovingUnits(IBattleUnitView s, int idx)
         {
             UnitRecord[] own = s.Own;
@@ -788,9 +845,14 @@ namespace WhiskeyRealism.Tactical.Battle
             return -1;
         }
 
+        // Swap-remove; the slot's target array moves with it so both stay pooled.
         private void RemovePending(int p)
         {
-            _pending[p] = _pending[--_pendingCount];
+            int last = --_pendingCount;
+            _pending[p] = _pending[last];
+            IssuedTarget[] removed = _pendingTargets[p];
+            _pendingTargets[p] = _pendingTargets[last];
+            _pendingTargets[last] = removed;
         }
 
         private void AddTicket(in BattleOrderIntent failed, float x, float z, int retries)
@@ -915,6 +977,7 @@ namespace WhiskeyRealism.Tactical.Battle
             public BattleOrderIntent Intent;
             public double IssuedAtHours;
             public int PathsBefore;
+            public int TargetCount;
             public MoveState State;
             public int Retries;
         }

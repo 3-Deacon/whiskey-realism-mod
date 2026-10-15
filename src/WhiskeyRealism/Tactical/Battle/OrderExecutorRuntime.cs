@@ -73,6 +73,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // BattleUnits.completeunitlist when the roster grows or a lookup misses
         // (at most once per tick).
         private static readonly Dictionary<int, Regiment> _regiments = new Dictionary<int, Regiment>(1024);
+        // The units one Move reached (grown to the largest chain seen).
+        private static IssuedTarget[] _issued = new IssuedTarget[64];
         // Session latch for the first-fire line (built only once).
         private static bool _firstFireLogged;
         private static int _lookupUnitCount = -1;
@@ -106,7 +108,9 @@ namespace WhiskeyRealism.Tactical.Battle
             if (groupIndex < 0) return 0;
 
             int executed = 0;
+            int issued = 0;
             int queuedBefore = 0, pathsBefore = 0, queuedAfter = 0, pathsAfter = 0;
+            if (_issued.Length < plan.Targets.Count) _issued = new IssuedTarget[Math.Max(plan.Targets.Count, _issued.Length * 2)];
             for (int t = 0; t < plan.Targets.Count; t++)
             {
                 int targetIndex = plan.Targets.TargetIndices[t];
@@ -125,6 +129,12 @@ namespace WhiskeyRealism.Tactical.Battle
                 bool wrote;
                 if (winner.Channel == OrderChannel.Move)
                 {
+                    Vector3 waypointBefore = unit.lastsetwaypointposition;
+                    _issued[issued++] = new IssuedTarget
+                    {
+                        InstanceId = own[targetIndex].InstanceId, X = x, Z = z,
+                        WaypointBeforeX = waypointBefore.x, WaypointBeforeZ = waypointBefore.z,
+                    };
                     queuedBefore += QueuedSignal(unit);
                     pathsBefore += MovingUnits(unit);
                     wrote = IssueMove(bunits, unit, winner, plan.UseOrderDelay, x, z);
@@ -146,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattleOrderIntent recorded = winner;
                 recorded.TargetX = plan.X;
                 recorded.TargetZ = plan.Z;
-                executor.RecordIssued(recorded, nowHours, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
+                executor.RecordIssued(recorded, nowHours, _issued, issued, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
             }
 
             if (executed > 0 && !_firstFireLogged)
