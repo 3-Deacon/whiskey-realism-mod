@@ -49,6 +49,7 @@ internal static class TelemetryInfraFixTests
         ProbeTickDoesNotAllocateOnNormalFrames();
         ProbeTickEmitsProtectedHitchRowWithTopLevelScopes();
         SummaryReportsFrameHitches();
+        ProbeRecordsTopLevelScopesSuppressedByProfile();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         FaultSiteDetectsModFramesInStack();
@@ -1138,5 +1139,51 @@ internal static class TelemetryInfraFixTests
         GC.KeepAlive(probe.Peek());
         OnceLog.Reset();
         LogPass("reflection get field reads and warns once per missing field");
+    }
+
+    // ---------------------------------------------------------------- M2
+
+    private static void ProbeRecordsTopLevelScopesSuppressedByProfile()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryFrameProbe.ResetForTests();
+            TelemetryRuntime runtime = StartRuntime(gameRoot, profile: TelemetryProfile.TacticalTuning);
+            string dir = SessionDir(gameRoot, runtime);
+            TelemetryFrameProbe.Tick(0.016f);
+            for (int i = 0; i < 4; i++)
+            {
+                using (TelemetryPerf.Scope("campaign.p-test.suppressed", TelemetryLayer.Campaign, TelemetryCategory.Performance, 0.0))
+                {
+                }
+            }
+            TelemetryFrameProbe.Tick(0.016f);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 2000; i++)
+            {
+                using (TelemetryPerf.Scope("campaign.p-test.suppressed", TelemetryLayer.Campaign, TelemetryCategory.Performance, 0.0))
+                {
+                }
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            TestHarness.AssertEqual(0L, allocated, "record-only scopes allocate nothing");
+
+            TelemetryFrameProbe.Tick(0.6f);
+            TelemetryRouter.Shutdown("p-test");
+
+            string health = ReadIfExists(Path.Combine(dir, "health.jsonl"));
+            TestHarness.AssertTrue(health.Contains("campaign.p-test.suppressed:"), "profile-suppressed top-level scope still reaches the hitch row");
+            TestHarness.AssertEqual(0, RowsForScope(dir, "campaign.p-test.suppressed", "Performance").Count, "no slow rows for suppressed layer");
+            TestHarness.AssertEqual(0, RowsForScope(dir, "campaign.p-test.suppressed", "PerformanceAggregate").Count, "no aggregate rows for suppressed layer");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            TelemetryFrameProbe.ResetForTests();
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("probe records top-level scopes suppressed by profile");
     }
 }

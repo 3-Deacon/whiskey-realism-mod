@@ -90,6 +90,12 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        // True on the thread that runs Tick (Unity main thread).
+        internal static bool IsProbeThread
+        {
+            get { return t_isProbeThread; }
+        }
+
         // Called by TelemetryPerf when a depth-0 scope completes. Only the thread that runs
         // Tick (Unity main thread) records; worker/writer threads are ignored.
         internal static void RecordTopLevelScope(string scope, double durationMs)

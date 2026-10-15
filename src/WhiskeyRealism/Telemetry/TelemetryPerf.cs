@@ -16,7 +16,8 @@ namespace WhiskeyRealism.Telemetry
     //   - a call at/above its threshold also emits one full "Performance" row, at most
     //     MaxSlowRowsPerScopeWindow per scope per window, and only while the
     //     "Telemetry Performance Warnings" config is on.
-    // Top-level scopes on the frame-probe thread are reported to TelemetryFrameProbe.
+    // Top-level scopes on the frame-probe thread are reported to TelemetryFrameProbe, even
+    // when the profile suppresses that layer's rows (record-only: timed, no rows).
     internal static class TelemetryPerf
     {
         internal const int MaxSlowRowsPerScopeWindow = 8;
@@ -40,16 +41,25 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                if (!TelemetryRouter.ShouldEmit(TelemetryRouter.CurrentProfile, layer, category))
-                    return NoopScope.Instance;
-
+                TelemetryProfile profile = TelemetryRouter.CurrentProfile;
                 int depth = t_depth;
+                bool recordOnly = false;
+                if (!TelemetryRouter.ShouldEmit(profile, layer, category))
+                {
+                    // The profile suppresses this layer's rows, but a top-level scope on the
+                    // frame-probe (main) thread is still timed so hitch rows can name it
+                    // (e.g. campaign.* scopes under the default TacticalTuning profile).
+                    if (profile == TelemetryProfile.Off || depth != 0 || !TelemetryFrameProbe.IsProbeThread)
+                        return NoopScope.Instance;
+                    recordOnly = true;
+                }
+
                 if (depth < 0 || depth >= MaxDepth)
                     return NoopScope.Instance;
 
                 PerfScope[] pool = t_pool ?? (t_pool = new PerfScope[MaxDepth]);
                 PerfScope perfScope = pool[depth] ?? (pool[depth] = new PerfScope(depth));
-                perfScope.Begin(scope, layer, category, thresholdMs);
+                perfScope.Begin(scope, layer, category, thresholdMs, recordOnly);
                 t_depth = depth + 1;
                 return perfScope;
             }
@@ -109,6 +119,9 @@ namespace WhiskeyRealism.Telemetry
             double durationMs = (endTimestamp - scope.StartTimestamp) * TicksToMs;
             if (scope.Depth == 0)
                 TelemetryFrameProbe.RecordTopLevelScope(scope.Name, durationMs);
+            if (scope.RecordOnly)
+                return;
+
             ThreadAggregates aggregates = t_aggregates ?? (t_aggregates = new ThreadAggregates(endTimestamp));
             ScopeAggregate aggregate = aggregates.Get(scope.Name, scope.Layer, scope.Category, scope.ThresholdMs);
             if (aggregate != null)
@@ -236,10 +249,12 @@ namespace WhiskeyRealism.Telemetry
             internal TelemetryCategory Category { get; private set; }
             internal double ThresholdMs { get; private set; }
             internal long StartTimestamp { get; private set; }
+            internal bool RecordOnly { get; private set; }
             private bool _active;
 
-            internal void Begin(string scope, TelemetryLayer layer, TelemetryCategory category, double thresholdMs)
+            internal void Begin(string scope, TelemetryLayer layer, TelemetryCategory category, double thresholdMs, bool recordOnly)
             {
+                RecordOnly = recordOnly;
                 Name = TelemetryEvent.Safe(scope);
                 Layer = layer;
                 Category = category;
