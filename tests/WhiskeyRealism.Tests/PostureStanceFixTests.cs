@@ -40,6 +40,13 @@ internal static class PostureStanceFixTests
         // B-divplay
         Pass("division play keeps ledger hold tasks", DivisionPlayKeepsLedgerHoldTasks);
         Pass("division play stands down for a defending side", DivisionPlayStandsDownForDefender);
+
+        // R8
+        Pass("formation policy never re-lays a group in combat", FormationPolicyNeverRelaysInCombat);
+        Pass("formation policy changes formation the vanilla way out of combat", FormationPolicyUsesVanillaOutOfCombat);
+        Pass("formation policy waits while moving or in cover", FormationPolicyWaitsWhileMovingOrInCover);
+        Pass("formation policy cooldown is longer under fire", FormationPolicyCooldownLongerUnderFire);
+        Pass("vanilla SetFormation index round-trips group formations", VanillaSetFormationIndexRoundTrips);
     }
 
     private static void Pass(string name, Action test)
@@ -314,5 +321,73 @@ internal static class PostureStanceFixTests
         }, sideDefending: true));
         AssertFalse(decision.HasAnchor, "defending side keeps its ledger tasks");
         AssertEqual(0, decision.Orders.Count, "no play orders");
+    }
+
+    private static FormationWriteInput Fw(
+        bool needsFormation = false, bool needsFacing = false, bool needsRefuse = false,
+        float combat = 0f, float moving = 0f, int paths = 0, float cover = 0f,
+        float now = 2f, float last = -1f)
+    {
+        return new FormationWriteInput(needsFormation, needsFacing, needsRefuse, combat, moving, paths, cover, now, last);
+    }
+
+    private static void FormationPolicyNeverRelaysInCombat()
+    {
+        var formation = CommandFormationWritePolicy.Decide(Fw(needsFormation: true, combat: 0.5f));
+        AssertEqual(FormationWriteKind.None, formation.Kind, "no formation change in contact (AdjustGroupFormations 5891)");
+        var facing = CommandFormationWritePolicy.Decide(Fw(needsFormation: true, needsFacing: true, combat: 0.5f));
+        AssertEqual(FormationWriteKind.RotateInPlace, facing.Kind, "in contact only rotate in place");
+        var refuse = CommandFormationWritePolicy.Decide(Fw(needsRefuse: true, combat: 0.5f));
+        AssertEqual(FormationWriteKind.None, refuse.Kind, "no skewed re-lay in contact");
+    }
+
+    private static void FormationPolicyUsesVanillaOutOfCombat()
+    {
+        AssertEqual(FormationWriteKind.VanillaFormation, CommandFormationWritePolicy.Decide(Fw(needsFormation: true)).Kind, "formation via SetFormation");
+        AssertEqual(FormationWriteKind.WheelGroup, CommandFormationWritePolicy.Decide(Fw(needsFacing: true)).Kind, "facing wheel");
+        AssertEqual(FormationWriteKind.WheelGroup, CommandFormationWritePolicy.Decide(Fw(needsRefuse: true)).Kind, "refuse wheel");
+        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw()).Kind, "nothing needed");
+    }
+
+    private static void FormationPolicyWaitsWhileMovingOrInCover()
+    {
+        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw(needsFormation: true, paths: 2)).Kind, "moving group");
+        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw(needsFacing: true, moving: 0.5f)).Kind, "subordinates moving");
+        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw(needsFormation: true, cover: 1f)).Kind, "in cover keeps formation (5925)");
+        AssertEqual(FormationWriteKind.WheelGroup, CommandFormationWritePolicy.Decide(Fw(needsFormation: true, needsFacing: true, cover: 1f)).Kind, "in cover may still face");
+    }
+
+    private static void FormationPolicyCooldownLongerUnderFire()
+    {
+        float now = 2f;
+        var calm = CommandFormationWritePolicy.Decide(Fw(needsFacing: true, now: now, last: now - CommandFormationWritePolicy.CooldownHours * 1.1f));
+        AssertEqual(FormationWriteKind.WheelGroup, calm.Kind, "calm cooldown elapsed");
+        var underFire = CommandFormationWritePolicy.Decide(Fw(needsFacing: true, combat: 0.5f, now: now, last: now - CommandFormationWritePolicy.CooldownHours * 1.1f));
+        AssertEqual(FormationWriteKind.None, underFire.Kind, "under fire uses the longer cooldown");
+        AssertTrue(CommandFormationWritePolicy.UnderFireCooldownHours >= CommandFormationWritePolicy.CooldownHours, "never shorter under fire");
+        var reloaded = CommandFormationWritePolicy.Decide(Fw(needsFacing: true, now: 1f, last: 5f));
+        AssertEqual(FormationWriteKind.WheelGroup, reloaded.Kind, "clock reset clears cooldown");
+    }
+
+    // Vanilla BattleUnits.SetFormation (90971) remap for unittyp >= 14.
+    private static int VanillaGroupRemap(int index)
+    {
+        switch (index)
+        {
+            case 0: return 3;
+            case 1: return 1;
+            case 2: return 1;
+            case 3: return 2;
+            case 4: return 4;
+            case 5: return 0;
+            default: return index;
+        }
+    }
+
+    private static void VanillaSetFormationIndexRoundTrips()
+    {
+        for (int f = 0; f <= 4; f++)
+            AssertEqual(f, VanillaGroupRemap(CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(f)), "group formation " + f);
+        AssertEqual(-1, CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(7), "invalid");
     }
 }

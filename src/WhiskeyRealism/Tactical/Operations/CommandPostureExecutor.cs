@@ -106,6 +106,133 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    public enum FormationWriteKind
+    {
+        None,
+        // Rotate each non-moving regiment in place (Regiment.RotateRegiment,
+        // 130159): no target clearing, no slot re-lay.
+        RotateInPlace,
+        // SetGroupFormation(current formation, rotation, newpath:false,
+        // modifylastwaypoint:true): skips ClearTargets/ChangeRegimentFormation
+        // (91884) and wheels the group to rotated slots.
+        WheelGroup,
+        // BattleUnits.SetFormation (90971): courier-delivered formation change,
+        // the way AdjustGroupFormations does it (5927).
+        VanillaFormation
+    }
+
+    public readonly struct FormationWriteInput
+    {
+        public FormationWriteInput(
+            bool needsFormation,
+            bool needsFacing,
+            bool needsRefuse,
+            float combatStatusSubordinates,
+            float groupSubordinatesMoving,
+            int regimentPaths,
+            float coverValueSubordinates,
+            float nowHours,
+            float lastWriteHours)
+        {
+            NeedsFormation = needsFormation;
+            NeedsFacing = needsFacing;
+            NeedsRefuse = needsRefuse;
+            CombatStatusSubordinates = combatStatusSubordinates;
+            GroupSubordinatesMoving = groupSubordinatesMoving;
+            RegimentPaths = regimentPaths;
+            CoverValueSubordinates = coverValueSubordinates;
+            NowHours = nowHours;
+            LastWriteHours = lastWriteHours;
+        }
+
+        public bool NeedsFormation { get; }
+        public bool NeedsFacing { get; }
+        public bool NeedsRefuse { get; }
+        public float CombatStatusSubordinates { get; }
+        public float GroupSubordinatesMoving { get; }
+        public int RegimentPaths { get; }
+        public float CoverValueSubordinates { get; }
+        public float NowHours { get; }
+        public float LastWriteHours { get; }
+    }
+
+    public readonly struct FormationWriteDecision
+    {
+        public FormationWriteDecision(FormationWriteKind kind, string reason)
+        {
+            Kind = kind;
+            Reason = string.IsNullOrEmpty(reason) ? "unspecified" : reason;
+        }
+
+        public FormationWriteKind Kind { get; }
+        public string Reason { get; }
+    }
+
+    // R8 (2026-10-14): how #61 may change a group's formation / facing.
+    // Vanilla AdjustGroupFormations (5875-5935) only re-forms a group when its
+    // stance has settled, it has no path, subordinates are not moving
+    // (groupsubordinatesmoving <= 0), it is not in combat
+    // (combatstatussubordinates <= 0) and not in cover
+    // (covervaluesubordinates <= 0), and it goes through SetFormation (courier).
+    // SetGroupFormation with newpath (91884) runs ClearTargets +
+    // ChangeRegimentFormation + RegimentSetPath on every regiment — a re-lay —
+    // so it is never used on a group in contact.
+    public static class CommandFormationWritePolicy
+    {
+        // 3 game-minutes between formation/facing writes; 6 under fire (each
+        // rotation stops the regiments, StopRegiment manualstop).
+        public const float CooldownHours = 0.05f;
+        public const float UnderFireCooldownHours = 0.1f;
+
+        public static FormationWriteDecision Decide(in FormationWriteInput input)
+        {
+            if (!input.NeedsFormation && !input.NeedsFacing && !input.NeedsRefuse)
+                return new FormationWriteDecision(FormationWriteKind.None, "already-correct");
+
+            bool inCombat = input.CombatStatusSubordinates > 0f;
+            if (input.LastWriteHours >= 0f && input.NowHours >= input.LastWriteHours)
+            {
+                float cooldown = inCombat ? UnderFireCooldownHours : CooldownHours;
+                if (input.NowHours - input.LastWriteHours < cooldown)
+                    return new FormationWriteDecision(FormationWriteKind.None, inCombat ? "under-fire-cooldown" : "cooldown");
+            }
+
+            if (input.RegimentPaths > 0 || input.GroupSubordinatesMoving > 0f)
+                return new FormationWriteDecision(FormationWriteKind.None, "moving");
+
+            if (inCombat)
+            {
+                return input.NeedsFacing
+                    ? new FormationWriteDecision(FormationWriteKind.RotateInPlace, "combat-rotate-in-place")
+                    : new FormationWriteDecision(FormationWriteKind.None, "combat-no-relay");
+            }
+
+            if (input.NeedsFormation && input.CoverValueSubordinates <= 0f)
+                return new FormationWriteDecision(FormationWriteKind.VanillaFormation, "vanilla-set-formation");
+
+            if (input.NeedsFacing || input.NeedsRefuse)
+                return new FormationWriteDecision(FormationWriteKind.WheelGroup, "wheel");
+
+            return new FormationWriteDecision(FormationWriteKind.None, "in-cover");
+        }
+
+        // SetFormation (90971) remaps its argument for groups (unittyp >= 14):
+        // 0→3, 1→1, 2→1, 3→2, 4→4, 5→0. Returns the argument that yields the
+        // given group formation, or -1.
+        public static int VanillaSetFormationIndexForGroup(int groupFormation)
+        {
+            switch (groupFormation)
+            {
+                case 0: return 5;
+                case 1: return 1;
+                case 2: return 3;
+                case 3: return 0;
+                case 4: return 4;
+                default: return -1;
+            }
+        }
+    }
+
     public static class CommandWaypointWritePolicy
     {
         private const float MovementFlagThreshold = 0.05f;

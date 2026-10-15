@@ -20,7 +20,6 @@ namespace WhiskeyRealism.Patches
     internal static class BattleCommandPostureExecutorPatch
     {
         private const float RecentOrderSeconds = 30f;
-        private const float UrgentFormationRetrySeconds = 5f;
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
@@ -45,6 +44,7 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFacingPulseAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastFormationWriteAt = new Dictionary<int, float>();
         private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
@@ -256,24 +256,11 @@ namespace WhiskeyRealism.Patches
 
             TacticalRefuseFlankIntent.Decision refusedFlank = ResolveRefusedFlank(group, state.Task, closeEngaged, flankRisk);
             int targetFormation = TargetFormationForTask(state.Task, group);
-            bool visibleFormationMismatch = CommandFormationCorrection.NeedsCorrection(
-                SafeFormation(group),
-                SafeFormationOrdered(group),
-                SafeGroupFormation(group),
-                targetFormation);
             bool allowStaleQueuedBypass = CanBypassStaleQueuedOrder(state.Task);
-            bool allowPendingLocalFormation = CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged,
-                flankRisk,
-                visibleFormationMismatch,
-                state.Task);
-            bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass) && !allowPendingLocalFormation;
-            float recentOrderSeconds = CommandFormationCorrection.RecentOrderCooldownSeconds(
-                closeEngaged,
-                visibleFormationMismatch,
-                state.Task,
-                RecentOrderSeconds,
-                UrgentFormationRetrySeconds);
+            // R8: no pending-order bypass and no shortened cooldown in contact —
+            // the old 5 s "urgent" retry re-laid engaged brigades repeatedly.
+            bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass);
+            float recentOrderSeconds = RecentOrderSeconds;
             bool recentOrder = CommandPostureExecutor.ShouldBlockForRecentOrder(
                 state.Task,
                 physical,
@@ -323,7 +310,7 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
+                if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowStaleQueuedBypass) &&
                     TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
                 {
                     _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
@@ -335,7 +322,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass))
+            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowStaleQueuedBypass))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
@@ -727,8 +714,13 @@ namespace WhiskeyRealism.Patches
                     return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
-                    bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
-                    return SetWaypoint(battle, bunits, group, state.Task, target) || formed;
+                    // Vanilla never re-forms a group that has a path
+                    // (AdjustGroupFormations 5886); a courier formation order
+                    // delivered mid-move re-lays the group at its current
+                    // position (SetGroupFormation newpath, 91884) and cancels
+                    // the move. Move first; re-form only when no move went out.
+                    if (SetWaypoint(battle, bunits, group, state.Task, target)) return true;
+                    return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
@@ -741,6 +733,9 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // R8: formation/facing writes follow CommandFormationWritePolicy —
+        // never a re-lay in contact, vanilla SetFormation (courier) for real
+        // formation changes, battle-time cooldown that is longer under fire.
         private static bool SetFormation(
             BattleUnits bunits,
             Regiment group,
@@ -767,28 +762,101 @@ namespace WhiskeyRealism.Patches
                 refusedFlank,
                 task,
                 closeEngaged);
-            bool needsRefusedFlank = refuseFlankParameter >= 0;
-            if (!needsFormation && !needsFacing && !needsRefusedFlank) return false;
-            bool useNewPath = CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
-                closeEngaged,
-                needsFormation);
 
-            bunits.SetGroupFormation(
-                group,
-                targetFormation,
-                manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
-                targetpos: default(Vector3),
-                immediateplacement: false,
-                newpath: useNewPath,
-                modifylastwaypoint: !useNewPath && needsFacing,
-                newstate: 2,
-                refuseflank: refuseFlankParameter,
-                ignoredeplyomentzone: false,
-                skiprotation: false,
-                showmovementoptions: false,
-                placeentrenchments: false,
-                adjustbyterrainshape: true);
-            return true;
+            int instanceId = SafeInstanceId(group);
+            float now = BattleHours();
+            float last = _lastFormationWriteAt.TryGetValue(instanceId, out float l) ? l : -1f;
+            FormationWriteDecision decision;
+            try
+            {
+                decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                    needsFormation,
+                    needsFacing,
+                    refuseFlankParameter >= 0,
+                    group.combatstatussubordinates,
+                    group.groupsubordinatesmoving,
+                    group.regimentpaths,
+                    group.covervaluesubordinates,
+                    now,
+                    last));
+            }
+            catch
+            {
+                return false;
+            }
+
+            bool wrote = false;
+            switch (decision.Kind)
+            {
+                case FormationWriteKind.RotateInPlace:
+                    wrote = RotateRegimentsInPlace(group, manualFinalRotation) > 0;
+                    break;
+                case FormationWriteKind.WheelGroup:
+                {
+                    int current = SafeGroupFormation(group);
+                    bunits.SetGroupFormation(
+                        group,
+                        current >= 0 && current <= 4 ? current : targetFormation,
+                        manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
+                        targetpos: default(Vector3),
+                        immediateplacement: false,
+                        newpath: false,
+                        modifylastwaypoint: true,
+                        newstate: 2,
+                        refuseflank: refuseFlankParameter,
+                        ignoredeplyomentzone: false,
+                        skiprotation: false,
+                        showmovementoptions: false,
+                        placeentrenchments: false,
+                        adjustbyterrainshape: true);
+                    wrote = true;
+                    break;
+                }
+                case FormationWriteKind.VanillaFormation:
+                {
+                    int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(targetFormation);
+                    GameObject gameObject = UnityObject(group);
+                    if (index < 0 || gameObject == null) return false;
+                    bunits.SetFormation(gameObject, index, exitifsameformation: true);
+                    wrote = true;
+                    break;
+                }
+            }
+
+            if (wrote) _lastFormationWriteAt[instanceId] = now;
+            return wrote;
+        }
+
+        // Rotate each settled combat regiment of the group in place, the way
+        // vanilla turns a unit toward an enemy (UnlimberArtilleryAIMicro 3491:
+        // RotateRegiment). No ClearTargets, no new slots. Artillery is left to
+        // vanilla (RotateRegiment re-applies lastformation, which may unlimber
+        // or limber a battery, 135440-135452).
+        private static int RotateRegimentsInPlace(Regiment group, float rotation)
+        {
+            int rotated = 0;
+            try
+            {
+                Regiment[] units = group.allattachedunits;
+                if (units == null) return 0;
+                for (int i = 0; i < units.Length; i++)
+                {
+                    Regiment unit = units[i];
+                    if (unit == null || unit.unittyp > TacticalUnitType.MaxCombat) continue;
+                    if (unit.unittyp == TacticalUnitType.Artillery) continue;
+                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
+                    if (unit.regimentpaths > 0 || unit.withinrotationprocess || unit.movementmode == 3) continue;
+                    if ((UnityEngine.Object)unit.chargetarget != null) continue;
+                    GameObject gameObject = UnityObject(unit);
+                    if (gameObject == null || !gameObject.activeInHierarchy) continue;
+                    if (!CommandFormationCorrection.NeedsFacingCorrection(SafeRotationY(unit), rotation, FacingRefreshToleranceDegrees)) continue;
+                    unit.RotateRegiment(rotation);
+                    rotated++;
+                }
+            }
+            catch { }
+
+            return rotated;
         }
 
         private static bool TryThreatFacingRotation(
@@ -2183,7 +2251,6 @@ namespace WhiskeyRealism.Patches
             WriteEligibilitySnapshot eligibility,
             CommandPhysicalState physical,
             float recentOrderSeconds,
-            bool allowPendingLocalFormation,
             bool allowStaleQueuedBypass)
         {
             if (!eligibility.ModeAllowsWrites) return false;
@@ -2192,7 +2259,7 @@ namespace WhiskeyRealism.Patches
             if (eligibility.OrderPending) return false;
             if (eligibility.RecentOrder) return false;
             if (physical.ActiveMove) return false;
-            if (!allowPendingLocalFormation && HasPendingOrder(group, allowStaleQueuedBypass)) return false;
+            if (HasPendingOrder(group, allowStaleQueuedBypass)) return false;
             if (CommandPostureExecutor.ShouldBlockForRecentOrder(
                     task,
                     physical,
@@ -3688,6 +3755,14 @@ namespace WhiskeyRealism.Patches
             TacticalStanceWriter.EnsureStanceForTask(bunits, group, task, null, StanceWriteSource.Executor);
         }
 
+        // Battle clock (game hours since battle start). Every doctrine timer
+        // in this patch runs on it (plan Global Constraints: Clocks).
+        private static float BattleHours()
+        {
+            try { return GameVars.currenttimefromstart; }
+            catch { return 0f; }
+        }
+
         private static int SafeEodCycle(BattleUnits bunits)
         {
             try { return bunits != null ? bunits.eodcycle : 1; }
@@ -3918,6 +3993,7 @@ namespace WhiskeyRealism.Patches
             _lastExecutorOrderAt.Clear();
             _lastFacingPulseAt.Clear();
             _lastFireControlAt.Clear();
+            _lastFormationWriteAt.Clear();
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();
             _lastTelemetryAt.Clear();
