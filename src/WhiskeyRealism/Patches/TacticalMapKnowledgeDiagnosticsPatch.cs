@@ -13,7 +13,8 @@ namespace WhiskeyRealism.Patches
     // context a watched regiment can see. It never changes orders, facing, formation, or paths.
     // Scene anchors (objectives, entry points, FortificationGroups — FindObjectsOfType /
     // GameObject.Find walks) are built once per battle and cleared by Reset() at battle end
-    // (WS P); previously they were rebuilt on every CheckGlobalAIStrategy cycle.
+    // or when the BattleUnits identity changes (WS P); previously they were rebuilt on every
+    // CheckGlobalAIStrategy cycle.
     [HarmonyPatch]
     internal static class TacticalMapKnowledgeDiagnosticsPatch
     {
@@ -37,6 +38,7 @@ namespace WhiskeyRealism.Patches
         private static List<Anchor> _objectiveAnchors;
         private static List<Anchor> _entryPointAnchors;
         private static List<Anchor> _fortificationAnchors;
+        private static int _battleKey;
         private static bool _inventoryEmitted;
         private static int _unitRowsEmitted;
         private static string[] _watchTokensCache;
@@ -52,6 +54,7 @@ namespace WhiskeyRealism.Patches
             _objectiveAnchors = null;
             _entryPointAnchors = null;
             _fortificationAnchors = null;
+            _battleKey = 0;
         }
 
         private static void EnsureAnchors()
@@ -71,6 +74,14 @@ namespace WhiskeyRealism.Patches
                 {
                     if (Plugin.EnableTacticalMapKnowledgeDiagnostics == null || !Plugin.EnableTacticalMapKnowledgeDiagnostics.Value)
                         return;
+
+                    // Per-battle caches follow the BattleUnits identity, independent of the
+                    // orchestrator's OnBattleEnd reset.
+                    int battleKey = TacticalRegimentDiagnosticsPatch.CurrentBattleKey();
+                    if (TacticalRegimentDiagnosticsPatch.IsNewBattle(_battleKey, battleKey))
+                        Reset();
+                    if (battleKey != 0)
+                        _battleKey = battleKey;
 
                     if (!_inventoryEmitted)
                     {

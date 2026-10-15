@@ -1076,10 +1076,15 @@ internal static class TelemetryInfraFixTests
 
     private static void RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges()
     {
-        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(false, 0, 120, "Hampton", "Hampton"), "no cache yet");
-        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 120, "Hampton", "Hampton"), "same roster and list reuses cache");
-        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 121, "Hampton", "Hampton"), "roster count change rescans");
-        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 120, "Hampton", "Hampton,Tennessee"), "watch list change rescans");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(false, 7, 7, 0, 120, "Hampton", "Hampton", false), "no cache yet");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 7, 7, 120, 120, "Hampton", "Hampton", false), "same battle, roster and list reuses cache");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 7, 7, 120, 121, "Hampton", "Hampton", false), "roster count change rescans");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 7, 7, 120, 120, "Hampton", "Hampton,Tennessee", false), "watch list change rescans");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 7, 9, 120, 120, "Hampton", "Hampton", false), "new battle (BattleUnits identity) rescans without OnBattleEnd");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 7, 7, 120, 120, "Hampton", "Hampton", true), "a destroyed cached unit rescans");
+        TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.IsNewBattle(7, 9), "battle identity change");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.IsNewBattle(7, 7), "same battle");
+        TestHarness.AssertFalse(TacticalRegimentDiagnosticsPatch.IsNewBattle(7, 0), "unknown identity keeps state");
         LogPass("regiment diagnostics rescan only when roster or watch list changes");
     }
 

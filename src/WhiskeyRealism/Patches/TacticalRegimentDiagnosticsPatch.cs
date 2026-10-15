@@ -17,12 +17,14 @@ namespace WhiskeyRealism.Patches
     // for that unit. Per-unit min-sample-interval prevents spam from rapid state churn.
     // Hard-capped at MaxLinesPerBattle to bound worst-case log size.
     //
-    // Reset between battles via TacticalBattleCoordinator.OnBattleEnd → ClearLedgersBetweenBattles.
+    // Reset between battles via TacticalBattleCoordinator.OnBattleEnd → ClearLedgersBetweenBattles,
+    // and independently whenever the AIBattle.bunits (BattleUnits) instance changes.
     //
     // Cost (WS P, P-regdiag): hosted on AIBattle.CheckGlobalAIStrategy (decompile 6314, the
     // macro AI cycle). An empty watch list returns before touching BattleUnits. Matched
     // regiments are cached per battle; BattleUnits.completeunitlist (78920) is re-walked
-    // (reading .name for every unit) only when its Count or the watch list changes.
+    // (reading .name for every unit) only when its Count or the watch list changes, or a
+    // cached regiment has been destroyed.
     [HarmonyPatch]
     internal static class TacticalRegimentDiagnosticsPatch
     {
@@ -66,9 +68,13 @@ namespace WhiskeyRealism.Patches
         private static bool _watchedValid;
         private static int _watchedRosterCount;
         private static string _watchedSource;
+        private static int _battleKey;
+        private static System.Reflection.FieldInfo _aiBattleUnitsField;
+        private static bool _aiBattleUnitsFieldResolved;
 
         public static void Reset()
         {
+            _battleKey = 0;
             _last.Clear();
             _logCount = 0;
             _watchTokensCache = null;
@@ -88,6 +94,15 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if (!Plugin.EnableTacticalRegimentDiagnostics.Value) return;
+
+                    // Self-contained battle lifecycle: a new BattleUnits instance means a new
+                    // battle even if the orchestrator's OnBattleEnd reset never ran.
+                    int battleKey = CurrentBattleKey();
+                    if (IsNewBattle(_battleKey, battleKey))
+                        Reset();
+                    if (battleKey != 0)
+                        _battleKey = battleKey;
+
                     if (_logCount >= MaxLinesPerBattle) return;
 
                     string source = Plugin.TacticalRegimentDiagnosticNames != null
@@ -99,7 +114,7 @@ namespace WhiskeyRealism.Patches
                     var all = BattleUnits.completeunitlist;
                     if (all == null || all.Count == 0) return;
 
-                    if (ShouldRescan(_watchedValid, _watchedRosterCount, all.Count, _watchedSource, source))
+                    if (ShouldRescan(_watchedValid, _battleKey, battleKey, _watchedRosterCount, all.Count, _watchedSource, source, AnyWatchedDestroyed()))
                         RebuildWatched(all, watchTokens, source);
                     if (_watched.Count == 0) return;
 
@@ -136,11 +151,60 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        internal static bool ShouldRescan(bool hasCache, int cachedRosterCount, int rosterCount, string cachedSource, string source)
+        internal static bool IsNewBattle(int cachedBattleKey, int battleKey)
+        {
+            return battleKey != 0 && cachedBattleKey != 0 && battleKey != cachedBattleKey;
+        }
+
+        internal static bool ShouldRescan(
+            bool hasCache,
+            int cachedBattleKey,
+            int battleKey,
+            int cachedRosterCount,
+            int rosterCount,
+            string cachedSource,
+            string source,
+            bool anyCachedUnitDestroyed)
         {
             return !hasCache
+                || IsNewBattle(cachedBattleKey, battleKey)
+                || anyCachedUnitDestroyed
                 || cachedRosterCount != rosterCount
                 || !string.Equals(cachedSource, source, StringComparison.Ordinal);
+        }
+
+        private static bool AnyWatchedDestroyed()
+        {
+            for (int i = 0; i < _watched.Count; i++)
+            {
+                if (_watched[i].Unit == null)
+                    return true;
+            }
+            return false;
+        }
+
+        // Battle identity: instance id of the BattleUnits component AIBattle.Start caches in
+        // its static `bunits` field (decompile 3306, assigned 3354 from the scene's
+        // GameController); each battle scene has its own. 0 when unavailable.
+        internal static int CurrentBattleKey()
+        {
+            try
+            {
+                if (!_aiBattleUnitsFieldResolved)
+                {
+                    _aiBattleUnitsFieldResolved = true;
+                    _aiBattleUnitsField = AccessTools.Field(typeof(AIBattle), "bunits");
+                    if (_aiBattleUnitsField == null)
+                        OnceLog.Warning("tactical-regiment-diag:missing-anchor", "[TacticalRegimentDiagnostics] missing-anchor AIBattle.bunits; battle identity unavailable.");
+                }
+
+                var bunits = _aiBattleUnitsField != null ? _aiBattleUnitsField.GetValue(null) as BattleUnits : null;
+                return bunits != null ? bunits.GetInstanceID() : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static void RebuildWatched(List<Regiment> all, string[] watchTokens, string source)
