@@ -150,10 +150,12 @@ namespace WhiskeyRealism.Util
         }
 
         // Hand one group back to vanilla: drop ownership and pull a future
-        // stamp back so 4264 re-evaluates it on the next macro cycle.
+        // stamp back so 4264 re-evaluates it on the next macro cycle. Only a
+        // group Whiskey held can carry a Whiskey stamp; vanilla's own stamps
+        // are left alone (no vanilla-state write in MonitorOnly).
         private static void Yield(Regiment group, int id, float now)
         {
-            _records.Remove(id);
+            if (!_records.Remove(id)) return;
             float release = TacticalStanceOwnership.ReleaseStamp(now);
             if (group.lastaistancechangetime > release) group.lastaistancechangetime = release;
         }
