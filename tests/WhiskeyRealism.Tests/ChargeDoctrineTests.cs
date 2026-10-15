@@ -5,6 +5,10 @@ using static TestHarness;
 // BC6a: pure infantry charge doctrine. Vanilla anchors (Assembly-CSharp build 14703111):
 // Regiment.UpdateChargeTarget 122199-122345, MicroAICheckForCharges 4905-4930, micro cycle 6
 // 5617-5638, StopRegiment 132316 (regimentpaths = 0 at 132397, movementmode untouched).
+//
+// Owed by BC6b (needs BC4's arbiter): the arbiter-fixture DenialPrecedenceOverCharge, where a
+// ChargeDemotion Safety claim on the Stance channel and this doctrine's Executor intent on the
+// CombatBehavior channel meet in one tick. Here it is the pure decision only.
 internal static class ChargeDoctrineTests
 {
     public static void Run()
@@ -35,7 +39,7 @@ internal static class ChargeDoctrineTests
             ("charge doctrine revert during an assault disarms once vanilla returns to mode 3", DeferredDisarmAfterAssault),
             ("charge doctrine pending disarm flag follows the action and the mode", PendingDisarmFlagTransitions),
             ("charge doctrine reverts when the group stance is demoted", RevertWhenStanceDemoted),
-            ("charge doctrine stance denial beats a charge in every movement mode", DenialPrecedenceOverCharge),
+            ("charge doctrine stance denial beats a charge in every movement mode", DenialPrecedenceOverCharge), // arbiter fixture: BC6b
             ("charge doctrine arms only the two leading regiments", OnlyTwoLeadingRegimentsCharge),
             ("charge doctrine config off never charges and releases its own arming", ConfigOffNeverCharges),
             ("charge doctrine decide and leading selection do not allocate", DecideAndLeadingDoNotAllocate),
