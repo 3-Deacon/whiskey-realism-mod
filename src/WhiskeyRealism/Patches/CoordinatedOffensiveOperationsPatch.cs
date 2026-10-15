@@ -613,7 +613,7 @@ namespace WhiskeyRealism.Patches
                     date - AverageTimeOfNotMoving(decision.Output, ownUnits),
                     DLC_WL.dlc_scenarioactive,
                     GamePrefs.dlcwl_careerincreasedaggressiveness,
-                    PackageContainsPlayerGroup(decision.Output, ownUnits));
+                    PackageContainsPlayerGroup(decision.Output));
                 return CoordinatedOffensiveVanillaGates.TempoPasses(UnityEngine.Random.Range(0f, 1f), tval, forced)
                     ? TempoVerdict.Go
                     : TempoVerdict.Wait;
@@ -628,7 +628,7 @@ namespace WhiskeyRealism.Patches
 
         // Vanilla (14241-14244, 14346): the W&L player's campaign group is
         // BattleUnits.GetCampaignGroup(commander[dlc_chosencommander].currentcommand).
-        private static bool PackageContainsPlayerGroup(CoordinatedOperationOutput output, IList ownUnits)
+        private static bool PackageContainsPlayerGroup(CoordinatedOperationOutput output)
         {
             if (!DLC_WL.dlc_scenarioactive) return false;
             int chosen = DLC_WL.dlc_chosencommander;

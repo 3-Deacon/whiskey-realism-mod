@@ -288,9 +288,11 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
-    // Cached FieldInfo lookups on vanilla's private AICampaign.AIFaction (one
-    // type) and its nested types, so per-call campaign patches do not re-run
-    // AccessTools.Field. A missing field caches as null (callers handle null).
+    // Cached FieldInfo lookups keyed by (declaring runtime type, field name) for
+    // vanilla objects read via reflection - AICampaign.AIFaction and its nested
+    // types, AICampaign, Regiment fields read from untyped lists - so per-call
+    // campaign code does not re-run AccessTools.Field. A missing field caches as
+    // null (callers handle null).
     internal static class VanillaFieldCache
     {
         private static readonly System.Collections.Generic.Dictionary<(Type, string), FieldInfo> _fields =

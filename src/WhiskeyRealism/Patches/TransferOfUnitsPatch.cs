@@ -279,6 +279,9 @@ namespace WhiskeyRealism.Patches
             return null;
         }
 
+        // Whole-army total on the heatmap's strength field: UpdateHeatmaps paints
+        // groupstrengthdirect (12332), and vanilla's own army total
+        // (GetStrengthRatio, 12377) sums groupstrengthdirect over ownunits.
         private static float SumStrength(IList units)
         {
             float total = 0f;
@@ -287,7 +290,7 @@ namespace WhiskeyRealism.Patches
             {
                 var unit = units[i] as Regiment;
                 if ((UnityEngine.Object)(object)unit != (UnityEngine.Object)null)
-                    total += Math.Max(0, unit.groupstrengthactive);
+                    total += Math.Max(0, unit.groupstrengthdirect);
             }
             return total;
         }
