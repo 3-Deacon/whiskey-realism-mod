@@ -27,7 +27,6 @@ namespace WhiskeyRealism.Telemetry
     {
         private const int FileWritePerfWindowMs = 1000;
         private const int FileWritePerfWindowMinEvents = 2;
-        private const int StreamBufferBytes = 64 * 1024;
         private const int MaxRetryBackoffMs = 2000;
         internal const int MaxConsecutiveWriteFailures = 5;
 
