@@ -74,7 +74,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // deltas drove the 180 s plan deadline before, so at 20x
             // compression a plan "expired" after ~10 battle-minutes and at 1x
             // every 3 wall-clock minutes. The runtime passes
-            // TacticalDoctrineClock.NowBattleSeconds; while the coordinator
+            // TacticalDoctrineTime.NowBattleSeconds; while the coordinator
             // holds that clock through the night cycle, a frozen value yields
             // a zero delta, so the night does not burn phase budgets or the
             // plan deadline. Legacy callers without

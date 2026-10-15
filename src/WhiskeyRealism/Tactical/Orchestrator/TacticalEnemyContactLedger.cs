@@ -9,7 +9,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// in fire range. That picture is range-limited, not fog-limited (vanilla
     /// AI perception); fog-honest perception arrives with the battle-core
     /// snapshot. Everything is on doctrine time
-    /// (<see cref="TacticalDoctrineClock"/>, game hours).
+    /// (<see cref="TacticalDoctrineTime"/>, game hours).
     ///
     /// Stands in for whole-army reads the side has no range-based access to:
     /// the enemy's <c>sideinformation.totalactiveforce</c>, its

@@ -29,7 +29,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         // BATTLE seconds a decision must be held before a transition is
         // allowed (10 battle-minutes). The caller measures elapsed time on
-        // TacticalDoctrineClock, so the hold means the same amount of
+        // TacticalDoctrineTime, so the hold means the same amount of
         // battle at 1x and 50x compression (the old 6 wall-clock seconds were
         // 36 battle-seconds at 1x and 5 battle-minutes at 50x).
         //

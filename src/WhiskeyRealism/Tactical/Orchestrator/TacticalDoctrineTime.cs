@@ -15,7 +15,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// where its doctrine-hours getter plugs in so no doctrine consumer reads
     /// the raw clock itself.
     /// </summary>
-    public static class TacticalDoctrineClock
+    public static class TacticalDoctrineTime
     {
         /// <summary>Doctrine time in battle seconds.</summary>
         public static double NowBattleSeconds
