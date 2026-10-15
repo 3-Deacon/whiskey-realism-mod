@@ -25,6 +25,15 @@ namespace WhiskeyRealism.Patches
     // is local (CampaignMilitaryGates.PlanTransferRequiredAtTarget) instead of
     // a share of the whole army. The deficit restore runs in a Finalizer so a
     // vanilla exception cannot leave the plan target stored as positiondeficit.
+    //
+    // 2026-10-15 (BUG-WL-010): the Postfix reports what vanilla actually did with
+    // the unit it appended (DC:17327). Vanilla first drops every entry whose
+    // transfertime <= 0 (DC:17255-17262), so the new entry is counted after that
+    // purge, and it is reported as transfer-queued only when SetTransfer started a
+    // transit (transfertime > 0, DC:93147). In a W&L career BattleUnits.MoveUnit
+    // returns unless both units are player-owned (DC:93099; CheckTransferOfUnits
+    // passes no skipdlccheck, DC:17328), so the row is transfer-blocked with
+    // reason wl-career-moveunit-guard (BUG-WL-003, fixed by stage G).
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {
@@ -37,11 +46,14 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
         // Verbose transfer-steer rows are emitted only when the alliance's steer signature changes.
         private static readonly Dictionary<int, string> LastLoggedSteer = new Dictionary<int, string>();
+        // Non-queued rows (transfer-blocked repeats every vanilla pass in a career) are emitted only when the alliance's signature changes.
+        private static readonly Dictionary<int, string> LastLoggedBlocked = new Dictionary<int, string>();
 
         internal static void ResetForNewCampaign()
         {
             LogOnceKeys.Clear();
             LastLoggedSteer.Clear();
+            LastLoggedBlocked.Clear();
         }
 
         private sealed class TransferSteerState
@@ -52,6 +64,7 @@ namespace WhiskeyRealism.Patches
             public int AllianceId;
             public int ObjectiveId;
             public int BeforeTransferCount;
+            public int StaleBeforeCount;
             public string SourceSector;
             public string DestinationSector;
             public TransferBudgetAction BudgetAction;
@@ -178,6 +191,7 @@ namespace WhiskeyRealism.Patches
                     AllianceId = allianceId,
                     ObjectiveId = phase.TargetObjectiveId,
                     BeforeTransferCount = TransferCount(faction),
+                    StaleBeforeCount = StaleTransferCount(faction),
                     SourceSector = sourceSector,
                     DestinationSector = destinationSector,
                     BudgetAction = budgetAction
@@ -213,10 +227,19 @@ namespace WhiskeyRealism.Patches
 
             try
             {
-                int afterTransferCount = TransferCount(state.Faction);
-                if (afterTransferCount > state.BeforeTransferCount)
+                var list = VanillaFieldCache.List(state.Faction, "unitstobetransfered");
+                int after = list?.Count ?? 0;
+                int added = WlEconomyFixes.TransferAddedCount(state.BeforeTransferCount, state.StaleBeforeCount, after);
+                bool career = DLC_WL.dlc_scenarioactive;
+                for (int i = Math.Max(0, after - added); i < after; i++)
                 {
-                    EmitPlanTransferQueued(state, afterTransferCount - state.BeforeTransferCount);
+                    var unit = list[i] as Regiment;
+                    bool transit = (UnityEngine.Object)(object)unit != null && unit.transfertime > 0f;
+                    var outcome = WlEconomyFixes.ClassifyTransfer(transit, career);
+                    EmitPlanTransferOutcome(state, outcome);
+                    if (outcome == WlTransferOutcome.BlockedByCareerGuard)
+                        OnceLog.Info("transfer:wl-career-blocked",
+                            "[Patch:Transfer] W&L career: vanilla MoveUnit refused the transfer (both units must be player-owned, 93099); reported as transfer-blocked, not queued");
                 }
             }
             catch (Exception ex)
@@ -283,6 +306,20 @@ namespace WhiskeyRealism.Patches
             return list?.Count ?? 0;
         }
 
+        // Entries vanilla's purge will drop at the start of the call (DC:17257).
+        private static int StaleTransferCount(object faction)
+        {
+            var list = VanillaFieldCache.List(faction, "unitstobetransfered");
+            if (list == null) return 0;
+            int stale = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var unit = list[i] as Regiment;
+                if ((UnityEngine.Object)(object)unit != null && unit.transfertime <= 0f) stale++;
+            }
+            return stale;
+        }
+
         private static Vector3? ReadTransferPosition(object transferData)
         {
             if (transferData == null) return null;
@@ -343,21 +380,33 @@ namespace WhiskeyRealism.Patches
                 .WithField("budgetAction", budgetAction.ToString()));
         }
 
-        private static void EmitPlanTransferQueued(TransferSteerState state, int queued)
+        // transfer-queued (Write row) only when a transit started; otherwise a
+        // Decision row: transfer-blocked (career guard, nothing moved) or
+        // transfer-no-transit (re-parented inside its corps, or refused by MoveUnit's type gates).
+        private static void EmitPlanTransferOutcome(TransferSteerState state, WlTransferOutcome outcome)
         {
             string safeSource = string.IsNullOrWhiteSpace(state.SourceSector) ? "-" : state.SourceSector;
             string safeDestination = string.IsNullOrWhiteSpace(state.DestinationSector) ? "-" : state.DestinationSector;
+            bool queued = outcome == WlTransferOutcome.Queued;
+            bool blocked = outcome == WlTransferOutcome.BlockedByCareerGuard;
+            string action = queued ? "transfer-queued" : blocked ? "transfer-blocked" : "transfer-no-transit";
+            string reason = queued ? state.BudgetAction.ToString() : blocked ? "wl-career-moveunit-guard" : "no-transit-started";
             string signature = "alliance=" + state.AllianceId +
-                "|action=transfer-queued" +
+                "|action=" + action +
                 "|objective=" + state.ObjectiveId +
                 "|from=" + safeSource +
                 "|to=" + safeDestination +
-                "|queued=" + queued;
-            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Write, "Plan", TelemetrySeverity.Info, ev => ev
+                "|reason=" + reason;
+            if (!queued)
+            {
+                if (LastLoggedBlocked.TryGetValue(state.AllianceId, out string last) && last == signature) return;
+                LastLoggedBlocked[state.AllianceId] = signature;
+            }
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, queued ? TelemetryCategory.Write : TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(state.AllianceId)
-                .WithDecision("transfer-queued", state.BudgetAction.ToString(), signature)
+                .WithDecision(action, reason, signature)
                 .WithField("objective", state.ObjectiveId)
-                .WithField("queued", queued)
+                .WithField("queued", queued ? 1 : 0)
                 .WithField("sourceSector", safeSource)
                 .WithField("destinationSector", safeDestination)
                 .WithField("budgetAction", state.BudgetAction.ToString()));

@@ -53,6 +53,11 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
+        internal static ConfigEntry<bool> EnableWlAttritionScopeFix;
+        internal static ConfigEntry<bool> EnableWlBuySuppliesFix;
+        internal static ConfigEntry<bool> EnableWlSupplyStaffScopeFix;
+        internal static ConfigEntry<bool> EnableWlSupplyEfficiencySignFix;
+        internal static ConfigEntry<bool> EnableWlActionOnceEffectsFix;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
@@ -355,6 +360,43 @@ namespace WhiskeyRealism
                 "Enable Player Order Doctrine Diagnostics",
                 true,
                 "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
+            EnableWlAttritionScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Attrition Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla Regiment.UpdateCampaignUnitStats applies the player's attrition effect (Camp Rules, " +
+                "Provost Marshal) to the sickness and desertion of every regiment in the game, enemies included. With this on it applies only " +
+                "where vanilla scopes medical care, training and readiness: regiments of a campaign group the player owns. Off: vanilla.");
+            EnableWlBuySuppliesFix = Config.Bind(
+                "W&L",
+                "Enable W&L Buy Supplies Fix",
+                true,
+                "Default ON. W&L career only. Vanilla \"Buy Supplies\" (and the average-supply value it and its conditions read) tests the " +
+                "player's command type instead of each subordinate's, so a division, corps or army commander pays 1000 money and no unit gets " +
+                "supplies. With this on, an HQ commander's owned basic units are filled the way vanilla fills a brigade commander's. Off: vanilla.");
+            EnableWlSupplyStaffScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Supply Staff Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla applies the player's Quartermaster, Subsistence and Ordnance staff, the reinforcement-speed " +
+                "effect and the camp station Inspect Logistics only when the player's command is itself a campaign-map group. With this on they " +
+                "also apply to the map group that carries the player's command (the group vanilla's own camp treats as the player's), so a " +
+                "brigade or regiment commander, or a division inside an AI corps, gets them. No other AI group is affected. Off: vanilla.");
+            EnableWlSupplyEfficiencySignFix = Config.Bind(
+                "W&L",
+                "Enable W&L Supply Efficiency Sign Fix",
+                true,
+                "Default ON. W&L career only. Vanilla multiplies the resupply duration by the player's supply-efficiency bonus and by Inspect " +
+                "Logistics, so a better Quartermaster or camp result makes resupply slower. With this on the same bonus shortens the duration " +
+                "instead (a +25% bonus resupplies in 1/1.25 of the time; a camp malus still lengthens it). Off: vanilla direction.");
+            EnableWlActionOnceEffectsFix = Config.Bind(
+                "W&L",
+                "Enable W&L Action Once-Effects Fix",
+                true,
+                "Default ON. W&L career only. The actions Logistics Corps and Not Yet Ready (supply efficiency) and Engineer Corps (engineering " +
+                "points) store their bonus where vanilla never reads it. With this on that bonus multiplies the running effect, x(1 + value). " +
+                "The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow resupply). The " +
+                "attrition values of Harsh Punishments, Ample Rewards and Purge stay vanilla (intent unclear). Off: vanilla.");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
