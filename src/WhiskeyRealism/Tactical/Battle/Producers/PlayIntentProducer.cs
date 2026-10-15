@@ -12,8 +12,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // the shipped code: it assigns corps to template rects that feed the direct
     // child allocator (ObserveDirectChildEvidenceWithZones), so its effect
     // reaches the battle as ledger roles and tasks, which the Posture producer
-    // executes. It has no orders to submit, so no "Play" producer is registered;
-    // the BattleCoreTick order keeps the slot for one.
+    // executes. It has no orders to submit, so there is no "Play" producer
+    // (and no slot for one in BattleProducerRegistry.Order).
     //
     // The division play (#61 BuildRuntimeDivisionPlayOrders, B-divplay) is
     // registered as "DivisionPlay" at Priority.Play. D8: the spec ladder is
@@ -23,15 +23,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // ledger task with the play task before deciding (patch L156-172).
     internal sealed class DivisionPlayIntentProducer : IBattleIntentProducer
     {
-        private static readonly DivisionPlayIntentProducer Instance = new DivisionPlayIntentProducer();
-
         static DivisionPlayIntentProducer()
         {
             BattleScope.Register("division-play-producer", Reset);
-            BattleCoreTick.RegisterProducer(Instance);
         }
-
-        internal static void Register() { }
 
         public string Name => "DivisionPlay";
 

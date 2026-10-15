@@ -25,11 +25,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // GameObject id, so the live unit behind the record supplies the cache key.
     internal sealed class GroupStanceIntentProducer : IBattleIntentProducer
     {
-        static GroupStanceIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(new GroupStanceIntentProducer());
-        }
-
         public string Name => "GroupStance";
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)

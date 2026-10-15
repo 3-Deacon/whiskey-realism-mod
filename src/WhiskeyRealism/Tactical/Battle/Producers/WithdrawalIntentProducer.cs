@@ -17,20 +17,11 @@ namespace WhiskeyRealism.Tactical.Battle
     // moraletriggerforfallbackifenemyclose, the values CheckLineFallbacks 5167/5170 and
     // MicroAICheckForRetreats 4853 use) and the ledger's doctrine orders.
     //
-    // Registered from the static constructor (BattleCoreTick.RegisterProducer);
-    // runs inside the arbiter tick (BattleCoreArbiterPatch, AdjustGroupFormations
-    // 5870 Postfix). Rollback: Enable Tactical Withdrawal Doctrine = false.
+    // Built by BattleCoreTick's producer registry; runs inside the arbiter tick
+    // (BattleCoreArbiterPatch, AdjustGroupFormations 5870 Postfix). Rollback:
+    // Enable Tactical Withdrawal Doctrine = false.
     internal sealed partial class WithdrawalIntentProducer : IBattleIntentProducer
     {
-        static WithdrawalIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(new WithdrawalIntentProducer());
-        }
-
-        private WithdrawalIntentProducer()
-        {
-        }
-
         public string Name => "Withdrawal";
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)

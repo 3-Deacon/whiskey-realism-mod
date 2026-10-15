@@ -46,23 +46,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // stamps, failed-write backoff, brigade task hold, courier cadence, outbound
     // order ledger, duplicate-waypoint and safe-waypoint checks, the write gate
     // and the groupsubordinatesmoving stamp.
-    internal static class PostureProducers
-    {
-        /// <summary>
-        /// Runs the producers' static constructors, which register them with
-        /// BattleCoreTick in plan order. Called from the coordinator tick
-        /// (ArmyPostureInputsRuntime.Refresh, CheckGlobalAIStrategy 5866) before the
-        /// arbiter's first AdjustGroupFormations Postfix.
-        /// </summary>
-        internal static void EnsureRegistered()
-        {
-            PostureIntentProducer.Register();
-            FacingPulseIntentProducer.Register();
-            FireControlIntentProducer.Register();
-            DivisionPlayIntentProducer.Register();
-            ChargeIntentProducer.Register(); // BC6b; BC7's explicit registry replaces this touch
-        }
-    }
 
     // What the posture producer decided for one group this tick; the facing
     // pulse and fire control read it (they ran only on a group #61 left alone).
@@ -184,15 +167,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     /// </summary>
     internal sealed class PostureIntentProducer : IBattleIntentProducer
     {
-        private static readonly PostureIntentProducer Instance = new PostureIntentProducer();
-
         static PostureIntentProducer()
         {
             BattleScope.Register("posture-producer", Reset);
-            BattleCoreTick.RegisterProducer(Instance);
         }
-
-        internal static void Register() { }
 
         public string Name => "Posture";
 
@@ -1172,15 +1150,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     /// </summary>
     internal sealed class FacingPulseIntentProducer : IBattleIntentProducer
     {
-        private static readonly FacingPulseIntentProducer Instance = new FacingPulseIntentProducer();
-
-        static FacingPulseIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(Instance);
-        }
-
-        internal static void Register() { }
-
         public string Name => "FacingPulse";
 
         private const int MaxRegimentPulsesPerGroup = 4;
@@ -1309,15 +1278,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     /// </summary>
     internal sealed class FireControlIntentProducer : IBattleIntentProducer
     {
-        private static readonly FireControlIntentProducer Instance = new FireControlIntentProducer();
-
-        static FireControlIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(Instance);
-        }
-
-        internal static void Register() { }
-
         public string Name => "FireControl";
 
         // #61 FireControlOrderCooldownHours: 45 real seconds at 1x.

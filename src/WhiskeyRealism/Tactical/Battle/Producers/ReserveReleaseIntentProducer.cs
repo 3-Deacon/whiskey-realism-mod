@@ -21,20 +21,11 @@ namespace WhiskeyRealism.Tactical.Battle
     // reads the BattleSnapshot only). Once the ledger catches up the group is no
     // longer held and the posture executor owns it.
     //
-    // Registered from the static constructor (BattleCoreTick.RegisterProducer);
-    // runs inside the arbiter tick. Rollback: Enable Tactical Orchestrator Reserve
-    // Commit Gate = false (the gate and its release are one feature).
+    // Built by BattleCoreTick's producer registry; runs inside the arbiter tick.
+    // Rollback: Enable Tactical Orchestrator Reserve Commit Gate = false (the gate
+    // and its release are one feature).
     internal sealed class ReserveReleaseIntentProducer : IBattleIntentProducer
     {
-        static ReserveReleaseIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(new ReserveReleaseIntentProducer());
-        }
-
-        private ReserveReleaseIntentProducer()
-        {
-        }
-
         public string Name => "ReserveRelease";
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)

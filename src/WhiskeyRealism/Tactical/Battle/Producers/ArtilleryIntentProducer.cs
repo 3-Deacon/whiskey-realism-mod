@@ -17,7 +17,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     3499-3539), cease fire below 10 % ammo;
     //   - ArtillerySetWaypointVetoPatch (SetWaypoint Postfix, 91232): a battery
     //     vanilla moves to within 60 m of a visible enemy is pulled back.
-    // Two producers come from this class, matching BattleCoreTick's order:
+    // Two producers come from this class, matching BattleProducerRegistry.Order:
     // "ArtilleryDoctrine" (doctrine + micro, Executor priority; retreats Safety)
     // and "ArtilleryPointBlank" (the watchdog, Safety). The decisions are pure
     // (BattleWriterPolicy.ArtilleryDoctrineIntents / TryArtilleryPointBlankIntent);
@@ -31,12 +31,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // point-blank watchdog is Safety and is not held.
     internal sealed class ArtilleryIntentProducer : IBattleIntentProducer
     {
-        static ArtilleryIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(new ArtilleryIntentProducer("ArtilleryDoctrine", pointBlank: false));
-            BattleCoreTick.RegisterProducer(new ArtilleryIntentProducer("ArtilleryPointBlank", pointBlank: true));
-        }
-
         private static readonly OrderChannel[] HeldChannels =
         {
             OrderChannel.CombatBehavior, OrderChannel.Formation, OrderChannel.Facing, OrderChannel.Move,
@@ -45,9 +39,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private readonly bool _pointBlank;
         private readonly BattleOrderIntent[] _buffer = new BattleOrderIntent[3];
 
-        private ArtilleryIntentProducer(string name, bool pointBlank)
+        internal ArtilleryIntentProducer(bool pointBlank)
         {
-            Name = name;
+            Name = pointBlank ? "ArtilleryPointBlank" : "ArtilleryDoctrine";
             _pointBlank = pointBlank;
         }
 

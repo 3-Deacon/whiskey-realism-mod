@@ -26,13 +26,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     charge if unit is outflanked or receiving flanking fire", shipped true, never
     //     read by vanilla): honoured, an outflanked regiment is not armed.
     //
-    // Registered from the static constructor (BattleCoreTick.RegisterProducer); runs last
-    // in the arbiter tick (BattleCoreArbiterPatch, AdjustGroupFormations 5870 Postfix).
+    // Built by BattleCoreTick's producer registry; runs last in the arbiter tick
+    // (BattleCoreArbiterPatch, AdjustGroupFormations 5870 Postfix).
     // Rollback: Enable Infantry Charge Doctrine = false (releases what the doctrine armed,
     // then idles) or Tactical Commander Mode MonitorOnly/Off (the executor writes nothing).
     internal sealed partial class ChargeIntentProducer : IBattleIntentProducer
     {
-        private static readonly ChargeIntentProducer Instance = new ChargeIntentProducer();
         private static readonly ChargeMemory[] _memory = { new ChargeMemory(), new ChargeMemory() };
 
         private static bool _prefsRead;
@@ -43,15 +42,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         static ChargeIntentProducer()
         {
             BattleScope.Register("charge-producer", Reset);
-            BattleCoreTick.RegisterProducer(Instance);
         }
-
-        private ChargeIntentProducer()
-        {
-        }
-
-        /// <summary>Runs the static constructor (registration); see PostureProducers.EnsureRegistered.</summary>
-        internal static void Register() { }
 
         public string Name => "Charge";
 

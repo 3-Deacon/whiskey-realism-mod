@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Battle;
-using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -14,8 +13,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // tick (CheckGlobalAIStrategy, 5866) before the same UpdateAITasks reaches the
     // arbiter (AdjustGroupFormations, 5870). Call Refresh once per side per
     // coordinator tick:
-    //   - producer registration: PostureProducers.EnsureRegistered runs the
-    //     producers' static constructors before the arbiter's first tick;
     //   - leaf brigade map: ArmyOrchestrator.UpdateLeafBrigadeMap(tree) from the
     //     alliance's extended probe tree, cached per snapshot roster signature,
     //     without the snapshot's PlayerOwned units (PostureProbeFilter);
@@ -60,7 +57,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int allianceId = bunits.alliance[side];
                 if (allianceId < 0 || allianceId >= 2) return;
 
-                PostureProducers.EnsureRegistered();
                 RefreshAiPool(battle, allianceId);
                 _defending[allianceId] = bunits.GetBattleType(allianceId, usereadinesswhendraw: true) == 2;
 

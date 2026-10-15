@@ -1,7 +1,7 @@
 using System;
 using System.Reflection;
-using System.Text;
 using HarmonyLib;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -32,23 +32,18 @@ namespace WhiskeyRealism.Tactical.Battle
     //
     // RunArbiter: producers (fixed order) → OrderArbiter.Resolve → outcomes of
     // the last tick's moves and their retries → OrderExecutor.Plan +
-    // OrderExecutorRuntime.Execute per winner. With no producer registered it
-    // returns before touching anything.
+    // OrderExecutorRuntime.Execute per winner.
+    //
+    // Producers (plan BC5 order, BC7 registry): built here, once, from one
+    // explicit list (BattleProducerRegistry.Order through CreateProducer). They
+    // used to register from their own static constructors, which never ran
+    // because nothing else referenced the producer types.
     internal static class BattleCoreTick
     {
-        // Plan BC5 producer order; IBattleIntentProducer.Name is matched against it.
-        // Unknown names run after these, in registration order.
-        private static readonly string[] ProducerOrder =
-        {
-            "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Posture",
-            "FacingPulse", "FireControl", "Play", "DivisionPlay", "ReserveRelease", "Charge",
-        };
-
         private const float TelemetryIntervalRealSeconds = 30f;
         private const int SkipReasonCount = (int)SkipReason.LowerPriorityThanClaim + 1;
 
-        private static IBattleIntentProducer[] _producers = new IBattleIntentProducer[16];
-        private static int _producerCount;
+        private static readonly BattleProducerRegistry Producers = new BattleProducerRegistry(CreateProducer);
 
         private static readonly BattleSnapshot[] _spare = new BattleSnapshot[2];
         private static readonly int[] _builtFrame = { -1, -1 };
@@ -71,25 +66,26 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleScope.Register("battle-core-tick", Reset);
         }
 
-        internal static bool HasProducers => _producerCount > 0;
+        internal static bool HasProducers => Producers.HasProducers;
 
-        /// <summary>Called once from each producer's static constructor.</summary>
-        internal static void RegisterProducer(IBattleIntentProducer producer)
+        // One case per BattleProducerRegistry.Order name, in that order.
+        private static IBattleIntentProducer CreateProducer(string name)
         {
-            if (producer == null) return;
-            for (int i = 0; i < _producerCount; i++)
-                if (ReferenceEquals(_producers[i], producer)) return;
-            if (_producerCount == _producers.Length) Array.Resize(ref _producers, _producers.Length * 2);
-
-            int rank = Rank(producer.Name);
-            int at = _producerCount;
-            while (at > 0 && Rank(_producers[at - 1].Name) > rank)
+            switch (name)
             {
-                _producers[at] = _producers[at - 1];
-                at--;
+                case "Withdrawal": return new WithdrawalIntentProducer();
+                case "ArtilleryDoctrine": return new ArtilleryIntentProducer(pointBlank: false);
+                case "ArtilleryPointBlank": return new ArtilleryIntentProducer(pointBlank: true);
+                case "GroupStance": return new GroupStanceIntentProducer();
+                case "ChargeDemotion": return new ChargeDemotionIntentProducer();
+                case "Posture": return new PostureIntentProducer();
+                case "FacingPulse": return new FacingPulseIntentProducer();
+                case "FireControl": return new FireControlIntentProducer();
+                case "DivisionPlay": return new DivisionPlayIntentProducer();
+                case "ReserveRelease": return new ReserveReleaseIntentProducer();
+                case "Charge": return new ChargeIntentProducer();
+                default: return null;
             }
-            _producers[at] = producer;
-            _producerCount++;
         }
 
         internal static BattleSnapshot EnsureSnapshot(AIBattle battle, int alliance)
@@ -130,7 +126,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         internal static void RunArbiter(AIBattle battle, int alliance)
         {
-            if (_producerCount == 0) return;
+            if (!Producers.HasProducers) return;
             OrderArbiter arbiter = OrderArbiter.ForAlliance(alliance);
             OrderExecutor executor = OrderExecutor.ForAlliance(alliance);
             if (arbiter == null || executor == null) return;
@@ -148,22 +144,25 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!_producersLogged)
             {
                 _producersLogged = true;
-                OnceLog.Info("tactical-battle-core:producers", "[BattleCore] producers count=" + _producerCount + " order=" + ProducerNames());
+                OnceLog.Info("tactical-battle-core:producers", "[BattleCore] producers count=" + Producers.Count + " order=" + Producers.Names);
+                if (Producers.Missing.Length > 0)
+                    OnceLog.Warning("tactical-battle-core:producers-missing",
+                        "[BattleCore] producers not built (they never run): " + Producers.Missing);
             }
             double now = TacticalDoctrineTime.NowBattleHours;
             ArbiterStats stats = _stats[alliance];
 
             arbiter.BeginTick();
-            for (int p = 0; p < _producerCount; p++)
+            for (int p = 0; p < Producers.Count; p++)
             {
-                IBattleIntentProducer producer = _producers[p];
+                IBattleIntentProducer producer = Producers[p];
                 try
                 {
                     producer.Produce(snapshot, arbiter);
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("tactical-battle-core:producer-threw:" + producer.Name,
+                    OnceLog.Warning(Producers.ThrewKey(p),
                         "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
@@ -210,24 +209,6 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             stats.EmitIfDue(alliance);
-        }
-
-        private static int Rank(string name)
-        {
-            for (int i = 0; i < ProducerOrder.Length; i++)
-                if (string.Equals(ProducerOrder[i], name, StringComparison.Ordinal)) return i;
-            return ProducerOrder.Length;
-        }
-
-        private static string ProducerNames()
-        {
-            var sb = new StringBuilder();
-            for (int i = 0; i < _producerCount; i++)
-            {
-                if (i > 0) sb.Append(',');
-                sb.Append(_producers[i].Name);
-            }
-            return sb.ToString();
         }
 
         // AIBattle.bunits is a private static field (3306) holding the battle's

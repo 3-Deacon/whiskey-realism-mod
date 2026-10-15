@@ -18,11 +18,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // (TacticalStanceOwnership.SourceFor).
     internal sealed class ChargeDemotionIntentProducer : IBattleIntentProducer
     {
-        static ChargeDemotionIntentProducer()
-        {
-            BattleCoreTick.RegisterProducer(new ChargeDemotionIntentProducer());
-        }
-
         public string Name => "ChargeDemotion";
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)
