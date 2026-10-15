@@ -88,10 +88,12 @@ Merge order into `feat/battle-core`: BC0, BC1, BC3, BC4, BC2a, BC2b, BC6a, BC5c,
 namespace WhiskeyRealism.Tactical.Battle {
   [System.Flags] public enum UnitFlags : uint { None = 0, Alive = 1, Active = 2, Routed = 4, OnRetreat = 8, InMelee = 16,
     PlayerOwned = 32, AncestorOfPlayerCommand = 64, PlayerCommandDetached = 128, Feud = 256, PermanentlyDetached = 512,
-    Garrisoned = 1024, IsGroup = 2048, IsArtillery = 4096, IsCavalry = 8192, IsInfantry = 16384, PlayerCommand = 32768, LiedDown = 65536 }
+    Garrisoned = 1024, IsGroup = 2048, IsArtillery = 4096, IsCavalry = 8192, IsInfantry = 16384, PlayerCommand = 32768, LiedDown = 65536,
+    MarkedForRout = 131072 /* added in BC1: vanilla markedforrout, excluded from the front-axis leaf sample as shipped */ }
   public struct UnitRecord {
     public int InstanceId; public int UnitTyp; public int Alliance; public int Commander;
     public float X, Y, Z, RotationY; public int Strength; public float GroupStrengthDirect;
+    public int GroupOwnInRange, GroupStrengthAiGroup; /* added in BC1: the shipped command-tree strength bucket source */
     public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
     public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
     public float LastWaypointX, LastWaypointZ; public int ParentIndex; /* -1 root */ public int FirstEnemyInRangeId; /* enemyinrangereg[0] or 0 */
@@ -168,7 +170,7 @@ public sealed partial class BattleSnapshot : WhiskeyRealism.Tactical.Orchestrato
 internal static class BattleSnapshotAssembler {
   internal static void AssembleCommandTree(UnitRecord[] own, int count, int[][] attachedIds, int[] attachedCounts, BattleSnapshotScratch scratch); // sets ParentIndex
   internal static void ApplyOwnershipFlags(BattleSnapshot s, in PlayerOwnershipInput input); // delegates to BC3 PlayerOwnership.Compute
-  internal static WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis FitFrontAxis(BattleSnapshot s, WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis previous);
+  internal static WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis FitFrontAxis(BattleSnapshot s, WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis previous, int commandHierarchyShift); // shift: group fallback sample starts at the shifted command level
 }
 internal static class BattleSnapshotBuilder { // runtime
   internal static BattleSnapshot Build(AIBattle battle, int alliance, BattleSnapshot reuse, long tickId, double doctrineHours);
@@ -185,12 +187,19 @@ internal static class BattleSnapshotBuilder { // runtime
   - `DirectChildrenMatchesParentMap`
   - `IsAncestorOfWalksParentChain`
   - `IndexOfOwnReturnsMinusOneForUnknown`
-  - `AssemblerRebuildsTreeOnlyOnRosterChange`, using the roster signature (count, routed count, sum of instance ids)
+  - `AssemblerRebuildsTreeOnlyOnRosterChange`, using the roster signature: own unit count, sum of instance ids, identity of the vanilla `completeunitlist`, and the sum of `allattachedunits.Length` over own groups. All are field reads with no allocation; `gameObject.name` is loaded only for ids missing from the name cache
+  - `RoutDoesNotBumpTreeGeneration`: rout never re-parents (`Rout` returns for groups at 123547 and writes no transform for a leaf), so a leaf rout keeps the parent map and `TreeGeneration`, and `CommandTreeRuntime` serves it from its cache or the `RefreshLiveFlags` path, never a rebuild
   - `SnapshotAssemblyAllocatesNothingAfterWarmup`: a 300-unit fixture, assemble twice, the second call allocates 0 bytes
   - `FrontAxisStabilizedAcrossTicks`
+  - `MoveUnitStaleSourceListYieldsToDestination`: after `MoveUnit` a deep source group keeps a stale list that still holds the moved unit; the claimant that was the unit's previous parent yields to the other one, and the move changes the attached-length sum
+  - `BeginBuildResetsPerceptionSummary`: `NearestVisibleReinforcementHours` resets to `float.MaxValue` ("none seen", BC2a's sentinel), never 0
+  - `FrontAxisGroupFallbackWeightsByAiGroupStrength`: with no combat leaf, groups weigh `max(1, max(0, groupstrengthaigroup))`, as the shipped `ArmyEvidenceBuilder` group samples and `Centroid` did
+  - `FrontAxisGroupFallbackFilterMatchesShippedSample`: the group fallback samples units at or above the shifted command level, not routed and not `PlayerOwned` (shipped `ArmyEvidenceBuilder` filter); a player-owned division is excluded
+  - `FrontAxisLeafSampleExcludesMarkedForRout`: a leaf with vanilla `markedforrout` (cavalry mounting to rout, `Rout` 123555-123559) is left out of the front-axis sample, as the shipped `isrouted || markedforrout` test did
+  - `StrengthBucketReadsAiGroupAndInRangeStrength`: the extended probe keeps the shipped bucket source `max(groupowninrange, groupstrengthaigroup)` (vanilla 120297, 120559-120564), so `ChooseEnvelopmentAnchorIndices` sees unchanged strengths; a non-AI-group division out of contact stays bucket 0
 - [ ] Implement `BattleSnapshot` with grow-only pooled arrays. Growth allocates only when the roster exceeds capacity, which the allocation test accepts as warm-up.
-- [ ] Implement the runtime builder. It does one pass over `BattleUnits.completeunitlist` (as `IList`, no LINQ). Own units of `alliance` go into `Own` and enemies into `EnemyRecords`. It caches `allattachedunits` id lists only when the roster signature changes. It sets `FirstEnemyInRangeId` from `unitrange.enemyinrangereg[0]`. On ancestry, it counts disagreements between the D5 parent map and `transform.IsChildOf` for the player chain only (cheap), and emits `OnceLog.Info("battle-core:ancestry-mismatch", …)` once per battle when the count is > 0.
-- [ ] Runtime fallbacks: a null `bunits` gives an empty snapshot plus `OnceLog.Warning("battle-core:snapshot-degraded")`. Never throw.
+- [ ] Implement the runtime builder. It does one pass over `BattleUnits.completeunitlist` (as `IList`, no LINQ). Own units of `alliance` go into `Own` and enemies into `EnemyRecords`. It caches `allattachedunits` id lists only when the roster signature changes. It sets `FirstEnemyInRangeId` from `unitrange.enemyinrangereg[0]`. On ancestry, it counts disagreements between the D5 parent map and `transform.IsChildOf` for the player chain only (cheap), and emits `OnceLog.Info("tactical-battle-core:ancestry-mismatch", …)` once per battle when the count is > 0. The key must start with `tactical` (`OnceLog.TacticalKeyPrefix`): `OnceLog.ResetTactical` releases only those keys at battle end, so a key without the prefix would fire once per process.
+- [ ] Runtime fallbacks: a null `bunits` gives an empty snapshot plus `OnceLog.Warning("tactical-battle-core:snapshot-degraded", …)`. Never throw. Every battle-core OnceLog key starts with `tactical-battle-core:` so `OnceLog.ResetTactical` (prefix `tactical`) releases it at battle end.
 - [ ] **One parent map.** There are three independent `GetAttachedUnitsReg` walks today, with different tie-breaks:
   - `DirectChildDiscoveryRuntime` at :45 and :147 keeps the first parent found and passes `includenonactiveunits:false`.
   - `CommandTreeRuntime.BuildAttachedParentMap` (:331) keeps the last parent found, and falls back to `parentregiment`, then `transform.parent` (:394).
@@ -200,6 +209,19 @@ internal static class BattleSnapshotBuilder { // runtime
 - [ ] Rewrite the "urgent recovery boundary" header in `TacticalBattleRuntimeSnapshot.cs` (:32-79). The live movement fields it lists (pathinterrupted, regimentpaths, lastsetwaypointposition, formation, rotation, position) are now captured fresh into `UnitRecord` every tick, in the same frame (built at 5866). The header should point at `BattleSnapshot` instead of live reads.
 - [ ] Scope: `tactical.snapshot.build` (5.0 ms) around `Build`.
 - [ ] **Acceptance:** tests pass; `BattleSnapshotBuilder` is not in the test csproj; the alloc test is green.
+
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the console harness: the pure assembler (parent map, stale-source rule, roster signature, probe converters, strength bucket, front axis) including zero allocation over 300 units after warm-up. Runtime proof of `BattleSnapshotBuilder.Build` is the BC7 in-game smoke, because nothing builds the snapshot before BC4 wires `BattleCoreTick.EnsureSnapshot`; until then `CommandTreeRuntime` / `DirectChildDiscoveryRuntime` read no snapshot and warn once per battle (`tactical-battle-core:snapshot-missing`).
+
+**Merge items (BC1):**
+- **At the BC3 merge:** `BattleSnapshotBuilder.OwnershipFlags` sets `PlayerOwned` from `dlcw_isundercommander` even outside W&L (verify finding 5). Replace it with BC3's `PlayerOwnership.Compute`, as the seam comment in `OwnershipFlags` says, and add `ApplyChainFlags` after `AssembleCommandTree`. Two consumers read `PlayerOwned` and follow the change without edits: `FitFrontAxis`'s group fallback, which replaces the shipped `dlcw_isundercommander` test, and `ToRegimentProbes(excludePlayerOwned)`.
+- **At the BC4 merge:** `ArmyPostureInputsRuntime.ExtendedProbes` (`ArmyPostureInputsRuntime.cs:103-111`) caches the probe list against its own roster signature. Before the first snapshot build, `DirectChildDiscovery.BuildExtendedProbesForAlliance` returns an empty list, which would then be cached until the roster changes. BC4 must build the snapshot (`EnsureSnapshot`) before any reader runs, or the cache must not store an empty probe list taken before the first build.
+
+**Known limitations (BC1):**
+- **Stale `allattachedunits` after `MoveUnit` (93091-93150).** `MoveUnit` refreshes the destination (`UpdateAllAttachedUnits`, 93136) and the new parent chain (`UpdateAllParentUnits` 93141 → 90524-90546). On the source side it refreshes only the highest parent up to unittyp 16 (`GetHighestParentUnit(unittomove, 16)`, read before the move at 93103) and, through `includesubordinategroups`, that parent's direct subordinate groups (93137-93140 → 129619-129627). A source group two or more levels below keeps a stale list that still holds the moved unit.
+  - Parent choice: handled. Lists of a consistent tree are nested or disjoint, so two non-nested claimants mean one is stale; the claimant that was the unit's previous parent yields (`ResolveStaleSourceClaims`, test `MoveUnitStaleSourceListYieldsToDestination`). With no previous map (first build of the battle) the smallest group stays.
+  - Detection: the destination list always grows, so the attached-length sum changes in the common case (+1 per moved unit and descendant when the stale source and destination sit at the same depth). It nets to zero when the refreshed source groups shrink by as much as the destination chain grows: for example, a regiment moved from a deep brigade to directly under a sibling division of the same top group, where the destination division gains one and the refreshed source division loses one. That move keeps the cached map until a later list refresh changes the sum. The side-stat cycle re-runs `UpdateAllAttachedUnits` on every battle-data group (84647, gated by `sidestatupdatecycle` at 84572; battle-data units are those set at 88391), so a stale battle-data source group self-corrects within one cycle.
+  - In-battle reachability: the OOB drag (`PanelHandler.UpdateDragAndDrop` 208051) needs `campaignmainpanel`, which is bound only when `IsCampaign` (201477). `AICampaign.CheckCombinationOfUnits` / `CheckTransferOfUnits` (17158, 17328) and `CampaignMainPanel.DetachUnitToIndependentCorps` (178375) are campaign-only. The one path the battle OOB window can reach (`oob` bound outside the campaign, 201495) is the W&L `REQUESTTransfer` prompt (`OOB.CheckCommandPrompt` 198841, `CanRequestTransfer` 43911), which moves the player's own command. `AncestryMismatchCount` compares the player chain with `Transform.IsChildOf` and logs the `tactical-battle-core:ancestry-mismatch` OnceLog when they disagree.
+  - Two moves of the same unit inside one side-stat cycle leave two stale lists. `ResolveStaleSourceClaims` yields only the previous-map parent, so the smallest-first winner can still be the first stale source. Same single in-battle trigger (W&L `REQUESTTransfer`); self-corrects at the next side-stat refresh for battle-data groups (BC1 verify r2 landing note).
 
 ---
 
@@ -480,7 +502,7 @@ internal static class OrderExecutorRuntime {
   - Scope `tactical.patch.battle-core-arbiter` (5.0).
   - Gate per D3 → `BattleCoreTick.RunArbiter`.
   - Inner scopes `tactical.arbiter.resolve` (0.5) and `tactical.arbiter.execute` (2.0).
-- [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> pending=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> topSkip=<reason>`. Use OnceLog `battle-core:arbiter-first-fire` for the first execution.
+- [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> pending=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> topSkip=<reason>`. Use OnceLog `tactical-battle-core:arbiter-first-fire` for the first execution.
 - [ ] **Acceptance:** tests pass; the alloc test is green; the arbiter patch compiles with zero producers registered (an empty run is a no-op).
 
 ---
@@ -639,7 +661,7 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
   - `DenialPrecedenceOverCharge` (arbiter fixture)
   - `OnlyTwoLeadingRegimentsCharge`
   - `ConfigOffNeverCharges`
-- [ ] BC6b: the producer reads vanilla GamePrefs once per battle into the snapshot scratch, and checks the lane through the snapshot's own positions on the segment (40 m corridor, reusing `WaypointValidator.FriendlyFireClearanceMeters`). Scope `tactical.producer.charge`. OnceLog `battle-core:charge-first-fire`.
+- [ ] BC6b: the producer reads vanilla GamePrefs once per battle into the snapshot scratch, and checks the lane through the snapshot's own positions on the segment (40 m corridor, reusing `WaypointValidator.FriendlyFireClearanceMeters`). Scope `tactical.producer.charge`. OnceLog `tactical-battle-core:charge-first-fire`.
 
 ---
 
@@ -648,7 +670,7 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
 **Owned files:** `Plugin.cs`, `docs/*`, `AGENTS.md`, `MEMORY.md`, the Stage B `tools/smoke-check.py` / `tools/smoke-situational.txt` (extend; create only if Stage B has not landed them), the test csproj (final reconciliation).
 
 - [ ] Wiring checks:
-  - Every producer is registered: `BattleCoreTick` logs `[once:battle-core:producers] count=12 order=…` on first tick.
+  - Every producer is registered: `BattleCoreTick` logs `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…` on first tick.
   - `TacticalBattleCoordinatorRuntime.Tick` calls `EnsureSnapshot` before any evidence read.
   - The heavy path receives the snapshot.
   - `TacticalObserverPatch` no longer re-decides posture.
@@ -679,12 +701,13 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
   - `observer-check-global-ai-strategy` (coordinator driver)
   Remove the deleted patches from the list: `posture-executor`, `group-stance`, `b7-bombardment`, `b8-check-line-fallbacks`, `b8-use-of-reserves`, `artillery-waypoint-veto`.
 - [ ] Expected telemetry in a 20× smoke battle (tuning sidecar plus LogOutput):
-  - `[once:battle-core:producers]`.
+  - `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…`.
+  - `[once:tactical-battle-core:arbiter-first-fire] [OrderArbiter] first vanilla order issued channel=<channel> source=<source>`.
   - `[BattlePerception] … mode=FogGrid` for the enemy AI side after ≤ 5 battle-seconds. Before that, `mode=RangeOnly reason=GridNotPainted`. With HQ-in-the-saddle, `reason=HqInTheSaddle`.
   - `[OrderArbiter]` rows with `moved > 0`, `failed/issued < 0.2`, and no `gaveUp` storm (≤ 5 per side per 30 s).
   - Perf: `tactical.snapshot.build` p95 ≤ 1.5 ms per side, `tactical.arbiter.resolve` p95 ≤ 0.5 ms, no `tactical.patch.battle-core-arbiter` row above 5 ms more than 1 % of calls.
-  - `[once:battle-core:charge-first-fire]` in an infantry assault.
-  - A W&L brigade career shows: player units never in `[OrderArbiter]` issued counts; a dispatch panel naming the superior when the parent division is moved; `[once:battle-core:ancestry-mismatch]` absent, or explained.
+  - A line starting `[once:tactical-battle-core:charge-first-fire]` in an infantry assault (message text set by BC6b).
+  - A W&L brigade career shows: player units never in `[OrderArbiter]` issued counts; a dispatch panel naming the superior when the parent division is moved; `[once:tactical-battle-core:ancestry-mismatch] [BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance=<a> groups=<n>` absent, or explained.
 - [ ] Docs:
   - `docs/patch-catalog.md`: remove #41, #46, #45, #48, #49, #52, #61, veto; add the arbiter; note #59/#56/#42 as executor-inline.
   - `docs/tactical-orchestrator.md` and `docs/tactical-operations-ledger.md`: battle core section, D3/D4/D8.

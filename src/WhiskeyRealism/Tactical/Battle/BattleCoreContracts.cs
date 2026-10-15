@@ -28,6 +28,7 @@ namespace WhiskeyRealism.Tactical.Battle
         IsInfantry = 16384,
         PlayerCommand = 32768,
         LiedDown = 65536,
+        MarkedForRout = 131072, // vanilla markedforrout: a cavalry leaf mounting up to rout (Rout 123555-123559)
     }
 
     public struct UnitRecord
@@ -39,6 +40,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Y, Z, RotationY;
         public int Strength;
         public float GroupStrengthDirect;
+        public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
         public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
