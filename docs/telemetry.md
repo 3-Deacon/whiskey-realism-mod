@@ -60,6 +60,8 @@ Tags are routed by `TelemetryTagPolicy`; unregistered `Tactical*` tags fall back
 | `TacticalCommandPosture` | Decision | Posture and division-play producers (`PostureTelemetry.Group`): per group decision, task, target, intents submitted (`writeResult=submitted`/`none`); per (source, group) signature, 30 s throttle. |
 | `TacticalLeafCascade` | Decision | Posture producer (`PostureTelemetry.Leaf`): leaf brigade role/task/outcome, cascade chain, applied. |
 | `TacticalFacingPulse` | Decision / Write | Facing-pulse producer (`PostureTelemetry.Facing`): scope, task, target formation/facing, `writeResult`. |
+| `ChargeDemotion` | Decision | ChargeDemotion producer: a vanilla assault (stance 4) demoted, counted once the executor issued it (`ChargeDemotionTracker`): unit, `decision=DemoteToHold`, `reason=charge-demotion`, `fromStance`, `toStance`, `submittedAtHours`; per (side, group, stance) signature, 30 s throttle. |
+| `ChargeDemotionCount` | Decision | ChargeDemotion producer: per side, at most every 30 s real time and only after a new demotion: `demoted` (window), `battleTotal`, `windowSeconds`. |
 | `BattlePerception` | Decision | `BattlePerceptionProbe`: per-side perception mode change (mode, reason, visible, remembered). The once-per-mode `[BattlePerception]` line also goes to `LogOutput.log`. |
 | `TacticalHeavyGate` | Gate | `TacticalBattleCoordinatorRuntime`: heavy snapshot-build gate decision per side (executed/skipped + reason, battle/real-time clocks, pending flag, unit count, objective hash). |
 
@@ -76,7 +78,7 @@ Keys must be static: a literal, or a literal plus a value from a small fixed set
 | `tactical-stance-write:<source>:<reason>:<stance>` (also `:yield:` / `:refuse:` variants) | `TacticalStanceWriter.EnsureStance` | `TacticalStanceWrite` (Write) |
 | `tactical-combatbehavior-write:<behavior>` | `TacticalCombatBehaviorWriter` | default OnceLog routing |
 | `tactical-brigade-posture:opportunity-override` | posture producer, leaf opportunity override | `TacticalBrigadePosture` (Decision) |
-| `tactical-battle-core:<event>` (`producers`, `producers-missing`, `arbiter-first-fire`, `charge-first-fire`, `ancestry-mismatch`, `snapshot-*`, `blocked-crossings-*`, `terrain-*`, …) and `tactical-battle-core:producer-threw:<producer name>` (eleven fixed names, keys built once by `BattleProducerRegistry`) | battle core | `[BattleCore]` / `[OrderArbiter]` / `[ChargeDoctrine]` / `[BattleSnapshot]` lines: not a tactical tag, so they reach `LogOutput.log` |
+| `tactical-battle-core:<event>` (`producers`, `producers-missing`, `arbiter-first-fire`, `charge-first-fire`, `charge-demotion-first-fire`, `ancestry-mismatch`, `snapshot-*`, `blocked-crossings-*`, `terrain-*`, …) and `tactical-battle-core:producer-threw:<producer name>` (eleven fixed names, keys built once by `BattleProducerRegistry`) | battle core | `[BattleCore]` / `[OrderArbiter]` / `[ChargeDoctrine]` / `[ChargeDemotion]` / `[BattleSnapshot]` lines: not a tactical tag, so they reach `LogOutput.log` |
 | `tactical.battle-perception:mode:<FogGrid\|RangeOnly\|OwnSideWithinFog>` | `BattlePerceptionProbe` | `[BattlePerception]`, `LogOutput.log` |
 | `tactical-feud-guard:<event>` | #42 | `TacticalFeudGuard` (Gate) |
 
@@ -149,7 +151,7 @@ Non-patch scopes:
 
 ## Battle-core rows
 
-`LogOutput.log` (tags outside the tactical routing): `[BattleCore] producers count=11 order=…` and `[OrderArbiter] first vanilla order issued channel=… source=…` once per battle; `[OrderArbiter] alliance=… intents=… winners=… issued=… moved=… failed=… retried=… gaveUp=… skipped=… deduped=… superseded=… topSkip=…` every 30 s real time per AI side while the arbiter runs; `[BattlePerception] alliance=… mode=… reason=… visible=… remembered=…` once per mode per battle; `[ChargeDoctrine] first infantry charge armed: …` once per battle. Battle-core warnings use `[once:tactical-battle-core:…]` keys. The ordered battle-core smoke checklist is in `docs/superpowers/plans/2026-10-15-battle-core.md` § BC7.
+`LogOutput.log` (tags outside the tactical routing): `[BattleCore] producers count=11 order=…` and `[OrderArbiter] first vanilla order issued channel=… source=…` once per battle; `[OrderArbiter] alliance=… intents=… winners=… issued=… moved=… failed=… retried=… gaveUp=… skipped=… deduped=… superseded=… topSkip=…` every 30 s real time per AI side while the arbiter runs; `[BattlePerception] alliance=… mode=… reason=… visible=… remembered=…` once per mode per battle; `[ChargeDoctrine] first infantry charge armed: …` and `[ChargeDemotion] first vanilla assault demoted: …` once per battle. Battle-core warnings use `[once:tactical-battle-core:…]` keys. The ordered battle-core smoke checklist is in `docs/superpowers/plans/2026-10-15-battle-core.md` § BC7.
 
 ## Smoke checklist
 

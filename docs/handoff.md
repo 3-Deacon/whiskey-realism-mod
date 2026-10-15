@@ -11,7 +11,7 @@
 | **Branch** | `feat/battle-core` (worktree `.worktrees/feat-battle-core`): roadmap stage D, slices BC0-BC7 complete, BC7 awaiting review. Not merged to `main`, not deployed. |
 | **`main`** | `6695ecd` — the 2026-10-15 checkpoint (review remediation + Stage B integration); last released line is v0.2.2 (2026-05-04). |
 | **Build** | `./build.sh` — 0 warnings, 0 errors on `feat/battle-core`; the test build is 0 warnings too. |
-| **Harness** | 1899 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
+| **Harness** | 1907 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
 | **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` (checkpoint tag `checkpoint-2026-10-15`): `WhiskeyRealism.dll` 1,593,856 bytes, SHA-256 `0831547f9835e3f084953e64bed7cd049c26c68f96ce22c2a0134c35fee17638` (dist and plugins match); harness 1688 PASS / 0 FAIL. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
@@ -52,7 +52,6 @@ Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found alon
 ### Open items
 
 - **Battle core:** BC7 review, then merge `feat/battle-core` → `main`, build, deploy with the user's go-ahead (BepInEx 5.4.23.5 is installed), and run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
-- **Battle-core gaps noted at BC7:** no telemetry row records a charge demotion (the `[TacticalChargeDeny]` emitter went with #45); `FormationSnapshot.GroupStrengthDirect` (strategic) is written but never read (pre-battle-core, untouched).
 - No in-game smoke of the 2026-10-15 checkpoint DLL on `main` yet (deployed, awaiting smoke).
 
 ## Next stages
