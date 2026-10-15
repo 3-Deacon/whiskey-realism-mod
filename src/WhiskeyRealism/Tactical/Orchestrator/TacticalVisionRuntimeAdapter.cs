@@ -774,28 +774,76 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var mapObjectives = UnityEngine.Object.FindObjectsOfType<Objectives>();
-                if (mapObjectives == null || mapObjectives.Length == 0) return Array.Empty<MapObjectiveCapture>();
+                var mapObjectives = SceneObjectives();
+                if (mapObjectives.Length == 0) return Array.Empty<MapObjectiveCapture>();
 
                 var result = new MapObjectiveCapture[mapObjectives.Length];
-                int written = 0;
                 for (int i = 0; i < mapObjectives.Length; i++)
                 {
                     Objectives obj = mapObjectives[i];
-                    if (obj == null) continue;
-                    TacticalMapPoint point = SafeObjectivePoint(obj);
-                    string id = SafeObjectiveId(obj, written);
-                    int owner = SafeIntField(obj, "owner", -2);
-                    bool isActive = obj.isActiveAndEnabled;
-                    result[written++] = new MapObjectiveCapture(id, point, owner, isActive);
+                    result[i] = new MapObjectiveCapture(
+                        MapObjectiveId(obj, i),
+                        SafeObjectivePoint(obj),
+                        obj != null ? obj.owner : -2,
+                        obj != null && obj.isActiveAndEnabled);
                 }
-                if (written == result.Length) return result;
-                Array.Resize(ref result, written);
                 return result;
             }
             catch
             {
                 return Array.Empty<MapObjectiveCapture>();
+            }
+        }
+
+        /// <summary>
+        /// Vanilla's own objective list: BattleUnits.objectives (static, 78910), built in
+        /// InitBattleUnits from Battlemap/Map/Objectives incl. inactive ones; activation
+        /// is restored by Objectives.Load (106017) before the AI runs. Falls back to a
+        /// scene scan (active objects only) when the static is unset.
+        /// </summary>
+        internal static Objectives[] SceneObjectives()
+        {
+            try
+            {
+                var vanilla = BattleUnits.objectives;
+                if (vanilla != null && vanilla.Length > 0) return vanilla;
+                return UnityEngine.Object.FindObjectsOfType<Objectives>() ?? Array.Empty<Objectives>();
+            }
+            catch
+            {
+                return Array.Empty<Objectives>();
+            }
+        }
+
+        internal static string MapObjectiveId(Objectives objective, int index)
+        {
+            return SafeObjectiveId(objective, index);
+        }
+
+        /// <summary>
+        /// Cheap fingerprint of everything the approach-avenue scan depends on that
+        /// vanilla mutates mid-battle (see TacticalAvenueSourceSignature).
+        /// </summary>
+        internal static TacticalAvenueSourceSignature ReadAvenueSourceSignature(BattleUnits battleUnits)
+        {
+            try
+            {
+                if (battleUnits == null) return default(TacticalAvenueSourceSignature);
+                int arrivals = battleUnits.scheduledarrival != null ? battleUnits.scheduledarrival.Count : 0;
+                int ownerHash = 17;
+                var entryPoints = battleUnits.entrypoints;
+                if (entryPoints != null)
+                {
+                    for (int i = 0; i < entryPoints.Length; i++)
+                    {
+                        unchecked { ownerHash = ownerHash * 31 + (entryPoints[i] != null ? entryPoints[i].owner + 2 : 0); }
+                    }
+                }
+                return new TacticalAvenueSourceSignature(arrivals, ownerHash, battleUnits.battlepasseddays);
+            }
+            catch
+            {
+                return default(TacticalAvenueSourceSignature);
             }
         }
 
@@ -917,8 +965,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var mapObjectives = UnityEngine.Object.FindObjectsOfType<Objectives>();
-                if (mapObjectives == null || mapObjectives.Length == 0) return;
+                var mapObjectives = SceneObjectives();
+                if (mapObjectives.Length == 0) return;
 
                 for (int i = 0; i < mapObjectives.Length; i++)
                 {
@@ -1052,7 +1100,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                BattleUnits battleUnits = UnityEngine.Object.FindObjectOfType<BattleUnits>();
+                return BuildApproachAvenueObservations(UnityEngine.Object.FindObjectOfType<BattleUnits>());
+            }
+            catch
+            {
+                return Array.Empty<TacticalApproachAvenueObservation>();
+            }
+        }
+
+        internal static TacticalApproachAvenueObservation[] BuildApproachAvenueObservations(BattleUnits battleUnits)
+        {
+            try
+            {
                 if (battleUnits == null) return Array.Empty<TacticalApproachAvenueObservation>();
 
                 var observations = new List<TacticalApproachAvenueObservation>();

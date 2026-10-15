@@ -12,15 +12,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // mutation hook didn't fire) we detect the divergence and emit a telemetry
     // event so smoke can spot silent correctness failures introduced by the caches.
     //
-    // What we validate:
-    //   - TacticalStableSceneCache.MapObjectives count matches the current scene scan
-    //     (Objectives don't appear or disappear mid-battle; a count change means
-    //     either vanilla added objectives at runtime or our cache forgot to refresh).
-    //   - TacticalStableSceneCache.ApproachAvenues count matches a fresh scan (entry
-    //     points are stable; mismatch indicates the same class of bug).
-    //   - CommandTreeRuntime cached snapshot has non-empty Nodes when there are
-    //     active regiments for that alliance (catches the case where the cache
-    //     was populated empty by accident).
+    // What we validate (content signatures, not counts — BR-H5):
+    //   - TacticalStableSceneCache map objectives: content hash (id, owner, active,
+    //     position) equals a fresh live capture. Owner flips at runtime (105746).
+    //   - TacticalStableSceneCache approach avenues: content hash (source, owner,
+    //     origin, target) equals a fresh scan (scheduledarrival / EntryPoint.owner
+    //     mutate mid-battle, 87601-87927).
+    //   - CommandTreeRuntime: the cached roster signature equals the live one
+    //     (completeunitlist identity/count, active/routed/marked counts, id set), and
+    //     the cached snapshot has nodes when the side has active regiments.
     //   - _resolvedDecisionsBySide has at least one entry per side with active
     //     commandable regiments (catches the case where pre-populate failed silently).
     //
@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 float now = SafeRealtimeSeconds();
+                // Realtime is fine here: this is a CPU-budget throttle, not doctrine.
                 if (now - _lastValidationRealtimeSeconds < ValidationIntervalSeconds) return;
                 _lastValidationRealtimeSeconds = now;
 
@@ -99,26 +100,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 var cachedObjectives = TacticalStableSceneCache.GetOrCaptureMapObjectives();
                 var liveObjectives = TacticalVisionRuntimeAdapter.CaptureMapObjectivesLive();
-                if (cachedObjectives.Length != liveObjectives.Length)
+                if (TacticalCacheSignatures.MapObjectivesContentHash(cachedObjectives)
+                    != TacticalCacheSignatures.MapObjectivesContentHash(liveObjectives))
                 {
                     mismatches++;
                     OnceLog.Warning(
                         "tactical-cache-validator:scene-map-objectives-drift",
                         "[TacticalCacheValidator] map objectives drift: cached="
                         + cachedObjectives.Length + " live=" + liveObjectives.Length
-                        + " — scene scan returned different count; cache may be stale");
+                        + " — content (id/owner/active/position) differs from a live capture");
                 }
 
                 var cachedAvenues = TacticalStableSceneCache.GetOrCaptureApproachAvenues(0);
                 var liveAvenues = TacticalVisionRuntimeAdapter.BuildApproachAvenueObservationsLive(0);
-                if (cachedAvenues.Length != liveAvenues.Length)
+                if (TacticalCacheSignatures.AvenuesContentHash(cachedAvenues)
+                    != TacticalCacheSignatures.AvenuesContentHash(liveAvenues))
                 {
                     mismatches++;
                     OnceLog.Warning(
                         "tactical-cache-validator:scene-avenues-drift",
                         "[TacticalCacheValidator] approach avenues drift: cached="
                         + cachedAvenues.Length + " live=" + liveAvenues.Length
-                        + " — entry points changed during battle (unexpected)");
+                        + " — content (source/owner/origin/target) differs from a live scan");
                 }
             }
             catch { /* validator must never throw out of Tick */ }
@@ -139,13 +142,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     long misses = CommandTreeRuntime.GetCacheMisses(allianceId);
                     if (hits + misses == 0) continue; // never called for this alliance
 
+                    if (CommandTreeRuntime.TryGetCachedRosterSignature(allianceId, out TacticalRosterSignature cachedRoster))
+                    {
+                        var liveRoster = CommandTreeRuntime.ReadRosterSignature(allianceId);
+                        if (!cachedRoster.Equals(liveRoster))
+                        {
+                            // Expected between a roster change and the next Snapshot();
+                            // the next read rebuilds. Recorded (not a fault) so smoke sees the churn.
+                            OnceLog.Info(
+                                "tactical-cache-validator:command-tree-roster-changed",
+                                "[TacticalCacheValidator] command tree roster changed since last build: cached="
+                                + cachedRoster + " live=" + liveRoster + " — next Snapshot() rebuilds");
+                        }
+                    }
+
                     var snap = CommandTreeRuntime.Snapshot(allianceId);
                     bool hasAnyRegiments = CountActiveRegimentsForAlliance(allianceId) > 0;
                     if (hasAnyRegiments && (snap == null || snap == CommandTreeSnapshot.Empty))
                     {
                         mismatches++;
                         OnceLog.Warning(
-                            "tactical-cache-validator:command-tree-empty-but-populated:" + allianceId,
+                            "tactical-cache-validator:command-tree-empty-but-populated",
                             "[TacticalCacheValidator] command tree cache empty for alliance="
                             + allianceId + " but live roster has active regiments — invalidating");
                         CommandTreeRuntime.Invalidate(allianceId);
@@ -209,7 +226,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         mismatches++;
                         OnceLog.Warning(
-                            "tactical-cache-validator:resolved-cache-miss:" + allianceId,
+                            "tactical-cache-validator:resolved-cache-miss",
                             "[TacticalCacheValidator] resolved-decisions cache MISS for alliance="
                             + allianceId + " probedInstanceId=" + probedInstanceId
                             + " activeRegiments=" + activeRegiments

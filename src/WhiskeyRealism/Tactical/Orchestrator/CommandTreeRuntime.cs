@@ -16,20 +16,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private static FieldInfo _commandHierarchyShiftField;
 
-        // Stage B perf cache (2026-05-21). The command tree structure (parent-child
-        // relationships between brigades/divisions/corps + raw unittyp + alliance) is
-        // STABLE between roster mutation events. BattleUnits.completeunitlist itself is
-        // immutable during a battle (vanilla only mutates it at battle-init line 79980
-        // per the decompile audit), and Regiment.alliance/unittyp don't change once a
-        // unit is on the field. So we build the tree ONCE per (allianceId, shift) and
-        // reuse on every heavy-gate fire. Saves ~8ms per side per fire — the largest
-        // single per-cycle main-thread cost remaining after Stage A.
+        // Stage B perf cache (2026-05-21), corrected 2026-10-14 (BR-H5). The tree
+        // structure (command parent links, raw unittyp, alliance) only changes on roster
+        // events, but completeunitlist is NOT immutable mid-battle: UpdateUnitList
+        // (79974) replaces it from CreateUnitDefault (89670), DetachUnits (90239) and
+        // ReattachCompany (90609), and each probe's Active/Routed/MarkedForRout flag is
+        // live vanilla state (routs, reinforcement arrivals). Every Snapshot() therefore
+        // reads a cheap roster signature (one pass over completeunitlist, plain field
+        // reads; no names, no GetAttachedUnitsReg) and rebuilds the tree whenever the
+        // list identity, unit/active/routed/marked counts or id set changed. A cache hit
+        // thus always carries the live routed/active flags.
         //
         // Invalidation surface:
-        //   - Battle end: TacticalBattleCoordinator.OnBattleEnd → Invalidate()
-        //   - Shift change: detected on every Snapshot() call; rebuild on mismatch
-        //   - Manual: Invalidate(allianceId) exposed for future roster-event hooks
-        //     (Stage C — when a regiment dies or reinforcements arrive)
+        //   - Roster signature change (incl. a new battle's new list): rebuild
+        //   - Shift change: rebuild
+        //   - Battle end: TacticalBattleCoordinator.OnBattleEnd -> InvalidateAll()
         //
         // Indexed by allianceId 0/1; index 2+ (Europe) is intentionally not cached
         // because the orchestrator has no role for alliance 2 anyway.
@@ -40,6 +41,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         };
         private static readonly int[] _cachedShifts = { int.MinValue, int.MinValue };
         private static readonly bool[] _cacheValid = { false, false };
+        private static readonly TacticalRosterSignature[] _cachedRosters = new TacticalRosterSignature[2];
 
         // Exposed counters for diagnostics — populated cheaply on hit/miss; emitted
         // periodically via TacticalCommandTreeCache events. Per-side so the dashboard
@@ -55,9 +57,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static CommandTreeSnapshot Snapshot(int allianceId, int commandHierarchyShift)
         {
             // Cache check: only alliance 0/1 are cached. Skip cache for invalid alliance ids.
-            if (allianceId >= 0 && allianceId < _cachedSnapshots.Length)
+            bool cacheable = allianceId >= 0 && allianceId < _cachedSnapshots.Length;
+            TacticalRosterSignature liveRoster = default(TacticalRosterSignature);
+            if (cacheable)
             {
-                if (_cacheValid[allianceId] && _cachedShifts[allianceId] == commandHierarchyShift)
+                liveRoster = ReadRosterSignature(allianceId);
+                if (!TacticalCacheSignatures.ShouldRebuildCommandTree(
+                        _cacheValid[allianceId],
+                        _cachedShifts[allianceId],
+                        commandHierarchyShift,
+                        _cachedRosters[allianceId],
+                        liveRoster))
                 {
                     _cacheHits[allianceId]++;
                     return _cachedSnapshots[allianceId];
@@ -69,17 +79,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var probes = BuildProbes(allianceId, commandHierarchyShift);
                 var snapshot = CommandTreeBuilder.Build(probes, allianceId, commandHierarchyShift);
 
-                if (allianceId >= 0 && allianceId < _cachedSnapshots.Length)
+                if (cacheable)
                 {
                     _cachedSnapshots[allianceId] = snapshot ?? CommandTreeSnapshot.Empty;
                     _cachedShifts[allianceId] = commandHierarchyShift;
+                    _cachedRosters[allianceId] = liveRoster;
                     _cacheValid[allianceId] = true;
                     _cacheMisses[allianceId]++;
                     OnceLog.Info(
                         "tactical-command-tree-cache:populated:" + allianceId,
                         "[TacticalCommandTreeCache] populated alliance=" + allianceId
                         + " shift=" + commandHierarchyShift
-                        + " — subsequent reads served from cache");
+                        + " — reads served from cache until the roster signature changes");
                 }
                 return snapshot;
             }
@@ -103,6 +114,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _cacheValid[allianceId] = false;
             _cachedSnapshots[allianceId] = CommandTreeSnapshot.Empty;
             _cachedShifts[allianceId] = int.MinValue;
+            _cachedRosters[allianceId] = default(TacticalRosterSignature);
             if (wasValid)
             {
                 OnceLog.Info(
@@ -121,9 +133,50 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _cacheValid[i] = false;
                 _cachedSnapshots[i] = CommandTreeSnapshot.Empty;
                 _cachedShifts[i] = int.MinValue;
+                _cachedRosters[i] = default(TacticalRosterSignature);
                 _cacheHits[i] = 0;
                 _cacheMisses[i] = 0;
             }
+        }
+
+        /// <summary>
+        /// One pass over completeunitlist for the alliance: list identity, unit count,
+        /// activeInHierarchy / isrouted / markedforrout counts and an order-independent
+        /// id hash. Plain field reads only.
+        /// </summary>
+        internal static TacticalRosterSignature ReadRosterSignature(int allianceId)
+        {
+            try
+            {
+                var units = BattleUnits.completeunitlist;
+                if (units == null) return default(TacticalRosterSignature);
+                int count = 0, active = 0, routed = 0, marked = 0, idHash = 0;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i];
+                    if (reg == null || reg.alliance != allianceId) continue;
+                    count++;
+                    if (reg.isrouted) routed++;
+                    if (reg.markedforrout) marked++;
+                    if (reg.gameObject.activeInHierarchy) active++;
+                    unchecked { idHash += reg.GetInstanceID() * 16777619; }
+                }
+                return new TacticalRosterSignature(
+                    System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(units),
+                    count, active, routed, marked, idHash);
+            }
+            catch
+            {
+                return default(TacticalRosterSignature);
+            }
+        }
+
+        internal static bool TryGetCachedRosterSignature(int allianceId, out TacticalRosterSignature roster)
+        {
+            roster = default(TacticalRosterSignature);
+            if (allianceId < 0 || allianceId >= _cachedRosters.Length || !_cacheValid[allianceId]) return false;
+            roster = _cachedRosters[allianceId];
+            return true;
         }
 
         // Diagnostic accessor — periodic dashboard emission can summarize hit/miss

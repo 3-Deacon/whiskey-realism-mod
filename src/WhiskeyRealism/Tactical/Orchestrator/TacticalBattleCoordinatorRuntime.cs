@@ -281,7 +281,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // from this cache instead of re-scanning the scene every cycle. Populate is
             // try/catch-safe internally; on failure the cache stays empty and live-scan
             // fallback engages (strict no-regression contract).
-            try { TacticalStableSceneCache.Populate(); }
+            try { TacticalStableSceneCache.Populate(ResolveBattleUnits(battle)); }
             catch (Exception sce)
             {
                 Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache populate threw: "

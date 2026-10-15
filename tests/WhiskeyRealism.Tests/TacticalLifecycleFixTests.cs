@@ -26,6 +26,12 @@ internal static class TacticalLifecycleFixTests
         Pass("brm2 snapshot keeps per-side data age", BrM2SnapshotKeepsPerSideDataAge);
         Pass("brm2 worker starts only after successful bootstrap", BrM2WorkerStartsOnlyWhenActive);
         Pass("brm2 worker capture only on heavy build", BrM2WorkerCaptureOnlyOnHeavyBuild);
+
+        Pass("brh5 roster signature tracks rout and list identity", BrH5RosterSignatureTracksRoutAndListIdentity);
+        Pass("brh5 command tree rebuilds on roster or shift change", BrH5CommandTreeRebuildPolicy);
+        Pass("brh5 map objective content hash sees owner and active", BrH5MapObjectiveContentHash);
+        Pass("brh5 avenue source signature sees arrivals and owners", BrH5AvenueSourceSignature);
+        Pass("brh5 avenue content hash sees owner change", BrH5AvenueContentHash);
     }
 
     private static void Pass(string name, Action test)
@@ -223,5 +229,65 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: true, heavyBuiltThisTick: true), "capture");
         TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: true, heavyBuiltThisTick: false), "reuse");
         TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: false, heavyBuiltThisTick: true), "no worker");
+    }
+
+    // ---- BR-H5 caches ----
+
+    private static void BrH5RosterSignatureTracksRoutAndListIdentity()
+    {
+        var a = new TacticalRosterSignature(listIdentity: 1, unitCount: 40, activeCount: 30, routedCount: 2, markedForRoutCount: 1, idHash: 99);
+        var same = new TacticalRosterSignature(1, 40, 30, 2, 1, 99);
+        TestHarness.AssertTrue(a.Equals(same), "same");
+        TestHarness.AssertFalse(a.Equals(new TacticalRosterSignature(1, 40, 30, 3, 1, 99)), "routed");
+        TestHarness.AssertFalse(a.Equals(new TacticalRosterSignature(1, 40, 29, 2, 1, 99)), "active");
+        // DetachUnits 90239 / ReattachCompany 90609 / CreateUnitDefault 89670 call
+        // UpdateUnitList (79974), which replaces completeunitlist with a new list.
+        TestHarness.AssertFalse(a.Equals(new TacticalRosterSignature(2, 40, 30, 2, 1, 99)), "list replaced");
+        TestHarness.AssertFalse(a.Equals(new TacticalRosterSignature(1, 40, 30, 2, 1, 98)), "ids");
+    }
+
+    private static void BrH5CommandTreeRebuildPolicy()
+    {
+        var r = new TacticalRosterSignature(1, 40, 30, 2, 1, 99);
+        var routed = new TacticalRosterSignature(1, 40, 30, 3, 1, 99);
+        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(false, 0, 0, r, r), "invalid");
+        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 1, r, r), "shift");
+        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 0, r, routed), "roster");
+        TestHarness.AssertFalse(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 0, r, r), "hit");
+    }
+
+    private static void BrH5MapObjectiveContentHash()
+    {
+        var p = new WhiskeyRealism.Tactical.Operations.TacticalMapPoint(100f, 200f);
+        var baseline = new[] { new MapObjectiveCapture("Hill", p, 0, true) };
+        int h = TacticalCacheSignatures.MapObjectivesContentHash(baseline);
+        TestHarness.AssertEqual(h, TacticalCacheSignatures.MapObjectivesContentHash(new[] { new MapObjectiveCapture("Hill", p, 0, true) }), "stable");
+        // Objectives.owner flips on capture at runtime (105746).
+        TestHarness.AssertTrue(h != TacticalCacheSignatures.MapObjectivesContentHash(new[] { new MapObjectiveCapture("Hill", p, 1, true) }), "owner");
+        TestHarness.AssertTrue(h != TacticalCacheSignatures.MapObjectivesContentHash(new[] { new MapObjectiveCapture("Hill", p, 0, false) }), "active");
+    }
+
+    private static void BrH5AvenueSourceSignature()
+    {
+        var s = new TacticalAvenueSourceSignature(scheduledArrivals: 3, entryPointOwnerHash: 11, battlePassedDays: 0);
+        TestHarness.AssertTrue(s.Equals(new TacticalAvenueSourceSignature(3, 11, 0)), "same");
+        // scheduledarrival.RemoveAt 87620 when a column arrives; entrypoint.owner 87601.
+        TestHarness.AssertFalse(s.Equals(new TacticalAvenueSourceSignature(2, 11, 0)), "arrived");
+        TestHarness.AssertFalse(s.Equals(new TacticalAvenueSourceSignature(3, 12, 0)), "owner");
+        TestHarness.AssertFalse(s.Equals(new TacticalAvenueSourceSignature(3, 11, 1)), "day");
+    }
+
+    private static void BrH5AvenueContentHash()
+    {
+        var a = new[] { Avenue(0) };
+        TestHarness.AssertEqual(TacticalCacheSignatures.AvenuesContentHash(a), TacticalCacheSignatures.AvenuesContentHash(new[] { Avenue(0) }), "stable");
+        TestHarness.AssertTrue(TacticalCacheSignatures.AvenuesContentHash(a) != TacticalCacheSignatures.AvenuesContentHash(new[] { Avenue(1) }), "owner");
+    }
+
+    private static WhiskeyRealism.Tactical.Operations.TacticalApproachAvenueObservation Avenue(int owner)
+    {
+        return new WhiskeyRealism.Tactical.Operations.TacticalApproachAvenueObservation(
+            WhiskeyRealism.Tactical.Operations.TacticalApproachAvenueSource.EntryPoint,
+            owner, 0f, 0f, 100f, 100f, 0.7f, true, false, "entrypoint-0");
     }
 }
