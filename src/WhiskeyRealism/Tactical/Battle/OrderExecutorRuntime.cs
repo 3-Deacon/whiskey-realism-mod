@@ -75,6 +75,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly Dictionary<int, Regiment> _regiments = new Dictionary<int, Regiment>(1024);
         // The units one Move reached (grown to the largest chain seen).
         private static IssuedTarget[] _issued = new IssuedTarget[64];
+        // Pre-call waypoints of those units and their descendants (grown as needed).
+        private static UnitWaypoint[] _waypointsBefore = new UnitWaypoint[256];
         // Per-battle latch for the first-fire line, so the message string is built
         // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
@@ -110,6 +112,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             int executed = 0;
             int issued = 0;
+            int waypoints = 0;
             int queuedBefore = 0, pathsBefore = 0, queuedAfter = 0, pathsAfter = 0;
             if (_issued.Length < plan.Targets.Count) _issued = new IssuedTarget[Math.Max(plan.Targets.Count, _issued.Length * 2)];
             float sizeX = 0f, sizeZ = 0f;
@@ -131,12 +134,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 bool wrote;
                 if (winner.Channel == OrderChannel.Move)
                 {
-                    Vector3 waypointBefore = unit.lastsetwaypointposition;
-                    _issued[issued++] = new IssuedTarget
-                    {
-                        InstanceId = own[targetIndex].InstanceId, X = x, Z = z,
-                        WaypointBeforeX = waypointBefore.x, WaypointBeforeZ = waypointBefore.z,
-                    };
+                    RecordWaypointsBefore(unit, issued, ref waypoints);
+                    _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
                     queuedBefore += QueuedSignal(unit);
                     pathsBefore += MovingUnits(unit);
                     wrote = IssueMove(bunits, unit, winner, plan.UseOrderDelay, x, z);
@@ -158,7 +157,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattleOrderIntent recorded = winner;
                 recorded.TargetX = plan.X;
                 recorded.TargetZ = plan.Z;
-                executor.RecordIssued(recorded, nowHours, _issued, issued, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
+                executor.RecordIssued(recorded, nowHours, _issued, issued, _waypointsBefore, waypoints,
+                    queuedBefore, pathsBefore, queuedAfter, pathsAfter);
             }
 
             if (executed > 0 && !_firstFireLogged)
@@ -401,6 +401,28 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             bool[] active = unit.ordertypeactive;
             return active != null && active.Length > 1 && (active[0] || active[1]);
+        }
+
+        // The unit's and every descendant's lastsetwaypointposition before the call
+        // (allattachedunits holds all descendants), keyed as the snapshot keys them.
+        private static void RecordWaypointsBefore(Regiment unit, int target, ref int count)
+        {
+            Regiment[] units = unit.allattachedunits;
+            int needed = count + 1 + (units != null ? units.Length : 0);
+            if (_waypointsBefore.Length < needed) Array.Resize(ref _waypointsBefore, Math.Max(needed, _waypointsBefore.Length * 2));
+            AddWaypointBefore(unit, target, ref count);
+            if (units == null) return;
+            for (int i = 0; i < units.Length; i++)
+                if ((UnityEngine.Object)units[i] != null) AddWaypointBefore(units[i], target, ref count);
+        }
+
+        // UnitRecord.InstanceId is the unit's GameObject instance id (BattleSnapshotBuilder).
+        private static void AddWaypointBefore(Regiment unit, int target, ref int count)
+        {
+            GameObject go = ((Component)unit).gameObject;
+            if (go == null) return;
+            Vector3 w = unit.lastsetwaypointposition;
+            _waypointsBefore[count++] = new UnitWaypoint { InstanceId = go.GetInstanceID(), Target = target, X = w.x, Z = w.z };
         }
 
         private static int MovingUnits(Regiment unit)

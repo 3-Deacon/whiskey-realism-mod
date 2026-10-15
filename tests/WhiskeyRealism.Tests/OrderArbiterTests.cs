@@ -36,6 +36,7 @@ internal static class OrderArbiterTests
             ("battle-core FailedRetriesOnceRotatedThenGivesUp", FailedRetriesOnceRotatedThenGivesUp),
             ("battle-core RedirectOfMovingGroupIsMoved", RedirectOfMovingGroupIsMoved),
             ("battle-core StaleWaypointNearTargetIsNotATake", StaleWaypointNearTargetIsNotATake),
+            ("battle-core DescendantAlreadyOnTargetIsNotATake", DescendantAlreadyOnTargetIsNotATake),
             ("battle-core PlayerOwnedNeverExecuted", PlayerOwnedNeverExecuted),
             ("battle-core FeudNeverExecuted", FeudNeverExecuted),
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
@@ -575,6 +576,35 @@ internal static class OrderArbiterTests
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "a waypoint already on the target before the call is no evidence");
     }
 
+    // Every waypoint TargetTaken inspects needs its pre-call value: a brigade
+    // whose waypoint was already within 60 m of the division's new target is no
+    // evidence that vanilla took the order.
+    private static void DescendantAlreadyOnTargetIsNotATake()
+    {
+        var outcomes = new OrderOutcome[8];
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 100f, -100f);
+        int child = view.AddGroup(2, 90f, -110f, parentIndex: g);
+        view.Own[g].RegimentPaths = 1;
+        view.Own[g].LastWaypointX = 800f;
+        view.Own[g].LastWaypointZ = -800f;
+        view.Own[child].LastWaypointX = 210f;
+        view.Own[child].LastWaypointZ = -880f;
+        var executor = NewExecutor();
+        var order = Move(1, 200f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor);
+
+        Record(executor, order, 1.0, 0, 1, 0, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
+            childId: 2, childBeforeX: 210f, childBeforeZ: -880f);
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "the brigade was already there before the call: not a take");
+
+        var fresh = NewExecutor();
+        Record(fresh, order, 1.0, 0, 1, 0, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
+            childId: 2, childBeforeX: 500f, childBeforeZ: -500f);
+        fresh.ObserveOutcomes(view, 1.01, outcomes, out n);
+        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "the brigade's waypoint moved onto the target: a take");
+    }
+
     // ---------------------------------------------------------------- ownership
 
     private static void PlayerOwnedNeverExecuted()
@@ -680,7 +710,7 @@ internal static class OrderArbiterTests
             new IssuedTarget { InstanceId = 11, X = 380f, Z = -420f },
             new IssuedTarget { InstanceId = 12, X = 420f, Z = -420f },
         };
-        executor.RecordIssued(order, 1.0, targets, 2, queuedBefore: 0, pathsBefore: 0, queuedAfter: 2, pathsAfter: 0);
+        executor.RecordIssued(order, 1.0, targets, 2, null, 0, queuedBefore: 0, pathsBefore: 0, queuedAfter: 2, pathsAfter: 0);
 
         view.Own[player].RegimentPaths = 1;
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
@@ -804,18 +834,20 @@ internal static class OrderArbiterTests
     }
 
     private static readonly IssuedTarget[] _issued = new IssuedTarget[1];
+    private static readonly UnitWaypoint[] _before = new UnitWaypoint[2];
 
-    // A Move issued to the group itself (self-only chain) at the intent's target.
+    // A Move issued to the group itself (self-only chain) at the intent's target,
+    // with the pre-call waypoints of the group and optionally one descendant.
     private static void Record(OrderExecutor executor, in BattleOrderIntent intent, double now,
         int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter,
-        float waypointBeforeX = 0f, float waypointBeforeZ = 0f)
+        float waypointBeforeX = 0f, float waypointBeforeZ = 0f,
+        int childId = 0, float childBeforeX = 0f, float childBeforeZ = 0f)
     {
-        _issued[0] = new IssuedTarget
-        {
-            InstanceId = intent.GroupId, X = intent.TargetX, Z = intent.TargetZ,
-            WaypointBeforeX = waypointBeforeX, WaypointBeforeZ = waypointBeforeZ,
-        };
-        executor.RecordIssued(intent, now, _issued, 1, queuedBefore, pathsBefore, queuedAfter, pathsAfter);
+        _issued[0] = new IssuedTarget { InstanceId = intent.GroupId, X = intent.TargetX, Z = intent.TargetZ };
+        _before[0] = new UnitWaypoint { InstanceId = intent.GroupId, Target = 0, X = waypointBeforeX, Z = waypointBeforeZ };
+        _before[1] = new UnitWaypoint { InstanceId = childId, Target = 0, X = childBeforeX, Z = childBeforeZ };
+        executor.RecordIssued(intent, now, _issued, 1, _before, childId != 0 ? 2 : 1,
+            queuedBefore, pathsBefore, queuedAfter, pathsAfter);
     }
 
     private static BattleOrderIntent Move(int group, float x, float z, IntentPriority priority, IntentSource source,
