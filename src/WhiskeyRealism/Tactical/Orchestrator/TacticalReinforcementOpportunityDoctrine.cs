@@ -152,7 +152,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // screening a major army's flank is a real tactical decision; telling
         // it "you're too small to matter" is wrong. Small forces with poor
         // intel naturally drop to NoOpportunity via this confidence gate.
-        public const float MinIntelConfidenceForAction = 0.5f;
+        //
+        // 0.35: confidence is coverage x contact recency (TacticalEnemyContactLedger).
+        // A fully observed front with no enemy-side entry point watched reads
+        // 0.5, and with one of five coverage bands unobserved as well 0.4; both
+        // must act. A picket seen under low coverage (~0.1) must not.
+        public const float MinIntelConfidenceForAction = 0.35f;
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
         {

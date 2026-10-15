@@ -25770,7 +25770,7 @@ static class Program
     private static void ReinforcementOpportunityIntelConfidenceFloorFallsThrough()
     {
         // Same scenario as attack-window-open but with intel confidence 0.3
-        // (below the 0.5 floor for action) → falls through to NoOpportunity
+        // (below the 0.35 floor for action) → falls through to NoOpportunity
         var ev = MakeForceBalance(15000f, 10000f,
             enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
             aggression: 0.5f, intel: 0.3f);

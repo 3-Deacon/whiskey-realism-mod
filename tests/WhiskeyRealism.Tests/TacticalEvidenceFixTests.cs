@@ -1289,6 +1289,15 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), front,
             6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
         TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase, "the probe commits at half confidence");
+
+        // One of five coverage bands unobserved as well: 0.8 x 0.5 = 0.4 still acts.
+        var oneBandShort = Seen(1f, 2000f, 0f, bands: 4, watchedEntries: 0, totalEntries: 3);
+        TestHarness.AssertTrue(Near(oneBandShort.Confidence(1f), 0.4f), "0.4 confidence");
+        ArmyEvidenceBuilder.ForceBalanceIntel(oneBandShort, 1f, out float enemy4, out float conf4);
+        var ev4 = new TacticalForceBalanceEvidence(6000f, enemy4, Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+            0.5f, 0.5f, conf4, stance: BattleStance.Meeting);
+        TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev4).Reason != "intel-confidence-too-low",
+            "the opportunity doctrine acts at 0.4");
     }
 
     private static void CoverageBandsSpanKnownEnemy()
@@ -1324,8 +1333,11 @@ internal static class TacticalEvidenceFixTests
             BattlePhase.Probe, 60f, 1.9f, 1f, 1.9f, 1f, 1f, 0.4f, 0.35f, 0.5f,
             intelConfidence01: conf);
         TestHarness.AssertEqual(BattlePhase.Probe, TacticalPhaseProgressionDoctrine.Decide(In(0.1f)).NextPhase, "0.1 confidence keeps probing");
+        TestHarness.AssertEqual(0.35f, TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction, "intel gate pinned at 0.35");
         TestHarness.AssertEqual(BattlePhase.MainEffort, TacticalPhaseProgressionDoctrine.Decide(In(0.5f)).NextPhase,
-            "the opportunity doctrine's gate (0.5) is enough to commit");
+            "unwatched entry points with the front observed (0.5) commit");
+        TestHarness.AssertEqual(BattlePhase.MainEffort, TacticalPhaseProgressionDoctrine.Decide(In(0.4f)).NextPhase,
+            "one band of five unobserved as well (0.4) commits");
         TestHarness.AssertEqual(TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction,
             TacticalPhaseProgressionDoctrine.ProbeCommitMinIntelConfidence, "one intel gate for both doctrines");
     }
