@@ -56,6 +56,8 @@ internal static class PlayerOwnershipTests
             ("battle-core dispatch mapper table", DispatchMapperTable),
             ("battle-core dispatch mapper never emits 13 14 15", DispatchMapperNeverEmits13_14_15),
             ("battle-core dispatch dedupe same type within 110m", DispatchDedupeSameTypeWithin110m),
+            ("battle-core dispatch dedupe re-arms when the given order is cleared or differs", DispatchDedupeRearmsWhenGivenOrderClearedOrDiffers),
+            ("battle-core dispatch dedupe never suppresses a type-11 refresh", DispatchDedupeNeverSuppressesReserveRefresh),
         });
     }
 
@@ -416,18 +418,44 @@ internal static class PlayerOwnershipTests
         }
     }
 
+    private static GivenOrderView Given(int type, float x, float z, int session) => new GivenOrderView(true, type, x, z, session);
+
     private static void DispatchDedupeSameTypeWithin110m()
     {
         var state = new PlayerOrderDedupeState();
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, givenOrderSession: 5, meters: 110f), "nothing recorded");
+        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(0, 0f, 0f, 5), meters: 110f), "nothing recorded");
 
         state.RecordDispatch(0, 0f, 0f, givenOrderSession: 5);
-        AssertTrue(state.IsDuplicateDispatch(0, 100f, 0f, 5, 110f), "same type within 110 m");
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 120f, 5, 110f), "same type beyond 110 m");
-        AssertFalse(state.IsDuplicateDispatch(12, 10f, 0f, 5, 110f), "different type");
-        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, 6, 110f), "a newer given order (session moved) re-arms the dispatch");
+        var current = Given(0, 0f, 0f, 5);
+        AssertTrue(state.IsDuplicateDispatch(0, 100f, 0f, current, 110f), "same type within 110 m");
+        AssertFalse(state.IsDuplicateDispatch(0, 0f, 120f, current, 110f), "same type beyond 110 m");
+        AssertFalse(state.IsDuplicateDispatch(12, 10f, 0f, current, 110f), "different type");
+        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, Given(0, 0f, 0f, 6), 110f), "a newer given order (session moved) re-arms the dispatch");
 
         state.ClearForBattleBoundary("next");
-        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, 5, 110f), "battle boundary clears the record");
+        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, current, 110f), "battle boundary clears the record");
+    }
+
+    private static void DispatchDedupeRearmsWhenGivenOrderClearedOrDiffers()
+    {
+        var state = new PlayerOrderDedupeState();
+        state.RecordDispatch(0, 0f, 0f, givenOrderSession: 5);
+
+        // Vanilla nulls givenorder without moving the session: end of day
+        // (CheckClearingBattleOrdersEOD 47989) and zone completion (123533).
+        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, default(GivenOrderView), 110f), "cleared given order re-arms");
+
+        // Our attempt was refused and an older order is still active.
+        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(2, 500f, 500f, 5), 110f), "different active type re-arms");
+        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(0, 400f, 0f, 5), 110f), "active target elsewhere re-arms");
+    }
+
+    private static void DispatchDedupeNeverSuppressesReserveRefresh()
+    {
+        // A type-11 order onto an active type 11 is vanilla's in-place refresh
+        // (flag4, no session bump); vanilla's own 8643 test keeps it from repeating.
+        var state = new PlayerOrderDedupeState();
+        state.RecordDispatch(11, 0f, 0f, givenOrderSession: 5);
+        AssertFalse(state.IsDuplicateDispatch(11, 0f, 0f, Given(11, 0f, 0f, 5), 110f), "type 11 always reaches vanilla");
     }
 }

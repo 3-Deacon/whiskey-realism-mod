@@ -22,8 +22,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //   attack; 15 terminal; 13 sticky); bumps givenorderssession (8651) except for a
     //   type-11 refresh (flag4); shows the panel (8653-8664).
     // Vanilla already dedupes; this emitter's 110 m record skips the call (string
-    // building, terrain sample, debug log) when the same dispatch was attempted and
-    // no given order has been issued since — including attempts vanilla rejected.
+    // building, terrain sample, debug log) only while the player still holds the
+    // order the last dispatch produced (PlayerOrderDedupeState.IsDuplicateDispatch).
     internal static class TacticalPlayerDispatchRuntime
     {
         internal static readonly PlayerOrderDedupeState Dedupe = new PlayerOrderDedupeState();
@@ -50,7 +50,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0) return false;
 
                     int before = DLC_WL.GivenOrders.givenorderssession;
-                    if (Dedupe.IsDuplicateDispatch(vanillaType, x, z, before, DispatchDedupeMeters)) return false;
+                    if (Dedupe.IsDuplicateDispatch(vanillaType, x, z, CurrentGivenOrder(before), DispatchDedupeMeters)) return false;
 
                     AIBattle.CheckCurrentOrderUpdate(
                         ancestorOrPlayerCommand,
@@ -71,6 +71,13 @@ namespace WhiskeyRealism.Tactical.Battle
                     return false;
                 }
             }
+        }
+
+        private static GivenOrderView CurrentGivenOrder(int session)
+        {
+            DLC_WL.GivenOrders order = DLC_WL.givenorder;
+            if (order == null) return new GivenOrderView(false, -1, 0f, 0f, session);
+            return new GivenOrderView(true, order.type, order.position.x, order.position.z, session);
         }
     }
 }
