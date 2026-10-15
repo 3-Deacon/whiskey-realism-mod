@@ -206,6 +206,12 @@ internal static class BattleSnapshotBuilder { // runtime
 - [ ] Scope: `tactical.snapshot.build` (5.0 ms) around `Build`.
 - [ ] **Acceptance:** tests pass; `BattleSnapshotBuilder` is not in the test csproj; the alloc test is green.
 
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the console harness: the pure assembler (parent map, stale-source rule, roster signature, probe converters, strength bucket, front axis) including zero allocation over 300 units after warm-up. Runtime proof of `BattleSnapshotBuilder.Build` is the BC7 in-game smoke, because nothing builds the snapshot before BC4 wires `BattleCoreTick.EnsureSnapshot`; until then `CommandTreeRuntime` / `DirectChildDiscoveryRuntime` read no snapshot and warn once (`battle-core:snapshot-missing`).
+
+**Merge items (BC1):**
+- **At the BC3 merge:** `BattleSnapshotBuilder.OwnershipFlags` sets `PlayerOwned` from `dlcw_isundercommander` even outside W&L (verify finding 5). Replace it with BC3's `PlayerOwnership.Compute`, as the seam comment in `OwnershipFlags` says, and add `ApplyChainFlags` after `AssembleCommandTree`.
+- **At the BC4 merge:** `ArmyPostureInputsRuntime.ExtendedProbes` (`ArmyPostureInputsRuntime.cs:103-111`) caches the probe list against its own roster signature. Before the first snapshot build, `DirectChildDiscovery.BuildExtendedProbesForAlliance` returns an empty list, which would then be cached until the roster changes. BC4 must build the snapshot (`EnsureSnapshot`) before any reader runs, or the cache must not store an empty probe list taken before the first build.
+
 **Known limitations (BC1):**
 - **Stale `allattachedunits` after `MoveUnit` (93091-93150).** `MoveUnit` refreshes the destination (`UpdateAllAttachedUnits`, 93136) and the new parent chain (`UpdateAllParentUnits` 93141 → 90524-90546). On the source side it refreshes only the highest parent up to unittyp 16 (`GetHighestParentUnit(unittomove, 16)`, read before the move at 93103) and, through `includesubordinategroups`, that parent's direct subordinate groups (93137-93140 → 129619-129627). A source group two or more levels below keeps a stale list that still holds the moved unit.
   - Parent choice: handled. Lists of a consistent tree are nested or disjoint, so two non-nested claimants mean one is stale; the claimant that was the unit's previous parent yields (`ResolveStaleSourceClaims`, test `MoveUnitStaleSourceListYieldsToDestination`). With no previous map (first build of the battle) the smallest group stays.
