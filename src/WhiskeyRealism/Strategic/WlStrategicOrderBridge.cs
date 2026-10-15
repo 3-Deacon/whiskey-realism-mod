@@ -248,7 +248,13 @@ namespace WhiskeyRealism.Strategic
         internal static WlStrategicOrderDecision ClassifyOnly(WlStrategicOrderRequest request)
         {
             if (request == null) return InvalidRequest();
-            return Classify(request.Intent, BuildFacts(request));
+            return ClassifyOnly(WlChainContext.Capture(), request.AllianceId, request.Unit, request.Intent);
+        }
+
+        // For loops: the caller captures the context once per pass.
+        internal static WlStrategicOrderDecision ClassifyOnly(in WlChainContext context, int allianceId, Regiment unit, WlStrategicIntent intent)
+        {
+            return Classify(intent, FactsFor(in context, allianceId, unit));
         }
 
         // The unit's chain class for code that changes vanilla state without an
