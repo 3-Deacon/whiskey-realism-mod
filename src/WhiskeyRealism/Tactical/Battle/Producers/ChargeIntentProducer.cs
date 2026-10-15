@@ -21,7 +21,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     check of charge ... a renewed charge order is not given if it was broken up
     //     before due to bad conditions", shipped 0.5 h). Vanilla's own use (4917) is dead
     //     code, and compares lastaichargetime < now + renew, which is always true; the
-    //     doctrine waits max(RearmAfterRefusalBattleSeconds, renew) after a refusal.
+    //     doctrine waits max(RearmAfterRefusalBattleSeconds, renew) after a refusal;
+    //   GamePrefs.nomicroaichargeifunitisoutflanked (54784; battleprefs "No micro ai
+    //     charge if unit is outflanked or receiving flanking fire", shipped true, never
+    //     read by vanilla): honoured, an outflanked regiment is not armed.
     //
     // Registered from the static constructor (BattleCoreTick.RegisterProducer); runs last
     // in the arbiter tick (BattleCoreArbiterPatch, AdjustGroupFormations 5870 Postfix).
@@ -35,6 +38,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static bool _prefsRead;
         private static float _maxChargeRadius;
         private static float _renewHours;
+        private static bool _noChargeIfOutflanked;
 
         static ChargeIntentProducer()
         {
@@ -60,7 +64,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (alliance < 0 || alliance >= _memory.Length || !PluginEnabled()) return;
                 ReadPrefsOnce();
 
-                var settings = new Settings(ConfigOn(), _maxChargeRadius, _renewHours);
+                var settings = new Settings(ConfigOn(), _maxChargeRadius, _renewHours, _noChargeIfOutflanked);
                 int confirmed = Plan(snapshot, settings, _memory[alliance], OrderExecutor.ForAlliance(alliance), sink);
                 if (confirmed > 0)
                     OnceLog.Info("tactical-battle-core:charge-first-fire",
@@ -76,12 +80,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 _maxChargeRadius = GamePrefs.maxchargeradius;
                 _renewHours = GamePrefs.timetorenewaichargecheck;
+                _noChargeIfOutflanked = GamePrefs.nomicroaichargeifunitisoutflanked;
             }
             catch (Exception ex)
             {
                 // Radius 0 never charges (strict <); the 120 s floor still holds.
                 _maxChargeRadius = 0f;
                 _renewHours = 0f;
+                _noChargeIfOutflanked = true;
                 OnceLog.Warning("tactical-battle-core:charge-prefs",
                     "[ChargeDoctrine] GamePrefs charge constants unreadable; the doctrine arms nothing: " + ex.GetType().Name + " " + ex.Message);
             }
@@ -108,8 +114,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 return Plugin.EnableInfantryChargeDoctrine != null && Plugin.EnableInfantryChargeDoctrine.Value;
             }
-            catch
+            catch (Exception ex)
             {
+                OnceLog.Warning("tactical-battle-core:charge-config",
+                    "[ChargeDoctrine] config read failed; treated as off: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
         }

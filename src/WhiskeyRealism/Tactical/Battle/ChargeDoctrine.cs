@@ -72,9 +72,12 @@ namespace WhiskeyRealism.Tactical.Battle
         // RefusalBackoffSeconds(GamePrefs.timetorenewaichargecheck); below the floor (0 when
         // unset) RearmAfterRefusalBattleSeconds applies.
         public double RefusalBackoffSeconds;
-        // permanentlydetached, isrouted or markedforrout: MicroAICheckForCharges' own unit
-        // filter (4917, 4922) bars arming and the stance-drop cancel.
+        // permanentlydetached, isrouted, markedforrout or a feuding group: MicroAICheckForCharges'
+        // own unit filter (4917, 4922) bars arming and the stance-drop cancel.
         public bool ExcludedByVanillaFilter;
+        // GamePrefs.nomicroaichargeifunitisoutflanked (54784) is set and the regiment's own
+        // outflanked is non-zero: no new charge.
+        public bool OutflankedBarsCharge;
     }
 
     public enum ChargeAction
@@ -157,7 +160,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     ? input.RefusalBackoffSeconds
                     : RearmAfterRefusalBattleSeconds;
                 bool backoffElapsed = input.SecondsSinceLastAiChargeRefusal >= backoff;
-                return atGate && backoffElapsed && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
+                return atGate && backoffElapsed && !input.OutflankedBarsCharge && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
                     ? ChargeAction.Charge
                     : ChargeAction.None;
             }

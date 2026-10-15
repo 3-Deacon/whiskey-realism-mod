@@ -59,6 +59,9 @@ internal static class ChargeDoctrineTests
             ("charge producer measures from the parent group, strictly inside the radius", ProducerDistanceFromParentGroupStrict),
             ("charge producer group stance is 4 only while ordered and current are 4", ProducerGroupStanceNeedsOrderedAndCurrent),
             ("charge producer lane is blocked only by a friendly between regiment and target", ProducerLaneBlockedOnlyBetween),
+            ("charge producer lane ignores routed and inactive friendlies", ProducerLaneIgnoresRoutedAndInactive),
+            ("charge producer applies vanilla's unit filter (detached, routed, marked for rout, feud)", ProducerVanillaUnitFilter),
+            ("charge producer honours vanilla's no-charge-if-outflanked pref", ProducerHonoursNoChargeIfOutflanked),
             ("charge producer reads target state only from a visible target's record", ProducerTargetStateFromVisibleRecord),
             ("charge producer never touches player-owned regiments", ProducerNeverTouchesPlayerOwned),
             ("charge producer disarms after a denied assault once vanilla returns to mode 3", ProducerDeferredDisarmAfterAssault),
@@ -835,7 +838,17 @@ internal static class ChargeDoctrineTests
         other.Executor.RecordIssued(new BattleOrderIntent { GroupId = RegB, Channel = OrderChannel.CombatBehavior, Value = 1, Source = IntentSource.FireControl },
             1.0, null, 0, null, 0, 0, 0);
         other.Plan(s, On());
+        AssertEqual(0, other.Confirmed, "another source's Issued confirms nothing");
         AssertFalse(other.Sink.TryFind(RegB, out _), "fire control's write is not the doctrine's arming");
+
+        // A stale doctrine outcome (a Revert issued before this Charge was submitted) is no
+        // confirmation either.
+        var stale = new Harness();
+        stale.Executor.RecordIssued(ChargeIntentProducer.Intent(RegB, ChargeAction.Revert), 0.9, null, 0, null, 0, 0, 0);
+        stale.Plan(Line(1.0), On());
+        stale.Plan(s, On());
+        AssertEqual(0, stale.Confirmed, "outcome older than the submission");
+        AssertFalse(stale.Sink.TryFind(RegB, out _), "the refused charge is not armed");
     }
 
     private static void ProducerFreshStampIsNotARefusal()
@@ -945,6 +958,62 @@ internal static class ChargeDoctrineTests
         h = new Harness();
         h.Plan(beyond, On());
         AssertTrue(h.Sink.TryFind(RegB, out _), "friendly beyond the target is not in the lane");
+    }
+
+    private static void ProducerLaneIgnoresRoutedAndInactive()
+    {
+        foreach (UnitFlags drop in new[] { UnitFlags.Active, UnitFlags.Alive })
+        {
+            BattleSnapshot s = LineWith(RegD, 500f, -550f);
+            Own(s, RegD).Flags &= ~drop;
+            var h = new Harness();
+            h.Plan(s, On());
+            AssertTrue(h.Sink.TryFind(RegB, out _), "friendly without " + drop + " does not block");
+        }
+        BattleSnapshot routed = LineWith(RegD, 500f, -550f);
+        Own(routed, RegD).Flags |= UnitFlags.Routed;
+        var r = new Harness();
+        r.Plan(routed, On());
+        AssertTrue(r.Sink.TryFind(RegB, out _), "routed friendly does not block");
+    }
+
+    // MicroAICheckForCharges' unit filter (4917 arm, 4922 cancel): not permanentlydetached,
+    // not routed, not markedforrout, group not feuding.
+    private static void ProducerVanillaUnitFilter()
+    {
+        foreach (UnitFlags flag in new[] { UnitFlags.PermanentlyDetached, UnitFlags.Routed, UnitFlags.MarkedForRout, UnitFlags.Feud })
+        {
+            BattleSnapshot s = Line(1.0);
+            Own(s, RegB).Flags |= flag;
+            var h = new Harness();
+            h.Plan(s, On());
+            AssertFalse(h.Sink.TryFind(RegB, out _), flag + ": never armed");
+
+            BattleSnapshot cancel = Line(1.0);
+            Own(cancel, BrigadeId).AiStanceOrdered = 2;
+            Own(cancel, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+            Own(cancel, RegB).CombatBehaviorOrdered = 0;
+            Own(cancel, RegB).Flags |= flag;
+            h = new Harness();
+            h.Plan(cancel, On());
+            AssertFalse(h.Sink.TryFind(RegB, out _), flag + ": no stance-drop cancel");
+        }
+    }
+
+    // battleprefs "No micro ai charge if unit is outflanked or receiving flanking fire"
+    // (GamePrefs.nomicroaichargeifunitisoutflanked, 54784; shipped true, never read by vanilla).
+    private static void ProducerHonoursNoChargeIfOutflanked()
+    {
+        BattleSnapshot s = Line(1.0);
+        Own(s, RegB).Outflanked = 2;
+        var h = new Harness();
+        h.Plan(s, new ChargeIntentProducer.Settings(true, Radius, 0f, noChargeIfOutflanked: true));
+        AssertFalse(h.Sink.TryFind(RegB, out _), "pref set: an outflanked regiment does not charge");
+        AssertTrue(h.Sink.TryFind(RegA, out _), "a regiment not outflanked still charges");
+
+        h = new Harness();
+        h.Plan(s, new ChargeIntentProducer.Settings(true, Radius, 0f, noChargeIfOutflanked: false));
+        AssertTrue(h.Sink.TryFind(RegB, out _), "pref clear: outflanked does not matter");
     }
 
     private static BattleSnapshot LineWith(int id, float x, float z)
@@ -1065,7 +1134,7 @@ internal static class ChargeDoctrineTests
         Own(s, BrigadeId).AiStanceOrdered = 2; // conditions fail: Revert would write 2 again
         h.Plan(s, On());
         AssertFalse(h.Sink.TryFind(RegB, out _), "behavior 2 already ordered: no write");
-        AssertTrue(h.Memory.TryGet(RegB, out ChargeIntentProducer.RegimentMemory m) && !m.Armed, "released");
+        AssertTrue(h.Memory.ById.TryGetValue(RegB, out ChargeIntentProducer.RegimentMemory m) && !m.Armed, "released");
 
         // Cascade while every condition still holds: released, then armed afresh.
         Harness again = Armed();

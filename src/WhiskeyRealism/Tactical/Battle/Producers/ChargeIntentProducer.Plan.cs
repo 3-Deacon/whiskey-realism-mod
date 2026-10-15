@@ -32,8 +32,17 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //   state      only for a visible target (BC5a TargetGarrisoned / EnemyAdvancing
     //              precedent). outflanked (UpdateFlanking 122959-123175) is computed from
     //              the target's facing and this side's own units in its flank sectors,
-    //              both of which this side sees. Disordered = routing (markedforrout),
-    //              on retreat, or in a fallback/retreat movement mode (2/4).
+    //              both of which this side sees; caveat: a sector is cleared when one of
+    //              the target's own friendlies stands closer in it (123077-123110), and
+    //              those friendlies may be hidden from this side. Disordered = routing
+    //              (markedforrout), on retreat, or in a fallback/retreat movement mode (2/4).
+    //   own flank  battleprefs "No micro ai charge if unit is outflanked or receiving
+    //              flanking fire" (GamePrefs.nomicroaichargeifunitisoutflanked, 54784;
+    //              shipped true, never read by vanilla): when set, a regiment whose own
+    //              outflanked is non-zero is not armed.
+    //   filter     MicroAICheckForCharges' unit filter (4917 arm, 4922 cancel):
+    //              permanentlydetached, routed, markedforrout, or a feuding group (the W&L
+    //              feud instance owns those, and the write guard refuses them).
     //   lane       an own standing regiment (not a group, not this one) whose projection
     //              falls strictly between the regiment and the target and lies within
     //              WaypointValidator.FriendlyFireClearanceMeters (40 m) of that segment.
@@ -67,16 +76,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         internal readonly struct Settings
         {
-            public Settings(bool configOn, float maxChargeRadius, float vanillaRenewHours)
+            public Settings(bool configOn, float maxChargeRadius, float vanillaRenewHours, bool noChargeIfOutflanked = false)
             {
                 ConfigOn = configOn;
                 MaxChargeRadius = maxChargeRadius;
                 VanillaRenewHours = vanillaRenewHours;
+                NoChargeIfOutflanked = noChargeIfOutflanked;
             }
 
             public bool ConfigOn { get; }
             public float MaxChargeRadius { get; }          // GamePrefs.maxchargeradius (53232)
             public float VanillaRenewHours { get; }        // GamePrefs.timetorenewaichargecheck (54820)
+            public bool NoChargeIfOutflanked { get; }       // GamePrefs.nomicroaichargeifunitisoutflanked (54784)
         }
 
         // What the producer remembers about one regiment between ticks.
@@ -110,11 +121,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ById.Clear();
                 VisibleObservation.Clear();
                 EnemyRecord.Clear();
-            }
-
-            internal bool TryGet(int instanceId, out RegimentMemory memory)
-            {
-                return ById.TryGetValue(instanceId, out memory);
             }
         }
 
@@ -251,7 +257,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 WhiskeyArmed = m.Armed,
                 WhiskeyArmedPendingDisarm = m.PendingDisarm,
                 RefusalBackoffSeconds = ChargeDoctrine.RefusalBackoffSeconds(settings.VanillaRenewHours),
-                ExcludedByVanillaFilter = (r.Flags & (UnitFlags.PermanentlyDetached | UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0,
+                ExcludedByVanillaFilter = (r.Flags & (UnitFlags.PermanentlyDetached | UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.Feud)) != 0,
+                OutflankedBarsCharge = settings.NoChargeIfOutflanked && r.Outflanked != 0,
                 SecondsSinceLastAiChargeRefusal = m.HasRefusal
                     ? (now - m.RefusalAtHours) * TacticalBattleClock.BattleSecondsPerHour
                     : double.PositiveInfinity,
