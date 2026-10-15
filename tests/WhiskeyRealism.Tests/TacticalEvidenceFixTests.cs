@@ -83,6 +83,7 @@ internal static class TacticalEvidenceFixTests
         Run("flank threat is the mean outflanked weight of a group's regiments", FlankThreatIsMeanOverSubordinates);
         Run("an externally recorded replan counts against the replan cooldown", RecordedReplanRateLimits);
         Run("a backward doctrine clock does not lock out replans", BackwardClockDoesNotLockReplan);
+        Run("recorded replans and summed-delta ticks share one cooldown clock", RecordReplanWithSummedDeltas);
     }
 
     private static void Run(string name, Action test)
@@ -1217,5 +1218,29 @@ internal static class TacticalEvidenceFixTests
         var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
             doctrineNowSeconds: 29 * 3600.0);
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, trigger, "a stamp in the future is treated as long ago");
+    }
+
+    private static ReplanTrigger CasualtyTick(ArmyOrchestrator orch, float battleDelta)
+        => ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
+            6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: battleDelta);
+
+    private static void RecordReplanWithSummedDeltas()
+    {
+        // Absolute stamp first, then summed-delta ticks.
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        ArmyTickCycle.RecordReplan(orch.AllianceId, 108000.0);
+        TestHarness.AssertEqual(ReplanTrigger.None, CasualtyTick(orch, 30f), "30 s after the recorded replan: rate-limited");
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, CasualtyTick(orch, 40f), "70 s after: replans");
+
+        // Summed deltas first, then a recorded replan, then a delta.
+        ArmyTickCycle.ResetForTest();
+        var orch2 = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        var quiet = ArmyTickCycle.MaybeReplan(orch2, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
+            6000f, 1f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 500f);
+        TestHarness.AssertEqual(ReplanTrigger.None, quiet, "summed-delta tick, nothing to replan on");
+        ArmyTickCycle.RecordReplan(orch2.AllianceId, 108000.0);
+        TestHarness.AssertEqual(ReplanTrigger.None, CasualtyTick(orch2, 20f), "live trigger 20 s after the recorded replan: rate-limited");
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, CasualtyTick(orch2, 50f), "70 s after: the same trigger replans");
     }
 }

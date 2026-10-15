@@ -88,12 +88,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // all run on BATTLE time when the caller supplies it. Wall-clock
             // deltas drove the 180 s plan deadline before, so at 20x
             // compression a plan "expired" after ~10 battle-minutes and at 1x
-            // every 3 wall-clock minutes. The runtime passes
-            // TacticalDoctrineTime.NowBattleSeconds; while the coordinator
-            // holds that clock through the night cycle, a frozen value yields
-            // a zero delta, so the night does not burn phase budgets or the
-            // plan deadline. Legacy callers without
-            // a battle clock keep the single-clock behaviour.
+            // every 3 wall-clock minutes. Callers pass
+            // TacticalDoctrineTime.NowBattleSeconds. A frozen value yields a
+            // zero delta; the night freeze itself comes from the
+            // coordinator's doctrine clock once NowBattleSeconds is pointed
+            // at it (integration). On this branch the seam reads the raw
+            // clock, which does not freeze. Legacy callers without a battle
+            // clock keep the single-clock behaviour.
             bool doctrineClock = !double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds);
             if (doctrineClock)
             {
