@@ -37,7 +37,7 @@
 | D3 | Arbiter tick vs vanilla `UpdateAITasks` (5857-5872) | One Postfix on `AIBattle.AdjustGroupFormations` (5870) at `Priority.Last`. This is the hook #61 uses today, and #61's Postfix is deleted. It runs after vanilla's own movers in the same call: `UpdateMovingTargets` 5862, `CheckFlankMoves` 5867, `AdjustGroupAIStance` 5869, `AdjustGroupFormations` 5870. Whiskey's winning orders are therefore the last macro-cycle write, using a snapshot built at 5866 in the same frame. It is gated by `PostureExecutorBattleGate.Allows` (state ≥ 5, macroai ≠ 3 → `ReleaseForRetreat`, eod, feud instance, player instance unless `ai_vs_ai`) and by `TacticalBattleCoordinator.DrivesOrchestrator`. `CheckForFeudGroupActions` (5871) runs after it and is the feud instance only. |
 | D4 | Collecting intents without patches writing mod state | (a) **Producers:** every Whiskey-originated order comes from an `IBattleIntentProducer` run inside the arbiter tick over the snapshot. (b) **Inline steering:** patches that must act inside a vanilla micro call (#56 courier parity, #42 feud replay) build a `BattleOrderIntent` and call `OrderExecutor.ExecuteInline(...)`. That call runs the same guard → chain → validation → pre-check → dedupe → call pipeline. It is refused when a higher-priority claim exists for that group and channel in the arbiter's published claim table, which is read-only to patches. Executor bookkeeping (claims, outcomes, cooldown stamps) is write-path state owned by the executor. It is not doctrine/orchestrator state, so the AGENTS.md "patches READ" rule holds. |
 | D5 | Command tree source | Each group's `allattachedunits` (all descendants, 119840+) is scanned once per roster change. A child's direct parent is the containing group with the smallest `allattachedunits.Length`. This needs no `transform.parent` (AGENTS.md rule) and no `GetAttachedUnitsReg` allocation (it uses `Array.Resize` per element). It reproduces vanilla's own direct relation, because `GetAttachedUnitsReg(directonly)` tests `transform.parent == this`. Disagreements with vanilla's `Transform.IsChildOf` ancestry (used by `CheckCurrentOrderUpdate` 8272 and `IsUnitUnderCommander` 91203) are counted and logged once per battle as telemetry. |
-| D6 | Queued orders vs the spec's "outcome next tick" | Under `useorderdelay`, `SetWaypoint` queues through `AddToOrderQueue` (91483-91510), so `regimentpaths` stays 0 until the courier arrives. Outcomes are therefore `Pending` (queue count rose, measured by the existing `CommandWaypointWritePolicy.MovementIssued`) → `Moved` (`regimentpaths > 0` on the group or any child) → `Failed` after `PendingCourierTimeoutHours`, or immediately when neither rose. |
+| D6 | Queued orders vs the spec's "outcome next tick" | Under `useorderdelay`, `SetWaypoint` queues through `AddToOrderQueue` (91483-91510) but still reaches `SetGroupFormation`/`RegimentSetPath` in the same call (91540/91559, `newpath:false`), and `AddPath` adds the path at once (`regimentpaths++` 130519) with `pathstatus` 0 until the courier arrives (131243-131246). So there is no courier wait to observe and no `Pending` outcome: a move is `Moved` when its targets' moving-unit count rose (at the call or by the next tick) or vanilla took the target (waypoint stamp, step 8), else `Failed` at the next tick (a silent exit; the pre-checked ones never reach the call). (Revised in the BC4 review: the first draft assumed `regimentpaths` stayed 0 until delivery.) |
 | D7 | Map bounds clamp (spec says `[1, size−2]`) | Vanilla 131057-131068 clamps **x to [1, sizeX−2] and z to [−sizeZ+2, −1]**, because the battle z axis is negative. `WaypointValidator` uses that rule. It reuses `VanillaMapBounds.ClampXZ` (moved from `CommandPostureExecutor.cs:381`) with a parity test against the vanilla lines. |
 | D8 | Ladder vs today's division-play override | The spec ladder is binding: Executor (#61) beats Play. Today the division play overrides the ledger task inside #61 (patch L156-172). After the migration, a division-play order only wins for a child where the posture producer submits no intent on that channel. This behavior change is recorded in the BC5a commit and in `docs/tactical-operations-ledger.md`. |
 | D9 | §C dispatch vs existing #62 | `PlayerSubordinateOrderPatch` (#62) already issues the player's own order through `CheckCurrentOrderUpdate`. Both #62 and the executor's §C ancestor dispatch call the one emitter, `TacticalPlayerDispatchRuntime.Emit`. It owns the single `PlayerOrderDedupeState`, moved out of #62. That gives one dedupe for (type, target within 110 m) and no double pop-up. |
@@ -423,7 +423,7 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
 **Interfaces — Produces:**
 ```csharp
 public sealed class OrderArbiter : IIntentSink {
-  public const float DedupeMeters = 15f;
+  public const float DedupeMeters = 60f;   // = #61 MinWaypointDistance (2026-05-21 microshift fix, patch :36-43)
   public void BeginTick(BattleSnapshot s);
   public void Submit(in BattleOrderIntent intent);
   public int Resolve(BattleOrderIntent[] winners);                 // one per (group, channel); ties keep the previous tick's source (hysteresis)
@@ -431,15 +431,15 @@ public sealed class OrderArbiter : IIntentSink {
   public static OrderArbiter ForAlliance(int alliance);            // 0/1 bound-checked; Europe (2) → null
 }
 public sealed class OrderExecutor {
-  public const float RecentOrderBattleSeconds = 30f;                   // was #61 RecentOrderHours
+  public const float RecentOrderBattleSeconds = 180f;                  // = #61 RecentOrderHours 0.05 h (patch :30); 30 s expired inside one 0.015 h macro cycle
   public const float CourierIntervalBattleHours = 0.25f;               // was #61 OutboundCourierIntervalSeconds 900
   public const float FailedWriteBackoffHours = 0.05f;
-  public const float PendingCourierTimeoutHours = 0.25f;
   public const float RetryBearingDegrees = 30f; public const int MaxRetries = 1;
   // task hold reads Plugin.BrigadeTaskHoldSeconds (existing, default 12) via TacticalBattleClock.RealSecondsAtOneXToHours
   public ExecutionPlan Plan(BattleSnapshot s, in BattleOrderIntent winner, double nowHours);   // pure: guard→chain→validate→precheck→dedupe→cooldown
-  public void RecordIssued(in BattleOrderIntent i, double nowHours, int queuedBefore, int pathsBefore);
-  public void ObserveOutcomes(BattleSnapshot s, double nowHours, OrderOutcome[] outcomes, out int count); // Pending/Moved/Failed/Retry/GaveUp
+  public void RecordIssued(in BattleOrderIntent i, double nowHours, IssuedTarget[] targets, int targetCount,
+      UnitWaypoint[] waypointsBefore, int waypointCount, int pathsBefore, int pathsAfter); // targets: unit id + its target; waypointsBefore: every target's and descendant's pre-call waypoint
+  public void ObserveOutcomes(BattleSnapshot s, double nowHours, OrderOutcome[] outcomes, out int count); // Moved/Failed/Retry/GaveUp
   public static OrderExecutor ForAlliance(int alliance);
 }
 public struct ExecutionPlan { public bool Execute; public SkipReason Skip; public ChainResolution Targets; public float X, Z; public bool UseOrderDelay; public int DispatchType; }
@@ -467,17 +467,18 @@ internal static class OrderExecutorRuntime {
 2. Chain: `TacticalChainOrderPlanner.ResolveTargets`.
 3. Waypoint validation (Move and Facing):
    - Clamp to x ∈ [1, sizeX−2], z ∈ [−sizeZ+2, −1].
-   - Run `BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, target, 4)` with `CheckTerrainLine(start, target, {4, 8}, 2f)`. On water or fence, step back toward the start in 25 m steps up to 4 times, else skip `Water`.
+   - Run `BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, target, 4)`; on a water or fence target, step back toward the start in 25 m steps up to 4 times, else skip `Water`.
+   - `CheckTerrainLine(start, target, {4, 8}, 2f)` applies only to `InContactWithdrawal` moves (immediate, under fire). Planned moves are not line-checked, because `AddPath` routes them over fords and bridges (130364-130394). The line starts one 2 m step out, because `CheckTerrainLine` tests its start position first (27659-27686) and would otherwise reject every withdrawal of a group standing at a fence or wall. Battle terrain ids come from the battleprefs.txt table (`GamePrefs.loadcontrols` 54325-54330; NavMesh area indices, bake 26596-26623): 4 river, 5 river crossing (ford), 6 bridge, 8 fences/walls. 8 is sea only in the campaign table (campaignprefs.txt; `GrabFleet` 12224, `SetRetreatToDepot` 116051). A ford cell carries 5, not 4 (the bake keeps the crossing area over the river, 26601-26618; 5/6 are the crossing positions, 26628), so a group on a ford never trips `{4, 8}` at its start cell — for fords the start-cell skip is moot; it matters for a group at a fence or wall.
    - Reject a target inside a friendly group's footprint unless `ReliefOrSupport`.
    - For `ArtilleryFirePosition`, reject when the segment from the target to `FireTargetId` passes within 40 m of a friendly group, and reject when a visible enemy is within 60 m.
 4. Silent-exit pre-check.
-5. Dedupe: same target within 15 m while the group's last waypoint matches, or there is an active or pending move; or the same stance, formation or behavior already ordered.
-6. Cooldown: recent-order 30 s, task hold, courier 0.25 h, failed backoff. `Safety` bypasses recent-order and task-hold only.
+5. Dedupe: same target within 60 m (#61's `CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint` at `MinWaypointDistance`) while the group's last waypoint matches and it is moving or already standing there, or a pending move has that target; or the same stance, formation or behavior already ordered. #61's interrupted-path radius (`InterruptedReissueDistance` 60 m) equals the base radius, and the snapshot carries no `pathinterrupted`, so it adds nothing.
+6. Cooldown: recent-order 180 battle-s (#61's 0.05 h), task hold, courier 0.25 h, failed backoff. `Safety` bypasses recent-order and task-hold only.
 7. Vanilla call:
    - Stance runs before Move, and Move before Formation (#61 L768-774, L976-988).
    - Group `SetWaypoint(showmovementoptions:false, useorderdelay:intent has UseOrderDelay && !InContactWithdrawal)`.
    - `PerRegiment` combat behavior goes through `TacticalCombatBehaviorWriter.EnsureBehavior` per regiment.
-8. Outcome next tick (D6): `Failed` → one retry at ±30° (first +30°, then −30° if the +30° target fails validation) → `GaveUp`, reported to the source through `OrderExecutor.LastOutcome(groupId, channel)`.
+8. Outcome next tick (D6): `Moved` also when vanilla took the target — a target unit's or a descendant's last waypoint moved onto it within `DedupeMeters` (SetGroupFormation stamps it, 92067; RegimentSetPath 131254/131258) — because a redirected moving group keeps its moving-unit count and `AddToOrderQueue` skips a same-type in-flight order (91490/91502). A unit (target or descendant) whose waypoint was already on the target before the call is ignored; every inspected unit's pre-call waypoint is recorded. `Failed` → one retry at ±30° (first +30°, then −30° if the +30° target fails validation) → `GaveUp`, reported to the source through `OrderExecutor.LastOutcome(groupId, channel)`.
 9. W&L dispatch: when `PlayerShareNeedsDispatch`, and the plan executed for an ancestor, and `TacticalDispatchTypeMapper.Map(...) != None`, call `TacticalPlayerDispatchRuntime.Emit(ancestor, type, x, z, heading, name)`.
 
 **Steps:**
@@ -485,18 +486,19 @@ internal static class OrderExecutorRuntime {
   - `HigherPriorityWinsPerChannel`
   - `ChannelsResolveIndependently`
   - `TieKeepsPreviousWinner`
-  - `DedupeWithin15m`
+  - `DedupeWithin60m`
   - `SafetyBypassesRecentOrderButNotDedupe`
   - `TaskHoldBlocksSameTaskOnly`
   - `ClampMatchesVanillaBoundsNegativeZ`
   - `WaterTargetStepsBack`
   - `WaterTargetRejectedAfterFourSteps`
+  - `WithdrawalFromFenceCellSkipsStartCell`
   - `FriendlyFootprintRejectedUnlessRelief`
   - `FriendlyFireLineRejectsArtilleryPosition`
   - `PointBlankRejectsArtilleryTarget`
   - `PrecheckSkipsRoutedOnRetreatGarrison`
-  - `QueuedOrderIsPendingNotFailed`
-  - `PendingTimesOutToFailed`
+  - `CourierMoveCountsAtTheCall`
+  - `SilentExitFailsAtNextObservation`
   - `FailedRetriesOnceRotatedThenGivesUp`
   - `StanceBeforeMoveBeforeFormationOrder`
   - `PlayerOwnedNeverExecuted`
@@ -505,6 +507,9 @@ internal static class OrderExecutorRuntime {
   - `InlineIntentRefusedUnderHigherClaim`
   - `ArbiterResolveAllocatesNothingAfterWarmup`
   - `StanceRecordUsesDoctrineClock`, a night-jump fixture
+  - `StanceCheapPathNeedsLiveVanillaStamp` (the writer's short-circuit also needs vanilla's raw 4264 stamp live)
+  - `RedirectOfMovingGroupIsMoved`, `StaleWaypointNearTargetIsNotATake`, `DescendantAlreadyOnTargetIsNotATake`, `FanOutOutcomeCountsTheOrderedSet`
+  - `GatedOffArbiterPublishesNoClaims`
 - [ ] Implement `BattleCoreArbiterPatch`:
   - `[HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")] [HarmonyPostfix][HarmonyPriority(Priority.Last)]`.
   - Scope `tactical.patch.battle-core-arbiter` (5.0).
@@ -512,6 +517,13 @@ internal static class OrderExecutorRuntime {
   - Inner scopes `tactical.arbiter.resolve` (0.5) and `tactical.arbiter.execute` (2.0).
 - [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> pending=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> topSkip=<reason>`. Use OnceLog `tactical-battle-core:arbiter-first-fire` for the first execution.
 - [ ] **Acceptance:** tests pass; the alloc test is green; the arbiter patch compiles with zero producers registered (an empty run is a no-op).
+
+PROVE-MODE: harness. Per-slice proof is `OrderArbiterTests` — arbiter resolve (priority, channels, tie hysteresis, execution order, zero allocation after warm-up), executor outcomes (Moved/Failed/Retried/GaveUp, redirect of a moving group, fan-out set), dedupe and cooldowns, ownership skips, and the waypoint validator. Runtime proof is the BC7 in-game smoke: until BC1 merges `BuildSnapshot` returns null and `ViewOf` has no view, and no producer registers before BC5, so the arbiter path cannot run in the game from this slice.
+
+**BC4 merge items:**
+- BC1 merge: `BattleSnapshot : IBattleUnitView` (identity `ViewOf`), `BuildSnapshot` calls `BattleSnapshotBuilder.Build`.
+- `ArmyPostureInputsRuntime.cs:103-111` (`ExtendedProbes`) must not cache an empty probe list before the first snapshot build: an empty result cached under an unchanged roster signature stays for the battle (from the BC1 verify).
+- BC3 merge: replace `ModeOrderGuard`, `SelfOnlyChainResolver`, the local `ChainResolution` copy and the null dispatch mapper/emitter with BC3's guard, chain planner, mapper and `TacticalPlayerDispatchRuntime.Emit`.
 
 ---
 
@@ -564,7 +576,7 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
   - Facing pulse → `Facing` intents.
 - [ ] Delete from #61 without porting:
   - `_lastExecutorOrderAt`, `_writeBackoffUntil`, `_brigadeTaskHoldState`, `_lastCourierAt`, `_lastOutboundOrderSignatureByGroup`, `ShouldSkipDuplicateWaypoint`, `IsSafeWaypoint`, `CanWrite`, `HasRecentExecutorOrder`, `AllowsOutboundCourier` and `AllowsOutboundOrderLedger` (the executor owns these now).
-  - The `groupsubordinatesmoving` stamp (L1118). The executor's Pending state replaces it; vanilla recomputes the field itself.
+  - The `groupsubordinatesmoving` stamp (L1118). The executor's outcome tracking (D6) replaces it; vanilla recomputes the field itself.
   - The `BlockedMovingOrder` path (L1038). Keep it as executor option `IntentFlags`? **No.** Delete it, because vanilla's `UpdateBlockedCrossings` (7917) handles crossings. This is recorded in the commit.
 - [ ] Scopes `tactical.producer.posture` and `tactical.producer.play` (2.0).
 - Scope note (BC3 verify r3): #61 `RotateRegimentsInPlace` rotates AI regiments inside detached AI sub-groups; when migrated to the arbiter it must follow vanilla's group-order exclusion of detached sub-groups (`GetAttachedUnitsReg(excludedechainedunits)` 119865).

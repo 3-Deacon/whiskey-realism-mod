@@ -371,6 +371,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     unchecked { _tickSerial++; }
                     bool aiVsAi = SafeAiVsAi();
 
+                    // Battle core (D1): one pooled BattleSnapshot per side per frame,
+                    // built before any evidence read; the arbiter patch at 5870 reuses
+                    // it in this UpdateAITasks call. BC2b passes it into the heavy path
+                    // (EnsureSideSnapshot / ArmyEvidenceBuilder.Build).
+                    EnsureBattleCoreSnapshot(side0, battle, aiVsAi);
+                    EnsureBattleCoreSnapshot(side1, battle, aiVsAi);
+
                     // Drive each side; the heavy-gate publishes into
                     // _lastPublishedSnapshots[s] when it fires.
                     DriveTacticalCommanderSide(side0, battle, aiVsAi);
@@ -404,6 +411,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // ---- Private runtime helpers ----
+
+        private static void EnsureBattleCoreSnapshot(TacticalBattleOrchestrator side, AIBattle battle, bool aiVsAi)
+        {
+            if (side == null || !ShouldRunTacticalCommanderForSide(side.AllianceId, _playerAllianceId, aiVsAi)) return;
+            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
+            Battle.BattleCoreTick.EnsureSnapshot(sideBattle, side.AllianceId);
+        }
 
         // Mark as processed for this vanilla side-stat cycle (the lastsidestatupdate value
         // vanilla set before calling CheckGlobalAIStrategy, 84572-84574).

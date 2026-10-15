@@ -25,6 +25,14 @@ namespace WhiskeyRealism.Tactical
     //     writes neither.
     //   macroai == 3 (army retreat): vanilla forces every group to screen (4258).
     //
+    // Two clocks (BC4): hold records (StanceHoldRecord.WrittenAtHours, HoldHours,
+    // MinSelfChangeHours) run on the doctrine clock (TacticalDoctrineTime), which
+    // is frozen while vanilla's night end-of-day cycle jumps the raw clock ~9 h
+    // (CheckTimeIssues 86368-86490); a raw-clock record expired every hold
+    // overnight. lastaistancechangetime stays on GameVars.currenttimefromstart
+    // because vanilla compares it with that clock (4264): VanillaHoldStamp and
+    // ReleaseStamp take the raw clock (StanceWriteInput.VanillaNowHours).
+    //
     // Ownership: a Whiskey write AND a Whiskey claim (agreement) stamp the
     // vanilla hold, so AdjustGroupAIStance leaves the group alone for
     // HoldHours after Whiskey last held an opinion. Stamping only on writes
@@ -128,7 +136,8 @@ namespace WhiskeyRealism.Tactical
             float nowHours,
             StanceHoldRecord record,
             StanceWriteSource source,
-            int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown)
+            int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown,
+            float vanillaNowHours = float.NaN)
         {
             IsAiGroup = isAiGroup;
             TargetStance = targetStance;
@@ -138,13 +147,19 @@ namespace WhiskeyRealism.Tactical
             Record = record;
             Source = source == StanceWriteSource.None ? StanceWriteSource.Scorer : source;
             VanillaGroupStance = vanillaGroupStance;
+            VanillaNowHours = float.IsNaN(vanillaNowHours) ? nowHours : vanillaNowHours;
         }
 
         public bool IsAiGroup { get; }
         public int TargetStance { get; }
         public int CurrentOrderedStance { get; }
         public int MacroAi { get; }
+        // Doctrine hours (TacticalDoctrineTime, frozen across vanilla's night
+        // end-of-day cycle): every hold record and dwell is on this clock.
         public float NowHours { get; }
+        // GameVars.currenttimefromstart: the clock vanilla compares
+        // lastaistancechangetime with (4264). Only stamps use it.
+        public float VanillaNowHours { get; }
         public StanceHoldRecord Record { get; }
         public StanceWriteSource Source { get; }
         // Vanilla's per-group stance for this group right now
@@ -209,6 +224,22 @@ namespace WhiskeyRealism.Tactical
         public const float MinSelfChangeHours = 0.05f;
 
         public const int VanillaStanceUnknown = -1;
+
+        // Battle-core intent sources on the ownership ladder: the explicit charge
+        // denial outranks everything, the #45 scorer is the lowest rung, every
+        // other battle-core source holds a stance like the executor (#61).
+        public static StanceWriteSource SourceFor(Battle.IntentSource source)
+        {
+            switch (source)
+            {
+                case Battle.IntentSource.ChargeDemotion:
+                    return StanceWriteSource.ChargeDemotion;
+                case Battle.IntentSource.GroupStanceScorer:
+                    return StanceWriteSource.Scorer;
+                default:
+                    return StanceWriteSource.Executor;
+            }
+        }
 
         // Port of the per-group lines of AdjustGroupAIStance (4239-4252); the
         // side-level lines 4248 and 4256 and the retreat line 4258 are left out
@@ -322,6 +353,39 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        // The writer's steady-state short-circuit: Whiskey's fresh record agrees,
+        // vanilla still has the stance ordered, and vanilla's own hold stamp is
+        // still live on the raw clock. Skips the per-group check, so a group that
+        // turns weak is yielded at most HoldHours * 0.5 after the last full pass.
+        // Without the stamp test the night jump (raw clock +~9 h, doctrine clock
+        // frozen) lapsed the hold while the record stayed fresh, and vanilla
+        // re-decided the group at 4264; the full pass then claims and re-stamps.
+        public static bool SteadyStateHolds(
+            in StanceHoldRecord record,
+            int targetStance,
+            StanceWriteSource source,
+            int currentOrderedStance,
+            float nowHours,
+            float vanillaStamp,
+            float vanillaNowHours,
+            float vanillaResetHours)
+        {
+            if (!record.HasValue || record.Stance != targetStance || record.Source < source) return false;
+            if (currentOrderedStance != targetStance) return false;
+            float age = nowHours - record.WrittenAtHours;
+            if (age < 0f || age >= HoldHours * 0.5f) return false;
+            return VanillaHoldLive(vanillaStamp, vanillaNowHours, vanillaResetHours);
+        }
+
+        // Vanilla 4264 re-decides a group when lastaistancechangetime <
+        // currenttimefromstart + updatetimeforresettingofaistance; otherwise the
+        // stamp holds it.
+        private static bool VanillaHoldLive(float stamp, float vanillaNowHours, float vanillaResetHours)
+        {
+            float reset = vanillaResetHours > 0f ? vanillaResetHours : 0f;
+            return !(stamp < vanillaNowHours + reset);
+        }
+
         // A write always stamps. A claim stamps only when the caller could
         // check vanilla's per-group valves; otherwise vanilla stays free to
         // re-decide (thrash, but its valves intact).
@@ -342,6 +406,13 @@ namespace WhiskeyRealism.Tactical
         public static float ReleaseStamp(float nowHours)
         {
             return nowHours - MinSelfChangeHours;
+        }
+
+        // The vanilla hold stamp for a claim or write: on the raw clock
+        // (input.VanillaNowHours), never the doctrine clock the record uses.
+        public static float VanillaHoldStamp(in StanceWriteInput input, float vanillaResetHours)
+        {
+            return VanillaHoldStamp(input.VanillaNowHours, HoldHours, vanillaResetHours);
         }
 
         // lastaistancechangetime value that makes vanilla 4264 skip the group
