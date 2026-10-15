@@ -68,6 +68,9 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per replace fallback survives original already moved to bak", PerReplaceFallbackSurvivesMissingOriginal);
         Check("c1 per load falls back to bak when primary is corrupt", PerLoadFallsBackToBak);
         Check("c1 per load falls back to tmp when primary and bak are missing", PerLoadFallsBackToTmp);
+        Check("c1 per corrupt primary prefers the newer tmp over an older bak", PerCorruptPrimaryPrefersNewerTmp);
+        Check("c1 per corrupt primary ignores a stale tmp older than bak", PerCorruptPrimaryIgnoresStaleTmp);
+        Check("c1 per save sequence round trips", PerSaveSequenceRoundTrips);
         Check("c1 per load reports no sidecar when nothing is usable", PerLoadReportsNothingUsable);
 
         // R15/H3 — reset between campaigns
@@ -855,10 +858,11 @@ internal static class CampaignLifecycleFixTests
         finally { System.IO.Directory.Delete(dir, true); }
     }
 
-    private static string ValidSidecarJson(int lastSeenMonth)
+    private static string ValidSidecarJson(int lastSeenMonth, long saveSequence = 0)
     {
         var snap = SampleSnapshot();
         snap.LastSeenMonth = lastSeenMonth;
+        snap.SaveSequence = saveSequence;
         return SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
     }
 
@@ -886,6 +890,41 @@ internal static class CampaignLifecycleFixTests
             TestHarness.AssertEqual(path + ".bak", source, "source");
             TestHarness.AssertEqual(4, snap.LastSeenMonth, "bak content");
         });
+    }
+
+    private static void PerCorruptPrimaryPrefersNewerTmp()
+    {
+        WithTempDir(path =>
+        {
+            // Crash mid File.Copy in ReplaceByCopy: truncated primary, previous save in .bak,
+            // complete newer save still in .tmp.
+            System.IO.File.WriteAllText(path, "{\"version\":2,\"fac");
+            System.IO.File.WriteAllText(path + ".bak", ValidSidecarJson(4, saveSequence: 5));
+            System.IO.File.WriteAllText(path + ".tmp", ValidSidecarJson(6, saveSequence: 6));
+            TestHarness.AssertTrue(SidecarDtoCodec.TryLoadWithFallback(path, out var snap, out var source, out var reason), "loads: " + reason);
+            TestHarness.AssertEqual(path + ".tmp", source, "newest save chosen");
+            TestHarness.AssertEqual(6, snap.LastSeenMonth, "tmp content");
+        });
+    }
+
+    private static void PerCorruptPrimaryIgnoresStaleTmp()
+    {
+        WithTempDir(path =>
+        {
+            System.IO.File.WriteAllText(path, "garbage");
+            System.IO.File.WriteAllText(path + ".bak", ValidSidecarJson(7, saveSequence: 7));
+            System.IO.File.WriteAllText(path + ".tmp", ValidSidecarJson(3, saveSequence: 3));
+            TestHarness.AssertTrue(SidecarDtoCodec.TryLoadWithFallback(path, out var snap, out var source, out var reason), "loads: " + reason);
+            TestHarness.AssertEqual(path + ".bak", source, "stale tmp ignored");
+            TestHarness.AssertEqual(7, snap.LastSeenMonth, "bak content");
+        });
+    }
+
+    private static void PerSaveSequenceRoundTrips()
+    {
+        var snap = SampleSnapshot();
+        snap.SaveSequence = 42;
+        TestHarness.AssertEqual(42L, RoundTrip(snap).SaveSequence, "save sequence");
     }
 
     private static void PerLoadFallsBackToTmp()

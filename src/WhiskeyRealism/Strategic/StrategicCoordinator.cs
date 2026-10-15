@@ -63,6 +63,7 @@ namespace WhiskeyRealism.Strategic
         private readonly int[] _capitalStreakDay = { -1, -1 };
         private readonly int[] _frontChangedDay = { -1, -1 };
         private int _lastReviewSerial = -1;
+        private long _saveSequence;
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
@@ -178,6 +179,7 @@ namespace WhiskeyRealism.Strategic
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
             _lastReviewSerial = -1;
+            _saveSequence = 0;
             _lastSnapshot = default(WarStateObserver.Snapshot);
             _lastSnapshotDay = _lastSnapshotMonth = _lastSnapshotYear = -1;
             _loggedVicksburg = _loggedChattanooga = _loggedAtlanta = false;
@@ -1814,6 +1816,7 @@ namespace WhiskeyRealism.Strategic
             snap.Battles.AddRange(BattleHistory);
             snap.LastSeenMonth = LastSeenMonth;
             snap.LastSeenYear = LastSeenYear;
+            snap.SaveSequence = ++_saveSequence;
             var written = PickCampaignObjectivePatch.SnapshotWrittenByMod();
             for (int a = 0; a < written.Length && a < snap.ModWrittenObjective.Length; a++)
                 snap.ModWrittenObjective[a] = written[a];
@@ -1847,6 +1850,7 @@ namespace WhiskeyRealism.Strategic
             BattleHistory.AddRange(snap.Battles);
             LastSeenMonth = snap.LastSeenMonth;
             LastSeenYear = snap.LastSeenYear;
+            _saveSequence = snap.SaveSequence;
             var written = new int[2];
             for (int a = 0; a < written.Length; a++)
             {

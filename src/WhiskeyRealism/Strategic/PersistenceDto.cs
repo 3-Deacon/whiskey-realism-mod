@@ -9,6 +9,9 @@ namespace WhiskeyRealism.Strategic
     {
         internal const int CurrentVersion = 2;
         [JsonProperty("version")] public int Version = CurrentVersion;
+        // Monotonic per campaign line: each save writes (last loaded/saved sequence + 1). Used
+        // to choose the newest of .bak/.tmp after a crash, never file mtimes.
+        [JsonProperty("saveSequence")] public long SaveSequence;
         [JsonProperty("lastSeenMonth")] public int? LastSeenMonth;
         [JsonProperty("lastSeenYear")] public int? LastSeenYear;
         [JsonProperty("factions")] public List<FactionDto> Factions = new List<FactionDto>();

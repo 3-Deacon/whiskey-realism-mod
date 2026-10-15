@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Strategic
         public List<BattleHistoryRecord> Battles = new List<BattleHistoryRecord>();
         public int LastSeenMonth = -1;
         public int LastSeenYear = -1;
+        public long SaveSequence;
         // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance;
         // null = unknown (sidecar written before the field existed).
         public int?[] ModWrittenObjective = { -1, -1 };
@@ -144,6 +145,7 @@ namespace WhiskeyRealism.Strategic
         {
             var dto = new SidecarDto
             {
+                SaveSequence = snap.SaveSequence,
                 LastSeenMonth = snap.LastSeenMonth,
                 LastSeenYear = snap.LastSeenYear
             };
@@ -238,6 +240,7 @@ namespace WhiskeyRealism.Strategic
                     if (record != null) result.Battles.Add(record);
                 }
                 while (result.Battles.Count > MaxBattleHistory) result.Battles.RemoveAt(0);
+                result.SaveSequence = dto.SaveSequence;
                 result.LastSeenMonth = dto.LastSeenMonth ?? -1;
                 result.LastSeenYear = dto.LastSeenYear ?? -1;
                 snap = result;
@@ -290,35 +293,55 @@ namespace WhiskeyRealism.Strategic
             File.Delete(tmp);
         }
 
-        // Loads the first usable sidecar among <path>, <path>.bak, <path>.tmp. Returns false
-        // with reason "no-sidecar" when none exists, otherwise the last rejection reason.
+        // Loads <path> when it parses. Otherwise (missing, truncated by a crash mid-copy, or
+        // rejected) picks the NEWEST of <path>.bak / <path>.tmp that parses, by the
+        // SaveSequence stored in the document (a stale .tmp from an older crash loses to a
+        // newer .bak; a complete newer .tmp wins over the previous save in .bak). Returns false
+        // with reason "no-sidecar" when no file exists, otherwise the last rejection reason.
         internal static bool TryLoadWithFallback(string path, out SidecarSnapshot snapshot, out string source, out string reason)
         {
             snapshot = null;
             source = null;
             reason = "no-sidecar";
-            foreach (var candidate in new[] { path, path + ".bak", path + ".tmp" })
+            if (TryLoadFile(path, ref reason, out var primary))
             {
-                if (!File.Exists(candidate)) continue;
-                string json;
-                try
-                {
-                    json = File.ReadAllText(candidate);
-                }
-                catch (Exception ex)
-                {
-                    reason = "read-failed " + candidate + ": " + ex.Message;
-                    continue;
-                }
-                if (TryDeserialize(json, out var dto, out var why) && TryDecode(dto, out var snap, out why))
+                snapshot = primary;
+                source = path;
+                return true;
+            }
+
+            foreach (var candidate in new[] { path + ".bak", path + ".tmp" })
+            {
+                if (!TryLoadFile(candidate, ref reason, out var snap)) continue;
+                if (snapshot == null || snap.SaveSequence > snapshot.SaveSequence)
                 {
                     snapshot = snap;
                     source = candidate;
-                    reason = "ok";
-                    return true;
                 }
-                reason = candidate + ": " + why;
             }
+            if (snapshot == null) return false;
+            reason = "ok";
+            return true;
+        }
+
+        private static bool TryLoadFile(string candidate, ref string reason, out SidecarSnapshot snapshot)
+        {
+            snapshot = null;
+            if (!File.Exists(candidate)) return false;
+            string json;
+            try
+            {
+                json = File.ReadAllText(candidate);
+            }
+            catch (Exception ex)
+            {
+                reason = "read-failed " + candidate + ": " + ex.Message;
+                return false;
+            }
+            if (TryDeserialize(json, out var dto, out var why) && TryDecode(dto, out snapshot, out why))
+                return true;
+            reason = candidate + ": " + why;
+            snapshot = null;
             return false;
         }
 
