@@ -40,6 +40,7 @@ internal static class BattleWriterFixTests
         DeploymentSkipsVanillaFortifiedPlacement();
         DeploymentSkipsFleetsAndMissingZones();
         HqLinkSameCommandUsesVanillaHierarchy();
+        CombinedArtilleryGunsFollowVanillaInitializeRule();
     }
 
     private static void Pass(string name)
@@ -298,6 +299,20 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(assaultMove: true)), "assault move");
         TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(ableToFight: false)), "unable to fight");
         Pass("battle writers: #46 movement gate matches UpdateMovingTargets");
+    }
+
+    // #34: Regiment.Initialize sets guns = GetSollGuns(forinitialization: true)
+    // (112681); on the campaign map GetSollGuns derives from
+    // GetSpriteAmounts(-1, calculateonly: true), i.e. from strength (135231,
+    // 127049). In battle it reads the live sprite count, which CombineUnits
+    // does not update, so nothing durable can be computed there.
+    private static void CombinedArtilleryGunsFollowVanillaInitializeRule()
+    {
+        TestHarness.AssertEqual(7, BattleWriterPolicy.GunsAfterCombine(true, true, 7, 4), "campaign artillery takes the initialize value");
+        TestHarness.AssertEqual(2, BattleWriterPolicy.GunsAfterCombine(true, true, 2, 4), "smaller source keeps the initialize value too");
+        TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(true, false, 7, 4), "battle: unchanged");
+        TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(false, true, 7, 4), "not artillery");
+        Pass("battle writers: #34 combined artillery guns follow vanilla initialize rule");
     }
 
     private static void AssertNear(float expected, float actual, string label)

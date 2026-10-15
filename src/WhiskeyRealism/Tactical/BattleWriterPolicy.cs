@@ -453,6 +453,18 @@ namespace WhiskeyRealism.Tactical
             return sourceParentId == targetParentId;
         }
 
+        // #34: artillery guns are derived, not stored: Regiment.Initialize sets
+        // guns = GetSollGuns(forinitialization: true) (112681), which on the
+        // campaign map counts sprites from strength (GetSpriteAmounts(-1,
+        // calculateonly: true), 135231/127049). After CombineUnits moves men,
+        // the durable value is that same derivation; in battle the sprite count
+        // is stale, so the guns are left to vanilla.
+        public static int GunsAfterCombine(bool isArtillery, bool calledFromCampaign, int sollGuns, int currentGuns)
+        {
+            if (!isArtillery || !calledFromCampaign || sollGuns < 0) return currentGuns;
+            return sollGuns;
+        }
+
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
         // commits a reserve when an attached unit (unittyp <= 2, no paths, not
         // routed) is outflanked (1|5 left, 2|6 right) on a side its own flank
