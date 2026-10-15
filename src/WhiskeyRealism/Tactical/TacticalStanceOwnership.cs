@@ -25,6 +25,14 @@ namespace WhiskeyRealism.Tactical
     //     writes neither.
     //   macroai == 3 (army retreat): vanilla forces every group to screen (4258).
     //
+    // Two clocks (BC4): hold records (StanceHoldRecord.WrittenAtHours, HoldHours,
+    // MinSelfChangeHours) run on the doctrine clock (TacticalDoctrineTime), which
+    // is frozen while vanilla's night end-of-day cycle jumps the raw clock ~9 h
+    // (CheckTimeIssues 86368-86490); a raw-clock record expired every hold
+    // overnight. lastaistancechangetime stays on GameVars.currenttimefromstart
+    // because vanilla compares it with that clock (4264): VanillaHoldStamp and
+    // ReleaseStamp take the raw clock (StanceWriteInput.VanillaNowHours).
+    //
     // Ownership: a Whiskey write AND a Whiskey claim (agreement) stamp the
     // vanilla hold, so AdjustGroupAIStance leaves the group alone for
     // HoldHours after Whiskey last held an opinion. Stamping only on writes
@@ -128,7 +136,8 @@ namespace WhiskeyRealism.Tactical
             float nowHours,
             StanceHoldRecord record,
             StanceWriteSource source,
-            int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown)
+            int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown,
+            float vanillaNowHours = float.NaN)
         {
             IsAiGroup = isAiGroup;
             TargetStance = targetStance;
@@ -138,13 +147,19 @@ namespace WhiskeyRealism.Tactical
             Record = record;
             Source = source == StanceWriteSource.None ? StanceWriteSource.Scorer : source;
             VanillaGroupStance = vanillaGroupStance;
+            VanillaNowHours = float.IsNaN(vanillaNowHours) ? nowHours : vanillaNowHours;
         }
 
         public bool IsAiGroup { get; }
         public int TargetStance { get; }
         public int CurrentOrderedStance { get; }
         public int MacroAi { get; }
+        // Doctrine hours (TacticalDoctrineTime, frozen across vanilla's night
+        // end-of-day cycle): every hold record and dwell is on this clock.
         public float NowHours { get; }
+        // GameVars.currenttimefromstart: the clock vanilla compares
+        // lastaistancechangetime with (4264). Only stamps use it.
+        public float VanillaNowHours { get; }
         public StanceHoldRecord Record { get; }
         public StanceWriteSource Source { get; }
         // Vanilla's per-group stance for this group right now
@@ -342,6 +357,13 @@ namespace WhiskeyRealism.Tactical
         public static float ReleaseStamp(float nowHours)
         {
             return nowHours - MinSelfChangeHours;
+        }
+
+        // The vanilla hold stamp for a claim or write: on the raw clock
+        // (input.VanillaNowHours), never the doctrine clock the record uses.
+        public static float VanillaHoldStamp(in StanceWriteInput input, float vanillaResetHours)
+        {
+            return VanillaHoldStamp(input.VanillaNowHours, HoldHours, vanillaResetHours);
         }
 
         // lastaistancechangetime value that makes vanilla 4264 skip the group
