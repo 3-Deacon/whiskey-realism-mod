@@ -21,6 +21,10 @@ internal static class CampaignMilitaryFixTests
         CommanderNameMatchFallsBackToExactSurname();
         ArmyGroupCommanderEligibilityMirrorsVanilla();
         ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange();
+        SuccessionRoleResolvesTheaterArmyGroup();
+        SuccessionRoleNeverTargetsPlayerOrWrongFront();
+        SuccessionGeneralInChiefIsNotAnArmyGroup();
+        StalePreviousCommandIsRefilledNotOrphaned();
     }
 
     private static void LogPass(string message)
@@ -230,5 +234,72 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(false, 5, 5, true), "chosen commander id irrelevant outside W&L");
         TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupAcceptsUnits(false, 12, 5, false), "group full");
         LogPass("c2a army group accepts units mirrors GetArmyGroupInRange");
+    }
+
+    // C-CmdrReplace: the displaced commander was "first army-group commander by
+    // index", so "Bragg -> Western" could unseat Lee. Resolve by role + theater.
+    private static System.Collections.Generic.List<ArmyGroupRoleCandidate> SampleGroups()
+    {
+        return new System.Collections.Generic.List<ArmyGroupRoleCandidate>
+        {
+            new ArmyGroupRoleCandidate(0, Theater.East, "VirginiaCapitalCorridor", 60000f, false),
+            new ArmyGroupRoleCandidate(1, Theater.West, "Unassigned", 45000f, false),
+            new ArmyGroupRoleCandidate(2, Theater.East, "ShenandoahValley", 15000f, false),
+            new ArmyGroupRoleCandidate(3, Theater.West, "Unassigned", 20000f, false),
+        };
+    }
+
+    private static void SuccessionRoleResolvesTheaterArmyGroup()
+    {
+        var groups = SampleGroups();
+        TestHarness.AssertEqual(0, CommanderAssignmentGuard.ResolveRoleTargetGroup("ANV", groups), "ANV -> main eastern group");
+        TestHarness.AssertEqual(0, CommanderAssignmentGuard.ResolveRoleTargetGroup("AoP", groups), "AoP -> main eastern group");
+        TestHarness.AssertEqual(1, CommanderAssignmentGuard.ResolveRoleTargetGroup("Western", groups), "Western -> largest western group");
+        TestHarness.AssertEqual(2, CommanderAssignmentGuard.ResolveRoleTargetGroup("Valley", groups), "Valley -> Shenandoah group");
+        LogPass("c2a succession role resolves the theater army group");
+    }
+
+    private static void SuccessionRoleNeverTargetsPlayerOrWrongFront()
+    {
+        var westOnly = new System.Collections.Generic.List<ArmyGroupRoleCandidate>
+        {
+            new ArmyGroupRoleCandidate(0, Theater.West, "Unassigned", 50000f, false),
+        };
+        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("ANV", westOnly), "no eastern group -> defer, never unseat the west");
+        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("Valley", SampleGroups().GetRange(0, 2)), "no valley group -> defer");
+        var playerEast = new System.Collections.Generic.List<ArmyGroupRoleCandidate>
+        {
+            new ArmyGroupRoleCandidate(0, Theater.East, "VirginiaCapitalCorridor", 60000f, true),
+            new ArmyGroupRoleCandidate(1, Theater.East, "WashingtonDefenses", 10000f, false),
+        };
+        TestHarness.AssertEqual(1, CommanderAssignmentGuard.ResolveRoleTargetGroup("AoP", playerEast), "W&L player's group is never displaced");
+        LogPass("c2a succession role never targets player group or another front");
+    }
+
+    private static void SuccessionGeneralInChiefIsNotAnArmyGroup()
+    {
+        TestHarness.AssertFalse(CommanderAssignmentGuard.RoleIsArmyGroupCommand("GeneralInChief"), "GiC is GameVars.alliance.commanderinchief, not an army group");
+        TestHarness.AssertTrue(CommanderAssignmentGuard.RoleIsArmyGroupCommand("Western"), "Western is an army group");
+        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup("GeneralInChief", SampleGroups()), "GiC resolves no group");
+        TestHarness.AssertEqual(-1, CommanderAssignmentGuard.ResolveRoleTargetGroup(null, SampleGroups()), "null role");
+        LogPass("c2a succession general-in-chief is not an army-group swap");
+    }
+
+    // CommanderAssignmentPreviousCommandPatch set prior.commander = -1, leaving a
+    // commanderless unit that vanilla indexes as GameVars.commander[-1]. Vanilla's
+    // own fix for a vacated command is BattleUnits.ReplaceCommanderOfUnit (81389),
+    // exactly what ArmyGroup.AppointCommander does first (75575).
+    private static void StalePreviousCommandIsRefilledNotOrphaned()
+    {
+        TestHarness.AssertEqual(PreviousCommandAction.ReplaceViaVanilla,
+            CommanderAssignmentGuard.ResolvePreviousCommandAction(staleReference: true, replacementInProgress: false),
+            "stale previous unit gets a vanilla replacement commander");
+        TestHarness.AssertEqual(PreviousCommandAction.None,
+            CommanderAssignmentGuard.ResolvePreviousCommandAction(staleReference: true, replacementInProgress: true),
+            "re-entrant AssignCommando from our own ReplaceCommanderOfUnit call is left alone");
+        TestHarness.AssertEqual(PreviousCommandAction.None,
+            CommanderAssignmentGuard.ResolvePreviousCommandAction(staleReference: false, replacementInProgress: false),
+            "nothing stale -> nothing to do");
+        LogPass("c2a stale previous command is refilled by vanilla, never orphaned");
     }
 }

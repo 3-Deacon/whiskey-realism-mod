@@ -1,6 +1,7 @@
 using System;
-using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
+using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -10,47 +11,50 @@ namespace WhiskeyRealism.Patches
     // Bridge layer patch #6 — Prefix on AICampaign.CheckAICommanderReplacements
     // (decompile line 17008). When SuccessionScheduler has fired but
     // un-applied events for this alliance, perform the scripted swap and skip
-    // vanilla's competence-based pick. Otherwise let vanilla run normally.
+    // vanilla's competence-based pick for this tick. Otherwise vanilla runs.
     //
-    // v0.2.1 swap mechanic (concrete, replacing v0.2.0's gate-only stub):
-    //   1. Resolve replacement Commander by combinedname last-token + alliance.
-    //   2. Find an army-group-level commander in the same alliance to displace
-    //      (Commander.IsArmyGroupCommander() == true with non-null currentcommand).
-    //   3. Apply Commander.AssignCommando(displaced.currentcommand, true, true)
-    //      and BattleUnits.DoCommanderPromotion(replacementId).
-    //   4. Mark applied via SuccessionScheduler.MarkApplied — persisted in sidecar
-    //      so we don't re-apply on reload.
-    //
-    // If the replacement isn't in GameVars.commander[] (rare officer not yet on the
-    // historical roster) OR no displaceable army-group commander exists, log and
-    // skip — fall through to vanilla's normal pick.
+    // 2026-10-14 (C-CmdrReplace) swap mechanic, aligned with vanilla:
+    //   1. Replacement = the catalogued historical figure (exact combinedname for
+    //      ambiguous surnames, ArmyGroupDoctrine.CommanderNameMatches), filtered by
+    //      Commander.CanBePickedForAIReplacement(alliance, includeofficerswithcommand:
+    //      true) (60748) and never the W&L avatar.
+    //   2. Target army group = resolved from Event.ReplacedRole + theater
+    //      (CommanderAssignmentGuard.ResolveRoleTargetGroup), never the W&L
+    //      player's group. GeneralInChief is GameVars.alliance.commanderinchief,
+    //      not an army group, and stays deferred.
+    //   3. Swap via ArmyGroup.AppointCommander (75559): sets ArmyGroup.commanderid
+    //      and first refills the replacement's old command through
+    //      BattleUnits.ReplaceCommanderOfUnit. The old code called
+    //      Commander.AssignCommando on the displaced commander's currentcommand,
+    //      which never changed commanderid and required currentcommand != null,
+    //      a state vanilla's AppointCommander -> RemoveFromCommand (60830) clears.
+    //   4. Mark applied via SuccessionScheduler.MarkApplied (persisted in sidecar).
     [HarmonyPatch(typeof(AICampaign), "CheckAICommanderReplacements")]
     internal static class CommanderReplacementPatch
     {
-        private static readonly System.Collections.Generic.HashSet<string> LogOnceKeys =
-            new System.Collections.Generic.HashSet<string>();
+        private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
 
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
         {
             using (TelemetryPerf.Scope("campaign.patch.commander-replacement", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("replace", "CommanderReplacementPatch wired (v0.2.1 concrete swap)");
+                OnceLog.Info("replace", "CommanderReplacementPatch wired (role-resolved AppointCommander swap)");
                 try
                 {
                     if (StrategicCoordinator.Instance == null) return true;
 
                     int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                    if (allianceId < 0) return true;
+                    if (allianceId < 0 || allianceId > 1) return true;
 
                     int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                     if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return true;
 
-                    // Apply any pending scripted-event swaps. We collect first to
-                    // avoid mutating the AppliedEventIds set during enumeration.
-                    var pending = new System.Collections.Generic.List<SuccessionScheduler.Event>();
+                    // Collect first to avoid mutating the applied set during enumeration.
+                    var pending = new List<SuccessionScheduler.Event>();
                     foreach (var e in StrategicCoordinator.Instance.Succession.GetPendingApplications(allianceId))
                         pending.Add(e);
+                    if (pending.Count == 0) return true;
 
                     bool anyApplied = false;
                     foreach (var e in pending)
@@ -60,178 +64,175 @@ namespace WhiskeyRealism.Patches
                             StrategicCoordinator.Instance.Succession.MarkApplied(e.Id);
                             anyApplied = true;
                         }
-                        else
-                        {
-                            // Couldn't apply (no replacement / no displaceable commander).
-                            // Don't mark applied — retry next tick. But avoid spam: log once per event id.
-                            EmitSuccessionInfoOnce("replace:retry:" + e.Id,
-                                $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=preconditions-unmet");
-                        }
                     }
 
-                    // If we applied a scripted swap, skip vanilla's competence-based
-                    // pick this tick — vanilla would otherwise look at the same
-                    // worstcommanderidperlevel slots we just consumed.
+                    // After a scripted swap, skip vanilla's competence-based pick this
+                    // tick so it does not immediately second-guess the appointment.
                     return !anyApplied;
                 }
                 catch (Exception ex)
                 {
-                    Plugin.Log.LogWarning("[Patch:Replace] " + ex.Message);
+                    OnceLog.Warning("replace:prefix", "[Patch:Replace] " + ex.Message);
                     return true;
                 }
             }
         }
 
-        // Returns true on successful application; false if we couldn't find
-        // either the replacement commander or a displaceable army-group commander.
         private static bool TryApplyScriptedSwap(int allianceId, SuccessionScheduler.Event e)
         {
             try
             {
-                // GameVars.commander is List<Commander>; reflect it.
-                var gvType = AccessTools.TypeByName("GameVars");
-                var commandersField = AccessTools.Field(gvType, "commander");
-                var commanders = commandersField?.GetValue(null) as IList;
-                if (commanders == null) return false;
+                if (!CommanderAssignmentGuard.RoleIsArmyGroupCommand(e.ReplacedRole))
+                {
+                    Defer(e, allianceId, "role-not-army-group", "role=" + e.ReplacedRole);
+                    return false;
+                }
 
-                int replacementId = FindCommanderIdByLastName(commanders, e.ReplacementName, allianceId);
+                var commanders = GameVars.commander;
+                if (commanders == null || BattleUnits.armygroups == null) return false;
+
+                var groups = AllianceGroups(allianceId);
+                int targetIndex = CommanderAssignmentGuard.ResolveRoleTargetGroup(e.ReplacedRole, BuildCandidates(groups));
+                if (targetIndex < 0 && IsForceAllSuccessionEnabled())
+                {
+                    // Test mode: exercise the same AppointCommander path on any AI
+                    // army group of this alliance when the role's theater has none.
+                    targetIndex = AnyAiGroupIndex(groups);
+                    if (targetIndex >= 0)
+                        TelemetryRouter.LegacyInfo($"[Succession:{e.Id}] action=test-fallback alliance={allianceId} reason=no-role-group", TelemetryLayer.Campaign);
+                }
+                if (targetIndex < 0)
+                {
+                    Defer(e, allianceId, "no-role-group", "role=" + e.ReplacedRole);
+                    return false;
+                }
+
+                var group = groups[targetIndex];
+                int displacedId = group.GetCommanderID();
+
+                // Already in command of the role's army: nothing to swap.
+                if (displacedId >= 0 && displacedId < commanders.Count &&
+                    ArmyGroupDoctrine.CommanderNameMatches(allianceId, e.ReplacementName, commanders[displacedId]?.combinedname))
+                    return true;
+
+                int replacementId = FindReplacementId(commanders, allianceId, e.ReplacementName);
                 if (replacementId < 0)
                 {
-                    EmitSuccessionInfoOnce($"replace:noreplacement:{e.Id}",
-                        $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=no-replacement replacement={e.ReplacementName}");
+                    Defer(e, allianceId, "no-available-replacement", "replacement=" + e.ReplacementName);
                     return false;
                 }
 
-                int displaceId = FindDisplaceableArmyGroupCommanderId(commanders, allianceId, replacementId);
-                if (displaceId < 0 && Plugin.Instance.ForceAllSuccessionEvents.Value)
-                {
-                    // Test-mode fallback: when no army-group commander exists yet
-                    // (typical early in a campaign before BattleUnits.armygroups
-                    // gets populated), displace ANY commander with a currentcommand
-                    // so the swap mechanic actually exercises end-to-end. NOT used
-                    // in normal play.
-                    displaceId = FindAnyDisplaceableCommanderId(commanders, allianceId, replacementId);
-                    if (displaceId >= 0)
-                        TelemetryRouter.LegacyInfo($"[Succession:{e.Id}] action=test-fallback alliance={allianceId} reason=no-agc displaceId={displaceId}", TelemetryLayer.Campaign);
-                }
-                if (displaceId < 0)
-                {
-                    // Common in early campaign. OnceLog'd to prevent per-tick spam.
-                    EmitSuccessionInfoOnce($"replace:noagc:{e.Id}",
-                        $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=no-agc");
-                    return false;
-                }
-
-                var replacement = commanders[replacementId];
-                var displaced   = commanders[displaceId];
-
-                var cmdType = replacement.GetType();
-                var ccField = AccessTools.Field(cmdType, "currentcommand");
-                var displacedCommand = ccField?.GetValue(displaced);
-                if (displacedCommand == null) return false;
-
-                // Resolve Regiment type for AssignCommando lookup.
-                var regimentType = AccessTools.TypeByName("Regiment");
-                if (regimentType == null) return false;
-                var assignCommando = AccessTools.Method(cmdType, "AssignCommando",
-                    new[] { regimentType, typeof(bool), typeof(bool) });
-                if (assignCommando == null) return false;
-
-                assignCommando.Invoke(replacement, new object[] { displacedCommand, true, true });
-
-                var battleUnitsType = AccessTools.TypeByName("BattleUnits");
-                var doPromotion = AccessTools.Method(battleUnitsType, "DoCommanderPromotion", new[] { typeof(int) });
-                doPromotion?.Invoke(null, new object[] { replacementId });
-
-                // Vanilla also sets refreshcommand = true post-swap — match the pattern.
-                AccessTools.Field(cmdType, "refreshcommand")?.SetValue(replacement, true);
+                ArmyGroup.AppointCommander(group, replacementId, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
+                if (group.GetCommanderID() != replacementId) return false;
 
                 TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
                     .WithAlliance(allianceId)
-                    .WithDecision("applied", e.ReplacedRole, "alliance=" + allianceId + "|event=" + e.Id + "|replacement=" + replacementId + "|displaced=" + displaceId)
+                    .WithDecision("applied", e.ReplacedRole, "alliance=" + allianceId + "|event=" + e.Id + "|replacement=" + replacementId + "|displaced=" + displacedId)
                     .WithField("eventId", e.Id)
                     .WithField("replacement", e.ReplacementName)
                     .WithField("replacementId", replacementId)
-                    .WithField("displacedId", displaceId)
+                    .WithField("displacedId", displacedId)
+                    .WithField("armyGroup", SafeName(group))
                     .WithField("role", e.ReplacedRole));
                 return true;
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning($"[Succession:{e.Id}] swap failed: {ex.Message}");
+                OnceLog.Warning("replace:swap", $"[Succession] swap failed: {ex.Message}");
                 return false;
             }
         }
 
-        private static void EmitSuccessionInfoOnce(string key, string line)
+        private static List<ArmyGroup> AllianceGroups(int allianceId)
         {
-            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
-            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+            var result = new List<ArmyGroup>();
+            var all = BattleUnits.armygroups;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var group = all[i];
+                if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null) continue;
+                if (group.GetAlliance() != allianceId) continue;
+                result.Add(group);
+            }
+            return result;
         }
 
-        private static int FindCommanderIdByLastName(IList commanders, string lastNameLower, int allianceId)
+        private static List<ArmyGroupRoleCandidate> BuildCandidates(List<ArmyGroup> groups)
+        {
+            var candidates = new List<ArmyGroupRoleCandidate>(groups.Count);
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var group = groups[i];
+                Vector3 position = default(Vector3);
+                float strength = 0f;
+                int count = 0;
+                if (group.attachedunits != null)
+                {
+                    for (int u = 0; u < group.attachedunits.Count; u++)
+                    {
+                        var unit = group.attachedunits[u];
+                        if ((UnityEngine.Object)(object)unit == (UnityEngine.Object)null) continue;
+                        position += ((Component)unit).transform.position;
+                        strength += unit.groupstrengthactive;
+                        count++;
+                    }
+                }
+                if (count > 0) position /= count;
+                Theater theater = count > 0 ? TheaterClassifier.FromPosition(position.x, position.z) : Theater.Unknown;
+                string area = count > 0 ? ArmyAreaRuntime.AreaKey(position) : null;
+                candidates.Add(new ArmyGroupRoleCandidate(i, theater, area, strength, IsPlayerGroup(group)));
+            }
+            return candidates;
+        }
+
+        private static int AnyAiGroupIndex(List<ArmyGroup> groups)
+        {
+            for (int i = 0; i < groups.Count; i++)
+                if (!IsPlayerGroup(groups[i])) return i;
+            return -1;
+        }
+
+        private static bool IsPlayerGroup(ArmyGroup group)
+        {
+            return DLC_WL.dlc_scenarioactive && group.GetCommanderID() == DLC_WL.dlc_chosencommander;
+        }
+
+        private static int FindReplacementId(List<GameVars.Commander> commanders, int allianceId, string replacementName)
         {
             for (int i = 0; i < commanders.Count; i++)
             {
-                var cmd = commanders[i];
-                if (cmd == null) continue;
-                var cmdType = cmd.GetType();
-                var allianceField = AccessTools.Field(cmdType, "alliance");
-                if (allianceField == null || (int)allianceField.GetValue(cmd) != allianceId) continue;
+                var commander = commanders[i];
+                if (commander == null || commander.alliance != allianceId) continue;
+                if (!ArmyGroupDoctrine.CommanderNameMatches(allianceId, replacementName, commander.combinedname)) continue;
+                if (DLC_WL.dlc_scenarioactive && i == DLC_WL.dlc_chosencommander) continue;
 
-                var combined = AccessTools.Field(cmdType, "combinedname")?.GetValue(cmd) as string;
-                if (string.IsNullOrWhiteSpace(combined)) continue;
-
-                var trimmed = combined.Trim();
-                var space = trimmed.LastIndexOf(' ');
-                var last = (space >= 0) ? trimmed.Substring(space + 1) : trimmed;
-                if (last.ToLowerInvariant() == lastNameLower)
-                    return i;
+                bool pickable;
+                try { pickable = commander.CanBePickedForAIReplacement(allianceId, includeofficerswithcommand: true); }
+                catch { pickable = false; }
+                if (pickable) return i;
             }
             return -1;
         }
 
-        private static int FindDisplaceableArmyGroupCommanderId(IList commanders, int allianceId, int skipId)
+        private static bool IsForceAllSuccessionEnabled()
         {
-            for (int i = 0; i < commanders.Count; i++)
-            {
-                if (i == skipId) continue;
-                var cmd = commanders[i];
-                if (cmd == null) continue;
-                var cmdType = cmd.GetType();
-                var allianceField = AccessTools.Field(cmdType, "alliance");
-                if (allianceField == null || (int)allianceField.GetValue(cmd) != allianceId) continue;
-
-                var ccField = AccessTools.Field(cmdType, "currentcommand");
-                if (ccField?.GetValue(cmd) == null) continue;
-
-                var isAGC = AccessTools.Method(cmdType, "IsArmyGroupCommander");
-                if (isAGC == null) continue;
-                if ((bool)isAGC.Invoke(cmd, null)) return i;
-            }
-            return -1;
+            try { return Plugin.Instance != null && Plugin.Instance.ForceAllSuccessionEvents.Value; }
+            catch { return false; }
         }
 
-        // Test-mode-only fallback: any commander in this alliance with a
-        // non-null currentcommand. Lets the swap mechanic exercise without
-        // waiting for the AI to populate BattleUnits.armygroups.
-        private static int FindAnyDisplaceableCommanderId(IList commanders, int allianceId, int skipId)
+        private static void Defer(SuccessionScheduler.Event e, int allianceId, string reason, string detail)
         {
-            for (int i = 0; i < commanders.Count; i++)
-            {
-                if (i == skipId) continue;
-                var cmd = commanders[i];
-                if (cmd == null) continue;
-                var cmdType = cmd.GetType();
-                var allianceField = AccessTools.Field(cmdType, "alliance");
-                if (allianceField == null || (int)allianceField.GetValue(cmd) != allianceId) continue;
+            string key = "replace:defer:" + e.Id + ":" + reason;
+            if (!LogOnceKeys.Add(key)) return;
+            TelemetryRouter.LegacyInfo(
+                $"[Succession:{e.Id}] action=defer alliance={allianceId} reason={reason} {detail}",
+                TelemetryLayer.Campaign);
+        }
 
-                var ccField = AccessTools.Field(cmdType, "currentcommand");
-                if (ccField?.GetValue(cmd) == null) continue;
-
-                return i;
-            }
-            return -1;
+        private static string SafeName(UnityEngine.Object obj)
+        {
+            try { return obj != null ? obj.name : "<unknown>"; }
+            catch { return "<unknown>"; }
         }
     }
 }
