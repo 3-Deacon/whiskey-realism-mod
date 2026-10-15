@@ -289,8 +289,9 @@ namespace WhiskeyRealism.Patches
                                 ResetOperationsTelemetry();
                                 break;
                             case BattleLifecycleTransition.Restart:
-                                OnceLog.Info("orch-lifecycle-restart",
-                                    "[TacticalOrchestrator] battle restart detected reason=" + decision.Reason);
+                                // One line per detected restart (bounded by the detector's identity changes).
+                                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] battle restart detected reason="
+                                    + decision.Reason, TelemetryLayer.Tactical);
                                 TacticalBattleCoordinator.OnBattleEnd();
                                 ResetOperationsTelemetry();
                                 TacticalBattleCoordinator.OnBattleStart(__instance);

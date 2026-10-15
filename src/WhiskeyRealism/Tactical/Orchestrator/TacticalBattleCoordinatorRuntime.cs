@@ -249,8 +249,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (!entry.MatchedHistoricalRegistry)
                         TelemetryRouter.LegacyInfoToMainLogIfAllowed("[TacticalCommanderUnknown] echelon=" + entry.Echelon
                             + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name), TelemetryLayer.Tactical);
-                OnceLog.Info("orch-bootstrap", "[TacticalOrchestrator] bootstrap sidesActive=" + activated
-                    + " sidesSuppressed=" + suppressed);
+                // Lifecycle lines are emitted once per battle (not once per session) so every
+                // battle, reload and restart in a session is visible in the log.
+                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] bootstrap battle=" + _battleSequence
+                    + " sidesActive=" + activated + " sidesSuppressed=" + suppressed, TelemetryLayer.Tactical);
             }
             catch (Exception e)
             {
@@ -334,7 +336,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _playerAllianceId = -1;
                 _activeBattleUnitsId = 0;
                 active = false;
-                OnceLog.Info("orch-teardown", "[TacticalOrchestrator] teardown");
+                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] teardown battle=" + _battleSequence, TelemetryLayer.Tactical);
             }
             catch (Exception e)
             {
