@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace WhiskeyRealism.Strategic.BugFixes
 {
     // BUG-LOG-002. Regiment.UpdateCampsAndEntrenchments (decompile 115392-115470) places
@@ -108,6 +110,56 @@ namespace WhiskeyRealism.Strategic.BugFixes
         internal static bool ShouldDetachTransportSounds(bool isPlayerAlliance, bool isWithinFog, bool hasModel, bool isFleet)
         {
             return !isPlayerAlliance && !isFleet && isWithinFog && hasModel;
+        }
+
+        // Ship.InitializeFlag (141278-141284) is skipped for a model the fix creates for a
+        // fogged AI land unit (the Finalizer hides it at once) and replayed when the model is
+        // shown. Only while the replay can run: a skip that cannot be replayed would leave
+        // a visible model with the prefab's flag.
+        internal static bool ShouldDeferTransportFlag(bool deferEnabled, bool creatingFoggedLandModel, bool replayAvailable)
+        {
+            return deferEnabled && creatingFoggedLandModel && replayAvailable;
+        }
+    }
+
+    // Transport models whose flag setup was skipped, one per unit. Resolve runs after the
+    // Finalizer set the model's active state: a deferred model that is active now gets its
+    // flag set up (once); an entry whose model was replaced or destroyed is dropped, so the
+    // map holds at most one live model per hidden embarked unit. Main thread only.
+    internal sealed class DeferredFlagLedger<TUnit, TModel> where TUnit : class where TModel : class
+    {
+        private readonly Dictionary<TUnit, TModel> _pending;
+
+        internal DeferredFlagLedger(int capacity)
+        {
+            _pending = new Dictionary<TUnit, TModel>(capacity);
+        }
+
+        internal int Count => _pending.Count;
+
+        internal void Defer(TUnit unit, TModel model)
+        {
+            if (unit == null || model == null) return;
+            _pending[unit] = model;
+        }
+
+        // True when the caller must replay the flag setup on currentModel now.
+        internal bool Resolve(TUnit unit, TModel currentModel, bool modelActive)
+        {
+            if (unit == null || _pending.Count == 0 || !_pending.TryGetValue(unit, out TModel model)) return false;
+            if (!ReferenceEquals(model, currentModel))
+            {
+                _pending.Remove(unit);
+                return false;
+            }
+            if (!modelActive) return false;
+            _pending.Remove(unit);
+            return true;
+        }
+
+        internal void Clear()
+        {
+            _pending.Clear();
         }
     }
 

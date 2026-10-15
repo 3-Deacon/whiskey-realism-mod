@@ -92,6 +92,9 @@ namespace WhiskeyRealism.Patches
 
         internal bool Active => _unit != null;
 
+        // The unit whose flag is cleared for the current call (null when none).
+        internal TUnit Unit => _unit;
+
         internal bool Apply(TUnit unit)
         {
             if (unit == null || _unit != null) return false;

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using WhiskeyRealism;
+using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Telemetry;
@@ -23,7 +24,26 @@ internal static class AllocationRegressionTests
             ("alloc OnceLog fired key allocates nothing", OnceLogFiredKey),
             ("alloc PatchFirstFire fired id allocates nothing", FirstFireFiredId),
             ("alloc observer caches allocate nothing in steady state", ObserverCaches),
+            ("alloc deferred flag ledger allocates nothing in steady state", DeferredFlagLedgerSteadyState),
         });
+    }
+
+    // #83 hidden transport flags: defer, hidden cycles and the replay on show reuse the
+    // pre-sized dictionary.
+    private static void DeferredFlagLedgerSteadyState()
+    {
+        var ledger = new DeferredFlagLedger<object, object>(64);
+        var units = new object[32];
+        var models = new object[32];
+        for (int i = 0; i < units.Length; i++) { units[i] = new object(); models[i] = new object(); }
+        Action cycle = () =>
+        {
+            for (int i = 0; i < units.Length; i++) ledger.Defer(units[i], models[i]);
+            for (int i = 0; i < units.Length; i++) ledger.Resolve(units[i], models[i], false);
+            for (int i = 0; i < units.Length; i++) ledger.Resolve(units[i], models[i], true);
+            ledger.Resolve(units[0], models[0], true);
+        };
+        AssertEqual(0L, Measure(cycle, 200), "deferred flag ledger bytes");
     }
 
     private static long Measure(Action body, int calls)

@@ -121,6 +121,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableFoggedAiCampPlacementBudget;
         public static ConfigEntry<int> FoggedAiCampPlacementsPerFrame;
         public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableHiddenTransportFlagDeferral;
         public static ConfigEntry<bool> EnableOrphanCampCleanup;
         public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
         public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
@@ -905,6 +906,9 @@ namespace WhiskeyRealism
             EnableFoggedAiEmbarkationFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
                 "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableHiddenTransportFlagDeferral = Config.Bind(
+                "Campaign Bug Fixes", "Enable Hidden Transport Flag Deferral", true,
+                "Default ON. With the Fogged AI Embarkation Fix, a transport model created for an AI unit the player cannot see is hidden at once, yet vanilla still sets up its flag (texture loads and a material copy the model's removal does not free). That setup is skipped for such a model and run when the model is shown, which is when vanilla itself would have created it; a model removed while hidden never sets its flag up. Off: the flag is set up when the model is created (models already deferred still set theirs up when shown).");
             EnableOrphanCampCleanup = Config.Bind(
                 "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
                 "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");

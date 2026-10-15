@@ -22,6 +22,8 @@ internal static class FoggedModelBudgetTests
             ("fogged camp budget simulation matches vanilla outcome at k=1", () => SimulationMatchesVanilla(60, 20, 1, 3)),
             ("fogged camp budget that never binds keeps vanilla timing", BudgetThatNeverBindsKeepsVanillaTiming),
             ("fogged transport sounds detached only while hidden with a model", TransportSoundsDetachedOnlyWhileHiddenWithModel),
+            ("fogged transport flag deferred only inside the fix with a replay", TransportFlagDeferredOnlyInsideFixWithReplay),
+            ("fogged transport flag ledger replays once on show and drops replaced models", TransportFlagLedgerReplaysOnceOnShow),
         });
     }
 
@@ -186,5 +188,73 @@ internal static class FoggedModelBudgetTests
         AssertFalse(FoggedModelRule.ShouldDetachTransportSounds(false, false, true, false), "visible AI unit");
         AssertFalse(FoggedModelRule.ShouldDetachTransportSounds(true, true, true, false), "player alliance");
         AssertFalse(FoggedModelRule.ShouldDetachTransportSounds(false, true, true, true), "fleet");
+    }
+
+    private static void TransportFlagDeferredOnlyInsideFixWithReplay()
+    {
+        AssertTrue(FoggedModelRule.ShouldDeferTransportFlag(true, true, true), "fogged land model, flag on, replay resolved");
+        AssertFalse(FoggedModelRule.ShouldDeferTransportFlag(false, true, true), "flag off: vanilla");
+        AssertFalse(FoggedModelRule.ShouldDeferTransportFlag(true, false, true), "outside the fix's call (visible units, fleets, player units): vanilla");
+        AssertFalse(FoggedModelRule.ShouldDeferTransportFlag(true, true, false), "no replay available: vanilla");
+    }
+
+    private sealed class SimModel
+    {
+        internal bool Active = true;
+        internal int FlagSetups;
+    }
+
+    // The Finalizer's order per regular cycle: create (Prefix defers), hide/show, Resolve.
+    private static void TransportFlagLedgerReplaysOnceOnShow()
+    {
+        var ledger = new DeferredFlagLedger<object, SimModel>(4);
+        var unit = new object();
+        var other = new object();
+        var model = new SimModel();
+
+        AssertFalse(ledger.Resolve(unit, model, true), "nothing deferred: no replay");
+        ledger.Defer(unit, model);
+        model.Active = false;
+        AssertEqual(1, ledger.Count, "deferred at creation");
+        for (int cycle = 0; cycle < 5; cycle++)
+            AssertFalse(ledger.Resolve(unit, model, model.Active), "hidden cycles: no replay");
+        AssertFalse(ledger.Resolve(other, model, true), "another unit: no replay");
+        model.Active = true;
+        if (ledger.Resolve(unit, model, model.Active)) model.FlagSetups++;
+        AssertEqual(1, model.FlagSetups, "shown: flag set up");
+        AssertEqual(0, ledger.Count, "entry consumed");
+        for (int cycle = 0; cycle < 3; cycle++)
+            if (ledger.Resolve(unit, model, model.Active)) model.FlagSetups++;
+        AssertEqual(1, model.FlagSetups, "set up once (vanilla never refreshes a live model's flag)");
+
+        // Replaced while hidden (rail -> river): the old model is dropped and never set up.
+        var rail = new SimModel { Active = false };
+        ledger.Defer(unit, rail);
+        var river = new SimModel { Active = false };
+        AssertFalse(ledger.Resolve(unit, river, false), "replaced model");
+        AssertEqual(0, ledger.Count, "replaced entry dropped");
+        AssertFalse(ledger.Resolve(unit, river, true), "the replacement was not deferred");
+
+        // Destroyed while hidden: dropped.
+        ledger.Defer(unit, rail);
+        AssertFalse(ledger.Resolve(unit, null, false), "model gone");
+        AssertEqual(0, ledger.Count, "destroyed entry dropped");
+
+        // Left active (the fog restore failed): set up at once.
+        var kept = new SimModel();
+        ledger.Defer(other, kept);
+        AssertTrue(ledger.Resolve(other, kept, kept.Active), "active right after creation: set up now");
+
+        // A second deferral for the same unit replaces the first.
+        ledger.Defer(unit, rail);
+        ledger.Defer(unit, river);
+        AssertEqual(1, ledger.Count, "one entry per unit");
+        AssertTrue(ledger.Resolve(unit, river, true), "the newest model is the one set up");
+        ledger.Defer(unit, river);
+        ledger.Clear();
+        AssertEqual(0, ledger.Count, "campaign reset");
+        ledger.Defer(null, river);
+        ledger.Defer(unit, null);
+        AssertEqual(0, ledger.Count, "null unit or model ignored");
     }
 }

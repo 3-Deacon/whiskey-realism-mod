@@ -2,13 +2,13 @@
 
 > Branch `fix/perf-hot-paths` (worktree `.worktrees/perf-hot-paths`), base `main` `742d7e4`, `main` `0c2bd01` merged in. Source review: the 2026-10-15 performance review ("campaign map and battles"), § 1 "fix now" items plus the user's scope addendum. Sub-branches merged into this one: `fix/perf-transpilers`, `fix/perf-campaign-hooks`, `fix/perf-fog-budgets`, `fix/perf-daily-review`.
 
-**User direction (2026-10-15):** "fix it all correctly", then "fix all that and bring it up to par to what games do". Transpilers #109/#110: the user approved both, answer "Approve both (Recommended)" (2026-10-15).
+**User direction (2026-10-15):** "fix it all correctly", then "fix all that and bring it up to par to what games do". Transpilers #109/#110: the user approved both, answer "Approve both (Recommended)" (2026-10-15). Skipping Prefix on `Ship.InitializeFlag` (L2 flags): "Approve (Recommended)" (2026-10-15). BUG-LOG-015a (hidden marching sounds): "Leave as vanilla" (2026-10-15).
 
 ## Rules held
 
 - Behaviour unchanged except where an item below says "stated change". Every optimisation has a harness equivalence test (old against new on fixtures, edge cases included), and each was mutation-checked: a planted behaviour change turned the test red.
 - `TelemetryPerf.Scope` + `PatchFirstFire.Mark` stay first in every patch entry that does work; the only early returns before a scope are no-op paths (L3, matching the observer's existing `if (!Enabled()) return;`).
-- No Transpiler or skipping Prefix beyond the two approved ones. Doctrine clock, fog honesty, battle write rules and BattleScope/CampaignScope unchanged.
+- No Transpiler or skipping Prefix beyond the approved ones (#109, #110, #83 `HiddenModelFlag`). Doctrine clock, fog honesty, battle write rules and BattleScope/CampaignScope unchanged.
 - Numbers are net8 RyuJIT micro-benchmarks (Release, tiered compilation and PGO off) on a loaded WSL2 machine. The game runs Unity 2021.3 Mono with a Boehm GC: expect 1.5-3x slower in time; bytes are exact.
 
 ## As built
@@ -30,6 +30,7 @@
 | Label fix (found here) | HarmonyX 2.10.2 `CodeInstruction.Clone()` drops labels and blocks; #89, #90 and the perk-id transpilers on `main` returned clones; now copy-constructed | — | `TranspilerLabelTests` (runs the real `Transpile` helpers, sweeps `src` for `Clone()`) |
 | L1 #82 | per-frame budget for hidden-unit camp placement (K = 2, carried to later regular cycles; units with a camp always flip) | H = 50/100: peak 8/10 placements per frame -> 2 | `FoggedModelBudgetTests` simulation: same per-unit camps, never earlier, never destroyed |
 | L2 #83 | no budget: the transport model is game state, deferring it would change outcomes | — | recorded |
+| L2 #83 flags (skipping Prefix, approved) | `HiddenModelFlag` skips `Ship.InitializeFlag` for a model the fix creates for a fogged AI land unit (hidden at once) and the Finalizer replays it once that model is active; a model replaced or destroyed while hidden never sets its flag up. Flag `Enable Hidden Transport Flag Deferral` | per hidden model: 3 `GameObject.Find` + 2 `Resources.Load` + one leaked `Renderer.material` copy per flag renderer -> 0 until shown | rule truth table and ledger simulation (`FoggedModelBudgetTests`), wiring pins (`CampaignLogisticsGlueTests`), binding test on the shipped DLL (`InitializeFlag` private void, one caller `Ship.Initialize`), ledger allocation pin; each mutation-checked. Stated difference: the naval-flag texture is chosen for the date the model is shown, which is the date vanilla would create the model (it creates none while the unit is hidden) |
 | BUG-LOG-015 #83 | hidden embarked AI units no longer play train/steamboat sounds (their sound objects are detached while hidden, reattached when shown) | — | `CampaignLogisticsGlueTests` + binding test against the shipped DLL |
 | L4 #82/#83 | per-call `OnceLog.Info` behind static first-log flags | 16.1 -> 1.1 ns per call | flag-per-log pin |
 | M2 / B-1 daily review | ordered 21-job list (map, then per alliance CIC ... report) run under `Daily Review Frame Budget Ms` (4), results published atomically (`StrategicLedgerSet`), days never interleave, #111 drains before campaign saves | per frame: all jobs on one frame -> <= 4 ms + the largest job | `DailyReviewSchedulerTests` (sliced = unsliced over a 40-day model, random budgets; readers between slices see the previous day), `StrategicLedgerSetTests` |
@@ -45,21 +46,24 @@ Not built, with reason:
 
 ## PROVE-MODE
 
-Harness (2399 PASS on this branch, with `main` `0c2bd01` merged) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Runtime proof is the smoke below; nothing is deployed. The `Clone()` label fix found here is already on `main` (`dce672e`, deployed); `TranspilerLabelTests` covers #109 and #110 with their real `Transpile` on the real IL.
+Harness (2404 PASS on this branch, with `main` `0c2bd01` merged) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Runtime proof is the smoke below; nothing is deployed. The `Clone()` label fix found here is already on `main` (`dce672e`, deployed); `TranspilerLabelTests` covers #109 and #110 with their real `Transpile` on the real IL.
 
 ## Smoke (first perf smoke: `Logging Profile = FullTuning`, `Max Tuning Log MB = 2000`, review § 7)
 
 1. Battle (one W&L, one normal; 10 min at 1x, 5 min at 20x): `PerformanceAggregate` for `tactical.perception`, `tactical.snapshot.build`, `tactical.arbiter.*`, `tactical.producer.*`, `tactical.observer-pass`, `tactical.patch.observer.*`, `tactical.patch.skirmisher-screen`; `FrameHitch` rows (`topScopes`, `gen0Delta`); `count` of `tactical.orchestrator-tick` per 5 s window. `TacticalDecisionMatrix` battle rows carry `events=...`; group rows repeat only on change or every 30 s.
 2. Campaign (W&L and non-W&L; 5 game days at 20x and 50x): `[DailyOps:Perf] ... slices=N maxSliceMs=...` with `maxSliceMs` <= ~4 + the largest per-ledger ms; `campaign.patch.coord-offensive-ops.prefix` and `campaign.patch.importance-values` count/total; no `campaign.patch.wl-morale-scope.*` / `wl-unit-stats-scope.*` rows in a non-W&L campaign.
-3. Log lines: `[first-fire] campaign.patch.unit-list-reuse.hook`; in W&L `[first-fire] campaign.patch.wl-unit-name-read.hook`; `[first-fire] campaign.patch.daily-review-save-drain` on a save; `[once:fogged-camp:deferred]`; `[once:fogged-embarkation:silenced]` (if `[once:fogged-embarkation:kept]` appears and `silenced` never does across hidden rail/river moves, the sound fix is a no-op).
-4. Must not appear: `HarmonyException`, `Label ... not marked`, a mass of NEVER FIRED in `tools/smoke-check.py`, `[Patch:UnitListReuse] completeunitlist.ToList() found`, `[Patch:WlUnitNameRead] dead name read found`, `[OffensiveAvailability] ... not found or not bindable`, `[DailyOps] review slice failed`, `[BattleRecon] Regiment.LinkedUnitData fields not found`.
-5. Behaviour watch: hidden AI camps appear in the same numbers over about twice as many frames; no train whistle or steamboat loop from an empty map area; recon missions still start in a post-contact lull.
+3. Log lines: `[first-fire] campaign.patch.unit-list-reuse.hook`; in W&L `[first-fire] campaign.patch.wl-unit-name-read.hook`; `[first-fire] campaign.patch.daily-review-save-drain` on a save; `[once:fogged-camp:deferred]`; `[first-fire] campaign.patch.fogged-embarkation.hidden-flag.prefix` and, after a hidden AI unit embarks then comes into view, `[once:fogged-embarkation:flag-deferred]` then `[once:fogged-embarkation:flag-replayed]`; `[once:fogged-embarkation:silenced]` (if `[once:fogged-embarkation:kept]` appears and `silenced` never does across hidden rail/river moves, the sound fix is a no-op).
+4. Must not appear: `HarmonyException`, `Label ... not marked`, a mass of NEVER FIRED in `tools/smoke-check.py`, `[Patch:UnitListReuse] completeunitlist.ToList() found`, `[Patch:WlUnitNameRead] dead name read found`, `[OffensiveAvailability] ... not found or not bindable`, `[DailyOps] review slice failed`, `[BattleRecon] Regiment.LinkedUnitData fields not found`, `Ship.InitializeFlag not found`, `flag deferral failed`, `setting up a shown transport model's flag failed`.
+5. Behaviour watch: hidden AI camps appear in the same numbers over about twice as many frames; no train whistle or steamboat loop from an empty map area; an AI train or boat that comes into view flies its flag (not the prefab's default texture); recon missions still start in a post-contact lull.
 
-## Needs the user
+## User decisions (2026-10-15)
 
-- A skipping Prefix on `Ship.InitializeFlag` for models about to be hidden (L2: the flag `Resources.Load` and the vanilla material leak). Not implemented.
-- BUG-LOG-015a: vanilla plays a hidden marching AI unit's foot loop, music and bugles with no fog test. Recorded, not fixed.
-- Arbiter / #44 replay dedupe for the Statistics panel (M4): needs a design decision on vanilla overwriting Whiskey's writes within a frame.
+- Skipping Prefix on `Ship.InitializeFlag` for models about to be hidden: "Approve (Recommended)". Built as #83 `HiddenModelFlag` (row above).
+- BUG-LOG-015a (vanilla plays a hidden marching AI unit's foot loop, music and bugles with no fog test): "Leave as vanilla". Recorded in `docs/bug-fixes/vanilla-campaign-logistics.md`; no code.
+
+## Open design items
+
+- M4 Statistics panel, arbiter / #44 replay dedupe: left undone (integrator decision, 2026-10-15). A replay of `UpdateAITasks` in the same frame can overwrite Whiskey's writes, and the battle-core arbiter's repeated run re-asserts them; deduping would change which write stands within that frame and needs its own design.
 
 ## Remaining gap against production practice (not built)
 

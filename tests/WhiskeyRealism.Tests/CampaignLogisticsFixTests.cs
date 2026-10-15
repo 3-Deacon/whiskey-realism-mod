@@ -44,6 +44,7 @@ internal static class CampaignLogisticsFixTests
             ("logistics raid scale matches vanilla group supply state il", RaidScaleMatchesVanillaGroupSupplyStateIl),
             ("logistics patch targets bind the vanilla names", PatchTargetsBindTheVanillaNames),
             ("logistics hidden transport sound fields bind", HiddenTransportSoundFieldsBind),
+            ("logistics hidden transport flag method binds", HiddenTransportFlagMethodBinds),
         });
     }
 
@@ -467,6 +468,30 @@ internal static class CampaignLogisticsFixTests
         AssertTrue(AccessTools.Field(typeof(Regiment), "csound_shipfiring") != null, "Regiment.csound_shipfiring");
         foreach (var field in new[] { "shownmodel", "currentmodeltype", "campbuilding", "entrenchment", "iswithinfog" })
             AssertTrue(AccessTools.Field(typeof(Regiment), field) != null, "Regiment." + field);
+    }
+
+    // #83 HiddenModelFlag skips and later replays Ship.InitializeFlag (141278): a private,
+    // parameterless void instance method the replay binds as an open Action<Ship>.
+    private static void HiddenTransportFlagMethodBinds()
+    {
+        var method = AccessTools.Method(typeof(Ship), "InitializeFlag", Type.EmptyTypes);
+        AssertTrue(method != null && !method.IsStatic && !method.IsPublic && method.ReturnType == typeof(void), "Ship.InitializeFlag is a private void instance method");
+        var replay = (Action<Ship>)Delegate.CreateDelegate(typeof(Action<Ship>), method);
+        AssertTrue(replay != null, "binds as Action<Ship>");
+        AssertTrue(AccessTools.Field(typeof(Ship), "flag")?.FieldType == typeof(Flag), "Ship.flag is the Flag InitializeFlag sets up");
+        AssertTrue(AccessTools.Field(typeof(Regiment), "shownmodel")?.FieldType == typeof(Ship), "Regiment.shownmodel is the Ship");
+        // InitializeFlag's one caller is Ship.Initialize (141260), the call the fix's
+        // CheckModelReplacement makes for a new model (116394, 116414, 116456).
+        var initialize = AccessTools.Method(typeof(Ship), "Initialize");
+        int calls = PatchProcessor.GetOriginalInstructions(initialize).Count(ci => (ci.opcode == OpCodes.Call || ci.opcode == OpCodes.Callvirt) && Equals(ci.operand, method));
+        AssertEqual(1, calls, "Ship.Initialize calls InitializeFlag once");
+        int flagCalls = 0;
+        foreach (var other in typeof(Ship).GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+        {
+            if (other.GetMethodBody() == null) continue;
+            flagCalls += PatchProcessor.GetOriginalInstructions(other).Count(ci => Equals(ci.operand, method));
+        }
+        AssertEqual(1, flagCalls, "no other Ship method calls InitializeFlag");
     }
 
     // BUG-LOG-015: FoggedEmbarkationPatch reaches SoundEngine's private sound objects by

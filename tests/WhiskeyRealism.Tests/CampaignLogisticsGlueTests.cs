@@ -38,6 +38,7 @@ internal static class CampaignLogisticsGlueTests
             ("logistics glue patches pass the decisions vanilla state", PatchesPassDecisionsVanillaState),
             ("logistics glue camp placement budget wired", CampPlacementBudgetWired),
             ("logistics glue hidden transport sounds wired", HiddenTransportSoundsWired),
+            ("logistics glue hidden transport flag deferred and replayed on show", HiddenTransportFlagWired),
             ("logistics glue fog patches log through first-log flags", FogPatchesLogThroughFirstLogFlags),
         });
     }
@@ -110,7 +111,9 @@ internal static class CampaignLogisticsGlueTests
         var sounds = new[] { 4, 7 };
         var unit = new Unit { Fog = true, Sounds = sounds };
         var flip = SoundFlip(muted);
+        AssertEqual(null, flip.Unit, "no unit before apply");
         AssertTrue(flip.Apply(unit), "applied");
+        AssertTrue(ReferenceEquals(unit, flip.Unit), "the flipped unit is exposed for the call");
         AssertFalse(unit.Fog, "fog cleared for the call");
         AssertTrue(ReferenceEquals(muted, unit.Sounds), "bugle muted");
         AssertFalse(flip.Apply(new Unit { Fog = true }), "nested apply refused");
@@ -118,6 +121,7 @@ internal static class CampaignLogisticsGlueTests
         AssertTrue(unit.Fog, "fog back");
         AssertTrue(ReferenceEquals(sounds, unit.Sounds), "sounds back");
         AssertFalse(flip.Active, "inactive");
+        AssertEqual(null, flip.Unit, "no unit after restore");
         AssertEqual(null, flip.Restore(false), "idle restore is a no-op");
         AssertFalse(flip.Apply(null), "null unit refused");
     }
@@ -470,6 +474,41 @@ internal static class CampaignLogisticsGlueTests
             && embark.Contains("AccessTools.Inner(typeof(SoundEngine), \"SoundObject\")")
             && embark.Contains("AccessTools.Field(soundObject, \"go\")")
             && embark.Contains("AccessTools.Field(soundObject, \"oldgo\")"), "reflection names match the binding test");
+    }
+
+    // L2 (user-approved skipping Prefix): Ship.InitializeFlag is skipped only through the
+    // rule, inside the fix's own call, once the replay delegate resolved; the Finalizer
+    // replays it after the model's active state is set and after the fog flag is restored.
+    private static void HiddenTransportFlagWired()
+    {
+        string embark = PatchSource("FoggedEmbarkationPatch.cs");
+        AssertTrue(embark.Contains("[HarmonyPatch(typeof(Ship), \"InitializeFlag\")]"), "patches Ship.InitializeFlag");
+        string flagClass = embark.Substring(embark.IndexOf("class HiddenModelFlag", StringComparison.Ordinal));
+        string prefix = MethodBody(flagClass, "Prefix");
+        string rule = "if (!FoggedModelRule.ShouldDeferTransportFlag(DeferFlagEnabled(), Flip.Active, ResolveInitializeFlag())) return true;";
+        AssertTrue(prefix.Contains(rule), "skip decided by the rule with the replay resolved");
+        int ruleAt = prefix.IndexOf(rule, StringComparison.Ordinal);
+        int defer = prefix.IndexOf("DeferredFlags.Defer(unit, __instance);", StringComparison.Ordinal);
+        int skip = prefix.IndexOf("return false;", StringComparison.Ordinal);
+        AssertTrue(ruleAt >= 0 && ruleAt < defer && defer < skip, "recorded before vanilla is skipped");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(prefix, @"return false;").Count, "one skip path");
+        AssertTrue(prefix.Contains("Regiment unit = Flip.Unit;"), "the unit is the one the fix flipped");
+        string catchBlock = prefix.Substring(prefix.IndexOf("catch (Exception", StringComparison.Ordinal));
+        AssertTrue(catchBlock.Contains("return true;"), "a failure runs vanilla");
+        string fin = MethodBody(embark, "Finalizer");
+        int restore = fin.IndexOf("Flip.Restore(", StringComparison.Ordinal);
+        int sync = fin.IndexOf("ModelActiveSync.Apply(", StringComparison.Ordinal);
+        int replay = fin.IndexOf("ReplayDeferredFlag(__instance);", StringComparison.Ordinal);
+        AssertTrue(restore >= 0 && restore < sync && sync < replay, "replay after the restore and the show/hide");
+        string replayBody = MethodBody(embark, "void ReplayDeferredFlag");
+        AssertTrue(replayBody.Contains("bool active = (UnityEngine.Object)model != null && ((Component)model).gameObject.activeSelf;"), "replay only on an active model");
+        int resolve = replayBody.IndexOf("if (!DeferredFlags.Resolve(unit, ", StringComparison.Ordinal);
+        int call = replayBody.IndexOf("_initializeFlag(model);", StringComparison.Ordinal);
+        AssertTrue(resolve >= 0 && resolve < call, "replay runs vanilla's InitializeFlag after the ledger says so");
+        AssertTrue(embark.Contains("AccessTools.Method(typeof(Ship), \"InitializeFlag\", Type.EmptyTypes)"), "replays the same vanilla method");
+        AssertTrue(embark.Contains("DeferredFlags.Clear();"), "ledger cleared per campaign");
+        string resolveBody = MethodBody(embark, "bool ResolveInitializeFlag");
+        AssertTrue(resolveBody.Contains("if (_initializeFlagMissing) return false;"), "no skip once the replay is unavailable");
     }
 
     // L4: every OnceLog.Info in the two hot fog patches sits behind a static first-log
