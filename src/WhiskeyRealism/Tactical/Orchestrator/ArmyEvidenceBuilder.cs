@@ -203,11 +203,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ownReinforcementsArriving: 0f);
         }
 
-        // Last bare (un-banded) front axis per alliance, kept so centroid jitter
-        // does not re-band units every tick (TacticalFrontAxis.Stabilize) and
-        // so a side with no enemy in sight keeps facing where it last faced.
-        // Reset when the BattleUnits instance changes (new battle / reload).
-        private static readonly TacticalFrontAxis[] _lastBareAxis = new TacticalFrontAxis[2];
+        // Last evidence axis per alliance: the stabilization reference for the
+        // nearest-objective fallback and the axis SectorOfPoint / MapOwnGroupsToSectors
+        // band with. Reset when the BattleUnits instance changes (new battle / reload).
         private static readonly TacticalFrontAxis[] _lastFittedAxis = new TacticalFrontAxis[2];
         private static readonly TacticalEnemyContactLedger[] _contactLedgers =
             { new TacticalEnemyContactLedger(), new TacticalEnemyContactLedger() };
@@ -247,7 +245,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             for (int i = 0; i < 2; i++)
             {
-                _lastBareAxis[i] = TacticalFrontAxis.None;
                 _lastFittedAxis[i] = TacticalFrontAxis.None;
                 _contactLedgers[i].Reset();
                 _terrainByAlliance[i] = null;
@@ -452,9 +449,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Group flank threat is the vanilla outflanked weight over the snapshot's perceived
         /// flank pressure (<see cref="MeanFlankThreatByGroup"/>).
         ///
-        /// Sectors are lateral bands of a <see cref="TacticalFrontAxis"/> from the own
-        /// centroid toward the visible-enemy centroid (or the nearest objective we do not
-        /// hold), keyed by GameObject instance id.
+        /// Sectors are lateral bands of the snapshot's front axis (own centroid toward the
+        /// visible-enemy centroid; the nearest objective we do not hold until anything is
+        /// seen, <see cref="EvidenceFrontAxis"/>), keyed by GameObject instance id.
         /// </summary>
         private static EnemyVisibleState BuildEnemyVisibleState(BattleSnapshot s, BattleUnits bunits)
         {
@@ -521,8 +518,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 CollectEnemySamples(s, _engagedIds, enemyVisible, _sectorEnemyBuffer, _knownEnemyBuffer);
 
                 var ownSample = ownCombat.Count > 0 ? ownCombat : ownGroups;
-                var bare = BareAxis(bunits, ownAllianceId, ownSample, enemyVisible);
-                var axis = EnemyVisibleSectorBuilder.FitAxis(bare, ownSample, enemyVisible);
+                var previous = ownAllianceId >= 0 && ownAllianceId <= 1 ? _lastFittedAxis[ownAllianceId] : TacticalFrontAxis.None;
+                bool hasObjective = false;
+                float objectiveX = 0f, objectiveZ = 0f;
+                if (s.FrontAxis.IsValid && s.FrontAxis.TargetDistance <= 0f)
+                    hasObjective = TryNearestOpenObjective(ownAllianceId, s.FrontAxis.OriginX, s.FrontAxis.OriginZ, out objectiveX, out objectiveZ);
+                var axis = EvidenceFrontAxis(s.FrontAxis, previous, hasObjective, objectiveX, objectiveZ, ownSample, enemyVisible);
                 if (ownAllianceId >= 0 && ownAllianceId <= 1) _lastFittedAxis[ownAllianceId] = axis;
                 var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, ownCombat, _sectorEnemyBuffer);
                 var instanceSectors = EnemyVisibleSectorBuilder.MapInstances(axis, ownGroups);
@@ -548,10 +549,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // Coverage: bands across own units and known (visible +
                     // remembered) enemy positions, observed where an own combat
                     // unit stands; and the enemy-side entry points an own unit watches.
+                    // The fitted axis serves as the coverage frame: CoverageBands re-spreads
+                    // its own bands over own + known extent and only keeps origin and heading.
                     int bandCount = EnemyVisibleSectorBuilder.CoverageBands(
-                        bare, ownCombat, _knownEnemyBuffer, _ownBandBuffer, _bandMinBuffer, _bandMaxBuffer);
+                        axis, ownCombat, _knownEnemyBuffer, _ownBandBuffer, _bandMinBuffer, _bandMaxBuffer);
                     ledger.ObserveCoverage(nowHours, _bandMinBuffer, _bandMaxBuffer, _ownBandBuffer, bandCount,
-                        visibleEntries.Count, enemyEntries.Count, bare.HeadingDegrees);
+                        visibleEntries.Count, enemyEntries.Count, axis.HeadingDegrees);
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
                     intelConfidence = ledger.Confidence(nowHours);
@@ -594,40 +597,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Own-centroid → target axis, stabilized against the last axis for this
-        /// alliance. Target = strength-weighted centroid of visible enemies; with
-        /// nothing in sight, the nearest objective not held by this alliance
-        /// (BattleUnits.objectives 78910, owner 84809 — public map knowledge);
-        /// otherwise keep facing the last known way.
-        /// </summary>
-        private static TacticalFrontAxis BareAxis(
-            BattleUnits bunits,
-            int allianceId,
-            IReadOnlyList<FrontUnitSample> own,
-            IReadOnlyList<FrontUnitSample> enemy)
-        {
-            if (!Centroid(own, out float ox, out float oz)) return TacticalFrontAxis.None;
-
-            int slot = allianceId == 1 ? 1 : 0;
-            var previous = allianceId >= 0 && allianceId <= 1 ? _lastBareAxis[slot] : TacticalFrontAxis.None;
-
-            TacticalFrontAxis next;
-            if (Centroid(enemy, out float ex, out float ez))
-                next = TacticalFrontAxis.FromCentroids(ox, oz, ex, ez);
-            else if (TryNearestOpenObjective(allianceId, ox, oz, out float tx, out float tz))
-                next = TacticalFrontAxis.FromCentroids(ox, oz, tx, tz);
-            else if (previous.IsValid)
-                next = TacticalFrontAxis.FromCentroids(ox, oz, ox + previous.ForwardX * previous.TargetDistance,
-                    oz + previous.ForwardZ * previous.TargetDistance);
-            else
-                next = TacticalFrontAxis.FromCentroids(ox, oz, ox, oz);
-
-            var stable = TacticalFrontAxis.Stabilize(previous, next, TacticalFrontAxis.DefaultMinHeadingChangeDegrees);
-            if (allianceId >= 0 && allianceId <= 1) _lastBareAxis[slot] = stable;
-            return stable;
-        }
-
-        /// <summary>
         /// Own command group (GameObject instance id) → lateral band, using the
         /// last front axis fitted for this alliance by <see cref="Build"/> and the
         /// side's current battle snapshot. Empty until a Build has run. Lets callers
@@ -654,24 +623,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             catch { }
             return map;
-        }
-
-        private static bool Centroid(IReadOnlyList<FrontUnitSample> units, out float x, out float z)
-        {
-            x = 0f; z = 0f;
-            if (units == null || units.Count == 0) return false;
-            double sx = 0, sz = 0, w = 0;
-            for (int i = 0; i < units.Count; i++)
-            {
-                double weight = Math.Max(1f, units[i].Strength);
-                sx += units[i].X * weight;
-                sz += units[i].Z * weight;
-                w += weight;
-            }
-            if (w <= 0) return false;
-            x = (float)(sx / w);
-            z = (float)(sz / w);
-            return true;
         }
 
         private static bool TryNearestOpenObjective(int allianceId, float ox, float oz, out float tx, out float tz)

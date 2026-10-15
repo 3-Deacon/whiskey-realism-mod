@@ -268,6 +268,10 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("tactical.patch.observer.check-global", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
                 PatchFirstFire.Mark("tactical.patch.observer.check-global");
+                // Battle core (D1): build every AI-run side's snapshot first, whatever the
+                // orchestrator flag, so this call's observer context and every fog-honest
+                // reader see this frame's perception.
+                TacticalBattleCoordinator.EnsureBattleCoreSnapshots(__instance);
                 // One battle context per vanilla call, shared by both observed events.
                 var context = BuildContextIfEnabled(__instance);
                 Observe(__instance, TacticalObservedEvent.Macro, null, null, context);

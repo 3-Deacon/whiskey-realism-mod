@@ -49,6 +49,7 @@ internal static class BattlePerceptionTests
             ("battle-perception unseen enemy avenues are filtered", UnseenEnemyAvenuesAreFiltered),
             ("battle-perception signature inputs from snapshot", SignatureInputsFromSnapshot),
             ("battle-perception group pressure helpers read the snapshot", GroupPressureHelpersReadTheSnapshot),
+            ("battle-perception evidence front axis is the snapshot axis", EvidenceFrontAxisIsTheSnapshotAxis),
         });
     }
 
@@ -913,5 +914,51 @@ internal static class BattlePerceptionTests
         AssertEqual(0f, ArmyEvidenceBuilder.SlicePressureTotal(null, 0), "no snapshot");
         AssertFalse(ArmyEvidenceBuilder.HasFlankPressure(s, 1), "far unit: no flank pressure");
         AssertFalse(ArmyEvidenceBuilder.HasFlankPressure(null, 0), "no snapshot: no flank pressure");
+    }
+
+    // Evidence bands on the snapshot's front axis (BC1 fit, refit on what is seen by BC2a);
+    // only before any enemy has given the snapshot a target does it face the nearest open
+    // objective, as the shipped evidence axis did.
+    private static void EvidenceFrontAxisIsTheSnapshotAxis()
+    {
+        var own = new[] { OwnUnit(1, -200f, -1000f, strength: 600), OwnUnit(2, 200f, -1000f, strength: 600) };
+        var seen = ConsumerSnapshot(10.0, own, Seen(21, 0f, -500f, 800f));
+        seen.SetEnemySummary(800f, 0f, 0f, -500f); // what BattlePerception.Publish sets for 21
+        BattleSnapshotTestAxis(seen);
+        AssertTrue(seen.FrontAxis.TargetDistance > 0f, "fixture: the snapshot axis faces the visible enemy");
+        var ownSample = new List<FrontUnitSample> { new FrontUnitSample(1, -200f, -1000f, 600f, false), new FrontUnitSample(2, 200f, -1000f, 600f, false) };
+        var visible = new List<FrontUnitSample> { new FrontUnitSample(21, 0f, -500f, 800f, false) };
+
+        TacticalFrontAxis axis = ArmyEvidenceBuilder.EvidenceFrontAxis(seen.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 5000f, objectiveZ: -1000f, ownSample, visible);
+        AssertNear(seen.FrontAxis.HeadingDegrees, axis.HeadingDegrees, 0.001f, "a snapshot axis with a target is used as is");
+        AssertNear(seen.FrontAxis.LateralMin, axis.LateralMin, 0.001f, "its bands too");
+        AssertTrue(axis.HasEnemyExtent, "enemy extent kept");
+
+        // Nothing ever seen: the snapshot axis is degenerate (forward +z, no target distance).
+        var blind = ConsumerSnapshot(10.0, own);
+        BattleSnapshotTestAxis(blind);
+        AssertTrue(blind.FrontAxis.IsValid && blind.FrontAxis.TargetDistance <= 0f, "fixture: degenerate snapshot axis");
+        axis = ArmyEvidenceBuilder.EvidenceFrontAxis(blind.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 2000f, objectiveZ: -1000f, ownSample, Array.Empty<FrontUnitSample>());
+        AssertNear(90f, axis.HeadingDegrees, 0.01f, "faces the nearest open objective (due east)");
+        AssertNear(blind.FrontAxis.OriginX, axis.OriginX, 0.001f, "from the snapshot's own centroid");
+        AssertEqual(TacticalFrontAxis.DefaultBandCount, axis.BandCount, "banded over the own sample");
+        AssertNear(2000f, axis.TargetDistance, 0.01f, "objective distance");
+
+        axis = ArmyEvidenceBuilder.EvidenceFrontAxis(blind.FrontAxis, TacticalFrontAxis.None,
+            hasOpenObjective: false, objectiveX: 0f, objectiveZ: 0f, ownSample, Array.Empty<FrontUnitSample>());
+        AssertNear(blind.FrontAxis.HeadingDegrees, axis.HeadingDegrees, 0.001f, "no open objective: the snapshot axis");
+
+        AssertFalse(ArmyEvidenceBuilder.EvidenceFrontAxis(TacticalFrontAxis.None, TacticalFrontAxis.None,
+            hasOpenObjective: true, objectiveX: 2000f, objectiveZ: -1000f, ownSample, visible).IsValid,
+            "no own sample (invalid snapshot axis): no axis");
+    }
+
+    // What BattleSnapshotBuilder.RefitFrontAxis does after perception: fit the axis on the
+    // snapshot's own sample and visible observations.
+    private static void BattleSnapshotTestAxis(BattleSnapshot s)
+    {
+        s.SetFrontAxis(BattleSnapshotAssembler.FitFrontAxis(s, TacticalFrontAxis.None, 0));
     }
 }

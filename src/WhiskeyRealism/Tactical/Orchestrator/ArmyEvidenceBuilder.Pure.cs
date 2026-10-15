@@ -258,6 +258,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// The evidence's front axis: the snapshot's (BattleSnapshotAssembler.FitFrontAxis,
+        /// refit on what is seen by the perception probe), which the sector bands, the
+        /// instance map and the coverage frame all share. Until any enemy has given the
+        /// snapshot a target (axis degenerate: forward +z, TargetDistance 0) the side faces
+        /// the nearest objective it does not hold instead, from the snapshot's own centroid,
+        /// stabilized against <paramref name="previous"/> and banded over
+        /// <paramref name="ownSample"/>. An invalid snapshot axis (no own sample) stays invalid.
+        /// </summary>
+        internal static TacticalFrontAxis EvidenceFrontAxis(TacticalFrontAxis snapshotAxis, TacticalFrontAxis previous,
+            bool hasOpenObjective, float objectiveX, float objectiveZ,
+            IReadOnlyList<FrontUnitSample> ownSample, IReadOnlyList<FrontUnitSample> enemyVisible)
+        {
+            if (!snapshotAxis.IsValid || snapshotAxis.TargetDistance > 0f || !hasOpenObjective) return snapshotAxis;
+            var toward = TacticalFrontAxis.FromCentroids(snapshotAxis.OriginX, snapshotAxis.OriginZ, objectiveX, objectiveZ);
+            var bare = TacticalFrontAxis.Stabilize(previous, toward, TacticalFrontAxis.DefaultMinHeadingChangeDegrees);
+            return EnemyVisibleSectorBuilder.FitAxis(bare, ownSample, enemyVisible);
+        }
+
+        /// <summary>
         /// Army-wide average fatigue and ammo (vanilla rule already applied by the snapshot,
         /// UnitRecord.Ammo01) and morale relative to battle start, over alive combat
         /// regiments (unittyp 0-3; strength &gt; 0, active, not routed: vanilla unitsonfield,

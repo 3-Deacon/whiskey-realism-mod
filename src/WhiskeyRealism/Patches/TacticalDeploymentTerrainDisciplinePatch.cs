@@ -27,7 +27,9 @@ namespace WhiskeyRealism.Patches
     //   - groups vanilla placed on fortification lines (num3 == 1, 85684-85751,
     //     ignoredeplyomentzone: true) are left alone;
     //   - fleets and zones with fewer than 2 frontline vectors are skipped;
-    //   - writes go through TacticalWriteGuard.CanWrite.
+    //   - writes go through TacticalWriteGuard.CanWrite;
+    //   - the visible-enemy bearing reads the side's battle snapshot, which this patch
+    //     builds first (BC2b D1 amendment: deployment precedes the first doctrine tick).
     [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
     internal static class TacticalDeploymentTerrainDisciplinePatch
     {
@@ -58,6 +60,7 @@ namespace WhiskeyRealism.Patches
 
                     BattleUnits.Grp[] groups = ReadGroups(__instance);
                     if (groups.Length == 0) return;
+                    EnsureSideSnapshot(__instance, foralliance);
 
                     if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
                         return;
@@ -94,6 +97,24 @@ namespace WhiskeyRealism.Patches
                         "tactical-deployment-terrain:failed",
                         "TacticalDeploymentTerrainDisciplinePatch failed: " + ex.GetType().Name + ": " + ex.Message);
                 }
+            }
+        }
+
+        // Battle core D1 (amended in BC2b): deployment runs before the side's first
+        // CheckGlobalAIStrategy tick (day 1 at battle-init frame 30, 23993-23994; later days
+        // when the deployment panel closes, 164879-164880), so the side's battle snapshot is
+        // built here for the visible-enemy bearing read below. A per-frame cache, not
+        // doctrine state; any AIBattle resolves the side's own instance.
+        private static void EnsureSideSnapshot(BattleUnits battleUnits, int alliance)
+        {
+            AIBattle[] battles = battleUnits.aibattle;
+            if (battles == null) return;
+            for (int i = 0; i < battles.Length; i++)
+            {
+                if ((UnityEngine.Object)battles[i] == null) continue;
+                AIBattle sideBattle = WhiskeyRealism.Tactical.Orchestrator.ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battles[i], alliance);
+                WhiskeyRealism.Tactical.Battle.BattleCoreTick.EnsureSnapshot(sideBattle, alliance);
+                return;
             }
         }
 

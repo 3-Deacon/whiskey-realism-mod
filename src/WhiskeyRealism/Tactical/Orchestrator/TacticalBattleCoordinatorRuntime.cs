@@ -374,9 +374,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // Battle core (D1): one pooled BattleSnapshot per side per frame,
                     // built before any evidence read; the arbiter patch at 5870 reuses
                     // it in this UpdateAITasks call. Every evidence, signature, sector
-                    // and posture-input read below takes it (SideSnapshot).
-                    EnsureBattleCoreSnapshot(side0, battle, aiVsAi);
-                    EnsureBattleCoreSnapshot(side1, battle, aiVsAi);
+                    // and posture-input read below takes it (SideSnapshot). The observer
+                    // postfix already built it this frame; this call is then a no-op.
+                    EnsureBattleCoreSnapshots(battle);
 
                     // Drive each side; the heavy-gate publishes into
                     // _lastPublishedSnapshots[s] when it fires.
@@ -412,11 +412,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // ---- Private runtime helpers ----
 
-        private static void EnsureBattleCoreSnapshot(TacticalBattleOrchestrator side, AIBattle battle, bool aiVsAi)
+        /// <summary>
+        /// Builds the battle snapshot of every AI-run side (vanilla's AI plays the alliance:
+        /// both under ai_vs_ai, which W&amp;L forces, else the non-player alliance), each from
+        /// that side's own AIBattle. Infrastructure, not doctrine (D1, amended in BC2b): it
+        /// runs whenever vanilla's battle AI runs, whatever the orchestrator flag and the
+        /// Commander Mode, because fog-honest readers (evidence, TacticalFogOfWarContact,
+        /// observer telemetry) run in every mode and the snapshot is a per-frame cache with no
+        /// writes. Called from the CheckGlobalAIStrategy postfix (vanilla 5866) and again
+        /// first in Tick; the per-frame cache makes the second call free. Never throws.
+        /// </summary>
+        public static void EnsureBattleCoreSnapshots(AIBattle battle)
         {
-            if (side == null || !ShouldRunTacticalCommanderForSide(side.AllianceId, _playerAllianceId, aiVsAi)) return;
-            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
-            Battle.BattleCoreTick.EnsureSnapshot(sideBattle, side.AllianceId);
+            try
+            {
+                if ((UnityEngine.Object)battle == null) return;
+                bool aiVsAi = SafeAiVsAi();
+                int playerAllianceId = aiVsAi ? -1 : SafePlayerAllianceId();
+                for (int alliance = 0; alliance < 2; alliance++)
+                {
+                    if (!ShouldRunTacticalCommanderForSide(alliance, playerAllianceId, aiVsAi)) continue;
+                    AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, alliance);
+                    Battle.BattleCoreTick.EnsureSnapshot(sideBattle, alliance);
+                }
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-battle-core:ensure-snapshots", "[BattleCore] snapshot build skipped: "
+                    + e.GetType().Name + " " + e.Message);
+            }
         }
 
         // The side's battle snapshot built at the top of this Tick (EnsureBattleCoreSnapshot);
