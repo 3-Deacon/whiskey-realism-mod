@@ -506,12 +506,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Builds the per-band own/enemy picture for one side.
         ///
-        /// Enemy strength is the union of vanilla's fog-filtered sight lists
+        /// Enemy strength is the union of vanilla's range-limited sight lists
         /// across the side's alive combat regiments (<c>unitrange.enemyinrangereg</c>
         /// within raycastrange[0], 122649, and <c>enemyinfirerangereg</c>, 122692),
-        /// each enemy counted once. The old per-group sum of
-        /// <c>unitrange.enemystrengthwithinangle</c> (122720-122732) is not fog
-        /// filtered and holds every enemy within aidefensivemaxrange for EVERY
+        /// each enemy counted once. The lists are not fog-filtered for the AI
+        /// (122650/122699 skip the fog test for player-alliance targets), so
+        /// this is "in range", not "seen". The old per-group sum of
+        /// <c>unitrange.enemystrengthwithinangle</c> (122720-122732) holds
+        /// every enemy within aidefensivemaxrange for EVERY
         /// regiment, so a brigade of four counted the same enemy four times and
         /// a corps about forty times.
         ///
@@ -576,7 +578,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, ownCombat, enemyVisible);
                 var instanceSectors = EnemyVisibleSectorBuilder.MapInstances(axis, ownGroups);
 
-                // Fog-honest enemy knowledge (T6/T11): the enemy's reserve share
+                // In-range enemy knowledge (T6/T11): the enemy's reserve share
                 // is the part of the force we have seen that is NOT yet in fire
                 // range of our line; contact-broken comes from real contact
                 // history. Never the enemy AIBattle's reservegroups designation.
@@ -1167,8 +1169,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 float ownDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
 
-                // Fog-honest enemy picture (T11): the enemy force this side has
-                // seen (largest sighting, decaying), arrivals only through an
+                // In-range enemy picture (T11): the enemy force this side has had
+                // in range (largest sighting, decaying), arrivals only through an
                 // entry point our units can see, and confidence from contact
                 // coverage/recency instead of a fixed 0.8. The ledger and the
                 // watched entry points are refreshed by Build on the evidence

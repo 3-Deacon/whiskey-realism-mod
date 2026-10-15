@@ -46,9 +46,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// One unit's position and strength as the side sees it. Own units come
-    /// from the own roster; enemy units only from vanilla's fog-filtered
-    /// per-regiment sight lists (<c>unitrange.enemyinrangereg</c> /
-    /// <c>enemyinfirerangereg</c>, Regiment 122649/122692).
+    /// from the own roster; enemy units only from vanilla's per-regiment
+    /// sight lists (<c>unitrange.enemyinrangereg</c> /
+    /// <c>enemyinfirerangereg</c>, Regiment 122649/122692). Those lists are
+    /// range-limited, not fog-filtered for the AI: the test is
+    /// <c>!iswithinfog | target.alliance == playeralliance | !usefow</c>
+    /// (122650/122699), and <c>iswithinfog</c> is the player's fog
+    /// (127210-127229). The AI side sees every player unit within range; only
+    /// targets that are not the player's alliance are fog-gated.
     /// </summary>
     public readonly struct FrontUnitSample
     {
@@ -175,8 +180,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
-    /// Visible enemy state bundle, fog-honest: enemy figures come only from
-    /// what the side's own regiments can see. Built by ArmyEvidenceBuilder and
+    /// Visible enemy state bundle: enemy figures come only from vanilla's
+    /// range-limited sight lists of the side's own regiments (no omniscient
+    /// side totals; see <see cref="FrontUnitSample"/> for the fog caveat).
+    /// Built by ArmyEvidenceBuilder and
     /// consumed by ArmyIntentInference.Build. Carries the front geometry the
     /// sectors were built on so every consumer (allocator, cascade, coordinator
     /// sector map) bands units the same way, including on the heavy-gated path

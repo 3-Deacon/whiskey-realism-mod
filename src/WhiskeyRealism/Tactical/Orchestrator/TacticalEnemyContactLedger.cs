@@ -4,10 +4,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
     /// What one side knows about the enemy army from its own eyes. Fed once per
-    /// evidence build with the enemy strength the side can currently see
-    /// (vanilla's fog-filtered sight lists, deduped) and the part of it already
-    /// in fire range. Everything is on battle time (game hours,
-    /// <c>GameVars.currenttimefromstart</c>).
+    /// evidence build with the enemy strength in range of the side's regiments
+    /// (vanilla's range-limited sight lists, deduped — see
+    /// <see cref="FrontUnitSample"/> for what vanilla does and does not
+    /// filter) and the part of it already in fire range. Everything is on
+    /// doctrine time (<see cref="TacticalDoctrineClock"/>, game hours).
     ///
     /// Replaces omniscient reads: the enemy's <c>sideinformation.totalactiveforce</c>,
     /// its <c>reinforcementarrivalswithin24hrs</c> and the enemy AIBattle's

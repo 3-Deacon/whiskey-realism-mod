@@ -487,7 +487,7 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(DirectChildRole.RefuseLeft, map[10].LeafRole, "facing east the north brigade is the left flank");
     }
 
-    // ---- T6 / T11 fog-honest enemy knowledge ----
+    // ---- T6 / T11 in-range enemy knowledge (no omniscient side totals) ----
 
     private static void ContactLedgerBeforeContact()
     {
