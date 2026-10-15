@@ -1,20 +1,18 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// What one side has had of the enemy army within range of its own
-    /// regiments. Fed once per evidence build with the enemy strength in
-    /// vanilla's per-regiment sight lists (deduped) and the part of it already
-    /// in fire range. That picture is range-limited, not fog-limited (vanilla
-    /// AI perception); fog-honest perception arrives with the battle-core
-    /// snapshot. Everything is on doctrine time
-    /// (<see cref="TacticalDoctrineTime"/>, game hours).
+    /// What one side has seen of the enemy army. Fed once per evidence build from the side's
+    /// BattleSnapshot observations (BC2b): visible enemies at full strength and remembered
+    /// ones weighted by their confidence (BC2a memory, vanilla AI-side fog), plus the part of
+    /// the visible force already in fire range. Everything is on doctrine time
+    /// (<see cref="TacticalDoctrineTime"/>, game hours; the snapshot carries it).
     ///
-    /// Stands in for whole-army reads the side has no range-based access to:
-    /// the enemy's <c>sideinformation.totalactiveforce</c>, its
-    /// <c>reinforcementarrivalswithin24hrs</c> and the enemy AIBattle's
+    /// Stands in for whole-army reads the side cannot know: the enemy's
+    /// <c>sideinformation.totalactiveforce</c>, its arrival schedule and the enemy AIBattle's
     /// <c>objectivechain[].reservegroups</c> designation.
     /// </summary>
     public sealed class TacticalEnemyContactLedger
@@ -154,11 +152,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return d > 180f ? 360f - d : d;
         }
 
-        public void Observe(float nowHours, float visibleEnemyStrength, float engagedEnemyStrength)
+        /// <summary>
+        /// One build's sighting from the snapshot: every non-reinforcement observation, visible
+        /// at full strength and remembered weighted by confidence, at the snapshot's doctrine
+        /// hours. Only a visible enemy (or fire) counts as contact.
+        /// </summary>
+        public void Observe(BattleSnapshot snapshot, float engagedEnemyStrength)
+        {
+            if (snapshot == null) return;
+            float visible = 0f, remembered = 0f;
+            EnemyObservation[] observations = snapshot.Observations;
+            for (int i = 0; i < snapshot.ObservationCount; i++)
+            {
+                if (observations[i].IsReinforcement) continue;
+                if (observations[i].State == ObservationState.Visible) visible += observations[i].Strength;
+                else remembered += observations[i].Strength * observations[i].Confidence01;
+            }
+            Observe((float)snapshot.DoctrineHours, visible, engagedEnemyStrength, remembered);
+        }
+
+        public void Observe(float nowHours, float visibleEnemyStrength, float engagedEnemyStrength, float rememberedEnemyStrength = 0f)
         {
             if (!Finite(nowHours)) return;
             if (_lastObserveHours >= 0f && nowHours < _lastObserveHours) Reset();
 
+            float known = Sanitize(visibleEnemyStrength) + Sanitize(rememberedEnemyStrength);
             float visible = Sanitize(visibleEnemyStrength);
             if (_lastObserveHours >= 0f && _largestSeen > 0f)
             {
@@ -167,7 +185,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (keep < 0f) keep = 0f;
                 _largestSeen *= keep;
             }
-            if (visible > _largestSeen) _largestSeen = visible;
+            if (known > _largestSeen) _largestSeen = known;
             if (visible > 0f || Sanitize(engagedEnemyStrength) > 0f) _lastContactHours = nowHours;
             _lastObserveHours = nowHours;
         }

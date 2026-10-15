@@ -50,7 +50,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // the BC5 migration.
     //
     // What stays here: the throttled, expensive derivations (evidence sectors, objective records with
-    // approach avenues, the CommandTreeSnapshot / DirectChildSnapshot views of the parent map). Readers of
+    // approach avenues, the CommandTreeSnapshot / DirectChildSnapshot views of the parent map), all
+    // derived from that per-tick snapshot (BC2b): own figures from its Own records, enemy figures
+    // only from its visible and remembered observations. Readers of
     // this struct guard with HasData and degrade to the per-tick BattleSnapshot when it is Empty
     // (heavy throttling off, no orchestrator/ledger yet, Commander Mode Off).
     //
@@ -139,10 +141,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float OwnArmyMorale { get; }
         public float OwnReservesCommittedFraction { get; }
         /// <summary>
-        /// Own reinforcement strength due within 24 h
-        /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
-        /// the enemy's schedule is not known; enemy arrivals count once in
-        /// range, through the contact ledger.
+        /// Own reinforcement strength due inside vanilla's retreat-decision window
+        /// (ArmyEvidenceBuilder.OwnReinforcementsArriving, 84764-84767). Own side only:
+        /// the enemy's schedule is not known; enemy arrivals count once seen,
+        /// through the contact ledger.
         /// </summary>
         public float OwnReinforcementsArriving { get; }
         public IReadOnlyList<ObjectiveRecord> Objectives { get; }

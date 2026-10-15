@@ -45,7 +45,6 @@ internal static class TacticalLifecycleFixTests
         Pass("perf ledger ticks on mode change or max interval", PerfLedgerTicksOnModeChangeOrMaxInterval);
         Pass("perf ledger ticks after clock rewind", PerfLedgerTicksAfterClockRewind);
         Pass("perf command tree hash sees parent change", PerfCommandTreeHashSeesParentChange);
-        Pass("perf frame cache hits within one frame only", PerfFrameCacheHitsWithinOneFrame);
         Pass("perf intents hash equal for reallocated identical intents", PerfIntentsHashEqualForReallocatedIntents);
         Pass("perf intents hash sees role change", PerfIntentsHashSeesRoleChange);
 
@@ -424,17 +423,6 @@ internal static class TacticalLifecycleFixTests
             new CommandTreeBuilder.CommandProbe(2, parentOfChild == "node-1" ? 1 : 3, 0, 15, "div", true, false, false),
         };
         return CommandTreeBuilder.Build(probes, 0, 0);
-    }
-
-    private static void PerfFrameCacheHitsWithinOneFrame()
-    {
-        var cache = new TacticalFrameCache<string>();
-        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "empty");
-        cache.Set(10, 7, "enemy");
-        TestHarness.AssertTrue(cache.TryGet(10, 7, out string hit) && hit == "enemy", "same frame");
-        TestHarness.AssertFalse(cache.TryGet(10, 8, out _), "other unit");
-        TestHarness.AssertFalse(cache.TryGet(11, 7, out _), "next frame");
-        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "previous frame entries dropped");
     }
 
     private static CommandNodeIntent[] Intents(DirectChildRole role)

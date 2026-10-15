@@ -81,7 +81,6 @@ internal static class TacticalEvidenceFixTests
         Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
         Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
         Run("the orchestrator's one observe path releases reserves and holds Main", OrchestratorObservePathAppliesReleaseAndHysteresis);
-        Run("evidence is built once per side per frame and shared", EvidenceMemoSharesWithinFrame);
         Run("flank threat is the mean outflanked weight of a group's regiments", FlankThreatIsMeanOverSubordinates);
         Run("an externally recorded replan counts against the replan cooldown", RecordedReplanRateLimits);
         Run("a backward doctrine clock does not lock out replans", BackwardClockDoesNotLockReplan);
@@ -1241,23 +1240,13 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds");
     }
 
-    private static void EvidenceMemoSharesWithinFrame()
+    // The group threat ArmyEvidenceBuilder.MeanFlankThreatByGroup computes for these states.
+    private static float MeanOutflankedWeight(int[] states, int count)
     {
-        var memo = new ArmyEvidenceBuilder.PerSideFrameMemo<string>();
-        var battleA = new object();
-        var battleB = new object();
-        TestHarness.AssertFalse(memo.TryGet(battleA, 0, 10, out _), "empty memo misses");
-        memo.Store(battleA, 0, 10, "a0@10");
-        memo.Store(battleA, 1, 10, "a1@10");
-        TestHarness.AssertTrue(memo.TryGet(battleA, 0, 10, out var hit) && hit == "a0@10", "same side, same frame: shared");
-        TestHarness.AssertTrue(memo.TryGet(battleA, 1, 10, out var hit1) && hit1 == "a1@10", "sides are separate");
-        TestHarness.AssertFalse(memo.TryGet(battleA, 0, 11, out _), "next frame rebuilds");
-        TestHarness.AssertFalse(memo.TryGet(battleB, 1, 10, out _), "another battle never reuses");
-        memo.Store(battleA, 2, 10, "europe");
-        TestHarness.AssertFalse(memo.TryGet(battleA, 2, 10, out _), "only alliances 0/1 are cached");
-        TestHarness.AssertFalse(memo.TryGet(battleA, 0, -1, out _), "unknown frame never hits");
-        memo.Reset();
-        TestHarness.AssertFalse(memo.TryGet(battleA, 1, 10, out _), "reset clears");
+        if (count <= 0) return 0f;
+        float sum = 0f;
+        for (int i = 0; i < count; i++) sum += ArmyEvidenceBuilder.VanillaOutflankedWeight(states[i]);
+        return sum / count;
     }
 
     private static void FlankThreatIsMeanOverSubordinates()
@@ -1271,21 +1260,21 @@ internal static class TacticalEvidenceFixTests
 
         var wingCorps = new int[12];
         wingCorps[0] = 1; wingCorps[7] = 2;
-        float twoOutflanked = ArmyEvidenceBuilder.MeanOutflankedWeight(wingCorps, wingCorps.Length);
+        float twoOutflanked = MeanOutflankedWeight(wingCorps, wingCorps.Length);
         TestHarness.AssertTrue(Near(twoOutflanked, 2f / 12f), "two of twelve regiments: " + twoOutflanked);
         TestHarness.AssertEqual(2, TacticalFrontAxis.FlankExposureBucket(true, true, twoOutflanked),
             "two outflanked regiments in an overlapped wing corps do not trigger refuse");
 
         var turned = new int[12];
         for (int i = 0; i < turned.Length; i++) turned[i] = 1;
-        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, ArmyEvidenceBuilder.MeanOutflankedWeight(turned, turned.Length)),
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, MeanOutflankedWeight(turned, turned.Length)),
             "a whole wing outflanked refuses");
 
         var rear = new int[12];
         for (int i = 0; i < 6; i++) rear[i] = 4;
-        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, ArmyEvidenceBuilder.MeanOutflankedWeight(rear, rear.Length)),
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, MeanOutflankedWeight(rear, rear.Length)),
             "half the wing taken in the rear refuses");
-        TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.MeanOutflankedWeight(new int[0], 0), "no regiments, no threat");
+        TestHarness.AssertEqual(0f, MeanOutflankedWeight(new int[0], 0), "no regiments, no threat");
     }
 
     private static void RecordedReplanRateLimits()
