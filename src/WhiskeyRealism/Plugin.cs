@@ -103,6 +103,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
+        internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -706,6 +707,13 @@ namespace WhiskeyRealism
             EnableArtilleryCombineGunSync = Config.Bind(
                 "Campaign", "Enable Artillery Combine Gun Sync", true,
                 "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
+            FixPerkIdMismatches = Config.Bind(
+                "Campaign", "Fix Perk Id Mismatches", true,
+                "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on: the Expert Scouts " +
+                "sight and concealment bonuses go only to battle units with Expert Scouts or Expert Skirmishers, not to a corps with Ambulance " +
+                "Corps or Bureau of Military Information, or to a fleet; and a regiment's wounded mortality and forced-march sickness use its " +
+                "corps' and army's Ambulance Corps and Foot Cavalry, as the campaign tooltips promise, instead of the regiment's own Expert " +
+                "Scouts and Ace of Spade. Same rule for every side, including the W&L player. Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
