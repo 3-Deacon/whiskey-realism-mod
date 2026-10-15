@@ -30,7 +30,7 @@ namespace WhiskeyRealism.Strategic
     // One pending order per scope (vanilla keeps one given order). A new order
     // before the old one resolved, a cleared order and a clock regress are
     // neutral: the player had no fair chance to comply. Reliability is an
-    // exponential average of complied (1) / missed (0) outcomes.
+    // exponential average of complied (1) / missed (0) outcomes, starting at 1.
     internal sealed class PlayerComplianceLedger
     {
         // Campaign: three game days to march into the zone. Battle: half a battle hour
@@ -38,7 +38,10 @@ namespace WhiskeyRealism.Strategic
         public const double CampaignGraceHours = 72.0;
         public const double BattleGraceHours = 0.5;
         public const float Alpha = 0.25f;
-        public const float Prior = 0.5f;
+        // Trust until evidence (stage F review, 2026-10-15): the AI plans around the
+        // player only after it has seen him ignore orders; nothing is held against
+        // him up front.
+        public const float Prior = 1f;
 
         private readonly bool[] _pending = new bool[2];
         private readonly int[] _session = new int[2];

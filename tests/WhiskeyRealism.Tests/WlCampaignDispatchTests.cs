@@ -26,6 +26,9 @@ internal static class WlCampaignDispatchTests
             ("wl campaign dispatch absorbs the queued second call of another type", AbsorbsQueuedSecondCall),
             ("wl campaign dispatch reissues after a game day", ReissuesAfterGameDay),
             ("wl campaign dispatch issues to a new target the same day", IssuesNewTargetSameDay),
+            ("wl campaign dispatch rate limits A after B within a day", RateLimitsAlternatingTargets),
+            ("wl campaign dispatch history keeps the last four targets", HistoryKeepsLastFour),
+            ("wl campaign dispatch subordinate orders keep vanilla zone and prestige", SubordinateOrdersKeepVanillaZone),
         });
     }
 
@@ -130,40 +133,40 @@ internal static class WlCampaignDispatchTests
 
     private static void IssuesFreshOrder()
     {
-        string reason = WlCampaignDispatchPolicy.Decide(5, 100f, 100f, moveDistance: 300f, last: default(WlDispatchRecord), current: NoOrder, nowDays: 10.0);
+        string reason = WlCampaignDispatchPolicy.Decide(5, 100f, 100f, moveDistance: 300f, history: new WlDispatchHistory(), current: NoOrder, nowDays: 10.0);
         AssertEqual(WlCampaignDispatchPolicy.Issue, reason);
     }
 
     private static void SkipsNoOpMove()
     {
-        string reason = WlCampaignDispatchPolicy.Decide(5, 100f, 100f, moveDistance: 19.9f, last: default(WlDispatchRecord), current: NoOrder, nowDays: 10.0);
+        string reason = WlCampaignDispatchPolicy.Decide(5, 100f, 100f, moveDistance: 19.9f, history: new WlDispatchHistory(), current: NoOrder, nowDays: 10.0);
         AssertEqual("no-op-move", reason);
     }
 
     private static void SkipsNonFiniteTarget()
     {
-        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(5, float.NaN, 100f, 300f, default(WlDispatchRecord), NoOrder, 10.0));
-        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(5, 100f, float.PositiveInfinity, 300f, default(WlDispatchRecord), NoOrder, 10.0));
-        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(-1, 100f, 100f, 300f, default(WlDispatchRecord), NoOrder, 10.0));
+        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(5, float.NaN, 100f, 300f, new WlDispatchHistory(), NoOrder, 10.0));
+        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(5, 100f, float.PositiveInfinity, 300f, new WlDispatchHistory(), NoOrder, 10.0));
+        AssertEqual("invalid-target", WlCampaignDispatchPolicy.Decide(-1, 100f, 100f, 300f, new WlDispatchHistory(), NoOrder, 10.0));
     }
 
     private static void SkipsActiveDuplicate()
     {
         var current = new GivenOrderView(true, 7, 150f, 150f, 3);
-        string reason = WlCampaignDispatchPolicy.Decide(7, 200f, 200f, 300f, default(WlDispatchRecord), current, 10.0);
+        string reason = WlCampaignDispatchPolicy.Decide(7, 200f, 200f, 300f, new WlDispatchHistory(), current, 10.0);
         AssertEqual("active-duplicate", reason);
     }
 
     private static void ActiveOrderOfOtherTypeDoesNotBlock()
     {
         var current = new GivenOrderView(true, 8, 100f, 100f, 3);
-        string reason = WlCampaignDispatchPolicy.Decide(7, 100f, 100f, 300f, default(WlDispatchRecord), current, 10.0);
+        string reason = WlCampaignDispatchPolicy.Decide(7, 100f, 100f, 300f, new WlDispatchHistory(), current, 10.0);
         AssertEqual(WlCampaignDispatchPolicy.Issue, reason);
     }
 
     private static void RateLimitsSameTargetWithinDay()
     {
-        var last = new WlDispatchRecord(16, 100f, 100f, day: 10.0);
+        var last = History((100f, 100f, 10.0));
         string reason = WlCampaignDispatchPolicy.Decide(16, 150f, 120f, 300f, last, NoOrder, 10.9);
         AssertEqual("rate-limit", reason);
     }
@@ -172,22 +175,53 @@ internal static class WlCampaignDispatchTests
     {
         // A queued move re-enters MoveUnitTo when it executes (10048); by then the
         // unit is listed in the offensive, so it classifies as 6, not 16.
-        var last = new WlDispatchRecord(16, 100f, 100f, day: 10.0);
+        var last = History((100f, 100f, 10.0));
         string reason = WlCampaignDispatchPolicy.Decide(6, 101f, 99f, 300f, last, NoOrder, 10.01);
         AssertEqual("rate-limit", reason);
     }
 
     private static void ReissuesAfterGameDay()
     {
-        var last = new WlDispatchRecord(16, 100f, 100f, day: 10.0);
+        var last = History((100f, 100f, 10.0));
         string reason = WlCampaignDispatchPolicy.Decide(16, 100f, 100f, 300f, last, NoOrder, 11.0);
         AssertEqual(WlCampaignDispatchPolicy.Issue, reason);
     }
 
     private static void IssuesNewTargetSameDay()
     {
-        var last = new WlDispatchRecord(16, 100f, 100f, day: 10.0);
+        var last = History((100f, 100f, 10.0));
         string reason = WlCampaignDispatchPolicy.Decide(16, 211f, 100f, 300f, last, NoOrder, 10.1);
         AssertEqual(WlCampaignDispatchPolicy.Issue, reason);
+    }
+
+    private static WlDispatchHistory History(params (float x, float z, double day)[] emitted)
+    {
+        var history = new WlDispatchHistory();
+        foreach (var e in emitted) history.Record(e.x, e.z, e.day);
+        return history;
+    }
+
+    private static void RateLimitsAlternatingTargets()
+    {
+        var history = History((100f, 100f, 10.0), (900f, 900f, 10.1));
+        AssertEqual("rate-limit", WlCampaignDispatchPolicy.Decide(5, 100f, 100f, 300f, history, NoOrder, 10.2), "A after B");
+        AssertEqual("rate-limit", WlCampaignDispatchPolicy.Decide(5, 900f, 900f, 300f, history, NoOrder, 10.2), "B again");
+    }
+
+    private static void HistoryKeepsLastFour()
+    {
+        var history = History((100f, 100f, 10.0), (300f, 300f, 10.0), (500f, 500f, 10.0), (700f, 700f, 10.0));
+        AssertEqual("rate-limit", WlCampaignDispatchPolicy.Decide(5, 100f, 100f, 300f, history, NoOrder, 10.5), "oldest of four still remembered");
+        history.Record(900f, 900f, 10.1);
+        AssertEqual(WlCampaignDispatchPolicy.Issue, WlCampaignDispatchPolicy.Decide(5, 100f, 100f, 300f, history, NoOrder, 10.5), "fifth target evicts the oldest");
+        AssertEqual("rate-limit", WlCampaignDispatchPolicy.Decide(5, 300f, 300f, 300f, history, NoOrder, 10.5), "second oldest kept");
+    }
+
+    private static void SubordinateOrdersKeepVanillaZone()
+    {
+        // User decision 2026-10-15: subordinate dispatches pay vanilla's arrival prestige
+        // (zone shown, CheckDLCWLTopics 123484-123517 unchanged).
+        AssertTrue(WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: true), "subordinate: vanilla zone");
+        AssertTrue(WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: false), "top-level player decides: zone");
     }
 }

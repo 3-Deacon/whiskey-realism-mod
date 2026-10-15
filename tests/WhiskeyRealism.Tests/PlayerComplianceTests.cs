@@ -10,7 +10,7 @@ internal static class PlayerComplianceTests
         TestHarness.RunAll(new (string name, Action run)[]
         {
             ("player compliance starts at the prior with no samples", StartsAtPrior),
-            ("player compliance complied order raises reliability", CompliedRaises),
+            ("player compliance complied order restores reliability", CompliedRestores),
             ("player compliance campaign order missed after the grace window", CampaignMissedAfterGrace),
             ("player compliance campaign order pending inside the grace window", CampaignPendingInsideGrace),
             ("player compliance battle grace window is half an hour", BattleGraceIsHalfHour),
@@ -30,22 +30,26 @@ internal static class PlayerComplianceTests
 
     private static void StartsAtPrior()
     {
+        // Trust until evidence: the AI adapts only after observed non-compliance.
         var ledger = new PlayerComplianceLedger();
-        AssertNear(0.5f, ledger.Reliability, 1e-6f, "prior");
+        AssertNear(1f, ledger.Reliability, 1e-6f, "prior");
         AssertEqual(0, ledger.Samples);
         AssertFalse(ledger.HasPending(ComplianceScope.Campaign), "no pending");
     }
 
-    private static void CompliedRaises()
+    private static void CompliedRestores()
     {
         var ledger = new PlayerComplianceLedger();
+        ledger.OnDispatch(ComplianceScope.Battle, 1, 1.0);
+        ledger.Tick(ComplianceScope.Battle, 2.0);
+        AssertNear(0.75f, ledger.Reliability, 1e-6f, "one miss");
         AssertEqual(ComplianceOutcome.None, ledger.OnDispatch(ComplianceScope.Campaign, 4, 100.0));
         AssertEqual(ComplianceOutcome.Complied, ledger.OnReached(ComplianceScope.Campaign, 4));
-        AssertNear(0.625f, ledger.Reliability, 1e-6f, "0.5 + 0.25 * 0.5");
-        AssertEqual(1, ledger.Samples);
+        AssertNear(0.8125f, ledger.Reliability, 1e-6f, "0.75 + 0.25 * 0.25");
+        AssertEqual(2, ledger.Samples);
         AssertFalse(ledger.HasPending(ComplianceScope.Campaign), "resolved");
         AssertEqual(ComplianceOutcome.None, ledger.OnReached(ComplianceScope.Campaign, 4));
-        AssertEqual(1, ledger.Samples);
+        AssertEqual(2, ledger.Samples);
     }
 
     private static void CampaignMissedAfterGrace()
@@ -53,7 +57,7 @@ internal static class PlayerComplianceTests
         var ledger = new PlayerComplianceLedger();
         ledger.OnDispatch(ComplianceScope.Campaign, 1, 1000.0);
         AssertEqual(ComplianceOutcome.Missed, ledger.Tick(ComplianceScope.Campaign, 1000.0 + PlayerComplianceLedger.CampaignGraceHours + 0.01));
-        AssertNear(0.375f, ledger.Reliability, 1e-6f, "0.5 - 0.25 * 0.5");
+        AssertNear(0.75f, ledger.Reliability, 1e-6f, "1 - 0.25 * 1");
         AssertEqual(1, ledger.Samples);
     }
 
@@ -143,7 +147,8 @@ internal static class PlayerComplianceTests
         used.OnDispatch(ComplianceScope.Battle, 1, 1.0);
         used.OnReached(ComplianceScope.Battle, 1);
         AssertFalse(used.Restore(0.1f, 40), "a ledger with this session's samples keeps them");
-        AssertNear(0.625f, used.Reliability, 1e-6f, "kept");
+        AssertNear(1f, used.Reliability, 1e-6f, "kept");
+        AssertEqual(1, used.Samples);
     }
 
     private static void RestoreClampsAndRejects()
@@ -155,7 +160,7 @@ internal static class PlayerComplianceTests
         var b = new PlayerComplianceLedger();
         AssertFalse(b.Restore(float.NaN, 3), "NaN rejected");
         AssertFalse(b.Restore(0.4f, 0), "zero samples carry nothing");
-        AssertNear(0.5f, b.Reliability, 1e-6f, "prior kept");
+        AssertNear(1f, b.Reliability, 1e-6f, "prior kept");
     }
 
     private static void StrengthWeight()

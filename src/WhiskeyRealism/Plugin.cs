@@ -365,8 +365,9 @@ namespace WhiskeyRealism
                 "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
                 "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
                 "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
-                "top-level player's group use the same dispatcher. One order per target per game day. Whiskey never moves the player's " +
-                "command or the group carrying it. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
+                "are remembered). Whiskey never " +
+                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
             EnablePlayerComplianceLedger = Config.Bind(
                 "W&L",
                 "Enable Player Compliance Ledger",
@@ -374,7 +375,7 @@ namespace WhiskeyRealism
                 "Default ON. W&L: measures how often the player reaches the zone of the orders his superiors give (campaign: within three " +
                 "game days, only while his command is its own map group; battle: within half a battle hour) and keeps a per-career " +
                 "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
-                "sectors, so it does not build its main effort on a player who ignores orders. No penalty for the player. Off: the " +
+                "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
                 "player's regiments count fully and nothing is recorded.");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",

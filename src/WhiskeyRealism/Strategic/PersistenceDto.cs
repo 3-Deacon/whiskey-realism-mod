@@ -5,6 +5,9 @@ namespace WhiskeyRealism.Strategic
 {
     // Version history: 1 = v0.2.x; 2 = adds lastSeenMonth/Year, per-faction probe state and
     // fiscal memory, nullable director posture. Readers accept 1..CurrentVersion.
+    // Optional fields added without a version bump (older readers ignore them, a
+    // missing field decodes to null): playerCompliance (stage F, 2026-10-15; W&L order
+    // reliability {careerKey, reliability, samples}, PlayerComplianceRuntime).
     internal class SidecarDto
     {
         internal const int CurrentVersion = 2;

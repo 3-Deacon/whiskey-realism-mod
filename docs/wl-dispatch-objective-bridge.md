@@ -37,12 +37,12 @@ Dispatcher (chain-of-command spec §D, decompile build 14703111):
 
 - **Who receives what.** Vanilla's campaign gate (`AIBattle.CheckCurrentOrderUpdate` 8366) passes only orders to the player's own campaign-map group. The bridge therefore dispatches only to such a player (`IsUnderCommander` + own map group + the ordered unit at or above his parent); #69 covers the subordinate, whose group vanilla moves with `AICampaign.MoveUnitTo` (14479).
 - **Type (#69).** Classified after the vanilla caller listed the unit (an `UpdateUnitAI` Postfix): defensive operation → 7, capital defense → 8 (capital position and name), continuing offensive → 6, new offensive → 16 with enemy strength in the target area else 5, anything else → 5. The bridge uses `WlOrderTypeForIntent`.
-- **Emission.** Vanilla's own tail (8398-8664): group unit = the player's parent unit, zone widened to it and to `dlcwl_minimumobjectivezone`, the type's tooltip text, `new GivenOrders(...)`, `givenorderssession++`, `CareerInformationPanel.ShowNewOrder`. Issuer: the moving formation's commander (#69) or `DLC_WL.GetSeniorCommander()` (bridge). Compliance and prestige stay vanilla's (`CheckDLCWLTopics`).
-- **Dedupe.** Same type and target (110) as the active order, or any order to the same target within one game day, is skipped; a move shorter than 20 is no order. This also absorbs the second `MoveUnitTo` call of a queued move (10048).
+- **Emission.** Vanilla's own tail (8398-8664): group unit = the player's parent unit, zone widened to it and to `dlcwl_minimumobjectivezone`, the type's tooltip text, `new GivenOrders(...)`, `givenorderssession++`, `CareerInformationPanel.ShowNewOrder`. Issuer: the moving formation's commander (#69) or `DLC_WL.GetSeniorCommander()` (bridge). Zone, compliance and prestige stay vanilla's (`CheckDLCWLTopics`) for both triggers — for #69 too, by user decision 2026-10-15, although the corps carries the player (`WlCampaignDispatchPolicy.SubordinateDispatchesShowZone` would make #69 orders informational).
+- **Dedupe.** Same type and target (110) as the active order, or any of the last four targets within one game day (`WlDispatchHistory`), is skipped; a move shorter than 20 is no order. This also absorbs the second `MoveUnitTo` call of a queued move (10048).
 
 ## Invariants
 
-- No direct movement of a W&L player-owned unit, and no movement of the subordinate player's parent group by Whiskey (`IsPlayerPartOfUnit` → ineligible).
+- No direct movement of a W&L player-owned unit. The subordinate player's parent group is not moved by Whiskey yet (`IsPlayerPartOfUnit` → ineligible); stage G5a lifts that for the parent group and relies on #69 for the dispatch.
 - No Transpiler.
 - No edit to `GameVars.groupstancename[0]`.
 - No direct movement fallback for W&L player-chain/player-involved units when the bridge rejects, fails, or the dispatcher skips.

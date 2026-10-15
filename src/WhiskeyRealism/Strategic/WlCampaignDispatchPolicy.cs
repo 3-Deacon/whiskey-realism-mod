@@ -44,23 +44,45 @@ namespace WhiskeyRealism.Strategic
         public bool EnemyAtTarget; // AIArea.enemycampaignunitsstrengthclose > 0 at the destination
     }
 
-    // The last dispatch this dispatcher emitted.
-    internal readonly struct WlDispatchRecord
+    // The targets of the last Capacity dispatches this dispatcher emitted (ring).
+    // The rate limit is per target whatever the type: a queued move re-enters
+    // MoveUnitTo (10048) after vanilla listed the unit, so its second pass
+    // classifies as another type (16 -> 6) for the same target.
+    internal sealed class WlDispatchHistory
     {
-        public WlDispatchRecord(int type, float x, float z, double day)
+        public const int Capacity = 4;
+
+        private readonly float[] _x = new float[Capacity];
+        private readonly float[] _z = new float[Capacity];
+        private readonly double[] _day = new double[Capacity];
+        private int _count;
+        private int _next;
+
+        public void Record(float x, float z, double day)
         {
-            HasValue = true;
-            Type = type;
-            X = x;
-            Z = z;
-            Day = day;
+            _x[_next] = x;
+            _z[_next] = z;
+            _day[_next] = day;
+            _next = (_next + 1) % Capacity;
+            if (_count < Capacity) _count++;
         }
 
-        public bool HasValue { get; }
-        public int Type { get; }
-        public float X { get; }
-        public float Z { get; }
-        public double Day { get; }
+        public bool TargetedWithin(float x, float z, float radius, double nowDays, double windowDays)
+        {
+            for (int i = 0; i < _count; i++)
+            {
+                float dx = x - _x[i];
+                float dz = z - _z[i];
+                if (dx * dx + dz * dz < radius * radius && nowDays - _day[i] < windowDays) return true;
+            }
+            return false;
+        }
+
+        public void Clear()
+        {
+            _count = 0;
+            _next = 0;
+        }
     }
 
     internal static class WlCampaignDispatchPolicy
@@ -72,6 +94,19 @@ namespace WhiskeyRealism.Strategic
         public const int Offensive = 16;
 
         public const string Issue = "issue";
+
+        // User decision 2026-10-15: subordinate dispatches keep vanilla's zone and
+        // arrival prestige exactly as the base game pays them (CheckDLCWLTopics
+        // 123484-123517: 150/100/120 for types 5/6/7), although the corps carries the
+        // player into the zone; the one-per-target-per-day cap bounds it. Set false
+        // to make them informational (showzone false, as vanilla's types 13/14: no
+        // zone mark, no prestige).
+        public const bool SubordinateDispatchesShowZone = true;
+
+        public static bool ShowsZone(bool subordinateDispatch)
+        {
+            return !subordinateDispatch || SubordinateDispatchesShowZone;
+        }
 
         // Same-target radius: vanilla's own order dedupe distance (8643).
         public const float DedupeUnits = 110f;
@@ -109,12 +144,12 @@ namespace WhiskeyRealism.Strategic
         }
 
         // Issue, or the skip reason.
-        public static string Decide(int type, float x, float z, float moveDistance, in WlDispatchRecord last, in GivenOrderView current, double nowDays)
+        public static string Decide(int type, float x, float z, float moveDistance, WlDispatchHistory history, in GivenOrderView current, double nowDays)
         {
             if (type < 0 || !IsFinite(x) || !IsFinite(z)) return "invalid-target";
             if (IsFinite(moveDistance) && moveDistance < MinMoveUnits) return "no-op-move";
             if (current.HasOrder && current.Type == type && Within(x, z, current.X, current.Z)) return "active-duplicate";
-            if (last.HasValue && Within(x, z, last.X, last.Z) && nowDays - last.Day < RateLimitDays) return "rate-limit";
+            if (history != null && history.TargetedWithin(x, z, DedupeUnits, nowDays, RateLimitDays)) return "rate-limit";
             return Issue;
         }
 

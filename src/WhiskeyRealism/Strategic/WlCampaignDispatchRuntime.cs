@@ -37,6 +37,7 @@ namespace WhiskeyRealism.Strategic
         private const int MaxLoggedSignatures = 64;
         private const float VanillaZone = 20f;
         private const double HoursPerYear = 8760.0;
+        private const string VanillaMoveTrigger = "vanilla-move";
 
         private struct PendingMove
         {
@@ -48,7 +49,7 @@ namespace WhiskeyRealism.Strategic
 
         private static readonly List<PendingMove> _pending = new List<PendingMove>(MaxPending);
         private static readonly HashSet<string> _loggedSignatures = new HashSet<string>(StringComparer.Ordinal);
-        private static WlDispatchRecord _last;
+        private static readonly WlDispatchHistory _history = new WlDispatchHistory();
         private static CareerInformationPanel _panel;
         private static bool _terrainResolved;
         private static PropertyInfo _activeTerrain;
@@ -63,7 +64,7 @@ namespace WhiskeyRealism.Strategic
         {
             _pending.Clear();
             _loggedSignatures.Clear();
-            _last = default(WlDispatchRecord);
+            _history.Clear();
             _panel = null;
         }
 
@@ -181,13 +182,13 @@ namespace WhiskeyRealism.Strategic
             else if (type == WlCampaignDispatchPolicy.Engage)
                 name = NearestEnemyName(faction, move.Destination) ?? name;
 
-            Emit("vanilla-move", move.Unit, move.Unit.commander, type, target, name, move.Distance, VanillaZone, VanillaZone);
+            Emit(VanillaMoveTrigger, move.Unit, move.Unit.commander, type, target, name, move.Distance, VanillaZone, VanillaZone);
         }
 
         private static string Emit(string trigger, Regiment issuerUnit, int issuerCommanderId, int type, Vector3 target, string destinationName, float moveDistance, float width, float depth)
         {
             double nowDays = NowDays();
-            string decision = WlCampaignDispatchPolicy.Decide(type, target.x, target.z, moveDistance, in _last, CurrentGivenOrder(), nowDays);
+            string decision = WlCampaignDispatchPolicy.Decide(type, target.x, target.z, moveDistance, _history, CurrentGivenOrder(), nowDays);
             string signature = trigger + ":" + type + ":" + Mathf.RoundToInt(target.x) + ":" + Mathf.RoundToInt(target.z);
             if (decision != WlCampaignDispatchPolicy.Issue)
             {
@@ -197,16 +198,17 @@ namespace WhiskeyRealism.Strategic
                 return decision;
             }
 
-            if (!ShowOrder(issuerUnit, issuerCommanderId, type, target, destinationName, width, depth)) return "failed";
-            _last = new WlDispatchRecord(type, target.x, target.z, nowDays);
+            bool showZone = WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: trigger == VanillaMoveTrigger);
+            if (!ShowOrder(issuerUnit, issuerCommanderId, type, target, destinationName, width, depth, showZone)) return "failed";
+            _history.Record(target.x, target.z, nowDays);
             TelemetryRouter.LegacyInfoToMainLogIfAllowed(
                 "[W&LCampaignDispatch] trigger=" + trigger + " type=" + type + " unit=" + SafeName(issuerUnit) +
-                " issuer=" + CommanderName(issuerCommanderId) + " target=" + Fmt(target) + " dest=" + destinationName + " action=issue",
+                " issuer=" + CommanderName(issuerCommanderId) + " target=" + Fmt(target) + " dest=" + destinationName + " zone=" + (showZone ? "shown" : "none") + " action=issue",
                 TelemetryLayer.Campaign);
             return decision;
         }
 
-        private static bool ShowOrder(Regiment issuerUnit, int issuerCommanderId, int type, Vector3 position, string destinationName, float width, float depth)
+        private static bool ShowOrder(Regiment issuerUnit, int issuerCommanderId, int type, Vector3 position, string destinationName, float width, float depth, bool showZone)
         {
             int tooltip = TooltipFor(type);
             if (tooltip < 0) return false;
@@ -241,7 +243,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             DLC_WL.givenorder = new DLC_WL.GivenOrders(group, type, headline, content, position, -1f + 180f, width, depth,
-                destinationName, resetfirstunitreached: true, _showzone: true, manualcommanderid: issuerCommanderId);
+                destinationName, resetfirstunitreached: true, _showzone: showZone, manualcommanderid: issuerCommanderId);
             DLC_WL.GivenOrders.givenorderssession++;
             panel.ShowNewOrder(DLC_WL.givenorder);
             return true;

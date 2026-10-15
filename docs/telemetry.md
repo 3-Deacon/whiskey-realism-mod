@@ -157,7 +157,7 @@ Non-patch scopes:
 
 ## W&L campaign rows
 
-`LogOutput.log`: `[W&LCampaignDispatch] trigger=vanilla-move|whiskey-order type=… unit=… issuer=… target=x,z dest=… action=issue` for every campaign order Whiskey gives a W&L player (at most one per target per game day); skips (`action=skip reason=no-op-move|active-duplicate|rate-limit|…`) go to the campaign sidecar only, at most 64 distinct signatures before the set resets. `[PlayerCompliance] scope=campaign|battle outcome=complied|missed reliability=… samples=…` per resolved order. `[once:cic-faction-ai-guard:applied]` the first time #70 lets a non-player faction past vanilla's CIC early return. Warnings use `[once:wl-campaign-dispatch:…]`, `[once:player-compliance:…]` and `[once:cic-faction-ai-guard:…]` keys.
+`LogOutput.log`: `[W&LCampaignDispatch] trigger=vanilla-move|whiskey-order type=… unit=… issuer=… target=x,z dest=… zone=none|shown action=issue` for every campaign order Whiskey gives a W&L player (`zone=none` only if subordinate orders are switched to informational; at most one per target per game day over the last four targets); skips (`action=skip reason=no-op-move|active-duplicate|rate-limit|…`) go to the campaign sidecar only, at most 64 distinct signatures before the set resets. `[PlayerCompliance] scope=campaign|battle outcome=complied|missed reliability=… samples=…` per resolved order. `[once:cic-faction-ai-guard:applied]` the first time #70 lets a non-player faction past vanilla's CIC early return. Warnings use `[once:wl-campaign-dispatch:…]`, `[once:player-compliance:…]` and `[once:cic-faction-ai-guard:…]` keys.
 
 ## Smoke checklist
 
