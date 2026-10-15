@@ -118,7 +118,6 @@ namespace WhiskeyRealism.Strategic
     {
         [JsonProperty("firedEvents")]   public List<int> FiredEvents   = new List<int>();
         [JsonProperty("appliedEvents")] public List<int> AppliedEvents = new List<int>();   // v0.2.1 — track concrete-swap applications
-        [JsonProperty("lastChecked")]   public string    LastChecked;
     }
 
     internal class BattleHistoryDto

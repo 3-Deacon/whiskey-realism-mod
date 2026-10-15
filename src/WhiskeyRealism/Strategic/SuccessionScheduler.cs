@@ -16,7 +16,6 @@ namespace WhiskeyRealism.Strategic
             public string ReplacementName;
             public string ReplacedRole;
             public Func<WarStateView, bool> WarStateGate;
-            public bool   Fired;
         }
 
         internal class WarStateView

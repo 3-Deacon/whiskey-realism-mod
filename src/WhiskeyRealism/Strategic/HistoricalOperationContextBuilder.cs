@@ -97,16 +97,12 @@ namespace WhiskeyRealism.Strategic
             int daySerial,
             int objectiveId,
             OperationalPlan plan,
-            PhaseTruthOutput baseTruth,
             FrontSectorLedger fronts,
-            DefenseIntentLedgerOutput defense,
-            FormationDirectiveLedger formation,
-            CampaignMapLedger map,
             TheaterPressureView pressure,
             DirectorPosture posture,
             OperationDecisionMemory memory,
             IReadOnlyList<BattleHistoryRecord> battleHistory,
-            HistoricalOperationLocalSignals signals = null)
+            HistoricalOperationLocalSignals signals)
         {
             var context = new HistoricalOperationContext
             {
@@ -123,63 +119,30 @@ namespace WhiskeyRealism.Strategic
                 RecentReplanCount = memory?.CountRecentReplans(daySerial, 30) ?? 0
             };
 
-            if (baseTruth != null)
-            {
-                if (baseTruth.Verdict == PhaseTruthVerdict.ObjectiveUnavailable)
-                    context.ObjectiveAvailable = false;
-                if (baseTruth.Verdict == PhaseTruthVerdict.TargetAccomplished)
-                    context.ObjectiveAccomplished = true;
-                if (baseTruth.Verdict == PhaseTruthVerdict.TargetEngaged)
-                    context.TargetEngagedRecently = true;
-                if (baseTruth.Verdict == PhaseTruthVerdict.MissingTargetPosition)
-                    context.TargetPositionResolves = false;
-            }
-
             HistoricalOperationProfile profile = null;
             if (!string.IsNullOrEmpty(plan?.OperationId))
                 HistoricalOperationCatalog.TryGetById(plan.OperationId, out profile);
 
-            Vector3? position;
-            Theater theater;
-            if (signals != null)
-            {
-                // Same target position (ObjectiveAdapter), classifier (CampaignMapTheaterRuntime)
-                // and local strengths PhaseTruth used this review.
-                position = signals.HasTarget ? new Vector3(signals.TargetX, 0f, signals.TargetZ) : (Vector3?)null;
-                theater = signals.TargetTheater;
-            }
-            else
-            {
-                position = ResolveObjectivePosition(objectiveId);
-                theater = position.HasValue ? TheaterClassifier.FromPosition(position.Value.x, position.Value.z) : Theater.Unknown;
-            }
-            context.TargetPositionResolves = position.HasValue;
-            if (!position.HasValue)
+            // Same target position (ObjectiveAdapter), classifier (CampaignMapTheaterRuntime) and
+            // LOCAL strengths PhaseTruth used this review.
+            if (signals == null || !signals.HasTarget)
                 return context;
-
-            FrontSector sector = fronts?.GetSector(theater.ToString());
-            theater = sector?.Theater ?? theater;
-            if (signals != null)
-            {
-                context.TargetSectorOwnStrength = Math.Max(0f, signals.LocalOwnStrength);
-                context.TargetSectorEnemyStrength = Math.Max(0f, signals.LocalEnemyStrength);
-            }
-            else if (sector != null)
-            {
-                context.TargetSectorOwnStrength = Math.Max(0f, sector.OwnStrength);
-                context.TargetSectorEnemyStrength = Math.Max(0f, sector.EnemyStrength);
-            }
+            context.TargetPositionResolves = true;
+            var position = new Vector3(signals.TargetX, 0f, signals.TargetZ);
+            Theater theater = fronts?.GetSector(signals.TargetTheater.ToString())?.Theater ?? signals.TargetTheater;
+            context.TargetSectorOwnStrength = Math.Max(0f, signals.LocalOwnStrength);
+            context.TargetSectorEnemyStrength = Math.Max(0f, signals.LocalEnemyStrength);
             context.TargetSectorRatio = context.TargetSectorOwnStrength /
                 Math.Max(1f, context.TargetSectorEnemyStrength);
 
             FillTheaterPressure(context, pressure, fronts, theater);
-            FillBattleSignals(context, allianceId, position.Value, daySerial, battleHistory, NearTargetRadius(profile));
+            FillBattleSignals(context, allianceId, position, daySerial, battleHistory, NearTargetRadius(profile));
 
             context.EnemyConcentratesInTheater =
                 context.TheaterEnemyPressure > context.TheaterOwnPressure &&
                 context.TheaterEnemyPressure >= Math.Max(1f, context.TargetSectorEnemyStrength);
 
-            context.EnemyThreatensCapitalCorridor = signals != null && signals.EnemyThreatensCapital;
+            context.EnemyThreatensCapitalCorridor = signals.EnemyThreatensCapital;
             return context;
         }
 
@@ -241,14 +204,6 @@ namespace WhiskeyRealism.Strategic
             if (profile != null && profile.NearTargetRadius > 0f)
                 return Math.Min(profile.NearTargetRadius, vanilla);
             return vanilla;
-        }
-
-        private static Vector3? ResolveObjectivePosition(int objectiveId)
-        {
-            if (objectiveId < 0) return null;
-            if (!ObjectiveCatalog.TryResolvePosition(objectiveId, out float x, out float z))
-                return null;
-            return new Vector3(x, 0f, z);
         }
     }
 }

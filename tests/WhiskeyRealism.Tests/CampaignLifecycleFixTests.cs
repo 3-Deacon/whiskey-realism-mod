@@ -507,7 +507,6 @@ internal static class CampaignLifecycleFixTests
     private static OperationalPlan ReplanWith(int alliance, EraStage stage, int month, int year, params int[] objectiveIds)
     {
         var savedProvider = CIC.AvailableObjectivesProvider;
-        var savedChapter = CIC.CurrentChapterProvider;
         var savedPosition = CIC.TargetPositionResolves;
         var savedDoctrine = CicSettings.HistoricalOperationDoctrine;
         try
@@ -515,7 +514,6 @@ internal static class CampaignLifecycleFixTests
             var list = new List<object>();
             foreach (int id in objectiveIds) list.Add(new FakeObjective(id));
             CIC.AvailableObjectivesProvider = _ => list;
-            CIC.CurrentChapterProvider = () => 2;
             CIC.TargetPositionResolves = id => ObjectiveCatalog.TryResolvePosition(id, out _, out _);
             CicSettings.HistoricalOperationDoctrine = true;
             var cic = new CIC { AllianceId = alliance, OfficerName = "Test" };
@@ -526,7 +524,6 @@ internal static class CampaignLifecycleFixTests
         finally
         {
             CIC.AvailableObjectivesProvider = savedProvider;
-            CIC.CurrentChapterProvider = savedChapter;
             CIC.TargetPositionResolves = savedPosition;
             CicSettings.HistoricalOperationDoctrine = savedDoctrine;
         }
@@ -820,7 +817,7 @@ internal static class CampaignLifecycleFixTests
             LocalEnemyStrength = 6000f,
             EnemyThreatensCapital = true
         };
-        var context = HistoricalOperationContextBuilder.Build(0, Serial(1, 6, 1862), 3, null, null, null, null, null, null, null, null, null, null, signals);
+        var context = HistoricalOperationContextBuilder.Build(0, Serial(1, 6, 1862), 3, null, null, null, null, null, null, signals);
         TestHarness.AssertTrue(context.TargetPositionResolves, "position from live signals");
         TestHarness.AssertEqual(12000f, context.TargetSectorOwnStrength, "local own");
         TestHarness.AssertEqual(6000f, context.TargetSectorEnemyStrength, "local enemy");

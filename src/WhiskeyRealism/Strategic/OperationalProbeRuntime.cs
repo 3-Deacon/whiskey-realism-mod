@@ -414,27 +414,6 @@ namespace WhiskeyRealism.Strategic
             return -1;
         }
 
-        private static bool ReadBool(object target, string field)
-        {
-            try
-            {
-                var f = AccessTools.Field(target.GetType(), field);
-                if (f != null) return Convert.ToBoolean(f.GetValue(target));
-            }
-            catch { }
-            return false;
-        }
 
-        private static object ReadObject(object target, string field)
-        {
-            try
-            {
-                return AccessTools.Field(target.GetType(), field)?.GetValue(target);
-            }
-            catch
-            {
-                return null;
-            }
-        }
     }
 }

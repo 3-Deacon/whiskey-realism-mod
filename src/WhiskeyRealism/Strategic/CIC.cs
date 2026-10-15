@@ -43,7 +43,6 @@ namespace WhiskeyRealism.Strategic
     public class CIC
     {
         public int AllianceId;
-        public int OfficerCommanderId;
         public string OfficerName;
         public PersonalityVector OfficerPersonality;
         public OperationalPlan ActivePlan;
@@ -53,7 +52,6 @@ namespace WhiskeyRealism.Strategic
         // the harness swaps them for fixtures.
         internal static Func<int, IList> AvailableObjectivesProvider = GetAvailableObjectivesViaReflection;
         internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
-        internal static Func<int> CurrentChapterProvider = ResolveCurrentChapter;
         internal static Func<int, bool> TargetPositionResolves = id => ObjectiveAdapter.ResolveObjectivePosition(id).HasValue;
 
         public PersonalityVector Effective(EraStageManager era)
@@ -88,19 +86,6 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
             return outcome == CicRouteOutcome.KeepPlan;
-        }
-
-        public void Replan(EraStageManager era, int currentMonth, int currentYear)
-        {
-            int daySerial = currentYear * 372 + currentMonth * 31 + 1;
-            Replan(
-                era,
-                currentMonth,
-                currentYear,
-                daySerial,
-                CurrentChapterProvider(),
-                null,
-                null);
         }
 
         public void Replan(
@@ -601,21 +586,6 @@ namespace WhiskeyRealism.Strategic
         private static void EmitCampaignInfo(string line)
         {
             TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
-        }
-
-        private static int ResolveCurrentChapter()
-        {
-            try
-            {
-                var t = AccessTools.TypeByName("Policy");
-                var f = t != null ? AccessTools.Field(t, "CurrentChapter") : null;
-                if (f == null) return -1;
-                return (int)f.GetValue(null);
-            }
-            catch
-            {
-                return -1;
-            }
         }
 
         private static IList GetAvailableObjectivesViaReflection(int allianceId)

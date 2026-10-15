@@ -943,7 +943,7 @@ static class Program
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
             ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
-            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
+            ("director publish clamp suppresses second publish on the same game day", DirectorPublishClampSuppressesSecondPublishOnSameGameDay),
             ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse),
             ("director raises recover floor under overheated", DirectorRaisesRecoverFloorUnderOverheated),
             ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure),
@@ -14922,7 +14922,7 @@ static class Program
             AllowProbeOnly = true
         });
 
-        bool keepPlan = CicReviewRouter.RouteAction(
+        bool keepPlan = CicReviewRouter.Route(
             plan,
             new PhaseTruthOutput
             {
@@ -14930,8 +14930,9 @@ static class Program
                 RecommendedAction = PhaseTruthAction.Exploit,
                 RuleId = "friendly-victory-exploit"
             },
+            1864 * 372 + 7 * 31 + 1,
             7,
-            1864);
+            1864) == CicRouteOutcome.KeepPlan;
 
         AssertEqual(true, keepPlan);
         AssertEqual(OperationPosture.ExploitBreakthrough, plan.OperationPosture);
@@ -20561,7 +20562,7 @@ static class Program
         AssertEqual(1, rebuilt.RecentEventSummaries.Count);
     }
 
-    // Task 13: CicReviewRouter.RouteAction routes Advance → AdvancePhase, which exhausts the
+    // Task 13: CicReviewRouter.Route routes Advance → AdvancePhase, which exhausts the
     // last phase and marks the plan dirty. Single-phase plan: after accomplished truth,
     // IsDirty=true, return false (signals replan to caller).
     // CIC.ReviewPlanWithTruth delegates to CicReviewRouter, so this exercises the real routing
@@ -20592,13 +20593,13 @@ static class Program
             Reason = "target-accomplished"
         };
 
-        bool result = CicReviewRouter.RouteAction(plan, truth, 6, 1862);
-        AssertTrue(!result, "RouteAction should return false when last phase is exhausted by Advance");
+        bool result = CicReviewRouter.Route(plan, truth, 1862 * 372 + 6 * 31 + 1, 6, 1862) == CicRouteOutcome.KeepPlan;
+        AssertTrue(!result, "Route should not keep the plan when last phase is exhausted by Advance");
         AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
     }
 
     // R16: the clamp is per alliance per game day (no wall clock).
-    private static void DirectorPublishClampSuppressesSecondPublishInSameRealSecond()
+    private static void DirectorPublishClampSuppressesSecondPublishOnSameGameDay()
     {
         var clamp = new DirectorPublishClamp();
         int day = 1862 * 372 + 5 * 31 + 5;

@@ -154,7 +154,6 @@ namespace WhiskeyRealism.Strategic
             dto.Succession.FiredEvents.Sort();
             dto.Succession.AppliedEvents.AddRange(snap.AppliedEvents);
             dto.Succession.AppliedEvents.Sort();
-            dto.Succession.LastChecked = snap.LastSeenYear + "-" + snap.LastSeenMonth.ToString("D2") + "-01";
             foreach (var battle in snap.Battles)
             {
                 var battleDto = BattleToDto(battle);

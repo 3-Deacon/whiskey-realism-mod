@@ -173,17 +173,6 @@ namespace WhiskeyRealism.Strategic
             return query.Radius > 0f && dx * dx + dz * dz <= query.Radius * query.Radius;
         }
 
-        // Legacy bool shape kept for existing harness callers: true = keep plan.
-        internal static bool RouteAction(
-            OperationalPlan plan,
-            PhaseTruthOutput truth,
-            int currentMonth,
-            int currentYear)
-        {
-            int daySerial = currentYear * 372 + currentMonth * 31 + 1;
-            return Route(plan, truth, daySerial, currentMonth, currentYear) == CicRouteOutcome.KeepPlan;
-        }
-
         // Plan/phase deadline checks. Every keep-plan path runs through here so a posture
         // override (Recover, ScreenAndDelay, ...) can never freeze the deadlines.
         internal static bool ReviewPlanBaseline(OperationalPlan plan, int daySerial, int currentMonth, int currentYear)
@@ -204,11 +193,6 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
-        internal static bool ReviewPlanBaseline(OperationalPlan plan, int currentMonth, int currentYear)
-        {
-            return ReviewPlanBaseline(plan, currentYear * 372 + currentMonth * 31 + 1, currentMonth, currentYear);
-        }
-
         // Advances the plan's current phase index and stamps the new phase's start day.
         // If no next phase exists, marks the plan dirty and returns false (signals replan).
         internal static bool AdvancePhase(OperationalPlan plan, int daySerial)
@@ -223,11 +207,6 @@ namespace WhiskeyRealism.Strategic
             }
             plan.IsDirty = true;
             return false;
-        }
-
-        internal static bool AdvancePhase(OperationalPlan plan)
-        {
-            return AdvancePhase(plan, plan?.CurrentPhase?.PhaseStartedDaySerial ?? 0);
         }
 
         private static void MarkOperationDecision(

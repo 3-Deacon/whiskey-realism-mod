@@ -207,11 +207,6 @@ namespace WhiskeyRealism.Strategic
             return cic;
         }
 
-        public void NotifyDateAdvanced(int gameMonth, int gameYear)
-        {
-            NotifyDateAdvanced(1, gameMonth, gameYear);
-        }
-
         public void NotifyDateAdvanced(int gameDay, int gameMonth, int gameYear)
         {
             if (!Initialized) InitializeFromGameState();
@@ -280,11 +275,6 @@ namespace WhiskeyRealism.Strategic
         {
             try { return Policy.CurrentChapter; }
             catch { return -1; }
-        }
-
-        public void OnMonthlyTick(int month, int year)
-        {
-            OnMonthlyTick(1, month, year);
         }
 
         public void OnMonthlyTick(int day, int month, int year)
@@ -614,11 +604,7 @@ namespace WhiskeyRealism.Strategic
                     daySerial,
                     phase.TargetObjectiveId,
                     cic.ActivePlan,
-                    null,
                     fronts,
-                    alliance < DefenseIntents.Length ? DefenseIntents[alliance] : null,
-                    alliance < FormationDirectives.Length ? FormationDirectives[alliance] : null,
-                    CampaignMap,
                     fronts != null ? TheaterPressureView.From(fronts) : null,
                     alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
                     alliance < OperationMemories.Length ? OperationMemories[alliance] : null,
