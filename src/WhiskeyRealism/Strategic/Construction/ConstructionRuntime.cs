@@ -77,6 +77,7 @@ namespace WhiskeyRealism.Strategic.Construction
                 {
                     input.LowSupplyFormationCount = formation.Pressure.LowSupplyCount;
                     input.LowAmmoFormationCount = formation.Pressure.LowAmmoCount;
+                    input.FormationCount = formation.Assignments != null ? formation.Assignments.Count : 0;
                     // Area key (ArmyAreaClassifier), kept separate from the fiscal Theater name.
                     if (!string.IsNullOrEmpty(formation.Pressure.TopSupplyAreaKey))
                         input.TopSupplyAreaKey = formation.Pressure.TopSupplyAreaKey;
@@ -96,7 +97,7 @@ namespace WhiskeyRealism.Strategic.Construction
                 ConstructionThreat.Apply(input, front);
                 if (count <= 0) return;
                 input.SupplyPressure = Clamp01(supply / count);
-                input.AmmoPressure = input.LowAmmoFormationCount > 0
+                input.AmmoPressure = ConstructionIntentLedger.HasLowFormationShare(input.LowAmmoFormationCount, input.FormationCount, null)
                     ? Clamp01(input.SupplyPressure + 0.15f)
                     : Clamp01(input.SupplyPressure * 0.5f);
                 input.TransportPressure = input.LogisticsExpansion ? Math.Max(input.SupplyPressure, 0.35f) : input.SupplyPressure;

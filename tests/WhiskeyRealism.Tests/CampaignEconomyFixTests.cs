@@ -39,6 +39,7 @@ internal static class CampaignEconomyFixTests
         ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors();
         ConstructionEastAtParityIsNotThreatened();
         ConstructionOutmatchedCriticalSectorYieldsDefensiveWorks();
+        ConstructionFewLowSupplyFormationsDoNotForceFieldSupply();
 
         GovernorMatchesVanillaPassesOnCheapFrames();
         GovernorKeepsVanillaProgressionWhenEveryFrameIsOverBudget();
@@ -519,6 +520,28 @@ internal static class CampaignEconomyFixTests
         var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
         TestHarness.AssertEqual(ConstructionPosture.DefensiveWorks, output.Posture, "outmatched critical sector => defensive works");
         LogPass("c2b construction outmatched critical sector yields defensive works");
+    }
+
+    // Same share rule as fiscal supply stress: one starving formation out of twenty is
+    // local, not a reason to switch the whole construction posture to FieldSupply.
+    private static void ConstructionFewLowSupplyFormationsDoNotForceFieldSupply()
+    {
+        var input = new ConstructionInput
+        {
+            AllianceId = 0,
+            FiscalPosture = WhiskeyRealism.Strategic.Fiscal.FiscalPosture.BalancedWar,
+            CurrentRating = 2,
+            BondFloorRating = 11,
+            SupplyProtection = true,
+            LowSupplyFormationCount = 1,
+            FormationCount = 20
+        };
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+        TestHarness.AssertEqual(ConstructionPosture.Infrastructure, output.Posture, "1/20 starving formations");
+        input.LowSupplyFormationCount = 8;
+        output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+        TestHarness.AssertEqual(ConstructionPosture.FieldSupply, output.Posture, "8/20 starving formations");
+        LogPass("c2b construction few low-supply formations do not force field supply");
     }
 
     // ---------------------------------------------------------------- C-Governor

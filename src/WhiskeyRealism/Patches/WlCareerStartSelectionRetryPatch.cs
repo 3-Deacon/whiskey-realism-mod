@@ -41,8 +41,15 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!RetryActive()) return;
-                TryRetry(ResolveCareerPanel(), "ai");
+                try
+                {
+                    if (!RetryActive()) return;
+                    TryRetry(ResolveCareerPanel(), "ai");
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("wl-start-selection:ai-postfix", "[W&LStartSelection] postfix failed: " + DescribeException(ex));
+                }
             }
         }
 
@@ -189,8 +196,15 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.campaign", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!WlCareerStartSelectionRetryPatch.RetryActive()) return;
-                WlCareerStartSelectionRetryPatch.TryRetry(WlCareerStartSelectionRetryPatch.ResolveCareerPanelFromController(__instance), "campaign");
+                try
+                {
+                    if (!WlCareerStartSelectionRetryPatch.RetryActive()) return;
+                    WlCareerStartSelectionRetryPatch.TryRetry(WlCareerStartSelectionRetryPatch.ResolveCareerPanelFromController(__instance), "campaign");
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("wl-start-selection:campaign-postfix", "[W&LStartSelection] campaign postfix failed: " + ex.GetType().Name + ": " + ex.Message);
+                }
             }
         }
     }

@@ -18,6 +18,8 @@ namespace WhiskeyRealism.Patches
     internal static class PerkSelectionPatch
     {
         private static readonly HashSet<string> _loggedChoices = new HashSet<string>();
+        private static readonly Dictionary<string, System.Reflection.FieldInfo> _factionFields =
+            new Dictionary<string, System.Reflection.FieldInfo>();
 
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
@@ -207,9 +209,18 @@ namespace WhiskeyRealism.Patches
             return available;
         }
 
+        // AIFaction is a single private type; field lookups are cached by name.
         private static IList ReadList(object obj, string fieldName)
         {
-            try { return AccessTools.Field(obj.GetType(), fieldName)?.GetValue(obj) as IList; }
+            try
+            {
+                if (!_factionFields.TryGetValue(fieldName, out var field))
+                {
+                    field = AccessTools.Field(obj.GetType(), fieldName);
+                    _factionFields[fieldName] = field;
+                }
+                return field?.GetValue(obj) as IList;
+            }
             catch { return null; }
         }
 

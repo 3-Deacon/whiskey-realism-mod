@@ -36,6 +36,7 @@ namespace WhiskeyRealism.Strategic.Construction
     public sealed class ConstructionOptions
     {
         public float SupplyPressureThreshold = 0.35f;
+        public float LowSupplyFormationShare = 0.33f;
         public float DefensiveThreatThreshold = 0.65f;
         public int CsaArmsStressLastYear = 1863;
         public int MinimumRatingBufferFromBondFloor = 1;
@@ -59,6 +60,7 @@ namespace WhiskeyRealism.Strategic.Construction
         public List<ConstructionSectorThreat> SectorThreats = new List<ConstructionSectorThreat>();
         public int LowSupplyFormationCount;
         public int LowAmmoFormationCount;
+        public int FormationCount;
         public float SupplyPressure;
         public float AmmoPressure;
         public float TransportPressure;

@@ -50,8 +50,8 @@ namespace WhiskeyRealism.Strategic.Construction
                 return ConstructionPosture.EmergencyHold;
 
             if ((input.SupplyProtection || input.LogisticsExpansion) &&
-                (input.LowSupplyFormationCount > 0 ||
-                 input.LowAmmoFormationCount > 0 ||
+                (HasLowFormationShare(input.LowSupplyFormationCount, input.FormationCount, options) ||
+                 HasLowFormationShare(input.LowAmmoFormationCount, input.FormationCount, options) ||
                  input.SupplyPressure >= options.SupplyPressureThreshold ||
                  input.AmmoPressure >= options.SupplyPressureThreshold ||
                  input.TransportPressure >= options.SupplyPressureThreshold))
@@ -66,6 +66,14 @@ namespace WhiskeyRealism.Strategic.Construction
                 return ConstructionPosture.IndustrialExpansion;
 
             return ConstructionPosture.Infrastructure;
+        }
+
+        // Same share rule as FiscalIntentLedger supply stress (FormationCount unknown =>
+        // any low formation counts, the legacy behavior).
+        public static bool HasLowFormationShare(int lowCount, int formationCount, ConstructionOptions options)
+        {
+            options = options != null ? options : new ConstructionOptions();
+            return FiscalIntentLedger.LowShare(lowCount, formationCount) >= options.LowSupplyFormationShare;
         }
 
         private static bool IsNearBondFloor(ConstructionInput input, ConstructionOptions options)

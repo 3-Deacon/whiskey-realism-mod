@@ -117,10 +117,11 @@ namespace WhiskeyRealism.Strategic.Fiscal
                 || LowShare(input.LowAmmoFormationCount, input.SectorCount) >= options.LowSupplySectorShare;
         }
 
-        // A single starving sector out of six (theater buckets) is local, not systemic;
-        // it must not hold Expansion / force-growth policy research indefinitely.
-        // SectorCount unknown (0) => the count itself is the denominator (legacy: any low => stress).
-        private static float LowShare(int lowCount, int sectorCount)
+        // A single starving sector/formation out of many is local, not systemic; it must
+        // not hold Expansion / force-growth policy research or construction posture
+        // indefinitely. Total unknown (0) => the count itself is the denominator
+        // (legacy: any low => stress). Shared with ConstructionIntentLedger.
+        public static float LowShare(int lowCount, int sectorCount)
         {
             if (lowCount <= 0) return 0f;
             int denominator = sectorCount > lowCount ? sectorCount : lowCount;
