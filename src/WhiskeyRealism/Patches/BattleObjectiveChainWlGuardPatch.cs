@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -10,38 +9,45 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // W&L guard for AIBattle.UpdateMovingTargets. Vanilla skips objective-chain
-    // movement when the center group itself is under player command, but not
-    // when that AI center group carries player-commanded attached units.
+    // #46 — W&L guard for AIBattle.UpdateMovingTargets (decompile 6870).
+    // Vanilla skips objective-chain MOVEMENT when the chain center itself is
+    // under the player's command (6951: !dlc | !center.dlcw_isundercommander),
+    // but still runs CheckCurrentOrderUpdate (6995-7003) so the player's
+    // superior issues the order. It does not skip a center that merely carries
+    // player-commanded attached units, which drags the player's brigade along.
+    //
+    // The Prefix removes such chains so vanilla does not move them, and for
+    // each removed chain that vanilla would have reached (pure
+    // BattleWriterPolicy.ObjectiveChainWouldReachMovement, 6872-6936) replays
+    // vanilla's non-movement side: UpdateGroupStrength, unitlinkedto = null,
+    // the assigned objective, and the static CheckCurrentOrderUpdate (8233)
+    // with vanilla's type 0/12 rule. Only SetWaypoint/BlockedMovingOrder and
+    // the "subordinates moving" flags are suppressed.
+    // The removed chains are restored in a [HarmonyFinalizer], so a vanilla
+    // throw cannot lose them. Commander Mode != Active: vanilla runs untouched.
     [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
     internal static class BattleObjectiveChainWlGuardPatch
     {
-        private static FieldInfo _objectiveChainField;
-        private static FieldInfo _chainCenterUnitField;
+        private static FieldInfo _bunitsField;
+        private static MethodInfo _isGroupStillAbleToFight;
         private static bool _missingRequiredAnchorLogged;
 
         internal sealed class ObjectiveChainFilterState
         {
-            internal IList Chain;
+            internal List<AIBattle.ObjectiveChain> Chain;
             internal readonly List<RemovedObjectiveChain> Removed = new List<RemovedObjectiveChain>();
         }
 
         internal readonly struct RemovedObjectiveChain
         {
-            internal RemovedObjectiveChain(int index, object chain, Regiment center, int attachedUnderCommander, string reason)
+            internal RemovedObjectiveChain(int index, AIBattle.ObjectiveChain chain)
             {
                 Index = index;
                 Chain = chain;
-                Center = center;
-                AttachedUnderCommander = attachedUnderCommander;
-                Reason = reason;
             }
 
             internal int Index { get; }
-            internal object Chain { get; }
-            internal Regiment Center { get; }
-            internal int AttachedUnderCommander { get; }
-            internal string Reason { get; }
+            internal AIBattle.ObjectiveChain Chain { get; }
         }
 
         [HarmonyPrefix]
@@ -50,52 +56,60 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.objective-chain-wl-guard-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                __state = new ObjectiveChainFilterState();
-                if (!Enabled()) return;
+                __state = null;
+                if (!DLC_WL.dlc_scenarioactive) return;
+                if (!BattleWriterPolicy.GateMayIntervene(TacticalWriteGuard.ModeAllowsWrites(), Enabled())) return;
 
+                var state = new ObjectiveChainFilterState();
                 try
                 {
-                    IList chain = ObjectiveChain(__instance);
+                    if (__instance == null) return;
+                    if (!BattleWriterPolicy.ObjectiveChainCycleActive(__instance.state, __instance.macroai)) return;
+
+                    List<AIBattle.ObjectiveChain> chain = __instance.objectivechain;
                     if (chain == null || chain.Count <= 0) return;
-                    __state.Chain = chain;
+                    state.Chain = chain;
+                    __state = state;
 
                     for (int i = chain.Count - 1; i >= 0; i--)
                     {
-                        object entry = chain[i];
-                        Regiment center = CenterUnit(entry);
-                        if (center == null) continue;
+                        AIBattle.ObjectiveChain entry = chain[i];
+                        Regiment center = entry != null ? entry.linegroup_centerunit : null;
+                        if ((UnityEngine.Object)center == null) continue;
+                        if (center.dlcw_isundercommander) continue; // vanilla's own branch handles it
 
                         int attachedUnderCommander = CountAttachedUnderCommander(center);
-                        var decision = TacticalWlActionGuard.Decide(
-                            configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
-                            dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                            action: TacticalWlGuardAction.ObjectiveChainAdvance,
-                            unitUnderCommander: center.dlcw_isundercommander,
-                            groupUnderCommander: center.dlcw_isundercommander,
-                            attachedUnitUnderCommander: attachedUnderCommander > 0);
+                        if (attachedUnderCommander <= 0) continue;
 
-                        if (decision.Allow) continue;
-
-                        __state.Removed.Add(new RemovedObjectiveChain(i, entry, center, attachedUnderCommander, decision.Reason));
+                        state.Removed.Add(new RemovedObjectiveChain(i, entry));
                         chain.RemoveAt(i);
-                        LogDenied(center, i, attachedUnderCommander, decision.Reason);
+                        OnceLog.Info(
+                            "tactical-objective-chain-guard:deny",
+                            "[TacticalObjectiveGuard] suppressed objective-chain movement center=" +
+                            TacticalCurrentOrderSignature.Safe(center.name) +
+                            " attachedUnderCommander=" + attachedUnderCommander);
                     }
+
+                    // Vanilla iterates chains in index order; replay in the same order.
+                    for (int i = state.Removed.Count - 1; i >= 0; i--)
+                        ReplayNonMovementPath(__instance, state.Removed[i].Chain);
                 }
                 catch (Exception ex)
                 {
-                    Restore(__state);
+                    Restore(state);
+                    __state = null;
                     OnceLog.Warning("tactical-objective-chain-guard:failed-pre", "BattleObjectiveChainWlGuardPatch failed before vanilla movement; restored filtered chains and falling back to vanilla: " + ex.Message);
                 }
             }
         }
 
-        [HarmonyPostfix]
-        [HarmonyPriority(Priority.First)]
-        internal static void Postfix(ObjectiveChainFilterState __state)
+        [HarmonyFinalizer]
+        internal static Exception Finalizer(Exception __exception, ObjectiveChainFilterState __state)
         {
-            using (TelemetryPerf.Scope("tactical.patch.objective-chain-wl-guard", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("tactical.patch.objective-chain-wl-guard-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 Restore(__state);
+                return __exception;
             }
         }
 
@@ -106,45 +120,88 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableWlTacticalChargeGuard.Value;
         }
 
-        private static IList ObjectiveChain(AIBattle battle)
+        // Vanilla 6877-6936 + 6995-7003 for one chain, minus the movement.
+        private static void ReplayNonMovementPath(AIBattle battle, AIBattle.ObjectiveChain entry)
         {
-            if (battle == null) return null;
-            if (_objectiveChainField == null)
-                _objectiveChainField = AccessTools.Field(typeof(AIBattle), "objective" + "chain");
-            if (_objectiveChainField == null)
-            {
-                LogMissingRequiredAnchor("objectivechain");
-                return null;
-            }
+            Regiment center = entry.linegroup_centerunit;
+            if ((UnityEngine.Object)center == null || entry.objectives == null || entry.objectives.Count <= 0) return;
 
-            var chain = _objectiveChainField.GetValue(battle) as IList;
-            if (chain == null) LogMissingRequiredAnchor("objectivechain:value");
-            return chain;
+            center.UpdateGroupStrength(overridecalc: true);
+
+            Objectives first = entry.objectives[0];
+            BattleUnits bunits = BattleUnitsOf(battle);
+            if (bunits == null || bunits.uniStormSystem == null) return;
+
+            var probe = new ObjectiveChainMovementProbe(
+                hasCenter: true,
+                objectiveCount: entry.objectives.Count,
+                hasFirstObjective: (UnityEngine.Object)first != null,
+                firstObjectiveTimeToMove: entry.objectivetimetomove != null && entry.objectivetimetomove.Count > 0
+                    ? entry.objectivetimetomove[0]
+                    : float.MaxValue,
+                nowBattleHours: bunits.uniStormSystem.Hour + (float)bunits.battlepasseddays * 24f,
+                centerUnitTyp: center.unittyp,
+                centerRegimentPaths: center.regimentpaths,
+                groupSubordinatesMovingNotFar: center.groupsubordinatesmovingnotfar,
+                groupPositionAttachedUnits: center.groupposition != null ? center.groupposition.attachedunits : -1,
+                pathInterrupted: center.pathinterrupted,
+                blockedMovingOrderRunning: AIBattle.BlockedMovingOrder.OrderRunning(center),
+                moveOrderActive: center.ordertypeactive != null && center.ordertypeactive.Length > 1 &&
+                    (center.ordertypeactive[0] || center.ordertypeactive[1]),
+                combatEngagedNonArtillery: center.combatstatussubordinatesengagednonari,
+                assaultMoveActive: center.aiassaultmove || center.aiassaultmoveisolatedtarget,
+                ableToFight: IsGroupStillAbleToFight(battle, center));
+            if (!BattleWriterPolicy.ObjectiveChainWouldReachMovement(probe)) return;
+
+            center.unitlinkedto = null;
+            center.currentsetobjective = first;
+            if (center.groupposition == null) return;
+
+            int type = first.owner != center.alliance ? 0 : 12;
+            AIBattle.CheckCurrentOrderUpdate(
+                center,
+                type,
+                ((Component)first).gameObject.transform.position,
+                center.currentsetobjective.objectivename,
+                center.lastsetwaypointrotation,
+                center.groupposition.groupwidth,
+                center.groupposition.groupdepth);
         }
 
-        private static Regiment CenterUnit(object chain)
+        private static BattleUnits BattleUnitsOf(AIBattle battle)
         {
-            if (chain == null) return null;
-            if (_chainCenterUnitField == null)
-                _chainCenterUnitField = AccessTools.Field(chain.GetType(), "linegroup_centerunit");
-            if (_chainCenterUnitField == null)
+            if (_bunitsField == null) _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
+            if (_bunitsField == null)
             {
-                LogMissingRequiredAnchor("linegroup_centerunit");
+                LogMissingRequiredAnchor("bunits");
                 return null;
             }
 
-            return _chainCenterUnitField.GetValue(chain) as Regiment;
+            return _bunitsField.GetValue(battle) as BattleUnits;
+        }
+
+        private static bool IsGroupStillAbleToFight(AIBattle battle, Regiment center)
+        {
+            if (_isGroupStillAbleToFight == null)
+                _isGroupStillAbleToFight = AccessTools.Method(typeof(AIBattle), "IsGroupStillAbleToFight", new[] { typeof(Regiment), typeof(bool) });
+            if (_isGroupStillAbleToFight == null)
+            {
+                LogMissingRequiredAnchor("IsGroupStillAbleToFight");
+                return false;
+            }
+
+            return _isGroupStillAbleToFight.Invoke(battle, new object[] { center, true }) is bool able && able;
         }
 
         private static int CountAttachedUnderCommander(Regiment group)
         {
-            if (group == null || group.allattachedunits == null) return 0;
+            if (group.allattachedunits == null) return 0;
 
             int count = 0;
             for (int i = 0; i < group.allattachedunits.Length; i++)
             {
                 Regiment unit = group.allattachedunits[i];
-                if (unit != null && unit.dlcw_isundercommander) count++;
+                if ((UnityEngine.Object)unit != null && unit.dlcw_isundercommander) count++;
             }
 
             return count;
@@ -170,27 +227,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void LogDenied(Regiment center, int chainIndex, int attachedUnderCommander, string reason)
-        {
-            string centerName = center != null && center.gameObject != null
-                ? ((UnityEngine.Object)center.gameObject).name
-                : "unknown";
-            int centerId = center != null ? center.GetInstanceID() : 0;
-
-            OnceLog.Info(
-                "tactical-objective-chain-guard:" + centerId,
-                "[TacticalObjectiveGuard] denied objective-chain advance center=" + centerName +
-                "#" + centerId +
-                " chain=" + chainIndex +
-                " attachedUnderCommander=" + attachedUnderCommander +
-                " reason=" + reason);
-        }
-
         private static void LogMissingRequiredAnchor(string name)
         {
             if (_missingRequiredAnchorLogged) return;
             _missingRequiredAnchorLogged = true;
-            OnceLog.Warning("tactical-objective-chain-guard:missing-anchor", "BattleObjectiveChainWlGuardPatch missing required anchor: " + name + "; vanilla objective-chain movement will run.");
+            OnceLog.Warning("tactical-objective-chain-guard:missing-anchor", "BattleObjectiveChainWlGuardPatch missing required anchor: " + name + "; the suppressed chain's order update is skipped.");
         }
     }
 }

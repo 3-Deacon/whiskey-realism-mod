@@ -58,6 +58,62 @@ namespace WhiskeyRealism.Tactical
         public string Reason { get; }
     }
 
+    // Per-chain inputs of AIBattle.UpdateMovingTargets (6870) that decide
+    // whether vanilla reaches the movement branch for an objective chain.
+    internal readonly struct ObjectiveChainMovementProbe
+    {
+        public ObjectiveChainMovementProbe(
+            bool hasCenter,
+            int objectiveCount,
+            bool hasFirstObjective,
+            float firstObjectiveTimeToMove,
+            float nowBattleHours,
+            int centerUnitTyp,
+            int centerRegimentPaths,
+            float groupSubordinatesMovingNotFar,
+            int groupPositionAttachedUnits,
+            bool pathInterrupted,
+            bool blockedMovingOrderRunning,
+            bool moveOrderActive,
+            float combatEngagedNonArtillery,
+            bool assaultMoveActive,
+            bool ableToFight)
+        {
+            HasCenter = hasCenter;
+            ObjectiveCount = objectiveCount;
+            HasFirstObjective = hasFirstObjective;
+            FirstObjectiveTimeToMove = firstObjectiveTimeToMove;
+            NowBattleHours = nowBattleHours;
+            CenterUnitTyp = centerUnitTyp;
+            CenterRegimentPaths = centerRegimentPaths;
+            GroupSubordinatesMovingNotFar = groupSubordinatesMovingNotFar;
+            GroupPositionAttachedUnits = groupPositionAttachedUnits;
+            PathInterrupted = pathInterrupted;
+            BlockedMovingOrderRunning = blockedMovingOrderRunning;
+            MoveOrderActive = moveOrderActive;
+            CombatEngagedNonArtillery = combatEngagedNonArtillery;
+            AssaultMoveActive = assaultMoveActive;
+            AbleToFight = ableToFight;
+        }
+
+        public bool HasCenter { get; }
+        public int ObjectiveCount { get; }
+        public bool HasFirstObjective { get; }
+        public float FirstObjectiveTimeToMove { get; }
+        public float NowBattleHours { get; }
+        public int CenterUnitTyp { get; }
+        public int CenterRegimentPaths { get; }
+        public float GroupSubordinatesMovingNotFar { get; }
+        // -1 when the center has no groupposition.
+        public int GroupPositionAttachedUnits { get; }
+        public bool PathInterrupted { get; }
+        public bool BlockedMovingOrderRunning { get; }
+        public bool MoveOrderActive { get; }
+        public float CombatEngagedNonArtillery { get; }
+        public bool AssaultMoveActive { get; }
+        public bool AbleToFight { get; }
+    }
+
     // Pure decisions behind the WS T3 battle writer/gate patches. Runtime
     // patches gather vanilla state and ask these functions what to do, so the
     // harness can pin each decision to the vanilla rule it mirrors.
@@ -299,6 +355,35 @@ namespace WhiskeyRealism.Tactical
         public static bool GateMayIntervene(bool modeAllowsWrites, bool gateEnabled)
         {
             return modeAllowsWrites && gateEnabled;
+        }
+
+        // #46: AIBattle.UpdateMovingTargets returns at 6872 when
+        // state < 4 || macroai == 3 || macroai == -1.
+        public static bool ObjectiveChainCycleActive(int state, int macroAi)
+        {
+            return state >= 4 && macroAi != 3 && macroAi != -1;
+        }
+
+        // #46: UpdateMovingTargets 6877-6936 - the per-chain "continue"
+        // conditions before the movement branch. When this is true vanilla
+        // would move the chain center (and then run CheckCurrentOrderUpdate);
+        // for a center protected by the W&L guard Whiskey suppresses only the
+        // movement and keeps the rest.
+        public static bool ObjectiveChainWouldReachMovement(in ObjectiveChainMovementProbe chain)
+        {
+            if (!chain.HasCenter || chain.ObjectiveCount <= 0) return false;
+
+            bool busy = false;
+            if (chain.CenterUnitTyp <= 13 && chain.CenterRegimentPaths > 0) busy = true;
+            if (chain.CenterUnitTyp > 13 && chain.GroupSubordinatesMovingNotFar > 0.3f) busy = true;
+            if (chain.GroupPositionAttachedUnits == 0 && chain.CenterUnitTyp > 13) busy = true;
+            if (chain.PathInterrupted || chain.BlockedMovingOrderRunning) busy = true;
+
+            if (!chain.HasFirstObjective) return false;
+            if (!(chain.FirstObjectiveTimeToMove <= chain.NowBattleHours)) return false;
+            if (busy || chain.MoveOrderActive) return false;
+            if (!(chain.CombatEngagedNonArtillery <= 0f) || chain.AssaultMoveActive) return false;
+            return chain.AbleToFight;
         }
 
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only

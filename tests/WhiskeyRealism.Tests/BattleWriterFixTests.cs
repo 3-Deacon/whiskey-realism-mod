@@ -34,6 +34,8 @@ internal static class BattleWriterFixTests
         ChargeGateAllowsCounterChargeAgainstChargingEnemy();
         FeudGateRestoresVanillaDistanceCap();
         GatesFailOpenOutsideActiveMode();
+        ObjectiveChainCycleGateMatchesVanilla();
+        ObjectiveChainMovementGateMatchesVanilla();
     }
 
     private static void Pass(string name)
@@ -217,6 +219,60 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, true, 0, 0), "obstacle builder");
         TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, false, 2, 0), "formation change pending");
         Pass("battle writers: #59 rolls back only when StopRegiment side effects are reversible");
+    }
+
+    private static ObjectiveChainMovementProbe Chain(
+        bool hasCenter = true,
+        int objectives = 1,
+        bool firstObjective = true,
+        float timeToMove = 5f,
+        float nowHours = 10f,
+        int centerTyp = 14,
+        int centerPaths = 0,
+        float subsMovingNotFar = 0f,
+        int groupPositionAttached = 3,
+        bool pathInterrupted = false,
+        bool blockedOrderRunning = false,
+        bool orderActive = false,
+        float engagedNonAri = 0f,
+        bool assaultMove = false,
+        bool ableToFight = true)
+    {
+        return new ObjectiveChainMovementProbe(
+            hasCenter, objectives, firstObjective, timeToMove, nowHours, centerTyp, centerPaths,
+            subsMovingNotFar, groupPositionAttached, pathInterrupted, blockedOrderRunning,
+            orderActive, engagedNonAri, assaultMove, ableToFight);
+    }
+
+    // UpdateMovingTargets 6872: state < 4 || macroai == 3 || macroai == -1 returns.
+    private static void ObjectiveChainCycleGateMatchesVanilla()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ObjectiveChainCycleActive(5, 1), "active");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainCycleActive(3, 1), "state < 4");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainCycleActive(5, 3), "retreat");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainCycleActive(5, -1), "unset macro");
+        Pass("battle writers: #46 cycle gate matches UpdateMovingTargets");
+    }
+
+    // UpdateMovingTargets 6877-6936: the per-chain continue conditions that
+    // precede the movement branch and CheckCurrentOrderUpdate.
+    private static void ObjectiveChainMovementGateMatchesVanilla()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain()), "ready group");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(hasCenter: false)), "no center");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(objectives: 0)), "no objectives");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(timeToMove: 11f)), "not yet time");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(subsMovingNotFar: 0.5f)), "group moving");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(centerTyp: 0, centerPaths: 1)), "regiment moving");
+        TestHarness.AssertTrue(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(centerTyp: 0, subsMovingNotFar: 0.9f)), "regiment ignores group moving flag");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(groupPositionAttached: 0)), "empty group");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(pathInterrupted: true)), "path interrupted");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(blockedOrderRunning: true)), "blocked order");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(orderActive: true)), "order active");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(engagedNonAri: 0.1f)), "engaged");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(assaultMove: true)), "assault move");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(ableToFight: false)), "unable to fight");
+        Pass("battle writers: #46 movement gate matches UpdateMovingTargets");
     }
 
     private static void AssertNear(float expected, float actual, string label)
