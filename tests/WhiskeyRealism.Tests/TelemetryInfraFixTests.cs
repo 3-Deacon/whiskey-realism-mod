@@ -33,6 +33,12 @@ internal static class TelemetryInfraFixTests
         PerfSlowRowsAreBoundedPerWindow();
         PerfWarningsOffFoldsSlowCallsIntoAggregate();
         PerfAggregateWindowFlushesAutomatically();
+        WriterDoesNotRewriteManifestPerBatch();
+        WriterRewritesManifestOnTimer();
+        WriterKeepsOneOpenStreamPerFileAndClosesOnStop();
+        WriterRetriesTransientFailureWithoutDisablingSink();
+        WriterDisablesSinkAfterConsecutiveFailures();
+        WriterShutdownDrainIsBounded();
     }
 
     private static void LogPass(string message)
@@ -543,5 +549,210 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("perf aggregate window flushes automatically");
+    }
+
+    // ---------------------------------------------------------------- P-queue / TEL-sink / TEL-run
+
+    private static TelemetryEvent Decision(string session, int i)
+    {
+        return TelemetryEvent.Create(session, TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision, "PTestWriterDecision", TelemetrySeverity.Info)
+            .WithDecision("hold", "writer", "sig-" + i.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static int CountLines(string path)
+    {
+        if (!File.Exists(path)) return 0;
+        int count = 0;
+        foreach (string line in File.ReadAllLines(path))
+            if (!string.IsNullOrWhiteSpace(line)) count++;
+        return count;
+    }
+
+    private static bool WaitUntil(Func<bool> condition, int timeoutMs)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMs)
+        {
+            if (condition()) return true;
+            System.Threading.Thread.Sleep(5);
+        }
+        return condition();
+    }
+
+    private static void WriterDoesNotRewriteManifestPerBatch()
+    {
+        string dir = TempDir();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            int manifestCalls = 0;
+            for (int i = 0; i < 10; i++)
+                queue.Enqueue(Decision("w", i));
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { System.Threading.Interlocked.Increment(ref manifestCalls); },
+                "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 1);
+            writer.Start();
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertEqual(10, CountLines(Path.Combine(dir, "tactical.jsonl")), "all rows written");
+            TestHarness.AssertTrue(manifestCalls >= 1 && manifestCalls <= 3, "manifest written on new file + shutdown only, got " + manifestCalls.ToString(CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            DeleteQuietly(dir);
+        }
+        LogPass("writer does not rewrite manifest per batch");
+    }
+
+    private static void WriterRewritesManifestOnTimer()
+    {
+        string dir = TempDir();
+        int savedInterval = TelemetryWriter.ManifestIntervalMs;
+        try
+        {
+            TelemetryWriter.ManifestIntervalMs = 40;
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            int manifestCalls = 0;
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { System.Threading.Interlocked.Increment(ref manifestCalls); },
+                "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            for (int i = 0; i < 6; i++)
+            {
+                queue.Enqueue(Decision("w", i));
+                writer.Signal();
+                System.Threading.Thread.Sleep(60);
+            }
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertTrue(manifestCalls >= 4, "timer rewrites manifest while rows keep arriving, got " + manifestCalls.ToString(CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            TelemetryWriter.ManifestIntervalMs = savedInterval;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer rewrites manifest on timer");
+    }
+
+    private static void WriterKeepsOneOpenStreamPerFileAndClosesOnStop()
+    {
+        string dir = TempDir();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 4);
+            writer.Start();
+            for (int i = 0; i < 12; i++)
+                queue.Enqueue(Decision("w", i));
+            queue.Enqueue(TelemetryEvent.Create("w", TelemetryProfile.FullTuning, TelemetryLayer.System, TelemetryCategory.Health, "PTestHealth", TelemetrySeverity.Info));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => queue.Count == 0 && CountLines(Path.Combine(dir, "tactical.jsonl")) == 12, 3000), "rows flushed to disk while stream stays open");
+            TestHarness.AssertEqual(2, writer.OpenStreamCount, "one open stream per output file");
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertEqual(0, writer.OpenStreamCount, "streams closed on stop");
+            TestHarness.AssertEqual(1, CountLines(Path.Combine(dir, "health.jsonl")), "health row written");
+        }
+        finally
+        {
+            DeleteQuietly(dir);
+        }
+        LogPass("writer keeps one open stream per file and closes on stop");
+    }
+
+    private static void WriterRetriesTransientFailureWithoutDisablingSink()
+    {
+        string dir = TempDir();
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        try
+        {
+            TelemetryWriter.RetryBaseMilliseconds = 20;
+            Directory.Delete(dir, true);
+            var warnings = new List<string>();
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, warnings.Add, flushMilliseconds: 50, flushRows: 8);
+            writer.Start();
+            for (int i = 0; i < 3; i++)
+                queue.Enqueue(Decision("w", i));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 2000), "transient failure observed");
+            Directory.CreateDirectory(dir);
+            TestHarness.AssertTrue(WaitUntil(() => CountLines(Path.Combine(dir, "tactical.jsonl")) == 3, 3000), "rows retried and written after the sink recovers");
+            TestHarness.AssertFalse(writer.FileSinkDisabled, "transient failure does not disable the sink");
+            queue.Enqueue(Decision("w", 99));
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertEqual(4, CountLines(Path.Combine(dir, "tactical.jsonl")), "later rows still written");
+            TestHarness.AssertTrue(warnings.Count >= 1, "failure warned");
+        }
+        finally
+        {
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer retries transient failure without disabling sink");
+    }
+
+    private static void WriterDisablesSinkAfterConsecutiveFailures()
+    {
+        string dir = TempDir();
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        try
+        {
+            TelemetryWriter.RetryBaseMilliseconds = 5;
+            Directory.Delete(dir, true);
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 8);
+            writer.Start();
+            queue.Enqueue(Decision("w", 0));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => writer.FileSinkDisabled, 3000), "sink disabled after repeated failures");
+            TestHarness.AssertTrue(writer.SinkFailureCount >= TelemetryWriter.MaxConsecutiveWriteFailures, "each failed attempt counted");
+            writer.StopAndFlush(2000);
+            TestHarness.AssertFalse(Directory.Exists(dir), "writer never recreates the session directory");
+        }
+        finally
+        {
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer disables sink after consecutive failures");
+    }
+
+    private static void WriterShutdownDrainIsBounded()
+    {
+        string dir = TempDir();
+        bool stopProducer = false;
+        System.Threading.Thread producer = null;
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 4096);
+            var budget = new TelemetryBudget(totalBytes: 64L << 20, rotateBytes: 64L << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 64);
+            writer.Start();
+            producer = new System.Threading.Thread(() =>
+            {
+                int i = 0;
+                while (!System.Threading.Volatile.Read(ref stopProducer))
+                {
+                    queue.Enqueue(Decision("w", i++));
+                    if ((i & 255) == 0) System.Threading.Thread.Yield();
+                }
+            });
+            producer.IsBackground = true;
+            producer.Start();
+            System.Threading.Thread.Sleep(50);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            writer.StopAndFlush(6000);
+            watch.Stop();
+            TestHarness.AssertTrue(watch.ElapsedMilliseconds < 4000, "shutdown drain bounded while a producer keeps enqueuing, took " + watch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + "ms");
+        }
+        finally
+        {
+            System.Threading.Volatile.Write(ref stopProducer, true);
+            if (producer != null) producer.Join(2000);
+            DeleteQuietly(dir);
+        }
+        LogPass("writer shutdown drain is bounded");
     }
 }

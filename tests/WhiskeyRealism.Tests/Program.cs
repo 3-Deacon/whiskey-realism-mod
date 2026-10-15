@@ -1555,7 +1555,9 @@ static class Program
             writer.Start();
             AssertTrue(writer.StopAndFlush(1000), "writer stops after configured row batches");
             AssertEqual(5, CountJsonLines(File.ReadAllText(Path.Combine(sessionDirectory, "tactical.jsonl"))), "configured flush writer row count");
-            AssertTrue(manifestCalls >= 4, "flushRows=2 should split five rows across multiple flush manifest writes");
+            // WS P P-queue: the manifest is rewritten on new output file / rotation / timer /
+            // shutdown only, not once per flush batch.
+            AssertTrue(manifestCalls >= 1 && manifestCalls <= 3, "flushRows=2 batches do not each rewrite the manifest");
         }
         finally
         {
