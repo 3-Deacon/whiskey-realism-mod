@@ -420,6 +420,8 @@ namespace WhiskeyRealism.Telemetry
                 if (_writerShutdownTimedOut)
                     manifest.DroppedCounters["writerShutdownTimedOut"] = 1L;
 
+                TelemetryFrameProbe.AddManifestStats(manifest.FrameProbe);
+
                 string path = Path.Combine(_sessionDirectory, "manifest.json");
                 File.WriteAllText(path, manifest.ToJson());
                 if (endUtc.HasValue)

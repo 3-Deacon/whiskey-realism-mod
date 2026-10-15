@@ -53,6 +53,12 @@ namespace WhiskeyRealism.Telemetry
         internal static long MaxInputBytes = 32L * 1024L * 1024L;
 
         private long _inputBytesRead;
+        private long _frameHitchRows;
+        private long _frameHitchSevereRows;
+        private double _frameHitchRowMaxMs;
+        private long _manifestHitchCount;
+        private long _manifestSevereHitchCount;
+        private double _manifestMaxFrameMs;
         private readonly SortedDictionary<string, long> _countByLayer = new SortedDictionary<string, long>(StringComparer.Ordinal);
         private readonly SortedDictionary<string, long> _countByCategory = new SortedDictionary<string, long>(StringComparer.Ordinal);
         private readonly SortedDictionary<string, long> _countByEvent = new SortedDictionary<string, long>(StringComparer.Ordinal);
@@ -161,6 +167,7 @@ namespace WhiskeyRealism.Telemetry
             AppendStrings(builder, "deniedGates", _deniedGates);
             AppendItems(builder, "writeResults", WriteResults);
             AppendSlowScopes(builder);
+            AppendFrameHitches(builder);
             AppendItems(builder, "queueDrops", QueueDrops);
             AppendItems(builder, "budgetDrops", BudgetDrops);
             AppendItems(builder, "capTransitions", CapTransitions);
@@ -209,6 +216,14 @@ namespace WhiskeyRealism.Telemetry
                 Profile = SafeTokenString(manifest["profile"], Profile);
                 StartUtc = ParseDate(manifest["startUtc"]);
                 EndUtc = ParseDate(manifest["endUtc"]);
+
+                JObject frameProbe = manifest["frameProbe"] as JObject;
+                if (frameProbe != null)
+                {
+                    _manifestHitchCount = NumberAsLong(frameProbe["hitchCount"]);
+                    _manifestSevereHitchCount = NumberAsLong(frameProbe["severeHitchCount"]);
+                    _manifestMaxFrameMs = NumberAsDouble(frameProbe["maxFrameMs"]);
+                }
 
                 JObject dropped = manifest["droppedCounters"] as JObject;
                 if (dropped != null)
@@ -317,6 +332,15 @@ namespace WhiskeyRealism.Telemetry
 
             if (string.Equals(category, "Performance", StringComparison.OrdinalIgnoreCase) && durationMs > 0.0)
                 AddSlowScope(new TelemetrySlowScope(FirstNonBlank(FieldString(fields, "scope"), eventName), eventName, durationMs));
+
+            if (string.Equals(eventName, "FrameHitch", StringComparison.Ordinal))
+            {
+                _frameHitchRows++;
+                if (durationMs >= 500.0)
+                    _frameHitchSevereRows++;
+                if (durationMs > _frameHitchRowMaxMs)
+                    _frameHitchRowMaxMs = durationMs;
+            }
 
             if (string.Equals(category, "Failure", StringComparison.OrdinalIgnoreCase))
             {
@@ -653,6 +677,25 @@ namespace WhiskeyRealism.Telemetry
             foreach (TelemetrySlowScope scope in scopes)
                 values.Add(scope.ToString());
             builder.AppendLine(string.Join(", ", values));
+        }
+
+        // Max frame and >500 ms count are the hitch evidence (p99 hides a 5 s stall every
+        // 30 s). The manifest counters are authoritative when rows were dropped or capped.
+        private void AppendFrameHitches(StringBuilder builder)
+        {
+            long count = Math.Max(_frameHitchRows, _manifestHitchCount);
+            long severe = Math.Max(_frameHitchSevereRows, _manifestSevereHitchCount);
+            double maxMs = Math.Max(_frameHitchRowMaxMs, _manifestMaxFrameMs);
+            builder.Append("- frameHitches: ");
+            if (count == 0 && maxMs <= 0.0)
+            {
+                builder.AppendLine("-");
+                return;
+            }
+
+            builder.AppendLine("count=" + count.ToString(CultureInfo.InvariantCulture)
+                + " over500ms=" + severe.ToString(CultureInfo.InvariantCulture)
+                + " maxMs=" + maxMs.ToString("0", CultureInfo.InvariantCulture));
         }
 
         private void AppendRepeatedFailures(StringBuilder builder)

@@ -43,6 +43,12 @@ internal static class TelemetryInfraFixTests
         ShutdownRewritesManifestOnlyAfterLateFailure();
         SummaryKeepsBoundedSlowestScopes();
         SummaryBoundsInputBytesAndReadsFailuresFirst();
+        ProbeStateDetectsHitchWithGcDeltasAndTopScopes();
+        ProbeStateTracksSessionMaxAndSevereCount();
+        ProbeStateBoundsRecordedScopes();
+        ProbeTickDoesNotAllocateOnNormalFrames();
+        ProbeTickEmitsProtectedHitchRowWithTopLevelScopes();
+        SummaryReportsFrameHitches();
     }
 
     private static void LogPass(string message)
@@ -872,5 +878,148 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(dir);
         }
         LogPass("summary bounds input bytes and reads failures first");
+    }
+
+    // ---------------------------------------------------------------- P-probe
+
+    private static void ProbeStateDetectsHitchWithGcDeltasAndTopScopes()
+    {
+        var state = new FrameProbeState();
+        TelemetryFrameHitch hitch;
+        TestHarness.AssertFalse(state.Observe(16.0, 10, 2, 1, out hitch), "normal first frame");
+        state.ResetFrameScopes();
+        state.RecordScope("a", 1.0);
+        state.RecordScope("b", 300.0);
+        state.RecordScope("c", 5.0);
+        state.RecordScope("b", 20.0);
+        TestHarness.AssertTrue(state.Observe(400.0, 13, 2, 1, out hitch), "400 ms frame is a hitch");
+        TestHarness.AssertEqual(400.0, hitch.FrameMs, "frame ms");
+        TestHarness.AssertEqual(3L, hitch.Gen0Delta, "gen0 delta");
+        TestHarness.AssertEqual(0L, hitch.Gen1Delta, "gen1 delta");
+        TestHarness.AssertEqual(4, hitch.ScopeCount, "scope count");
+        TestHarness.AssertEqual(326.0, hitch.ScopeTotalMs, "scope total");
+        TestHarness.AssertEqual("b:300.0;b:20.0;c:5.0;a:1.0", hitch.TopScopes, "top scopes by duration");
+        TestHarness.AssertFalse(hitch.Severe, "400 ms below severe threshold");
+        state.ResetFrameScopes();
+        TestHarness.AssertFalse(state.Observe(30.0, 13, 2, 1, out hitch), "back to normal");
+        LogPass("probe state detects hitch with gc deltas and top scopes");
+    }
+
+    private static void ProbeStateTracksSessionMaxAndSevereCount()
+    {
+        var state = new FrameProbeState();
+        TelemetryFrameHitch hitch;
+        state.Observe(16.0, 0, 0, 0, out hitch);
+        state.Observe(260.0, 0, 0, 0, out hitch);
+        state.Observe(5200.0, 1, 0, 0, out hitch);
+        TestHarness.AssertTrue(hitch.Severe, "5.2 s frame is severe");
+        state.Observe(700.0, 1, 0, 0, out hitch);
+        state.Observe(100.0, 1, 0, 0, out hitch);
+        TestHarness.AssertEqual(3L, state.HitchCount, "frames over 250 ms");
+        TestHarness.AssertEqual(2L, state.SevereHitchCount, "frames over 500 ms");
+        TestHarness.AssertEqual(5200.0, state.MaxFrameMs, "max frame ms");
+        TestHarness.AssertEqual(5L, state.FrameCount, "frames observed");
+        LogPass("probe state tracks session max and severe count");
+    }
+
+    private static void ProbeStateBoundsRecordedScopes()
+    {
+        var state = new FrameProbeState();
+        for (int i = 0; i < FrameProbeState.MaxScopesPerFrame + 40; i++)
+            state.RecordScope("s" + (i % 3).ToString(CultureInfo.InvariantCulture), 1.0);
+        TelemetryFrameHitch hitch;
+        TestHarness.AssertTrue(state.Observe(600.0, 0, 0, 0, out hitch), "hitch");
+        TestHarness.AssertEqual(FrameProbeState.MaxScopesPerFrame + 40, hitch.ScopeCount, "all scopes counted");
+        TestHarness.AssertEqual(40, hitch.ScopeOverflow, "overflow counted");
+        TestHarness.AssertEqual((double)(FrameProbeState.MaxScopesPerFrame + 40), hitch.ScopeTotalMs, "total includes overflow");
+        LogPass("probe state bounds recorded scopes");
+    }
+
+    private static void ProbeTickDoesNotAllocateOnNormalFrames()
+    {
+        TelemetryFrameProbe.ResetForTests();
+        for (int i = 0; i < 4; i++)
+            TelemetryFrameProbe.Tick(0.016f);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 5000; i++)
+        {
+            TelemetryFrameProbe.RecordTopLevelScope("p-test.frame", 0.1);
+            TelemetryFrameProbe.Tick(0.016f);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        TestHarness.AssertEqual(0L, allocated, "normal-frame probe ticks allocated bytes");
+        TelemetryFrameProbe.ResetForTests();
+        LogPass("probe tick does not allocate on normal frames");
+    }
+
+    private static void ProbeTickEmitsProtectedHitchRowWithTopLevelScopes()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryFrameProbe.ResetForTests();
+            TelemetryRuntime runtime = StartRuntime(gameRoot, profile: TelemetryProfile.TacticalTuning);
+            string dir = SessionDir(gameRoot, runtime);
+            TelemetryFrameProbe.Tick(0.016f);
+            using (TelemetryPerf.Scope("p-test.probe.outer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+            {
+                using (TelemetryPerf.Scope("p-test.probe.inner", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            }
+            TelemetryFrameProbe.Tick(0.9f);
+            TelemetryFrameProbe.Tick(0.016f);
+            TelemetryRouter.Shutdown("p-test");
+
+            string health = ReadIfExists(Path.Combine(dir, "health.jsonl"));
+            TestHarness.AssertEqual(1, CountOccurrences(health, "\"event\":\"FrameHitch\""), "one hitch row");
+            string hitchLine = null;
+            foreach (string line in health.Split('\n'))
+                if (line.Contains("\"event\":\"FrameHitch\"")) hitchLine = line;
+            var row = Newtonsoft.Json.Linq.JObject.Parse(hitchLine);
+            TestHarness.AssertEqual("Health", (string)row["category"], "protected category");
+            TestHarness.AssertTrue((double)row["durationMs"] >= 899.0, "frame duration recorded");
+            TestHarness.AssertTrue(((string)row["fields"]["topScopes"]).StartsWith("p-test.probe.outer:"), "top-level scope recorded");
+            TestHarness.AssertFalse(((string)row["fields"]["topScopes"]).Contains("p-test.probe.inner"), "nested scope not recorded as top-level");
+            TestHarness.AssertTrue((bool)row["fields"]["severe"], "900 ms is severe");
+            foreach (string field in new[] { "gen0Delta", "gen1Delta", "gen2Delta", "gcTotalMemoryBytes", "monoUsedBytes", "monoHeapBytes", "queueDepth", "scopeCount", "scopeTotalMs", "wallIntervalMs" })
+                TestHarness.AssertTrue(row["fields"][field] != null, "hitch field " + field);
+
+            var manifest = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(Path.Combine(dir, "manifest.json")));
+            TestHarness.AssertEqual(1L, (long)manifest["frameProbe"]["severeHitchCount"], "manifest severe hitch count");
+            TestHarness.AssertTrue((double)manifest["frameProbe"]["maxFrameMs"] >= 899.0, "manifest max frame");
+            string summary = File.ReadAllText(Path.Combine(dir, "summary.md"));
+            TestHarness.AssertTrue(summary.Contains("- frameHitches: count=1 over500ms=1 maxMs=9"), "summary frame hitch line: " + summary);
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            TelemetryFrameProbe.ResetForTests();
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("probe tick emits protected hitch row with top-level scopes");
+    }
+
+    private static void SummaryReportsFrameHitches()
+    {
+        string dir = TempDir();
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (double ms in new[] { 300.0, 5400.0, 800.0 })
+            {
+                var ev = TelemetryEvent.Create("sum", TelemetryProfile.FullTuning, TelemetryLayer.System, TelemetryCategory.Health, "FrameHitch", TelemetrySeverity.Warning)
+                    .WithDurationMs(ms);
+                sb.Append(TelemetryJson.ToJsonLine(ev));
+            }
+            File.WriteAllText(Path.Combine(dir, "health.jsonl"), sb.ToString());
+            string markdown = TelemetrySummary.FromDirectory(dir).ToMarkdown();
+            TestHarness.AssertTrue(markdown.Contains("- frameHitches: count=3 over500ms=2 maxMs=5400"), "summary from rows: " + markdown);
+        }
+        finally
+        {
+            DeleteQuietly(dir);
+        }
+        LogPass("summary reports frame hitches");
     }
 }

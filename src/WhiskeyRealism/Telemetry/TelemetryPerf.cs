@@ -107,6 +107,8 @@ namespace WhiskeyRealism.Telemetry
         private static void Complete(PerfScope scope, long endTimestamp)
         {
             double durationMs = (endTimestamp - scope.StartTimestamp) * TicksToMs;
+            if (scope.Depth == 0)
+                TelemetryFrameProbe.RecordTopLevelScope(scope.Name, durationMs);
             ThreadAggregates aggregates = t_aggregates ?? (t_aggregates = new ThreadAggregates(endTimestamp));
             ScopeAggregate aggregate = aggregates.Get(scope.Name, scope.Layer, scope.Category, scope.ThresholdMs);
             if (aggregate != null)

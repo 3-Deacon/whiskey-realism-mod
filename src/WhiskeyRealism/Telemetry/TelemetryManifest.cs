@@ -11,6 +11,7 @@ namespace WhiskeyRealism.Telemetry
             ConfigSnapshot = new Dictionary<string, string>(StringComparer.Ordinal);
             OutputFiles = new List<string>();
             DroppedCounters = new Dictionary<string, long>(StringComparer.Ordinal);
+            FrameProbe = new Dictionary<string, double>(StringComparer.Ordinal);
         }
 
         internal string Schema
@@ -33,6 +34,9 @@ namespace WhiskeyRealism.Telemetry
         internal Dictionary<string, long> DroppedCounters { get; private set; }
         internal int UnflushedCount { get; set; }
 
+        // TelemetryFrameProbe session stats (frame/hitch counts, max frame ms).
+        internal Dictionary<string, double> FrameProbe { get; private set; }
+
         internal string ToJson()
         {
             return JsonConvert.SerializeObject(new
@@ -51,7 +55,8 @@ namespace WhiskeyRealism.Telemetry
                 emittedBytes = EmittedBytes,
                 rotationIndex = RotationIndex,
                 droppedCounters = DroppedCounters,
-                unflushedCount = UnflushedCount
+                unflushedCount = UnflushedCount,
+                frameProbe = FrameProbe
             }, Formatting.Indented);
         }
 
