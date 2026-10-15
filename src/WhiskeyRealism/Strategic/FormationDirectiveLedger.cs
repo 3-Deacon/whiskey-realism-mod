@@ -59,6 +59,15 @@ namespace WhiskeyRealism.Strategic
         private readonly List<FormationDirectiveAssignment> _ordered =
             new List<FormationDirectiveAssignment>();
 
+        // The fallback directive (G1b; it was Screen "default-screen" before Screen meant a recon
+        // mission). Its perk path stays the old fallback's (integrator decision, G1b verify r1 F2).
+        public const string DefaultHoldReason = "default-hold";
+
+        public static bool IsDefaultHold(string reason)
+        {
+            return string.Equals(reason, DefaultHoldReason, StringComparison.Ordinal);
+        }
+
         public IReadOnlyList<FormationDirectiveAssignment> Assignments => _ordered;
         public FormationPressureSummary Pressure = new FormationPressureSummary();
 
@@ -97,7 +106,10 @@ namespace WhiskeyRealism.Strategic
                 assignment.ParentUnitKey = child.ParentUnitKey;
                 assignment.DirectMovementAllowed = false;
                 assignment.Directive = parent != null ? parent.Directive : FormationDirective.Hold;
-                assignment.Reason = parent != null ? "attached-inherits-parent" : "attached-parent-missing";
+                // A child of a default-hold parent keeps that reason, so its perks fall through to the
+                // objective role as the parent's do (PerkSelectionScorer.TryDirectiveRole).
+                assignment.Reason = parent == null ? "attached-parent-missing"
+                    : IsDefaultHold(parent.Reason) ? DefaultHoldReason : "attached-inherits-parent";
                 assignment.OffensiveAllowed = false;
                 assignment.DefensiveAllowed = parent == null || parent.DefensiveAllowed;
                 assignment.TransferDonorAllowed = false;
@@ -249,7 +261,7 @@ namespace WhiskeyRealism.Strategic
             if (snapshot.Level == FormationLevel.Army)
                 return Set(assignment, FormationDirective.Hold, "army-hold", false, true, false);
 
-            return Set(assignment, FormationDirective.Hold, "default-hold", false, true, false);
+            return Set(assignment, FormationDirective.Hold, DefaultHoldReason, false, true, false);
         }
 
         private static FormationDirectiveAssignment BaseAssignment(FormationSnapshot snapshot)

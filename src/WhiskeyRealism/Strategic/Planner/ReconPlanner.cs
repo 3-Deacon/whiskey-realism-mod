@@ -136,7 +136,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     case ReconKind.Picket:
                         if (SectorOf(sectors, f) != task.SectorId) continue;
-                        if (sectorOwn - f.Strength < holdNeed) continue;
+                        // The player's own command and a map-group player never hold a sector (C4):
+                        // only committed defenders count, before and after the picket leaves.
+                        if (sectorOwn - (WlChainRules.CountsAsCommittedDefender(f.Chain) ? f.Strength : 0f) < holdNeed) continue;
                         break;
                     case ReconKind.AdvanceGuard:
                     case ReconKind.Probe:
@@ -389,7 +391,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // The main effort's objective is the main SectorPlan's target. Its front is the
         // strength-weighted centre of the own formations in the main sector, else the own formation
         // nearest the objective; its main body is every own formation within the relocation range of
-        // the front (vanilla's own gathering radius, 14257-14275).
+        // the front (vanilla's own gathering radius, 14257-14275) that counts as a committed defender
+        // (stage F's WlChainRules: never the W&L player's own command or a map-group player, C4).
         private static bool TryMainEffort(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, out MainEffort m)
         {
             m = default(MainEffort);
@@ -407,7 +410,8 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!OwnMean(s, sectors, m.Sector, out m.FrontX, out m.FrontZ) && !NearestOwn(s, m.TargetX, m.TargetZ, out m.FrontX, out m.FrontZ))
                 return false;
             for (int i = 0; i < s.Own.Count; i++)
-                if (InMainBody(s, m, s.Own[i])) m.BodyStrength += Math.Max(0f, s.Own[i].Strength);
+                if (InMainBody(s, m, s.Own[i]) && WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain))
+                    m.BodyStrength += Math.Max(0f, s.Own[i].Strength);
             return true;
         }
 
@@ -608,7 +612,8 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             own = enemy = 0f;
             for (int i = 0; i < s.Own.Count; i++)
-                if (SectorOf(sectors, s.Own[i]) == sector) own += Math.Max(0f, s.Own[i].Strength);
+                if (SectorOf(sectors, s.Own[i]) == sector && WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain))
+                    own += Math.Max(0f, s.Own[i].Strength);
             for (int i = 0; i < s.Beliefs.Count; i++)
             {
                 var b = s.Beliefs[i];

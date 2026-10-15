@@ -59,6 +59,15 @@ internal static class ReconPlannerTests
             ("PlayerCommandRefusedLive", PlayerCommandRefusedLive),
             ("ScreenDirectiveOnlyForReconMissions", ScreenDirectiveOnlyForReconMissions),
             ("ScreenMapsToScoutingPerkRole", ScreenMapsToScoutingPerkRole),
+            ("DefaultHoldKeepsObjectivePerkRole", DefaultHoldKeepsObjectivePerkRole),
+            ("PicketReserveIgnoresPlayerCommand", PicketReserveIgnoresPlayerCommand),
+            ("PicketReserveIgnoresMapGroupPlayer", PicketReserveIgnoresMapGroupPlayer),
+            ("PicketComesFromItsOwnSector", PicketComesFromItsOwnSector),
+            ("BusySetIncludesVanillaOperationLists", BusySetIncludesVanillaOperationLists),
+            ("AdvanceGuardAndProbeSizeCap", AdvanceGuardAndProbeSizeCap),
+            ("MainBodyStrengthExcludesPlayerFormations", MainBodyStrengthExcludesPlayerFormations),
+            ("RecallPointIsNearestHeldFormation", RecallPointIsNearestHeldFormation),
+            ("RecallPointNeverAPlayerFormation", RecallPointNeverAPlayerFormation),
             ("DivisionVsArmyIsDelayNotScreen", DivisionVsArmyIsDelayNotScreen),
             ("DefaultFallbackIsHold", DefaultFallbackIsHold),
         });
@@ -766,9 +775,194 @@ internal static class ReconPlannerTests
 
     private static void ScreenMapsToScoutingPerkRole()
     {
+        AssertTrue(PerkSelectionScorer.TryDirectiveRole(FormationDirective.Screen, "recon-mission", out var role), "Screen names a role");
+        AssertEqual(ArmyPerkRole.Scouting, role, "a recon formation picks scouting perks");
+        // PerkSelectionPatch (runtime, not in the harness) takes its directive role from the scorer.
         string src = ReadRepoFile("src/WhiskeyRealism/Patches/PerkSelectionPatch.cs");
-        AssertTrue(Regex.IsMatch(src, @"case FormationDirective\.Screen:\s*return ArmyPerkRole\.Scouting;"), "a recon formation picks scouting perks");
+        AssertTrue(Regex.IsMatch(src, @"if \(directive != null && PerkSelectionScorer\.TryDirectiveRole\(directive\.Directive, directive\.Reason, out var directiveRole\)\)\s*return directiveRole;"), "the patch reads the scorer's mapping");
+        AssertFalse(Regex.IsMatch(src, @"case FormationDirective\."), "no second mapping in the patch");
         AssertFalse(src.Contains("RaidSupport"), "the raid-support directive is gone");
+    }
+
+    // Integrator decision (G1b verify r1 F2): the fallback Hold keeps the old default-screen perk path
+    // (the objective's role); only an explicit Hold takes capital-defence perks.
+    private static void DefaultHoldKeepsObjectivePerkRole()
+    {
+        AssertFalse(PerkSelectionScorer.TryDirectiveRole(FormationDirective.Hold, "default-hold", out _), "default-hold falls through to the objective role");
+        AssertTrue(PerkSelectionScorer.TryDirectiveRole(FormationDirective.Hold, "army-hold", out var explicitHold), "an explicit Hold names a role");
+        AssertEqual(ArmyPerkRole.CapitalDefense, explicitHold, "capital-defence perks");
+        AssertTrue(PerkSelectionScorer.TryDirectiveRole(FormationDirective.Hold, "attached-parent-missing", out var orphan), "a Hold for another reason too");
+        AssertEqual(ArmyPerkRole.CapitalDefense, orphan, "capital-defence perks");
+        AssertFalse(PerkSelectionScorer.TryDirectiveRole(FormationDirective.Delay, "x", out _), "Delay names none, as before");
+
+        var parent = Snapshot("corps", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold);
+        var child = Snapshot("div", 0, 14, 5000f, 0f, FormationLevel.Unknown, FrontPosture.Hold);
+        child.IsTopUnit = false;
+        child.ParentUnitKey = "corps";
+        var ledger = FormationDirectiveLedger.Build(new[] { parent, child }, EraStage.Operational1862, null);
+        AssertEqual(FormationDirectiveLedger.DefaultHoldReason, ledger.GetAssignment("corps").Reason, "parent falls back");
+        AssertEqual(FormationDirective.Hold, ledger.GetAssignment("div").Directive, "child inherits Hold");
+        AssertEqual(FormationDirectiveLedger.DefaultHoldReason, ledger.GetAssignment("div").Reason, "and the default-hold perk path");
+    }
+
+    // C4: the W&L player's own command and a map-group player are never a sector's hold
+    // (WlChainRules.CountsAsCommittedDefender), so the sector's only AI corps is its final reserve.
+    private static void PicketReserveIgnoresPlayerCommand()
+    {
+        var (s, sectors, plan, picket) = ReserveFixture(WlChainClass.PlayerCommand);
+        AssertEqual(-1, Pick(s, sectors, plan, picket), "the AI corps stays: the player's own command holds nothing for the planner");
+    }
+
+    private static void PicketReserveIgnoresMapGroupPlayer()
+    {
+        var (s, sectors, plan, picket) = ReserveFixture(WlChainClass.PlayerMapGroup);
+        int got = Pick(s, sectors, plan, picket);
+        AssertTrue(got != 1, "the AI corps is the sector's final reserve, got " + got);
+        AssertEqual(2, got, "the map-group player may picket (order-only); the AI corps keeps the hold");
+    }
+
+    private static (CampaignSnapshot, SectorModel, TheaterPlan, ReconTask) ReserveFixture(WlChainClass otherChain)
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 600f, 0f, 20000f, 0f, 15));
+        var other = Unit(2, 500f, 0f, 25000f, 0f, 15);
+        other.Chain = otherChain;
+        s.Own.Add(other);
+        s.Beliefs.Add(Belief("threat", 550f, 60f, 30000f, Today, 1f, 5f)); // hold need 18000
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
+        var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
+        return (s, SectorModel.Build(s), plan, picket);
+    }
+
+    private static void PicketComesFromItsOwnSector()
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 200f, 0f, 20000f, 0.9f, 15)); // sector 0, nearest the town
+        var sectors = SectorModel.Build(s);
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
+        var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
+        AssertEqual(-1, Pick(s, sectors, plan, picket), "a group outside the picket's sector is never taken");
+        s.Own.Add(Unit(2, 650f, 0f, 20000f, 0f, 15)); // sector 1
+        AssertEqual(2, Pick(s, SectorModel.Build(s), plan, picket), "the sector's own group is");
+    }
+
+    private static void BusySetIncludesVanillaOperationLists()
+    {
+        var task = ScreenTask(0f, 0f, 200f, 0f, -1);
+        foreach (var flag in new[] { FormationFlags.InOffensiveOps, FormationFlags.InDefensiveOps, FormationFlags.CapitalDefense, FormationFlags.RaidForce, FormationFlags.Embarked })
+        {
+            var s = World();
+            var cav = Unit(1, 0f, 0f, 3000f, 0.9f, 14);
+            cav.Flags |= flag;
+            s.Own.Add(cav);
+            AssertEqual(-1, Pick(s, null, null, task), flag + ": vanilla is moving it");
+        }
+    }
+
+    private static void AdvanceGuardAndProbeSizeCap()
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 400f, 0f, 30000f, 0f, 15));
+        s.Own.Add(Unit(2, 410f, 0f, 12000f, 0.9f, 15));  // cavalry, but above a quarter of the 46000 main body
+        s.Own.Add(Unit(3, 405f, 0f, 4000f, 0f, 15));
+        var sectors = SectorModel.Build(s);
+        var plan = MainPlan(2, 800f);
+        foreach (var kind in new[] { ReconKind.AdvanceGuard, ReconKind.Probe })
+        {
+            var task = new ReconTask { Kind = kind, SectorId = 2, FromX = 410f, HoldX = 460f, Reason = "test" };
+            AssertEqual(3, Pick(s, sectors, plan, task), kind + ": at most 25% of the main body (11500), cavalry or not");
+        }
+    }
+
+    private static void MainBodyStrengthExcludesPlayerFormations()
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 400f, 0f, 30000f, 0f, 15));
+        s.Own.Add(Unit(2, 410f, 0f, 4000f, 0.9f, 14));
+        var player = Unit(3, 420f, 0f, 40000f, 0f, 15);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        s.Beliefs.Add(Belief("strong", 800f, 0f, 40000f, Today, 1f, 5f)); // needs > 44000
+        var sectors = SectorModel.Build(s);
+        var plan = MainPlan(2, 800f);
+        AssertEqual(-1, Find(Plan(s, sectors, plan), ReconKind.AdvanceGuard, null), "the AI main body (34000) is short; the map-group player's 40000 is not counted");
+
+        // The 25% cap is on the AI main body: 30000 + 12000 + 3000 = 45000 -> 11250 refuses the 12000
+        // cavalry; counting the player's 40000 (85000 -> 21250) would admit it.
+        var t = LineWorld();
+        t.Own.Add(Unit(1, 400f, 0f, 30000f, 0f, 15));
+        t.Own.Add(Unit(2, 410f, 0f, 12000f, 0.9f, 15));
+        t.Own.Add(Unit(3, 405f, 0f, 3000f, 0f, 15));
+        t.Own.Add(player);
+        var probe = new ReconTask { Kind = ReconKind.Probe, SectorId = 2, FromX = 410f, HoldX = 460f, Reason = "test" };
+        AssertEqual(3, Pick(t, SectorModel.Build(t), plan, probe), "cap from the AI main body only");
+    }
+
+    private static void RecallPointIsNearestHeldFormation()
+    {
+        // Two holders: the nearer one.
+        var (s, ledger) = RecallFixture();
+        s.Own.Add(Unit(1, 250f, 0f, 20000f, 0f, 15));
+        s.Own.Add(Unit(2, 100f, 0f, 20000f, 0f, 15));
+        ledger.OnReview(s, Held((1, FormationRole.Hold), (2, FormationRole.Hold)));
+        AssertEqual(250f, ledger.Missions[0].HoldX, "nearest Hold formation");
+
+        // Only a MainEffort holder, a nearer formation without a holding role: the main effort.
+        (s, ledger) = RecallFixture();
+        s.Own.Add(Unit(3, 280f, 0f, 20000f, 0f, 15));
+        s.Own.Add(Unit(4, 0f, 0f, 20000f, 0f, 15));
+        ledger.OnReview(s, Held((3, FormationRole.Reserve), (4, FormationRole.MainEffort)));
+        AssertEqual(0f, ledger.Missions[0].HoldX, "the main effort counts as a holder");
+
+        // No holder: the capital, not the nearest formation.
+        (s, ledger) = RecallFixture();
+        s.HasCapital = true;
+        s.CapitalX = -50f;
+        s.Own.Add(Unit(3, 280f, 0f, 20000f, 0f, 15));
+        ledger.OnReview(s, Held((3, FormationRole.Reserve)));
+        AssertEqual(-50f, ledger.Missions[0].HoldX, "the own capital");
+    }
+
+    private static void RecallPointNeverAPlayerFormation()
+    {
+        var (s, ledger) = RecallFixture();
+        var player = Unit(5, 290f, 0f, 20000f, 0f, 15);
+        player.Chain = WlChainClass.PlayerCommand;
+        s.Own.Add(player);
+        s.Own.Add(Unit(1, 100f, 0f, 20000f, 0f, 15));
+        ledger.OnReview(s, Held((5, FormationRole.Hold), (1, FormationRole.Hold)));
+        AssertEqual(100f, ledger.Missions[0].HoldX, "the player's own command is never the rally point");
+
+        (s, ledger) = RecallFixture();
+        var mapGroup = Unit(6, 290f, 0f, 20000f, 0f, 15);
+        mapGroup.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(mapGroup);
+        s.Own.Add(Unit(1, 100f, 0f, 20000f, 0f, 15));
+        ledger.OnReview(s, Held((1, FormationRole.Reserve)));
+        AssertEqual(100f, ledger.Missions[0].HoldX, "nor, as the last fallback, a map-group player");
+    }
+
+    // A screen (unit 9) at 300 on a mission, recalled by low supply at the next review.
+    private static (CampaignSnapshot, ReconMissionLedger) RecallFixture()
+    {
+        var s = World();
+        var screen = Unit(9, 300f, 0f, 3000f, 0.9f, 14);
+        s.Own.Add(screen);
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Screen, 9, 300f, 0f, -1);
+        screen.Supply01 = 0.2f;
+        s.Own[0] = screen;
+        return (s, ledger);
+    }
+
+    private static Allocation Held(params (int id, FormationRole role)[] roles)
+    {
+        var a = new Allocation { Alliance = 0 };
+        foreach (var (id, role) in roles)
+            a.Assignments.Add(new Assignment { InstanceId = id, Role = role, ReconMissionId = -1 });
+        return a;
     }
 
     private static void DivisionVsArmyIsDelayNotScreen()

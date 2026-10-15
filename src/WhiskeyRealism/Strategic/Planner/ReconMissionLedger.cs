@@ -41,7 +41,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //                stamps LastContactDay: contact is its job, and the verdict decides.
     //                The hold point becomes the recall point: the nearest own formation the
     //                allocation holds with (Hold or MainEffort), else the own capital, else the
-    //                nearest own formation.
+    //                nearest own formation; never the W&L player's own command or a map-group
+    //                player (WlChainRules.CountsAsCommittedDefender, C4).
     //   -> Cleared   formation missing; retreating (vanilla owns the move); MaxMissionDays after it
     //                was issued (the planner re-plans it); a recalled group back at its recall point;
     //                its Recon assignment gone or re-tasked to another kind; a probe's verdict to
@@ -223,7 +224,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (assignment.InstanceId == f.InstanceId) continue;
                     if (assignment.Role != FormationRole.Hold && assignment.Role != FormationRole.MainEffort) continue;
                     int own = s.IndexOfOwn(assignment.InstanceId);
-                    if (own < 0) continue;
+                    if (own < 0 || !WlChainRules.CountsAsCommittedDefender(s.Own[own].Chain)) continue;
                     float d = Distance(s.Own[own].X, s.Own[own].Z, f.X, f.Z);
                     if (d >= best) continue;
                     best = d;
@@ -240,7 +241,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             for (int i = 0; i < s.Own.Count; i++)
             {
-                if (s.Own[i].InstanceId == f.InstanceId) continue;
+                if (s.Own[i].InstanceId == f.InstanceId || !WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain)) continue;
                 float d = Distance(s.Own[i].X, s.Own[i].Z, f.X, f.Z);
                 if (d >= best) continue;
                 best = d;
