@@ -13,9 +13,20 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B5 group sector stance scorer. This is deliberately limited to stance
-    // pressure; it does not issue movement, reserve, artillery, fallback, or
-    // charge orders.
+    // #45 Postfix on AIBattle.AdjustGroupAIStance (vanilla's per-group ai_stance
+    // pass). Hosts three writers, each with its own rollback:
+    //   - ai_stance (1-3) per AI brigade group from, in order, the doctrine order,
+    //     the operations-ledger task, else the B5 sector-odds scorer. Only the
+    //     scorer step is behind "Enable Tactical Group Sector Stance"; doctrine
+    //     and ledger-task stances belong to the command system and are written
+    //     only when Tactical Commander Mode = Active (MonitorOnly/Off: no writes).
+    //   - charge demotion: a vanilla assault (stance 4) is demoted when doctrine or
+    //     TacticalChargeDenial says so ("Enable Tactical Charge Denial"; skipped
+    //     unless Commander Mode allows writes).
+    //   - artillery all-stance audit: combat behavior / limber / retreat writes for
+    //     the side's batteries ("Enable Artillery All-Stance Audit").
+    // No movement, reserve or fallback orders. The patch runs when the sector
+    // flag is on or Commander Mode allows writes; turning both off stops it.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleGroupStancePatch
     {
@@ -501,6 +512,7 @@ namespace WhiskeyRealism.Patches
                 if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
                 if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
                 if (macro == 3) return;
+                if (resolved.RequiresCommanderWrites && !AllowsVanillaWrites()) return;
                 if (resolved.FinalStance == vanillaOrdered)
                 {
                     // Agreement: the writer re-stamps the single-owner hold so
@@ -555,6 +567,7 @@ namespace WhiskeyRealism.Patches
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
             if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return;
             if (macro == 3) return;
+            if (resolved.RequiresCommanderWrites && !AllowsVanillaWrites()) return;
 
             if (TacticalStanceWriter.EnsureStance(bunits, group, resolved.FinalStance, null, StanceWriteSource.Scorer))
                 LogResolvedDecision(side, group, resolved);
@@ -638,6 +651,7 @@ namespace WhiskeyRealism.Patches
 
             if (hasDoctrine)
             {
+                if (!AllowsVanillaWrites()) return;
                 int stance = doctrine.Action == DoctrineConsumerAction.Allow ? 3 : 2;
                 if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
                     LogDoctrineStanceDecision(side, group, order, doctrine, stance);
@@ -701,6 +715,8 @@ namespace WhiskeyRealism.Patches
                 state.Task,
                 TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
             if (stance < 0) return true;
+            // The ledger owns this group either way; MonitorOnly runs it without writes.
+            if (!AllowsVanillaWrites()) return true;
             if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
                 LogLedgerTaskDecision(side, group, state, stance);
             return true;
