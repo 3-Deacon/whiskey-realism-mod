@@ -96,7 +96,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (TryGetCurrent(alliance, out snapshot)) return true;
             if (alliance >= 0 && alliance < Sides)
                 OnceLog.Warning("battle-core:snapshot-missing",
-                    "[BattleSnapshot] no snapshot built for alliance " + alliance + "; command tree and direct children stay empty");
+                    "[BattleSnapshot] no snapshot built for a side; command tree and direct children stay empty");
             return false;
         }
 
@@ -184,8 +184,18 @@ namespace WhiskeyRealism.Tactical.Battle
             snapshot.SetAncestryMismatchCount(scratch.AncestryMismatchCount);
             snapshot.IndexCommandTree(scratch);
 
-            // Perception (BC2) has not run yet in this build, so the axis faces the last
-            // known way until the visible-enemy summary exists; see FitFrontAxis.
+            RefitFrontAxis(snapshot);
+        }
+
+        // Fits the snapshot's front axis against the alliance's last fitted axis (the
+        // Stabilize reference) and records it as the new reference. Build calls it before
+        // perception, so the axis keeps the last known heading; once BC2 has set the
+        // visible-enemy summary for the tick, call it again so the heading follows what
+        // is seen and the next tick stabilizes against that.
+        internal static void RefitFrontAxis(BattleSnapshot snapshot)
+        {
+            int alliance = snapshot != null ? snapshot.Alliance : -1;
+            if (alliance < 0 || alliance >= Sides) return;
             var axis = BattleSnapshotAssembler.FitFrontAxis(snapshot, _lastFrontAxis[alliance]);
             _lastFrontAxis[alliance] = axis;
             snapshot.SetFrontAxis(axis);

@@ -260,14 +260,14 @@ internal static class BattleSnapshotTests
     {
         var f = LargeArmy();
         var previous = TacticalFrontAxis.None;
-        f.Snapshot.SetEnemySummary(visibleStrength: 5000f, rememberedStrength: 0f, visibleCentroidX: 800f, visibleCentroidZ: 2000f);
+        var seen = new EnemyObservation { InstanceId = 900001, X = 700f, Z = 2000f, Strength = 5000f, State = ObservationState.Visible };
 
         // Warm-up: a rebuild and a reuse pass grow every pooled buffer.
-        f.Load(1); f.Assemble(); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
-        f.Load(2); f.Assemble(); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(1); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(2); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
-        f.Load(3); f.Assemble(); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(3); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
         long reuse = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, reuse, "second assembly (same roster) allocated bytes");
 
@@ -276,11 +276,19 @@ internal static class BattleSnapshotTests
         r.Flags |= UnitFlags.Routed;
         f.Records[0] = r;
         before = GC.GetAllocatedBytesForCurrentThread();
-        f.Load(4); f.Assemble(); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(4); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
         long rebuild = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, rebuild, "roster-change rebuild allocated bytes");
         AssertTrue(previous.IsValid, "front axis fitted");
+        AssertTrue(previous.HasEnemyExtent, "visible-enemy branch and enemy extent were measured");
         AssertEqual(f.Snapshot.IndexOfOwn(100000), f.Snapshot.Own[f.Snapshot.IndexOfOwn(200000)].ParentIndex, "large tree parent");
+    }
+
+    // What BC2 perception does each tick before the axis is fitted.
+    private static void SeeEnemy(BattleSnapshot s, in EnemyObservation enemy)
+    {
+        s.AddObservation(in enemy);
+        s.SetEnemySummary(enemy.Strength, 0f, enemy.X, enemy.Z);
     }
 
     private static void FrontAxisStabilizedAcrossTicks()
