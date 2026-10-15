@@ -159,11 +159,12 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in _previous)
                 if (!_current.Contains(pair.Key)) _lapsed.Add(Lapsed(pair.Value));
 
+            // Remembered before the lapsed copies are appended, so a lapse is reported once.
             _previous.Clear();
             for (int i = 0; i < threats.Count; i++)
             {
                 var t = threats[i];
-                if (t == null || t.SightingLapsed) continue;
+                if (t == null) continue;
                 if (t.Kind != DefenseThreatSourceKind.SeaInvasion && t.Kind != DefenseThreatSourceKind.RaidForce) continue;
                 _previous[signature(t)] = t;
             }
