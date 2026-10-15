@@ -85,6 +85,7 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 DeploymentFramesRoundTripAtAnyFacing", DeploymentFramesRoundTripAtAnyFacing),
             ("bc10 SpacingCountsEveryGroupPlacedInTheCall", SpacingCountsEveryGroupPlacedInTheCall),
             ("bc10 LockedGroupRuleCoversWlParentAndPlayerFlags", LockedGroupRuleCoversWlParentAndPlayerFlags),
+            ("bc10 LockedAndKeptGroupsLateInOrderAreStillRespected", LockedAndKeptGroupsLateInOrderAreStillRespected),
             ("bc10 DirectChildOfWalksToTheArmysChild", DirectChildOfWalksToTheArmysChild),
             ("bc10 LockedGroupIsNeverReplacedAndHoldsItsObjective", LockedGroupIsNeverReplacedAndHoldsItsObjective),
             ("bc10 DeploymentWritesOnlyThroughTheExecutor", DeploymentWritesOnlyThroughTheExecutor),
@@ -116,21 +117,25 @@ internal static partial class BattleMovementHonestyTests
 
     // ------------------------------------------------------------------ fixtures
 
-    // Zero allocation after warm-up, read without tiered-JIT noise: a real per-call allocation shows in
-    // every window, a runtime bookkeeping allocation (the occasional 1-2 KB seen on the calling thread) in
-    // some. Passes when any of eight windows of `calls` invocations allocates nothing.
+    // Zero allocation after warm-up, read without runtime noise: a real allocation (every call, or every
+    // few calls) dirties most of eight windows of `calls` invocations, while the occasional 1-2 KB
+    // bookkeeping allocation seen on the calling thread dirties one or two. Passes when at least six of
+    // the eight windows allocate nothing.
     private static void AssertNoAllocation(Action work, int calls, string label)
     {
+        const int windows = 8, cleanRequired = 6;
         for (int k = 0; k < 30; k++) work();
-        long last = 0L;
-        for (int window = 0; window < 8; window++)
+        int clean = 0;
+        long worst = 0L;
+        for (int window = 0; window < windows; window++)
         {
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int k = 0; k < calls; k++) work();
-            last = GC.GetAllocatedBytesForCurrentThread() - before;
-            if (last == 0L) return;
+            long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (bytes == 0L) clean++;
+            else if (bytes > worst) worst = bytes;
         }
-        AssertEqual(0L, last, label);
+        AssertTrue(clean >= cleanRequired, label + ": " + clean + " of " + windows + " windows were clean, worst window " + worst + " bytes");
     }
 
     private const int Top = 100, SubGroup = 110, Mem1 = 1, Mem2 = 2, Mem3 = 3, Outside = 9;

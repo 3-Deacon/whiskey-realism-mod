@@ -69,6 +69,8 @@ namespace WhiskeyRealism.Tactical.Battle
         internal DeploymentPlacement[] Base = new DeploymentPlacement[64];
         internal bool[] ObjectiveBlocked = new bool[64];
         internal bool[] ObjectiveUsed = new bool[64];
+        // Per group: the unspaced front, the assumed enemy point and the spacing radius of a Replaced placement.
+        internal float[] PreX = new float[64], PreZ = new float[64], EnemyX = new float[64], EnemyZ = new float[64], Radius = new float[64];
         internal float LineCentroidX, LineCentroidZ, AxisX, AxisZ;
         internal bool HasReserve;
         internal int ReserveGroupCount;
@@ -79,6 +81,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 Placements = new DeploymentPlacement[Math.Max(groups, Placements.Length * 2)];
                 Base = new DeploymentPlacement[Placements.Length];
+                PreX = new float[Placements.Length]; PreZ = new float[Placements.Length];
+                EnemyX = new float[Placements.Length]; EnemyZ = new float[Placements.Length]; Radius = new float[Placements.Length];
             }
             if (ObjectiveBlocked.Length < objectives)
             {
@@ -193,22 +197,28 @@ namespace WhiskeyRealism.Tactical.Battle
                     : NearVisible(s, objectives[o].X, objectives[o].Z);
             }
 
-            int replaced = 0;
-            int placed = 0;
+            // Vanilla has placed every group before this runs, so a Locked or Kept group stands where it
+            // is whatever its place in grp order. First every locked group claims its objective and takes
+            // its vanilla spot; then each other group chooses (objectives are taken in order, as vanilla's
+            // list does); last every re-placed front is spaced from all kept and locked groups and from the
+            // re-placed groups before it.
             for (int g = 0; g < groupCount; g++)
             {
                 ref DeploymentGroup group = ref groups[g];
-                if (group.Locked)
+                if (!group.Locked) continue;
+                HoldObjectiveOf(objectives, objectiveCount, into, group);
+                into.Placements[g] = new DeploymentPlacement
                 {
-                    HoldObjectiveOf(objectives, objectiveCount, into, group);
-                    into.Placements[g] = new DeploymentPlacement
-                    {
-                        GroupId = group.GroupId, ObjectiveIndex = -1, X = group.VanillaX, Z = group.VanillaZ,
-                        Heading = group.VanillaHeading, Kind = PlacementKind.Kept,
-                    };
-                    placed++;
-                    continue;
-                }
+                    GroupId = group.GroupId, ObjectiveIndex = -1, X = group.VanillaX, Z = group.VanillaZ,
+                    Heading = group.VanillaHeading, Kind = PlacementKind.Kept,
+                };
+            }
+
+            int replaced = 0;
+            for (int g = 0; g < groupCount; g++)
+            {
+                ref DeploymentGroup group = ref groups[g];
+                if (group.Locked) continue;
                 AssumedEnemyPoint(s, group.OldX, group.OldZ, enemyEntryX, enemyEntryZ, entries, mapCentreX, mapCentreZ,
                     out float ex, out float ez, out AssumedEnemySource source);
 
@@ -238,16 +248,24 @@ namespace WhiskeyRealism.Tactical.Battle
                     bool sameFacing = AngleDifference(group.VanillaHeading, heading) <= FacingToleranceDegrees;
                     if (!(sameFront && sameFacing))
                     {
-                        Spaced(into, placed, fx, fz, ex, ez, group.OldX, group.OldZ, radius, out float sx, out float sz);
-                        placement.X = sx;
-                        placement.Z = sz;
+                        placement.X = fx;
+                        placement.Z = fz;
                         placement.Heading = heading;
                         placement.Kind = PlacementKind.Replaced;
+                        into.PreX[g] = fx; into.PreZ[g] = fz; into.EnemyX[g] = ex; into.EnemyZ[g] = ez; into.Radius[g] = radius;
                         replaced++;
                     }
                 }
                 into.Placements[g] = placement;
-                placed++;
+            }
+
+            for (int g = 0; g < groupCount; g++)
+            {
+                if (into.Placements[g].Kind != PlacementKind.Replaced) continue;
+                Spaced(into, g, groupCount, into.PreX[g], into.PreZ[g], into.EnemyX[g], into.EnemyZ[g],
+                    groups[g].OldX, groups[g].OldZ, into.Radius[g], out float sx, out float sz);
+                into.Placements[g].X = sx;
+                into.Placements[g].Z = sz;
             }
 
             into.Count = groupCount;
@@ -506,20 +524,20 @@ namespace WhiskeyRealism.Tactical.Battle
         // moves; a front with a placed group within half the radius is tried on a ring of that
         // radius around it, up to eight times in 45 degree steps (alternating sides, starting
         // toward the group's old position - vanilla starts toward its rear flank point).
-        private static void Spaced(DeploymentPlan plan, int placed, float x, float z, float enemyX, float enemyZ,
+        private static void Spaced(DeploymentPlan plan, int self, int count, float x, float z, float enemyX, float enemyZ,
             float oldX, float oldZ, float radius, out float outX, out float outZ)
         {
             outX = x;
             outZ = z;
             if (Distance(x, z, enemyX, enemyZ) < radius) return;
-            bool occupied = Occupied(plan, placed, x, z, radius * 0.5f);
+            bool occupied = Occupied(plan, self, count, x, z, radius * 0.5f);
             float baseAngle = Bearing(x, z, oldX, oldZ);
             float step = 0f, sign = -1f;
             int tries = 0;
             while (occupied && tries < SpacingTries)
             {
                 AnglePos(x, z, baseAngle + step * sign, radius, out float cx, out float cz);
-                occupied = Occupied(plan, placed, cx, cz, radius * 0.5f);
+                occupied = Occupied(plan, self, count, cx, cz, radius * 0.5f);
                 if (sign == -1f) sign = 1f;
                 else { sign = -1f; step += SpacingStepDegrees; }
                 tries++;
@@ -527,12 +545,18 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static bool Occupied(DeploymentPlan plan, int placed, float x, float z, float radius)
+        private static bool Occupied(DeploymentPlan plan, int self, int count, float x, float z, float radius)
         {
-            // CheckAIGroupInRange over list5: every group placed earlier in the call (vanilla adds
-            // each objective-path group it placed, whatever Whiskey later decides about it).
-            for (int p = 0; p < placed; p++)
+            // CheckAIGroupInRange over list5: every group vanilla placed. A kept or locked group stands at
+            // its spot wherever it is in the order; a re-placed group counts once it has been spaced
+            // (the ones before this group).
+            for (int p = 0; p < count; p++)
+            {
+                if (p == self) continue;
+                PlacementKind kind = plan.Placements[p].Kind;
+                if (kind == PlacementKind.Replaced && p > self) continue;
                 if (Distance(plan.Placements[p].X, plan.Placements[p].Z, x, z) < radius) return true;
+            }
             return false;
         }
 

@@ -824,4 +824,44 @@ internal static partial class BattleMovementHonestyTests
         var fell = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), overmatched, enemyIntent, null);
         AssertEqual(DirectChildRole.Fallback, fell[1].Role, "a deployed reserve in contact and overmatched falls back");
     }
+
+    // Vanilla has already placed every group before the Postfix runs, so a Kept or Locked group stands at
+    // its spot whatever its place in grp order: a re-placed front is spaced from all of them, and a locked
+    // group keeps its objective even when it comes last.
+    private static void LockedAndKeptGroupsLateInOrderAreStillRespected()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // nearest the enemy
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },
+        };
+        float[] ex = { 3000f }, ez = { -100f };
+
+        // The locked W&L parent is last and stands on the nearest objective: the first group must not take it.
+        DeploymentGroup locked = Placed(2, 295f, -100f, 270f);
+        locked.Locked = true;
+        DeploymentPlan plan = Plan(s, new[] { Placed(1, 0f, -600f, 90f), locked }, objectives, true, ex, ez, out int replaced);
+        AssertEqual(1, plan.Placements[0].ObjectiveIndex, "the earlier group takes the other objective: the locked one keeps its own");
+        AssertNear(-300f, plan.Placements[0].X, 0.001f, "and stands there");
+        AssertEqual(PlacementKind.Kept, plan.Placements[1].Kind, "the locked group is untouched");
+
+        // Two objectives 8 m apart: a Kept group LAST on the nearer one; the first group's front must keep clear of it.
+        var close = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },
+            new DeploymentObjective { X = 308f, Z = -100f, Owner = -1 },
+        };
+        plan = Plan(s, new[] { Placed(1, 0f, -600f, 90f), Placed(2, 308f, -100f, 90f) }, close, true, ex, ez, out replaced);
+        AssertEqual(PlacementKind.Kept, plan.Placements[1].Kind, "the late group stands on its objective: kept");
+        AssertTrue(Dist(plan.Placements[0].X, plan.Placements[0].Z, plan.Placements[1].X, plan.Placements[1].Z) >= 24f,
+            "the re-placed first group keeps a spacing radius from the kept group that is later in order");
+
+        // The same with a locked group last (on the nearer objective, so the first group takes the other one).
+        DeploymentGroup lockedLast = Placed(2, 308f, -100f, 270f);
+        lockedLast.Locked = true;
+        plan = Plan(s, new[] { Placed(1, 0f, -600f, 90f), lockedLast }, close, true, ex, ez, out _);
+        AssertTrue(Dist(plan.Placements[0].X, plan.Placements[0].Z, plan.Placements[1].X, plan.Placements[1].Z) >= 24f,
+            "and from a locked group that is later in order");
+    }
 }

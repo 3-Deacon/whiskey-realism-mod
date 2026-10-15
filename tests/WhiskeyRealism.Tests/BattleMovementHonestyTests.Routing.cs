@@ -159,7 +159,7 @@ internal static partial class BattleMovementHonestyTests
         var scratch = new RoadRouteScratch();
         float[] px = { 100f, 3100f };
         float[] pz = { -1700f, -1700f };
-        AssertNoAllocation(() => RoadRoutePlanner.Plan(g, 100f, -1700f, 3100f, -1700f, px, pz, 2, scratch), 3, "no allocation after warm-up (6,000-cell corridor)");
+        AssertNoAllocation(() => RoadRoutePlanner.Plan(g, 100f, -1700f, 3100f, -1700f, px, pz, 2, scratch), 8, "no allocation after warm-up (6,000-cell corridor)");
     }
 
     // The posture pipeline's decision: group formation 4 first, the routed move after it.
