@@ -16,10 +16,86 @@ internal static class SlicePressureBuilderTests
             ("slice pressure grid equals full scan for units far outside the enemy field", GridEqualsFullScanFarOutside),
             ("slice pressure grid keeps the lowest index on closest-distance ties", GridKeepsLowestIndexOnTies),
             ("slice pressure build allocates nothing once warm", BuildAllocatesNothingOnceWarm),
+            ("slice pressure grid equals full scan at ulp-level cell boundaries", GridEqualsFullScanAtCellBoundaries),
+            ("slice pressure rows are current only until the snapshot changes", PressureCurrentClearedOnChange),
         });
     }
 
     private static readonly SliceGeometry Vanilla = new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f };
+
+    private static void PressureCurrentClearedOnChange()
+    {
+        var s = Snapshot(20);
+        AddOwn(s, 1, 0f, 0f, 0f);
+        s.IndexCommandTree(null);
+        AssertFalse(s.PressureCurrent, "not built");
+        SlicePressureBuilder.Build(s, Vanilla);
+        AssertTrue(s.PressureCurrent, "built");
+        AddOwn(s, 2, 10f, 0f, 0f);
+        AssertFalse(s.PressureCurrent, "a unit added after the build");
+        s.IndexCommandTree(null);
+        SlicePressureBuilder.Build(s, Vanilla);
+        AssertTrue(s.PressureCurrent, "rebuilt");
+        s.AddObservation(new EnemyObservation { InstanceId = 7, X = 0f, Z = 100f, Strength = 1f, State = ObservationState.Visible });
+        AssertFalse(s.PressureCurrent, "an observation added after the build");
+        SlicePressureBuilder.Build(s, Vanilla);
+        s.IndexCommandTree(null);
+        AssertFalse(s.PressureCurrent, "command tree re-indexed");
+        SlicePressureBuilder.Build(s, Vanilla);
+        s.BeginBuild(1, 0, 0, 2, 1.0);
+        AssertFalse(s.PressureCurrent, "next build");
+    }
+
+    // The cell padding's job (verify round 1, half B): a unit a few ulps below a cell
+    // boundary (for the unpadded and the padded cell size) with observations exactly on
+    // the far side of a flank circle or on the range ring, nudged by ulps. Without the
+    // padding the 3x3 block misses an in-reach observation in the next cell.
+    private static void GridEqualsFullScanAtCellBoundaries()
+    {
+        var rng = new Random(99);
+        var g = new SliceGeometry { MaxRangeMeters = 300f, FlankShiftMeters = 150f };
+        float reach = 300f;
+        float cellPadded = reach * 1.01f + 1f;
+        int mismatches = 0, cases = 0;
+        string first = null;
+        foreach (float cell in new[] { reach, cellPadded })
+        for (int iter = 0; iter < 20000; iter++)
+        {
+            float baseX = (float)(rng.Next(1, 40) * 1000);
+            var s = Snapshot(20);
+            int k = rng.Next(1, 6);
+            float ux = baseX + k * cell;
+            for (int n = rng.Next(0, 6); n > 0; n--) ux = MathF.BitDecrement(ux);
+            float facing = rng.NextDouble() < 0.5 ? (float)(rng.NextDouble() * 0.01 - 0.005) : 180f + (float)(rng.NextDouble() * 0.01 - 0.005);
+            s.AddOwn(new UnitRecord { InstanceId = 1, X = ux, Z = 5000f, RotationY = facing, ParentIndex = -1 });
+            s.IndexCommandTree(null);
+            // The anchor observation fixes the grid's minimum x at baseX.
+            s.AddObservation(new EnemyObservation { InstanceId = 1, X = baseX, Z = 5000f - 50000f, Strength = 1f, State = ObservationState.Visible });
+            for (int j = 0; j < 12; j++)
+            {
+                double ang = (facing + (rng.Next(2) == 0 ? 90.0 : -90.0) - 90.0) * Math.PI / 180.0;
+                float px = ux + (float)(Math.Cos(ang) * 150.0), pz = 5000f - (float)(Math.Sin(ang) * 150.0);
+                float ox = px + (px >= ux ? 150f : -150f), oz = pz;
+                if (j % 3 == 0) { ox = ux + (rng.Next(2) == 0 ? 300f : -300f); oz = 5000f; }
+                int nudge = rng.Next(-3, 4);
+                for (; nudge > 0; nudge--) ox = MathF.BitIncrement(ox);
+                for (; nudge < 0; nudge++) ox = MathF.BitDecrement(ox);
+                s.AddObservation(new EnemyObservation { InstanceId = 10 + j, X = ox, Z = oz, Strength = 1f + j, State = ObservationState.Remembered, Confidence01 = 1f });
+            }
+            cases++;
+            var exp = SlicePressureReference.Build(s, g);
+            SlicePressureBuilder.Build(s, g);
+            bool ok = true;
+            for (int q = 0; q < 20 && ok; q++) ok = BitConverter.SingleToInt32Bits(exp[0].Slices[q]) == BitConverter.SingleToInt32Bits(s.SlicePressure(0, q));
+            for (int f = 0; f < 3 && ok; f++) ok = BitConverter.SingleToInt32Bits(exp[0].Flanks[f]) == BitConverter.SingleToInt32Bits(s.FlankPressure(0, f));
+            if (!ok)
+            {
+                mismatches++;
+                if (first == null) first = "cell " + cell + " ux=" + ux + " base=" + baseX + " facing=" + facing;
+            }
+        }
+        AssertEqual(0, mismatches, "boundary mismatches of " + cases + " (first: " + first + ")");
+    }
 
     private static void GridEqualsFullScanOnRandomBattlefields()
     {

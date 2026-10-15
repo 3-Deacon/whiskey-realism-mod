@@ -159,4 +159,31 @@ namespace WhiskeyRealism.Strategic
             Faulted = false;
         }
     }
+
+    // Commit of a completed review day (StrategicCoordinator.CommitReviewDay).
+    internal static class ReviewDayCommit
+    {
+        // The published set is replaced by reference only once its copy is complete, so a
+        // copy that throws leaves the previous day's set in place, whole. A replaced set is
+        // never written again: a reader still holding it keeps seeing one whole day.
+        internal static void Publish<T>(ref T published, T working, Func<T, T> copy) where T : class
+        {
+            T next = copy(working);
+            published = next;
+        }
+
+        // Publishes and reports the day, then applies the battle results deferred while it
+        // ran even when the publish threw, so they are not held back to the next day's commit.
+        internal static void Run(Action publishAndReport, Action applyDeferred)
+        {
+            try
+            {
+                publishAndReport();
+            }
+            finally
+            {
+                applyDeferred();
+            }
+        }
+    }
 }

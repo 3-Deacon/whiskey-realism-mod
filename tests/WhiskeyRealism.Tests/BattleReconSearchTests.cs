@@ -22,6 +22,7 @@ internal static class BattleReconSearchTests
             ("recon search wrapped window still picks the nearest feasible rank", WrappedWindowPicksNearest),
             ("recon closest-visible rows are not read once an observation was added after them", StaleRowsAreNotRead),
             ("recon failed search allocates nothing and is bounded", FailedSearchAllocatesNothing),
+            ("recon search past 16 tied targets ranks by distance then source index", TiedTargetsRankBySourceIndex),
         });
     }
 
@@ -245,6 +246,38 @@ internal static class BattleReconSearchTests
             s.AddObservation(new EnemyObservation { InstanceId = 1000 + k, State = ObservationState.Remembered, Confidence01 = 0.5f, X = 0f, Z = -300f + k * 20f, Strength = 300f });
         s.AddObservation(new EnemyObservation { InstanceId = 2000, State = ObservationState.Remembered, Confidence01 = 0.5f, X = 1500f, Z = 400f, Strength = 300f });
         return s;
+    }
+
+    // Past 16 targets Array.Sort is no longer an insertion sort, so equal distances keep
+    // the (distance, source index) rank only through SortTargets' tie pass (verify round 1,
+    // half B): 24 remembered enemies on 4-fold symmetric points, shuffled.
+    private static void TiedTargetsRankBySourceIndex()
+    {
+        var rng = new Random(5);
+        int differ = 0;
+        for (int trial = 0; trial < 200; trial++)
+        {
+            var s = new BattleSnapshot();
+            s.BeginBuild(1, 0, 0, 1, 3.0);
+            s.SetSliceCount(20);
+            s.AddOwn(new UnitRecord { InstanceId = 1, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, AiStance = 1, AiStanceOrdered = 1, Strength = 1200, GroupStrengthAiGroup = 1200, Morale = 0.9f, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+            s.AddOwn(new UnitRecord { InstanceId = 2, UnitTyp = TacticalUnitType.Cavalry, X = 0f, Z = 0f, Strength = 400, Morale = 0.9f, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsCavalry });
+            s.Own[1].ParentIndex = 0;
+            s.IndexCommandTree(null);
+            var pts = new System.Collections.Generic.List<(float, float)>();
+            foreach (float d in new[] { 400f, 400f, 500f, 600f, 700f, 800f })
+                foreach (var (sx, sz) in new[] { (1f, 0f), (-1f, 0f), (0f, 1f), (0f, -1f) })
+                    pts.Add((sx * d, sz * d));
+            for (int i = pts.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); var t = pts[i]; pts[i] = pts[j]; pts[j] = t; }
+            for (int k = 0; k < pts.Count; k++)
+                s.AddObservation(new EnemyObservation { InstanceId = 1000 + k, State = ObservationState.Remembered, Confidence01 = 0.5f, X = pts[k].Item1, Z = pts[k].Item2, Strength = 300f });
+            var shipped = new ReconMemory();
+            BattleReconReference.Plan(s, Settings(), PastCapPicture(s), shipped, new OrderExecutor(), new Sink());
+            var capped = new ReconMemory();
+            BattleRecon.Plan(s, Settings(), PastCapPicture(s), capped, new OrderExecutor(), new Sink());
+            if (shipped.TargetX != capped.TargetX || shipped.TargetZ != capped.TargetZ) differ++;
+        }
+        AssertEqual(0, differ, "trials where the capped pick differs from the shipped pick");
     }
 
     private static ReconPicture PastCapPicture(BattleSnapshot s)

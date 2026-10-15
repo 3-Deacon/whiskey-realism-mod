@@ -1809,8 +1809,12 @@ namespace WhiskeyRealism.Patches
 
         // The decision matrix (perf slice F1). Side-wide: written once per AIBattle per
         // frame, at AdjustGroupAIStance (after the snapshot rebuild in CheckGlobalAIStrategy
-        // and vanilla's stance pass), naming the frame's observed events in `events`; the
-        // group rows do not depend on the event. Micro-AI: the battle row and the focus
+        // and vanilla's stance pass); the group rows do not depend on the event. `events`
+        // names the side-wide events observed in that frame up to and including the Group
+        // event. Sector and Order (observed after it inside AdjustGroupAIStancePostfix) and
+        // Feud (CheckForFeudGroupActions, later in UpdateAITasks, decompile 5857-5868) come
+        // after the write, so they never appear there and write no side-wide matrix of their
+        // own; their observer summaries (Feud with its delta=) are unchanged. Micro-AI: the battle row and the focus
         // group's row. A group row is written only when its decision inputs changed
         // (MatrixRowDedupe, 30 s keep-alive); the battle row keeps the per-signature
         // throttle (Tactical Decision Matrix Min Seconds Between Snapshots).

@@ -22,12 +22,13 @@ namespace WhiskeyRealism.Strategic
         // Two copies of the per-alliance strategic state (StrategicLedgerSet). The daily review
         // builds _work in place, in the same order as the single-frame review did. Readers
         // outside a review job (patches, and the runtime adapters they call) get _published,
-        // which CommitReviewDay refreshes once the whole day completes, so a reader between
-        // the slices of a time-sliced review sees the previous day, never half of today.
+        // which CommitReviewDay replaces with a complete copy once the whole day completes, so
+        // a reader between the slices of a time-sliced review sees the previous day, never half
+        // of today, and a copy that throws leaves the previous day published.
         // Inside a job View is the working set: the review's own runtime adapters, and any
         // patch vanilla runs from a job's calls, read exactly what they read before slicing.
         private readonly StrategicLedgerSet _work = new StrategicLedgerSet();
-        private readonly StrategicLedgerSet _published = new StrategicLedgerSet();
+        private StrategicLedgerSet _published = new StrategicLedgerSet();
         private StrategicLedgerSet View => _review.RunningJob ? _work : _published;
 
         public CIC[] CICs => View.CICs;
@@ -731,10 +732,15 @@ namespace WhiskeyRealism.Strategic
         }
 
         // The day is complete: publish it in one step, report its cost, then apply the battle
-        // results that arrived while it ran.
+        // results that arrived while it ran (also when the publish threw).
         private void CommitReviewDay(ReviewDay d)
         {
             _day = null;
+            ReviewDayCommit.Run(() => PublishAndReportReviewDay(d), ApplyDeferredBattleOutcomes);
+        }
+
+        private void PublishAndReportReviewDay(ReviewDay d)
+        {
             PublishStrategicState();
             if (d != null && !_review.Faulted)
             {
@@ -750,7 +756,10 @@ namespace WhiskeyRealism.Strategic
                         $"constructionMs={d.ConstructionMs:F2} defenseMs={d.DefenseMs:F2}");
                 }
             }
+        }
 
+        private void ApplyDeferredBattleOutcomes()
+        {
             if (_deferredBattleOutcomes.Count == 0) return;
             var deferred = _deferredBattleOutcomes.ToArray();
             _deferredBattleOutcomes.Clear();
@@ -760,7 +769,7 @@ namespace WhiskeyRealism.Strategic
 
         private void PublishStrategicState()
         {
-            _published.PublishFrom(_work);
+            ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);
             Succession.PublishFired();
         }
 

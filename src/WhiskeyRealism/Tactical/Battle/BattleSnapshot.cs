@@ -126,8 +126,8 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // True once SlicePressureBuilder.Build wrote the per-unit pressure and closest-visible
-        // rows for this snapshot's current observations; a later observation or a rebuild
-        // clears it. Readers that must equal a scan of the observations (BattleRecon) fall
+        // rows for this snapshot's current units and observations; a later unit, observation
+        // or rebuild clears it. Readers that must equal a scan of the observations (BattleRecon) fall
         // back to the scan while it is false.
         public bool PressureCurrent { get; private set; }
 
@@ -182,6 +182,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _own[OwnCount].ParentIndex = -1;
             if (record.InstanceId != 0) _ownIndexById[record.InstanceId] = OwnCount;
             OwnCount++;
+            PressureCurrent = false;
         }
 
         internal void AddEnemy(in UnitRecord record)

@@ -38,6 +38,9 @@ internal static class DailyReviewSchedulerTests
             ("daily review coordinator routes every published field through the view", CoordinatorRoutesThroughView),
             ("daily review coordinator drains before new day and save, clears on reset", CoordinatorDrainAndResetHooks),
             ("daily review patches pump each frame and drain before vanilla saves", PatchesPumpAndDrain),
+            ("daily review commit keeps the previous day published when the copy throws", CommitKeepsPreviousDayWhenCopyThrows),
+            ("daily review commit applies deferred battles even when the publish throws", CommitAppliesDeferredWhenPublishThrows),
+            ("daily review jobs hand off what the single-frame review did", JobHandOffsPinned),
         });
     }
 
@@ -587,10 +590,13 @@ internal static class DailyReviewSchedulerTests
             AssertContains(src, field + " => View." + name + ";", name + " goes through the view");
         }
         string commit = Body(src, "private void CommitReviewDay(");
-        AssertContains(commit, "PublishStrategicState();", "the day is published on commit");
-        AssertBefore(commit, "PublishStrategicState();", "RecordBattleOutcome(", "deferred battles after the publish");
+        AssertContains(commit, "ReviewDayCommit.Run(() => PublishAndReportReviewDay(d), ApplyDeferredBattleOutcomes);", "publish, then deferred battles in a finally");
+        AssertContains(Body(src, "private void PublishAndReportReviewDay("), "PublishStrategicState();", "the day is published on commit");
+        AssertContains(Body(src, "private void ApplyDeferredBattleOutcomes("), "RecordBattleOutcome(deferred[i]);", "deferred battles recorded");
         string publish = Body(src, "private void PublishStrategicState(");
-        AssertContains(publish, "_published.PublishFrom(_work);", "publish copies working into published");
+        AssertContains(publish, "ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);", "published replaced by a complete copy");
+        AssertEqual(1, src.Split(new[] { "_published = " }, StringSplitOptions.None).Length - 1, "published assigned only at its declaration");
+        AssertContains(src, "private StrategicLedgerSet _published = new StrategicLedgerSet();", "declaration");
         AssertContains(publish, "Succession.PublishFired();", "succession events publish with the day");
     }
 
@@ -614,6 +620,96 @@ internal static class DailyReviewSchedulerTests
         AssertContains(budget, "budgetMs <= 0f", "budget guarded");
         string job = Body(src, "private void RunReviewJob(");
         AssertContains(job, "DailyReviewJobList.Ordered[jobIndex]", "jobs come from the ordered list");
+    }
+
+    private static StrategicLedgerSet WorkingWithCic(string officer)
+    {
+        var working = new StrategicLedgerSet();
+        working.CICs[0] = new CIC { AllianceId = 0, OfficerName = officer };
+        working.Eras[0] = new EraStageManager { Stage = EraStage.Amateur1861 };
+        return working;
+    }
+
+    private static void CommitKeepsPreviousDayWhenCopyThrows()
+    {
+        StrategicLedgerSet published = StrategicLedgerSet.PublishedCopyOf(WorkingWithCic("Monday"));
+        StrategicLedgerSet monday = published;
+        var tuesday = WorkingWithCic("Tuesday");
+        bool threw = false;
+        try
+        {
+            // PublishFrom runs on the new set, then the copy fails.
+            ReviewDayCommit.Publish(ref published, tuesday, w =>
+            {
+                var next = new StrategicLedgerSet();
+                next.PublishFrom(w);
+                throw new InvalidOperationException("copy failed");
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            threw = true;
+        }
+        AssertTrue(threw, "the failure reaches the caller");
+        AssertTrue(ReferenceEquals(monday, published), "previous day still published");
+        AssertEqual("Monday", published.CICs[0].OfficerName, "previous day whole");
+
+        ReviewDayCommit.Publish(ref published, tuesday, StrategicLedgerSet.PublishedCopyOf);
+        AssertFalse(ReferenceEquals(monday, published), "a completed copy replaces the set");
+        AssertEqual("Tuesday", published.CICs[0].OfficerName, "new day published");
+        AssertEqual("Monday", monday.CICs[0].OfficerName, "a replaced set is never written again");
+        AssertFalse(ReferenceEquals(tuesday.CICs[0], published.CICs[0]), "published CIC is a copy");
+    }
+
+    private static void CommitAppliesDeferredWhenPublishThrows()
+    {
+        int applied = 0;
+        bool threw = false;
+        try
+        {
+            ReviewDayCommit.Run(() => throw new InvalidOperationException("publish failed"), () => applied++);
+        }
+        catch (InvalidOperationException)
+        {
+            threw = true;
+        }
+        AssertTrue(threw, "the failure reaches the caller (the pump logs it)");
+        AssertEqual(1, applied, "deferred battles applied anyway");
+        var order = new List<string>();
+        ReviewDayCommit.Run(() => order.Add("publish"), () => order.Add("deferred"));
+        AssertEqual("publish,deferred", string.Join(",", order), "deferred battles after the publish");
+    }
+
+    // The coordinator's job bodies hand each other the single-frame review's locals; these
+    // are the hand-offs (verify round 1, A1). Order is pinned by JobListOrder.
+    private static void JobHandOffsPinned()
+    {
+        string job = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunReviewJob("), @"\s+", " ");
+        string[] pins =
+        {
+            "UpdateCampaignMapLedger(d.Day, d.LogHeartbeat, d.WeeklyCatchUp)",
+            "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false)",
+            "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: true)",
+            "UpdatePolicyPlan(alliance, a.Era.Stage, d.ReviewSerial)",
+            "frontChanged = UpdateFrontLedger(alliance, a.Cic)",
+            "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.DaySerial;",
+            "a.FrontChanged = frontChanged;",
+            "UpdateDefenseIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year)",
+            "a.FormationChanged = false;",
+            "StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) || StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) || a.FrontChanged;",
+            "a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Cic, a.Era)",
+            "if (UpdateOperationalProbe(alliance, a.Cic, d.Day, d.Month, d.Year)) a.FormationChanged = true;",
+            "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, armyAreaSource, _armyAreaSourceSignatures[alliance], a.FormationChanged || d.WeeklyCatchUp)",
+            "UpdateArmyAreaLedger(alliance, a.Cic)",
+            "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, constructionSource, _constructionSourceSignatures[alliance], d.WeeklyCatchUp)",
+            "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat)",
+        };
+        foreach (string pin in pins)
+            AssertContains(job, pin, "hand-off: " + pin);
+        AssertBefore(job, "a.FormationChanged = false;", "a.FormationChanged = UpdateFormationDirectiveLedger(", "formation flag reset before the ledger runs");
+        string cic = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunCicReviewJob("), @"\s+", " ");
+        foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.Cic = cic;", "a.DaySerial = daySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;" })
+            AssertContains(cic, pin, "cic hand-off: " + pin);
     }
 
     private static void PatchesPumpAndDrain()
