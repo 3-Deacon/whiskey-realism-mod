@@ -153,13 +153,19 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // The decision behind TacticalWriteGuard's Regiment overloads, for writers
-        // that cannot fan out: a player-owned unit, or a group with an exposed
-        // player-owned descendant, is protected.
+        // that cannot fan out: a player-owned unit, a group with an exposed
+        // player-owned descendant, or a feuding unit (vanilla's feud instance owns
+        // its moves) is protected.
         public static bool DirectWriteProtected(UnitFlags flags, bool exposedOwnedDescendant, out SkipReason reason)
         {
             if ((flags & UnitFlags.PlayerOwned) != 0 || exposedOwnedDescendant)
             {
                 reason = SkipReason.PlayerOwned;
+                return true;
+            }
+            if ((flags & UnitFlags.Feud) != 0)
+            {
+                reason = SkipReason.Feud;
                 return true;
             }
             reason = SkipReason.None;

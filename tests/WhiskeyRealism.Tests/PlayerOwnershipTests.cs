@@ -45,6 +45,7 @@ internal static class PlayerOwnershipTests
             ("battle-core ownership group with an attached player-owned descendant needs fan-out", GroupWithAttachedOwnedDescendantNeedsFanOut),
             ("battle-core ownership detached node shields its owned subtree", DetachedNodeShieldsOwnedSubtree),
             ("battle-core ownership direct-write decision for regiment overloads", DirectWriteDecisionForRegimentOverloads),
+            ("battle-core ownership feuding unit protected from direct writers", FeudUnitProtectedFromDirectWriters),
             ("battle-core chain detached orders group", ChainDetachedOrdersGroup),
             ("battle-core chain not detached fans out skipping player child", ChainNotDetachedFansOutSkippingPlayerChild),
             ("battle-core chain player at root fans out nothing", ChainPlayerAtRootFansOutNothing),
@@ -286,6 +287,17 @@ internal static class PlayerOwnershipTests
         AssertEqual(SkipReason.PlayerOwned, exposed, "exposed reason");
         AssertFalse(PlayerOwnership.DirectWriteProtected(Anc | CD, exposedOwnedDescendant: false, out SkipReason none), "detached ancestor writable");
         AssertEqual(SkipReason.None, none, "writable reason");
+    }
+
+    private static void FeudUnitProtectedFromDirectWriters()
+    {
+        // #61 gates on IsPlayerProtected only, so a feuding group (vanilla's feud
+        // instance moves it, UpdateMicroAI 5549 / CheckForFeudGroupActions 5871)
+        // must read as protected there too.
+        AssertTrue(PlayerOwnership.DirectWriteProtected(UnitFlags.Feud, false, out SkipReason reason), "feud protected");
+        AssertEqual(SkipReason.Feud, reason, "feud reason");
+        AssertTrue(PlayerOwnership.DirectWriteProtected(UnitFlags.Feud | PO, false, out SkipReason both), "owned feud");
+        AssertEqual(SkipReason.PlayerOwned, both, "player ownership reported first");
     }
 
     // ---- chain resolution (chain-of-command spec §B) ---------------------

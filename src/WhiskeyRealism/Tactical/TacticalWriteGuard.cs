@@ -91,9 +91,9 @@ namespace WhiskeyRealism.Tactical
             return IsPlayerProtected(unit, out _);
         }
 
-        // PlayerOwned units, and groups whose order would reach an exposed
-        // player-owned descendant. An ancestor of a detached player command is not
-        // protected.
+        // PlayerOwned units, feuding units, and groups whose order would reach an
+        // exposed player-owned descendant. An ancestor of a detached player command
+        // is not protected.
         public static bool IsPlayerProtected(Regiment unit, out string reason)
         {
             reason = null;
@@ -103,8 +103,9 @@ namespace WhiskeyRealism.Tactical
                 PlayerOwnershipInput input = ReadOwnershipInput();
                 UnitFlags flags = OwnershipFlags(unit, input);
                 bool exposed = (flags & UnitFlags.PlayerOwned) == 0 && HasExposedOwnedDescendant(unit, input);
-                if (!PlayerOwnership.DirectWriteProtected(flags, exposed, out _)) return false;
-                if (exposed) reason = "owned-descendant-attached";
+                if (!PlayerOwnership.DirectWriteProtected(flags, exposed, out SkipReason skip)) return false;
+                if (skip == SkipReason.Feud) reason = "feud";
+                else if (exposed) reason = "owned-descendant-attached";
                 else if (!input.WlActive) reason = "player-side";
                 else if (unit.dlcw_isundercommander) reason = "wl-under-commander";
                 else if (input.PlayerIsCic) reason = "wl-cic";
