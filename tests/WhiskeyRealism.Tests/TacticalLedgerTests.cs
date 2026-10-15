@@ -956,8 +956,8 @@ internal static class TacticalLedgerTests
     {
         // Mid-band confidence (between low-confidence floor 0.40 and act floor 0.55)
         // returns Apply(vanillaStance, "pre-contact-preserve-vanilla") instead of
-        // Skip(low-confidence). BattleGroupStancePatch:109 short-circuits when
-        // decision.GroupStance == vanillaOrdered, so no actual stance write happens —
+        // Skip(low-confidence). With decision.GroupStance == vanillaOrdered the
+        // executor only refreshes vanilla's hold (a claim, no ChangeStance) —
         // movement orders flow through #61 / TacticalNavMeshPlanner independently.
         var sector = new TacticalSectorAssessment(
             sectorId: 0,
@@ -984,8 +984,8 @@ internal static class TacticalLedgerTests
     {
         // Regression: preserves whatever vanilla wanted (1, 2, or 3) for the
         // mid-band confidence range. The Apply-with-vanillaStance pattern means
-        // #45 BattleGroupStancePatch short-circuits the write since the new value
-        // equals the existing value.
+        // stance writer only claims (no ChangeStance) since the new value equals
+        // the existing value.
         var sector = new TacticalSectorAssessment(
             sectorId: 0, source: TacticalSectorSource.AngleSlice,
             ownStrength: 1000f, enemyStrength: 0f, confidence: 0.50f,

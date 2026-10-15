@@ -63,7 +63,10 @@ namespace WhiskeyRealism.Patches
     // enemystrengthwithinangle over true enemy positions (122719-122733), and
     // its in-range enemy strength is BattleWriterPolicy.SnapshotEnemyStrengthInRange
     // (perceived enemies within vanilla's line-of-sight reach) instead of
-    // groupenemiesinrange (120558-120563, not fog-filtered for the AI side).
+    // groupenemiesinrange (120558-120563, not fog-filtered for the AI side), and
+    // its flank risk is BattleWriterPolicy.PerceivedFlankRisk (perceived flank
+    // pressure) instead of flanksthreated / outflanked (120566-120580 over the
+    // unfiltered range lists, 122650, 122976+).
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
@@ -374,6 +377,15 @@ namespace WhiskeyRealism.Patches
             var sectors = new List<TacticalSectorAssessment>();
             int sectorId = 0;
             float sightRange = LineOfSightRange();
+            if (snapshot != null)
+            {
+                if (_flankThreatMean.Length < snapshot.OwnCount)
+                {
+                    _flankThreatMean = new float[snapshot.OwnCount * 2];
+                    _flankThreatCount = new int[snapshot.OwnCount * 2];
+                }
+                ArmyEvidenceBuilder.MeanFlankThreatByGroup(snapshot, _flankThreatMean, _flankThreatCount);
+            }
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
@@ -391,7 +403,7 @@ namespace WhiskeyRealism.Patches
                     closest != null ? SafeName(closest) : string.Empty,
                     closest != null && closest.isrouted,
                     closest != null && closest.permanentlydetached,
-                    group.flanksthreated > 0f || group.outflanked > 0,
+                    BattleWriterPolicy.PerceivedFlankRisk(snapshot, index, _flankThreatMean),
                     group.covervalue > 0.5f || group.fortinrange)));
             }
 
@@ -412,6 +424,11 @@ namespace WhiskeyRealism.Patches
                 total += BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, units[i] as Regiment));
             return total;
         }
+
+        // Per own record: mean vanilla outflanked weight of its regiments over the
+        // snapshot's flank pressure (grow-only scratch, main thread).
+        private static float[] _flankThreatMean = new float[64];
+        private static int[] _flankThreatCount = new int[64];
 
         // vanilla's enemiesinrange reach: max(maximumlineofsight[unittyp],
         // distancetoenemytocancelinterruption) (InitMaxUnitRanges 122510,

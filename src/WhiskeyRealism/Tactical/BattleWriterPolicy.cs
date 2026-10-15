@@ -421,6 +421,9 @@ namespace WhiskeyRealism.Tactical
         public const int CombatBehaviorFireAtWill = 7;
         public const int CombatBehaviorCounterBattery = 8;
         public const int CombatBehaviorBombard = 9;
+        // Vanilla micro facing turns a unit only toward an enemy closer than
+        // firerange * 1.5 (AIBattle 4606).
+        public const float VanillaTurnReachFireRanges = 1.5f;
         // Old audit/B7 interposition geometry: a friend shields the battery only
         // within ~one regiment frontage of the battery-enemy line.
         private const float InterposedLateralMeters = 100f;
@@ -589,8 +592,10 @@ namespace WhiskeyRealism.Tactical
                     // winning quadrant's strongest visible enemy in fire range
                     // (vanilla micro facing turns toward one enemy unit's
                     // position, GetAngleTerrain(own, enemy) + 180, 4603); with no
-                    // enemy in fire range, the closest visible one.
-                    float wheelTo = bestThreat > 0f ? HeadingTo(battery.X, battery.Z, threatX, threatZ) : towardEnemy;
+                    // enemy in fire range, the closest visible one, but only inside
+                    // vanilla's turn reach closestDistance < firerange * 1.5 (4606).
+                    float wheelTo = bestThreat > 0f ? HeadingTo(battery.X, battery.Z, threatX, threatZ)
+                        : hasEnemy && enemyDistance < b.FireRange * VanillaTurnReachFireRanges ? towardEnemy : -1f;
                     if (wheelTo >= 0f &&
                         ShouldRotateTowardTarget(battery.RotationY, wheelTo, r.TurnTriggerDegrees, b.CoverValue, b.CoverObject,
                             r.MaxCoverValueForRotation, r.AdditionalAngleInCover))
@@ -781,40 +786,44 @@ namespace WhiskeyRealism.Tactical
         }
 
         // Fog-honest replacement for vanilla groupenemiesinrange (#44 sector
-        // input): vanilla takes the max of the subordinates'
-        // unitrange.enemiesinrange (120558-120563), the strength of every enemy
-        // within max(maximumlineofsight, distancetoenemytocancelinterruption) of
-        // the unit (122608, 122650-122655), not fog-filtered for the AI side.
-        // Here: the enemies this side perceives within rangeMeters of the unit or
-        // any descendant, each counted once — visible in full, remembered by
-        // confidence, off-map reinforcements never.
-        public static float SnapshotEnemyStrengthInRange(BattleSnapshot s, int index, float rangeMeters)
+        // input). Vanilla's UpdateGroupStrength sets it from the group's OWN
+        // unitrange.enemiesinrange (120558/120563: the HQ-local reach), the
+        // strength of every enemy within max(maximumlineofsight,
+        // distancetoenemytocancelinterruption) of the unit (122608,
+        // 122650-122655), not fog-filtered for the AI side. Here: the enemies this
+        // side perceives within rangeMeters of the unit's own position — visible in
+        // full, remembered by confidence, off-map reinforcements never. The one
+        // implementation of this rule (BC5a's posture sense calls it too).
+        public static float SnapshotEnemyStrengthInRange(IBattleUnitView s, int index, float rangeMeters)
         {
             if (s == null || index < 0 || index >= s.OwnCount || rangeMeters <= 0f) return 0f;
-            UnitRecord[] own = s.Own;
-            if (_subtree.Length < s.OwnCount) _subtree = new int[System.Math.Max(s.OwnCount, _subtree.Length * 2)];
-            int members = 0;
-            for (int j = 0; j < s.OwnCount; j++)
-                if (j == index || s.IsAncestorOf(index, j)) _subtree[members++] = j;
-
+            float x = s.Own[index].X;
+            float z = s.Own[index].Z;
             EnemyObservation[] obs = s.Observations;
             float r2 = rangeMeters * rangeMeters;
             float total = 0f;
             for (int k = 0; k < s.ObservationCount; k++)
             {
                 if (obs[k].IsReinforcement) continue;
-                for (int m = 0; m < members; m++)
-                {
-                    if (DistSq(obs[k].X, obs[k].Z, own[_subtree[m]].X, own[_subtree[m]].Z) > r2) continue;
-                    total += obs[k].State == ObservationState.Visible ? obs[k].Strength : obs[k].Strength * obs[k].Confidence01;
-                    break;
-                }
+                if (DistSq(obs[k].X, obs[k].Z, x, z) > r2) continue;
+                total += obs[k].State == ObservationState.Visible ? obs[k].Strength : obs[k].Strength * obs[k].Confidence01;
             }
             return total;
         }
 
-        // Main-thread scratch for SnapshotEnemyStrengthInRange (grow-only).
-        private static int[] _subtree = new int[64];
+        // #44 sector flank risk from what the side perceives, replacing vanilla
+        // flanksthreated / outflanked (UpdateGroupStrength 120566-120580 over
+        // UpdateUnitRangeFast's unfiltered range lists, 122650, 122976+): the
+        // group's own outflanked state over the snapshot's flank pressure, or a
+        // positive mean vanilla outflanked weight of its regiments
+        // (ArmyEvidenceBuilder.MeanFlankThreatByGroup, filled by the caller).
+        public static bool PerceivedFlankRisk(BattleSnapshot s, int index, float[] meanFlankThreat)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount) return false;
+            if (ArmyEvidenceBuilder.OutflankedState(s.FlankPressure(index, 0), s.FlankPressure(index, 1), s.FlankPressure(index, 2)) != 0)
+                return true;
+            return meanFlankThreat != null && index < meanFlankThreat.Length && meanFlankThreat[index] > 0f;
+        }
 
         // Within max(80 m, 20 % of fire range) of a friendly infantry/cavalry
         // regiment: the doctrine's danger-close input (B7 HasFriendlyCloseRangeRisk

@@ -25,6 +25,7 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core FeudReplayFailsClosedWithoutSnapshot", FeudReplayFailsClosedWithoutSnapshot),
             ("battle-core MacroUsesSnapshotSlices", MacroUsesSnapshotSlices),
             ("battle-core MacroEnemiesInRangeFromSnapshot", MacroEnemiesInRangeFromSnapshot),
+            ("battle-core MacroFlankRiskFromPerceivedFlankPressure", MacroFlankRiskFromPerceivedFlankPressure),
             ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
             ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
             ("battle-core ArtilleryLimberUnlimberFaceAreFormationAndFacing", ArtilleryLimberUnlimberFaceAreFormationAndFacing),
@@ -32,6 +33,8 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core PointBlankVanillaMoveTriggersSafetyRetreat", PointBlankVanillaMoveTriggersSafetyRetreat),
             ("battle-core ArtilleryNeverStanceWrites", ArtilleryNeverStanceWrites),
             ("battle-core ArtilleryWheelFacesTheWinningQuadrant", ArtilleryWheelFacesTheWinningQuadrant),
+            ("battle-core ArtilleryWheelFacesTheStrongestInTheQuadrant", ArtilleryWheelFacesTheStrongestInTheQuadrant),
+            ("battle-core ArtilleryFallbackWheelHonoursVanillaReach", ArtilleryFallbackWheelHonoursVanillaReach),
             ("battle-core InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy", InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy),
             ("battle-core ArtilleryIgnoresFeudPlayerAndHeldBatteries", ArtilleryIgnoresFeudPlayerAndHeldBatteries),
         });
@@ -337,6 +340,41 @@ internal static class StanceArtilleryMigrationTests
         BattleWriterPolicy.QuadrantThreats(s, 500f, -500f, 180f, 1000f, out current, out best, out _, out _);
         AssertEqual(100f, best, "a remembered enemy is not a threat in fire range");
         AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "no wheel toward a remembered enemy");
+    }
+
+    // Two enemies in the winning (rear) quadrant: the wheel faces the stronger one,
+    // whichever order the observations come in.
+    private static void ArtilleryWheelFacesTheStrongestInTheQuadrant()
+    {
+        var buffer = new BattleOrderIntent[4];
+        for (int order = 0; order < 2; order++)
+        {
+            BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+            s.Observations[0].Strength = 100f;
+            var strong = new EnemyObservation { InstanceId = 903, UnitTyp = TacticalUnitType.Infantry, X = 800f, Z = 150f, Strength = 3000f, State = ObservationState.Visible, Confidence01 = 1f };
+            var weak = new EnemyObservation { InstanceId = 904, UnitTyp = TacticalUnitType.Infantry, X = 300f, Z = 100f, Strength = 2500f, State = ObservationState.Visible, Confidence01 = 1f };
+            s.AddObservation(order == 0 ? strong : weak);
+            s.AddObservation(order == 0 ? weak : strong);
+            SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+            BattleWriterPolicy.QuadrantThreats(s, 500f, -500f, 180f, 1000f, out _, out float best, out float bx, out float bz);
+            AssertEqual(5500f, best, "the quadrant sums both");
+            AssertNear(800f, bx, 0.01f, "target is the stronger enemy (order " + order + ")");
+            AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "one wheel");
+            AssertNear(BattleWriterPolicy.HeadingTo(500f, -500f, 800f, 150f), buffer[0].Heading, 0.01f, "faces the stronger enemy (order " + order + ")");
+        }
+    }
+
+    // With nothing in fire range the wheel falls back to the closest visible enemy,
+    // inside vanilla's micro-facing bound closestDistance < firerange * 1.5 (4606).
+    private static void ArtilleryFallbackWheelHonoursVanillaReach()
+    {
+        var buffer = new BattleOrderIntent[4];
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 1200f, facing: 0f);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "1.2 x fire range: turns toward it");
+        AssertEqual(OrderChannel.Facing, buffer[0].Channel, "facing");
+        AssertNear(180f, buffer[0].Heading, 0.01f, "toward the closest visible enemy");
+        s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 1600f, facing: 0f);
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "1.6 x fire range: beyond vanilla's turn reach");
     }
 
     private static BattleSnapshot TwoEnemyBatterySnapshot(ObservationState rearState)
@@ -655,15 +693,49 @@ internal static class StanceArtilleryMigrationTests
         s.AddOwn(new UnitRecord { InstanceId = 93, UnitTyp = TacticalUnitType.Infantry, X = 5000f, Z = -1000f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry });
         s.IndexCommandTree(null);
         s.AddObservation(new EnemyObservation { InstanceId = 1, X = 0f, Z = -1200f, Strength = 1000f, State = ObservationState.Visible, Confidence01 = 1f });
-        s.AddObservation(new EnemyObservation { InstanceId = 2, X = 0f, Z = -1700f, Strength = 400f, State = ObservationState.Remembered, Confidence01 = 0.5f });
+        s.AddObservation(new EnemyObservation { InstanceId = 2, X = 300f, Z = -1000f, Strength = 400f, State = ObservationState.Remembered, Confidence01 = 0.5f });
         s.AddObservation(new EnemyObservation { InstanceId = 3, X = 5000f, Z = -1100f, Strength = 9000f, State = ObservationState.Visible, Confidence01 = 1f });
         s.AddObservation(new EnemyObservation { InstanceId = 4, X = 0f, Z = -1300f, Strength = 7000f, State = ObservationState.Visible, Confidence01 = 1f, IsReinforcement = true });
+        s.AddObservation(new EnemyObservation { InstanceId = 5, X = 0f, Z = -1700f, Strength = 600f, State = ObservationState.Visible, Confidence01 = 1f });
 
         float inRange = BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 0, 350f);
         AssertNear(1000f + 0.5f * 400f, inRange, 0.01f,
-            "visible in full + remembered by confidence, reached through the descendant; another command's enemy and off-map arrivals never");
+            "visible in full + remembered by confidence, from the group's own position (vanilla reads the group's own unitrange, "
+            + "120558/120563): an enemy near only a descendant, another command's enemy and off-map arrivals never");
         AssertEqual(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, -1, 350f), "outside the snapshot");
         AssertEqual(0f, BattleWriterPolicy.SnapshotEnemyStrengthInRange(null, 0, 350f), "no snapshot");
+    }
+
+    // vanilla flanksthreated / outflanked come from the unfiltered range lists
+    // (UpdateUnitRangeFast 122650, 122976+; UpdateGroupStrength 120566-120580). #44's
+    // flank risk now uses the perceived flank pressure: the group's own outflanked
+    // state, or the mean vanilla outflanked weight of its regiments
+    // (ArmyEvidenceBuilder.MeanFlankThreatByGroup, BC2b).
+    private static void MacroFlankRiskFromPerceivedFlankPressure()
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        var group = Group(95, Brigade, 3);
+        s.AddOwn(group);
+        s.AddOwn(new UnitRecord { InstanceId = 96, UnitTyp = TacticalUnitType.Infantry, Strength = 500, X = 0f, Z = -100f, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry });
+        s.Own[1].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        var mean = new float[2];
+        var count = new int[2];
+
+        WhiskeyRealism.Tactical.Orchestrator.ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertFalse(BattleWriterPolicy.PerceivedFlankRisk(s, 0, mean), "nothing perceived on a flank");
+
+        s.SetFlankPressure(1, 0, 800f);
+        WhiskeyRealism.Tactical.Orchestrator.ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertTrue(BattleWriterPolicy.PerceivedFlankRisk(s, 0, mean), "a regiment outflanked on its left");
+
+        s.SetFlankPressure(1, 0, 0f);
+        s.SetFlankPressure(0, 2, 300f);
+        WhiskeyRealism.Tactical.Orchestrator.ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        AssertTrue(BattleWriterPolicy.PerceivedFlankRisk(s, 0, mean), "the group's own rear");
+        AssertFalse(BattleWriterPolicy.PerceivedFlankRisk(s, -1, mean), "outside the snapshot");
     }
 
     // ------------------------------------------------------------------ fixtures
