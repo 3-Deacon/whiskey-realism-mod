@@ -53,8 +53,8 @@ namespace WhiskeyRealism.Patches
                     var plans = ArmyGroupDoctrine.PlanGroups(ledger);
                     if (plans.Count == 0) return;
 
-                    var faction = GetFaction(_aifaction);
-                    var ownUnits = AccessTools.Field(faction?.GetType(), "ownunits")?.GetValue(faction) as IList;
+                    var faction = AICampaignReflect.GetFaction(_aifaction);
+                    var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                     if (ownUnits == null)
                     {
                         OnceLog.Warning(
@@ -123,7 +123,7 @@ namespace WhiskeyRealism.Patches
             if (unassigned.Count < 2) return;
             if (!HasCorpsOrArmy(unassigned)) return;
 
-            var prefab = AccessTools.Field(typeof(AICampaign), "ArmyGroupPrefab")?.GetValue(campaign) as GameObject;
+            var prefab = campaign.ArmyGroupPrefab;
             if (prefab == null)
             {
                 OnceLog.Warning("armygroup:prefab", "[Patch:ArmyGroup] AICampaign.ArmyGroupPrefab missing; cannot create historical army group");
@@ -221,7 +221,7 @@ namespace WhiskeyRealism.Patches
             if (!ArmyAreaRuntime.TryGetAnchor(areaKey, out anchor))
                 anchor = AveragePosition(units);
 
-            float range = ReadGamePrefsFloat("aiarmygroupmaxtheaterrange", 650f);
+            float range = GamePrefs.aiarmygroupmaxtheaterrange;
             return ArmyGroup.GetArmyGroupInRange(allianceId, anchor, range);
         }
 
@@ -276,7 +276,7 @@ namespace WhiskeyRealism.Patches
                     if (ArmyGroupDoctrine.IsEligibleArmyGroupCommander(
                             pickable,
                             IsPlayerCommander(i),
-                            CommanderCommandsOneOf(commander, units) || CommanderHasNoCommand(commander)))
+                            CommanderCommandsOneOf(commander, units) || (UnityEngine.Object)(object)commander.currentcommand == (UnityEngine.Object)null))
                         return i;
                 }
             }
@@ -294,9 +294,9 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool CommanderCommandsOneOf(object commander, List<Regiment> units)
+        private static bool CommanderCommandsOneOf(GameVars.Commander commander, List<Regiment> units)
         {
-            var currentCommand = AccessTools.Field(commander.GetType(), "currentcommand")?.GetValue(commander) as Regiment;
+            var currentCommand = commander.currentcommand;
             if ((UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)null) return false;
             for (int i = 0; i < units.Count; i++)
                 if ((UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)(object)units[i])
@@ -304,22 +304,9 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool CommanderHasNoCommand(object commander)
-        {
-            var currentCommand = AccessTools.Field(commander.GetType(), "currentcommand")?.GetValue(commander) as Regiment;
-            return (UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)null;
-        }
-
         private static bool IsPlayerCommander(int commanderId)
         {
             return DLC_WL.dlc_scenarioactive && commanderId == DLC_WL.dlc_chosencommander;
-        }
-
-        private static object GetFaction(int aifactionIndex)
-        {
-            var list = AccessTools.Field(typeof(AICampaign), "aifaction")?.GetValue(null) as IList;
-            if (list == null || aifactionIndex < 0 || aifactionIndex >= list.Count) return null;
-            return list[aifactionIndex];
         }
 
         private static string UnitKey(Regiment unit)
@@ -338,29 +325,9 @@ namespace WhiskeyRealism.Patches
 
         private static string CommanderName(int commanderId)
         {
-            var commanders = AccessTools.Field(typeof(GameVars), "commander")?.GetValue(null) as IList;
+            var commanders = GameVars.commander;
             if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return "<unknown>";
-            return ReadString(commanders[commanderId], "combinedname") ?? "<unknown>";
-        }
-
-        private static string ReadString(object target, string fieldName)
-        {
-            try
-            {
-                var field = AccessTools.Field(target.GetType(), fieldName);
-                return field?.GetValue(target) as string;
-            }
-            catch { return null; }
-        }
-
-        private static float ReadGamePrefsFloat(string fieldName, float fallback)
-        {
-            try
-            {
-                var field = AccessTools.Field(typeof(GamePrefs), fieldName);
-                return field != null ? Convert.ToSingle(field.GetValue(null)) : fallback;
-            }
-            catch { return fallback; }
+            return commanders[commanderId]?.combinedname ?? "<unknown>";
         }
 
         private static void EmitCampaignInfoOnce(string key, string line, TelemetryLayer layer)

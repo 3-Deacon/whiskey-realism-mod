@@ -33,7 +33,7 @@ namespace WhiskeyRealism.Patches
     internal static class ImportanceValuesPatch
     {
         private static bool _closestAreaDistanceResolved;
-        private static System.Reflection.MethodInfo _closestAreaDistance;
+        private static Func<AICampaign.AIArea, AICampaign.AIArea, float> _closestAreaDistance;
         private static int _cachedObjectiveId = int.MinValue;
         private static object _cachedAreaList;
         private static AICampaign.AIArea _cachedTargetArea;
@@ -119,22 +119,26 @@ namespace WhiskeyRealism.Patches
         }
 
         // Vanilla private static AICampaign.GetClosestAreaDistance(AIArea, AIArea)
-        // (decompile 14863); the (AIArea, Vector3) overload also exists.
+        // (decompile 14863); the (AIArea, Vector3) overload also exists. Bound
+        // once to a typed delegate - no object[] or boxing per call.
         private static float ClosestAreaDistance(AICampaign.AIArea source, AICampaign.AIArea target)
         {
             if (!_closestAreaDistanceResolved)
             {
                 _closestAreaDistanceResolved = true;
-                _closestAreaDistance = AccessTools.Method(
+                var method = AccessTools.Method(
                     typeof(AICampaign),
                     "GetClosestAreaDistance",
                     new[] { typeof(AICampaign.AIArea), typeof(AICampaign.AIArea) });
+                if (method != null)
+                    _closestAreaDistance = (Func<AICampaign.AIArea, AICampaign.AIArea, float>)Delegate.CreateDelegate(
+                        typeof(Func<AICampaign.AIArea, AICampaign.AIArea, float>), method);
                 if (_closestAreaDistance == null)
                     OnceLog.Warning("importance:closest-area-distance",
                         "[Patch:Importance] AICampaign.GetClosestAreaDistance(AIArea, AIArea) not found; plan-target redirect disabled");
             }
             if (_closestAreaDistance == null) return float.NaN;
-            return Convert.ToSingle(_closestAreaDistance.Invoke(null, new object[] { source, target }));
+            return _closestAreaDistance(source, target);
         }
 
         private static AICampaign.AIArea ResolveTargetAIAreaCached(int objectiveId)

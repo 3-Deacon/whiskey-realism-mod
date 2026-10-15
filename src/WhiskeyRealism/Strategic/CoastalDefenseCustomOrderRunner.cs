@@ -82,13 +82,11 @@ namespace WhiskeyRealism.Strategic
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 if (faction == null) return;
 
-                var defOpsField = AccessTools.Field(faction.GetType(), "unitsindefensiveoperations");
-                var ownUnitsField = AccessTools.Field(faction.GetType(), "ownunits");
-                var defOps = defOpsField?.GetValue(faction) as IList;
-                var ownUnits = ownUnitsField?.GetValue(faction) as IList;
+                var defOps = VanillaFieldCache.List(faction, "unitsindefensiveoperations");
+                var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                 if (defOps == null || ownUnits == null) return;
-                var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                var enemyUnits = AccessTools.Field(faction.GetType(), "enemyunits")?.GetValue(faction) as IList;
+                var offensive = VanillaFieldCache.Get(faction, "unitsinoffensiveoperations") as IList;
+                var enemyUnits = VanillaFieldCache.Get(faction, "enemyunits") as IList;
 
                 bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
@@ -251,14 +249,7 @@ namespace WhiskeyRealism.Strategic
 
         private static bool IsPlayerControlled(Regiment unit)
         {
-            try
-            {
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                if (dlcType == null) return false;
-                var method = AccessTools.Method(dlcType, "IsMovedByPlayer", new[] { typeof(Regiment) });
-                if (method == null) return false;
-                return (bool)method.Invoke(null, new object[] { unit });
-            }
+            try { return DLC_WL.IsMovedByPlayer(unit); }
             catch { return false; }
         }
 
@@ -347,20 +338,13 @@ namespace WhiskeyRealism.Strategic
             return new Vector3(x, anchor.y, z);
         }
 
+        private const int AifactionScanLimit = 8;
+
         private static int ResolveAifactionIndex(int allianceId)
         {
-            try
-            {
-                var aicType = AccessTools.TypeByName("AICampaign");
-                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
-                if (list == null) return -1;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    int aid = AICampaignReflect.GetAllianceId(i);
-                    if (aid == allianceId) return i;
-                }
-            }
-            catch { }
+            // AICampaign.aifaction holds one entry per alliance (incl. Europe = 2).
+            for (int i = 0; i < AifactionScanLimit; i++)
+                if (AICampaignReflect.GetAllianceId(i) == allianceId) return i;
             return -1;
         }
 

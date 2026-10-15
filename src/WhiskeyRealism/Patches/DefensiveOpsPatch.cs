@@ -71,7 +71,7 @@ namespace WhiskeyRealism.Patches
                     var era = StrategicCoordinator.Instance.Eras[allianceId] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
                     var personality = cic.Effective(era);
 
-                    var faction = GetFaction(_aifaction);
+                    var faction = AICampaignReflect.GetFaction(_aifaction);
                     if (faction == null) return;
 
                     var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
@@ -131,19 +131,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static object GetFaction(int aifactionIndex)
-        {
-            var aicType = AccessTools.TypeByName("AICampaign");
-            var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
-            if (list == null || aifactionIndex < 0 || aifactionIndex >= list.Count) return null;
-            return list[aifactionIndex];
-        }
-
         private static IList ReadList(object faction, string fieldName, string warningKey)
         {
             try
             {
-                var list = AccessTools.Field(faction.GetType(), fieldName)?.GetValue(faction) as IList;
+                var list = VanillaFieldCache.List(faction, fieldName);
                 if (list == null)
                     OnceLog.Warning(warningKey, $"DefensiveOpsPatch missing AIFaction.{fieldName} list");
                 return list;
@@ -443,8 +435,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var list = AccessTools.Field(faction.GetType(), fieldName)?.GetValue(faction) as IList;
-                list?.Remove(unit);
+                VanillaFieldCache.List(faction, fieldName)?.Remove(unit);
             }
             catch (Exception ex)
             {

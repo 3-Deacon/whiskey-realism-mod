@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -33,7 +34,7 @@ namespace WhiskeyRealism.Patches
         private sealed class TransferSteerState
         {
             public object Faction;
-            public System.Reflection.FieldInfo DeficitField;
+            public FieldInfo DeficitField;
             public object OriginalDeficit;
             public int AllianceId;
             public int ObjectiveId;
@@ -69,12 +70,12 @@ namespace WhiskeyRealism.Patches
                 var target = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
                 if (!target.HasValue) return;
 
-                var faction = GetFaction(_aifaction);
+                var faction = AICampaignReflect.GetFaction(_aifaction);
                 if (faction == null) return;
 
                 var factionType = faction.GetType();
-                var deficitField = AccessTools.Field(factionType, "positiondeficit");
-                var surplusField = AccessTools.Field(factionType, "positionsurplus");
+                var deficitField = VanillaFieldCache.Field(factionType, "positiondeficit");
+                var surplusField = VanillaFieldCache.Field(factionType, "positionsurplus");
                 if (deficitField == null || surplusField == null)
                 {
                     OnceLog.Warning("transfer:field:deficit-surplus", "TransferOfUnitsPatch missing AIFaction positiondeficit/positionsurplus fields");
@@ -84,8 +85,8 @@ namespace WhiskeyRealism.Patches
                 var surplus = surplusField.GetValue(faction);
                 if (surplus == null) return;
 
-                var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
-                var enemyUnits = AccessTools.Field(factionType, "enemyunits")?.GetValue(faction) as IList;
+                var ownUnits = VanillaFieldCache.List(faction, "ownunits");
+                var enemyUnits = VanillaFieldCache.List(faction, "enemyunits");
                 if (ownUnits == null || enemyUnits == null)
                 {
                     OnceLog.Warning("transfer:field:unit-lists", "TransferOfUnitsPatch missing AIFaction ownunits/enemyunits lists");
@@ -96,7 +97,7 @@ namespace WhiskeyRealism.Patches
                 // groupstrengthdirect with UpdateHeatmaps' per-unit weights (12320-12341).
                 float cellSize = HeatmapCellSize(faction);
                 if (cellSize <= 0f) return;
-                var capitalDefenders = AccessTools.Field(factionType, "groupstodefendcapital")?.GetValue(faction) as IList;
+                var capitalDefenders = VanillaFieldCache.List(faction, "groupstodefendcapital");
                 int followedObjective = ReadFollowedObjective(faction);
                 float ownNear = HeatmapStrengthAt(ownUnits, target.Value, cellSize,
                     u => capitalDefenders != null && capitalDefenders.Contains(u) ? GamePrefs.reducedrecruitmentcapital : 1f);
@@ -241,42 +242,34 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var field = AccessTools.Field(transferData.GetType(), fieldName);
+                var field = VanillaFieldCache.Field(transferData.GetType(), fieldName);
                 return field != null ? Convert.ToSingle(field.GetValue(transferData)) : 0f;
             }
             catch { return 0f; }
         }
 
-        private static object GetFaction(int aifactionIndex)
-        {
-            var aicType = AccessTools.TypeByName("AICampaign");
-            var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
-            if (list == null || aifactionIndex < 0 || aifactionIndex >= list.Count) return null;
-            return list[aifactionIndex];
-        }
+        private static ConstructorInfo _transferDataCtor;
+        private static bool _transferDataCtorResolved;
 
+        // AIFaction.TransferData(Vector3, float, float) (decompile 10301).
         private static object CreateTransferData(Type factionType, Vector3 position, float ownStrength, float enemyStrength)
         {
-            var transferDataType = AccessTools.Inner(factionType, "TransferData");
-            if (transferDataType == null)
+            if (!_transferDataCtorResolved)
             {
-                OnceLog.Warning("transfer:type:transferdata", "TransferOfUnitsPatch missing AIFaction.TransferData type");
-                return null;
+                _transferDataCtorResolved = true;
+                var transferDataType = AccessTools.Inner(factionType, "TransferData");
+                _transferDataCtor = transferDataType != null
+                    ? AccessTools.Constructor(transferDataType, new[] { typeof(Vector3), typeof(float), typeof(float) })
+                    : null;
+                if (_transferDataCtor == null)
+                    OnceLog.Warning("transfer:ctor:transferdata", "TransferOfUnitsPatch missing AIFaction.TransferData(Vector3,float,float) constructor");
             }
-
-            var ctor = AccessTools.Constructor(transferDataType, new[] { typeof(Vector3), typeof(float), typeof(float) });
-            if (ctor == null)
-            {
-                OnceLog.Warning("transfer:ctor:transferdata", "TransferOfUnitsPatch missing AIFaction.TransferData(Vector3,float,float) constructor");
-                return null;
-            }
-
-            return ctor.Invoke(new object[] { position, ownStrength, enemyStrength });
+            return _transferDataCtor?.Invoke(new object[] { position, ownStrength, enemyStrength });
         }
 
         private static int TransferCount(object faction)
         {
-            var list = AccessTools.Field(faction.GetType(), "unitstobetransfered")?.GetValue(faction) as IList;
+            var list = VanillaFieldCache.List(faction, "unitstobetransfered");
             return list?.Count ?? 0;
         }
 
@@ -285,7 +278,7 @@ namespace WhiskeyRealism.Patches
             if (transferData == null) return null;
             try
             {
-                var field = AccessTools.Field(transferData.GetType(), "position");
+                var field = VanillaFieldCache.Field(transferData.GetType(), "position");
                 if (field != null) return (Vector3)field.GetValue(transferData);
             }
             catch { }
@@ -293,14 +286,14 @@ namespace WhiskeyRealism.Patches
         }
 
         private static bool _heatmapRatioResolved;
-        private static System.Reflection.FieldInfo _heatmapRatioField;
+        private static FieldInfo _heatmapRatioField;
 
         // Heatmap cell size from the faction's own recruitment heatmap:
         // ratioheatmaptoterrain = segments / terrain size (Heatmap.Initialize(20),
         // 12310 / 33833), so one cell = 1 / ratio.x world units.
         private static float HeatmapCellSize(object faction)
         {
-            var heatmap = AccessTools.Field(faction.GetType(), "recruitmentheatmapown")?.GetValue(faction);
+            var heatmap = VanillaFieldCache.Get(faction, "recruitmentheatmapown");
             if (heatmap == null) return 0f;
             if (!_heatmapRatioResolved)
             {
@@ -346,7 +339,7 @@ namespace WhiskeyRealism.Patches
 
         private static int ReadFollowedObjective(object faction)
         {
-            try { return Convert.ToInt32(AccessTools.Field(faction.GetType(), "followedcampaignobjective")?.GetValue(faction) ?? -1); }
+            try { return Convert.ToInt32(VanillaFieldCache.Get(faction, "followedcampaignobjective") ?? -1); }
             catch { return -1; }
         }
 
