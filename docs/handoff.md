@@ -8,15 +8,15 @@
 
 | | |
 |---|---|
-| **Branch** | `feat/battle-core` (worktree `.worktrees/feat-battle-core`): roadmap stage D, slices BC0-BC7 complete, BC7 awaiting review. Not merged to `main`, not deployed. |
-| **`main`** | `6695ecd` — the 2026-10-15 checkpoint (review remediation + Stage B integration); last released line is v0.2.2 (2026-05-04). |
-| **Build** | `./build.sh` — 0 warnings, 0 errors on `feat/battle-core`; the test build is 0 warnings too. |
-| **Harness** | 1917 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
+| **Branch** | `main` — roadmap stage D (battle core, BC0-BC7) merged 2026-10-15 at `fc0b8af` after per-slice and two whole-branch reviews. In progress: BC8 (experience- and drill-aware AI decisions) on `feat/battle-core-bc8`. |
+| **`main`** | `fc0b8af` — battle core on top of the 2026-10-15 checkpoint (`6695ecd`); last released line is v0.2.2 (2026-05-04). |
+| **Build** | `./build.sh` — 0 warnings, 0 errors on `main`; the test build is 0 warnings too. |
+| **Harness** | 1917 PASS / 0 FAIL on `main` (auto-discovered `*Tests.Run()`; exit 0). |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
-| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` (checkpoint tag `checkpoint-2026-10-15`): `WhiskeyRealism.dll` 1,593,856 bytes, SHA-256 `0831547f9835e3f084953e64bed7cd049c26c68f96ce22c2a0134c35fee17638` (dist and plugins match); harness 1688 PASS / 0 FAIL. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
+| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `fc0b8af` (battle core): `WhiskeyRealism.dll` 1,631,232 bytes, SHA-256 `4f6e01fad62aa689a4f64296033c20196a2766d75d6b51fab4aefb9d2beab9ce` (dist and plugins match); harness 1917 PASS / 0 FAIL. The earlier checkpoint DLL (`0831547f…`) was never smoke-tested and is superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
 
-### What the battle core adds (stage D, `feat/battle-core`)
+### What the battle core adds (stage D, on `main`)
 
 Spec [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md), plan [`superpowers/plans/2026-10-15-battle-core.md`](superpowers/plans/2026-10-15-battle-core.md) (decisions D1-D11, per-slice As built, PROVE-MODE, the BC7 smoke checklist). Architecture: [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core.
 
@@ -51,15 +51,16 @@ Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found alon
 
 ### Open items
 
-- **Battle core:** BC7 review, then merge `feat/battle-core` → `main`, build, deploy with the user's go-ahead (BepInEx 5.4.23.5 is installed), and run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
-- No in-game smoke of the 2026-10-15 checkpoint DLL on `main` yet (deployed, awaiting smoke).
+- **Battle core:** merged and deployed 2026-10-15 (`fc0b8af`, SHA-256 `4f6e01fa…`). Next: run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
+- **BC8 experience and drill** (from the user's 2026-10-15 question): the mod's battle replacements (#44 force balance, group stance, withdrawal, charge pre-filter) ignore unit experience/drill where vanilla uses them (84862, 4238/6057, 128677, 122229); campaign offensives ignore live commander initiative (14250/14281). In progress on `feat/battle-core-bc8`.
+- **`[CIC:diag]`** was never written on `main` before `fc0b8af`; fixed in BC7 landing.
 
 ## Next stages
 
 From [`superpowers/plans/2026-10-15-full-overhaul-roadmap.md`](superpowers/plans/2026-10-15-full-overhaul-roadmap.md). Each stage ends with a clean build, all-PASS harness, clean `config-audit`/`orphan-sweep`, and an independent review.
 
 1. **C — Checkpoint.** Done: `main` at `6695ecd`, deployed 2026-10-15 (SHA-256 `0831547f…`).
-2. **D — Battle core.** Built on `feat/battle-core` (BC0-BC7); in review, then merge, deploy and smoke (see Open items). Spec: [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md).
+2. **D — Battle core.** Merged to `main` at `fc0b8af` and deployed 2026-10-15; awaiting the in-game smoke (see Open items). BC8 (experience/drill) follows. Spec: [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md).
 3. **E — Need-driven policy.** Plan: [`superpowers/plans/2026-10-14-need-driven-policy.md`](superpowers/plans/2026-10-14-need-driven-policy.md); spec [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md).
 4. **F — W&L chain of command** on the arbiter. Spec: [`superpowers/specs/2026-10-14-wl-chain-of-command-design.md`](superpowers/specs/2026-10-14-wl-chain-of-command-design.md) (§D-§F; §A-§C moved to battle core).
 5. **G — Live theater campaign planner.** Spec: [`superpowers/specs/2026-10-14-campaign-planner-design.md`](superpowers/specs/2026-10-14-campaign-planner-design.md). Supersedes locked design choices #3-#6 once it ships.
