@@ -86,6 +86,10 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 DeploymentWritesOnlyThroughTheExecutor", DeploymentWritesOnlyThroughTheExecutor),
             ("bc10 DeploymentPatchIsPrefixAndPostfixWithScopes", DeploymentPatchIsPrefixAndPostfixWithScopes),
             ("bc10 DeployedReserveIsReadFromTheExecutorOutcome", DeployedReserveIsReadFromTheExecutorOutcome),
+            // avenue flags
+            ("bc10 RoadAnchoredNeedsRoadSamples", RoadAnchoredNeedsRoadSamples),
+            ("bc10 CrossingAnchoredNeedsFordOrBridge", CrossingAnchoredNeedsFordOrBridge),
+            ("bc10 AvenueFlagsComeFromTheGrid", AvenueFlagsComeFromTheGrid),
             ("bc10 ReserveIsFloorThirdOfEligibleChildren", ReserveIsFloorThirdOfEligibleChildren),
             ("bc10 NoReserveBelowThreeChildren", NoReserveBelowThreeChildren),
             ("bc10 ReserveNeverPlayerOwnedOrCavalryOnly", ReserveNeverPlayerOwnedOrCavalryOnly),

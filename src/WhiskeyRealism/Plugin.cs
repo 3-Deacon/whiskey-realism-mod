@@ -209,6 +209,7 @@ namespace WhiskeyRealism
         {
             Instance = this;
             Log = Logger;
+            Tactical.Battle.BattleTerrainGrid.Provider = Tactical.Battle.BattleTerrainGridRuntime.Get;
 
             Enabled = Config.Bind(
                 "General", "Enabled", true,

@@ -74,6 +74,19 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public int CrossingCount => _crossingX.Length;
 
+        /// <summary>
+        /// The battle's grid for pure-compiled readers (the avenue adapter): bound once by the plugin to
+        /// BattleTerrainGridRuntime.Get, which builds it lazily and returns null when the terrain
+        /// array is unreadable. Null in the harness, where nothing is anchored.
+        /// </summary>
+        public static Func<BattleTerrainGrid> Provider { get; set; }
+
+        public static BattleTerrainGrid Current()
+        {
+            Func<BattleTerrainGrid> provider = Provider;
+            return provider != null ? provider() : null;
+        }
+
         /// <summary>The terrain id at a world point: GetCurrentTerrainOnPos (26727-26771).</summary>
         public int IdAt(float x, float z)
         {
