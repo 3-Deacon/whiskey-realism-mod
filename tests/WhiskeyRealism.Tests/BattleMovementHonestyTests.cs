@@ -28,6 +28,15 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 GridRiverImpassableUnlessFrozen", GridRiverImpassableUnlessFrozen),
             ("bc10 GridSpeedCostFallsBackToGrassForUnknownIds", GridSpeedCostFallsBackToGrassForUnknownIds),
             ("bc10 GridCrossingsAreCopiedAndBounded", GridCrossingsAreCopiedAndBounded),
+            // covered crossings
+            ("bc10 CoveredCrossingFromVisibleFacingEnemyWithin1_5FireRange", CoveredCrossingFromVisibleFacingEnemyWithin1_5FireRange),
+            ("bc10 CoveredCrossingIgnoresHiddenEnemy", CoveredCrossingIgnoresHiddenEnemy),
+            ("bc10 CoveredCrossingIgnoresArtillery", CoveredCrossingIgnoresArtillery),
+            ("bc10 CoveredCrossingRememberedOnlyAboveHalfConfidence", CoveredCrossingRememberedOnlyAboveHalfConfidence),
+            ("bc10 CoverPointAheadOfStandingEnemyInCover", CoverPointAheadOfStandingEnemyInCover),
+            ("bc10 CoverPointNotForForestCoverOrMovingEnemy", CoverPointNotForForestCoverOrMovingEnemy),
+            ("bc10 CoveredCrossingsAllocateNothingAfterWarmup", CoveredCrossingsAllocateNothingAfterWarmup),
+            ("bc10 PerceptionMemoryKeepsTheRowDetailWhileVisible", PerceptionMemoryKeepsTheRowDetailWhileVisible),
         });
     }
 

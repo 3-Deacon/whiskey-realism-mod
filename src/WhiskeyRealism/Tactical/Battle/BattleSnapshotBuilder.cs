@@ -297,6 +297,7 @@ namespace WhiskeyRealism.Tactical.Battle
             record.CoverValue = reg.covervalue;
             record.CoverObject = reg.coverobject;
             record.FriendlyRoutedNear = reg.friendlyroutednear;
+            record.FireRange = reg.firerange;
             record.LastAiChargeTime = reg.lastaichargetime;
             record.Outflanked = reg.outflanked;
             record.FireFromFlank = reg.firefromflank;

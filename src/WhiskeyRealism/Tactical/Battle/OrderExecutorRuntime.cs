@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
-using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle
@@ -23,7 +22,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     the same call (AddPath 130519, pathstatus 0 until the courier arrives,
     //     131243-131246), so the moving-unit count is the "issued" signal.
     //   Move with IntentFlags.AvoidCoveredCrossings: new AIBattle.BlockedMovingOrder
-    //     (3054-3150) with the side's own AIBattle.blockedcrossings and vanilla's
+    //     (3054-3150) with the crossings and fire points the side's PERCEIVED enemy covers
+    //     (CoveredCrossings: vanilla's UpdateBlockedCrossings rules 7917-7973 over the
+    //     snapshot's observations, not its omniscient unit scan) and vanilla's
     //     150 m range, as vanilla's line-group move does (6953-6956). It carves
     //     NavMeshObstacles over the covered crossings away from the destination;
     //     UpdateOrders (3382, every AIBattle.Update frame, before the pause
@@ -33,8 +34,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //     sees the move through the waypoint stamp (SetGroupFormation 92067) or
     //     the moving-unit count; a same-clock re-run (vanilla's override calls)
     //     leaves it pending (OrderExecutor.ObserveOutcomes).
-    //     Without a covered crossing (a null list on a map without river
-    //     crossings, 7919-7920, or an empty one, 7936-7949) the move is a plain
+    //     Without a perceived covered point (an empty list) the move is a plain
     //     SetWaypoint with its courier delay (OrderExecutor.TakesBlockedMovingOrder).
     //   Stance: Util/TacticalStanceWriter (the one ChangeStance caller, 90772).
     //   Formation: BattleUnits.SetFormation (90971, courier) only when
@@ -84,8 +84,13 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool _layoutTouched;
         private static RefuseFlank _layoutRefuse;
 
-        private static FieldInfo _blockedCrossingsField;
-        private static bool _blockedCrossingsResolved;
+        // The perceived covered points per side (CoveredCrossings), rebuilt at most once per
+        // snapshot (TickId) and only when a move carries AvoidCoveredCrossings. Pooled.
+        private const int CoveredPointCapacity = 64;
+        private static readonly float[][] _coveredX = { new float[CoveredPointCapacity], new float[CoveredPointCapacity] };
+        private static readonly float[][] _coveredZ = { new float[CoveredPointCapacity], new float[CoveredPointCapacity] };
+        private static readonly List<Vector3>[] _covered = { new List<Vector3>(CoveredPointCapacity), new List<Vector3>(CoveredPointCapacity) };
+        private static readonly long[] _coveredTick = { -1L, -1L };
 
         // The units one Move reached (grown to the largest chain seen).
         private static IssuedTarget[] _issued = new IssuedTarget[64];
@@ -94,6 +99,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // Per-battle latch for the first-fire line, so the message string is built
         // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
+        private static bool _coveredLogged;
 
         /// <summary>Per-tick seams and settings for an executor.</summary>
         internal static void BindForTick(OrderExecutor executor)
@@ -153,7 +159,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     int waypointsAt = waypoints;
                     RecordWaypointsBefore(unit, issued, ref waypoints);
                     int before = MovingUnits(unit);
-                    wrote = IssueMove(bunits, unit, winner, plan.UseOrderDelay, x, z, out bool blocked);
+                    wrote = IssueMove(bunits, view, unit, winner, plan.UseOrderDelay, x, z, out bool blocked);
                     if (wrote)
                     {
                         _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
@@ -293,14 +299,14 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static bool IssueMove(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z,
+        private static bool IssueMove(BattleUnits bunits, BattleSnapshot view, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z,
             out bool viaBlockedOrder)
         {
             viaBlockedOrder = false;
             Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
             if ((w.Flags & IntentFlags.AvoidCoveredCrossings) != 0)
             {
-                List<Vector3> crossings = BlockedCrossings(bunits, unit.alliance);
+                List<Vector3> crossings = PerceivedCoveredPoints(view);
                 if (OrderExecutor.TakesBlockedMovingOrder(w, crossings != null ? crossings.Count : 0))
                 {
                     // A queued order for this unit sets its waypoint within two
@@ -617,45 +623,50 @@ namespace WhiskeyRealism.Tactical.Battle
             return moving;
         }
 
-        // The side's own AIBattle.blockedcrossings (private, 3340): the
-        // crossings that instance's UpdateBlockedCrossings found covered by the
-        // enemy of bunits.alliance[sideofai] (7939). The feud instance is skipped.
-        private static List<Vector3> BlockedCrossings(BattleUnits bunits, int alliance)
+        // The crossings and fire points the side's perceived enemy covers, as the world
+        // positions BlockedMovingOrder carves obstacles at (terrain height: a NavMeshObstacle
+        // far above or below the mesh carves nothing). Built once per snapshot.
+        private static List<Vector3> PerceivedCoveredPoints(BattleSnapshot view)
         {
-            try
+            int side = view.Alliance;
+            if (side < 0 || side >= _covered.Length) return null;
+            List<Vector3> list = _covered[side];
+            if (_coveredTick[side] == view.TickId) return list;
+            _coveredTick[side] = view.TickId;
+            list.Clear();
+            using (TelemetryPerf.Scope("tactical.covered-crossings", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
             {
-                if (!_blockedCrossingsResolved)
+                try
                 {
-                    _blockedCrossingsResolved = true;
-                    _blockedCrossingsField = AccessTools.Field(typeof(AIBattle), "blockedcrossings");
-                    if (_blockedCrossingsField == null)
-                        OnceLog.Warning("tactical-battle-core:blocked-crossings-missing",
-                            "[OrderExecutor] AIBattle.blockedcrossings not found; long objective moves use plain SetWaypoint");
+                    int count = CoveredCrossings.BuildPoints(view, BattleTerrainGridRuntime.Get(), _coveredX[side], _coveredZ[side], out int crossingPoints);
+                    for (int i = 0; i < count; i++)
+                        list.Add(TacticalTerrainProbe.WithTerrainHeight(new Vector3(_coveredX[side][i], 0f, _coveredZ[side][i])));
+                    if (count > 0 && !_coveredLogged)
+                    {
+                        _coveredLogged = true;
+                        OnceLog.Info("tactical-battle-core:covered-crossings",
+                            "[OrderExecutor] perceived covered crossings: alliance=" + side + " crossings=" + crossingPoints + " coverPoints=" + (count - crossingPoints));
+                    }
                 }
-                if (_blockedCrossingsField == null) return null;
-                AIBattle[] battles = bunits.aibattle;
-                int[] alliances = bunits.alliance;
-                if (battles == null || alliances == null) return null;
-                for (int i = 0; i < battles.Length; i++)
+                catch (Exception ex)
                 {
-                    AIBattle battle = battles[i];
-                    if ((UnityEngine.Object)battle == null || TacticalWriteGuard.IsFeudInstance(battle)) continue;
-                    int side = battle.sideofai;
-                    if (side < 0 || side >= alliances.Length || alliances[side] != alliance) continue;
-                    return _blockedCrossingsField.GetValue(battle) as List<Vector3>;
+                    list.Clear();
+                    OnceLog.Warning("tactical-battle-core:covered-crossings-failed",
+                        "[OrderExecutor] covered-crossing build failed, moves use a plain SetWaypoint: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-battle-core:blocked-crossings-failed",
-                    "[OrderExecutor] blockedcrossings read failed: " + ex.GetType().Name + " " + ex.Message);
-            }
-            return null;
+            return list;
         }
 
         private static void Reset()
         {
             _firstFireLogged = false;
+            _coveredLogged = false;
+            for (int a = 0; a < _covered.Length; a++)
+            {
+                _covered[a].Clear();
+                _coveredTick[a] = -1L;
+            }
         }
     }
 }

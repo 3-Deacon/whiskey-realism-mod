@@ -40,7 +40,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     objective-type group move over 150 m carries
     //     IntentFlags.AvoidCoveredCrossings, as shipped #61 sent it (vanilla's own
     //     line-group moves, 6953-6956); OrderExecutorRuntime issues it.
-    //     UpdateBlockedCrossings (7917-7973) only lists the covered crossings.
+    //     The covered crossings it avoids are the perceived ones (CoveredCrossings, vanilla's
+    //     UpdateBlockedCrossings rules 7917-7973 over the snapshot's observations).
     //
     // Deleted with #61, not ported (the executor owns them): the recent-order
     // stamps, failed-write backoff, brigade task hold, courier cadence, outbound

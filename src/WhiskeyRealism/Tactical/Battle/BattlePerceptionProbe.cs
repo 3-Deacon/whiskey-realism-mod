@@ -180,7 +180,9 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (enemies[i].UnitTyp > 13 || enemies[i].UnitTyp == 5) continue;
                     AddRow(ref side.Result, enemies[i].InstanceId, IsEnemyVisible(mode, grid, s, i), enemies[i].X, enemies[i].Z,
                         enemies[i].Strength, enemies[i].UnitTyp, (enemies[i].Flags & UnitFlags.Routed) != 0,
-                        reinforcement: false, arrivalHours: 0f, experience: enemies[i].Experience, morale: enemies[i].Morale);
+                        reinforcement: false, arrivalHours: 0f, experience: enemies[i].Experience, morale: enemies[i].Morale,
+                        heading: enemies[i].RotationY, fireRange: enemies[i].FireRange, coverValue: enemies[i].CoverValue,
+                        coverObject: enemies[i].CoverObject, standing: enemies[i].RegimentPaths <= 0);
                 }
                 AddReinforcements(side, battle, s.Alliance, mode, grid);
                 return true;
@@ -281,7 +283,8 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         private static void AddRow(ref PerceptionProbeResult result, int id, bool visible, float x, float z, float strength,
-            int unitTyp, bool routed, bool reinforcement, float arrivalHours, float experience, float morale)
+            int unitTyp, bool routed, bool reinforcement, float arrivalHours, float experience, float morale,
+            float heading = 0f, float fireRange = 0f, float coverValue = 0f, int coverObject = 0, bool standing = false)
         {
             int i = result.Count;
             PerceptionProbeResult.EnsureCapacity(ref result, i + 1);
@@ -296,6 +299,12 @@ namespace WhiskeyRealism.Tactical.Battle
             result.ArrivalHours[i] = arrivalHours;
             result.Experience[i] = experience; // true values; BattlePerception.Update keeps the star value of a visible row
             result.Morale[i] = morale;
+            // BC10: the covered-crossings inputs of a unit row (a reinforcement column has none).
+            result.Heading[i] = heading;
+            result.FireRange[i] = fireRange;
+            result.CoverValue[i] = coverValue;
+            result.CoverObject[i] = coverObject;
+            result.Standing[i] = standing;
             result.Count = i + 1;
         }
 

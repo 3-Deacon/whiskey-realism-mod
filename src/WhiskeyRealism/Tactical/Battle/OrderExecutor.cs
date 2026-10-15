@@ -96,9 +96,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Shipped #61 TryQueueBlockedMovingOrder: an objective-type group move
         // farther than 150 m avoids the crossings the enemy covers, as vanilla's
-        // own line-group move does. Whether the side has crossing data is the
-        // executor runtime's check (blockedcrossings stays null on a map without
-        // river crossings, UpdateBlockedCrossings 7919-7920).
+        // own line-group move does. Whether the side perceives a covered point is the
+        // executor runtime's check (CoveredCrossings; an empty list is a plain SetWaypoint).
         public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType task, float distance)
         {
             if (!IsFinite(distance) || distance <= BlockedMoveDistanceMeters) return false;
@@ -377,9 +376,9 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// A flagged move goes through vanilla BlockedMovingOrder only without heading
         /// or double-quick (UpdateOrders' SetWaypoint carries neither, 3139) and when
-        /// the side's blockedcrossings lists at least one crossing: the order carves
-        /// obstacles only over listed crossings (3071-3083), so with none it would only
-        /// drop the courier delay. An empty or missing list (7919-7949) is a plain
+        /// the side's perceived covered-point list (CoveredCrossings) holds at least one
+        /// point: the order carves obstacles only over listed points (3071-3083), so with
+        /// none it would only drop the courier delay. An empty list is a plain
         /// SetWaypoint.
         /// </summary>
         public static bool TakesBlockedMovingOrder(in BattleOrderIntent w, int crossingCount)
