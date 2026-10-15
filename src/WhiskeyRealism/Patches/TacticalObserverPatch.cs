@@ -1803,7 +1803,6 @@ namespace WhiskeyRealism.Patches
             var wlGuard = TacticalWlActionGuard.Decide(
                 true,
                 SafeDlcWlActive(),
-                TacticalWlGuardAction.FeudMovement,
                 group.dlcw_isundercommander,
                 group.dlcw_isundercommander,
                 CountAttachedUnderCommander(group) > 0);

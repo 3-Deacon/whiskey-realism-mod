@@ -798,7 +798,6 @@ namespace WhiskeyRealism.Patches
             var decision = TacticalWlActionGuard.Decide(
                 true,
                 DLC_WL.dlc_scenarioactive,
-                TacticalWlGuardAction.FeudMovement,
                 group != null && group.dlcw_isundercommander,
                 group != null && group.dlcw_isundercommander,
                 AttachedUnitUnderPlayerCommander(group));

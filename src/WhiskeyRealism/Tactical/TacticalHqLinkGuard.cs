@@ -8,7 +8,6 @@ namespace WhiskeyRealism.Tactical
             bool sourceIsGroupUnit,
             bool targetExists,
             bool sameHierarchy,
-            bool sameNonRootParent,
             bool sameAiGroup)
         {
             if (!modEnabled) return false;
@@ -16,7 +15,6 @@ namespace WhiskeyRealism.Tactical
             if (!sourceIsGroupUnit) return false;
             if (!targetExists) return false;
             if (sameHierarchy) return false;
-            if (sameNonRootParent) return false;
             if (sameAiGroup) return false;
 
             return true;

@@ -261,7 +261,6 @@ static class Program
             ("operation director fix and flank exposed weak point with reserve", OperationDirectorFixAndFlankExposedWeakPointWithReserve),
             ("operation macro ai maps soft abort to defend", OperationMacroAiMapsSoftAbortToDefend),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
-            ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
             ("tactical FOW contact rejects broad closest enemy leak", TacticalFowContactRejectsBroadClosestEnemyLeak),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
             ("tactical vision fallback objective uses vanilla movement waypoint", TacticalVisionFallbackObjectiveUsesVanillaMovementWaypoint),
@@ -309,15 +308,6 @@ static class Program
             ("posture executor long attack uses vanilla blocked movement order", PostureExecutorLongAttackUsesVanillaBlockedMovementOrder),
             ("posture executor group movement flags count as active move", PostureExecutorGroupMovementFlagsCountAsActiveMove),
             ("posture executor duplicate waypoint policy suppresses same target", PostureExecutorDuplicateWaypointPolicySuppressesSameTarget),
-            ("regimental doctrine routed yields no action", RegimentalDoctrineRoutedYieldsNoAction),
-            ("regimental doctrine pressed multiple sides yields retreat", RegimentalDoctrinePressedMultipleSidesYieldsRetreat),
-            ("regimental doctrine flanked low morale yields fallback", RegimentalDoctrineFlankedLowMoraleYieldsFallback),
-            ("regimental doctrine isolated with enemies yields fallback", RegimentalDoctrineIsolatedWithEnemiesYieldsFallback),
-            ("regimental doctrine flanked healthy yields wheel", RegimentalDoctrineFlankedHealthyYieldsWheel),
-            ("regimental doctrine no threats yields no action", RegimentalDoctrineNoThreatsYieldsNoAction),
-            ("regimental threat computer quadrant front detects centroid axis", RegimentalThreatComputerFrontQuadrant),
-            ("regimental threat computer detects flank from three enemies", RegimentalThreatComputerDetectsFlankFromThreeEnemies),
-            ("regimental threat computer isolation when no allies nearby", RegimentalThreatComputerIsolationWhenNoAllies),
             ("opportunity hysteresis holds same category", OpportunityHysteresisHoldsSameCategory),
             ("opportunity hysteresis blocks transition within hold window", OpportunityHysteresisBlocksWithinHoldWindow),
             ("opportunity hysteresis allows transition after hold expires", OpportunityHysteresisAllowsAfterHold),
@@ -347,7 +337,6 @@ static class Program
             ("macroai no-opportunity returns null", MacroAiNoOpportunityReturnsNull),
             ("macroai aggressive commander envelops at parity", MacroAiAggressiveCommanderEnvelopsAtParity),
             ("macroai cautious commander requires clear margin to flank", MacroAiCautiousCommanderRequiresClearMarginToFlank),
-            ("macroai legal-check rejects unset/out-of-range", MacroAiIsLegalChecks),
             ("play catalog returns template for every playbook", PlayCatalogReturnsTemplateForEveryPlaybook),
             ("play catalog unknown returns null", PlayCatalogUnknownReturnsNull),
             ("play projection forward axis aligns toward enemy", PlayProjectionForwardAxisAlignsTowardEnemy),
@@ -580,12 +569,6 @@ static class Program
             ("player order runtime classifies vanilla order scene activity", PlayerOrderRuntimeClassifiesVanillaOrderSceneActivity),
             ("tactical support screen quiet when no enemy and no screen", TacticalSupportScreenQuietWhenNoEnemyAndNoScreen),
             ("tactical unit type constants match vanilla unittyp", TacticalUnitTypeConstantsMatchVanillaUnittyp),
-            ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
-            ("tactical help request reserve screen on flank", TacticalHelpRequestReserveScreenOnFlank),
-            ("tactical help request line relief on high pressure", TacticalHelpRequestLineReliefOnHighPressure),
-            ("tactical help request artillery support", TacticalHelpRequestArtillerySupport),
-            ("tactical help request main effort shift", TacticalHelpRequestMainEffortShift),
-            ("tactical sector ledger stores help request", TacticalSectorLedgerStoresHelpRequest),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -601,8 +584,7 @@ static class Program
             ("wl operation null guard finishes missing operation", WlOperationNullGuardFinishesMissingOperation),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
             ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
-            ("tactical wl guard denies player subordinate charge initiation", TacticalWlGuardDeniesPlayerSubordinateChargeInitiation),
-            ("tactical wl guard allows charge cancellation", TacticalWlGuardAllowsChargeCancellation),
+            ("tactical wl guard denies player subordinate feud movement", TacticalWlGuardDeniesPlayerSubordinate),
             ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
             ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
@@ -1018,7 +1000,6 @@ static class Program
             ("tactical playbook catalog personality weight dominates terrain", TacticalPlaybookCatalogPersonalityWeightDominatesTerrain),
             ("tactical playbook catalog opposing hint changes ranking", TacticalPlaybookCatalogOpposingHintChangesRanking),
             ("tactical playbook catalog jitter deterministic for same seed", TacticalPlaybookCatalogJitterDeterministicForSameSeed),
-            ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
             ("tactical battle coordinator activates on battle start with synthetic inputs", TacticalBattleCoordinatorActivatesOnBattleStartWithSyntheticInputs),
@@ -1353,7 +1334,6 @@ static class Program
         CampaignLifecycleFixTests.Run();
         CampaignMilitaryFixTests.Run();
         TelemetryInfraFixTests.Run();
-        TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
         IntegrationFollowupTests.Run();
         IntegrationWiringTests.Run();
@@ -5920,53 +5900,6 @@ static class Program
         AssertEqual(0f, snapshot.CommanderPersonality.Audacity, "commander audacity");
     }
 
-    private static void TacticalVisionRuntimeAdapterBuildsReportsAndObjectives()
-    {
-        var reports = TacticalVisionRuntimeAdapter.BuildContactReports(new[]
-        {
-            new ContactObservationInput(TacticalContactSource.VisualContact, 1000f, 0f, true, true, false),
-            new ContactObservationInput(TacticalContactSource.RecentFire, 500f, 600f, false, false, false),
-        }, staleAfterSeconds: 300f);
-
-        AssertEqual(2, reports.Length, "report count");
-        AssertTrue(reports[0].Confidence > reports[1].Confidence, "fresh visual outranks stale fire");
-
-        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecords(
-            new[]
-            {
-                new ObjectiveObservationInput(
-                    "ridge-a",
-                    TacticalObjectiveType.Ridge,
-                    TacticalObjectiveSource.VerifiedSceneObject,
-                    new TacticalMapPoint(10f, 20f),
-                    0.9f,
-                    1.0f,
-                    typeAnchorVerified: true),
-                new ObjectiveObservationInput(
-                    "bridge-unverified",
-                    TacticalObjectiveType.Bridge,
-                    TacticalObjectiveSource.ObjectiveChain,
-                    new TacticalMapPoint(float.NaN, float.PositiveInfinity),
-                    float.PositiveInfinity,
-                    float.NaN,
-                    typeAnchorVerified: false),
-            },
-            new[] { TacticalObjectiveStatus.WeaklyHeld, TacticalObjectiveStatus.StronglyHeld },
-            new[] { 70f, float.PositiveInfinity },
-            new[] { 100f, 50f });
-
-        AssertEqual(2, objectives.Length, "objective count");
-        AssertEqual("ridge-a", objectives[0].Observation.ObjectiveId, "first id");
-        AssertEqual(TacticalObjectiveStatus.WeaklyHeld, objectives[0].Status, "first status");
-        AssertEqual(70f, objectives[0].EnemyStrength, "first enemy strength");
-        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, objectives[1].Observation.Type, "unverified bridge downgraded");
-        AssertEqual(0f, objectives[1].EnemyStrength, "nonfinite enemy strength");
-        AssertFalse(objectives[1].HasUsableStrengthEvidence, "nonfinite strength is not usable");
-
-        var empty = TacticalVisionRuntimeAdapter.BuildContactReports(null, 300f);
-        AssertEqual(0, empty.Length, "null contacts");
-    }
-
     private static void TacticalFowContactRejectsBroadClosestEnemyLeak()
     {
         AssertFalse(TacticalFogOfWarContact.AcceptContactEvidence(
@@ -10055,7 +9988,6 @@ static class Program
             sourceIsGroupUnit: true,
             targetExists: true,
             sameHierarchy: false,
-            sameNonRootParent: false,
             sameAiGroup: false);
 
         AssertTrue(clear, "cross-command group auto-link should be cleared");
@@ -10069,15 +10001,6 @@ static class Program
             sourceIsGroupUnit: true,
             targetExists: true,
             sameHierarchy: true,
-            sameNonRootParent: false,
-            sameAiGroup: false);
-        bool sibling = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
-            modEnabled: true,
-            newlyLinked: true,
-            sourceIsGroupUnit: true,
-            targetExists: true,
-            sameHierarchy: false,
-            sameNonRootParent: true,
             sameAiGroup: false);
         bool existingManualLink = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
             modEnabled: true,
@@ -10085,11 +10008,9 @@ static class Program
             sourceIsGroupUnit: true,
             targetExists: true,
             sameHierarchy: false,
-            sameNonRootParent: false,
             sameAiGroup: false);
 
         AssertTrue(!hierarchy, "hierarchy link should be preserved");
-        AssertTrue(!sibling, "same non-root parent link should be preserved");
         AssertTrue(!existingManualLink, "existing link should not be treated as a new auto-link");
     }
 
@@ -10189,7 +10110,6 @@ static class Program
         var decision = TacticalWlActionGuard.Decide(
             configEnabled: true,
             dlcScenarioActive: false,
-            action: TacticalWlGuardAction.ChargeInitiation,
             unitUnderCommander: true,
             groupUnderCommander: true,
             attachedUnitUnderCommander: true);
@@ -10203,7 +10123,6 @@ static class Program
         var decision = TacticalWlActionGuard.Decide(
             configEnabled: false,
             dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ChargeInitiation,
             unitUnderCommander: true,
             groupUnderCommander: false,
             attachedUnitUnderCommander: false);
@@ -10212,32 +10131,17 @@ static class Program
         AssertEqual("config-disabled", decision.Reason, "reason");
     }
 
-    private static void TacticalWlGuardDeniesPlayerSubordinateChargeInitiation()
+    private static void TacticalWlGuardDeniesPlayerSubordinate()
     {
         var decision = TacticalWlActionGuard.Decide(
             configEnabled: true,
             dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ChargeInitiation,
             unitUnderCommander: true,
             groupUnderCommander: false,
             attachedUnitUnderCommander: false);
 
-        AssertTrue(!decision.Allow, "player-subordinate charge initiation should be denied");
+        AssertTrue(!decision.Allow, "player-subordinate feud movement should be denied");
         AssertEqual("player-subordinate", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardAllowsChargeCancellation()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ChargeCancellation,
-            unitUnderCommander: true,
-            groupUnderCommander: true,
-            attachedUnitUnderCommander: true);
-
-        AssertTrue(decision.Allow, "charge cancellation must always be preserved");
-        AssertEqual("preserve-cancellation", decision.Reason, "reason");
     }
 
     private static void TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate()
@@ -10245,7 +10149,6 @@ static class Program
         var decision = TacticalWlActionGuard.Decide(
             configEnabled: true,
             dlcScenarioActive: true,
-            action: TacticalWlGuardAction.FeudMovement,
             unitUnderCommander: false,
             groupUnderCommander: false,
             attachedUnitUnderCommander: true);
@@ -10259,7 +10162,6 @@ static class Program
         var decision = TacticalWlActionGuard.Decide(
             configEnabled: true,
             dlcScenarioActive: true,
-            action: TacticalWlGuardAction.FeudMovement,
             unitUnderCommander: false,
             groupUnderCommander: false,
             attachedUnitUnderCommander: false);
@@ -13085,77 +12987,6 @@ static class Program
         AssertEqual(14, TacticalUnitType.BattleGroupBrigade, "battle group brigade = 14");
         AssertEqual(15, TacticalUnitType.BattleGroupDivision, "battle group division = 15");
         AssertEqual(16, TacticalUnitType.BattleGroupArmy, "battle group army = 16");
-    }
-
-    private static void TacticalHelpRequestNoRequestWhenSafe()
-    {
-        var input = new TacticalHelpRequest.Input
-        {
-            SectorPressureRatio = 0.4f,
-            OutflankedTierMax = 0,
-            ArtilleryCounterBatteryNeeded = false,
-            MainEffortStalled = false,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
-            TacticalHelpRequest.Score(input), "no request when safe");
-    }
-
-    private static void TacticalHelpRequestReserveScreenOnFlank()
-    {
-        var input = new TacticalHelpRequest.Input
-        {
-            SectorPressureRatio = 0.5f,
-            OutflankedTierMax = 3,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalHelpRequest.Decision.RequestReserveScreen,
-            TacticalHelpRequest.Score(input), "reserve screen on outflanked tier 3");
-    }
-
-    private static void TacticalHelpRequestLineReliefOnHighPressure()
-    {
-        var input = new TacticalHelpRequest.Input
-        {
-            SectorPressureRatio = 1.4f,
-            OutflankedTierMax = 0,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalHelpRequest.Decision.RequestLineRelief,
-            TacticalHelpRequest.Score(input), "line relief on high pressure");
-    }
-
-    private static void TacticalHelpRequestArtillerySupport()
-    {
-        var input = new TacticalHelpRequest.Input
-        {
-            SectorPressureRatio = 0.6f,
-            OutflankedTierMax = 0,
-            ArtilleryCounterBatteryNeeded = true,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalHelpRequest.Decision.RequestArtillerySupport,
-            TacticalHelpRequest.Score(input), "artillery support");
-    }
-
-    private static void TacticalHelpRequestMainEffortShift()
-    {
-        var input = new TacticalHelpRequest.Input
-        {
-            SectorPressureRatio = 0.8f,
-            MainEffortStalled = true,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalHelpRequest.Decision.RequestMainEffortShift,
-            TacticalHelpRequest.Score(input), "main effort shift");
-    }
-
-    private static void TacticalSectorLedgerStoresHelpRequest()
-    {
-        int sectorId = 5;
-        TacticalSectorLedger.SetHelpRequest(sectorId, TacticalHelpRequest.Decision.RequestLineRelief);
-        AssertEqual(TacticalHelpRequest.Decision.RequestLineRelief,
-            TacticalSectorLedger.GetHelpRequest(sectorId), "sector ledger stores help request");
     }
 
     private static void TacticalB6cReactionContextReturnsLastDecisionPerGroup()
@@ -20925,17 +20756,6 @@ static class Program
 
     // ---- TacticalSectorLedger.ClearHelpRequests tests ----
 
-    private static void TacticalSectorLedgerClearHelpRequestsEmptiesState()
-    {
-        TacticalSectorLedger.SetHelpRequest(1, TacticalHelpRequest.Decision.RequestLineRelief);
-        TacticalSectorLedger.SetHelpRequest(2, TacticalHelpRequest.Decision.RequestArtillerySupport);
-        TacticalSectorLedger.ClearHelpRequests();
-        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
-            TacticalSectorLedger.GetHelpRequest(1), "sector 1 should be cleared");
-        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
-            TacticalSectorLedger.GetHelpRequest(2), "sector 2 should be cleared");
-    }
-
     // ---- TacticalMoraleSnapshotLedger.Clear tests ----
 
     private static void TacticalMoraleSnapshotLedgerClearEmptiesState()
@@ -26443,117 +26263,6 @@ static class Program
     // branches + threat computer's quadrant assignment + isolation detection.
     // ============================================================================
 
-    private static void RegimentalDoctrineRoutedYieldsNoAction()
-    {
-        var threats = new TacticalRegimentalThreatAssessment(
-            100f, 200f, 0f, 0f, 1, true, false, 3, 0f);
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.3f, 0.5f, isRouted: true, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.NoAction, d.Action, "routed regiments defer to vanilla rout state");
-    }
-
-    private static void RegimentalDoctrinePressedMultipleSidesYieldsRetreat()
-    {
-        // pressed=2: enemies inside wheel-distance on 2 quadrants. No safe wheel.
-        var threats = new TacticalRegimentalThreatAssessment(
-            150f, 200f, 100f, 50f, 2, true, false, 5, 90f);
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.7f, 0.1f, isRouted: false, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.RetreatToBrigade, d.Action, "pressed>=2 forces retreat");
-    }
-
-    private static void RegimentalDoctrineFlankedLowMoraleYieldsFallback()
-    {
-        // Flanked but only pressed=1, low morale → fallback (not retreat, not wheel).
-        var threats = new TacticalRegimentalThreatAssessment(
-            100f, 200f, 0f, 0f, 1, true, false, 3, 0f);
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.30f, 0.1f, isRouted: false, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.FallBack, d.Action, "flanked+low-morale falls back");
-    }
-
-    private static void RegimentalDoctrineIsolatedWithEnemiesYieldsFallback()
-    {
-        // Not flanked, healthy, but isolated from brigade-mates + enemies present.
-        var threats = new TacticalRegimentalThreatAssessment(
-            150f, 30f, 0f, 0f, 0, false, true, 2, 0f);
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.8f, 0.1f, isRouted: false, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.FallBack, d.Action, "isolated regiments fall back toward brigade");
-    }
-
-    private static void RegimentalDoctrineFlankedHealthyYieldsWheel()
-    {
-        // Flanked, healthy, can wheel → wheel toward whichever flank is heaviest.
-        // Left=300, right=50, rear=0 → wheel left.
-        var threats = new TacticalRegimentalThreatAssessment(
-            100f, 300f, 0f, 50f, 1, true, false, 3, 0f);
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.8f, 0.1f, isRouted: false, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.WheelToLeftFlank, d.Action, "healthy flanked unit wheels to heaviest flank");
-    }
-
-    private static void RegimentalDoctrineNoThreatsYieldsNoAction()
-    {
-        var threats = TacticalRegimentalThreatAssessment.Empty;
-        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.9f, 0.0f, isRouted: false, stanceAllowsWheel: true);
-        AssertEqual(RegimentalAction.NoAction, d.Action, "no engagement, no override");
-    }
-
-    private static void RegimentalThreatComputerFrontQuadrant()
-    {
-        // Single enemy directly north of own position → front quadrant assignment.
-        AssertEqual(RegimentalQuadrant.Front,
-            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(0f),
-            "0° relative bearing = Front");
-        AssertEqual(RegimentalQuadrant.RightFlank,
-            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(90f),
-            "+90° relative bearing = RightFlank");
-        AssertEqual(RegimentalQuadrant.LeftFlank,
-            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(-90f),
-            "-90° relative bearing = LeftFlank");
-        AssertEqual(RegimentalQuadrant.Rear,
-            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(180f),
-            "180° relative bearing = Rear");
-    }
-
-    private static void RegimentalThreatComputerDetectsFlankFromThreeEnemies()
-    {
-        // Own at (0,0). 3 enemies all to the east (right flank if front faces north,
-        // but front is centroid-derived so front IS the east direction here).
-        // To force a real flank: place 1 enemy north (front) + 2 east (right flank).
-        // Centroid bearing should split between them → enemies will land in front
-        // and right flank quadrants.
-        var observations = new List<TacticalUnitObservation>();
-        var allyIndices = new List<int> { 0 };
-        var enemyIndices = new List<int> { 1, 2, 3 };
-
-        // Own unit at origin
-        observations.Add(BuildObs(0, 1, 0, 0, 100));
-        // Enemy 1 at (0, 100) — straight ahead (north)
-        observations.Add(BuildObs(100, 2, 0, 100, 100));
-        // Enemy 2 at (100, 0) — east (right flank from north-facing perspective)
-        observations.Add(BuildObs(101, 2, 100, 0, 100));
-        // Enemy 3 at (100, 50) — north-east
-        observations.Add(BuildObs(102, 2, 100, 50, 100));
-
-        var assessment = TacticalRegimentalThreatComputer.Compute(observations[0], observations, allyIndices, enemyIndices);
-        AssertEqual(3, assessment.TotalEnemiesInRange, "all 3 enemies counted within 300m");
-        // Sanity: total threat across quadrants > 0
-        AssertTrue(
-            assessment.FrontThreat + assessment.LeftFlankThreat + assessment.RightFlankThreat + assessment.RearThreat > 0f,
-            "threat assigned to at least one quadrant");
-    }
-
-    private static void RegimentalThreatComputerIsolationWhenNoAllies()
-    {
-        // Own at origin, no other allies → isolated.
-        var observations = new List<TacticalUnitObservation>
-        {
-            BuildObs(1, 1, 0, 0, 100),
-        };
-        var allyIndices = new List<int> { 0 };
-        var enemyIndices = new List<int>();
-
-        var assessment = TacticalRegimentalThreatComputer.Compute(observations[0], observations, allyIndices, enemyIndices);
-        AssertTrue(assessment.IsIsolated, "lone regiment with no allies is isolated");
-    }
-
     // ============================================================================
     // Friendly-path blocking gate tests (2026-05-21). Verify Scourge's 3-layer
     // gate logic produces the right block/clear results for common scenarios.
@@ -26819,17 +26528,6 @@ static class Program
         AssertTrue(result.HasValue, "must return a value");
         AssertEqual(TacticalVanillaMacroAiMapping.MacroAiFrontalAttack, result.Value,
             "Cautious commander requires clear-margin (1.4×) before enveloping");
-    }
-
-    private static void MacroAiIsLegalChecks()
-    {
-        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(0), "0 is legal");
-        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(1), "1 is legal");
-        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(2), "2 is legal");
-        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 (retreat) is never a Whiskey write");
-        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(-1), "-1 (unset) is NOT a legal write");
-        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(4), "4 is out of range");
-        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(99), "99 is out of range");
     }
 
     // ============================================================================

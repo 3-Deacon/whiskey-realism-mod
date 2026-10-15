@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -95,11 +94,6 @@ namespace WhiskeyRealism.Tactical
 
     public static class TacticalSectorLedger
     {
-        static TacticalSectorLedger()
-        {
-            BattleScope.Register("sector-help-requests", ClearHelpRequests);
-        }
-
         public static TacticalSectorLedgerResult Evaluate(IEnumerable<TacticalSectorAssessment> rawSectors)
         {
             var sectors = (rawSectors ?? Array.Empty<TacticalSectorAssessment>()).ToArray();
@@ -151,29 +145,6 @@ namespace WhiskeyRealism.Tactical
 
             float minimum = Math.Max(500f, sector.OwnStrength * 0.05f);
             return sector.EnemyStrength >= minimum;
-        }
-
-        private static readonly System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision> helpRequests
-            = new System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision>();
-
-        public static void SetHelpRequest(int sectorId, TacticalHelpRequest.Decision decision)
-        {
-            helpRequests[sectorId] = decision;
-        }
-
-        public static TacticalHelpRequest.Decision GetHelpRequest(int sectorId)
-        {
-            return helpRequests.TryGetValue(sectorId, out var d) ? d : TacticalHelpRequest.Decision.NoRequest;
-        }
-
-        /// <summary>
-        /// Clears all queued help requests. Called by TacticalBattleCoordinator on battle end
-        /// to prevent stale requests from carrying over to the next engagement.
-        /// Idempotent — safe to call on an already-empty table.
-        /// </summary>
-        public static void ClearHelpRequests()
-        {
-            helpRequests.Clear();
         }
     }
 }

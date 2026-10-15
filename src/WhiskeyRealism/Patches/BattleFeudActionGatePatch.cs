@@ -87,7 +87,6 @@ namespace WhiskeyRealism.Patches
                         var wlDecision = TacticalWlActionGuard.Decide(
                             configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
                             dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                            action: TacticalWlGuardAction.FeudMovement,
                             unitUnderCommander: group.dlcw_isundercommander,
                             groupUnderCommander: group.dlcw_isundercommander,
                             attachedUnitUnderCommander: attachedUnderCommander);

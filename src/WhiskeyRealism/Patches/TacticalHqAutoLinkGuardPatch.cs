@@ -61,7 +61,6 @@ namespace WhiskeyRealism.Patches
                         sourceIsGroupUnit: true,
                         targetExists: (UnityEngine.Object)target != null,
                         sameHierarchy: SameCommand(__instance, target),
-                        sameNonRootParent: false,
                         sameAiGroup: SameAiGroup(__instance, target));
                     if (!clear) return;
 

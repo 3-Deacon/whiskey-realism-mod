@@ -13,21 +13,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _objectiveChainField;
         private static readonly Dictionary<string, FieldInfo> _fieldCache = new Dictionary<string, FieldInfo>();
 
-        public static EnemyContactReport[] BuildContactReports(
-            IEnumerable<ContactObservationInput> observations,
-            float staleAfterSeconds)
-        {
-            if (observations == null) return Array.Empty<EnemyContactReport>();
-
-            var reports = new List<EnemyContactReport>();
-            foreach (var observation in observations)
-            {
-                reports.Add(TacticalVisionModel.BuildContact(observation, staleAfterSeconds));
-            }
-
-            return reports.ToArray();
-        }
-
         public static ObjectiveRecord[] BuildObjectiveRecords(
             IReadOnlyList<ObjectiveObservationInput> observations,
             IReadOnlyList<TacticalObjectiveStatus> statuses,

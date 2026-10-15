@@ -775,7 +775,6 @@ internal static class TacticalEvidenceFixTests
             var m = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(o, 3f, 0.5f);
             TestHarness.AssertTrue(!m.HasValue || m.Value != 3, o + " must never map to macroai 3 (no startoffallback stamp, 6355/6362)");
         }
-        TestHarness.AssertFalse(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is not a legal Whiskey write");
     }
 
     private static TacticalForceBalanceEvidence Stanced(float own, float enemy, BattleStance stance)

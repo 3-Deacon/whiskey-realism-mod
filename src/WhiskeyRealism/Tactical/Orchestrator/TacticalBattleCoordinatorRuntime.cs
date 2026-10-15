@@ -85,6 +85,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if ((UnityEngine.Object)bunits == null || bunits.IsCampaign) return default(DoctrineClockSample);
             return new DoctrineClockSample(bunits.GetInstanceID(), GameVars.currenttimefromstart, bunits.eodcycle);
         }
+        // Per-session battle counter for lifecycle log lines; never reset.
         private static int _battleSequence;
         private static int _playerAllianceId = -1;
         private static int _activeBattleUnitsId;
@@ -170,17 +171,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // reads live vanilla state; only the side-wide objective record
         // snapshot is staggered). Reset to 0 in ResetRuntimeTickState.
         private static int _heavyTickParity = 0;
-
-        /// <summary>
-        /// Per-session battle counter, incremented on each successful OnBattleStart and
-        /// never reset (so a value never identifies two battles). Still read by
-        /// BattleGroupStancePatch's worker-snapshot check, which is dead since the
-        /// worker thread was removed and goes away with it at integration.
-        /// </summary>
-        public static int BattleSequenceForParity
-        {
-            get { return _battleSequence; }
-        }
 
         /// <summary>
         /// "Cheap per-group" cache lookup. Returns the pre-resolved
