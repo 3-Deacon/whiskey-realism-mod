@@ -52,8 +52,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalHqLinkGuard;
         internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
-        internal ConfigEntry<bool> EnableWlPlayerSubordinateOrderBridge;
-        internal ConfigEntry<bool> EnableWlPlayerOrderDoctrineDiagnostics;
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
@@ -369,16 +367,6 @@ namespace WhiskeyRealism
                 "Enable W&L Tactical Charge Guard",
                 true,
                 "Default ON for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
-            EnableWlPlayerSubordinateOrderBridge = Config.Bind(
-                "W&L",
-                "Enable Player Order Doctrine",
-                true,
-                "Default ON. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
-            EnableWlPlayerOrderDoctrineDiagnostics = Config.Bind(
-                "W&L",
-                "Enable Player Order Doctrine Diagnostics",
-                true,
-                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine. Diagnostics do not issue orders when Enable Player Order Doctrine is off.");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -387,13 +375,13 @@ namespace WhiskeyRealism
             EnablePlayerOrderDoctrine = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
-                false,
-                "Default-off write valve for Whiskey-authored player-facing W&L orders. Per AGENTS.md named-exception scope, #62 PlayerSubordinateOrderPatch stays default-off until focused smoke proves no player-subordinate retasking. Diagnostics can run while this is disabled.");
+                true,
+                "Default ON. W&L only: after vanilla AIBattle.UpdateDLCPlayerOrders, the tactical operations ledger may give the player's command its current order (the order your AI superior issues you) through vanilla AIBattle.CheckCurrentOrderUpdate. Yields to vanilla's own order transitions, dedupes repeats and retries a rejected order at most once per 120 ticks, and writes only when Tactical Commander Mode = Active.");
             EnablePlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine Diagnostics",
                 true,
-                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine.");
+                "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
