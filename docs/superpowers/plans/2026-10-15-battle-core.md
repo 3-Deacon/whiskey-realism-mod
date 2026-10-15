@@ -478,6 +478,9 @@ internal static class OrderExecutorRuntime {
   - `InlineIntentRefusedUnderHigherClaim`
   - `ArbiterResolveAllocatesNothingAfterWarmup`
   - `StanceRecordUsesDoctrineClock`, a night-jump fixture
+  - `StanceCheapPathNeedsLiveVanillaStamp` (the writer's short-circuit also needs vanilla's raw 4264 stamp live)
+  - `RedirectOfMovingGroupIsMoved`, `StaleWaypointNearTargetIsNotATake`, `FanOutOutcomeCountsTheOrderedSet`
+  - `GatedOffArbiterPublishesNoClaims`
 - [ ] Implement `BattleCoreArbiterPatch`:
   - `[HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")] [HarmonyPostfix][HarmonyPriority(Priority.Last)]`.
   - Scope `tactical.patch.battle-core-arbiter` (5.0).
@@ -485,6 +488,13 @@ internal static class OrderExecutorRuntime {
   - Inner scopes `tactical.arbiter.resolve` (0.5) and `tactical.arbiter.execute` (2.0).
 - [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> pending=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> topSkip=<reason>`. Use OnceLog `battle-core:arbiter-first-fire` for the first execution.
 - [ ] **Acceptance:** tests pass; the alloc test is green; the arbiter patch compiles with zero producers registered (an empty run is a no-op).
+
+PROVE-MODE: harness. Per-slice proof is `OrderArbiterTests` — arbiter resolve (priority, channels, tie hysteresis, execution order, zero allocation after warm-up), executor outcomes (Pending/Moved/Failed/Retried/GaveUp, redirect of a moving group, fan-out set), dedupe and cooldowns, ownership skips, and the waypoint validator. Runtime proof is the BC7 in-game smoke: until BC1 merges `BuildSnapshot` returns null and `ViewOf` has no view, and no producer registers before BC5, so the arbiter path cannot run in the game from this slice.
+
+**BC4 merge items:**
+- BC1 merge: `BattleSnapshot : IBattleUnitView` (identity `ViewOf`), `BuildSnapshot` calls `BattleSnapshotBuilder.Build`.
+- `ArmyPostureInputsRuntime.cs:103-111` (`ExtendedProbes`) must not cache an empty probe list before the first snapshot build: an empty result cached under an unchanged roster signature stays for the battle (from the BC1 verify).
+- BC3 merge: replace `ModeOrderGuard`, `SelfOnlyChainResolver`, the local `ChainResolution` copy and the null dispatch mapper/emitter with BC3's guard, chain planner, mapper and `TacticalPlayerDispatchRuntime.Emit`.
 
 ---
 
