@@ -71,6 +71,12 @@ internal static class TacticalEvidenceFixTests
         Run("reserve reinforces an adjacent sector in crisis", ReserveReinforcesCrisisSector);
         Run("main role needs a challenger to win three cycles running", MainRoleHysteresis);
         Run("replan cooldown is the configured battle seconds, no hidden floor", ReplanCooldownIsConfiguredValue);
+        Run("doctrine clock excludes paused spans", DoctrineClockExcludesPausedSpans);
+        Run("a paused night leaves phase budgets unchanged", PausedNightLeavesPhaseBudgets);
+        Run("a paused night leaves contact-ledger decay unchanged", PausedNightLeavesLedgerDecay);
+        Run("army odds stay unknown while intel confidence is low", ArmyOddsUnknownUnderLowConfidence);
+        Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
+        Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
     }
 
     private static void Run(string name, Action test)
@@ -905,5 +911,86 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, first, "first replan");
         var second = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.9f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 100f);
         TestHarness.AssertEqual(ReplanTrigger.ReserveExhaustion, second, "100 battle-s later a configured 60 s cooldown has passed");
+    }
+
+    private static void DoctrineClockExcludesPausedSpans()
+    {
+        TacticalDoctrineClock.ResetForBattleEnd();
+        TestHarness.AssertEqual(3600.0, TacticalDoctrineClock.Effective(3600.0, TacticalDoctrineClock.PausedTotalSeconds), "no pause");
+        TacticalDoctrineClock.AddPausedSpan(9 * 3600.0);
+        TacticalDoctrineClock.AddPausedSpan(-50.0);
+        TacticalDoctrineClock.AddPausedSpan(double.NaN);
+        TestHarness.AssertEqual(9 * 3600.0, TacticalDoctrineClock.PausedTotalSeconds, "only valid spans accumulate");
+        TestHarness.AssertEqual(3600.0, TacticalDoctrineClock.Effective(3600.0 + 9 * 3600.0, TacticalDoctrineClock.PausedTotalSeconds), "night excluded");
+        TestHarness.AssertEqual(0.0, TacticalDoctrineClock.Effective(100.0, 9 * 3600.0), "never negative");
+        TacticalDoctrineClock.ResetForBattleEnd();
+        TestHarness.AssertEqual(0.0, TacticalDoctrineClock.PausedTotalSeconds, "reset per battle");
+    }
+
+    private static ReplanTrigger DoctrineTick(ArmyOrchestrator orch, double doctrineNow)
+        => ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
+            6000f, 1f, 0.5f, 0f, 600, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 0f, doctrineNowSeconds: doctrineNow);
+
+    private static void PausedNightLeavesPhaseBudgets()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+        double evening = 18 * 3600.0;
+        DoctrineTick(orch, TacticalDoctrineClock.Effective(evening, 0.0));
+        DoctrineTick(orch, TacticalDoctrineClock.Effective(evening + 600.0, 0.0));
+        float ageBefore = orch.PhaseAgeSeconds;
+        TestHarness.AssertTrue(Near(ageBefore, 600f), "10 battle-minutes of probing, got " + ageBefore);
+        // Night: raw clock runs 9 h, all of it paused.
+        DoctrineTick(orch, TacticalDoctrineClock.Effective(evening + 600.0 + 9 * 3600.0, 9 * 3600.0));
+        TestHarness.AssertTrue(Near(orch.PhaseAgeSeconds, ageBefore), "night does not burn the probe budget");
+        TestHarness.AssertTrue(Near(orch.PlanAgeSeconds, ageBefore), "night does not age the plan");
+    }
+
+    private static void PausedNightLeavesLedgerDecay()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        double evening = 18 * 3600.0, paused = 9 * 3600.0;
+        ledger.Observe((float)(TacticalDoctrineClock.Effective(evening, 0.0) / 3600.0), 4000f, 1000f);
+        ledger.Observe((float)(TacticalDoctrineClock.Effective(evening + paused, paused) / 3600.0), 0f, 0f);
+        TestHarness.AssertEqual(4000f, ledger.EstimatedEnemyStrength, "no decay across the paused night");
+    }
+
+    private static TacticalEnemyContactLedger Seen(float hours, float visible, float engaged)
+    {
+        var l = new TacticalEnemyContactLedger();
+        l.Observe(hours, visible, engaged);
+        return l;
+    }
+
+    private static void ArmyOddsUnknownUnderLowConfidence()
+    {
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f), 1f), "40-man vedette: odds unknown");
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, new TacticalEnemyContactLedger(), 1f), "no contact: unknown");
+        TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 4000f, 1000f), 1f), 1.5f), "real contact: own/seen");
+    }
+
+    private static void PicketOnlyContactKeepsProbe()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+        var ledger = Seen(1f, 40f, 40f);
+        float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
+        var picketFront = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 40f, true) },
+            ledger.ReserveCommitFraction(40f), true, false, 0f);
+        var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), picketFront,
+            6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
+        TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "a picket is not a reason to commit the main effort");
+        TestHarness.AssertTrue(trigger != ReplanTrigger.ForceImbalanceShift, "no 150:1 force-imbalance replan");
+    }
+
+    private static void MorningOddsNotInflated()
+    {
+        var ledger = new TacticalEnemyContactLedger();
+        double evening = 18 * 3600.0, paused = 9 * 3600.0;
+        ledger.Observe((float)(evening / 3600.0), 4000f, 1000f);
+        float morningHours = (float)(TacticalDoctrineClock.Effective(evening + paused + 60.0, paused) / 3600.0);
+        ledger.Observe(morningHours, 0f, 0f);
+        float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, morningHours);
+        TestHarness.AssertTrue(odds > 1.45f && odds < 1.55f, "morning odds stay ~1.5, got " + odds);
     }
 }

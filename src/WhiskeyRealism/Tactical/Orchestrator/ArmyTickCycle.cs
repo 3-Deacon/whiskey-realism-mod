@@ -11,11 +11,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
+        private static readonly Dictionary<int, double> _lastDoctrineNowByAlliance = new Dictionary<int, double>();
 
         public static void Reset()
         {
             _lastReplanByAlliance.Clear();
             _clockByAlliance.Clear();
+            _lastDoctrineNowByAlliance.Clear();
         }
 
         public static void ResetForTest()
@@ -61,18 +63,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownAvgAmmo01,
             float nearestReinforcementHours,
             float nearestReinforcementStrength,
-            float battleDeltaSeconds = -1f)
+            float battleDeltaSeconds = -1f,
+            double doctrineNowSeconds = double.NaN)
         {
             if (orchestrator == null) return ReplanTrigger.None;
 
             var allianceId = orchestrator.AllianceId;
             // Doctrine clock (T8): plan age, phase age and the replan cooldown
-            // all run on BATTLE time when the caller supplies it (the runtime
-            // passes GameVars.currenttimefromstart deltas). Wall-clock deltas
-            // drove the 180 s plan deadline before, so at 20x compression a
-            // plan "expired" after ~10 battle-minutes and at 1x every 3
-            // wall-clock minutes. Legacy callers without a battle delta keep
-            // the single-clock behaviour.
+            // all run on BATTLE time when the caller supplies it. Wall-clock
+            // deltas drove the 180 s plan deadline before, so at 20x
+            // compression a plan "expired" after ~10 battle-minutes and at 1x
+            // every 3 wall-clock minutes. The runtime passes
+            // TacticalDoctrineClock.NowBattleSeconds, which excludes the
+            // night cycle, so the overnight jump of the raw clock does not
+            // burn phase budgets or the plan deadline. Legacy callers without
+            // a battle clock keep the single-clock behaviour.
+            if (!double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds))
+            {
+                double delta = 0.0;
+                if (_lastDoctrineNowByAlliance.TryGetValue(allianceId, out var lastDoctrineNow) && doctrineNowSeconds > lastDoctrineNow)
+                    delta = doctrineNowSeconds - lastDoctrineNow;
+                _lastDoctrineNowByAlliance[allianceId] = doctrineNowSeconds;
+                battleDeltaSeconds = (float)delta;
+            }
             bool battleClock = battleDeltaSeconds >= 0f;
             float clockDelta = battleClock ? battleDeltaSeconds : deltaSeconds;
             if (clockDelta > 0f && !float.IsNaN(clockDelta) && !float.IsInfinity(clockDelta))

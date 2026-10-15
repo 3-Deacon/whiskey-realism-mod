@@ -27,7 +27,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     public static class TacticalPhaseProgressionDoctrine
     {
         // Phase budgets in BATTLE seconds (phase age advances by
-        // GameVars.currenttimefromstart deltas, game hours x 3600). Civil War
+        // TacticalDoctrineClock deltas, night cycle excluded). Civil War
         // scale: a probe takes tens of minutes, a main effort hours. The old
         // 30-180 s budgets elapsed in seconds of battle time, so every plan hit
         // MainEffort -> Consolidate almost immediately.

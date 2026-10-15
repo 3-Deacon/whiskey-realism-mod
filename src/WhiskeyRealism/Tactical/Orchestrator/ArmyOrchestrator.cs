@@ -151,7 +151,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Advances plan age (time since the last replan) and phase age (time
         /// since the last phase transition) by the same doctrine-clock delta.
-        /// The tick cycle passes BATTLE seconds (GameVars.currenttimefromstart).
+        /// The tick cycle passes doctrine seconds (TacticalDoctrineClock).
         /// </summary>
         public void AdvancePlanAge(float deltaSeconds)
         {
@@ -1002,19 +1002,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence)
         {
-            float nowBattleSeconds = 0f;
-            try
-            {
-                float hours = GameVars.currenttimefromstart;
-                if (!float.IsNaN(hours) && !float.IsInfinity(hours) && hours > 0f) nowBattleSeconds = hours * 3600f;
-            }
-            catch { }
-            UpdateReinforcementOpportunity(evidence, nowBattleSeconds);
+            UpdateReinforcementOpportunity(evidence, (float)TacticalDoctrineClock.NowBattleSeconds);
         }
 
         /// <summary>
-        /// Clock-injected overload. The hysteresis hold is measured on battle
-        /// time (GameVars.currenttimefromstart), so the same span of battle
+        /// Clock-injected overload. The hysteresis hold is measured on doctrine
+        /// time (TacticalDoctrineClock), so the same span of battle
         /// passes at every time compression. The "Opportunity Hysteresis Min
         /// Hold Seconds" config value is read as battle MINUTES.
         /// </summary>

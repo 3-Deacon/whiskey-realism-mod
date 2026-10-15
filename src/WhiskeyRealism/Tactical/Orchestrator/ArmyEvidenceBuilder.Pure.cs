@@ -167,5 +167,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (wooded / n >= WoodedShare) return TerrainKind.Wooded;
             return TerrainKind.Open;
         }
+    
+        /// <summary>
+        /// Army-wide odds against the enemy this side has actually seen. Unknown
+        /// (1) until the contact ledger is confident enough to act on
+        /// (<see cref="TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction"/>)
+        /// and while the seen force is below the meaningful-enemy floor
+        /// (<see cref="EnemyVisibleSector.MinMeaningfulEnemyFractionOfOwn"/>): a
+        /// 40-man vedette is not the enemy army, and dividing by it produced
+        /// 150:1 odds that pushed the plan straight past Probe.
+        /// </summary>
+        internal static float KnownEnemyOdds(float ownStrength, TacticalEnemyContactLedger ledger, float nowDoctrineHours)
+        {
+            if (ledger == null || !(ownStrength > 0f)) return 1f;
+            float enemyKnown = ledger.EstimatedEnemyStrength;
+            if (!(enemyKnown > 0f)) return 1f;
+            if (enemyKnown < ownStrength * EnemyVisibleSector.MinMeaningfulEnemyFractionOfOwn) return 1f;
+            if (ledger.Confidence(nowDoctrineHours, ownStrength) < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction) return 1f;
+            return ownStrength / enemyKnown;
+        }
     }
 }

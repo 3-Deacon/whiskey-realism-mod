@@ -119,9 +119,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Odds against the enemy force this side has actually seen
                 // (TacticalEnemyContactLedger), not the enemy's
                 // sideinformation.totalactiveforce, which the side cannot know.
-                // Before contact the odds are unknown -> 1.
-                float enemyKnown = KnownEnemyStrength(allianceId);
-                float odds = enemyKnown <= 0f ? 1f : ownActive / Math.Max(1f, enemyKnown);
+                // Unknown (1) until the ledger is confident and the seen force
+                // clears the meaningful-enemy floor (KnownEnemyOdds).
+                float odds = KnownEnemyOdds(ownActive, ContactLedger(allianceId), DoctrineHours());
                 // Default main effort = the center band of the front, not
                 // "whatever group is first in completeunitlist".
                 var ownEvidence = new ArmyEvidence(odds, BattlefieldTerrain(allianceId, enemyVisible.FrontAxis),
@@ -381,22 +381,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static TacticalEnemyContactLedger ContactLedger(int allianceId)
             => allianceId >= 0 && allianceId <= 1 ? _contactLedgers[allianceId] : null;
 
-        /// <summary>Largest enemy strength this side has seen (decaying), 0 before contact.</summary>
-        private static float KnownEnemyStrength(int allianceId)
-        {
-            var ledger = ContactLedger(allianceId);
-            return ledger == null ? 0f : ledger.EstimatedEnemyStrength;
-        }
-
-        private static float SafeBattleClockHours()
-        {
-            try
-            {
-                float t = GameVars.currenttimefromstart;
-                return float.IsNaN(t) || float.IsInfinity(t) || t < 0f ? 0f : t;
-            }
-            catch { return 0f; }
-        }
+        /// <summary>Doctrine time in battle hours (night cycle excluded).</summary>
+        private static float DoctrineHours() => (float)TacticalDoctrineClock.NowBattleHours;
 
         /// <summary>
         /// Own AIBattle for <paramref name="side"/> from BattleUnits.aibattle[]
@@ -600,7 +586,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     visibleStrength += enemyVisible[i].Strength;
                     if (enemyVisible[i].RecentFire) engagedStrength += enemyVisible[i].Strength;
                 }
-                float nowHours = SafeBattleClockHours();
+                float nowHours = DoctrineHours();
                 var ledger = ContactLedger(ownAllianceId);
                 float enemyReserveCommitFraction = TacticalEnemyContactLedger.UnknownReserveCommitFraction;
                 bool contactBroken = false;
@@ -877,54 +863,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch { return BattleStance.Meeting; }
         }
 
-        // Cached battle-start timestamp for elapsed-hours computation.
-        // uniStormSystem.Hour is HOUR OF DAY (0-24), not elapsed since battle
-        // start — vanilla uses `uniStormSystem.Hour + battlepasseddays * 24`
-        // as a TIMESTAMP everywhere (lastfeudactiontime at decompile 3898,
-        // 4212, etc.). Without subtracting the start, a battle that begins at
-        // 14:00 game time immediately reports 14h elapsed, which fires the
-        // doctrine's prolonged-delay gate (>= 6h) on tick 1 for any outnumbered
-        // side. Smoke 2026-05-23 14:07:51 confirmed: side 0 escalated
-        // DelayingDefense → WithdrawalToFightLater after 29 real seconds with
-        // reason=delay-escalation-prolonged.
-        private static float _battleStartTimestampHours = -1f;
-        private static System.WeakReference<BattleUnits> _battleStartTimestampOwner;
+        // Battle-start doctrine time for elapsed-hours computation. The doctrine
+        // clock (TacticalDoctrineClock) is a TIMESTAMP — vanilla's
+        // currenttimefromstart is `uniStormSystem.Hour + battlepasseddays * 24`
+        // (SetTimeVariables 93545) — so a battle that begins at 14:00 would
+        // report 14h elapsed without subtracting the start, firing the
+        // doctrine's prolonged-delay gate (>= 6h) on tick 1. Doctrine time
+        // also excludes the night cycle, so the overnight jump no longer
+        // counts as hours of delay.
+        private static float _battleStartDoctrineHours = -1f;
+        private static System.WeakReference<BattleUnits> _battleStartOwner;
 
         /// <summary>
-        /// Reads ELAPSED battle hours from vanilla state by snapshotting the
-        /// start timestamp on first read for this BattleUnits instance and
-        /// returning `current - start`. Resets the cache when the BattleUnits
-        /// reference changes (battle teardown + restart) or when the current
-        /// timestamp goes backward (impossible under normal play).
+        /// Elapsed doctrine hours since this BattleUnits was first read. Resets
+        /// when the BattleUnits reference changes (battle teardown + restart)
+        /// or the clock goes backward.
         /// </summary>
         private static float SafeReadBattleHours(BattleUnits bunits)
         {
             try
             {
                 if (bunits == null) return 0f;
-                int days = bunits.battlepasseddays;
-                if (days < 0) days = 0;
-                float hourOfDay = 0f;
-                if (bunits.uniStormSystem != null)
-                {
-                    try { hourOfDay = bunits.uniStormSystem.Hour; }
-                    catch { hourOfDay = 0f; }
-                }
-                if (float.IsNaN(hourOfDay) || float.IsInfinity(hourOfDay) || hourOfDay < 0f) hourOfDay = 0f;
-                float currentTimestamp = days * 24f + hourOfDay;
+                float now = DoctrineHours();
 
                 bool sameOwner = false;
-                if (_battleStartTimestampOwner != null && _battleStartTimestampOwner.TryGetTarget(out var cachedOwner))
+                if (_battleStartOwner != null && _battleStartOwner.TryGetTarget(out var cachedOwner))
                     sameOwner = ReferenceEquals(cachedOwner, bunits);
 
-                if (!sameOwner || _battleStartTimestampHours < 0f || currentTimestamp < _battleStartTimestampHours)
+                if (!sameOwner || _battleStartDoctrineHours < 0f || now < _battleStartDoctrineHours)
                 {
-                    _battleStartTimestampHours = currentTimestamp;
-                    _battleStartTimestampOwner = new System.WeakReference<BattleUnits>(bunits);
+                    _battleStartDoctrineHours = now;
+                    _battleStartOwner = new System.WeakReference<BattleUnits>(bunits);
                     return 0f;
                 }
 
-                return currentTimestamp - _battleStartTimestampHours;
+                return now - _battleStartDoctrineHours;
             }
             catch { return 0f; }
         }
@@ -1203,7 +1176,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 EnsureBattleOwner(bunits);
                 var ledger = ContactLedger(allianceId);
                 float enemyDeployed = ledger == null ? 0f : ledger.EstimatedEnemyStrength;
-                float intelConfidence = ledger == null ? 0f : ledger.Confidence(SafeBattleClockHours(), ownDeployed);
+                float intelConfidence = ledger == null ? 0f : ledger.Confidence(DoctrineHours(), ownDeployed);
 
                 var ownArrivals = BuildArrivalsForSide(bunits, side);
                 var enemyArrivals = allianceId >= 0 && allianceId <= 1
@@ -1212,7 +1185,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 // Casualty escalation inputs (2026-05-23 / J). Read from vanilla
                 // BattleUnits.sideinformation. casualtyratio: 0..1; routedratio:
-                // 0..1; battle hours from battlepasseddays * 24 + uniStormSystem.Hour.
+                // 0..1; elapsed battle hours on doctrine time.
                 float ownCasualtyRatio = Math.Max(0f, Math.Min(1f, SafeSideInfoFloat(bunits, side, "casualtyratio")));
                 float ownRoutedRatio = Math.Max(0f, Math.Min(1f, SafeSideInfoFloat(bunits, side, "routedratio")));
                 float battleHours = SafeReadBattleHours(bunits);
