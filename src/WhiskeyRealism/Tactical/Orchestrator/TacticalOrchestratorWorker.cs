@@ -128,9 +128,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 snapshot = TacticalOrchestratorWorkerAnalysis.Analyze(input, cycleId);
             }
 
+            // Stopped workers (teardown or a stalled Join) and snapshots for a battle
+            // that is no longer live are never published (BR-M2).
+            if (_stopRequested) return;
             using (TelemetryPerf.Scope("tactical.worker.cycle.publish", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1.0))
             {
-                TacticalDecisionSnapshot.Publish(snapshot);
+                TacticalDecisionSnapshot.TryPublish(snapshot);
             }
         }
 

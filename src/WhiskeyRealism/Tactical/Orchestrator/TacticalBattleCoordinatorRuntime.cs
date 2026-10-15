@@ -148,6 +148,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // shadow — sync path still owns behavior; worker produces partial decisions
         // that patches don't yet consume (Task 14 will wire fallback-to-legacy lookups).
         private static TacticalOrchestratorWorker _worker;
+        // Set when any side rebuilt its heavy snapshot during the current Tick; gates
+        // the worker input capture (BR-M2).
+        private static bool _heavyBuiltThisTick;
 
         /// <summary>
         /// Battle sequence integer used as the parity-window key in
@@ -216,6 +219,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 BuildAndActivate(suppressedAllianceId, roster);
                 _playerAllianceId = playerAllianceId;
                 _battleSequence++;
+                TacticalDecisionSnapshot.SetLiveBattleSequence(_battleSequence);
 
                 if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
                 {
@@ -251,12 +255,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ClearForFailure();
             }
 
-            // Slice 2: start the worker thread once bootstrap has settled.
-            // If bootstrap above failed ClearForFailure already nulled state out;
-            // we still attempt worker start (Tick won't dispatch if !active).
+            // Slice 2: start the worker thread once bootstrap has settled. Never after
+            // a failed bootstrap (ClearForFailure left active=false), and never while a
+            // previous worker reference is still held (its Join may have timed out):
+            // stop that one first so two threads never run for one battle. Its late
+            // publishes are rejected by the battle-sequence gate (BR-M2).
             try
             {
-                if (IsWorkerEnabled())
+                StopWorker();
+                if (ShouldStartWorker(IsWorkerEnabled(), active))
                 {
                     _worker = new TacticalOrchestratorWorker();
                     _worker.Start();
@@ -295,6 +302,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // RequestStop + bounded Join so teardown never blocks on a wedged worker. If the
+        // Join times out the background thread finishes its current cycle; its publish
+        // is rejected because the battle sequence is closed (TacticalDecisionSnapshot).
+        private static void StopWorker()
+        {
+            var worker = _worker;
+            _worker = null;
+            if (worker == null) return;
+            try
+            {
+                worker.RequestStop();
+                worker.Join(250);
+            }
+            catch (Exception we)
+            {
+                OnceLog.Warning("orch-worker-stop", "[TacticalOrchestrator] worker stop failed: "
+                    + we.GetType().Name + " " + we.Message);
+            }
+        }
+
         private static bool IsWorkerEnabled()
         {
             try
@@ -314,22 +341,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 // Slice 2: stop the worker before tearing down orchestrator state.
-                // RequestStop + bounded Join so we don't block teardown if the worker
-                // is wedged. Background thread will die on AppDomain unload regardless.
-                try
-                {
-                    if (_worker != null)
-                    {
-                        _worker.RequestStop();
-                        _worker.Join(250);
-                        _worker = null;
-                    }
-                }
-                catch (Exception we)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] worker stop failed: "
-                        + we.GetType().Name + " " + we.Message);
-                }
+                StopWorker();
 
                 ClearLedgersBetweenBattles();
                 ResetRuntimeTickState();
@@ -406,6 +418,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
 
                     OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
+                    _heavyBuiltThisTick = false;
                     bool aiVsAi = SafeAiVsAi();
                     float deltaSeconds = ComputeTickDeltaSeconds();
 
@@ -443,7 +456,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // returns null and the worker waits one more tick. Patches
                     // fall through to legacy in the meantime.
                     bool workerActive = IsWorkerEnabled() && _worker != null;
-                    if (workerActive)
+                    if (ShouldCaptureWorkerInput(workerActive, _heavyBuiltThisTick))
                     {
                         try
                         {
@@ -639,6 +652,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         _lastSignatures[s] = currSig;
                         _lastPublishedSnapshots[s] = snap;
                         _hasPendingChange[s] = false;
+                        _heavyBuiltThisTick = true;
 
                         // "Cheap per-group" pre-compute (2026-05-20). Build
                         // resolved per-Regiment decisions for every commandable
@@ -824,6 +838,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             _lastSignatures[s] = currSig;
                             _lastPublishedSnapshots[s] = snap;
                             _hasPendingChange[s] = false;
+                            _heavyBuiltThisTick = true;
                         }
                         else
                         {
@@ -1634,6 +1649,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         _lastSignatures[s] = currSig;
                         _lastPublishedSnapshots[s] = snap;
                         _hasPendingChange[s] = false;
+                        _heavyBuiltThisTick = true;
                     }
                     else
                     {
@@ -1847,13 +1863,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int macro0 = SafeMacroAiForSide(bunits, 0);
                 int macro1 = SafeMacroAiForSide(bunits, 1);
 
-                CommandTreeSnapshot tree0 = SafeCommandTreeSnapshot(allianceA);
-                CommandTreeSnapshot tree1 = SafeCommandTreeSnapshot(allianceB);
-                IReadOnlyList<DirectChildSnapshot> dc0 = SafeDirectChildSnapshot(allianceA);
-                IReadOnlyList<DirectChildSnapshot> dc1 = SafeDirectChildSnapshot(allianceB);
-
-                var sectorMap0 = BuildInstanceToSectorIndexMap(battle, allianceA);
-                var sectorMap1 = BuildInstanceToSectorIndexMap(battle, allianceB);
+                // Command tree comes from the snapshot the heavy build just published
+                // (no second CommandTreeRuntime walk). Direct-child snapshots and the
+                // instance->sector maps are not read by the worker analysis, so they are
+                // no longer captured (was 2x DirectChildDiscovery + 2x sector-map walk per
+                // Tick on main, BR-H4/BR-M2).
+                CommandTreeSnapshot tree0 = snap0.CommandTree ?? CommandTreeSnapshot.Empty;
+                CommandTreeSnapshot tree1 = snap1.CommandTree ?? CommandTreeSnapshot.Empty;
 
                 CommanderRosterEntry entry0 = FindArmyEntry(side0);
                 CommanderRosterEntry entry1 = FindArmyEntry(side1);
@@ -1893,12 +1909,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side1Bundle: bundle1,
                     side0CommandTree: tree0,
                     side1CommandTree: tree1,
-                    side0DirectChildren: dc0,
-                    side1DirectChildren: dc1,
+                    side0DirectChildren: null,
+                    side1DirectChildren: null,
                     side0CommanderEntry: entry0,
                     side1CommanderEntry: entry1,
-                    side0InstanceToSectorMap: sectorMap0,
-                    side1InstanceToSectorMap: sectorMap1,
+                    side0InstanceToSectorMap: null,
+                    side1InstanceToSectorMap: null,
                     config: config,
                     side0Observations: obs0,
                     side1Observations: obs1,
@@ -2080,18 +2096,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static CommandTreeSnapshot SafeCommandTreeSnapshot(int allianceId)
-        {
-            try { return CommandTreeRuntime.Snapshot(allianceId); }
-            catch { return CommandTreeSnapshot.Empty; }
-        }
-
-        private static IReadOnlyList<DirectChildSnapshot> SafeDirectChildSnapshot(int allianceId)
-        {
-            try { return DirectChildDiscovery.Snapshot(allianceId); }
-            catch { return Array.Empty<DirectChildSnapshot>(); }
-        }
-
         private static TacticalOrchestratorWorkerConfigSnapshot BuildWorkerConfigSnapshot()
         {
             try
@@ -2211,7 +2215,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try { TacticalBattleSnapshotBuilder.ClearParityState(); } catch { }
             // Slice 2: reset the worker decision snapshot so stale per-cycle data
             // from the previous battle never leaks to readers in the next one.
-            try { TacticalDecisionSnapshot.ResetForBattleEnd(); } catch { }
+            try
+            {
+                TacticalDecisionSnapshot.SetLiveBattleSequence(TacticalDecisionSnapshot.ClosedBattleSequence);
+                TacticalDecisionSnapshot.ResetForBattleEnd();
+                TacticalOrchestratorWorkerAnalysis.ResetForBattleStart();
+            }
+            catch { }
             // Slice 2 parity window: reset per-battle compare counters so the
             // next battle starts a fresh 20-cycle window per side.
             try
@@ -2297,6 +2307,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void ClearForFailure()
         {
+            StopWorker();
             ResetRuntimeTickState();
             side0 = null;
             side1 = null;

@@ -107,59 +107,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // observation state doesn't shift materially in that window. The dicts
                 // are immutable-by-convention so reference-sharing across snapshots is
                 // safe (the snapshot ctor takes ownership but never mutates).
+                // Carry-forward is bounded (BR-M2): only data produced for the SAME
+                // battle within MaxCarryForwardBattleHours of this cycle is forwarded,
+                // and the forwarded side keeps its original production time so a side
+                // that stops producing data ages out instead of living forever.
+                bool fresh0 = HasFreshObservations(input, 0);
+                bool fresh1 = HasFreshObservations(input, 1);
+                float dataHours0 = input.BattleHours;
+                float dataHours1 = input.BattleHours;
                 var priorSnapshot = TacticalDecisionSnapshot.Current;
-                if (priorSnapshot != null && priorSnapshot.BattleSequence == input.BattleSequence)
+                if (!fresh0 && CanCarryForward(priorSnapshot, input, 0))
                 {
-                    if (objectives0.Length == 0
-                        && priorSnapshot.TryGetObjectiveRecords(0, out ObjectiveRecord[] prior0))
-                    {
+                    dataHours0 = priorSnapshot.GetSideDataBattleHours(0);
+                    if (objectives0.Length == 0 && priorSnapshot.TryGetObjectiveRecords(0, out ObjectiveRecord[] prior0))
                         objectives0 = prior0;
-                    }
-                    if (objectives1.Length == 0
-                        && priorSnapshot.TryGetObjectiveRecords(1, out ObjectiveRecord[] prior1))
-                    {
+                    groupStance0 = PreferNonEmpty(groupStance0, priorSnapshot.GetGroupStanceDict(0));
+                    groupSector0 = PreferNonEmpty(groupSector0, priorSnapshot.GetGroupSectorDict(0));
+                    regimentalDecisions0 = PreferNonEmpty(regimentalDecisions0, priorSnapshot.GetRegimentalDecisionsDict(0));
+                }
+                if (!fresh1 && CanCarryForward(priorSnapshot, input, 1))
+                {
+                    dataHours1 = priorSnapshot.GetSideDataBattleHours(1);
+                    if (objectives1.Length == 0 && priorSnapshot.TryGetObjectiveRecords(1, out ObjectiveRecord[] prior1))
                         objectives1 = prior1;
-                    }
-                    if (groupStance0.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetGroupStanceDict(0);
-                        if (priorDict != null && priorDict.Count > 0)
-                            groupStance0 = priorDict;
-                    }
-                    if (groupStance1.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetGroupStanceDict(1);
-                        if (priorDict != null && priorDict.Count > 0)
-                            groupStance1 = priorDict;
-                    }
-                    if (groupSector0.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetGroupSectorDict(0);
-                        if (priorDict != null && priorDict.Count > 0)
-                            groupSector0 = priorDict;
-                    }
-                    if (groupSector1.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetGroupSectorDict(1);
-                        if (priorDict != null && priorDict.Count > 0)
-                            groupSector1 = priorDict;
-                    }
-                    // Regimental decisions: same preservation pattern. With F stagger,
-                    // only one side has fresh observations per cycle; we'd otherwise
-                    // blow away the prior cycle's regimental decisions for the
-                    // non-building side.
-                    if (regimentalDecisions0.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetRegimentalDecisionsDict(0);
-                        if (priorDict != null && priorDict.Count > 0)
-                            regimentalDecisions0 = priorDict;
-                    }
-                    if (regimentalDecisions1.Count == 0)
-                    {
-                        var priorDict = priorSnapshot.GetRegimentalDecisionsDict(1);
-                        if (priorDict != null && priorDict.Count > 0)
-                            regimentalDecisions1 = priorDict;
-                    }
+                    groupStance1 = PreferNonEmpty(groupStance1, priorSnapshot.GetGroupStanceDict(1));
+                    groupSector1 = PreferNonEmpty(groupSector1, priorSnapshot.GetGroupSectorDict(1));
+                    regimentalDecisions1 = PreferNonEmpty(regimentalDecisions1, priorSnapshot.GetRegimentalDecisionsDict(1));
                 }
 
                 return new TacticalDecisionSnapshot(
@@ -176,7 +149,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     objectiveRecords0: objectives0,
                     objectiveRecords1: objectives1,
                     regimentalDecisions0: regimentalDecisions0,
-                    regimentalDecisions1: regimentalDecisions1);
+                    regimentalDecisions1: regimentalDecisions1,
+                    side0DataBattleHours: dataHours0,
+                    side1DataBattleHours: dataHours1);
             }
             catch (Exception e)
             {
@@ -185,6 +160,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + cycleId + " degraded: " + e.GetType().Name + " " + e.Message);
                 return TacticalDecisionSnapshot.Empty;
             }
+        }
+
+        // True when this cycle captured observations for the given alliance (F-stagger:
+        // only the side whose heavy snapshot was built carries observations).
+        private static bool HasFreshObservations(TacticalOrchestratorWorkerInput input, int allianceId)
+        {
+            return (input.Side0AllianceId == allianceId && input.Side0Observations.Count > 0)
+                || (input.Side1AllianceId == allianceId && input.Side1Observations.Count > 0);
+        }
+
+        private static bool CanCarryForward(TacticalDecisionSnapshot prior, TacticalOrchestratorWorkerInput input, int allianceId)
+        {
+            return prior != null
+                && TacticalDecisionSnapshot.IsCarryForwardFresh(
+                    prior.BattleSequence,
+                    input.BattleSequence,
+                    prior.GetSideDataBattleHours(allianceId),
+                    input.BattleHours,
+                    TacticalDecisionSnapshot.MaxCarryForwardBattleHours);
+        }
+
+        private static Dictionary<int, T> PreferNonEmpty<T>(Dictionary<int, T> current, Dictionary<int, T> prior)
+        {
+            if (current != null && current.Count > 0) return current;
+            return prior != null && prior.Count > 0 ? prior : current;
         }
 
         private static TacticalSideDecision ProcessSide(int sideIdx, TacticalOrchestratorWorkerInput input)
@@ -409,7 +409,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static bool TryClaimDiagBit(int sideIdx, int reasonIdx)
         {
-            int bit = 1 << (sideIdx * 4 + reasonIdx);
+            long bit = 1L << (sideIdx * 4 + reasonIdx);
             long prev, next;
             do
             {

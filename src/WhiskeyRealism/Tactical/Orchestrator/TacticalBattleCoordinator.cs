@@ -87,6 +87,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return allianceId != playerAllianceId;
         }
 
+        // ---- Worker lifecycle decisions (BR-M2) ----
+
+        /// <summary>The worker only runs for a battle whose bootstrap succeeded.</summary>
+        internal static bool ShouldStartWorker(bool workerEnabled, bool coordinatorActive)
+        {
+            return workerEnabled && coordinatorActive;
+        }
+
+        /// <summary>
+        /// Worker input is captured only on a tick where a side's heavy snapshot was
+        /// rebuilt; otherwise the worker would re-analyse the same snapshot while main
+        /// paid the capture cost (direct-child discovery, sector maps, observation copy).
+        /// </summary>
+        internal static bool ShouldCaptureWorkerInput(bool workerRunning, bool heavyBuiltThisTick)
+        {
+            return workerRunning && heavyBuiltThisTick;
+        }
+
         // ---- Pure helpers used by the runtime partial for telemetry ----
 
         internal static int MatchedCount(TacticalCommanderRoster roster, int alliance)
