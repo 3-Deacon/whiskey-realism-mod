@@ -107,6 +107,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
+        internal static ConfigEntry<bool> FixPerkIdMismatches;
+        internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -747,6 +749,21 @@ namespace WhiskeyRealism
             EnableArtilleryCombineGunSync = Config.Bind(
                 "Campaign", "Enable Artillery Combine Gun Sync", true,
                 "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
+            FixPerkIdMismatches = Config.Bind(
+                "Campaign", "Fix Perk Id Mismatches", true,
+                "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
+                "its own tooltip says: Expert Scouts sight and concealment only for battle units with Expert Scouts / Expert Skirmishers (not a " +
+                "corps with Ambulance Corps or Bureau of Military Information, a fleet, or a battle HQ); a regiment's wounded mortality and " +
+                "forced-march sickness from its corps' and army's Ambulance Corps and Foot Cavalry; autoresolve battles use Sharpshooters, Zouave " +
+                "and River Expedition instead of their id neighbours; Foot Cavalry speed and marching experience only for land units, Sea " +
+                "Raiders trade-node raiding only for fleets; battle HQs no longer run, tire less, take cover or gain engineers from campaign perks " +
+                "read as battle perks; and Cold Steel III, not an impossible Expert Scouts/Cold Steel pair, keeps a unit from doubting its charge. " +
+                "Same rule for every side, including the W&L player. Set false for rollback to vanilla.");
+            FixPerkEffectScope = Config.Bind(
+                "Campaign", "Fix Perk Effect Scope", true,
+                "Default ON. Applies two perks only where their tooltips say: Foot Cavalry's forced-march speed only while the unit is on a " +
+                "forced march (vanilla applies it to every campaign move), and Embedded Reporters' fame bonus for the unit that has the perk at " +
+                "that unit's level (vanilla ignores a corps' own perk when the corps sits under an army, and reads the level from the corps even when its army holds the perk). Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
