@@ -185,7 +185,7 @@ After the 2026-05-14 Scourge conversion pass, the direct tactical Scourge gaps a
 4. Artillery limber/unlimber and per-battery wheel/fallback behavior: implemented in `TacticalArtilleryMicroDoctrine` and B7 vanilla-safe writes.
 5. Campaign advance-guard/picket/supply-base sandbox movement: specified only; runtime implementation remains a separate strategic slice.
 
-The already-implemented Whiskey analogs are: frontage/echelon/artillery-line battle geometry, runtime path-quality sampling, tactical massing/endurance gates, operational reserve percentage/partial/final reserve policy, fallback ladder mapping, artillery weak-point/ammo/reposition mission planning, SOP authority gates, and default-off W&L player-subordinate order bridge.
+The already-implemented Whiskey analogs are: frontage/echelon/artillery-line battle geometry, runtime path-quality sampling, tactical massing/endurance gates, operational reserve percentage/partial/final reserve policy, fallback ladder mapping, artillery weak-point/ammo/reposition mission planning, SOP authority gates, and the W&L player-subordinate order bridge (#62).
 
 The lower-level candidates above are now partly converted: melee fear is wired into #41 charge doctrine, friendly front blockers are wired into #61 path-quality planning, and infantry fire control is wired into #61/#41 through verified vanilla combat-behavior orders. Skirmisher recall and the battlefield attribute matrix remain pure tested doctrine. Anti-cavalry square analogs and scenario phase templates were intentionally skipped in this pass. Fresh Active runtime smoke is still required for the new fire-control write surface.
 
@@ -267,13 +267,7 @@ Retreat direction = `base.DeP()` (brigade commander's rally point), NOT "away fr
 
 **Binary, not augmented:** when `true`, vanilla AI is fully blocked. Player input is the ONLY decision source for that regiment. No partial-control scenarios.
 
-For Whiskey's regimental intelligence: this means our doctrine MUST either (a) write through the same gate (selectively block vanilla and inject our order), or (b) skip player-commanded regiments entirely. We currently do (b) via `IsPlayerProtectedForRegiment`.
-
-### Whiskey integration plan
-
-1. `TacticalRegimentalIntelligenceDoctrine` ships independently of `PerformAIActionDLCWL` — our doctrine runs on the worker, applies on main via `BattleGroupStancePatch.ApplyRegimentalIntelligence`. Gated by `Enable Regimental Intelligence Writes`.
-2. Skips player-commanded regiments via `dlcw_isundercommander` check (matches vanilla's player-protection contract).
-3. Future enhancement (deferred): patch `PerformAIActionDLCWL` directly so our regimental decisions injection at the vanilla gate, replacing parallel-write architecture with proper integration.
+Whiskey takes option (b): it never writes to player-commanded units. `TacticalWriteGuard.IsPlayerProtected` covers `dlcw_isundercommander`, the player's command and chain, and DLC-taken-over units, failing closed. (The regimental-intelligence doctrine that this section originally planned for was removed on 2026-10-15; per-regiment control is not part of the current design.)
 
 ## 2026-05-22 artillery panic audit
 
@@ -429,13 +423,11 @@ The Whiskey play-template ↔ Scourge play translation:
 
 The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetypes (after the 2026-05-23 generic rename — `LeeEnvelopment → DoubleEnvelopment` etc.). Offensive templates only fire when stance allows attack; defensive templates only on Defender stance.
 
-### F sync — Whiskey ↔ vanilla macroai (2026-05-23)
+### Whiskey ↔ vanilla macroai
 
-`BattleMacroAIOverridePatch` (Harmony Prefix on `AIBattle.CheckGlobalAIStrategy`, line 6314) writes our doctrine output to `sideinformation[side].macroai` BEFORE vanilla reads it (line 6383). Vanilla's `AdjustGroupAIStance` (line 4220) then drives per-group `ai_stance` for brigades Whiskey doesn't have explicit roles for — line of battle forms for free via vanilla's macroai=2 cascade.
+#44 `BattleMacroStrategyPatch` (Postfix on `AIBattle.CheckGlobalAIStrategy`, line 6314, plus a value-restoring Prefix) is the single owner of the AIBattle instance `macroai`. Vanilla's `AdjustGroupAIStance` (4221) then drives per-group `ai_stance` for brigades Whiskey has no explicit role for, so the line of battle forms through vanilla's own cascade. The 2026-05-23 `BattleMacroAIOverridePatch` Prefix that wrote the persisted `sideinformation[side].macroai` was removed on 2026-10-15; its reinforcement-opportunity opinion is now #44's fallback when the operations ledger has none.
 
-Mapping:
-- Doctrine `AttackNow` + ratio ≥ effective-envelopment-threshold → macroai = 0 (flank attack)
-- Doctrine `AttackNow` + ratio < threshold → macroai = 1 (frontal attack)
-- Doctrine `DefensiveHold` / `WaitAndConsolidate` / `DelayingDefense` → macroai = 2 (defend → line of battle)
-- Doctrine `WithdrawalToFightLater` → macroai = 3 (retreat)
-- `NoOpportunity` → no write (vanilla's own decision stands)
+Reinforcement-opportunity mapping (`TacticalVanillaMacroAiMapping`):
+- `AttackNow` + ratio ≥ envelopment threshold → macroai 0 (flank attack); below it → 1 (frontal attack)
+- `WaitAndConsolidate` / `DelayingDefense` / `WithdrawalToFightLater` → 2 (defend). Whiskey never writes 3: a Whiskey-written retreat with `startoffallback == 0` ends the battle on the next cycle (6362).
+- `DefensiveHold` / `NoOpportunity` → no opinion (vanilla's own value stands)
