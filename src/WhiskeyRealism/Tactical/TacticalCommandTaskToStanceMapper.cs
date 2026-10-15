@@ -2,56 +2,48 @@ using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical
 {
-    // Scope B refactor (2026-05-22). Maps Whiskey's richer doctrine
-    // CommandTaskType vocabulary down to vanilla GT's 5 ai_stance values
-    // per `groupstancename = ["none", "screen", "defend", "attack", "assault"]`
-    // at decompile line 65061.
+    // Single source of truth for CommandTaskType → vanilla group ai_stance.
+    // Every Whiskey stance write goes through Util/TacticalStanceWriter with a
+    // value from here, so #45 (group stance) and #61 (posture executor) cannot
+    // disagree about what a task means.
     //
-    // Architectural context: prior Whiskey patches issued waypoints via
-    // `bunits.SetWaypoint` WITHOUT first setting ai_stance, which left
-    // vanilla micro-AI without context for how to execute. Per the W&L
-    // audit (docs/scourge-of-war-ai-anchors.md "2026-05-22 W&L stance
-    // refactor"), the canonical vanilla/W&L pipeline is:
+    // Vanilla stance semantics (decompile, build 14703111):
+    //   groupstancename (65061): 0 none, 1 screen, 2 defend, 3 attack, 4 assault.
+    //   UpdateMicroAI (5694-5736): RepositionAIGroupMicroTowardsEnemy runs only
+    //     for ai_stance > 0 && != 2. Screen moves with movementmode 4 and all
+    //     unit types; attack moves infantry only (restrictunittypes 0); assault
+    //     skips cover. Defend never advances toward the enemy.
+    //   battleprefs "% of max weapon distance for micro ai placement": screen
+    //     0.9, attack 0.85, assault 0.75 — screen keeps contact at long range.
+    //   AdjustCavalryBehavior (5047/5060): no cavalry charges in screen/defend.
+    //   CheckLineFallbacks (5167): low-morale fallback thresholds per stance.
+    //   AdjustGroupFormations (5875): no formation change while defending.
+    //   AdjustGroupAIStance (4239-4260): assault is vanilla's own
+    //     strength-triggered escalation; macroai 3 (retreat) sets screen.
     //
-    //   ChangeStance(unit, mapped_stance) → SetWaypoint(unit, target)
-    //
-    // ChangeStance updates `ai_stanceordered`, manages aibattle[1] pool
-    // membership, and cascades through `groupaiobject` so subordinates
-    // inherit the stance automatically. Doing only SetWaypoint bypasses all
-    // of this.
-    //
-    // The mapping is many-to-one: Whiskey's richer task vocabulary (Probe,
-    // GuardFlank, FallBackToLine, etc.) compiles down to the 5 vanilla
-    // stances. Vanilla's AI then drives micro-behavior CORRECTLY because it
-    // understands the stance. Pure function — no Unity API, harness-testable.
+    // Mapping and why:
+    //   Screen / Probe / Scout → screen (1): contact at 0.9 × range, skirmish
+    //     movement, no charges — reconnaissance without commitment. (A probe on
+    //     attack (3) would close to 0.85 × range and advance its infantry; that
+    //     is a commitment, not a probe.)
+    //   AttackObjective / SupportAttack → attack (3).
+    //   FixEnemy → attack (3): a fixing force must stay engaged. Defend (2)
+    //     disables the micro advance (5694), so the group would never close to
+    //     fire range unless the enemy came to it; screen (1) gives ground. Attack
+    //     closes to 0.85 × range without the charges of assault (4).
+    //   Hold / HoldChoke / GuardFlank / Consolidate / Delay / FormUp /
+    //     AdvanceToAssembly / FallBackToLine / Reserve / Release / Recover →
+    //     defend (2): hold the ground reached, fire, no micro advance.
+    //   None → none (0): no opinion — the writer never writes it.
+    //   Assault (4) is never produced; it stays vanilla's decision.
     public static class TacticalCommandTaskToStanceMapper
     {
-        // Vanilla ai_stance values (decompile line 65061).
         public const int StanceNone = 0;
         public const int StanceScreen = 1;
         public const int StanceDefend = 2;
         public const int StanceAttack = 3;
         public const int StanceAssault = 4;
 
-        // Maps a CommandTaskType to its corresponding vanilla ai_stance.
-        //
-        // Mapping rationale:
-        //   Screen / Probe / Scout      → screen (1)   forward-light commitment
-        //   FormUp / AdvanceToAssembly  → defend (2)   organizing posture
-        //   Consolidate                 → defend (2)   stabilizing posture
-        //   GuardFlank                  → defend (2)   defensive flank role
-        //   HoldObjective               → defend (2)   defensive stance
-        //   FallBackToLine              → defend (2)   defensive withdrawal
-        //   Reserve / ReleaseReserve    → defend (2)   reserved formation
-        //   AttackObjective             → attack (3)   committed advance
-        //   SupportAttack               → attack (3)   committed support
-        //   FixEnemy                    → attack (3)   aggressive holding
-        //   RecoverStuckOrder           → defend (2)   resume defensive
-        //   None                        → none (0)     no stance
-        //
-        // For close-engaged scenarios where the brigade should be in melee
-        // mode, callers should override the result with StanceAssault (4)
-        // based on engagement state (separate signal).
         public static int Map(CommandTaskType task)
         {
             switch (task)
@@ -85,20 +77,26 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
-        // Returns true when the task represents an offensive movement
-        // (vanilla AI should prefer aggressive micro-behaviors). Used by
-        // callers to decide whether to escalate stance to Assault (4) when
-        // enemy is in melee range.
-        public static bool IsOffensiveCommitment(CommandTaskType task)
+        // #45 group-stance scorer view of a ledger task. Returns -1 for tasks the
+        // scorer has no opinion on (movement/recon tasks belong to #61, which
+        // writes the stance with its waypoint). Hold-type tasks commit to attack
+        // when the sector shows a visible weak point (TacticalDoctrineScorer.
+        // ShouldCommitVisibleWeakPoint). Values come from Map so both writers agree.
+        public static int MapForGroupStanceScorer(CommandTaskType task, bool visibleWeakPoint)
         {
             switch (task)
             {
+                case CommandTaskType.HoldObjective:
+                case CommandTaskType.HoldChoke:
+                    return visibleWeakPoint ? StanceAttack : Map(task);
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
-                    return true;
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.FallBackToLine:
+                    return Map(task);
                 default:
-                    return false;
+                    return -1;
             }
         }
     }

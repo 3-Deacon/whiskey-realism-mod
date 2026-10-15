@@ -191,7 +191,8 @@ namespace WhiskeyRealism.Tactical.Operations
             bool inTrouble,
             bool isArtillery,
             float enemyDistance,
-            bool hasOrders)
+            bool hasOrders,
+            CommandTaskType currentTask = CommandTaskType.None)
         {
             NodeId = string.IsNullOrWhiteSpace(nodeId) ? "node-unknown" : nodeId.Trim();
             Role = role;
@@ -202,10 +203,33 @@ namespace WhiskeyRealism.Tactical.Operations
             IsArtillery = isArtillery;
             EnemyDistance = IsFinite(enemyDistance) && enemyDistance > 0f ? enemyDistance : float.MaxValue;
             HasOrders = hasOrders;
+            CurrentTask = currentTask;
         }
 
         public string NodeId { get; }
         public CommandNodeRole Role { get; }
+        // Ledger task the child already carries. Hold-type tasks are kept
+        // (B-divplay): the play never turns a holding brigade into an attacker.
+        public CommandTaskType CurrentTask { get; }
+        public bool HoldsPosition
+        {
+            get
+            {
+                switch (CurrentTask)
+                {
+                    case CommandTaskType.HoldObjective:
+                    case CommandTaskType.HoldChoke:
+                    case CommandTaskType.GuardFlank:
+                    case CommandTaskType.Delay:
+                    case CommandTaskType.Consolidate:
+                    case CommandTaskType.ReserveWait:
+                    case CommandTaskType.FallBackToLine:
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        }
         public bool HasTargets { get; }
         public bool EngagingEnemy { get; }
         public bool UnderCloseFire { get; }
@@ -226,14 +250,19 @@ namespace WhiskeyRealism.Tactical.Operations
         public TacticalDivisionPlayInput(
             string parentNodeId,
             float nowSeconds,
-            IReadOnlyList<TacticalDivisionPlaySubordinate> subordinates)
+            IReadOnlyList<TacticalDivisionPlaySubordinate> subordinates,
+            bool sideDefending = false)
         {
             ParentNodeId = string.IsNullOrWhiteSpace(parentNodeId) ? "parent-unknown" : parentNodeId.Trim();
             NowSeconds = IsFinite(nowSeconds) && nowSeconds > 0f ? nowSeconds : 0f;
             Subordinates = subordinates ?? Array.Empty<TacticalDivisionPlaySubordinate>();
+            SideDefending = sideDefending;
         }
 
         public string ParentNodeId { get; }
+        // Vanilla GetBattleType == 2 (defend, 86095): the side holds the
+        // objectives, so division plays never convert its brigades to attacks.
+        public bool SideDefending { get; }
         public float NowSeconds { get; }
         public IReadOnlyList<TacticalDivisionPlaySubordinate> Subordinates { get; }
 
@@ -312,6 +341,8 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 TacticalDivisionPlaySubordinate child = input.Subordinates[i];
                 help = help || child.InTrouble;
+                if (input.SideDefending) continue;
+                if (child.HoldsPosition) continue;
                 if (!child.IsEngagedCandidate) continue;
 
                 float scoreDistance = child.EnemyDistance;
@@ -332,6 +363,7 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 TacticalDivisionPlaySubordinate child = input.Subordinates[i];
                 if (child.HasOrders && child.NodeId != anchor.NodeId) continue;
+                if (child.HoldsPosition) continue;
 
                 CommandTaskType task = SelectTask(child, anchor.NodeId);
                 string reason = child.NodeId == anchor.NodeId
