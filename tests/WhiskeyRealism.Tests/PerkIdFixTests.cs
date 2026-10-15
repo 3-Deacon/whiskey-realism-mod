@@ -70,10 +70,10 @@ internal static class PerkIdFixTests
     // fleet 3/8 Balloon Barge / Blockade Busters.
     private static void BattleConcealmentPerksOnlyOnBattleTable()
     {
-        AssertTrue(VanillaPerkTables.BattleConcealmentPerksApply(0), "infantry");
-        AssertTrue(VanillaPerkTables.BattleConcealmentPerksApply(3), "skirmishers");
-        AssertFalse(VanillaPerkTables.BattleConcealmentPerksApply(15), "corps");
-        AssertFalse(VanillaPerkTables.BattleConcealmentPerksApply(17), "fleet");
+        AssertTrue(VanillaPerkTables.UsesBattleTable(0), "infantry");
+        AssertTrue(VanillaPerkTables.UsesBattleTable(3), "skirmishers");
+        AssertFalse(VanillaPerkTables.UsesBattleTable(15), "corps");
+        AssertFalse(VanillaPerkTables.UsesBattleTable(17), "fleet");
     }
 
     // UpdateCampaignUnitStats 115113-115120: num6 *= woundedtokilledambulancecorps[...]

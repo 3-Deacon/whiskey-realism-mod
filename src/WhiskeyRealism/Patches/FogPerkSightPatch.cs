@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
@@ -23,9 +22,7 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(FogOfWar), "UpdateViewRange")]
     internal static class FogPerkSightPatch
     {
-        private static readonly List<Regiment.Perk> NoPerks = new List<Regiment.Perk>();
-        private static readonly List<Regiment> _hidden = new List<Regiment>();
-        private static readonly List<List<Regiment.Perk>> _saved = new List<List<Regiment.Perk>>();
+        private static readonly PerkListSwap Swap = new PerkListSwap("perk-ids:fog-sight:restore");
 
         private static bool _resolved;
         private static FieldInfo _unitsField;
@@ -39,7 +36,7 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.perk-ids.fog-sight.prefix");
                 try
                 {
-                    Restore();
+                    Swap.Restore();
                     if (!Enabled() || !GameVars.usefow || !Resolve()) return;
                     if (!(_unitsField.GetValue(__instance) is IList units)) return;
 
@@ -53,17 +50,15 @@ namespace WhiskeyRealism.Patches
                         bool hasEight = reg.HasPerk(VanillaPerkTables.BattleExpertScouts);
                         if (!hasEight || VanillaPerkTables.ExpertScoutsSightApplies(reg.unittyp, hasEight)) continue;
 
-                        _hidden.Add(reg);
-                        _saved.Add(reg.perks);
-                        reg.perks = NoPerks;
+                        Swap.Hide(reg);
                     }
 
-                    if (_hidden.Count > 0)
+                    if (Swap.Active)
                         OnceLog.Info("perk-ids:fog-sight", "[Patch:PerkIds] UpdateViewRange: Expert Scouts sight withheld from a non-battle perk id 8 (Ambulance Corps / Blockade Busters)");
                 }
                 catch (Exception ex)
                 {
-                    Restore();
+                    Swap.Restore();
                     OnceLog.Warning("perk-ids:fog-sight:prefix", "[Patch:PerkIds] fog sight prefix failed, vanilla left as is: " + ex.Message);
                 }
             }
@@ -75,27 +70,8 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.perk-ids.fog-sight.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.perk-ids.fog-sight.finalizer");
-                Restore();
+                Swap.Restore();
             }
-        }
-
-        private static void Restore()
-        {
-            for (int i = 0; i < _hidden.Count; i++)
-            {
-                try
-                {
-                    Regiment reg = _hidden[i];
-                    if ((object)reg != null && ReferenceEquals(reg.perks, NoPerks))
-                        reg.perks = _saved[i];
-                }
-                catch (Exception ex)
-                {
-                    OnceLog.Warning("perk-ids:fog-sight:restore", "[Patch:PerkIds] fog sight restore failed: " + ex.Message);
-                }
-            }
-            _hidden.Clear();
-            _saved.Clear();
         }
 
         // FogOfWar.units is a private List<FOWUnit>; FOWUnit (100572) is a private nested class

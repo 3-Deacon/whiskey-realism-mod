@@ -20,13 +20,27 @@ namespace WhiskeyRealism.Strategic
         internal const int FleetUnitType = 17;
 
         // PerkBattleTooltips.txt.
+        internal const int BattleEngineering = 0;
+        internal const int BattleSharpshooters = 1;
+        internal const int BattleZouave = 2;
         internal const int BattleExpertSkirmishers = 3;
         internal const int BattleAceOfSpade = 6;
         internal const int BattleExpertScouts = 8;
+        internal const int BattleColdSteel = 9;
+        internal const int BattleStormers = 11;
+        internal const int BattleLightningBrigade = 13;
+        internal const int BattleSapperGunners = 18;
 
         // PerkTooltipsArmyCampaign.txt.
+        internal const int CampaignFlyingColumn = 5;
         internal const int CampaignFootCavalry = 6;
         internal const int CampaignAmbulanceCorps = 8;
+        internal const int CampaignSappersAndMiners = 10;
+        internal const int CampaignEmbeddedReporters = 14;
+        internal const int CampaignRiverExpedition = 17;
+
+        // PerkFleetsTooltips.txt.
+        internal const int FleetSeaRaiders = 6;
 
         internal static PerkTable TableFor(int unitType)
         {
@@ -42,12 +56,55 @@ namespace WhiskeyRealism.Strategic
             return hasPerkEight && TableFor(unitType) == PerkTable.Battle;
         }
 
-        // FogOfWar.UnitIsHidden (101205-101214) subtracts Expert Skirmishers (3) and Expert
-        // Scouts (8) concealment from any unit it is given. Its regref argument is used for
-        // nothing else, and no campaign or fleet perk promises concealment.
-        internal static bool BattleConcealmentPerksApply(int unitType)
+        // A call site written for battle ids (FogOfWar.UnitIsHidden concealment 101205-101214,
+        // CheckAbilityToRun 113255-113262, Regiment.UpdateFatigue 132665, GetCoverValueFromID
+        // 138518-138526, Initialize/ChoosePerk hasengineers 113162/123411, the Zouave running
+        // sound 133734-133743) is right only for a unit on the battle table; a battle HQ carries
+        // campaign ids there.
+        internal static bool UsesBattleTable(int unitType)
         {
             return TableFor(unitType) == PerkTable.Battle;
+        }
+
+        // RegimentMove (133518-133524) multiplies speed by forcedmarchspeedfootcavalry on
+        // HasPerk(6) / HasPerkParent(6) for every campaign unit on every move. Foot Cavalry is
+        // campaign 6 (fleet 6 is Sea Raiders), and its tooltip and campaignprefs.txt 2402 say
+        // "forced march speed": vanilla's forced march is doublequick | running (sickness
+        // 115153, Foot Cavalry XP 134116). fixIds applies the table rule, fixScope the
+        // forced-march gate; with both off this is vanilla.
+        internal static bool FootCavalrySpeedApplies(int unitType, bool forcedMarch, bool fixIds, bool fixScope)
+        {
+            if (fixIds && TableFor(unitType) != PerkTable.Campaign) return false;
+            if (fixScope && !forcedMarch) return false;
+            return true;
+        }
+
+        // RegimentMove grants Flying Column (5) XP for any campaign move and Foot Cavalry (6) XP
+        // on a forced march (134113-134119). On a fleet 5/6 are Blockading Squadron / Sea
+        // Raiders, which level up by blockading (PerkFleetsTooltips.txt).
+        internal static bool MarchPerkExpApplies(int unitType)
+        {
+            return TableFor(unitType) == PerkTable.Campaign;
+        }
+
+        // Regiment.UpdateBlockades (113790, 113813) lets HasPerk(6) open trade nodes as raid
+        // targets and grants sea-raider XP (113821). That is fleet 6, Sea Raiders ("Level up by
+        // blockading trade nodes"); for a land unit 6 is Foot Cavalry / Ace of Spade.
+        internal static bool SeaRaidersApplies(int unitType)
+        {
+            return TableFor(unitType) == PerkTable.Fleet;
+        }
+
+        // BattleUnits.CalculateCommanderFame (83930-83933) boosts a corps/army commander's
+        // fame when CheckForGroupPerk(reg, 14) finds Embedded Reporters, but that search starts
+        // at the parent (83866-83884) and the level is read from reg. The tooltip ("allowing
+        // newspaper reporters to follow the unit") makes the unit itself the first holder, and
+        // the factor is that holder's level. fixScope off = vanilla.
+        internal static PerkHolder FameReportersHolder(bool selfHas, bool ancestorHas, bool fixScope)
+        {
+            if (fixScope && selfHas) return PerkHolder.Self;
+            if (ancestorHas) return fixScope ? PerkHolder.Ancestor : PerkHolder.AncestorWithOwnLevel;
+            return PerkHolder.None;
         }
 
         // Ambulance Corps and Foot Cavalry belong to the campaign group that owns the
@@ -97,6 +154,15 @@ namespace WhiskeyRealism.Strategic
             if (factors == null || level < 0 || level >= factors.Length) return 1f;
             return factors[level];
         }
+    }
+
+    internal enum PerkHolder
+    {
+        None,
+        Self,
+        Ancestor,
+        // Vanilla: an ancestor holds the perk but the level is read from the unit itself.
+        AncestorWithOwnLevel
     }
 
     internal readonly struct CampaignWoundedPerkPlan

@@ -29,7 +29,7 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if ((UnityEngine.Object)regref == null || !Enabled()) return;
-                    if (VanillaPerkTables.BattleConcealmentPerksApply(regref.unittyp)) return;
+                    if (VanillaPerkTables.UsesBattleTable(regref.unittyp)) return;
                     if (!regref.HasPerk(VanillaPerkTables.BattleExpertSkirmishers) && !regref.HasPerk(VanillaPerkTables.BattleExpertScouts)) return;
 
                     regref = null;
