@@ -26,6 +26,9 @@ internal static class ReserveMigrationTests
             ("stalled fallback reissue from producer", StalledFallbackReissueFromProducer),
             ("vanilla may commit reserve mirrors early exits", VanillaMayCommitReserveMirrorsEarlyExits),
             ("reserve odds read snapshot slice pressure", ReserveOddsReadSnapshotSlicePressure),
+            ("withdrawal reads own-side cover and friendly routs", WithdrawalReadsOwnSideCoverAndRouts),
+            ("withdrawal retreat bearing matches vanilla retreatangle", WithdrawalRetreatBearingMatchesVanillaRetreatAngle),
+            ("snapshot carries own-side fallback fields through assembly", SnapshotCarriesFallbackFieldsThroughAssembly),
         });
     }
 
@@ -219,6 +222,10 @@ internal static class ReserveMigrationTests
         BattleSnapshot stanceOff = LeafSnapshot(morale: 0.3f, groupStance: -1);
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
             WithdrawalIntentProducer.PlanUnit(stanceOff, stanceOff.IndexOfOwn(Leaf), Settings(), out _, out _), "group without an AI stance");
+        BattleSnapshot feudGroup = LeafSnapshot(morale: 0.3f, groupFlags: UnitFlags.Feud);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            WithdrawalIntentProducer.PlanUnit(feudGroup, feudGroup.IndexOfOwn(Leaf), Settings(), out _, out _),
+            "a feuding group's units (B8: ai_feudstance == -1 gate)");
         BattleSnapshot routed = LeafSnapshot(morale: 0.3f, leafFlags: UnitFlags.Routed);
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
             WithdrawalIntentProducer.PlanUnit(routed, routed.IndexOfOwn(Leaf), Settings(), out _, out _), "routed");
@@ -292,9 +299,9 @@ internal static class ReserveMigrationTests
     private static void StalledFallbackReissueFromProducer()
     {
         CommandDoctrineOrder order = FallbackOrder(500f, -900f);
-        BattleSnapshot stalled = ArmySnapshot();
+        BattleSnapshot stalled = ArmySnapshot(reserveFlags: UnitFlags.PathInterrupted);
         int reserve = stalled.IndexOfOwn(Reserve);
-        AssertTrue(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve, order, out BattleOrderIntent move), "stopped short");
+        AssertTrue(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve, order, out BattleOrderIntent move), "contact interrupted it short");
         AssertEqual(IntentPriority.Support, move.Priority, "a courier nudge, below #61's executor move");
         AssertEqual(IntentSource.Withdrawal, move.Source, "source");
         AssertEqual(CommandTaskType.FallBackToLine, move.Task, "task");
@@ -302,7 +309,10 @@ internal static class ReserveMigrationTests
         AssertNear(500f, move.TargetX, 0.01f, "x");
         AssertNear(-900f, move.TargetZ, 0.01f, "z");
 
-        AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(reservePaths: 1), reserve, order, out _), "still moving");
+        AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(), reserve, order, out _),
+            "standing short but not interrupted: #61's move owns it");
+        AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(reserveFlags: UnitFlags.PathInterrupted, reserveQueued: 1),
+            reserve, order, out _), "a courier order is already in flight");
         AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve, FallbackOrder(500f, -830f), out _), "already there");
         AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve,
             TestFixtures.DoctrineOrder(CommandTaskType.FallBackToLine), out _), "no fallback target");
@@ -335,6 +345,90 @@ internal static class ReserveMigrationTests
         AssertNear(500f, TacticalReserveCommitGate.VisibleAngleStrength(s, leaf), 0.01f, "sum of the fog-honest slices");
         AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(s, -1), "unknown unit");
         AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(null, leaf), "no snapshot: nothing seen");
+    }
+
+    private static void WithdrawalReadsOwnSideCoverAndRouts()
+    {
+        // CheckLineFallbacks 5167 / TacticalMoralePressure: outflanked + under fire +
+        // low morale withdraws only without cover (covervalue <= 0 or coverobject 3).
+        BattleSnapshot covered = LeafSnapshot(morale: 0.45f, flank: 50f, cover: 0.6f, coverObject: 1);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            WithdrawalIntentProducer.PlanUnit(covered, covered.IndexOfOwn(Leaf), Settings(), out _, out _), "in cover: holds");
+        BattleSnapshot exposed = LeafSnapshot(morale: 0.45f, flank: 50f, cover: 0.6f, coverObject: 3);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Fallback,
+            WithdrawalIntentProducer.PlanUnit(exposed, exposed.IndexOfOwn(Leaf), Settings(), out _, out _), "coverobject 3 is no cover");
+
+        // friendlyroutednear is a morale penalty in [-1, 0] (128253): its magnitude is the pressure.
+        AssertEqual(0.5f, WithdrawalIntentProducer.FriendlyRoutPressure(-0.5f), "magnitude");
+        AssertEqual(0f, WithdrawalIntentProducer.FriendlyRoutPressure(0f), "none");
+        AssertEqual(0f, WithdrawalIntentProducer.FriendlyRoutPressure(float.NaN), "non-finite");
+    }
+
+    private static void WithdrawalRetreatBearingMatchesVanillaRetreatAngle()
+    {
+        // Vanilla: retreatangle = Tools.GetAngle(own, enemy) = atan2(dx, dz) deg - 180
+        // (151304, 122833); the point is GetAngleTerrainPosStatic(pos, angle, d):
+        // x + cos(angle - 90) d, z - sin(angle - 90) d (26897-26906).
+        float[,] enemies = { { 600f, -400f }, { 380f, -560f }, { 500f, -650f }, { 900f, -500f } };
+        for (int e = 0; e < enemies.GetLength(0); e++)
+        {
+            float ex = enemies[e, 0], ez = enemies[e, 1];
+            BattleSnapshot s = LeafSnapshot(morale: 0.3f, enemyVisible: false);
+            s.AddObservation(new EnemyObservation { InstanceId = Enemy, X = ex, Z = ez, Strength = 500f, State = ObservationState.Visible, Confidence01 = 1f });
+            s.SetClosestVisibleEnemy(1, 0, 1f);
+            WithdrawalIntentProducer.PlanUnit(s, 1, Settings(), out BattleOrderIntent move, out _);
+
+            double vanillaAngle = Math.Atan2(ex - 500f, ez - (-500f)) / Math.PI * 180.0 - 180.0;
+            double a = (vanillaAngle - 90.0) * Math.PI / 180.0;
+            float vx = 500f + (float)(Math.Cos(a) * 200f);
+            float vz = -500f - (float)(Math.Sin(a) * 200f);
+            AssertNear(vx, move.TargetX, 0.01f, "retreat x vs vanilla, enemy " + e);
+            AssertNear(vz, move.TargetZ, 0.01f, "retreat z vs vanilla, enemy " + e);
+        }
+    }
+
+    private static void SnapshotCarriesFallbackFieldsThroughAssembly()
+    {
+        var s = new BattleSnapshot();
+        var scratch = new BattleSnapshotScratch();
+        var own = new[]
+        {
+            new UnitRecord { InstanceId = Army, UnitTyp = 14, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup },
+            new UnitRecord { InstanceId = Leaf, UnitTyp = 0, Strength = 400, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry },
+        };
+        int[][] attached = { new[] { Army, Leaf }, null };
+        int[] counts = { 2, 0 };
+
+        void Build(long tick, float cover, int coverObject, float routs, bool interrupted)
+        {
+            own[1].CoverValue = cover;
+            own[1].CoverObject = coverObject;
+            own[1].FriendlyRoutedNear = routs;
+            own[1].Flags = interrupted ? own[1].Flags | UnitFlags.PathInterrupted : own[1].Flags & ~UnitFlags.PathInterrupted;
+            s.BeginBuild(1, 0, 0, tick, 1.0);
+            s.SetSliceCount(20);
+            for (int i = 0; i < own.Length; i++) s.AddOwn(in own[i]);
+            BattleSnapshotAssembler.AssembleCommandTree(s.Own, s.OwnCount, attached, counts, scratch);
+            s.IndexCommandTree(scratch);
+        }
+
+        Build(1, 0.4f, 2, -0.25f, interrupted: true);
+        int generation = scratch.TreeGeneration;
+        int leaf = s.IndexOfOwn(Leaf);
+        AssertEqual(0.4f, s.Own[leaf].CoverValue, "cover value");
+        AssertEqual(2, s.Own[leaf].CoverObject, "cover object");
+        AssertEqual(-0.25f, s.Own[leaf].FriendlyRoutedNear, "friendly routed near");
+        AssertTrue((s.Own[leaf].Flags & UnitFlags.PathInterrupted) != 0, "path interrupted");
+        AssertEqual(s.IndexOfOwn(Army), s.Own[leaf].ParentIndex, "parent kept");
+
+        // The live fields change every tick; they are not roster: no tree rebuild, no allocation.
+        Build(2, 0f, 0, 0f, interrupted: false);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Build(3, 0.7f, 1, -1f, interrupted: true);
+        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "same-roster rebuild allocated bytes");
+        AssertEqual(generation, scratch.TreeGeneration, "live fields do not rebuild the tree");
+        AssertEqual(0.7f, s.Own[leaf].CoverValue, "updated cover");
+        AssertTrue((s.Own[leaf].Flags & UnitFlags.PathInterrupted) != 0, "updated flag");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -397,7 +491,8 @@ internal static class ReserveMigrationTests
     // one enemy 100 m due north, in the regiment's range list.
     private static BattleSnapshot LeafSnapshot(
         float morale, float flank = 0f, int paths = 0, UnitFlags leafFlags = UnitFlags.None,
-        bool enemyVisible = true, bool axis = true, int groupStance = 1)
+        bool enemyVisible = true, bool axis = true, int groupStance = 1, UnitFlags groupFlags = UnitFlags.None,
+        float cover = 0f, int coverObject = 0, float friendlyRoutedNear = 0f)
     {
         var s = new BattleSnapshot();
         s.BeginBuild(1, 0, 0, 1, 1.0);
@@ -405,10 +500,11 @@ internal static class ReserveMigrationTests
         s.AddOwn(new UnitRecord
         {
             InstanceId = Army, UnitTyp = 15, X = 500f, Z = -520f, AiStance = groupStance,
-            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | groupFlags,
         });
         s.AddOwn(new UnitRecord
         {
+            CoverValue = cover, CoverObject = coverObject, FriendlyRoutedNear = friendlyRoutedNear,
             InstanceId = Leaf, UnitTyp = 0, X = 500f, Z = -500f, RotationY = 45f, Strength = 400,
             Morale = morale, BattleStartMorale = 1f, Fatigue = 0.1f, RegimentPaths = paths, CombatBehaviorOrdered = 1,
             FirstEnemyInRangeId = Enemy,
@@ -432,14 +528,14 @@ internal static class ReserveMigrationTests
 
     // Army root with a reserve brigade behind two line brigades (left at x 300,
     // right at x 700), front facing +z.
-    private static BattleSnapshot ArmySnapshot(bool axis = true, int reservePaths = 0, UnitFlags reserveFlags = UnitFlags.None)
+    private static BattleSnapshot ArmySnapshot(bool axis = true, int reserveQueued = 0, UnitFlags reserveFlags = UnitFlags.None)
     {
         var s = new BattleSnapshot();
         s.BeginBuild(1, 0, 0, 1, 1.0);
         s.SetSliceCount(20);
         const UnitFlags group = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup;
         s.AddOwn(new UnitRecord { InstanceId = Army, UnitTyp = 17, X = 500f, Z = -600f, Flags = group });
-        s.AddOwn(new UnitRecord { InstanceId = Reserve, UnitTyp = 15, X = 500f, Z = -800f, RegimentPaths = reservePaths, Flags = group | reserveFlags });
+        s.AddOwn(new UnitRecord { InstanceId = Reserve, UnitTyp = 15, X = 500f, Z = -800f, QueuedOrders = reserveQueued, Flags = group | reserveFlags });
         s.AddOwn(new UnitRecord { InstanceId = LeftLine, UnitTyp = 15, X = 300f, Z = -500f, Flags = group });
         s.AddOwn(new UnitRecord { InstanceId = RightLine, UnitTyp = 15, X = 700f, Z = -500f, Flags = group });
         for (int i = 1; i < 4; i++) s.Own[i].ParentIndex = 0;

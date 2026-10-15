@@ -21,25 +21,36 @@ namespace WhiskeyRealism.Tactical.Battle
     // behavior is a per-regiment CombatBehavior intent (the executor's
     // TacticalCombatBehaviorWriter), never a field write.
     //
-    // Inputs re-derived from the snapshot (fog-honest), not read from the Regiment:
-    //   retreat angle   vanilla's unitrange.retreatangle is the bearing away from the
-    //                   closest enemy (UpdateUnitRangeFast 122833); here away from the
-    //                   closest VISIBLE enemy, else away from the front axis, else none;
-    //   outflanked      any fog-honest flank pressure (left/right/rear) > 0, not vanilla's
-    //                   outflanked code (BC2a: the flank slots differ);
-    //   under fire      the unit's first range-list enemy (enemyinrangereg[0]) is visible,
-    //                   for vanilla's ReceivedFireFromUnit(closest);
-    //   cover           not in the snapshot: treated as no cover;
-    //   friendly routed not used: it only reaches UnderPressure (Stabilize/Screen, no move),
-    //                   and vanilla's own friendlyroutednear is <= 0 (128253) anyway.
+    // Own-side inputs are vanilla's own fields, read into the snapshot:
+    //   cover           covervalue / coverobject (CheckLineFallbacks 5167: no cover =
+    //                   covervalue <= 0 or coverobject 3);
+    //   friendly routed friendlyroutednear, a morale penalty in [-1, 0] (123612,
+    //                   128250-128257); its magnitude is the pressure the scorer reads.
+    // Enemy-derived inputs are perceived, not vanilla's (which read true enemy positions):
+    //   retreat angle   vanilla's unitrange.retreatangle is Tools.GetAngle(own, closest
+    //                   enemy) = atan2(dx, dz) - 180, the bearing away from it (151304,
+    //                   122833), walked by GetAngleTerrainPosStatic as
+    //                   (x + sin(a) d, z + cos(a) d) (26897-26906). Here the same angle
+    //                   away from the closest VISIBLE enemy, else away from the front
+    //                   axis, else no move. Vanilla's < 100 m GetBestFallbackPosition
+    //                   override (122864, 140166) is not copied;
+    //   outflanked      vanilla's outflanked code is set from enemy positions in its flank
+    //                   sectors (123145-123175); here any fog-honest flank pressure
+    //                   (left/right/rear) > 0 (BC2a: the slots differ, no thresholds reused);
+    //   under fire      for vanilla's ReceivedFireFromUnit(closest): the unit's first
+    //                   range-list enemy (enemyinrangereg[0]) is visible.
     // The rear-pressure quadrant reads the snapshot's slice pressure with vanilla's
     // slice width (SlicePressureBuilder bins by floor(bearing / sliceCount), 122732).
     //
     // Stalled fallback (was #56 TryClearStalledFallbackOrder): a group whose ledger
-    // doctrine order is FallBackToLine with a fallback target, that is not moving
-    // (no paths, no courier order in flight) and stands farther than DedupeMeters
-    // from the target, gets a courier re-issue of that target at Support, below
-    // #61's Executor-priority posture move.
+    // doctrine order is FallBackToLine with a fallback target, whose path contact
+    // interrupted (pathinterrupted: SetPathInterrupted + StopRegiment, 117330), with no
+    // courier order in flight, farther than DedupeMeters from the target, gets a
+    // courier re-issue of that target at Support, below #61's Executor-priority move.
+    //
+    // B8's aigroup.lastfeudactiontime stamp is not carried over: its only reader is the
+    // feud indicator in Regiment.UpdateUnitIcon (121676), reached only for
+    // ai_feudstance >= 0, and units of a feuding group are never withdrawn here.
     internal sealed partial class WithdrawalIntentProducer
     {
         // B8's default when the group's stance is outside moraletriggerforfallbackifenemyclose.
@@ -79,8 +90,12 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((f & (UnitFlags.PlayerOwned | UnitFlags.Feud)) != 0) return TacticalWithdrawalDoctrine.FallbackKind.None;
             if ((f & UnitFlags.Alive) == 0 || (f & UnitFlags.Active) == 0) return TacticalWithdrawalDoctrine.FallbackKind.None;
 
-            // CheckLineFallbacks runs only for a group with an AI stance (UpdateMicroAI 5609).
-            int stance = CommandingStance(s, rec);
+            // CheckLineFallbacks runs only for a group with an AI stance (UpdateMicroAI 5609)
+            // and, like B8, not for a feuding group (5137: ai_feudstance == -1).
+            int parent = rec.ParentIndex;
+            bool hasParent = parent >= 0 && parent < s.OwnCount;
+            if (hasParent && (s.Own[parent].Flags & UnitFlags.Feud) != 0) return TacticalWithdrawalDoctrine.FallbackKind.None;
+            int stance = hasParent ? s.Own[parent].AiStance : rec.AiStance;
             if (stance < 0) return TacticalWithdrawalDoctrine.FallbackKind.None;
 
             var kind = TacticalWithdrawalDoctrine.PlanTacticalFallback(Decide(s, index, rec, stance, settings), new TacticalWithdrawalDoctrine.FallbackUnitState(
@@ -158,7 +173,7 @@ namespace WhiskeyRealism.Tactical.Battle
             UnitFlags f = rec.Flags;
             if ((f & (UnitFlags.PlayerOwned | UnitFlags.Feud | UnitFlags.Routed)) != 0) return false;
             if ((f & UnitFlags.Alive) == 0 || (f & UnitFlags.Active) == 0) return false;
-            if (rec.RegimentPaths > 0 || rec.QueuedOrders > 0) return false;
+            if ((f & UnitFlags.PathInterrupted) == 0 || rec.QueuedOrders > 0) return false;
 
             float tx = order.FallbackTarget.X;
             float tz = order.FallbackTarget.Z;
@@ -196,8 +211,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 FallbackThreshold = MoraleTrigger(stance, settings),
                 Outflanked = s.FlankPressure(index, 0) > 0f || s.FlankPressure(index, 1) > 0f || s.FlankPressure(index, 2) > 0f ? 1 : 0,
                 ReceivedFireFromClosestFar = rec.FirstEnemyInRangeId != 0 && s.IsVisible(rec.FirstEnemyInRangeId),
-                CoverValue = 0f,
-                CoverObject = 0,
+                FriendlyRoutedNear = FriendlyRoutPressure(rec.FriendlyRoutedNear),
+                CoverValue = rec.CoverValue,
+                CoverObject = rec.CoverObject,
                 AiFeudStance = -1, // Feud / PlayerOwned units were skipped
                 IsPlayerAiOrFeud = 0,
                 Fatigue = rec.Fatigue,
@@ -218,14 +234,14 @@ namespace WhiskeyRealism.Tactical.Battle
             });
         }
 
-        // The commanding group's stance: CheckLineFallbacks reads
-        // moraletriggerforfallbackifenemyclose[aigroup.ai_stance] (5167).
-        private static int CommandingStance(BattleSnapshot s, in UnitRecord rec)
+        /// <summary>friendlyroutednear is a morale penalty in [-1, 0]; the scorer reads pressure &gt; 0.</summary>
+        internal static float FriendlyRoutPressure(float friendlyRoutedNear)
         {
-            int parent = rec.ParentIndex;
-            return parent >= 0 && parent < s.OwnCount ? s.Own[parent].AiStance : rec.AiStance;
+            if (float.IsNaN(friendlyRoutedNear) || float.IsInfinity(friendlyRoutedNear)) return 0f;
+            return friendlyRoutedNear < 0f ? -friendlyRoutedNear : 0f;
         }
 
+        // moraletriggerforfallbackifenemyclose[aigroup.ai_stance] (CheckLineFallbacks 5167).
         private static float MoraleTrigger(int stance, in Settings settings)
         {
             float[] table = settings.MoraleTriggerByStance;

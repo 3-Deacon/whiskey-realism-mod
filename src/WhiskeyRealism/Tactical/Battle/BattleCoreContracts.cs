@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Tactical.Battle
         PlayerCommand = 32768,
         LiedDown = 65536,
         MarkedForRout = 131072, // vanilla markedforrout: a cavalry leaf mounting up to rout (Rout 123555-123559)
+        PathInterrupted = 262144, // vanilla pathinterrupted (111012): contact stopped the move (117330), restored at 117195
     }
 
     public struct UnitRecord
@@ -44,6 +45,12 @@ namespace WhiskeyRealism.Tactical.Battle
         public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
+        // Own-side state vanilla's fallback rules read (CheckLineFallbacks 5167):
+        // covervalue (111404) and coverobject (111408; "no cover" = covervalue <= 0 or
+        // coverobject 3), friendlyroutednear (111158; <= 0, clamped to [-1, 0] at 128253).
+        public float CoverValue;
+        public int CoverObject;
+        public float FriendlyRoutedNear;
         public int ParentIndex;         // -1 = root
         public int FirstEnemyInRangeId; // enemyinrangereg[0], or 0
         public UnitFlags Flags;

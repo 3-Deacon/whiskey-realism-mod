@@ -678,13 +678,14 @@ internal sealed partial class WithdrawalIntentProducer : IBattleIntentProducer {
   internal static TacticalWithdrawalDoctrine.FallbackKind PlanUnit(BattleSnapshot s, int index, in Settings settings,
       out BattleOrderIntent move, out BattleOrderIntent behavior); // Safety Move InContactWithdrawal (+ CombatBehavior 2 PerRegiment for Fallback)
   internal static bool TryRetreatBearing(BattleSnapshot s, int index, out float bearing);  // away from closest visible enemy, else front axis + 180
-  internal static bool TryPlanStalledFallback(BattleSnapshot s, int groupIndex, in CommandDoctrineOrder order, out BattleOrderIntent move); // Support, courier
+  internal static bool TryPlanStalledFallback(BattleSnapshot s, int groupIndex, in CommandDoctrineOrder order, out BattleOrderIntent move); // PathInterrupted; Support, courier
+  internal static float FriendlyRoutPressure(float friendlyRoutedNear); // magnitude of the [-1, 0] penalty
 }
 internal sealed class ReserveReleaseIntentProducer : IBattleIntentProducer { /* Name "ReserveRelease", Support */ }
 ```
 - #56's re-issue uses BC4's `OrderExecutorRuntime.ExecuteInline`; `PlanCourierParity` runs before the path is removed, so a refused re-issue (player-owned unit, no snapshot record, higher claim) leaves vanilla's own move. The parity intent also carries `ReliefOrSupport` (the target sits one regiment width behind the endangered sibling, inside its group's footprint).
 - `OrderExecutorRuntime.IssueMove`: an `InContactWithdrawal` Move on an infantry/cavalry regiment ends in `SetMovementMode(2)`, as vanilla's fallbacks do (5178, 4898).
-- Snapshot gaps the withdrawal re-derives or drops: `retreatangle`, `outflanked`, `covervalue/coverobject` (treated as no cover), `ReceivedFireFromUnit`, `friendlyroutednear`, `pathinterrupted`, `chargetarget` — candidates for `UnitRecord`.
+- `UnitRecord` gains own-side fallback inputs (builder field reads, roster signature unchanged): `CoverValue`, `CoverObject`, `FriendlyRoutedNear`, and `UnitFlags.PathInterrupted`. The withdrawal reads cover and friendly routs from them, and the stalled-fallback re-issue requires `PathInterrupted`. Enemy-derived inputs stay perceived: the retreat bearing is vanilla's `retreatangle` convention (GetAngle 151304 / 122833, walked by GetAngleTerrainPosStatic 26897-26906) from the closest visible enemy; outflanked is fog-honest flank pressure (vanilla's code 123145-123175 reads true positions); under fire is a visible first range-list enemy. B8's `lastfeudactiontime` stamp is dropped: its only reader is the feud icon (UpdateUnitIcon 121676, `ai_feudstance >= 0`), and units of a feuding group are never withdrawn.
 - Producers register from their static constructors; nothing in `src` touches the types yet, so BC7 adds the touch.
 
 PROVE-MODE: harness. Per-slice proof is `ReserveMigrationTests` (merged deny, courier-parity plan and refusal, withdrawal Safety move/behavior through `OrderExecutor.Plan`, fog-honest retreat bearing, release target and priority, stalled-fallback re-issue, vanilla early-exit parity, snapshot slice odds). Runtime proof is the BC7 in-game smoke: a reserve commit converted to a courier order under order delays, a doctrine/Reserve-role rollback (`[TacticalReserveDrift]`), and `[OrderArbiter]` rows with Withdrawal / ReserveRelease sources.
