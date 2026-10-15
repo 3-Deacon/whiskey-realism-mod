@@ -33,8 +33,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     OrderExecutorRuntime, never here.
     //   GetAttachedUnitsReg(excludedechainedunits) 119865: group orders skip a
     //     detached subtree; PostureSense.CollectRotatableRegiments follows it.
-    //   Regiment.AddPath area costs 130364-130394 (R5): PostureNavAreaCosts,
-    //     applied before every NavMesh.CalculatePath of the path probe.
+    //   Regiment.AddPath area costs 130364-130394 (R5): PostureNavAreaCosts, set on a
+    //     NavMeshQueryFilter the path probe passes to NavMesh.CalculatePath (BC10): the
+    //     global area costs, which every AddPath rewrites, are never written.
     //
     //   AIBattle.BlockedMovingOrder 3054-3150 (UpdateOrders 3382): an
     //     objective-type group move over 150 m carries
@@ -80,6 +81,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side,
             // consumed only by this producer (TryNavPlan).
             public readonly NavPlanBudget Nav = new NavPlanBudget(4);
+            // BC10 decision 4: the NavMesh query filter of the path probe, built once per
+            // snapshot from the live area costs plus AddPath's battle costs.
+            public NavMeshQueryFilter NavFilter;
+            public bool NavFilterReady;
             public int LastOwnCount;
             public bool NavDeferred;
             public readonly List<float> SupportMainX = new List<float>(8);
@@ -135,6 +140,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             t.Nav.NextApply(t.LastOwnCount);
+            t.NavFilterReady = false;
             t.LastOwnCount = n;
             t.SupportMainBuilt = false;
             t.TickId = s.TickId;
@@ -933,35 +939,46 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             var lateral = new Vector3(-direction.z, 0f, direction.x);
             var threat = new Vector3(threatX, 0f, threatZ);
             var waypoint = new Vector3(rec.LastWaypointX, 0f, rec.LastWaypointZ);
-            ApplyVanillaPathAreaCosts();
+            EnsureNavFilter(t);
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
             return new[]
             {
-                Sample(t, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint),
-                Sample(t, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
-                Sample(t, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
+                Sample(t, grid, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint),
+                Sample(t, grid, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
+                Sample(t, grid, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
             };
         }
 
-        // R5: AddPath's battle area costs before probing; every AddPath sets them again.
-        private static void ApplyVanillaPathAreaCosts()
+        // R5 / BC10 decision 4: AddPath's battle costs (roads, bridges, fences, rivers) for the
+        // probe's pathfinding, on a query filter instead of the global NavMesh area costs. A
+        // fresh filter prices every area at 1, so every area's live cost is copied first
+        // (areaMask all areas, agent type 0: the overload vanilla's CalculatePath uses).
+        private static void EnsureNavFilter(PostureTick.State t)
         {
+            if (t.NavFilterReady) return;
+            t.NavFilterReady = true;
+            var filter = new NavMeshQueryFilter { areaMask = NavMesh.AllAreas, agentTypeID = 0 };
             try
             {
                 bool frozen = GameVars.isfrozen();
-                for (int a = 0; a < PostureNavAreaCosts.AreaNames.Length; a++)
+                for (int a = 0; a < NavAreaCount; a++) filter.SetAreaCost(a, NavMesh.GetAreaCost(a));
+                for (int k = 0; k < PostureNavAreaCosts.AreaNames.Length; k++)
                 {
-                    int area = NavMesh.GetAreaFromName(PostureNavAreaCosts.AreaNames[a]);
-                    if (area >= 0) NavMesh.SetAreaCost(area, PostureNavAreaCosts.Cost(a, frozen));
+                    int area = NavMesh.GetAreaFromName(PostureNavAreaCosts.AreaNames[k]);
+                    if (area >= 0 && area < NavAreaCount) filter.SetAreaCost(area, PostureNavAreaCosts.Cost(k, frozen));
                 }
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("tactical-producer-posture:area-cost-failed",
-                    "[PostureProducer] NavMesh area costs failed: " + ex.Message);
+                OnceLog.Warning("tactical-producer-posture:nav-filter-failed",
+                    "[PostureProducer] NavMesh query filter costs failed, the probe prices every area at 1: " + ex.GetType().Name + " " + ex.Message);
             }
+            t.NavFilter = filter;
         }
 
-        private static TacticalPathQualitySample Sample(PostureTick.State t, int selfId, Vector3 own, Vector3 candidate,
+        private const int NavAreaCount = 32; // NavMeshQueryFilter's cost table size
+
+        private static TacticalPathQualitySample Sample(PostureTick.State t, BattleTerrainGrid grid, int selfId, Vector3 own, Vector3 candidate,
             CommandTaskType task, bool hasThreat, Vector3 threat, bool hasWaypoint, Vector3 waypoint)
         {
             float slopeCost = 0f, terrainRisk = 0f, bridgeRisk = 0f, congestion = 0f, roadPreference = 0f;
@@ -970,7 +987,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             try
             {
                 var path = new NavMeshPath();
-                bool found = NavMesh.CalculatePath(own, candidate, NavMesh.AllAreas, path);
+                bool found = NavMesh.CalculatePath(own, candidate, t.NavFilter, path);
                 Vector3[] corners = path.corners;
                 int count = corners != null ? corners.Length : 0;
                 if (!found || path.status != NavMeshPathStatus.PathComplete || count <= 0)
@@ -979,7 +996,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 }
                 else
                 {
-                    roadPreference = count <= 3 ? 0.65f : 0.25f;
                     congestion = Math.Min(1f, Math.Max(0f, (count - 4) * 0.12f));
                     float previousHeight = SampleHeight(own);
                     for (int c = 0; c < count; c++)
@@ -987,20 +1003,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         float height = SampleHeight(corners[c]);
                         slopeCost = Math.Max(slopeCost, Math.Min(1f, Math.Abs(height - previousHeight) / 35f));
                         previousHeight = height;
-                        int terrain = TerrainAt(corners[c]);
-                        if (terrain == 4 || terrain == 8 || terrain == 6)
-                        {
-                            terrainRisk = Math.Max(terrainRisk, 0.85f);
-                            bridgeRisk = Math.Max(bridgeRisk, 0.70f);
-                        }
-                        if (NearCrossingTerrain(corners[c])) bridgeRisk = Math.Max(bridgeRisk, 0.55f);
                     }
+                    // BC10 decision 5: what the polyline walks on, sampled every 10 m on the grid.
+                    PathTerrainScore terrain = ScoreCorners(grid, corners, count);
+                    roadPreference = terrain.RoadShare;
+                    terrainRisk = terrain.TerrainRisk;
+                    bridgeRisk = terrain.BridgeRisk;
                 }
 
                 if (hasThreat)
                 {
                     float distance = Flat(candidate, threat);
-                    deadGround = distance >= 250f ? 0.70f : Math.Max(0f, distance / 250f * 0.45f);
+                    deadGround = PathTerrainScorer.DeadGround(hasThreat, TerrainBlocksSight(threat, candidate));
                     threatExposure = distance <= 100f ? 1f : Math.Max(0f, 1f - ((distance - 100f) / 350f));
                     artilleryDanger = threatExposure * (1f - deadGround) * 0.40f;
                     if (task == CommandTaskType.FallBackToLine)
@@ -1023,6 +1037,55 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 candidate.x, candidate.z, roadPreference, slopeCost, congestion, terrainRisk, bridgeRisk, deadGround,
                 t.Friendly.EstimateFrontBlocker(selfId, own.x, own.z, candidate.x, candidate.z),
                 threatExposure, routeContinuity, reservationPressure, fallbackLaneConflict, artilleryDanger);
+        }
+
+        private static float[] _cornerX = new float[64];
+        private static float[] _cornerZ = new float[64];
+
+        private static PathTerrainScore ScoreCorners(BattleTerrainGrid grid, Vector3[] corners, int count)
+        {
+            if (grid == null) return default(PathTerrainScore);
+            if (_cornerX.Length < count)
+            {
+                _cornerX = new float[count * 2];
+                _cornerZ = new float[count * 2];
+            }
+            for (int c = 0; c < count; c++)
+            {
+                _cornerX[c] = corners[c].x;
+                _cornerZ[c] = corners[c].z;
+            }
+            return PathTerrainScorer.Score(grid, _cornerX, _cornerZ, count);
+        }
+
+        // Dead ground: a Map-layer raycast from the threat's eye to the candidate's eye, +4 m
+        // each, as vanilla's own visibility paint casts (FogOfWar.DrawVisibility 101061-101063,
+        // Physics.Raycast(startpos + 4 m, direction, range, LayerMask "Map")).
+        private const float EyeHeightMeters = 4f;
+        private static int _mapLayerMask;
+        private static bool _mapLayerResolved;
+
+        private static bool TerrainBlocksSight(Vector3 threat, Vector3 candidate)
+        {
+            if (!_mapLayerResolved)
+            {
+                _mapLayerResolved = true;
+                try { _mapLayerMask = LayerMask.GetMask("Map"); }
+                catch { _mapLayerMask = 0; }
+            }
+            if (_mapLayerMask == 0) return false;
+            try
+            {
+                var from = new Vector3(threat.x, SampleHeight(threat) + EyeHeightMeters, threat.z);
+                var to = new Vector3(candidate.x, SampleHeight(candidate) + EyeHeightMeters, candidate.z);
+                Vector3 ray = to - from;
+                float distance = ray.magnitude;
+                return distance > 1f && Physics.Raycast(from, ray, distance, _mapLayerMask);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static float Flat(Vector3 a, Vector3 b)
@@ -1050,20 +1113,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 return point.y;
             }
-        }
-
-        private static int TerrainAt(Vector3 point)
-        {
-            try { return BattlefieldSetup.GetCurrentTerrainOnPos(point); }
-            catch { return -1; }
-        }
-
-        private static readonly int[] CrossingTerrain = { 4, 8 };
-
-        private static bool NearCrossingTerrain(Vector3 point)
-        {
-            try { return BattlefieldSetup.SearchTerrainInRangePos(point, CrossingTerrain, 2) != null; }
-            catch { return false; }
         }
 
         // BattleUnits keeps the scene's BattlefieldSetup in a private static (set at

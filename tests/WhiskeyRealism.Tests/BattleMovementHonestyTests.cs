@@ -48,6 +48,14 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 ApplyOverwritesTheRawVanillaCode", ApplyOverwritesTheRawVanillaCode),
             ("bc10 ChargeBarsOnPerceivedOutflankNotRaw", ChargeBarsOnPerceivedOutflankNotRaw),
             ("bc10 PerceivedFlankingAllocatesNothingAfterWarmup", PerceivedFlankingAllocatesNothingAfterWarmup),
+            // path probe
+            ("bc10 RoadShareCountsRoadAndBridgeSamples", RoadShareCountsRoadAndBridgeSamples),
+            ("bc10 BridgePathIsNotRiverRisk", BridgePathIsNotRiverRisk),
+            ("bc10 FordPathIsChokeNotRisk", FordPathIsChokeNotRisk),
+            ("bc10 FenceOnPathIsRisk", FenceOnPathIsRisk),
+            ("bc10 FrozenRiverIsNotRisk", FrozenRiverIsNotRisk),
+            ("bc10 DeadGroundNeedsAThreat", DeadGroundNeedsAThreat),
+            ("bc10 PathProbeUsesAQueryFilterNotTheGlobalAreaCosts", PathProbeUsesAQueryFilterNotTheGlobalAreaCosts),
         });
     }
 

@@ -1470,9 +1470,9 @@ namespace WhiskeyRealism.Tactical.Operations
 
     // R5: NavMesh area costs are global and Regiment.AddPath rewrites them for
     // every path (130364-130394), so the posture producer's path-quality probe
-    // sets AddPath's battle costs (roads allowed, path not interrupted) before
-    // every NavMesh.CalculatePath instead of running on whatever the last
-    // AddPath left.
+    // puts AddPath's battle costs (roads allowed, path not interrupted) on its own
+    // NavMeshQueryFilter for NavMesh.CalculatePath instead of running on whatever
+    // the last AddPath left, and instead of writing the global costs itself (BC10).
     public static class PostureNavAreaCosts
     {
         public static readonly string[] AreaNames =
