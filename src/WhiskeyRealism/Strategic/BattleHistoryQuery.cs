@@ -19,6 +19,18 @@ namespace WhiskeyRealism.Strategic
             int currentDaySerial,
             int withinDays)
         {
+            return Near(history, position.x, position.z, maxDistance, currentDaySerial, withinDays);
+        }
+
+        // The pure form (the planner's files hold positions as float X, Z, not Unity vectors).
+        public static IEnumerable<BattleHistoryRecord> Near(
+            IReadOnlyList<BattleHistoryRecord> history,
+            float x,
+            float z,
+            float maxDistance,
+            int currentDaySerial,
+            int withinDays)
+        {
             if (history == null || history.Count == 0) yield break;
             float maxDistSq = maxDistance * maxDistance;
             for (int i = 0; i < history.Count; i++)
@@ -27,8 +39,8 @@ namespace WhiskeyRealism.Strategic
                 if (record == null) continue;
                 int recordDay = LegacySerial(record.Year, record.Month, record.Day);
                 if (currentDaySerial - recordDay > withinDays || recordDay > currentDaySerial) continue;
-                float dx = record.PositionX - position.x;
-                float dz = record.PositionZ - position.z;
+                float dx = record.PositionX - x;
+                float dz = record.PositionZ - z;
                 if (dx * dx + dz * dz > maxDistSq) continue;
                 yield return record;
             }

@@ -87,6 +87,7 @@ internal static class ReconPlannerTests
             ("ReconFlagIsBoundAndRead", ReconFlagIsBoundAndRead),
             ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
             ("ReconRowRoutesToTheRegisteredEvent", ReconRowRoutesToTheRegisteredEvent),
+            ("ReconFilesHoldNoUnityTypes", ReconFilesHoldNoUnityTypes),
         });
     }
 
@@ -1404,6 +1405,19 @@ internal static class ReconPlannerTests
         AssertEqual(WhiskeyRealism.Telemetry.TelemetryLayer.Campaign, route.Layer, "on the campaign layer");
         AssertEqual(WhiskeyRealism.Telemetry.TelemetryCategory.State, route.Category, "as state");
         AssertTrue(counts.Row(1).StartsWith("[Recon] alliance=1 screens=2 "), "the plan's row text");
+    }
+
+    // Pure means no Unity or vanilla types (plan Global Constraints): positions are float X, Z. The probe verdict
+    // reaches ContactEvidenceLedger and BattleHistoryQuery.Near through their float forms for that reason.
+    private static void ReconFilesHoldNoUnityTypes()
+    {
+        foreach (string file in new[] { "ReconPlanner.cs", "ReconMissionLedger.cs", "ReconOrders.cs", "ReconStep.cs" })
+        {
+            string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/" + file);
+            AssertFalse(src.Contains("UnityEngine") || Regex.IsMatch(src, @"\bVector[23]\b"), file + " holds no Unity type");
+        }
+        string evidence = ReadRepoFile("src/WhiskeyRealism/Strategic/ContactEvidenceLedger.cs");
+        AssertFalse(evidence.Contains("UnityEngine") || evidence.Contains("TargetPosition"), "the evidence ledger's input is float X, Z");
     }
 
     private static void ReconFlagIsBoundAndRead()

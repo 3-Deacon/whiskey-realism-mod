@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
@@ -72,7 +71,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 var input = new ContactEvidenceInput
                 {
                     ObservingAllianceId = s.Alliance,
-                    TargetPosition = new Vector3(objective.TargetX, 0f, objective.TargetZ),
+                    TargetX = objective.TargetX,
+                    TargetZ = objective.TargetZ,
                     CurrentEnemyStrength = enemy,
                     CurrentFriendlyStrength = plan.MassStrength,
                     PreviousObservedEnemyStrength = m.ObservedEnemyStrength >= 0f ? m.ObservedEnemyStrength : enemy,

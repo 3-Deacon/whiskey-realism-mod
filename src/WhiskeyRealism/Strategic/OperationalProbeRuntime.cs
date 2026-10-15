@@ -106,7 +106,8 @@ namespace WhiskeyRealism.Strategic
                 var contactInput = new ContactEvidenceInput
                 {
                     ObservingAllianceId = allianceId,
-                    TargetPosition = target.Value,
+                    TargetX = target.Value.x,
+                    TargetZ = target.Value.z,
                     CurrentEnemyStrength = input.CurrentEnemyStrength,
                     CurrentFriendlyStrength = input.CurrentFriendlyStrength,
                     BeliefConfidence01 = localEnemyConfidence01,

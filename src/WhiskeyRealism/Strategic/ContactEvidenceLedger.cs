@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -18,7 +17,7 @@ namespace WhiskeyRealism.Strategic
     internal sealed class ContactEvidenceInput
     {
         public int ObservingAllianceId;
-        public Vector3 TargetPosition;
+        public float TargetX, TargetZ;
         public float CurrentEnemyStrength;
         public float CurrentFriendlyStrength;
         public float PreviousObservedEnemyStrength;
@@ -71,7 +70,8 @@ namespace WhiskeyRealism.Strategic
             {
                 foreach (var record in BattleHistoryQuery.Near(
                     input.BattleHistory,
-                    input.TargetPosition,
+                    input.TargetX,
+                    input.TargetZ,
                     input.SpatialMaxDistance,
                     input.CurrentDaySerial,
                     input.WithinDays))
