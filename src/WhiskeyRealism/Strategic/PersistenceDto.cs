@@ -33,6 +33,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("frontChangedDay")] public int? FrontChangedDay;
         [JsonProperty("capitalStreakDay")] public int? CapitalStreakDay;
         [JsonProperty("probeHysteresis")] public ProbeHysteresisDto ProbeHysteresis;
+        // Stage E need-driven policy: smoothed needs (NeedKind order) and the ledger's pick.
+        [JsonProperty("policyNeeds")] public float[] PolicyNeeds;
+        [JsonProperty("policyPick")] public int? PolicyPick;
     }
 
     internal class OperationalProbeStateDto
