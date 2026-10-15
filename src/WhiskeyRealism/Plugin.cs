@@ -93,6 +93,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
+        internal ConfigEntry<bool> EnableNeedDrivenPolicySelection;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
@@ -647,6 +648,15 @@ namespace WhiskeyRealism
                 "Default ON. AI CICs plan named historical operations when one fits. With no matching profile the CIC uses a generic plan only on " +
                 "objectives vanilla itself would pick that have towns/IIPs; otherwise vanilla picks. A phase in a defensive posture never sets the " +
                 "campaign objective. Off: historical operations are skipped and only generic plans are built.");
+            EnableNeedDrivenPolicySelection = Config.Bind(
+                "Strategic",
+                "Enable Need-Driven Policy Selection",
+                true,
+                "Default ON. When an alliance the daily review runs for has nothing in policy research, starts the policy its war needs most " +
+                "(credit, manpower, recognition, blockade, industry...), with the faction's vanilla AI personality list as a strong preference and " +
+                "irreversible acts held back until their need is high. Never cancels research, never acts for a non-career player alliance or a " +
+                "career Commander-in-Chief player. Off: vanilla Policies.CheckAIPolicyChange picks. The player's in-progress research is protected " +
+                "from vanilla's emergency cancel under the master switch either way.");
             EnableDefenseIntentLedger = Config.Bind(
                 "Defense Intent Ledger",
                 "Enable Defense Intent Ledger",
