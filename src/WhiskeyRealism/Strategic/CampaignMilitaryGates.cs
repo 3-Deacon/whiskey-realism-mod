@@ -7,6 +7,20 @@ namespace WhiskeyRealism.Strategic
     // Pure decision helpers for the campaign military write surfaces (WS C2a).
     // Runtime adapters and Harmony patches gather vanilla state and call these;
     // nothing here touches Unity objects, so the console harness covers them.
+    internal readonly struct CapitalForce
+    {
+        internal readonly float Distance;
+        internal readonly float Strength;
+        internal readonly float Morale;
+
+        internal CapitalForce(float distance, float strength, float morale)
+        {
+            Distance = distance;
+            Strength = strength;
+            Morale = morale;
+        }
+    }
+
     internal static class CampaignMilitaryGates
     {
         // ---- C-DefIntent: sea-invasion landed signal -------------------------
@@ -100,6 +114,77 @@ namespace WhiskeyRealism.Strategic
             if (closestAreaDistance > maxOffensiveDistance) return false;
             if (targetOwnPoints > targetSupplyCapacity) return false;
             return vanillaValueClause;
+        }
+
+        // ---- C-DefOps -------------------------------------------------------
+        // Vanilla AICampaign.AssignUnitToDefendCapital (decompile 11668):
+        //   num3 = closest enemy distance (each max(1, d)), start 9999
+        //   num2 = aiminimumstrengthformovement
+        //        + sum over enemies with d < aimaximumdistancetosearchforunitrelocations of
+        //          min(str, str*morale) / max(10, d)^0.3 * 0.5
+        //        - sum over own units with |lastwaypoint - capital| < num3 of str*morale
+        // Enemy.Distance = distance to the capital; own.Distance = distance from the
+        // unit's last waypoint to the capital.
+        internal static float VanillaCapitalDefenseNeed(float baseMinimum, float searchRadius,
+            System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own)
+        {
+            return CapitalDefenseNeed(baseMinimum, searchRadius, enemies, own, null, 1f, 1f);
+        }
+
+        // Personality-weighted variant: the base and the enemy pressure scale by the
+        // CIC strength-gate and capital-value multipliers, and pledged defenders that
+        // are still marching (waypoint not yet inside the closest-enemy ring, so not
+        // already subtracted as own units) count at 0.75 of morale-weighted strength.
+        internal static float PersonalityCapitalDefenseNeed(float baseMinimum, float searchRadius,
+            System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own,
+            System.Collections.Generic.IList<CapitalForce> pledged, float strengthMultiplier, float capitalMultiplier)
+        {
+            return CapitalDefenseNeed(baseMinimum, searchRadius, enemies, own, pledged, strengthMultiplier, capitalMultiplier);
+        }
+
+        private static float CapitalDefenseNeed(float baseMinimum, float searchRadius,
+            System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own,
+            System.Collections.Generic.IList<CapitalForce> pledged, float strengthMultiplier, float capitalMultiplier)
+        {
+            float closestEnemy = 9999f;
+            float need = baseMinimum * strengthMultiplier * capitalMultiplier;
+            if (enemies != null)
+            {
+                for (int i = 0; i < enemies.Count; i++)
+                {
+                    float d = Math.Max(1f, enemies[i].Distance);
+                    if (d < closestEnemy) closestEnemy = d;
+                    if (d < searchRadius)
+                    {
+                        float pressure = Math.Min(enemies[i].Strength, enemies[i].Strength * enemies[i].Morale);
+                        need += pressure / (float)Math.Pow(Math.Max(10f, d), 0.3f) * 0.5f * strengthMultiplier;
+                    }
+                }
+            }
+            if (own != null)
+            {
+                for (int i = 0; i < own.Count; i++)
+                    if (own[i].Distance < closestEnemy)
+                        need -= own[i].Strength * own[i].Morale;
+            }
+            if (pledged != null)
+            {
+                for (int i = 0; i < pledged.Count; i++)
+                {
+                    if (pledged[i].Distance < closestEnemy) continue; // already counted as own
+                    need -= pledged[i].Strength * Math.Max(0.25f, pledged[i].Morale) * 0.75f;
+                }
+            }
+            return need;
+        }
+
+        // Pledge before vanilla runs only when vanilla's own num2 > 0 too: then
+        // vanilla neither strips the pledge (its num2 <= 0 branch removes the
+        // farthest defender every call) and its move loop (11829) moves it this
+        // call. Personality chooses the candidate and adds it alongside vanilla's.
+        internal static bool ShouldPrePledgeCapitalDefender(float vanillaNeed, float personalityNeed)
+        {
+            return vanillaNeed > 0f && personalityNeed > 0f;
         }
 
         internal static float Clamp(float value, float min, float max)

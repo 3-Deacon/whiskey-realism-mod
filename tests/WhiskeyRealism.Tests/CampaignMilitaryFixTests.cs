@@ -25,6 +25,9 @@ internal static class CampaignMilitaryFixTests
         SuccessionRoleNeverTargetsPlayerOrWrongFront();
         SuccessionGeneralInChiefIsNotAnArmyGroup();
         StalePreviousCommandIsRefilledNotOrphaned();
+        CapitalNeedMatchesVanillaFormula();
+        CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
+        CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
     }
 
     private static void LogPass(string message)
@@ -301,5 +304,49 @@ internal static class CampaignMilitaryFixTests
             CommanderAssignmentGuard.ResolvePreviousCommandAction(staleReference: false, replacementInProgress: false),
             "nothing stale -> nothing to do");
         LogPass("c2a stale previous command is refilled by vanilla, never orphaned");
+    }
+
+    // C-DefOps: vanilla AssignUnitToDefendCapital (decompile 11668) computes
+    // num2 = aiminimumstrengthformovement + enemy pressure - own units whose
+    // last waypoint is closer than the closest enemy; when num2 <= 0 it removes
+    // the FARTHEST defender every call (~11778). A pledge vanilla does not also
+    // need is therefore stripped next call: the old Postfix churned forever.
+    private static void CapitalNeedMatchesVanillaFormula()
+    {
+        var enemies = new[] { new CapitalForce(100f, 10000f, 0.8f), new CapitalForce(700f, 5000f, 1f) };
+        var own = new[] { new CapitalForce(50f, 2000f, 0.5f), new CapitalForce(150f, 9000f, 1f) };
+        float need = CampaignMilitaryGates.VanillaCapitalDefenseNeed(500f, 650f, enemies, own);
+        // closest enemy 100; only the first enemy is inside 650; pressure = min(10000, 8000)/100^0.3*0.5
+        float pressure = 8000f / (float)Math.Pow(100f, 0.3f) * 0.5f;
+        // own: waypoint 50 < 100 subtracts 2000*0.5; waypoint 150 does not
+        float expected = 500f + pressure - 1000f;
+        TestHarness.AssertTrue(Math.Abs(expected - need) < 0.01f, "vanilla num2 reproduced: expected " + expected + " got " + need);
+        float noEnemies = CampaignMilitaryGates.VanillaCapitalDefenseNeed(500f, 650f, new CapitalForce[0], own);
+        // closest enemy distance stays 9999, so every own unit with a waypoint counts
+        TestHarness.AssertTrue(Math.Abs((500f - 1000f - 9000f) - noEnemies) < 0.01f, "no enemy -> all own waypoints count");
+        LogPass("c2a capital need matches vanilla num2 formula");
+    }
+
+    private static void CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders()
+    {
+        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(800f, 1200f), "both need -> pledge before vanilla's move loop");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(-50f, 1200f), "vanilla sufficient -> it would strip the pledge next call");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(800f, -10f), "personality satisfied -> leave it to vanilla");
+        LogPass("c2a capital pre-pledge only when vanilla also needs defenders");
+    }
+
+    private static void CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders()
+    {
+        var enemies = new[] { new CapitalForce(100f, 10000f, 1f) };
+        var own = new[] { new CapitalForce(50f, 4000f, 1f) };
+        // the same unit is a pledged defender: it already counted via its waypoint
+        var pledgedArrived = new[] { new CapitalForce(50f, 4000f, 1f) };
+        var pledgedMarching = new[] { new CapitalForce(400f, 4000f, 1f) };
+        float baseNeed = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, new CapitalForce[0], 1f, 1f);
+        float arrived = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, pledgedArrived, 1f, 1f);
+        float marching = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, pledgedMarching, 1f, 1f);
+        TestHarness.AssertTrue(Math.Abs(baseNeed - arrived) < 0.01f, "arrived defender not subtracted twice");
+        TestHarness.AssertTrue(Math.Abs((baseNeed - 3000f) - marching) < 0.01f, "marching defender counts at 0.75 strength");
+        LogPass("c2a capital personality need does not double count pledged defenders");
     }
 }

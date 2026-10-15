@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -9,11 +10,21 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // v0.2.2 concrete steering for vanilla AICampaign.AssignUnitToDefendCapital.
-    // Vanilla computes whether the capital is under-defended, picks one eligible
-    // unit, and then moves all capital-defense groups. We run after vanilla and
-    // add one extra eligible group only when the active CIC personality makes
-    // the capital-defense strength gate stricter. Vanilla owns the later move.
+    // v0.2.2 concrete steering for vanilla AICampaign.AssignUnitToDefendCapital
+    // (decompile 11668). Vanilla computes num2 (capital defense need), drops
+    // invalid defenders, removes the FARTHEST defender when num2 <= 0 (~11778),
+    // adds the closest eligible unit when num2 > 0, then moves every
+    // groupstodefendcapital entry toward the capital (~11829).
+    //
+    // 2026-10-14 (C-DefOps): this used to be a Postfix that added a candidate
+    // AFTER vanilla's move loop, whenever the personality gate was stricter than
+    // vanilla's. The unit never moved, vanilla stripped it as "farthest" the
+    // next call (num2 <= 0), the Postfix re-added it and stripped it from its
+    // other operations again: permanent churn. Now a Prefix pre-pledges the
+    // personality-chosen candidate only when vanilla's own num2 > 0 as well
+    // (CampaignMilitaryGates.ShouldPrePledgeCapitalDefender), so vanilla keeps
+    // it and its move loop moves it this call. Units the coastal-defense runner
+    // has custom-ordered are never pledged.
     [HarmonyPatch(typeof(AICampaign), "AssignUnitToDefendCapital")]
     [HarmonyPriority(Priority.High)]
     internal static class DefensiveOpsPatch
@@ -29,8 +40,8 @@ namespace WhiskeyRealism.Patches
         private static bool _removeUnitResolved;
         private static MethodInfo _removeUnitMethod;
 
-        [HarmonyPostfix]
-        internal static void Postfix(int _aifaction)
+        [HarmonyPrefix]
+        internal static void Prefix(int _aifaction)
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
@@ -68,12 +79,12 @@ namespace WhiskeyRealism.Patches
                     var capitalDefenders = ReadList(faction, "groupstodefendcapital", "defensiveops:field:capitaldefenders");
                     if (ownUnits == null || enemyUnits == null || capitalDefenders == null) return;
 
-                    float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown);
-                    if (required <= 0f) return;
+                    float vanillaNeed = CalculateRequiredDefense(ownUnits, enemyUnits, null, capitalPosition, default(PersonalityVector), null, vanillaOnly: true);
+                    float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown, vanillaOnly: false);
 
-                    // Scale the capital defense gate by the director's CapitalDefenseBudgetModifier.
-                    // A positive modifier (e.g., TooFastCollapse → +0.10) raises the effective strength
-                    // gate, causing the patch to add a defender when the vanilla threshold would not.
+                    // Scale the personality need by the director's CapitalDefenseBudgetModifier.
+                    // A positive modifier (e.g., TooFastCollapse → +0.10) raises the need. It can
+                    // only add a defender alongside vanilla's own (vanillaNeed > 0), never against it.
                     // Default preserved when coordinator or posture is absent.
                     try
                     {
@@ -82,12 +93,15 @@ namespace WhiskeyRealism.Patches
                         {
                             float capitalMod = directorMemories[allianceId]?.LastPosture?.CapitalDefenseBudgetModifier ?? 0f;
                             float capitalFraction = Clamp(1f + capitalMod, 0.90f, 1.30f);
-                            required *= capitalFraction;
+                            if (required > 0f) required *= capitalFraction;
                         }
                     }
                     catch { }
 
+                    if (!CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(vanillaNeed, required)) return;
+
                     var candidate = FindCandidate(
+                        allianceId,
                         _aifaction,
                         ownUnits,
                         capitalDefenders,
@@ -107,12 +121,12 @@ namespace WhiskeyRealism.Patches
 
                     TelemetryRouter.LegacyInfo(
                         $"[DefenseIntent] alliance={allianceId} capital={capitalName} " +
-                        $"assigned=1 need={required:F0} caution={personality.Caution:F2}",
+                        $"pre-pledged=1 need={required:F0} vanillaNeed={vanillaNeed:F0} caution={personality.Caution:F2}",
                         TelemetryLayer.Campaign);
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("defensiveops:postfix", "[Patch:DefensiveOps] postfix failed: " + ex.Message);
+                    OnceLog.Warning("defensiveops:prefix", "[Patch:DefensiveOps] prefix failed: " + ex.Message);
                 }
             }
         }
@@ -174,49 +188,82 @@ namespace WhiskeyRealism.Patches
             return null;
         }
 
+        // Builds the CampaignMilitaryGates inputs from live lists. vanillaOnly
+        // reproduces vanilla num2 exactly (11700-11740); otherwise the personality
+        // multipliers and search radius apply and pledged defenders that vanilla
+        // keeps (its own validity filter, 11745) count while still marching.
         private static float CalculateRequiredDefense(
             IList ownUnits,
             IList enemyUnits,
             IList capitalDefenders,
             Vector3 capitalPosition,
             PersonalityVector personality,
-            CampaignMapTown capitalTown)
+            CampaignMapTown capitalTown,
+            bool vanillaOnly)
         {
-            float closestEnemyDistance = 9999f;
-            float searchRadius = GamePrefs.aimaximumdistancetosearchforunitrelocations * SearchRadiusMultiplier(personality);
-            float required = GamePrefs.aiminimumstrengthformovement *
-                StrengthGateMultiplier(personality) *
-                CapitalValueMultiplier(capitalTown);
-
+            var enemies = new List<CapitalForce>(enemyUnits.Count);
             for (int i = 0; i < enemyUnits.Count; i++)
             {
                 var enemy = enemyUnits[i] as Regiment;
                 if (enemy == null) continue;
-                float distance = Mathf.Max(1f, Tools.GetXZDistance(((Component)enemy).transform.position, capitalPosition));
-                if (distance < closestEnemyDistance) closestEnemyDistance = distance;
-                if (distance < searchRadius)
+                enemies.Add(new CapitalForce(
+                    Tools.GetXZDistance(((Component)enemy).transform.position, capitalPosition),
+                    enemy.groupstrengthactive,
+                    enemy.groupmorale));
+            }
+
+            var own = new List<CapitalForce>(ownUnits.Count);
+            for (int i = 0; i < ownUnits.Count; i++)
+            {
+                var unit = ownUnits[i] as Regiment;
+                if (unit == null) continue;
+                own.Add(new CapitalForce(
+                    Tools.GetXZDistance(unit.GetLastWaypointPos(), capitalPosition),
+                    unit.groupstrengthactive,
+                    unit.groupmorale));
+            }
+
+            float baseMinimum = GamePrefs.aiminimumstrengthformovement;
+            if (vanillaOnly)
+            {
+                return CampaignMilitaryGates.VanillaCapitalDefenseNeed(
+                    baseMinimum, GamePrefs.aimaximumdistancetosearchforunitrelocations, enemies, own);
+            }
+
+            var pledged = new List<CapitalForce>();
+            if (capitalDefenders != null)
+            {
+                for (int i = 0; i < capitalDefenders.Count; i++)
                 {
-                    float pressure = Mathf.Min((float)enemy.groupstrengthactive, (float)enemy.groupstrengthactive * enemy.groupmorale);
-                    required += pressure / Mathf.Pow(Mathf.Max(10f, distance), 0.3f) * 0.5f * StrengthGateMultiplier(personality);
+                    var defender = capitalDefenders[i] as Regiment;
+                    if (defender == null || !VanillaKeepsDefender(defender)) continue;
+                    pledged.Add(new CapitalForce(
+                        Tools.GetXZDistance(defender.GetLastWaypointPos(), capitalPosition),
+                        defender.groupstrengthactive,
+                        defender.groupmorale));
                 }
             }
 
-            for (int i = 0; i < ownUnits.Count; i++)
-            {
-                var own = ownUnits[i] as Regiment;
-                if (own == null) continue;
-                if (Tools.GetXZDistance(own.GetLastWaypointPos(), capitalPosition) < closestEnemyDistance)
-                    required -= (float)own.groupstrengthactive * own.groupmorale;
-            }
+            return CampaignMilitaryGates.PersonalityCapitalDefenseNeed(
+                baseMinimum,
+                GamePrefs.aimaximumdistancetosearchforunitrelocations * SearchRadiusMultiplier(personality),
+                enemies,
+                own,
+                pledged,
+                StrengthGateMultiplier(personality),
+                CapitalValueMultiplier(capitalTown));
+        }
 
-            for (int i = 0; i < capitalDefenders.Count; i++)
-            {
-                var pledged = capitalDefenders[i] as Regiment;
-                if (pledged == null) continue;
-                required -= (float)pledged.groupstrengthactive * Mathf.Max(0.25f, pledged.groupmorale) * 0.75f;
-            }
-
-            return required;
+        // Vanilla drops a defender when groupstrength < min, morale < min,
+        // onretreat, or moved by the W&L player (11745).
+        private static bool VanillaKeepsDefender(Regiment defender)
+        {
+            if ((float)defender.groupstrength < GamePrefs.aiminimumstrengthformovement) return false;
+            if (defender.groupmorale < GamePrefs.aiminimummoraleformovement) return false;
+            if (defender.onretreat) return false;
+            try { if (DLC_WL.IsMovedByPlayer(defender)) return false; }
+            catch { }
+            return true;
         }
 
         private static float CapitalValueMultiplier(CampaignMapTown capitalTown)
@@ -232,6 +279,7 @@ namespace WhiskeyRealism.Patches
         }
 
         private static Regiment FindCandidate(
+            int allianceId,
             int aifactionIndex,
             IList ownUnits,
             IList capitalDefenders,
@@ -251,6 +299,7 @@ namespace WhiskeyRealism.Patches
             {
                 var unit = ownUnits[i] as Regiment;
                 if (!EligibleForCapitalDefense(aifactionIndex, unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance)) continue;
+                if (CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, ((UnityEngine.Object)unit).GetInstanceID())) continue;
 
                 float distance = Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition);
                 float readiness = ReadinessStep(unit);

@@ -35,6 +35,17 @@ namespace WhiskeyRealism.Strategic
         private static readonly HashSet<string> _wlCurrentOrderAttempts = new HashSet<string>();
         private static readonly HashSet<string> _logOnceKeys = new HashSet<string>();
 
+        // True while this runner holds `unitInstanceId` on a custom defensive
+        // order for any live threat signature of `allianceId`. Other steering
+        // (capital pledges) must not pull such units away.
+        internal static bool IsCustomOrdered(int allianceId, int unitInstanceId)
+        {
+            if (!_assignedByThreat.TryGetValue(allianceId, out var bySignature)) return false;
+            foreach (var units in bySignature.Values)
+                if (units != null && units.Contains(unitInstanceId)) return true;
+            return false;
+        }
+
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
             try
