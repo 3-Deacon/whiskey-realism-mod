@@ -54,6 +54,7 @@ internal static class TelemetryInfraFixTests
         FaultSiteDetectsModFramesInStack();
         FaultSiteAcceptsOnlyListedExceptionTypes();
         FaultSiteDiarySupplyCycleMatchesVanillaNullHandling();
+        ReflectionGetFieldReadsAndWarnsOncePerMissingField();
     }
 
     private static void LogPass(string message)
@@ -1103,5 +1104,28 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertFalse(VanillaFaultSite.DiarySupplyCycleSafe(14, new float[2]), "short array would throw at index 2");
         TestHarness.AssertTrue(VanillaFaultSite.DiarySupplyCycleSafe(14, new float[4]), "normal array");
         LogPass("fault site diary supply cycle matches vanilla null handling");
+    }
+
+    // ---------------------------------------------------------------- Util/Reflection
+
+    private sealed class ReflectionProbe
+    {
+        private string combinedname = "Ulysses S. Grant";
+        internal string Peek() { return combinedname; }
+    }
+
+    private static void ReflectionGetFieldReadsAndWarnsOncePerMissingField()
+    {
+        OnceLog.Reset();
+        var probe = new ReflectionProbe();
+        TestHarness.AssertEqual("Ulysses S. Grant", WhiskeyRealism.Util.Reflection.GetField<string>(probe, "combinedname"), "reads private field");
+        TestHarness.AssertEqual(null, WhiskeyRealism.Util.Reflection.GetField<string>(null, "combinedname"), "null instance");
+        int before = WhiskeyRealism.Plugin.Log.WarningCount;
+        for (int i = 0; i < 50; i++)
+            TestHarness.AssertEqual(null, WhiskeyRealism.Util.Reflection.GetField<string>(probe, "nosuchfield"), "missing field returns null");
+        TestHarness.AssertEqual(before + 1, WhiskeyRealism.Plugin.Log.WarningCount, "missing field warns once, not per call");
+        GC.KeepAlive(probe.Peek());
+        OnceLog.Reset();
+        LogPass("reflection get field reads and warns once per missing field");
     }
 }
