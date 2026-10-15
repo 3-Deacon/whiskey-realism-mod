@@ -2,7 +2,6 @@ using System;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
-using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;

@@ -990,24 +990,6 @@ namespace WhiskeyRealism.Patches
             catch { return 0; }
         }
 
-        private static bool SafeDoubleQuick(Regiment unit)
-        {
-            try { return unit != null && unit.doublequick; }
-            catch { return false; }
-        }
-
-        private static bool SafeRunning(Regiment unit)
-        {
-            try { return unit != null && unit.running; }
-            catch { return false; }
-        }
-
-        private static bool SafeLieDown(Regiment unit)
-        {
-            try { return unit != null && unit.liedown; }
-            catch { return false; }
-        }
-
         private static bool SafeInEngagement(Regiment unit)
         {
             try { return unit != null && unit.inengagement; }
