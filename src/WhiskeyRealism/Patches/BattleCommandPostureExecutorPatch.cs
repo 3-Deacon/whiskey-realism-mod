@@ -2542,7 +2542,8 @@ namespace WhiskeyRealism.Patches
         // SetGroupFormation places a group child (92060-92075): from the
         // parent's last waypoint and rotation, offset by
         // groupposition.unitoffsetposition[i] (lookup as GetOffsetPositionInGroup)
-        // plus the child's group depth.
+        // plus the child's group depth, then clamped to the map like
+        // RegimentSetPath (131054-131071). No parent or slot → no move.
         private static bool TryFormationSlot(Regiment group, Regiment parent, out Vector3 slot, out float rotation)
         {
             slot = default(Vector3);
@@ -2566,12 +2567,52 @@ namespace WhiskeyRealism.Patches
                 float depth = group.groupposition != null ? group.groupposition.groupdepth : 0f;
                 rotation = parent.lastsetwaypointrotation;
                 LeafFormationSlot.OffsetXZ(anchor.x, anchor.z, rotation, -offset.x, offset.z + depth, out float x, out float z);
+                Vector3 size = TerrainSize();
+                VanillaMapBounds.ClampXZ(x, z, size.x, size.z, out x, out z);
                 slot = new Vector3(x, anchor.y, z);
                 return !IsDefaultVector(slot);
             }
             catch
             {
                 return false;
+            }
+        }
+
+        // Terrain.activeTerrain.terrainData.size for the vanilla map clamp,
+        // read by reflection (UnityEngine.TerrainModule is not referenced);
+        // zero when unavailable, and VanillaMapBounds then leaves the target
+        // unchanged.
+        private static PropertyInfo _activeTerrainProperty;
+        private static PropertyInfo _terrainDataProperty;
+        private static PropertyInfo _terrainSizeProperty;
+        private static bool _terrainReflectionTried;
+
+        private static Vector3 TerrainSize()
+        {
+            try
+            {
+                if (!_terrainReflectionTried)
+                {
+                    _terrainReflectionTried = true;
+                    Type terrainType = AccessTools.TypeByName("UnityEngine.Terrain");
+                    Type terrainDataType = AccessTools.TypeByName("UnityEngine.TerrainData");
+                    _activeTerrainProperty = terrainType != null ? AccessTools.Property(terrainType, "activeTerrain") : null;
+                    _terrainDataProperty = terrainType != null ? AccessTools.Property(terrainType, "terrainData") : null;
+                    _terrainSizeProperty = terrainDataType != null ? AccessTools.Property(terrainDataType, "size") : null;
+                    if (_activeTerrainProperty == null || _terrainDataProperty == null || _terrainSizeProperty == null)
+                        OnceLog.Warning("tactical-command-posture:terrain-size-missing",
+                            "BattleCommandPostureExecutorPatch: Terrain size not readable; leaf targets are not map-clamped");
+                }
+
+                if (_activeTerrainProperty == null || _terrainDataProperty == null || _terrainSizeProperty == null)
+                    return Vector3.zero;
+                object terrain = _activeTerrainProperty.GetValue(null, null);
+                object data = terrain != null ? _terrainDataProperty.GetValue(terrain, null) : null;
+                return data != null ? (Vector3)_terrainSizeProperty.GetValue(data, null) : Vector3.zero;
+            }
+            catch
+            {
+                return Vector3.zero;
             }
         }
 

@@ -81,6 +81,7 @@ internal static class PostureStanceFixTests
         Pass("leaf brigade defers to an active parent order", LeafBrigadeDefersToActiveParentOrder);
         Pass("leaf brigade keeps executor safety gates", LeafBrigadeKeepsExecutorSafetyGates);
         Pass("formation slot mirrors vanilla GetAngleTerrainPosXY math", FormationSlotMirrorsVanillaMath);
+        Pass("waypoint clamp mirrors vanilla RegimentSetPath map bounds", WaypointClampMirrorsVanillaMapBounds);
 
         // B-61state / perf: probe cache keyed on roster, not frame
         Pass("roster signature changes with roster not with frame", RosterSignatureChangesWithRosterOnly);
@@ -589,6 +590,19 @@ internal static class PostureStanceFixTests
     private static LeafMoveDecision Leaf(CommandTaskType task, bool parentActive = false, bool hasSlot = true, bool closeEngaged = false, bool pending = false, bool activeMove = false)
     {
         return LeafBrigadeMovePolicy.Decide(task, parentActive, hasSlot, closeEngaged, pending, activeMove);
+    }
+
+    private static void WaypointClampMirrorsVanillaMapBounds()
+    {
+        // RegimentSetPath 131054-131071: x in [1, size.x - 2], z in [-(size.z - 2), -1].
+        VanillaMapBounds.ClampXZ(500f, -500f, 1000f, 1000f, out float x, out float z);
+        AssertEqual(500f, x, "inside x"); AssertEqual(-500f, z, "inside z");
+        VanillaMapBounds.ClampXZ(-40f, 20f, 1000f, 1000f, out x, out z);
+        AssertEqual(1f, x, "west edge"); AssertEqual(-1f, z, "north edge");
+        VanillaMapBounds.ClampXZ(1150f, -1150f, 1000f, 1000f, out x, out z);
+        AssertEqual(998f, x, "east edge"); AssertEqual(-998f, z, "south edge");
+        VanillaMapBounds.ClampXZ(float.NaN, 3f, 0f, 0f, out x, out z);
+        AssertTrue(float.IsNaN(x) && z == 3f, "no terrain size: unchanged");
     }
 
     private static void LeafBrigadeMovesOnlyForMovementTasks()

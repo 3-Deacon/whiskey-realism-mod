@@ -352,6 +352,23 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // The map clamp vanilla applies to every path target in
+    // Regiment.RegimentSetPath (131054-131071): x in [1, size.x - 2],
+    // z in [-(size.z - 2), -1] (battle maps run along negative z).
+    public static class VanillaMapBounds
+    {
+        public static void ClampXZ(float x, float z, float sizeX, float sizeZ, out float clampedX, out float clampedZ)
+        {
+            clampedX = x;
+            clampedZ = z;
+            if (sizeX <= 3f || sizeZ <= 3f) return;
+            if (clampedX < 1f) clampedX = 1f;
+            if (clampedX > sizeX - 2f) clampedX = sizeX - 2f;
+            if (clampedZ > -1f) clampedZ = -1f;
+            if (clampedZ < -sizeZ + 2f) clampedZ = -sizeZ + 2f;
+        }
+    }
+
     // Roster identity for per-battle caches (#61 perf): a cache built from the
     // unit roster stays valid until a unit is added/removed, a unit routs, or
     // a new battle starts — not merely until the next frame.
