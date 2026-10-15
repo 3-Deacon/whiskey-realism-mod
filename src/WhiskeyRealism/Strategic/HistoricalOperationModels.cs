@@ -95,7 +95,8 @@ namespace WhiskeyRealism.Strategic
         public string OperationName;
         public int AllianceId;
         public Theater Theater;
-        public EraStage Era;
+        public EraStage Era;     // lowest era that matches
+        public EraStage MaxEra;  // highest era that matches (== Era for a single-era profile)
         public int MinChapter;
         public int MaxChapter;
         public int StartMonth;
