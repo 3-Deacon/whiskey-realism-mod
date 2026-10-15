@@ -1960,7 +1960,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ref Battle.UnitRecord unit = ref snapshot.Own[ownIndex];
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 Battle.TroopQuality.SectorBlends(snapshot, ownIndex, Battle.TroopQualityRuntime.Prefs.ExpInfluence,
-                    out float ownBlend, out float enemyBlend);
+                    Battle.TroopQualityRuntime.Prefs.MoraleInfluence, out float ownBlend, out float enemyBlend);
                 return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     band,
                     Math.Max(unit.GroupOwnInRange, unit.GroupStrengthAiGroup),

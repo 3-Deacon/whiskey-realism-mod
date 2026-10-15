@@ -267,6 +267,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // W&L (140537-140549), so drill is the raw field, as vanilla's own calls leave it.
             record.Experience = group ? reg.groupexperience : reg.Experience();
             record.Training = group ? reg.grouptraining : reg.training;
+            record.GroupMorale = group ? reg.groupmorale : 0f;
             record.RegimentPaths = reg.regimentpaths;
             record.QueuedOrders = QueuedOrders(reg);
             record.MovementMode = reg.movementmode;

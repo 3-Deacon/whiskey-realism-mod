@@ -51,6 +51,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // 140537-140549); a group's groupexperience / grouptraining (UpdateGroupStrength
         // 120473 / 120508, divided 120671 / 120674).
         public float Experience, Training;
+        // BC8, groups only (0 for a regiment): groupmorale, the mean morale of the group's
+        // unrouted units (UpdateGroupStrength 120158 / 120670), GetGroupStrength's own morale
+        // term (6054). A group record's Morale stays its own morale field.
+        public float GroupMorale;
         // BC8 break tolerance, own infantry/cavalry regiments only (0 otherwise or with the
         // weighting off): the loss fraction vanilla's rout test reads (LossesAreUnbearable
         // 139831) and the fraction at which it routs (GetUnbearableLossesTrigger 113363-113400,

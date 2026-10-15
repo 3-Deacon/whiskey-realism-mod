@@ -2031,7 +2031,7 @@ namespace WhiskeyRealism.Patches
         {
             int ownIndex = SnapshotIndex(group, out BattleSnapshot snapshot);
             Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
-            TroopQuality.SectorBlends(snapshot, ownIndex, TroopQualityRuntime.Prefs.ExpInfluence, out float ownBlend, out float enemyBlend);
+            TroopQuality.SectorBlends(snapshot, ownIndex, TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out float ownBlend, out float enemyBlend);
             return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 sectorId,
                 group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
@@ -2180,7 +2180,7 @@ namespace WhiskeyRealism.Patches
             float ownBlend = 1f, enemyBlend = 1f;
             if (BattleCore.TryGetSnapshot(SafeAlliance(bunits, side), out BattleSnapshot snapshot))
                 TroopQuality.SideBlends(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount), snapshot.PerceivedEnemyQuality,
-                    TroopQualityRuntime.Prefs.ExpInfluence, out ownBlend, out enemyBlend);
+                    TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out ownBlend, out enemyBlend);
 
             return TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
                 own,

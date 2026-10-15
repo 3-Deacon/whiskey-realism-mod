@@ -13,8 +13,12 @@
 //   alliance gate: floor(Experience() × 5) stars, 0-5, for a regiment (121832-121852; a battle
 //   group shows 0). So a visible enemy regiment's experience is known to the star.
 // - Group strength for AI decisions (GetGroupStrength 6024-6060, AdjustGroupAIStance 4238,
-//   also 5962 / 6269-6270): own / enemy × (1 - ei + groupexperience × ei) / (1 - ei +
-//   enemyexp × ei), ei = expinfluenceonaidecisions. The enemy term is the closest enemy
+//   also 5962 / 6269-6270): own / enemy × (1 - mi + groupmorale × mi) / max(0.01, 1 - mi +
+//   enemymorale × mi) (6052-6055, includemorale) × (1 - ei + groupexperience × ei) /
+//   max(0.01, 1 - ei + enemyexp × ei) (6056-6057, includeexp); mi / ei =
+//   moraleinfluenceonaidecisions / expinfluenceonaidecisions (54712 / 54714, both 0.25).
+//   The enemy morale term is the closest enemy group's unitrange.ownmoraleinrange, a
+//   strength-weighted mean (122750 / 122892); here the perceived morale. The enemy term is the closest enemy
 //   group's unitrange.ownexpinrange (6039-6042), which vanilla accumulates as
 //   Σ Experience() × morale without a strength factor (122751) and divides by
 //   ownstrengthinrange (122894), so it is ≈ 0 for any real force. Not ported: the enemy
@@ -101,6 +105,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool Enabled;
         public float ExpInfluenceOnAiDecisions;   // GamePrefs.expinfluenceonaidecisions (54714; battleprefs 0.25)
         public float InitiativeTriggerInfluence;  // influenceofcommanderinitiativeonattackdefendtrigger (54680; 0.7)
+        public float MoraleInfluenceOnAiDecisions; // GamePrefs.moraleinfluenceonaidecisions (54712; battleprefs 0.25)
         public BreakToleranceRules Break;
         public ChargeOddsRules ChargeOdds;
 
@@ -112,6 +117,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public float ExpInfluence => Enabled ? Clamp01(ExpInfluenceOnAiDecisions) : 0f;
         public float InitiativeInfluence => Enabled ? NonNegative(InitiativeTriggerInfluence) : 0f;
+        public float MoraleInfluence => Enabled ? Clamp01(MoraleInfluenceOnAiDecisions) : 0f;
 
         /// <summary>The side quality a decision may use: Unknown (neutral) when off.</summary>
         public SideQuality Quality(in SideQuality quality)
@@ -163,49 +169,64 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// Vanilla's experience blend for AI strength decisions (6057): 1 - ei + x × ei, the
-        /// experience clamped to [0, 1] (NaN reads as 0) and ei the expinfluenceonaidecisions
+        /// Vanilla's quality blend for AI strength decisions (GetGroupStrength 6052-6057):
+        /// 1 - influence + x × influence, x (experience or morale) clamped to [0, 1] (NaN reads
+        /// as 0) and influence the expinfluenceonaidecisions / moraleinfluenceonaidecisions
         /// pref (0 = neutral).
         /// </summary>
-        public static float AiDecisionBlend(float experience, float expInfluence)
+        public static float AiDecisionBlend(float quality, float influence)
         {
-            float ei = TroopQualityPrefs.Clamp01(expInfluence);
-            return 1f - ei + TroopQualityPrefs.Clamp01(experience) * ei;
+            float w = TroopQualityPrefs.Clamp01(influence);
+            return 1f - w + TroopQualityPrefs.Clamp01(quality) * w;
         }
 
         /// <summary>
-        /// Side-level blends for global odds: own mean experience against the perceived enemy
-        /// mean. Neutral (1, 1) when either side is unknown, so one side is never weighed alone.
+        /// Side-level blends for global odds: own mean experience and morale against the
+        /// perceived enemy means, each through <see cref="AiDecisionBlend"/>, multiplied as
+        /// GetGroupStrength multiplies its morale and experience factors (6054, 6057).
+        /// Neutral (1, 1) when either side is unknown, so one side is never weighed alone.
         /// </summary>
-        public static void SideBlends(in SideQuality own, in SideQuality enemy, float expInfluence,
+        public static void SideBlends(in SideQuality own, in SideQuality enemy, float expInfluence, float moraleInfluence,
             out float ownBlend, out float enemyBlend)
         {
             ownBlend = 1f;
             enemyBlend = 1f;
             if (!own.Known || !enemy.Known) return;
-            ownBlend = AiDecisionBlend(own.Experience, expInfluence);
-            enemyBlend = AiDecisionBlend(enemy.Experience, expInfluence);
+            ownBlend = AiDecisionBlend(own.Experience, expInfluence) * AiDecisionBlend(own.Morale, moraleInfluence);
+            enemyBlend = AiDecisionBlend(enemy.Experience, expInfluence) * AiDecisionBlend(enemy.Morale, moraleInfluence);
         }
 
         /// <summary>
-        /// Blends for one own unit's sector: its own experience (a group's groupexperience)
-        /// against the perceived experience of the closest visible enemy (vanilla's closest
-        /// enemy group, 6039), else the side's perceived mean. Neutral (1, 1) when nothing is
-        /// perceived, the index is out of range or the influence is 0. No allocation.
+        /// Blends for one own unit's sector, GetGroupStrength(includemorale, includeexp) as
+        /// AdjustGroupAIStance reads it (4238; 6052-6057): the group's own groupexperience and
+        /// groupmorale against the perceived experience (stars) and morale of the closest
+        /// visible enemy (vanilla's closest enemy group, 6039), else the side's perceived means
+        /// (visible plus confidence-weighted remembered). Neutral (1, 1) when nothing is
+        /// perceived, the index is out of range or both influences are 0. No allocation.
         /// </summary>
-        public static void SectorBlends(BattleSnapshot s, int ownIndex, float expInfluence,
+        public static void SectorBlends(BattleSnapshot s, int ownIndex, float expInfluence, float moraleInfluence,
             out float ownBlend, out float enemyBlend)
         {
             ownBlend = 1f;
             enemyBlend = 1f;
-            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount || !(expInfluence > 0f)) return;
-            float enemyExperience;
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return;
+            if (!(expInfluence > 0f) && !(moraleInfluence > 0f)) return;
+            float enemyExperience, enemyMorale;
             int closest = s.ClosestVisibleEnemy(ownIndex, out _);
-            if (closest >= 0 && closest < s.ObservationCount) enemyExperience = s.Observations[closest].Experience;
-            else if (s.PerceivedEnemyQuality.Known) enemyExperience = s.PerceivedEnemyQuality.Experience;
+            if (closest >= 0 && closest < s.ObservationCount)
+            {
+                enemyExperience = s.Observations[closest].Experience;
+                enemyMorale = s.Observations[closest].Morale;
+            }
+            else if (s.PerceivedEnemyQuality.Known)
+            {
+                enemyExperience = s.PerceivedEnemyQuality.Experience;
+                enemyMorale = s.PerceivedEnemyQuality.Morale;
+            }
             else return;
-            ownBlend = AiDecisionBlend(s.Own[ownIndex].Experience, expInfluence);
-            enemyBlend = AiDecisionBlend(enemyExperience, expInfluence);
+            ref UnitRecord own = ref s.Own[ownIndex];
+            ownBlend = AiDecisionBlend(own.Experience, expInfluence) * AiDecisionBlend(own.GroupMorale, moraleInfluence);
+            enemyBlend = AiDecisionBlend(enemyExperience, expInfluence) * AiDecisionBlend(enemyMorale, moraleInfluence);
         }
 
         /// <summary>

@@ -45,6 +45,14 @@ internal static class TroopQualityTests
             ("troop-quality FlagOffDisablesBreakAndChargeOdds", FlagOffDisablesBreakAndChargeOdds),
             ("troop-quality OffensiveRatioScaledByInitiative", OffensiveRatioScaledByInitiative),
             ("troop-quality CautiousLeadNeedsMoreForAnOffensive", CautiousLeadNeedsMoreForAnOffensive),
+            ("troop-quality SectorBlendsWeighGroupMorale", SectorBlendsWeighGroupMorale),
+            ("troop-quality SideBlendsWeighMorale", SideBlendsWeighMorale),
+            ("troop-quality LadderAttackBoundaryIsDividedLikeVanillaAttack", LadderAttackBoundaryIsDividedLikeVanillaAttack),
+            ("troop-quality LadderWaitBandIsBelowTheDividedThreshold", LadderWaitBandIsBelowTheDividedThreshold),
+            ("troop-quality LadderDelayingDefenseIsBelowTheDividedThreshold", LadderDelayingDefenseIsBelowTheDividedThreshold),
+            ("troop-quality LadderWithdrawalIsUndividedLikeVanillaRetreat", LadderWithdrawalIsUndividedLikeVanillaRetreat),
+            ("troop-quality LadderProlongedEscalationIsUndivided", LadderProlongedEscalationIsUndivided),
+            ("troop-quality LadderDefensiveHoldAboveTheDividedThreshold", LadderDefensiveHoldAboveTheDividedThreshold),
         });
     }
 
@@ -359,12 +367,15 @@ internal static class TroopQualityTests
             Enabled = true,
             ExpInfluenceOnAiDecisions = 0.25f,
             InitiativeTriggerInfluence = 0.7f,
+            MoraleInfluenceOnAiDecisions = 0.25f,
         };
         AssertNear(0.25f, vanilla.ExpInfluence, 1e-6f, "on: vanilla exp influence");
+        AssertNear(0.25f, vanilla.MoraleInfluence, 1e-6f, "on: vanilla morale influence");
         AssertNear(0.7f, vanilla.InitiativeInfluence, 1e-6f, "on: vanilla initiative influence");
         var off = vanilla;
         off.Enabled = false;
         AssertNear(0f, off.ExpInfluence, 1e-6f, "off: no exp influence");
+        AssertNear(0f, off.MoraleInfluence, 1e-6f, "off: no morale influence");
         AssertNear(0f, off.InitiativeInfluence, 1e-6f, "off: no initiative influence");
         AssertFalse(off.Quality(new SideQuality(0.8f, 0.8f)).Known, "off: side quality unknown (factor 1)");
         AssertTrue(vanilla.Quality(new SideQuality(0.8f, 0.8f)).Known, "on: side quality passes");
@@ -414,7 +425,7 @@ internal static class TroopQualityTests
         s.AddObservation(in far);
         s.AddObservation(in closerRemembered);
         SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 1000f, FlankShiftMeters = 150f });
-        TroopQuality.SectorBlends(s, 0, 0.25f, out float own, out float enemy);
+        TroopQuality.SectorBlends(s, 0, 0.25f, 0f, out float own, out float enemy);
         AssertNear(0.95f, own, 1e-5f, "own: the group's groupexperience 0.8");
         AssertNear(0.775f, enemy, 1e-5f, "enemy: the closest VISIBLE observation (0.1), not the closer remembered one");
 
@@ -425,26 +436,26 @@ internal static class TroopQualityTests
         hidden.AddObservation(in onlyRemembered);
         BattlePerception.Publish(hidden, PerceptionMode.FogGrid, PerceptionFallbackReason.None,
             new[] { onlyRemembered }, 1, PerceptionProbeResult.Create(1));
-        TroopQuality.SectorBlends(hidden, 0, 0.25f, out _, out float fallback);
+        TroopQuality.SectorBlends(hidden, 0, 0.25f, 0f, out _, out float fallback);
         AssertNear(0.875f, fallback, 1e-5f, "no visible enemy: the side's perceived mean (0.5)");
 
         var empty = Begin();
         empty.AddOwn(in group);
         empty.IndexCommandTree(null);
-        TroopQuality.SectorBlends(empty, 0, 0.25f, out float ownAlone, out float none);
+        TroopQuality.SectorBlends(empty, 0, 0.25f, 0f, out float ownAlone, out float none);
         AssertNear(1f, none, 1e-6f, "nothing perceived: neutral enemy blend");
         AssertNear(1f, ownAlone, 1e-6f, "nothing perceived: neutral own blend too (no comparison)");
-        TroopQuality.SectorBlends(s, 0, 0f, out float offOwn, out float offEnemy);
+        TroopQuality.SectorBlends(s, 0, 0f, 0f, out float offOwn, out float offEnemy);
         AssertNear(1f, offOwn, 1e-6f, "weighting off: own neutral");
         AssertNear(1f, offEnemy, 1e-6f, "weighting off: enemy neutral");
     }
 
     private static void SideBlendsNeutralWhenUnknown()
     {
-        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), new SideQuality(0.7f, 0.6f), 0.25f, out float own, out float enemy);
+        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), new SideQuality(0.7f, 0.6f), 0.25f, 0f, out float own, out float enemy);
         AssertNear(0.8f, own, 1e-6f, "own side mean experience 0.2");
         AssertNear(0.9f, enemy, 1e-6f, "perceived mean experience 0.6");
-        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), SideQuality.Unknown, 0.25f, out own, out enemy);
+        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), SideQuality.Unknown, 0.25f, 0.25f, out own, out enemy);
         AssertNear(1f, own, 1e-6f, "unknown enemy: own neutral");
         AssertNear(1f, enemy, 1e-6f, "unknown enemy: enemy neutral");
     }
@@ -683,5 +694,110 @@ internal static class TroopQualityTests
         var timid = CoordinatedOperationPackageLedger.Build(OffensiveInput(
             CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0f, 1f)));
         AssertEqual(CoordinatedOperationDecision.Delay, timid.Decision, "influence 1: 1.3 < 0.85 x 2 = 1.7, the lead waits");
+    }
+
+    // ---------------------------------------------------------------- review follow-ups
+
+    // GetGroupStrength 6052-6055 (includemorale, AdjustGroupAIStance 4238):
+    // × (1 - mi + groupmorale × mi) / max(0.01, 1 - mi + enemymorale × mi),
+    // mi = moraleinfluenceonaidecisions (battleprefs 0.25; 54712).
+    private static void SectorBlendsWeighGroupMorale()
+    {
+        var s = Begin();
+        var group = Regiment(1, 16, 0.7f, 0.8f, extra: UnitFlags.IsGroup);
+        group.GroupMorale = 0.9f;
+        s.AddOwn(in group);
+        s.IndexCommandTree(null);
+        var near = Obs(10, 0.1f, 0.4f);
+        near.Z = -200f;
+        s.AddObservation(in near);
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 1000f, FlankShiftMeters = 150f });
+        TroopQuality.SectorBlends(s, 0, 0.25f, 0.25f, out float own, out float enemy);
+        AssertNear((0.75f + 0.8f * 0.25f) * (0.75f + 0.9f * 0.25f), own, 1e-5f, "own: groupexperience and groupmorale blends");
+        AssertNear((0.75f + 0.1f * 0.25f) * (0.75f + 0.4f * 0.25f), enemy, 1e-5f, "enemy: the closest visible observation's stars and morale");
+        TroopQuality.SectorBlends(s, 0, 0f, 0.25f, out float moraleOnly, out float enemyMoraleOnly);
+        AssertNear(0.75f + 0.9f * 0.25f, moraleOnly, 1e-5f, "morale alone");
+        AssertNear(0.75f + 0.4f * 0.25f, enemyMoraleOnly, 1e-5f, "enemy morale alone");
+
+        var hidden = Begin();
+        hidden.AddOwn(in group);
+        hidden.IndexCommandTree(null);
+        var remembered = Obs(12, 0.5f, 0.6f, remembered: true, confidence: 0.5f);
+        hidden.AddObservation(in remembered);
+        BattlePerception.Publish(hidden, PerceptionMode.FogGrid, PerceptionFallbackReason.None,
+            new[] { remembered }, 1, PerceptionProbeResult.Create(1));
+        TroopQuality.SectorBlends(hidden, 0, 0f, 0.25f, out _, out float fallback);
+        AssertNear(0.75f + 0.6f * 0.25f, fallback, 1e-5f, "no visible enemy: the perceived (remembered) mean morale");
+    }
+
+    private static void SideBlendsWeighMorale()
+    {
+        TroopQuality.SideBlends(new SideQuality(0.8f, 0.2f), new SideQuality(0.5f, 0.6f), 0.25f, 0.25f, out float own, out float enemy);
+        AssertNear(0.8f * 0.95f, own, 1e-6f, "own: experience 0.2, morale 0.8");
+        AssertNear(0.9f * 0.875f, enemy, 1e-6f, "perceived: experience 0.6, morale 0.5");
+    }
+
+    // CheckGlobalAIStrategy 6396-6430 (battleprefs: defend 0.80, attack 0.80, assault 3.0 / 4.0,
+    // influence 0.7): the attack, assault and defend triggers are divided by
+    // 1 + initiative × influence; the retreat trigger GetScreeningTrigger() = attack × 0.5
+    // (4216, read at 6414) is not. The mod's ladder: AttackNow / Wait / DelayingDefense
+    // compare against the divided threshold (vanilla's attack and defend boundary, one value
+    // since both triggers are 0.80); WithdrawalToFightLater and the prolonged-delay
+    // escalation use undivided thresholds (vanilla's retreat).
+    private static TacticalForceBalanceEvidence Ladder(float own, float enemy, float initiative,
+        ReinforcementArrival[] arrivals = null, float hours = 0f)
+    {
+        return new TacticalForceBalanceEvidence(own, enemy, arrivals ?? Array.Empty<ReinforcementArrival>(),
+            initiative, 0.5f, 0.8f, battleHoursElapsed: hours, initiativeTriggerInfluence: 0.7f);
+    }
+
+    private static ReinforcementOpportunity Decide(TacticalForceBalanceEvidence ev) =>
+        TacticalReinforcementOpportunityDoctrine.Decide(ev).Opportunity;
+
+    private static void LadderAttackBoundaryIsDividedLikeVanillaAttack()
+    {
+        // Own arrivals restore parity inside the window; ratio 0.62: above 1/1.7 at full
+        // initiative, below 1/1.35 at mid.
+        var arrivals = new[] { new ReinforcementArrival(0.5f, 4000f) };
+        AssertEqual(ReinforcementOpportunity.AttackNow, Decide(Ladder(6200f, 10000f, 1f, arrivals)), "0.62 >= 0.588 (initiative 1)");
+        AssertEqual(ReinforcementOpportunity.WaitAndConsolidate, Decide(Ladder(6200f, 10000f, 0.5f, arrivals)), "0.62 < 0.741 (initiative 0.5)");
+    }
+
+    private static void LadderWaitBandIsBelowTheDividedThreshold()
+    {
+        var arrivals = new[] { new ReinforcementArrival(2f, 6000f) }; // parity at 2 h, after the attack window
+        AssertEqual(ReinforcementOpportunity.WaitAndConsolidate, Decide(Ladder(5000f, 10000f, 1f, arrivals)), "0.5 < 0.588: wait for own arrivals");
+        AssertEqual(ReinforcementOpportunity.WaitAndConsolidate, Decide(Ladder(7000f, 10000f, 0f, arrivals)), "0.7 < 1 (initiative 0): wait");
+        AssertTrue(Decide(Ladder(7000f, 10000f, 1f, arrivals)) != ReinforcementOpportunity.WaitAndConsolidate,
+            "0.7 >= 0.588 (initiative 1): above vanilla's divided attack boundary, no longer waiting");
+    }
+
+    private static void LadderDelayingDefenseIsBelowTheDividedThreshold()
+    {
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(7000f, 10000f, 0f)), "0.7 < 1 at initiative 0: defend (vanilla 6400-6401)");
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(5500f, 10000f, 1f)), "0.55 < 0.588 at initiative 1: defend");
+    }
+
+    private static void LadderWithdrawalIsUndividedLikeVanillaRetreat()
+    {
+        // withdrawal threshold at aggression 0.5 is 0.40 (= vanilla's screening 0.80 × 0.5), whatever the initiative.
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, Decide(Ladder(3500f, 10000f, 1f)), "0.35 < 0.40 at initiative 1");
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, Decide(Ladder(3500f, 10000f, 0f)), "0.35 < 0.40 at initiative 0");
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(4500f, 10000f, 0f)), "0.45 >= 0.40: no withdrawal at initiative 0");
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(4500f, 10000f, 1f)), "0.45 >= 0.40: no withdrawal at initiative 1");
+    }
+
+    private static void LadderProlongedEscalationIsUndivided()
+    {
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, Decide(Ladder(4500f, 10000f, 1f, hours: 7f)), "0.45 < 0.50 after 6 h: escalates at any initiative");
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(5200f, 10000f, 0f, hours: 7f)), "0.52 >= 0.50: no escalation at initiative 0");
+    }
+
+    private static void LadderDefensiveHoldAboveTheDividedThreshold()
+    {
+        // Above the divided boundary without the parity tests: no opinion; vanilla's own
+        // CheckGlobalAIStrategy decides (it attacks there, 6403-6406).
+        AssertEqual(ReinforcementOpportunity.DefensiveHold, Decide(Ladder(8000f, 10000f, 0.5f)), "0.8 >= 0.741, outnumbered, no arrivals");
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(8000f, 10000f, 0f)), "same ratio at initiative 0: below 1, defend");
     }
 }

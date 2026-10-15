@@ -10,8 +10,9 @@ namespace WhiskeyRealism.Tactical.Battle
     // Enable Experience And Drill AI Weighting; off gives the neutral prefs.
     //
     // Vanilla prefs (battleprefs, parsed by GamePrefs, build 14703111):
-    //   expinfluenceonaidecisions (54714, shipped 0.25): the experience blend of
-    //     GetGroupStrength (6057), 1 - ei + groupexperience × ei;
+    //   expinfluenceonaidecisions (54714, shipped 0.25) and moraleinfluenceonaidecisions
+    //     (54712, shipped 0.25): the experience and morale blends of GetGroupStrength
+    //     (6052-6057), 1 - w + x × w;
     //   influenceofcommanderinitiativeonattackdefendtrigger (54680, shipped 0.7): the
     //     macro triggers are divided by 1 + initiative × this (6396-6430);
     //   unbearable-losses rule (GetUnbearableLossesTrigger 113363-113400): unitprefs
@@ -56,6 +57,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 prefs.ExpInfluenceOnAiDecisions = GamePrefs.expinfluenceonaidecisions;
                 prefs.InitiativeTriggerInfluence = GamePrefs.influenceofcommanderinitiativeonattackdefendtrigger;
+                prefs.MoraleInfluenceOnAiDecisions = GamePrefs.moraleinfluenceonaidecisions;
                 prefs.Break = new BreakToleranceRules
                 {
                     Trigger0 = GamePrefs.unbearablelossesmoraletrigger0,

@@ -613,10 +613,11 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. Whiskey's battle decisions weigh troop quality the way vanilla's own do. Army attack/hold (reinforcement " +
                 "opportunity doctrine, #44's macro opinion): vanilla's force balance, the strength ratio x (1 + own - enemy mean morale) x " +
-                "(1 + own - enemy mean experience), with the attack threshold divided by 1 + commander initiative x vanilla's initiative " +
-                "influence (0.7 shipped). Group stance sectors and #44's odds: own and enemy strength x vanilla's experience blend " +
-                "1 - ei + experience x ei (ei = expinfluenceonaidecisions, 0.25 shipped), a group's own experience against the closest visible " +
-                "enemy's. Withdrawal: an AI regiment under fire whose losses reach 80% of its own rout point (vanilla's unbearable-losses " +
+                "(1 + own - enemy mean experience); the attack/defend boundary is divided by 1 + commander initiative x vanilla's " +
+                "initiative influence (0.7 shipped) and the withdrawal threshold is not, as vanilla divides its attack and defend " +
+                "triggers but not its retreat trigger. Group stance sectors and #44's odds: own and enemy strength x vanilla's blends " +
+                "1 - w + experience x w and 1 - w + morale x w (expinfluenceonaidecisions / moraleinfluenceonaidecisions, 0.25 shipped), " +
+                "a group's own experience and morale against the closest visible enemy's. Withdrawal: an AI regiment under fire whose losses reach 80% of its own rout point (vanilla's unbearable-losses " +
                 "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
                 "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
                 "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
