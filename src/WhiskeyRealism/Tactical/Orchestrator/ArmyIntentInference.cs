@@ -10,7 +10,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     public static class ArmyIntentInference
     {
         public const float ConfidenceFloor = 0.3f;
-        public const float ConfidenceActionable = 0.6f;
 
         /// <summary>Enemy in sight equal to this share of own strength = full strength signal.</summary>
         public const float StrengthSignalOwnFraction = 0.5f;

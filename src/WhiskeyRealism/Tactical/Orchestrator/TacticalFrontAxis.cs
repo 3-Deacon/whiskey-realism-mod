@@ -158,9 +158,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float LateralOf(float x, float z)
             => (x - OriginX) * RightX + (z - OriginZ) * RightZ;
 
-        public float DepthOf(float x, float z)
-            => (x - OriginX) * ForwardX + (z - OriginZ) * ForwardZ;
-
         public int SectorOf(float x, float z)
         {
             if (!IsValid) return 0;

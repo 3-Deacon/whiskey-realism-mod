@@ -40,7 +40,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public float EstimatedEnemyStrength => _largestSeen;
         public bool HadContact => _lastContactHours >= 0f;
-        public float LastContactHours => _lastContactHours;
 
         public void Reset()
         {

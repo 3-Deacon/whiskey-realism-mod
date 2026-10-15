@@ -453,14 +453,30 @@ internal static class TacticalEvidenceFixTests
 
     private static void OrchestratorKeepsFrontAxis()
     {
+        // The #61 patch calls UpdateLeafBrigadeMap(tree) without an axis; the
+        // orchestrator must cascade with the axis the tick cycle observed.
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
-        var axis = Banded(0f, 0f, 1000f, 0f);
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f).WithOwnExtent(-400f, 400f, 5);
         var enemy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f, frontAxis: axis);
         ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), enemy,
             6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
-        TestHarness.AssertTrue(orch.CurrentFrontAxis.IsValid, "axis stored");
-        TestHarness.AssertTrue(Near(orch.CurrentFrontAxis.ForwardX, 1f), "axis faces east");
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("child-2", "army", 15, 0, "corps", true) });
+        orch.ObserveDirectChildEvidenceWithZones(new[] { new DirectChildEvidence(3, 0, false, 2, 0, 0.9f) }, null, null);
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            P(1, 16, "army", 0, 0f, 0f),
+            P(2, 15, "corps", 1, 0f, 0f),
+            P(10, 14, "b-north", 2, 90f, 400f),
+            P(11, 14, "b-nmid", 2, -60f, 200f),
+            P(12, 14, "b-center", 2, 30f, 0f),
+            P(13, 14, "b-smid", 2, -90f, -200f),
+            P(14, 14, "b-south", 2, 60f, -400f),
+        };
+        orch.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, 0));
+        var map = orch.CurrentLeafBrigadeMap;
+        TestHarness.AssertEqual(DirectChildRole.Main, map[12].LeafRole, "center brigade anchors");
+        TestHarness.AssertEqual(DirectChildRole.RefuseLeft, map[10].LeafRole, "facing east the north brigade is the left flank");
     }
 
     // ---- T6 / T11 fog-honest enemy knowledge ----

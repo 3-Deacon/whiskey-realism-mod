@@ -373,14 +373,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Legacy overload without hysteresis. Used by call sites that
-        /// haven't been updated to pass odds yet. Should be removed once
-        /// the runtime fully migrates to the hysteresis-aware path.
-        /// </summary>
-        public bool ConsiderMainEffortShift(int decisiveSectorId)
-            => ConsiderMainEffortShift(decisiveSectorId, decisiveSectorOdds: float.MaxValue, currentMainEffortOdds: 0f);
-
-        /// <summary>
         /// Per-tick phase progression evaluator. Runtime calls this after
         /// updating evidence; the doctrine decides whether to advance
         /// (Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw)
@@ -818,8 +810,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (!float.IsNaN(globalOdds) && !float.IsInfinity(globalOdds) && globalOdds >= 0f) _lastGlobalOdds = globalOdds;
         }
         private IReadOnlyDictionary<int, float> _flankThreat = new Dictionary<int, float>();
-
-        public TacticalFrontAxis CurrentFrontAxis => _frontAxis;
 
         /// <summary>
         /// Records the front axis and vanilla per-group flank threat the

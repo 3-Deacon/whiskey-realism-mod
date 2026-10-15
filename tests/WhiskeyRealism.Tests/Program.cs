@@ -24467,7 +24467,7 @@ static class Program
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
         AssertEqual(0, orch.CurrentPlan.MainEffortSector, "plan starts on sector 0");
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        bool shifted = orch.ConsiderMainEffortShift(2, float.MaxValue, 0f);
         AssertTrue(shifted, "shift returns true when sector changes");
         AssertEqual(2, orch.CurrentPlan.MainEffortSector,
             "main effort shifted to sector 2");
@@ -24480,7 +24480,7 @@ static class Program
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
         orch.AdvancePhase(BattlePhase.Withdraw);
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        bool shifted = orch.ConsiderMainEffortShift(2, float.MaxValue, 0f);
         AssertTrue(!shifted, "withdraw phase blocks main-effort shifts");
         AssertEqual(0, orch.CurrentPlan.MainEffortSector,
             "main effort unchanged during withdraw");
@@ -24492,7 +24492,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 1));
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 1);
+        bool shifted = orch.ConsiderMainEffortShift(1, float.MaxValue, 0f);
         AssertTrue(!shifted, "no-op when decisive sector equals current");
     }
 
@@ -25024,7 +25024,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, defaultMainEffortSector: 0));
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 3);
+        bool shifted = orch.ConsiderMainEffortShift(3, float.MaxValue, 0f);
         AssertTrue(shifted, "legacy overload shifts on any positive decisive sector");
         AssertEqual(3, orch.CurrentPlan.MainEffortSector, "shifted to sector 3");
     }
