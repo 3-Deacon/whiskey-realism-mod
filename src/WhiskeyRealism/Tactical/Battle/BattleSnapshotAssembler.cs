@@ -61,7 +61,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // One entry of a group's formation layout (vanilla GroupPosition.attachedunitid[k]
         // / unitoffsetposition[k], 78374-78378; SetGroupFormation places child k from it,
-        // 92094). Kept only for the child whose command parent (plan D5) is that group:
+        // 92086). Kept only for the child whose command parent (plan D5) is that group:
         // shipped #61 TryFormationSlot looked a brigade up in its transform parent's
         // layout. Call after the command tree is assembled. No allocation.
         internal static bool ApplyLayoutSlot(BattleSnapshot s, int groupIndex, int childInstanceId, float offsetX, float offsetZ)

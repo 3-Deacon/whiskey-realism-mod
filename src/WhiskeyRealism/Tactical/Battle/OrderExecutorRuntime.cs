@@ -78,6 +78,12 @@ namespace WhiskeyRealism.Tactical.Battle
         private static int[] _rotationQueue = new int[64];
         private static int[] _rotationTargets = new int[64];
 
+        // Set by the vanilla calls that re-lay a group's children (SetGroupFormation
+        // directly or via SetWaypoint / SetFormation) for the target being issued;
+        // Execute hands it to OrderExecutor.NoteChildLayout.
+        private static bool _layoutTouched;
+        private static RefuseFlank _layoutRefuse;
+
         private static FieldInfo _blockedCrossingsField;
         private static bool _blockedCrossingsResolved;
 
@@ -141,6 +147,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
 
                 bool wrote;
+                _layoutTouched = false;
                 if (winner.Channel == OrderChannel.Move)
                 {
                     int waypointsAt = waypoints;
@@ -166,6 +173,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
 
                 if (wrote) executed++;
+                if (wrote && _layoutTouched) executor.NoteChildLayout(own[targetIndex].InstanceId, _layoutRefuse);
             }
 
             // A Move counts once SetWaypoint was called; whether it took is the
@@ -301,6 +309,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (AIBattle.BlockedMovingOrder.OrderRunning(unit)) return false;
                     new AIBattle.BlockedMovingOrder(unit, crossings, CommandWaypointWritePolicy.BlockedMoveDistanceMeters, target);
                     viaBlockedOrder = true;
+                    NoteLayout(unit, RefuseFlank.None);
                     return true;
                 }
             }
@@ -324,6 +333,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 ignoredisabledships: false,
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
+            NoteLayout(unit, RefuseFlank.None);
             // An in-contact withdrawal of an infantry/cavalry regiment is vanilla's
             // tactical fallback, which ends in SetMovementMode(2) (CheckLineFallbacks
             // 5178, MicroAICheckForRetreats 4898; mounted units map 2 to 4, 124714-124718):
@@ -425,6 +435,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(formation);
                     if (index < 0) return false;
                     bunits.SetFormation(go, index, exitifsameformation: true);
+                    NoteLayout(unit, RefuseFlank.None);
                     return true;
                 }
                 case FormationWriteKind.WheelGroup:
@@ -509,7 +520,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 showmovementoptions: false,
                 placeentrenchments: false,
                 adjustbyterrainshape: true);
+            NoteLayout(unit, refuse);
             return true;
+        }
+
+        private static void NoteLayout(Regiment unit, RefuseFlank refuse)
+        {
+            if (unit.unittyp <= TacticalUnitType.MaxCombat) return;
+            _layoutTouched = true;
+            _layoutRefuse = refuse;
         }
 
         // The last formation or facing write the executor issued for the unit

@@ -1284,7 +1284,7 @@ namespace WhiskeyRealism.Tactical.Operations
     // its commander groupdepth + groupunitdistancetoback behind that waypoint (92050),
     // and paths each child group k to
     // GetAngleTerrainPosXY(waypoint, rotation, -offset[k].x, offset[k].z + child
-    // groupdepth) (92094: num + groupdepth2 / 2 = the full groupdepth2), facing the
+    // groupdepth) (92086: num + groupdepth2 / 2 = the full groupdepth2), facing the
     // rotation. Shipped read those live (LeafFormationSlot.OffsetXZ = the formula of
     // GetAngleTerrainPosXYStatic 26937-26949, without its terrain clamp; the executor's
     // validator clamps to the map, 131057-131068); the snapshot now carries them
@@ -1292,13 +1292,20 @@ namespace WhiskeyRealism.Tactical.Operations
     // UnitFlags.HasLayoutSlot). The parent's commander position never enters it.
     // A leaf within 60 m of its slot has no move. A refused flank
     // (refuseflank, 92095-92101) moves a child straight back by SkewedPosition's
-    // depth (78109-78130) and turns it to the skewed line; vanilla keeps no refuse
-    // state, so a leaf within 60 m of any refused slot holds too (and keeps its
-    // facing). Terrain-shape interpolation (92093-92096) is not applied, as shipped.
+    // depth (78109-78130) and turns it to the skewed line. Vanilla keeps no refuse
+    // state and its AI never refuses (the player UI does: RefuseFlank 91742 ->
+    // SetGroupFormation 91790; SetWaypoint forwards direction as refuseflank,
+    // 91559), so the refused slot counts only for the flank the order executor
+    // last refused on the parent (OrderExecutor.LastIssuedRefuse); a leaf within
+    // 60 m of it holds and keeps its facing. Terrain-shape interpolation
+    // (adjustbyterrainshape, 92089-92093) is not applied, as shipped. The parent's
+    // waypoint is current only while it was the top unit of its last
+    // SetGroupFormation (92065-92068): a division moved with its corps keeps a
+    // stale one.
     public static class LeafSlotTarget
     {
         public static bool TryResolve(IBattleUnitView s, int leafIndex, float refuseFlankDepth, float refuseFlankSkew,
-            out int parentIndex, out float x, out float z, out float heading)
+            RefuseFlank parentRefuse, out int parentIndex, out float x, out float z, out float heading)
         {
             parentIndex = -1;
             x = 0f;
@@ -1322,10 +1329,9 @@ namespace WhiskeyRealism.Tactical.Operations
             heading = PostureSense.NormalizeHeading(rotation);
             // A leaf already at its slot has no move to make.
             if (!PostureSense.IsMoveAway(leaf, x, z)) return false;
-            for (int direction = 0; direction <= 2; direction++)
+            float back = RefusedSetback(leaf.SlotOffsetX, p.GroupWidth, refuseFlankDepth, refuseFlankSkew, parentRefuse);
+            if (back > 0f)
             {
-                float back = RefusedSetback(leaf.SlotOffsetX, p.GroupWidth, refuseFlankDepth, refuseFlankSkew, direction);
-                if (!(back > 0f)) continue;
                 OffsetXZ(x, z, rotation, 0f, back, out float rx, out float rz);
                 if (!PostureSense.IsMoveAway(leaf, rx, rz)) return false;
             }
@@ -1335,21 +1341,21 @@ namespace WhiskeyRealism.Tactical.Operations
         /// <summary>
         /// SkewedPosition's setback of a refused child (78109-78130): with
         /// t = clamp01((offsetX + width / 2) / width), pow(t, skew) for the right
-        /// flank (1), pow(1 - t, skew) for the left (0), pow(|t - 0.5| * 2, skew) for
-        /// both (2), times width * depthFactor (GamePrefs.refuseflankdepth).
+        /// flank (refuseflank 1), pow(1 - t, skew) for the left (0), times
+        /// width * depthFactor (GamePrefs.refuseflankdepth). The executor refuses
+        /// only Left or Right (vanilla's both-flanks 2 is a player-UI value).
         /// </summary>
-        public static float RefusedSetback(float offsetX, float groupWidth, float depthFactor, float skew, int direction)
+        public static float RefusedSetback(float offsetX, float groupWidth, float depthFactor, float skew, RefuseFlank refuse)
         {
             if (!(groupWidth > 0f) || !(depthFactor > 0f) || float.IsInfinity(groupWidth)) return 0f;
             float t = (offsetX + groupWidth / 2f) / groupWidth;
             if (t < 0f) t = 0f;
             if (t > 1f) t = 1f;
             float u;
-            switch (direction)
+            switch (refuse)
             {
-                case 0: u = 1f - t; break;
-                case 1: u = t; break;
-                case 2: u = Math.Abs(t - 0.5f) * 2f; break;
+                case RefuseFlank.Left: u = 1f - t; break;
+                case RefuseFlank.Right: u = t; break;
                 default: return 0f;
             }
             return (float)Math.Pow(u, skew) * groupWidth * depthFactor;

@@ -51,6 +51,7 @@ internal static class PostureMigrationTests
             ("bc5a RefusedLeafHoldsItsSkewedSlot", RefusedLeafHoldsItsSkewedSlot),
             ("bc5a SnapshotCarriesTheLeafLayoutSlot", SnapshotCarriesTheLeafLayoutSlot),
             ("bc5a BlockedMovingOrderNeedsACoveredCrossing", BlockedMovingOrderNeedsACoveredCrossing),
+            ("bc5a ExecutorRemembersTheIssuedRefuse", ExecutorRemembersTheIssuedRefuse),
         });
     }
 
@@ -241,20 +242,20 @@ internal static class PostureMigrationTests
         };
         var s = Snapshot(own, new[] { -1, 0, 0 });
 
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out int parent, out float x, out float z, out float heading), "slot resolved");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out int parent, out float x, out float z, out float heading), "slot resolved");
         AssertEqual(0, parent, "parent from the snapshot's command-parent map");
         AssertNear(1350f, x, 0.01f, "the parent's waypoint + the layout offset (x)");
         AssertNear(-1440f, z, 0.01f, "the parent's waypoint + the leaf's depth behind it (z)");
         AssertNear(0f, heading, 0.001f, "the leaf faces the parent's waypoint rotation");
-        AssertFalse(LeafSlotTarget.TryResolve(s, 2, RefuseDepth, RefuseSkew, out _, out _, out _, out _), "no layout slot captured: no slot");
+        AssertFalse(LeafSlotTarget.TryResolve(s, 2, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out _, out _, out _), "no layout slot captured: no slot");
 
         var orphan = Snapshot(new[] { Leaf(20, 0f, -10f, 0f, 0f, 40f) }, new[] { -1 });
-        AssertFalse(LeafSlotTarget.TryResolve(orphan, 0, RefuseDepth, RefuseSkew, out _, out _, out _, out _), "root leaf: no parent, no slot");
+        AssertFalse(LeafSlotTarget.TryResolve(orphan, 0, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out _, out _, out _), "root leaf: no parent, no slot");
 
         own[0].LastWaypointX = 0f;
         own[0].LastWaypointZ = 0f;
         var noWaypoint = Snapshot(own, new[] { -1, 0, 0 });
-        AssertFalse(LeafSlotTarget.TryResolve(noWaypoint, 1, RefuseDepth, RefuseSkew, out _, out _, out _, out _), "parent without a waypoint: no slot");
+        AssertFalse(LeafSlotTarget.TryResolve(noWaypoint, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out _, out _, out _), "parent without a waypoint: no slot");
     }
 
     private static void PostureProducerKeepsBattleNavMeshAreaCosts()
@@ -617,7 +618,7 @@ internal static class PostureMigrationTests
     private static void LeafAtItsSlotHasNoMove()
     {
         // The division arrived: its commander stands groupdepth + 10 behind its
-        // waypoint (92050) and the leaf stands in its slot (92094). No move onto
+        // waypoint (92050) and the leaf stands in its slot (92086). No move onto
         // itself (Failed/retry churn) and no creep by the commander's setback.
         var own = new[]
         {
@@ -626,17 +627,17 @@ internal static class PostureMigrationTests
         };
         AssertNear(-1070f, own[0].Z, 0.001f, "the commander stands 70 m behind the waypoint");
         var s = Snapshot(own, new[] { -1, 0 });
-        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out int parent, out _, out _, out _), "in its slot: no move");
+        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out int parent, out _, out _, out _), "in its slot: no move");
         AssertEqual(0, parent, "the parent is still reported");
 
         s.Own[1].X = 1170f;
         s.Own[1].Z = -1060f;
-        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out _, out _, out _), "within 60 m of its slot: no move");
+        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out _, out _, out _), "within 60 m of its slot: no move");
 
         // 260 m behind: beyond every refused slot too (at most 117 m back here).
         s.Own[1].X = 1150f;
         s.Own[1].Z = -1300f;
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out float x, out float z, out _), "left behind: brought back");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out float x, out float z, out _), "left behind: brought back");
         AssertNear(1150f, x, 0.01f, "to its slot (x)");
         AssertNear(-1040f, z, 0.01f, "to its slot (z)");
 
@@ -989,7 +990,7 @@ internal static class PostureMigrationTests
         };
         AssertNear(-70f, own[0].X, 0.001f, "the commander stands behind (west of) the waypoint");
         var s = Snapshot(own, new[] { -1, 0 });
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out float x, out float z, out float heading), "east-facing slot");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out float x, out float z, out float heading), "east-facing slot");
         AssertNear(-60f, x, 0.01f, "60 m behind the waypoint (x)");
         AssertNear(-550f, z, 0.01f, "150 m on its right (z)");
         AssertNear(90f, heading, 0.01f, "faces the parent's waypoint rotation");
@@ -1001,15 +1002,23 @@ internal static class PostureMigrationTests
             Leaf(11, 300f, -100f, slotX: 150f, slotZ: 20f, groupDepth: 40f),
         };
         s = Snapshot(own, new[] { -1, 0 });
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out x, out z, out heading), "30-degree slot");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out x, out z, out heading), "30-degree slot");
         AssertNear(1099.9038f, x, 0.01f, "1000 - 0.5*60 + 0.866*150");
         AssertNear(-1126.9615f, z, 0.01f, "-1000 - 0.866*60 - 0.5*150");
         AssertNear(30f, heading, 0.01f, "faces 30");
 
         s.Own[1].RotationY = 200f;
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out float x2, out float z2, out _), "leaf facing ignored");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out float x2, out float z2, out _), "leaf facing ignored");
         AssertNear(x, x2, 0.001f, "the leaf's own facing does not move its slot (x)");
         AssertNear(z, z2, 0.001f, "the leaf's own facing does not move its slot (z)");
+
+        // The frame is the parent's waypoint rotation, not its commander's facing
+        // (the commander turned after arriving).
+        s.Own[0].RotationY = 120f;
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out float x3, out float z3, out float h3), "commander turned");
+        AssertNear(x, x3, 0.001f, "slot follows lastsetwaypointrotation (x)");
+        AssertNear(z, z3, 0.001f, "slot follows lastsetwaypointrotation (z)");
+        AssertNear(30f, h3, 0.01f, "and faces it");
     }
 
     private static void FireControlWalksTheGroupsSubtree()
@@ -1088,15 +1097,17 @@ internal static class PostureMigrationTests
     {
         // A refuse wheel (SetGroupFormation refuseflank, 92095-92101) moves a child
         // straight back from its slot by SkewedPosition's depth (78109-78130):
-        // pow(t, skew) * width * depth for the right flank (1), pow(1 - t, skew)
-        // for the left (0), pow(|t - 0.5| * 2, skew) for both (2), with
-        // t = (offset.x + width / 2) / width; it faces the skewed line. Vanilla
-        // keeps no refuse state, so a leaf on any of those slots holds.
-        AssertNear(117.236f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, 1), 0.01f, "right flank: 0.875^4 * 200");
-        AssertNear(0.0488f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, 0), 0.001f, "left flank: 0.125^4 * 200");
-        AssertNear(63.281f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, 2), 0.01f, "both flanks: 0.75^4 * 200");
-        AssertNear(200f, LeafSlotTarget.RefusedSetback(900f, 400f, RefuseDepth, RefuseSkew, 1), 0.01f, "t clamps to 1");
-        AssertNear(0f, LeafSlotTarget.RefusedSetback(150f, 0f, RefuseDepth, RefuseSkew, 1), 0.001f, "no width: no setback");
+        // pow(t, skew) * width * depth on the right flank (1), pow(1 - t, skew) on
+        // the left (0), t = (offset.x + width / 2) / width; it faces the skewed
+        // line. Vanilla keeps no refuse state and its AI never refuses (the player
+        // UI does, RefuseFlank 91742 -> 91790); the refused slot counts only for the
+        // flank Whiskey's executor last refused on that parent.
+        AssertNear(117.236f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, RefuseFlank.Right), 0.01f, "right flank: 0.875^4 * 200");
+        AssertNear(0.0488f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, RefuseFlank.Left), 0.001f, "left flank: 0.125^4 * 200");
+        AssertNear(117.236f, LeafSlotTarget.RefusedSetback(-150f, 400f, RefuseDepth, RefuseSkew, RefuseFlank.Left), 0.01f, "the mirror slot on the left");
+        AssertNear(200f, LeafSlotTarget.RefusedSetback(900f, 400f, RefuseDepth, RefuseSkew, RefuseFlank.Right), 0.01f, "t clamps to 1");
+        AssertNear(0f, LeafSlotTarget.RefusedSetback(150f, 400f, RefuseDepth, RefuseSkew, RefuseFlank.None), 0.001f, "no refuse: no setback");
+        AssertNear(0f, LeafSlotTarget.RefusedSetback(150f, 0f, RefuseDepth, RefuseSkew, RefuseFlank.Right), 0.001f, "no width: no setback");
 
         // Brigade on the division's right (offset.x 150 of a 400 m line), refused
         // right: 117 m behind its slot (1150, -1040), turned to the skewed line.
@@ -1107,14 +1118,19 @@ internal static class PostureMigrationTests
         };
         own[1].RotationY = 40f;
         var s = Snapshot(own, new[] { -1, 0 });
-        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out _, out _, out _), "on its refused slot: stays put, keeps its facing");
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, 0f, RefuseSkew, out _, out _, out _, out _), "without the refuse depth it would be pulled forward");
-
-        s.Own[1].Z = -1300f;
-        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, out _, out float x, out float z, out float heading), "behind its refused slot: brought back");
+        AssertFalse(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.Right, out _, out _, out _, out _),
+            "on the slot of the refuse Whiskey issued: stays put, keeps its facing");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.None, out _, out float x, out float z, out float heading),
+            "no refuse issued on the parent: only the unskewed slot counts");
         AssertNear(1150f, x, 0.01f, "to the unskewed slot, as shipped (x)");
         AssertNear(-1040f, z, 0.01f, "to the unskewed slot, as shipped (z)");
         AssertNear(0f, heading, 0.01f, "facing the parent's rotation");
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.Left, out _, out _, out _, out _),
+            "the other flank refused: this leaf's skewed slot is not 117 m back");
+
+        s.Own[1].Z = -1300f;
+        AssertTrue(LeafSlotTarget.TryResolve(s, 1, RefuseDepth, RefuseSkew, RefuseFlank.Right, out _, out x, out z, out _), "behind its refused slot: brought back");
+        AssertNear(-1040f, z, 0.01f, "to the unskewed slot, as shipped");
     }
 
     private static void SnapshotCarriesTheLeafLayoutSlot()
@@ -1181,5 +1197,22 @@ internal static class PostureMigrationTests
         BattleOrderIntent plain = move;
         plain.Flags &= ~IntentFlags.AvoidCoveredCrossings;
         AssertFalse(OrderExecutor.TakesBlockedMovingOrder(plain, 3), "not flagged");
+    }
+
+    private static void ExecutorRemembersTheIssuedRefuse()
+    {
+        // The runtime notes each vanilla call that re-lays a group's children
+        // (SetGroupFormation: the wheel with its refuseflank, the courier
+        // SetFormation and every move with refuseflank -1, SetWaypoint 91559); an
+        // in-place rotation lays out nothing.
+        var executor = new OrderExecutor();
+        AssertEqual(RefuseFlank.None, executor.LastIssuedRefuse(7), "nothing issued");
+        executor.NoteChildLayout(7, RefuseFlank.Right);
+        AssertEqual(RefuseFlank.Right, executor.LastIssuedRefuse(7), "the refuse wheel");
+        AssertEqual(RefuseFlank.None, executor.LastIssuedRefuse(8), "per group");
+        executor.NoteChildLayout(7, RefuseFlank.Left);
+        AssertEqual(RefuseFlank.Left, executor.LastIssuedRefuse(7), "a later refuse replaces it");
+        executor.NoteChildLayout(7, RefuseFlank.None);
+        AssertEqual(RefuseFlank.None, executor.LastIssuedRefuse(7), "a plain re-layout (move, formation) clears it");
     }
 }
