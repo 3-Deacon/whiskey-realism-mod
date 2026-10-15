@@ -113,6 +113,25 @@ namespace WhiskeyRealism.Tactical.Battle
         // Marks an entry for removal inside Update; vanilla instance ids are never 0.
         private const int DroppedId = 0;
 
+        // W&L player-intelligence incidents that make FogOfWar.UnitIsHidden answer "visible" for
+        // every position (101183-101186): 60 Lost Orders (battle), 61 and 64 Scouting Ahead
+        // (campaign). Incident.launchedtime >= 0 is what IsIncidentActive tests (46251-46263).
+        internal static readonly int[] PlayerIntelIncidents = { 60, 61, 64 };
+        internal const float IncidentNotLaunched = -1f;
+
+        internal static bool IncidentLaunched(float launchedTime)
+        {
+            return launchedTime >= 0f;
+        }
+
+        // Only the FogGrid probe asks UnitIsHidden for an AI side about the player's units; the
+        // player-alliance side (OwnSideWithinFog) reads vanilla's own verdict, which the
+        // incident is meant to open.
+        internal static bool MasksPlayerIntelIncidents(PerceptionMode mode, bool dlcScenarioActive)
+        {
+            return dlcScenarioActive && mode == PerceptionMode.FogGrid;
+        }
+
         /// <summary>
         /// Order: config off, fog off, player-alliance side (vanilla's own iswithinfog, which
         /// already applies the HQ-in-the-saddle rule and is cleared at init), HQ in the
