@@ -22,6 +22,7 @@ internal static class TranspilerLabelTests
         {
             ("transpiler offensive trim keeps every label and block", OffensiveTrimKeepsLabels),
             ("transpiler random pick keeps every label and block", RandomPickKeepsLabels),
+            ("transpiler allocation trims keep every label and block", AllocationTrimsKeepLabels),
             ("transpiler sources never copy instructions with clone", SourcesNeverCloneInstructions),
         });
     }
@@ -48,6 +49,23 @@ internal static class TranspilerLabelTests
             AssertFalse(ReferenceEquals(edited, vanilla), site.Method + " edited copy");
             AssertMarksKept(vanilla, edited, site.Method);
         }
+    }
+
+    private static void AllocationTrimsKeepLabels()
+    {
+        var list = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AICampaign), "UpdateUnitAI"));
+        var listHook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(ListHookStub));
+        var listEdited = WhiskeyRealism.Patches.AllocationTrimIl.TranspileUnitListCopy(list, WhiskeyRealism.Patches.AllocationTrimIl.ResolveCompleteUnitList(),
+            WhiskeyRealism.Patches.AllocationTrimIl.ResolveToListOfRegiment(), listHook, out int listMatches);
+        AssertEqual(1, listMatches, "UpdateUnitAI site");
+        AssertMarksKept(list, listEdited, "UpdateUnitAI");
+
+        var name = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(BattleUnits), "IsUnitUnderCommander"));
+        var nameHook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(NameHookStub));
+        var nameEdited = WhiskeyRealism.Patches.AllocationTrimIl.TranspileNameRead(name, WhiskeyRealism.Patches.AllocationTrimIl.ResolveObjectNameGetter(),
+            WhiskeyRealism.Patches.AllocationTrimIl.ResolveStringEquality(), nameHook, out int nameMatches);
+        AssertEqual(1, nameMatches, "IsUnitUnderCommander site");
+        AssertMarksKept(name, nameEdited, "IsUnitUnderCommander");
     }
 
     // PerkIdTranspiler needs the game-bound hooks, so it is not compiled here; this sweep
@@ -86,6 +104,15 @@ internal static class TranspilerLabelTests
     public static float FloatHookStub(float w)
     {
         return w;
+    }
+
+    public static List<Regiment> ListHookStub(IEnumerable<Regiment> source)
+    {
+        return null;
+    }
+
+    public static void NameHookStub(UnityEngine.Object unit)
+    {
     }
 
     public static int IntHookStub()
