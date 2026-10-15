@@ -1,43 +1,27 @@
-using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// Read-only view onto a captured set of <see cref="TacticalUnitObservation"/>.
-    /// Consumed by the aggregate-based variants of the six ObjectiveRecord
-    /// sub-builders. Implementations: <see cref="TacticalUnitObservationAggregate"/>
-    /// for runtime, harness stubs for tests.
+    /// One side's perceived battle as the objective-record and evidence sub-builders read it
+    /// (plan D11). The implementation is the per-tick <see cref="BattleSnapshot"/>: own units
+    /// are the side's true roster, enemies exist only as the snapshot's visible and remembered
+    /// observations (vanilla AI-side fog, BC2a). Harness tests build snapshots directly.
     /// </summary>
     public interface IObservationSource
     {
-        /// <summary>
-        /// Total number of units captured (allied + enemy combined).
-        /// </summary>
-        int Count { get; }
+        /// <summary>Own units, valid on [0, <see cref="OwnCount"/>).</summary>
+        int OwnCount { get; }
+        UnitRecord[] Own { get; }
 
-        /// <summary>
-        /// Alliance the aggregate was captured for. Visibility / objective /
-        /// waypoint fields are populated only for units where
-        /// <c>Alliance == CapturedForAlliance</c>.
-        /// </summary>
-        int CapturedForAlliance { get; }
+        /// <summary>Visible and remembered enemies, valid on [0, <see cref="ObservationCount"/>).</summary>
+        int ObservationCount { get; }
+        EnemyObservation[] Observations { get; }
 
-        /// <summary>
-        /// All captured units in <see cref="BattleUnits.completeunitlist"/>
-        /// iteration order. Index is stable within a single capture.
-        /// </summary>
-        IReadOnlyList<TacticalUnitObservation> AllUnits { get; }
+        /// <summary>Own index of a GameObject instance id, or -1.</summary>
+        int IndexOfOwn(int instanceId);
 
-        /// <summary>
-        /// Indices into <see cref="AllUnits"/> for units where
-        /// <c>Alliance == CapturedForAlliance</c>. Empty when no own-side units captured.
-        /// </summary>
-        IReadOnlyList<int> AlliedIndices { get; }
-
-        /// <summary>
-        /// Indices into <see cref="AllUnits"/> for units where
-        /// <c>Alliance != CapturedForAlliance</c>. Empty when no enemy units captured.
-        /// </summary>
-        IReadOnlyList<int> EnemyIndices { get; }
+        /// <summary>Observation index of the own unit's closest visible enemy (true XZ distance), or -1.</summary>
+        int ClosestVisibleEnemy(int ownIndex, out float distance);
     }
 }

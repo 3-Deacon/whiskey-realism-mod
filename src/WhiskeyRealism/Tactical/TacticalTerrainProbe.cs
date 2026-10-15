@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical
@@ -90,6 +91,10 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        // Nearest enemy to a candidate point among the regiment's vanilla range list
+        // (enemyinrangereg, range-only and unsorted, UpdateUnitRangeFast 122649 / 122840),
+        // keeping only enemies the side's battle snapshot sees (BC2a fog; none before the
+        // side's first snapshot), ranked by true XZ distance from the point.
         internal static TacticalEnemyBearingEvidence GetVisibleEnemyBearing(Regiment regiment, Vector3 origin)
         {
             try
@@ -97,7 +102,8 @@ namespace WhiskeyRealism.Tactical
                 if (regiment == null ||
                     regiment.unitrange == null ||
                     regiment.unitrange.enemyinrangereg == null ||
-                    regiment.unitrange.enemyinrangereg.Count == 0)
+                    regiment.unitrange.enemyinrangereg.Count == 0 ||
+                    !BattleCore.TryGetSnapshot(regiment.alliance, out BattleSnapshot snapshot))
                 {
                     return new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f);
                 }
@@ -109,7 +115,7 @@ namespace WhiskeyRealism.Tactical
                 for (int i = 0; i < regiment.unitrange.enemyinrangereg.Count; i++)
                 {
                     Regiment enemy = regiment.unitrange.enemyinrangereg[i];
-                    if (!IsBearingEligibleEnemy(regiment, enemy))
+                    if (!IsBearingEligibleEnemy(regiment, enemy) || !snapshot.IsVisible(enemy.gameObject.GetInstanceID()))
                         continue;
 
                     float distance = XzDistance(origin, enemy.transform.position);

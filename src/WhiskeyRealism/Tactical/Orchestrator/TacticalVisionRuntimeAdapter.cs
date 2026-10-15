@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Util;
 
@@ -214,97 +215,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
 
-        internal static ObjectiveRecord[] BuildObjectiveRecordsFromBattle(AIBattle battle, int allianceId)
+        /// <summary>
+        /// A current-set objective of an own unit (Regiment.currentsetobjective), read live by
+        /// the runtime caller for the snapshot's own index. The snapshot does not carry it.
+        /// </summary>
+        internal readonly struct OwnSetObjective
         {
-            try
+            public OwnSetObjective(int ownIndex, string name, TacticalMapPoint point)
             {
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null) return Array.Empty<ObjectiveRecord>();
-
-                var observations = new List<ObjectiveObservationInput>();
-                var statuses = new List<TacticalObjectiveStatus>();
-                var enemyStrengths = new List<float>();
-                var friendlyStrengths = new List<float>();
-                var seenObjectiveIds = new HashSet<string>(StringComparer.Ordinal);
-
-                AddObjectiveChainObservations(
-                    battle,
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    seenObjectiveIds);
-
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var own = units[i] as Regiment;
-                    if (!IsUsableOwnUnit(own, allianceId)) continue;
-
-                    var objective = SafeCurrentSetObjective(own);
-                    if (objective != null)
-                    {
-                        TacticalMapPoint point = SafeObjectivePoint(objective);
-                        if (!IsUsableMapPoint(point)) continue;
-
-                        string objectiveId = SafeObjectiveId(objective, observations.Count);
-                        if (!seenObjectiveIds.Add(objectiveId)) continue;
-
-                        observations.Add(new ObjectiveObservationInput(
-                            objectiveId,
-                            TacticalObjectiveType.UnknownVanillaObjective,
-                            TacticalObjectiveSource.CurrentSetObjective,
-                            point,
-                            sourceConfidence: 0.65f,
-                            value: 0.5f,
-                            typeAnchorVerified: false));
-                        statuses.Add(TacticalObjectiveStatus.Scouting);
-                        enemyStrengths.Add(EstimateVisibleEnemyStrength(own));
-                        friendlyStrengths.Add(SafeStrength(own));
-                    }
-                }
-
-                AddMapObjectiveObservations(
-                    TacticalStableSceneCache.GetOrCaptureMapObjectives(),
-                    allianceId,
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    seenObjectiveIds);
-
-                ApplyApproachAvenues(
-                    observations,
-                    allianceId,
-                    TacticalStableSceneCache.GetOrCaptureApproachAvenues(allianceId));
-
-                TacticalMapPoint? visibleEnemyLine = TryVisibleEnemyLine(units, allianceId, out TacticalMapPoint visibleEnemyPoint, out float visibleEnemyStrength, out float visibleFriendlyStrength)
-                    ? visibleEnemyPoint
-                    : (TacticalMapPoint?)null;
-
-                TacticalMapPoint? movementAnchor = TryMovementAnchorLine(units, allianceId, out TacticalMapPoint movementAnchorPoint, out float movementAnchorFriendlyStrength)
-                    ? movementAnchorPoint
-                    : (TacticalMapPoint?)null;
-
-                return BuildObjectiveRecordsWithMovementFallback(
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    visibleEnemyLine,
-                    visibleEnemyStrength,
-                    visibleFriendlyStrength,
-                    movementAnchor,
-                    movementAnchorFriendlyStrength,
-                    allianceId);
+                OwnIndex = ownIndex;
+                Name = name ?? string.Empty;
+                Point = point;
             }
-            catch
-            {
-                return Array.Empty<ObjectiveRecord>();
-            }
+
+            public int OwnIndex { get; }
+            public string Name { get; }
+            public TacticalMapPoint Point { get; }
         }
 
+        /// <summary>
+        /// Objective records for one side from its battle snapshot (plan D11): own units and
+        /// strengths from snapshot.Own, enemy strength only from the side's visible
+        /// observations (closest visible enemy per own unit, BC2a). Sources, in order: the
+        /// side's objective chain, own units' current-set objectives
+        /// (<paramref name="ownObjectives"/>, own-index order = completeunitlist order), map
+        /// objectives, then the visible-enemy-line and movement-anchor fallbacks; approach
+        /// avenues are matched last, the enemy's only where the side perceives them.
+        /// </summary>
         internal static ObjectiveRecord[] BuildObjectiveRecordsFromAggregate(
             IObservationSource source,
+            IReadOnlyList<OwnSetObjective> ownObjectives,
             AIBattle battle,
             int allianceId)
         {
@@ -320,44 +260,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 AddObjectiveChainObservations(
                     battle,
+                    source,
                     observations,
                     statuses,
                     enemyStrengths,
                     friendlyStrengths,
                     seenObjectiveIds);
 
-                // Main loop — own units with current-set objective.
-                // Mirrors IsUsableOwnUnit (alliance implicit via AlliedIndices,
-                // !IsRouted covers isrouted||markedforrout, !PermanentlyDetached)
-                // plus the HasCurrentSetObjective gate and IsUsableMapPoint check.
-                // Objective id formula matches legacy SafeObjectiveId:
+                // Own units with a current-set objective; routed, marked for rout and
+                // permanently detached units are skipped. Id formula as shipped:
                 //   string.IsNullOrWhiteSpace(name) ? "objective-" + observations.Count : name
-                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
+                for (int k = 0; ownObjectives != null && k < ownObjectives.Count; k++)
                 {
-                    int idx = source.AlliedIndices[ai];
-                    var own = source.AllUnits[idx];
-                    if (own.IsRouted) continue;
-                    if (own.PermanentlyDetached) continue;
-                    if (!own.HasCurrentSetObjective) continue;
-                    var point = new TacticalMapPoint(own.ObjectiveX, own.ObjectiveZ);
-                    if (!IsUsableMapPoint(point)) continue;
+                    OwnSetObjective objective = ownObjectives[k];
+                    int idx = objective.OwnIndex;
+                    if (idx < 0 || idx >= source.OwnCount || !IsUsableOwnUnit(in source.Own[idx])) continue;
+                    if (!IsUsableMapPoint(objective.Point)) continue;
 
-                    string objectiveId = string.IsNullOrWhiteSpace(own.ObjectiveName)
+                    string objectiveId = string.IsNullOrWhiteSpace(objective.Name)
                         ? "objective-" + observations.Count
-                        : own.ObjectiveName;
+                        : objective.Name;
                     if (!seenObjectiveIds.Add(objectiveId)) continue;
 
                     observations.Add(new ObjectiveObservationInput(
                         objectiveId,
                         TacticalObjectiveType.UnknownVanillaObjective,
                         TacticalObjectiveSource.CurrentSetObjective,
-                        point,
+                        objective.Point,
                         sourceConfidence: 0.65f,
                         value: 0.5f,
                         typeAnchorVerified: false));
                     statuses.Add(TacticalObjectiveStatus.Scouting);
-                    enemyStrengths.Add(own.VisibleEnemyStrength);
-                    friendlyStrengths.Add(own.Strength);
+                    enemyStrengths.Add(ClosestVisibleEnemyStrength(source, idx));
+                    friendlyStrengths.Add(OwnStrength(in source.Own[idx]));
                 }
 
                 AddMapObjectiveObservations(
@@ -369,15 +304,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     friendlyStrengths,
                     seenObjectiveIds);
 
-                // ApproachAvenue observations come from BattleUnits.scheduledarrival, NOT
-                // completeunitlist. The legacy walk is already cheap (small arrivals list)
-                // and is the correct data source. Reusing legacy here matches the prior
-                // per-call behavior exactly — aggregate path's only contribution to this
-                // stage is sharing the rest of the function's loop avoidance.
                 ApplyApproachAvenues(
                     observations,
                     allianceId,
-                    TacticalStableSceneCache.GetOrCaptureApproachAvenues(allianceId));
+                    TacticalStableSceneCache.GetOrCaptureApproachAvenues(allianceId),
+                    source);
 
                 bool haveVisibleEnemy = TryVisibleEnemyLineFromAggregate(
                     source,
@@ -546,24 +477,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return values[index];
         }
 
-        private static bool IsUsableOwnUnit(Regiment regiment, int allianceId)
+        // Shipped own-unit filter: not routed, not marked for rout, not permanently detached.
+        private static bool IsUsableOwnUnit(in UnitRecord unit)
         {
-            try
-            {
-                return regiment != null
-                    && regiment.alliance == allianceId
-                    && !regiment.isrouted
-                    && !regiment.markedforrout
-                    && !regiment.permanentlydetached;
-            }
-            catch
-            {
-                return false;
-            }
+            return (unit.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.PermanentlyDetached)) == 0;
+        }
+
+        /// <summary>
+        /// An own unit's strength as the objective records weigh it: groupstrengthaigroup, the
+        /// field the shipped reflected read resolved (UpdateGroupStrength 120176/120297; 0 on
+        /// regiments, so leaves add nothing and groups are not double counted).
+        /// </summary>
+        internal static float OwnStrength(in UnitRecord unit)
+        {
+            return Math.Max(0, unit.GroupStrengthAiGroup);
+        }
+
+        // Strength of the own unit's closest visible enemy; 0 when it sees none.
+        private static float ClosestVisibleEnemyStrength(IObservationSource source, int ownIndex)
+        {
+            int k = source.ClosestVisibleEnemy(ownIndex, out _);
+            return k >= 0 ? Math.Max(0f, source.Observations[k].Strength) : 0f;
         }
 
         private static void AddObjectiveChainObservations(
             AIBattle battle,
+            IObservationSource source,
             List<ObjectiveObservationInput> observations,
             List<TacticalObjectiveStatus> statuses,
             List<float> enemyStrengths,
@@ -602,8 +541,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         value: 0.65f,
                         typeAnchorVerified: false));
                     statuses.Add(TacticalObjectiveStatus.Scouting);
-                    enemyStrengths.Add(EstimateChainEnemyStrength(chain));
-                    friendlyStrengths.Add(EstimateChainFriendlyStrength(chain));
+                    enemyStrengths.Add(EstimateChainEnemyStrength(chain, source));
+                    friendlyStrengths.Add(EstimateChainFriendlyStrength(chain, source));
                 }
             }
         }
@@ -611,15 +550,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static void ApplyApproachAvenues(
             List<ObjectiveObservationInput> observations,
             int allianceId,
-            TacticalApproachAvenueObservation[] avenueObservations)
+            TacticalApproachAvenueObservation[] allAvenues,
+            IObservationSource source)
         {
             if (observations == null ||
                 observations.Count == 0 ||
-                avenueObservations == null ||
-                avenueObservations.Length == 0)
+                allAvenues == null ||
+                allAvenues.Length == 0)
             {
                 return;
             }
+
+            var known = new List<TacticalApproachAvenueObservation>(allAvenues.Length);
+            for (int i = 0; i < allAvenues.Length; i++)
+                if (IsAvenueKnown(in allAvenues[i], allianceId, source)) known.Add(allAvenues[i]);
+            if (known.Count == 0) return;
+            TacticalApproachAvenueObservation[] avenueObservations = known.ToArray();
 
             int enemyAllianceId = ResolveEnemyAlliance(allianceId);
             for (int i = 0; i < observations.Count; i++)
@@ -653,6 +599,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     observation.TypeAnchorVerified,
                     avenue);
             }
+        }
+
+        // A reinforcement observation sits at its entry point (BattlePerceptionProbe reads
+        // EntryPoint.entrypointposition); avenue origins come from the same field.
+        private const float EntryPointMatchMeters = 1f;
+
+        /// <summary>
+        /// Whether the side may use an approach avenue. Own and unowned avenues and entry-point
+        /// avenues (EntryPoint.owner is map knowledge) always; an enemy column's scheduled
+        /// arrival (BattleUnits.scheduledarrival 78960) only while perception sees its entry
+        /// point, i.e. the snapshot holds a visible reinforcement observation there; an enemy
+        /// deployment group's start/objective (BattleUnits.grp) never, as no perception reveals it.
+        /// </summary>
+        internal static bool IsAvenueKnown(in TacticalApproachAvenueObservation avenue, int allianceId, IObservationSource source)
+        {
+            int owner = avenue.OwnerAllianceId;
+            if (owner < 0 || owner == allianceId || avenue.Source == TacticalApproachAvenueSource.EntryPoint) return true;
+            if (avenue.Source != TacticalApproachAvenueSource.ScheduledArrival || source == null) return false;
+            EnemyObservation[] observations = source.Observations;
+            for (int i = 0; i < source.ObservationCount; i++)
+            {
+                ref EnemyObservation o = ref observations[i];
+                if (!o.IsReinforcement || o.State != ObservationState.Visible) continue;
+                if (Math.Abs(o.X - avenue.Origin.X) <= EntryPointMatchMeters && Math.Abs(o.Z - avenue.Origin.Z) <= EntryPointMatchMeters)
+                    return true;
+            }
+            return false;
         }
 
         // Promoted to internal so TacticalStableSceneCache can populate from it during
@@ -862,91 +835,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return -1;
         }
 
-        private static bool TryVisibleEnemyLine(
-            IList units,
-            int allianceId,
-            out TacticalMapPoint point,
-            out float enemyStrength,
-            out float friendlyStrength)
-        {
-            point = default;
-            enemyStrength = 0f;
-            friendlyStrength = 0f;
-
-            if (units == null) return false;
-
-            float weightedX = 0f;
-            float weightedZ = 0f;
-            float weightTotal = 0f;
-            for (int i = 0; i < units.Count; i++)
-            {
-                var own = units[i] as Regiment;
-                if (!IsUsableOwnUnit(own, allianceId)) continue;
-
-                friendlyStrength += SafeStrength(own);
-                Regiment enemy = SafeVisibleEnemy(own);
-                if (enemy == null) continue;
-
-                Vector3 enemyPosition = SafePosition(enemy);
-                if (IsDefaultVector(enemyPosition)) continue;
-
-                float weight = Math.Max(1f, SafeStrength(enemy));
-                weightedX += enemyPosition.x * weight;
-                weightedZ += enemyPosition.z * weight;
-                weightTotal += weight;
-                enemyStrength += SafeStrength(enemy);
-            }
-
-            if (weightTotal <= 0f) return false;
-            point = new TacticalMapPoint(weightedX / weightTotal, weightedZ / weightTotal);
-            return IsUsableMapPoint(point);
-        }
-
-        private static bool TryMovementAnchorLine(
-            IList units,
-            int allianceId,
-            out TacticalMapPoint point,
-            out float friendlyStrength)
-        {
-            point = default;
-            friendlyStrength = 0f;
-
-            if (units == null) return false;
-
-            float weightedX = 0f;
-            float weightedZ = 0f;
-            float weightTotal = 0f;
-            for (int i = 0; i < units.Count; i++)
-            {
-                var own = units[i] as Regiment;
-                if (!IsUsableOwnUnit(own, allianceId)) continue;
-
-                float strength = SafeStrength(own);
-                friendlyStrength += strength;
-                if (!TryLastWaypointPoint(own, out TacticalMapPoint waypoint)) continue;
-
-                float weight = Math.Max(1f, strength);
-                weightedX += waypoint.X * weight;
-                weightedZ += waypoint.Z * weight;
-                weightTotal += weight;
-            }
-
-            if (weightTotal <= 0f) return false;
-            point = new TacticalMapPoint(weightedX / weightTotal, weightedZ / weightTotal);
-            return IsUsableMapPoint(point);
-        }
-
-        // Aggregate variant of TryVisibleEnemyLine.
-        // Legacy selection logic: for each own (non-routed, non-detached) unit,
-        //   friendlyStrength += SafeStrength(own) unconditionally,
-        //   then if SafeVisibleEnemy(own) != null and its position is non-default:
-        //     weight = Math.Max(1f, SafeStrength(enemy))
-        //     centroid accumulates enemy's POSITION weighted by that weight
-        //     enemyStrength += SafeStrength(enemy)
-        // This is per-own-unit closest-visible-enemy linkage — NOT all enemies in the scene.
-        // Aggregate variant mirrors this exactly using HasVisibleEnemyPosition / VisibleEnemyX/Z
-        // (captured per own unit in CaptureUnit) and VisibleEnemyStrength (strength of that
-        // closest visible enemy, mirroring SafeStrength(enemy)).
+        // Per own unit (routed, marked for rout and permanently detached skipped):
+        //   friendlyStrength += OwnStrength(own), for every unit;
+        //   the unit's closest visible enemy (snapshot, true XZ distance), when it has one at a
+        //   usable point, adds its position weighted by max(1, strength) to the centroid and
+        //   its strength to enemyStrength.
+        // A per-own-unit closest-visible linkage, never every enemy on the map.
         private static bool TryVisibleEnemyLineFromAggregate(
             IObservationSource source,
             int allianceId,
@@ -961,34 +855,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float weightedX = 0f;
             float weightedZ = 0f;
             float weightTotal = 0f;
-            try
+            UnitRecord[] own = source.Own;
+            EnemyObservation[] observations = source.Observations;
+            for (int i = 0; i < source.OwnCount; i++)
             {
-                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
-                {
-                    int idx = source.AlliedIndices[ai];
-                    var own = source.AllUnits[idx];
-                    if (own.IsRouted) continue;
-                    if (own.PermanentlyDetached) continue;
+                if (!IsUsableOwnUnit(in own[i])) continue;
+                friendlyStrength += OwnStrength(in own[i]);
 
-                    // friendlyStrength: sum of ALL own units (mirrors legacy — accumulates
-                    // before the enemy-linkage check, not just contributing units).
-                    friendlyStrength += own.Strength;
+                int k = source.ClosestVisibleEnemy(i, out _);
+                if (k < 0) continue;
+                ref EnemyObservation enemy = ref observations[k];
+                if (!IsUsableMapPoint(new TacticalMapPoint(enemy.X, enemy.Z))) continue;
 
-                    // Per-unit closest visible enemy position (captured in CaptureUnit via
-                    // ClosestVisibleEnemy). Skip if no enemy found or position unreadable.
-                    if (!own.HasVisibleEnemy) continue;
-                    if (!own.HasVisibleEnemyPosition) continue;
-
-                    float weight = Math.Max(1f, own.VisibleEnemyStrength);
-                    weightedX += own.VisibleEnemyX * weight;
-                    weightedZ += own.VisibleEnemyZ * weight;
-                    weightTotal += weight;
-                    enemyStrength += own.VisibleEnemyStrength;
-                }
-            }
-            catch
-            {
-                return false;
+                float strength = Math.Max(0f, enemy.Strength);
+                float weight = Math.Max(1f, strength);
+                weightedX += enemy.X * weight;
+                weightedZ += enemy.Z * weight;
+                weightTotal += weight;
+                enemyStrength += strength;
             }
 
             if (weightTotal <= 0f) return false;
@@ -998,12 +882,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return true;
         }
 
-        // Aggregate variant of TryMovementAnchorLine.
-        // Legacy selection logic: strength-weighted centroid of last-waypoint positions
-        // for own units that have a usable waypoint (>25m from current position, already
-        // filtered during capture into HasLastWaypoint/LastWaypointX/Z).
-        // friendlyStrength = sum of ALL own unit strengths (not just those with waypoints).
-        // Weight per unit = Math.Max(1f, strength).
+        // Strength-weighted centroid of own units' last waypoints (lastsetwaypointposition,
+        // captured per tick in UnitRecord); a waypoint unset or within 25 m of the unit is
+        // ignored. friendlyStrength sums every usable own unit; weight = max(1, strength).
         private static bool TryMovementAnchorLineFromAggregate(
             IObservationSource source,
             int allianceId,
@@ -1016,29 +897,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float weightedX = 0f;
             float weightedZ = 0f;
             float weightTotal = 0f;
-            try
+            UnitRecord[] own = source.Own;
+            for (int i = 0; i < source.OwnCount; i++)
             {
-                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
-                {
-                    int idx = source.AlliedIndices[ai];
-                    var own = source.AllUnits[idx];
-                    if (own.IsRouted) continue;
-                    if (own.PermanentlyDetached) continue;
+                if (!IsUsableOwnUnit(in own[i])) continue;
+                float strength = OwnStrength(in own[i]);
+                friendlyStrength += strength;
+                if (!HasUsableWaypoint(in own[i])) continue;
 
-                    float strength = own.Strength;
-                    friendlyStrength += strength;
-
-                    if (!own.HasLastWaypoint) continue;
-
-                    float weight = Math.Max(1f, strength);
-                    weightedX += own.LastWaypointX * weight;
-                    weightedZ += own.LastWaypointZ * weight;
-                    weightTotal += weight;
-                }
-            }
-            catch
-            {
-                return false;
+                float weight = Math.Max(1f, strength);
+                weightedX += own[i].LastWaypointX * weight;
+                weightedZ += own[i].LastWaypointZ * weight;
+                weightTotal += weight;
             }
 
             if (weightTotal <= 0f) return false;
@@ -1046,6 +916,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (!IsUsableMapPoint(p)) return false;
             point = p;
             return true;
+        }
+
+        private static bool HasUsableWaypoint(in UnitRecord unit)
+        {
+            if (!IsUsableMapPoint(new TacticalMapPoint(unit.LastWaypointX, unit.LastWaypointZ))) return false;
+            float dx = unit.X - unit.LastWaypointX;
+            float dz = unit.Z - unit.LastWaypointZ;
+            return dx * dx + dz * dz >= 625f;
         }
 
         private static IList SafeObjectiveChains(AIBattle battle)
@@ -1103,21 +981,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return field;
         }
 
-        private static float EstimateChainEnemyStrength(object chain)
+        private static float EstimateChainEnemyStrength(object chain, IObservationSource source)
         {
             float total = 0f;
-            AddClosestEnemyStrength(SafeRegimentField(chain, "linegroup_centerunit"), ref total);
-            AddClosestEnemyStrengthFromList(SafeObjectList(chain, "linegroup_leftunits"), ref total);
-            AddClosestEnemyStrengthFromList(SafeObjectList(chain, "linegroup_rightunits"), ref total);
+            AddClosestEnemyStrength(SafeRegimentField(chain, "linegroup_centerunit"), source, ref total);
+            AddClosestEnemyStrengthFromList(SafeObjectList(chain, "linegroup_leftunits"), source, ref total);
+            AddClosestEnemyStrengthFromList(SafeObjectList(chain, "linegroup_rightunits"), source, ref total);
             return total;
         }
 
-        private static float EstimateChainFriendlyStrength(object chain)
+        private static float EstimateChainFriendlyStrength(object chain, IObservationSource source)
         {
             float total = 0f;
-            AddFriendlyStrength(SafeRegimentField(chain, "linegroup_centerunit"), ref total);
-            AddFriendlyStrengthFromList(SafeObjectList(chain, "linegroup_leftunits"), ref total);
-            AddFriendlyStrengthFromList(SafeObjectList(chain, "linegroup_rightunits"), ref total);
+            AddFriendlyStrength(SafeRegimentField(chain, "linegroup_centerunit"), source, ref total);
+            AddFriendlyStrengthFromList(SafeObjectList(chain, "linegroup_leftunits"), source, ref total);
+            AddFriendlyStrengthFromList(SafeObjectList(chain, "linegroup_rightunits"), source, ref total);
             return total;
         }
 
@@ -1133,39 +1011,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static void AddClosestEnemyStrength(Regiment own, ref float total)
+        // Chain line units are own regiments; both strengths come from the snapshot.
+        private static int OwnIndexOf(Regiment unit, IObservationSource source)
         {
-            if (own == null) return;
-            total += SafeStrength(SafeVisibleEnemy(own));
+            try { return unit != null ? source.IndexOfOwn(unit.gameObject.GetInstanceID()) : -1; }
+            catch { return -1; }
         }
 
-        private static void AddClosestEnemyStrengthFromList(IList units, ref float total)
+        private static void AddClosestEnemyStrength(Regiment own, IObservationSource source, ref float total)
+        {
+            int idx = OwnIndexOf(own, source);
+            if (idx >= 0) total += ClosestVisibleEnemyStrength(source, idx);
+        }
+
+        private static void AddClosestEnemyStrengthFromList(IList units, IObservationSource source, ref float total)
         {
             if (units == null) return;
-            for (int i = 0; i < units.Count; i++) AddClosestEnemyStrength(units[i] as Regiment, ref total);
+            for (int i = 0; i < units.Count; i++) AddClosestEnemyStrength(units[i] as Regiment, source, ref total);
         }
 
-        private static void AddFriendlyStrength(Regiment own, ref float total)
+        private static void AddFriendlyStrength(Regiment own, IObservationSource source, ref float total)
         {
-            total += SafeStrength(own);
+            int idx = OwnIndexOf(own, source);
+            if (idx >= 0) total += OwnStrength(in source.Own[idx]);
         }
 
-        private static void AddFriendlyStrengthFromList(IList units, ref float total)
+        private static void AddFriendlyStrengthFromList(IList units, IObservationSource source, ref float total)
         {
             if (units == null) return;
-            for (int i = 0; i < units.Count; i++) AddFriendlyStrength(units[i] as Regiment, ref total);
-        }
-
-        private static Regiment SafeVisibleEnemy(Regiment own)
-        {
-            try
-            {
-                return TacticalFogOfWarContact.ClosestVisibleEnemy(own);
-            }
-            catch
-            {
-                return null;
-            }
+            for (int i = 0; i < units.Count; i++) AddFriendlyStrength(units[i] as Regiment, source, ref total);
         }
 
         internal static object SafeCurrentSetObjective(Regiment own)
@@ -1188,13 +1062,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Returns the raw objective name string for use as
-        /// <see cref="TacticalUnitObservation.ObjectiveName"/>. Returns
-        /// <see cref="string.Empty"/> when the name is null, empty, whitespace,
-        /// or unreadable. Callers apply their own fallback formula at the right
-        /// point in the iteration (e.g. Task 8's BuildObjectiveRecordsFromAggregate
-        /// replicates the legacy <c>SafeObjectiveId(obj, observations.Count)</c>
-        /// formula at consumption time for bit-identical id streams).
+        /// Raw objective name for <see cref="OwnSetObjective.Name"/>; empty when the name is
+        /// null, whitespace or unreadable. BuildObjectiveRecordsFromAggregate applies the
+        /// <c>SafeObjectiveId(obj, observations.Count)</c> fallback at consumption time, where
+        /// the running count is known.
         /// </summary>
         internal static string SafeObjectiveName(object objective)
         {
@@ -1242,38 +1113,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return new TacticalMapPoint(0f, 0f);
-            }
-        }
-
-        internal static float EstimateVisibleEnemyStrength(Regiment own)
-        {
-            return SafeStrength(SafeVisibleEnemy(own));
-        }
-
-        private static Vector3 SafePosition(Regiment regiment)
-        {
-            try { return regiment != null ? regiment.transform.position : default(Vector3); }
-            catch { return default(Vector3); }
-        }
-
-        private static bool TryLastWaypointPoint(Regiment regiment, out TacticalMapPoint point)
-        {
-            point = default;
-            try
-            {
-                if (regiment == null) return false;
-                Vector3 waypoint = regiment.lastsetwaypointposition;
-                if (IsDefaultVector(waypoint)) return false;
-
-                Vector3 position = SafePosition(regiment);
-                if (!IsDefaultVector(position) && DistanceSquaredXZ(position, waypoint) < 625f) return false;
-
-                point = new TacticalMapPoint(waypoint.x, waypoint.z);
-                return IsUsableMapPoint(point);
-            }
-            catch
-            {
-                return false;
             }
         }
 
@@ -1347,32 +1186,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float.IsInfinity(value.y) ||
                 float.IsInfinity(value.z) ||
                 (Math.Abs(value.x) < 0.01f && Math.Abs(value.z) < 0.01f);
-        }
-
-        private static float DistanceSquaredXZ(Vector3 first, Vector3 second)
-        {
-            float dx = first.x - second.x;
-            float dz = first.z - second.z;
-            return dx * dx + dz * dz;
-        }
-
-        internal static float SafeStrength(Regiment regiment)
-        {
-            try
-            {
-                if (regiment == null) return 0f;
-                var field = regiment.GetType().GetField("groupstrengthaigroup");
-                if (field == null) field = regiment.GetType().GetField("strength");
-                var raw = field?.GetValue(regiment);
-                if (raw is int intValue) return Math.Max(0f, intValue);
-                if (raw is float floatValue) return Math.Max(0f, floatValue);
-                if (raw is double doubleValue) return (float)Math.Max(0d, doubleValue);
-                return 0f;
-            }
-            catch
-            {
-                return 0f;
-            }
         }
 
         // Test accessors — thin wrappers so harness tests can reach private static

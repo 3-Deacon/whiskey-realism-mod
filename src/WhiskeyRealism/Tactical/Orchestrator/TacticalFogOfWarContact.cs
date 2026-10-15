@@ -2,60 +2,19 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
-    /// <summary>
-    /// Per-frame memo keyed by an int id: entries are valid only for the frame they were
-    /// stored in; the first access in a new frame drops them.
-    /// </summary>
-    internal sealed class TacticalFrameCache<TValue>
-    {
-        private readonly Dictionary<int, TValue> _entries = new Dictionary<int, TValue>();
-        private int _frame = int.MinValue;
-
-        public bool TryGet(int frame, int key, out TValue value)
-        {
-            Roll(frame);
-            return _entries.TryGetValue(key, out value);
-        }
-
-        public void Set(int frame, int key, TValue value)
-        {
-            Roll(frame);
-            _entries[key] = value;
-        }
-
-        private void Roll(int frame)
-        {
-            if (frame == _frame) return;
-            _entries.Clear();
-            _frame = frame;
-        }
-    }
-
-    // Visible-contact reads over vanilla's per-unit range lists
-    // (unitrange.enemyinfirerangereg / enemyinrangereg). Many patches ask for the same
-    // unit's nearest visible enemy in one frame (stance, posture, charge, reserve,
-    // artillery), so the nearest-enemy search is memoised per frame (main thread only),
-    // and HasVisibleEnemy stops at the first valid candidate instead of ranking all of
-    // them by distance.
+    // Visible-contact reads for patches. Candidates are vanilla's per-unit range lists
+    // (unitrange.enemyinfirerangereg / enemyinrangereg, UpdateUnitRangeFast 122649 /
+    // 122692), which are range-only and unsorted (122840). A candidate counts only when the
+    // side's battle snapshot sees it (BattleCore.TryGetSnapshot + IsVisible: vanilla's
+    // AI-side fog, BC2a), and the nearest is chosen by true XZ distance, never by list
+    // order. With no snapshot for the side (no coordinator tick yet, or a side Whiskey does
+    // not run) nothing is visible. The snapshot is the per-tick memo (plan D2).
     internal static class TacticalFogOfWarContact
     {
-        private readonly struct NearestEnemy
-        {
-            public NearestEnemy(Regiment enemy, float distance)
-            {
-                Enemy = enemy;
-                Distance = distance;
-            }
-
-            public Regiment Enemy { get; }
-            public float Distance { get; }
-        }
-
-        private static readonly TacticalFrameCache<NearestEnemy> _nearestByUnit = new TacticalFrameCache<NearestEnemy>();
-
         public static Regiment ClosestVisibleEnemy(Regiment unit)
         {
             TryClosestVisibleEnemy(unit, out Regiment enemy, out _);
@@ -66,21 +25,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             enemy = null;
             distance = 0f;
-            if (unit == null || unit.unitrange == null) return false;
-
-            int frame = Time.frameCount;
-            int key = UnitIdentity(unit);
-            if (_nearestByUnit.TryGet(frame, key, out NearestEnemy cached))
-            {
-                enemy = cached.Enemy;
-                distance = cached.Distance;
-                return enemy != null;
-            }
+            if (!TrySideSnapshot(unit, out BattleSnapshot snapshot)) return false;
 
             float bestDistance = float.MaxValue;
-            AddNearestVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg, ref enemy, ref bestDistance);
-            AddNearestVisibleEnemy(unit, unit.unitrange.enemyinrangereg, ref enemy, ref bestDistance);
-            _nearestByUnit.Set(frame, key, new NearestEnemy(enemy, enemy != null ? bestDistance : 0f));
+            AddNearestVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg, snapshot, ref enemy, ref bestDistance);
+            AddNearestVisibleEnemy(unit, unit.unitrange.enemyinrangereg, snapshot, ref enemy, ref bestDistance);
             if (enemy == null) return false;
 
             distance = bestDistance;
@@ -89,36 +38,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static bool HasVisibleEnemy(Regiment unit)
         {
-            if (unit == null || unit.unitrange == null) return false;
-            return AnyValidVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg)
-                || AnyValidVisibleEnemy(unit, unit.unitrange.enemyinrangereg);
-        }
-
-        private static bool AnyValidVisibleEnemy(Regiment own, IList<Regiment> candidates)
-        {
-            if (candidates == null) return false;
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                if (IsValidVisibleEnemy(own, candidates[i])) return true;
-            }
-            return false;
-        }
-
-        public static int VisibleEnemyCount(Regiment unit)
-        {
-            if (unit == null || unit.unitrange == null) return 0;
-            var seen = new HashSet<int>();
-            AddVisibleEnemyIds(unit.unitrange.enemyinfirerangereg, seen);
-            AddVisibleEnemyIds(unit.unitrange.enemyinrangereg, seen);
-            return seen.Count;
-        }
-
-        public static float VisibleEnemyStrength(Regiment unit)
-        {
-            if (unit == null || unit.unitrange == null) return 0f;
-            var seen = new HashSet<int>();
-            return SumVisibleEnemyStrength(unit.unitrange.enemyinfirerangereg, seen) +
-                SumVisibleEnemyStrength(unit.unitrange.enemyinrangereg, seen);
+            if (!TrySideSnapshot(unit, out BattleSnapshot snapshot)) return false;
+            return AnyValidVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg, snapshot)
+                || AnyValidVisibleEnemy(unit, unit.unitrange.enemyinrangereg, snapshot);
         }
 
         public static float VisibleEnemyStrength(IList units)
@@ -130,17 +52,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < units.Count; i++)
             {
                 var unit = units[i] as Regiment;
-                if (unit == null || unit.unitrange == null) continue;
-                total += SumVisibleEnemyStrength(unit.unitrange.enemyinfirerangereg, seen);
-                total += SumVisibleEnemyStrength(unit.unitrange.enemyinrangereg, seen);
+                if (!TrySideSnapshot(unit, out BattleSnapshot snapshot)) continue;
+                total += SumVisibleEnemyStrength(unit, unit.unitrange.enemyinfirerangereg, snapshot, seen);
+                total += SumVisibleEnemyStrength(unit, unit.unitrange.enemyinrangereg, snapshot, seen);
             }
 
             return total;
         }
 
+        private static bool TrySideSnapshot(Regiment unit, out BattleSnapshot snapshot)
+        {
+            snapshot = null;
+            try
+            {
+                return unit != null && unit.unitrange != null && BattleCore.TryGetSnapshot(unit.alliance, out snapshot);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool AnyValidVisibleEnemy(Regiment own, IList<Regiment> candidates, BattleSnapshot snapshot)
+        {
+            if (candidates == null) return false;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (IsValidVisibleEnemy(own, candidates[i], snapshot)) return true;
+            }
+            return false;
+        }
+
         private static void AddNearestVisibleEnemy(
             Regiment own,
             IList<Regiment> candidates,
+            BattleSnapshot snapshot,
             ref Regiment bestEnemy,
             ref float bestDistance)
         {
@@ -149,7 +95,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < candidates.Count; i++)
             {
                 Regiment candidate = candidates[i];
-                if (!IsValidVisibleEnemy(own, candidate)) continue;
+                if (!IsValidVisibleEnemy(own, candidate, snapshot)) continue;
 
                 float distance = SafeDistance(own, candidate);
                 if (distance >= bestDistance) continue;
@@ -159,18 +105,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static bool IsValidVisibleEnemy(Regiment own, Regiment candidate)
+        // Vanilla's pressure filter (active, unittyp <= 13, not 5, not routed: 122644) plus
+        // the side's perception.
+        private static bool IsValidVisibleEnemy(Regiment own, Regiment candidate, BattleSnapshot snapshot)
         {
             try
             {
-                return own != null &&
-                    candidate != null &&
-                    candidate.alliance != own.alliance &&
-                    candidate.unittyp != 5 &&
-                    candidate.unittyp <= 13 &&
-                    !candidate.isrouted &&
-                    candidate.gameObject != null &&
-                    candidate.gameObject.activeInHierarchy;
+                if (own == null || candidate == null) return false;
+                if (candidate.alliance == own.alliance || candidate.unittyp == 5 || candidate.unittyp > 13 || candidate.isrouted)
+                    return false;
+                GameObject go = candidate.gameObject;
+                return go != null && go.activeInHierarchy && snapshot.IsVisible(go.GetInstanceID());
             }
             catch
             {
@@ -186,44 +131,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             catch
             {
-                try { return Vector3.Distance(own.transform.position, enemy.transform.position); }
-                catch { return float.MaxValue; }
+                return float.MaxValue;
             }
         }
 
-        private static void AddVisibleEnemyIds(IList<Regiment> units, HashSet<int> seen)
+        private static float SumVisibleEnemyStrength(Regiment own, IList<Regiment> candidates, BattleSnapshot snapshot, HashSet<int> seen)
         {
-            if (units == null || seen == null) return;
-            for (int i = 0; i < units.Count; i++)
-            {
-                Regiment unit = units[i];
-                if (unit == null) continue;
-                seen.Add(UnitIdentity(unit));
-            }
-        }
-
-        private static float SumVisibleEnemyStrength(IList<Regiment> units, HashSet<int> seen)
-        {
-            if (units == null || seen == null) return 0f;
+            if (candidates == null) return 0f;
 
             float total = 0f;
-            for (int i = 0; i < units.Count; i++)
+            for (int i = 0; i < candidates.Count; i++)
             {
-                Regiment unit = units[i];
-                if (unit == null) continue;
-
-                int id = UnitIdentity(unit);
-                if (!seen.Add(id)) continue;
-                total += Math.Max(0f, unit.strength);
+                Regiment candidate = candidates[i];
+                if (!IsValidVisibleEnemy(own, candidate, snapshot)) continue;
+                if (!seen.Add(candidate.gameObject.GetInstanceID())) continue;
+                total += Math.Max(0f, candidate.strength);
             }
 
             return total;
-        }
-
-        private static int UnitIdentity(Regiment unit)
-        {
-            try { return unit != null ? unit.GetInstanceID() : 0; }
-            catch { return 0; }
         }
     }
 }
