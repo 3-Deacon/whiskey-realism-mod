@@ -304,12 +304,16 @@ namespace WhiskeyRealism.Tactical.Battle
             return p >= 0 && p < s.OwnCount ? s.Own[p].InstanceId : 0;
         }
 
-        // 0 weak / 1 normal / 2 strong, the thresholds of the former runtime bucket.
-        // Groups read groupstrengthdirect (UpdateGroupStrength 120301), leaves their own
-        // strength; groupowninrange / groupstrengthaigroup are no longer read.
+        // 0 weak / 1 normal / 2 strong: the shipped runtime bucket, unchanged, so the role
+        // cascade's anchors (TacticalRoleCascade.ChooseEnvelopmentAnchorIndices via
+        // TacticalLeafBrigadeMap) see the same strengths. Source is
+        // max(groupowninrange, groupstrengthaigroup): groupstrengthaigroup sums only units
+        // whose groupaiobject is this group (UpdateGroupStrength 120297), groupowninrange
+        // is the largest unitrange.ownstrengthinrange (120559-120564). A group that is no
+        // vanilla AI group and has nothing in range therefore reads weak.
         private static int StrengthBucket(in UnitRecord u)
         {
-            float strength = Math.Max(u.GroupStrengthDirect, u.Strength);
+            int strength = Math.Max(u.GroupOwnInRange, u.GroupStrengthAiGroup);
             if (strength >= 3000f) return 2;
             if (strength >= 1000f) return 1;
             return 0;

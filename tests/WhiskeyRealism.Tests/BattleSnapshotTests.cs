@@ -25,6 +25,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot assembly allocates nothing after warm-up", SnapshotAssemblyAllocatesNothingAfterWarmup),
             ("battle snapshot front axis stabilized across ticks", FrontAxisStabilizedAcrossTicks),
             ("battle snapshot direct-child and command-tree probes agree on parents", DirectChildAndCommandTreeAgreeOnParents),
+            ("battle snapshot strength bucket reads ai-group and in-range strength", StrengthBucketReadsAiGroupAndInRangeStrength),
         });
     }
 
@@ -376,5 +377,38 @@ internal static class BattleSnapshotTests
         AssertFalse(regimentProbes.Find(p => p.InstanceId == R3).IsDirectChild, "skirmisher is not a direct child");
         AssertEqual(-1, regimentProbes.FindIndex(p => p.InstanceId == Brig3), "W&L player-owned excluded from discovery");
         AssertEqual(s.OwnCount - 1, regimentProbes.Count, "only the player-owned unit dropped");
+    }
+
+    // The extended probe keeps the shipped bucket source, max(groupowninrange,
+    // groupstrengthaigroup): UpdateGroupStrength sums groupstrengthaigroup only over
+    // units whose groupaiobject is this group (120297), and groupowninrange is the max
+    // unitrange.ownstrengthinrange (120559-120564), so a division that is no vanilla AI
+    // group and has nothing in range reads 0 however large groupstrengthdirect is.
+    private static void StrengthBucketReadsAiGroupAndInRangeStrength()
+    {
+        var f = SmallArmy();
+        SetStrengths(f, Div1, direct: 25000f, strength: 25000, ownInRange: 0, aiGroup: 0);
+        SetStrengths(f, Div2, direct: 900f, strength: 0, ownInRange: 3200, aiGroup: 0);
+        SetStrengths(f, Brig1, direct: 1200f, strength: 0, ownInRange: 0, aiGroup: 1500);
+        SetStrengths(f, Brig2, direct: 600f, strength: 0, ownInRange: 400, aiGroup: 999);
+        f.Load(2); f.Assemble();
+
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>();
+        BattleSnapshotAssembler.ToExtendedProbes(f.Snapshot, null, 0, probes);
+        AssertEqual(0, probes.Find(p => p.InstanceId == Div1).StrengthBucket, "non-AI-group division out of contact stays bucket 0");
+        AssertEqual(2, probes.Find(p => p.InstanceId == Div2).StrengthBucket, "own strength in range 3200 -> strong");
+        AssertEqual(1, probes.Find(p => p.InstanceId == Brig1).StrengthBucket, "AI-group strength 1500 -> normal");
+        AssertEqual(0, probes.Find(p => p.InstanceId == Brig2).StrengthBucket, "both below 1000 -> weak");
+    }
+
+    private static void SetStrengths(Fixture f, int id, float direct, int strength, int ownInRange, int aiGroup)
+    {
+        int i = f.Records.FindIndex(r => r.InstanceId == id);
+        var r = f.Records[i];
+        r.GroupStrengthDirect = direct;
+        r.Strength = strength;
+        r.GroupOwnInRange = ownInRange;
+        r.GroupStrengthAiGroup = aiGroup;
+        f.Records[i] = r;
     }
 }

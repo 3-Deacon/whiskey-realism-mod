@@ -26,6 +26,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - Regiment.unitrange.enemyinrangereg (109450), assigned from the unsorted temp list
     //     at the end of UpdateUnitRangeFast (122840); [0] is range-only, not nearest.
     //   - Regiment.ammo (111498) through ArmyEvidenceBuilder.NormalizeAmmo01 (T1 rule).
+    //   - groupowninrange (110894) / groupstrengthaigroup (110844), written by
+    //     UpdateGroupStrength (120297, 120559-120564): the command-tree strength bucket.
     //   - SetWaypoint's garrison exit (91331): Garrisoned = garrisonreference != null.
     //   - W&L ownership inputs: dlcw_isundercommander (110360, set by
     //     BattleUnits.IsUnitUnderCommander 91168-91222), DLC_WL.IsUnitTakenOver (45840),
@@ -215,6 +217,8 @@ namespace WhiskeyRealism.Tactical.Battle
             record.RotationY = go.transform.eulerAngles.y;
             record.Strength = reg.strength;
             record.GroupStrengthDirect = reg.groupstrengthdirect;
+            record.GroupOwnInRange = reg.groupowninrange;
+            record.GroupStrengthAiGroup = reg.groupstrengthaigroup;
             record.Morale = reg.morale;
             record.BattleStartMorale = reg.battlestartmorale;
             record.Ammo01 = ArmyEvidenceBuilder.NormalizeAmmo01(reg.ammo, reg.unittyp, 0.9f);

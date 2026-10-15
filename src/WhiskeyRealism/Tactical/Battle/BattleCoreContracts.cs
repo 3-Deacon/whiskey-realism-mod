@@ -39,6 +39,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Y, Z, RotationY;
         public int Strength;
         public float GroupStrengthDirect;
+        public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
         public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;

@@ -92,6 +92,7 @@ namespace WhiskeyRealism.Tactical.Battle {
   public struct UnitRecord {
     public int InstanceId; public int UnitTyp; public int Alliance; public int Commander;
     public float X, Y, Z, RotationY; public int Strength; public float GroupStrengthDirect;
+    public int GroupOwnInRange, GroupStrengthAiGroup; /* added in BC1: the shipped command-tree strength bucket source */
     public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
     public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
     public float LastWaypointX, LastWaypointZ; public int ParentIndex; /* -1 root */ public int FirstEnemyInRangeId; /* enemyinrangereg[0] or 0 */
@@ -188,6 +189,7 @@ internal static class BattleSnapshotBuilder { // runtime
   - `AssemblerRebuildsTreeOnlyOnRosterChange`, using the roster signature (count, routed count, sum of instance ids)
   - `SnapshotAssemblyAllocatesNothingAfterWarmup`: a 300-unit fixture, assemble twice, the second call allocates 0 bytes
   - `FrontAxisStabilizedAcrossTicks`
+  - `StrengthBucketReadsAiGroupAndInRangeStrength`: the extended probe keeps the shipped bucket source `max(groupowninrange, groupstrengthaigroup)` (vanilla 120297, 120559-120564), so `ChooseEnvelopmentAnchorIndices` sees unchanged strengths; a non-AI-group division out of contact stays bucket 0
 - [ ] Implement `BattleSnapshot` with grow-only pooled arrays. Growth allocates only when the roster exceeds capacity, which the allocation test accepts as warm-up.
 - [ ] Implement the runtime builder. It does one pass over `BattleUnits.completeunitlist` (as `IList`, no LINQ). Own units of `alliance` go into `Own` and enemies into `EnemyRecords`. It caches `allattachedunits` id lists only when the roster signature changes. It sets `FirstEnemyInRangeId` from `unitrange.enemyinrangereg[0]`. On ancestry, it counts disagreements between the D5 parent map and `transform.IsChildOf` for the player chain only (cheap), and emits `OnceLog.Info("battle-core:ancestry-mismatch", …)` once per battle when the count is > 0.
 - [ ] Runtime fallbacks: a null `bunits` gives an empty snapshot plus `OnceLog.Warning("battle-core:snapshot-degraded")`. Never throw.
