@@ -38,7 +38,6 @@ namespace WhiskeyRealism.Strategic
         public bool DefensiveAllowed;
         public bool TransferDonorAllowed;
         public bool DirectMovementAllowed;
-        public bool RaidAllowed;
         public bool InheritsFromParent;
         public string ParentUnitKey;
     }
@@ -60,10 +59,20 @@ namespace WhiskeyRealism.Strategic
         private readonly List<FormationDirectiveAssignment> _ordered =
             new List<FormationDirectiveAssignment>();
 
+        // The fallback directive (G1b; it was Screen "default-screen" before Screen meant a recon
+        // mission). Its perk path stays the old fallback's (integrator decision, G1b verify r1 F2).
+        public const string DefaultHoldReason = "default-hold";
+
+        public static bool IsDefaultHold(string reason)
+        {
+            return string.Equals(reason, DefaultHoldReason, StringComparison.Ordinal);
+        }
+
         public IReadOnlyList<FormationDirectiveAssignment> Assignments => _ordered;
         public FormationPressureSummary Pressure = new FormationPressureSummary();
 
-        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options = null)
+        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options = null,
+                                                     Func<string, bool> onReconMission = null)
         {
             options = options ?? new FormationDirectiveOptions();
             var ledger = new FormationDirectiveLedger();
@@ -81,7 +90,7 @@ namespace WhiskeyRealism.Strategic
                 if (!snapshot.CanReceiveDirectDirective) continue;
                 if (!snapshot.IsTopStrategicFormation) continue;
 
-                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey, options);
+                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey, options, onReconMission);
                 ledger.Add(assignment);
             }
 
@@ -97,7 +106,10 @@ namespace WhiskeyRealism.Strategic
                 assignment.ParentUnitKey = child.ParentUnitKey;
                 assignment.DirectMovementAllowed = false;
                 assignment.Directive = parent != null ? parent.Directive : FormationDirective.Hold;
-                assignment.Reason = parent != null ? "attached-inherits-parent" : "attached-parent-missing";
+                // A child of a default-hold parent keeps that reason, so its perks fall through to the
+                // objective role as the parent's do (PerkSelectionScorer.TryDirectiveRole).
+                assignment.Reason = parent == null ? "attached-parent-missing"
+                    : IsDefaultHold(parent.Reason) ? DefaultHoldReason : "attached-inherits-parent";
                 assignment.OffensiveAllowed = false;
                 assignment.DefensiveAllowed = parent == null || parent.DefensiveAllowed;
                 assignment.TransferDonorAllowed = false;
@@ -196,7 +208,12 @@ namespace WhiskeyRealism.Strategic
             _ordered.Add(assignment);
         }
 
-        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options)
+        // Screen means "on a campaign-planner recon mission" (Screen/Picket/AdvanceGuard/Probe; plan
+        // § G1b): onReconMission is ReconMissionLedger.IsRecon by unit key, null for none. Supply
+        // raiding is vanilla's raid forces' (CheckCreationOfRaidForces 17568-17612), so there is no
+        // raid directive.
+        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options,
+                                                                        Func<string, bool> onReconMission)
         {
             var assignment = BaseAssignment(snapshot);
 
@@ -209,17 +226,13 @@ namespace WhiskeyRealism.Strategic
             if (snapshot.OnRetreat && snapshot.HasActivePath)
                 return Set(assignment, FormationDirective.Delay, "retreat-skirmish-risk", false, true, false);
 
-            if (snapshot.IsCavalryCapable && snapshot.Readiness >= 0.65f && snapshot.Supply >= 0.65f &&
-                snapshot.FrontPosture == FrontPosture.EconomyOfForce && snapshot.LocalEnemyStrength <= snapshot.GroupStrengthActive)
-            {
-                assignment.RaidAllowed = true;
-                return Set(assignment, FormationDirective.RaidSupport, "cavalry-raid-support", false, false, true);
-            }
+            if (onReconMission != null && onReconMission(snapshot.UnitKey))
+                return Set(assignment, FormationDirective.Screen, "recon-mission", false, true, false);
 
             if (snapshot.Level == FormationLevel.Division &&
                 snapshot.VisibleEnemyLevel == FormationLevel.Army &&
                 !HasReachableSupport(snapshot))
-                return Set(assignment, FormationDirective.Screen, "division-vs-army-no-support", false, true, false);
+                return Set(assignment, FormationDirective.Delay, "division-vs-army-no-support", false, true, false);
 
             if (snapshot.Level == FormationLevel.Division &&
                 snapshot.VisibleEnemyLevel == FormationLevel.Corps &&
@@ -248,7 +261,7 @@ namespace WhiskeyRealism.Strategic
             if (snapshot.Level == FormationLevel.Army)
                 return Set(assignment, FormationDirective.Hold, "army-hold", false, true, false);
 
-            return Set(assignment, FormationDirective.Screen, "default-screen", false, true, false);
+            return Set(assignment, FormationDirective.Hold, DefaultHoldReason, false, true, false);
         }
 
         private static FormationDirectiveAssignment BaseAssignment(FormationSnapshot snapshot)

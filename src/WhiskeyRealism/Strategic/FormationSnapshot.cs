@@ -31,7 +31,6 @@ namespace WhiskeyRealism.Strategic
         public bool InBattle;
         public bool OnRetreat;
         public bool HasActivePath;
-        public bool IsCavalryCapable;
         public FormationLevel VisibleEnemyLevel = FormationLevel.Unknown;
         public float LocalEnemyStrength;
         public float LocalEnemyExchangePressure;

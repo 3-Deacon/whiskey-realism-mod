@@ -31,6 +31,42 @@ namespace WhiskeyRealism.Strategic
         // faction's armies do not all take the same perk sequence.
         internal const float NearTieMargin = 0.35f;
 
+        // A formation directive's army perk role (PerkSelectionPatch.ResolveArmyRole); false = the
+        // directive names none and the objective's role decides. Screen = on a campaign-planner recon
+        // mission (G1b). The fallback Hold ("default-hold") keeps the perk path of the fallback it
+        // replaced ("default-screen", which had no case here): only an explicit Hold takes the
+        // capital-defence perks (integrator decision, G1b verify r1 F2).
+        internal static bool TryDirectiveRole(FormationDirective directive, string reason, out ArmyPerkRole role)
+        {
+            role = ArmyPerkRole.General;
+            switch (directive)
+            {
+                case FormationDirective.Screen:
+                    role = ArmyPerkRole.Scouting;
+                    return true;
+                case FormationDirective.Recover:
+                    role = ArmyPerkRole.Recovery;
+                    return true;
+                case FormationDirective.Hold:
+                    if (FormationDirectiveLedger.IsDefaultHold(reason)) return false;
+                    role = ArmyPerkRole.CapitalDefense;
+                    return true;
+                case FormationDirective.Guard:
+                case FormationDirective.CoordinateHold:
+                    role = ArmyPerkRole.CapitalDefense;
+                    return true;
+                case FormationDirective.Probe:
+                case FormationDirective.Mass:
+                case FormationDirective.Counterstroke:
+                case FormationDirective.Reinforce:
+                case FormationDirective.CoordinateMass:
+                    role = ArmyPerkRole.Maneuver;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         // Vanilla AICampaign.CheckPerkSelection (decompile 11881/11888) draws
         // Random.Range(0, Length / LevelsPerPerk - 1): int overload, exclusive upper
         // bound, so the AI never receives the last perk id. Returns that exclusive

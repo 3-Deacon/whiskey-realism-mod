@@ -127,26 +127,8 @@ namespace WhiskeyRealism.Patches
         private static ArmyPerkRole ResolveArmyRole(int alliance, Regiment unit, ObjectiveMetadata meta)
         {
             var directive = CurrentDirective(alliance, unit);
-            if (directive != null)
-            {
-                switch (directive.Directive)
-                {
-                    case FormationDirective.RaidSupport:
-                        return ArmyPerkRole.Raid;
-                    case FormationDirective.Recover:
-                        return ArmyPerkRole.Recovery;
-                    case FormationDirective.Guard:
-                    case FormationDirective.Hold:
-                    case FormationDirective.CoordinateHold:
-                        return ArmyPerkRole.CapitalDefense;
-                    case FormationDirective.Probe:
-                    case FormationDirective.Mass:
-                    case FormationDirective.Counterstroke:
-                    case FormationDirective.Reinforce:
-                    case FormationDirective.CoordinateMass:
-                        return ArmyPerkRole.Maneuver;
-                }
-            }
+            if (directive != null && PerkSelectionScorer.TryDirectiveRole(directive.Directive, directive.Reason, out var directiveRole))
+                return directiveRole;
 
             if (meta.Category == Category.RiverControl || meta.Theater == Theater.River) return ArmyPerkRole.River;
             if (meta.Category == Category.CapitalThreat) return alliance == 1 ? ArmyPerkRole.CapitalDefense : ArmyPerkRole.Siege;

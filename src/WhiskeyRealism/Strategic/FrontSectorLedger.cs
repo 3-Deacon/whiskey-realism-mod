@@ -13,16 +13,6 @@ namespace WhiskeyRealism.Strategic
         Exploit
     }
 
-    public enum ArmyRole
-    {
-        Hold,
-        Screen,
-        Reserve,
-        Exploit,
-        Counterstroke,
-        Recover
-    }
-
     public enum TransferBudgetAction
     {
         Allowed,
@@ -72,7 +62,6 @@ namespace WhiskeyRealism.Strategic
         public float AverageSupply;
         public float AverageReadiness;
         public FrontPosture Posture;
-        public ArmyRole Role;
     }
 
     public sealed class TransferBudgetDecision
@@ -122,7 +111,6 @@ namespace WhiskeyRealism.Strategic
                 };
 
                 sector.Posture = ChoosePosture(input, sector, options);
-                sector.Role = ChooseRole(sector);
                 ledger._sectors[sector.SectorKey] = sector;
                 ledger._ordered.Add(sector);
             }
@@ -212,25 +200,6 @@ namespace WhiskeyRealism.Strategic
                 return FrontPosture.Counterstroke;
 
             return FrontPosture.Hold;
-        }
-
-        private static ArmyRole ChooseRole(FrontSector sector)
-        {
-            switch (sector.Posture)
-            {
-                case FrontPosture.Delay:
-                    return ArmyRole.Screen;
-                case FrontPosture.EconomyOfForce:
-                    return ArmyRole.Reserve;
-                case FrontPosture.Concede:
-                    return ArmyRole.Screen;
-                case FrontPosture.Counterstroke:
-                    return ArmyRole.Counterstroke;
-                case FrontPosture.Exploit:
-                    return ArmyRole.Exploit;
-                default:
-                    return ArmyRole.Hold;
-            }
         }
 
         private static float Clamp01(float value)

@@ -11,7 +11,6 @@ namespace WhiskeyRealism.Strategic
         Reinforce,
         Counterstroke,
         Mass,
-        RaidSupport,
         Recover,
         Concede,
         CoordinateHold,
