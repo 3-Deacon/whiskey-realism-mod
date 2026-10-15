@@ -11,7 +11,10 @@ namespace WhiskeyRealism.Tactical.Battle
     //
     // Vanilla anchors (decompile, build 14703111):
     //   BattlefieldSetup.GetCurrentTerrainOnPos (static, 26727) reads the baked
-    //     terrainspecs grid: 4 river, 8 fences/walls.
+    //     terrainspecs grid (NavMesh area per 1 m cell, 26596-26623) in battle
+    //     terrain ids (battleprefs.txt table, loadcontrols 54325-54330): 4 river,
+    //     5 river crossing (ford), 6 bridge, 8 fences/walls. 8 means sea only in
+    //     the campaign table (campaignprefs.txt).
     //   BattlefieldSetup.CheckTerrainLine(start, end, ids, step) (27638/27650):
     //     true when any step from start toward end lies on one of the ids.
     //   BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, end, 4) (25574):
@@ -27,6 +30,7 @@ namespace WhiskeyRealism.Tactical.Battle
         internal static readonly WaypointValidatorRuntime Instance = new WaypointValidatorRuntime();
 
         private const int RiverTerrain = 4;
+        // Battle id 8 "Fences Walls" (campaign id 8 is sea; never read here).
         private const int FenceTerrain = 8;
         private static readonly int[] WaterOrFenceIds = { RiverTerrain, FenceTerrain };
 

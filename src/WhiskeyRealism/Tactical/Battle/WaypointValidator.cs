@@ -7,8 +7,14 @@ namespace WhiskeyRealism.Tactical.Battle
     // BattlefieldSetup probes; tests use a fake.
     public interface ITerrainProbe
     {
-        // Terrain 4 (river) or 8 (fences/walls) at the point
-        // (BattlefieldSetup.GetCurrentTerrainOnPos, 26727).
+        // Battle terrain 4 (river) or 8 (fences/walls) at the point
+        // (BattlefieldSetup.GetCurrentTerrainOnPos, 26727). The ids are the
+        // battle terrain table (GamePrefs.loadcontrols reads battleprefs.txt,
+        // 54325-54330; "do not change rank"): 3 creek, 4 river, 5 river crossing
+        // (ford), 6 bridge, 7 road, 8 fences/walls. They are NavMesh area
+        // indices (26596-26623; 8 is the "FencesWalls, Sea (C)" area). Sea is 8
+        // only on the campaign map (campaignprefs.txt; GrabFleet 12224,
+        // SetRetreatToDepot 116051), not in battle.
         bool IsWaterOrFence(float x, float z);
 
         // BattlefieldSetup.CheckTerrainLine(start, target, {4, 8}, 2f) (27638/27650).
@@ -34,7 +40,10 @@ namespace WhiskeyRealism.Tactical.Battle
     //      would otherwise route it over a distant ford. A planned move may cross —
     //      AddPath routes it over a ford or bridge (130364-130394). CheckTerrainLine
     //      tests its start position first (27659-27686), so the line starts one
-    //      step out: a group standing on a ford or fence cell may still withdraw.
+    //      step out: a group standing at a fence or wall (8) may still withdraw.
+    //      A ford is its own id (5, river crossing: the bake keeps the crossing
+    //      area over the river, 26601-26618, and lists 5/6 as crossings, 26628),
+    //      so a group on a ford never trips the {4, 8} line at its start.
     //   3. Move only: a target inside another own group's footprint is rejected
     //      unless ReliefOrSupport. The group's own ancestors and descendants are not
     //      blockers.

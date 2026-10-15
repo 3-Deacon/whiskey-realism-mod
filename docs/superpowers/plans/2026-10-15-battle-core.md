@@ -439,7 +439,7 @@ internal static class OrderExecutorRuntime {
 3. Waypoint validation (Move and Facing):
    - Clamp to x ∈ [1, sizeX−2], z ∈ [−sizeZ+2, −1].
    - Run `BattlefieldSetup.CheckIfFinalWaypointIsOnTerrain(start, target, 4)`; on a water or fence target, step back toward the start in 25 m steps up to 4 times, else skip `Water`.
-   - `CheckTerrainLine(start, target, {4, 8}, 2f)` applies only to `InContactWithdrawal` moves (immediate, under fire). Planned moves are not line-checked, because `AddPath` routes them over fords and bridges (130364-130394). The line starts one 2 m step out, because `CheckTerrainLine` tests its start position first (27659-27686) and would otherwise reject every withdrawal of a group standing on a ford or fence cell.
+   - `CheckTerrainLine(start, target, {4, 8}, 2f)` applies only to `InContactWithdrawal` moves (immediate, under fire). Planned moves are not line-checked, because `AddPath` routes them over fords and bridges (130364-130394). The line starts one 2 m step out, because `CheckTerrainLine` tests its start position first (27659-27686) and would otherwise reject every withdrawal of a group standing at a fence or wall. Battle terrain ids come from the battleprefs.txt table (`GamePrefs.loadcontrols` 54325-54330; NavMesh area indices, bake 26596-26623): 4 river, 5 river crossing (ford), 6 bridge, 8 fences/walls. 8 is sea only in the campaign table (campaignprefs.txt; `GrabFleet` 12224, `SetRetreatToDepot` 116051). A ford cell carries 5, not 4 (the bake keeps the crossing area over the river, 26601-26618; 5/6 are the crossing positions, 26628), so a group on a ford never trips `{4, 8}` at its start cell — for fords the start-cell skip is moot; it matters for a group at a fence or wall.
    - Reject a target inside a friendly group's footprint unless `ReliefOrSupport`.
    - For `ArtilleryFirePosition`, reject when the segment from the target to `FireTargetId` passes within 40 m of a friendly group, and reject when a visible enemy is within 60 m.
 4. Silent-exit pre-check.
@@ -463,7 +463,7 @@ internal static class OrderExecutorRuntime {
   - `ClampMatchesVanillaBoundsNegativeZ`
   - `WaterTargetStepsBack`
   - `WaterTargetRejectedAfterFourSteps`
-  - `WithdrawalFromFordCellSkipsStartCell`
+  - `WithdrawalFromFenceCellSkipsStartCell`
   - `FriendlyFootprintRejectedUnlessRelief`
   - `FriendlyFireLineRejectsArtilleryPosition`
   - `PointBlankRejectsArtilleryTarget`

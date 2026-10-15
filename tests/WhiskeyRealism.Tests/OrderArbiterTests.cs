@@ -26,7 +26,7 @@ internal static class OrderArbiterTests
             ("battle-core ClampMatchesVanillaBoundsNegativeZ", ClampMatchesVanillaBoundsNegativeZ),
             ("battle-core WaterTargetStepsBack", WaterTargetStepsBack),
             ("battle-core WaterTargetRejectedAfterFourSteps", WaterTargetRejectedAfterFourSteps),
-            ("battle-core WithdrawalFromFordCellSkipsStartCell", WithdrawalFromFordCellSkipsStartCell),
+            ("battle-core WithdrawalFromFenceCellSkipsStartCell", WithdrawalFromFenceCellSkipsStartCell),
             ("battle-core FriendlyFootprintRejectedUnlessRelief", FriendlyFootprintRejectedUnlessRelief),
             ("battle-core FriendlyFireLineRejectsArtilleryPosition", FriendlyFireLineRejectsArtilleryPosition),
             ("battle-core PointBlankRejectsArtilleryTarget", PointBlankRejectsArtilleryTarget),
@@ -335,18 +335,19 @@ internal static class OrderArbiterTests
     }
 
     // CheckTerrainLine tests its start position first (27659-27686), so a group
-    // standing on a ford or fence cell would have every in-contact withdrawal
-    // rejected. The validator starts the line one step (2 m) out.
-    private static void WithdrawalFromFordCellSkipsStartCell()
+    // standing at a fence or wall (battle terrain 8) would have every in-contact
+    // withdrawal rejected. The validator starts the line one step (2 m) out. (A
+    // ford is terrain 5, outside {4, 8}.)
+    private static void WithdrawalFromFenceCellSkipsStartCell()
     {
         var view = new FixtureBattleView();
         int g = view.AddGroup(1, 100f, -100f);
         var withdrawal = Move(1, 40f, -100f, IntentPriority.Safety, IntentSource.Withdrawal);
         withdrawal.Flags = IntentFlags.InContactWithdrawal;
 
-        var ford = new FixtureTerrain { WaterDiscX = 100f, WaterDiscZ = -100f, WaterDiscRadius = 1f };
-        AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, withdrawal, 1000f, 1000f, ford, out _, out _),
-            "a group on a ford cell may withdraw off it");
+        var fence = new FixtureTerrain { WaterDiscX = 100f, WaterDiscZ = -100f, WaterDiscRadius = 1f };
+        AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, withdrawal, 1000f, 1000f, fence, out _, out _),
+            "a group at a fence cell may withdraw off it");
 
         var stream = new FixtureTerrain { WaterDiscX = 70f, WaterDiscZ = -100f, WaterDiscRadius = 1.5f };
         AssertEqual(SkipReason.None, WaypointValidator.Validate(view, g, withdrawal, 1000f, 1000f, stream, out float sx, out _),
