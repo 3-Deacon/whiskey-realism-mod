@@ -127,7 +127,7 @@ Vanilla reference docs for D/F/G: [`vanilla-vision-and-movement.md`](vanilla-vis
 - Per-battle and per-campaign static state registers a reset with `BattleScope`/`CampaignScope` (`Util/ScopedState.cs`); no hand-wired resets.
 - `AICampaign.aifaction` includes alliance 2 (Europe): bound-check every per-alliance array.
 - The first campaign date can arrive before `aifaction` exists: the heartbeat may run, operational ledgers defer until it is populated.
-- `Policy.CurrentChapter` is `-1` until vanilla's `Policy.CheckForChapterUpdate()` runs; `StrategicCoordinator` invokes it before reading the chapter.
+- `Policy.CurrentChapter` is `-1` until vanilla's `Policy.CheckForChapterUpdate()` runs (campaign frame 50, then every `updatetimeforcampaigndata`); `MonthlyTickHookPatch` waits for it (`ReviewCadenceCatchUp.ChapterKnown`) and Whiskey never calls the method itself. `EraStage.TotalWar1864` is vanilla's chapter 3 (Lincoln re-elected), not 1 Jan 1864 (`EraStageManager.ForDate`); the 1864 election stakes feed the Union `Morale` need (`ElectionMorale`).
 - W&L command selection: vanilla opens `ShowStartUnitSelectionList` once at campaign frame 50; `WlCareerStartSelectionRetryPatch` retries only while no command is selected.
 - Sidecar: `<GTCW>/Campaigns/<level>/<sublevel>/<save>/whiskeyrealism.json` (save paths are CWD-relative to the game install), written atomically with `.bak`/`.tmp` fallback on load.
 - Vanilla methods with default-valued tail parameters need the full parameter list in reflection lookups.
