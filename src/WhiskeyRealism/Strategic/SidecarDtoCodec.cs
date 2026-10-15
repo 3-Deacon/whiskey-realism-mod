@@ -222,8 +222,9 @@ namespace WhiskeyRealism.Strategic
         }
 
         // PER-atomic: write to <path>.tmp, then swap it in. File.Replace keeps the previous
-        // sidecar as <path>.bak; on first write (or a filesystem without Replace support)
-        // fall back to Move. A crash mid-write leaves the old sidecar intact.
+        // sidecar as <path>.bak; on first write fall back to Move, and when Replace is not
+        // supported or fails, to a copy that never leaves <path> missing. A crash mid-write
+        // leaves the old sidecar (or its .bak / the .tmp) for TryLoadWithFallback.
         internal static void WriteAtomic(string path, string contents)
         {
             string tmp = path + ".tmp";
@@ -248,11 +249,47 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static void ReplaceByCopy(string tmp, string path, string bak)
+        // Win32 ReplaceFile can fail after it has already renamed the original to .bak, so the
+        // original is only backed up when it still exists; the new content is copied over the
+        // target (no delete-then-move window) before the temp file is removed.
+        internal static void ReplaceByCopy(string tmp, string path, string bak)
         {
-            File.Copy(path, bak, overwrite: true);
-            File.Delete(path);
-            File.Move(tmp, path);
+            if (File.Exists(path))
+                File.Copy(path, bak, overwrite: true);
+            File.Copy(tmp, path, overwrite: true);
+            File.Delete(tmp);
+        }
+
+        // Loads the first usable sidecar among <path>, <path>.bak, <path>.tmp. Returns false
+        // with reason "no-sidecar" when none exists, otherwise the last rejection reason.
+        internal static bool TryLoadWithFallback(string path, out SidecarSnapshot snapshot, out string source, out string reason)
+        {
+            snapshot = null;
+            source = null;
+            reason = "no-sidecar";
+            foreach (var candidate in new[] { path, path + ".bak", path + ".tmp" })
+            {
+                if (!File.Exists(candidate)) continue;
+                string json;
+                try
+                {
+                    json = File.ReadAllText(candidate);
+                }
+                catch (Exception ex)
+                {
+                    reason = "read-failed " + candidate + ": " + ex.Message;
+                    continue;
+                }
+                if (TryDeserialize(json, out var dto, out var why) && TryDecode(dto, out var snap, out why))
+                {
+                    snapshot = snap;
+                    source = candidate;
+                    reason = "ok";
+                    return true;
+                }
+                reason = candidate + ": " + why;
+            }
+            return false;
         }
 
         internal static OperationalPlanDto PlanToDto(OperationalPlan p)

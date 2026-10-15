@@ -67,16 +67,8 @@ namespace WhiskeyRealism.Patches
                         // loaded so the new-scene detector doesn't reset it again.
                         StrategicCoordinator.Epoch.NoteLoad(UnityEngine.Object.FindObjectOfType<AICampaign>());
                         coordinator.ResetAll("load");
-                        var fullPath = Path.Combine(folder, SidecarFile);
-                        if (File.Exists(fullPath))
-                        {
-                            coordinator.LoadSidecar(fullPath);
-                        }
-                        else
-                        {
-                            Plugin.Log.LogInfo($"[Coordinator] no sidecar found at {fullPath} — initializing fresh state (this is normal for a brand-new career)");
-                            coordinator.InitializeFromGameState();
-                        }
+                        // Falls back to .bak / .tmp, or fresh state when the save has no sidecar.
+                        coordinator.LoadSidecar(Path.Combine(folder, SidecarFile));
                     }
                     catch (Exception ex)
                     {

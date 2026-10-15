@@ -60,6 +60,10 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
         Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
         Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
+        Check("c1 per replace fallback survives original already moved to bak", PerReplaceFallbackSurvivesMissingOriginal);
+        Check("c1 per load falls back to bak when primary is corrupt", PerLoadFallsBackToBak);
+        Check("c1 per load falls back to tmp when primary and bak are missing", PerLoadFallsBackToTmp);
+        Check("c1 per load reports no sidecar when nothing is usable", PerLoadReportsNothingUsable);
 
         // R15/H3 — reset between campaigns
         Check("c1 r15 new campaign scene without load resets", R15NewCampaignSceneWithoutLoadResets);
@@ -704,6 +708,70 @@ internal static class CampaignLifecycleFixTests
         var dto = SidecarDtoCodec.Encode(snap);
         TestHarness.AssertTrue(dto.Succession.FiredEvents.Contains(1), "naturally fired id persisted");
         TestHarness.AssertFalse(dto.Succession.FiredEvents.Contains(5), "test-mode forced id not persisted");
+    }
+
+    private static void WithTempDir(Action<string> body)
+    {
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wr-c1-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try { body(System.IO.Path.Combine(dir, "whiskeyrealism.json")); }
+        finally { System.IO.Directory.Delete(dir, true); }
+    }
+
+    private static string ValidSidecarJson(int lastSeenMonth)
+    {
+        var snap = SampleSnapshot();
+        snap.LastSeenMonth = lastSeenMonth;
+        return SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+    }
+
+    private static void PerReplaceFallbackSurvivesMissingOriginal()
+    {
+        WithTempDir(path =>
+        {
+            // Win32 ReplaceFile can fail after it already renamed the original to .bak.
+            System.IO.File.WriteAllText(path + ".bak", "old");
+            System.IO.File.WriteAllText(path + ".tmp", "new");
+            SidecarDtoCodec.ReplaceByCopy(path + ".tmp", path, path + ".bak");
+            TestHarness.AssertEqual("new", System.IO.File.ReadAllText(path), "new content in place");
+            TestHarness.AssertEqual("old", System.IO.File.ReadAllText(path + ".bak"), "backup untouched");
+            TestHarness.AssertFalse(System.IO.File.Exists(path + ".tmp"), "temp removed");
+        });
+    }
+
+    private static void PerLoadFallsBackToBak()
+    {
+        WithTempDir(path =>
+        {
+            System.IO.File.WriteAllText(path, "{\"version\":2,\"factions\":[{");
+            System.IO.File.WriteAllText(path + ".bak", ValidSidecarJson(4));
+            TestHarness.AssertTrue(SidecarDtoCodec.TryLoadWithFallback(path, out var snap, out var source, out var reason), "loads: " + reason);
+            TestHarness.AssertEqual(path + ".bak", source, "source");
+            TestHarness.AssertEqual(4, snap.LastSeenMonth, "bak content");
+        });
+    }
+
+    private static void PerLoadFallsBackToTmp()
+    {
+        WithTempDir(path =>
+        {
+            System.IO.File.WriteAllText(path + ".tmp", ValidSidecarJson(5));
+            TestHarness.AssertTrue(SidecarDtoCodec.TryLoadWithFallback(path, out var snap, out var source, out var reason), "loads: " + reason);
+            TestHarness.AssertEqual(path + ".tmp", source, "source");
+            TestHarness.AssertEqual(5, snap.LastSeenMonth, "tmp content");
+        });
+    }
+
+    private static void PerLoadReportsNothingUsable()
+    {
+        WithTempDir(path =>
+        {
+            TestHarness.AssertFalse(SidecarDtoCodec.TryLoadWithFallback(path, out _, out _, out var reason), "nothing on disk");
+            TestHarness.AssertEqual("no-sidecar", reason, "reason");
+            System.IO.File.WriteAllText(path, "garbage");
+            TestHarness.AssertFalse(SidecarDtoCodec.TryLoadWithFallback(path, out _, out _, out reason), "only a corrupt primary");
+            TestHarness.AssertTrue(reason != "no-sidecar", "rejection reason kept: " + reason);
+        });
     }
 
     private static void PerAtomicWriteKeepsBakAndNoTemp()

@@ -1754,29 +1754,22 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex) { Plugin.Log.LogError("[Coordinator] sidecar save failed: " + ex); }
         }
 
-        // Transactional: the sidecar is fully parsed and decoded into a SidecarSnapshot before
-        // any live state changes. A corrupt, truncated or newer-version file leaves the fresh
-        // state from InitializeFromGameState instead of a half-applied mix.
+        // Transactional: a sidecar (or, failing that, its .bak then .tmp) is fully parsed and
+        // decoded into a SidecarSnapshot before any live state changes. With no usable file the
+        // fresh state from InitializeFromGameState is kept instead of a half-applied mix.
         public void LoadSidecar(string fullPath)
         {
-            string reason;
-            try
+            if (SidecarDtoCodec.TryLoadWithFallback(fullPath, out var snapshot, out var source, out var reason))
             {
-                var json = System.IO.File.ReadAllText(fullPath);
-                if (SidecarDtoCodec.TryDeserialize(json, out var dto, out reason) &&
-                    SidecarDtoCodec.TryDecode(dto, out var snapshot, out reason))
-                {
-                    ApplySnapshot(snapshot);
-                    Initialized = true;
-                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] sidecar loaded: " + fullPath + " (version " + dto.Version + ")");
-                    return;
-                }
+                ApplySnapshot(snapshot);
+                Initialized = true;
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] sidecar loaded: " + source);
+                return;
             }
-            catch (Exception ex)
-            {
-                reason = ex.Message;
-            }
-            Plugin.Log.LogWarning("[Coordinator] sidecar load rejected (" + reason + "); starting fresh strategic state: " + fullPath);
+            if (reason == "no-sidecar")
+                Plugin.Log.LogInfo($"[Coordinator] no sidecar found at {fullPath} — initializing fresh state (this is normal for a brand-new career)");
+            else
+                Plugin.Log.LogWarning("[Coordinator] sidecar load rejected (" + reason + "); starting fresh strategic state");
             InitializeFromGameState();
         }
 
