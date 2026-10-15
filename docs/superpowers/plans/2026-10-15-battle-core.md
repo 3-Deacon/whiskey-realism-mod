@@ -633,6 +633,43 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
 - [ ] `TacticalStanceWriter.ReleaseForRetreat` stays, called from the arbiter patch gate on macroai 3.
 - [ ] **Acceptance:** `rg -n "ChangeCombatBehavior\(|MountUnits\(|RegimentSetPath\(|bombardstarttime" src/WhiskeyRealism/Patches` finds nothing. The only vanilla call sites live in `Tactical/Battle/OrderExecutorRuntime.cs` and `Util/Tactical*Writer.cs`.
 
+**Interfaces — as built (BC5b):**
+```csharp
+namespace WhiskeyRealism.Tactical.Battle.Producers {                 // runtime; registered from static ctors
+  internal sealed class GroupStanceIntentProducer : IBattleIntentProducer   // Name "GroupStance"
+  { internal static bool TryResolvedDecision(BattleSnapshot s, int index, out TacticalResolvedGroupDecision d); }
+  internal sealed class ChargeDemotionIntentProducer : IBattleIntentProducer // Name "ChargeDemotion"
+  internal sealed class ArtilleryIntentProducer : IBattleIntentProducer      // two instances: "ArtilleryDoctrine", "ArtilleryPointBlank"
+}
+namespace WhiskeyRealism.Tactical {                                  // pure, in the test csproj
+  internal static class BattleWriterPolicy {
+    bool TryGroupStanceIntent(in UnitRecord group, in TacticalResolvedGroupDecision d, out BattleOrderIntent i); // Stance, Scorer, GroupStanceScorer
+    bool ArtilleryBatteryEligible(BattleSnapshot s, int index);
+    int  ArtilleryDoctrineIntents(BattleSnapshot s, int index, in BattleArtilleryState b, in BattleArtilleryRules r, BattleOrderIntent[] buffer);
+    bool TryArtilleryPointBlankIntent(BattleSnapshot s, int index, float fallbackDistance, out BattleOrderIntent i);
+    BattleOrderIntent ArtilleryRetreatIntent(in UnitRecord battery, float enemyX, float enemyZ, float fallbackDistance, IntentSource src, string reason);
+    bool ArtilleryHoldActive(double now, double lastOutcome, double hold); bool ResetsBombardStart(in BattleOrderIntent i);
+    bool TryFeudReplayIntent(BattleSnapshot s, int index, float neededDistance, out BattleOrderIntent i);       // Move, Support, FeudReplay, UseOrderDelay
+    float SnapshotPressure(BattleSnapshot s, int ownIndex);                                                      // #44
+  }
+  internal struct BattleArtilleryState { /* live own-battery fields the snapshot lacks */ }  internal struct BattleArtilleryRules { /* flags + GamePrefs */ }
+  public static class TacticalChargeDenial { internal static bool TryDemotionIntent(in UnitRecord g, in TacticalResolvedGroupDecision d, out BattleOrderIntent i); } // Stance, Safety, ChargeDemotion
+}
+```
+**As built (BC5b, recorded):**
+- **Producer registration needs a touch.** The four producers register from their static constructors, but nothing references the producer types, so the constructors never run and `BattleCoreTick.HasProducers` stays false (no BC5 slice owns `BattleCoreTick.cs` or `Plugin.cs`). The integrator/BC7 must run the class constructors once (e.g. `RuntimeHelpers.RunClassConstructor` for every `IBattleIntentProducer` type, or a reflection scan, in `BattleCoreTick`'s static constructor) before the first arbiter tick.
+- **F6 (integration verify):** `OrderArbiter.Submit` drops `IntentSource.FeudReplay`, so the executor's Feud exemption is reachable only through #42's `OrderExecutorRuntime.ExecuteInline` (no producer intent, claim or retry carries it).
+- **Shared `OrderExecutorRuntime` edits:** `IssueMount` (Formation intents with `Limber`/`Unlimber` → `MountUnits(unit, 1/0)`, artillery only, formation 3 ⇔ mounted 1 per `ChangeRegimentFormation` 135440-135452), `MountUnits(unit, 1)` before a `Limber`-flagged Move, and `bombardstarttime = 0` after a 7 whose source is `ArtilleryDoctrine` (3904).
+- **Group stance decision cache key.** `PopulateResolvedDecisionsForSide` keys by `Regiment.GetInstanceID()` (component); the snapshot keys by GameObject id, so `TryResolvedDecision` takes the cache key from the live unit (`BattleSnapshotBuilder.UnitAt`). If BC2b re-keys the cache to `UnitRecord.InstanceId`, switch the lookup to `own[i].InstanceId`. `PopulateResolvedDecisionsForSide` itself is unchanged (its stance mapping already yields `FinalStance`/`ChargeAction` as the producers need). Groups without a cached decision get no stance intent (the tier-3 live re-decide is gone).
+- **Stance dedupe vs the #45 agreement re-stamp.** `OrderExecutor.IsDuplicate` treats `AiStanceOrdered == Value` as Duplicate, so a stance the group already holds never reaches `TacticalStanceWriter`'s claim path and vanilla's 4264 hold stamp is not refreshed; vanilla may flip the group after `TacticalStanceOwnership.HoldHours` and Whiskey re-asserts after the 180 battle-s cooldown. Executor decision (not BC5b's file) — flagged for the integrator.
+- **Order friction.** #45's `TacticalOrderSettlementGate` becomes the snapshot rule "no paths and no courier order in flight" for the Scorer stance; the Safety demotion is not held back by a march (a demotion that waits for the march is too late for BC6b).
+- **Artillery.** Bombard (9) stays vanilla's (its write carries `bombardposition`/`bombardrange`, 3898-3901). Retreat direction is away from the closest visible enemy (vanilla `retreatangle` is binned from true enemy slice strength, 122717/122830); the Move is immediate, line-checked, `Limber`, `ReliefOrSupport`, validated by `WaypointValidator`; vanilla's `SetMovementMode(4)` / `skipcover` from `CheckArtyFallback` 3525 are not reproduced. The point-blank watchdog does not delete vanilla's queued order: the immediate `SetWaypoint(newpath)` replaces the battery's paths and a later courier delivery only raises the status of the paths present (`SetOrderStatus` 125482), so it re-paths nothing. Quadrant threat (wheel test) = visible strength in fire range per 90° around the battery's facing. Per-battery hold reads the executor's last outcome (`TryGetLastOutcome`) on the doctrine clock.
+- **#44.** Only enemy reads moved to the snapshot (`SnapshotPressure` for sector and inferred strength); `reinforcementarrivalswithin24hrs` is the side's OWN arrivals (odds input `reinforcementStrength24h` is added to own strength; vanilla reads it for its own retreat test, 6414), so it stays.
+- **#42.** Target = the snapshot's closest visible enemy inside `neededdistancefeudgroupmovement`; vanilla still rolls per eligible group first; vanilla runs when a feud side has no snapshot. `TacticalWlActionGuard` callers removed: #42, the deleted #45, and `TacticalObserverPatch`'s decision-matrix row (→ `TacticalWriteGuard.IsPlayerProtected`).
+- **Flags for BC7:** `BattleGroupStanceMinIntervalSeconds` and `EnableArtilleryWaypointVeto` have no reader; `Plugin.TacticalOperationsLedgerAllowsWrites` is orphaned (its only reader was #45's enable gate); descriptions of `EnableArtilleryAllStanceAudit`, `ArtilleryAuditMinHoldSeconds`, `EnableTacticalArtilleryDoctrine`, `EnableWlTacticalChargeGuard` name deleted patches. First-fire ids removed: `group-stance`, `b7-bombardment`, `artillery-waypoint-veto`.
+
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is `StanceArtilleryMigrationTests` (exit code 0; a failing assertion throws): stance and demotion intent shapes and arbiter precedence, F6 arbiter refusal of FeudReplay, artillery cease/counter-battery/release, limber/unlimber/face, the validated retreat through `OrderExecutor.Plan`, the point-blank watchdog, eligibility/hold, feud replay through the executor pipeline (Feud exempt, PlayerOwned refused, higher claim refuses), and #44 snapshot pressure. Mutation evidence: dropping the Visible filter on enemy batteries, the `InContactWithdrawal` flag on retreats, or the doctrine flag gate on the counter-battery release each turns a named test red. Runtime proof (producers count, `[OrderArbiter]` rows with artillery/stance sources, a #42 feud replay) is the BC7 smoke, after the producer touch above.
+
 ### BC5c — Reserves (#59, #56, B8) and withdrawal fallback
 
 **Owned files:**

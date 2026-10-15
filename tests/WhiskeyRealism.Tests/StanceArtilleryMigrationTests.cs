@@ -21,6 +21,7 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core FeudReplayNeverEntersTheArbiter", FeudReplayNeverEntersTheArbiter),
             ("battle-core FeudReplayUsesInlineExecutor", FeudReplayUsesInlineExecutor),
             ("battle-core FeudReplayRefusedForPlayerOwned", FeudReplayRefusedForPlayerOwned),
+            ("battle-core MacroUsesSnapshotSlices", MacroUsesSnapshotSlices),
             ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
             ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
             ("battle-core ArtilleryLimberUnlimberFaceAreFormationAndFacing", ArtilleryLimberUnlimberFaceAreFormationAndFacing),
@@ -470,6 +471,31 @@ internal static class StanceArtilleryMigrationTests
                 : (unit.Flags & UnitFlags.Feud) != 0 ? SkipReason.Feud : SkipReason.None;
             return reason == SkipReason.None;
         }
+    }
+
+    // ------------------------------------------------------------------ #44 macro
+
+    // #44's legacy odds scorer read vanilla's enemystrengthwithinangle (true enemy
+    // positions, 122719-122733). It now reads the snapshot's slice pressure:
+    // visible enemies in full, remembered ones discounted, unseen ones never.
+    private static void MacroUsesSnapshotSlices()
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        var group = Group(61, Brigade, 3);
+        group.X = 500f;
+        group.Z = -500f;
+        s.AddOwn(group);
+        s.IndexCommandTree(null);
+        s.AddObservation(new EnemyObservation { InstanceId = 1, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -600f, Strength = 1000f, State = ObservationState.Visible, Confidence01 = 1f });
+        s.AddObservation(new EnemyObservation { InstanceId = 2, UnitTyp = TacticalUnitType.Infantry, X = 600f, Z = -500f, Strength = 400f, State = ObservationState.Remembered, Confidence01 = 0.5f });
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+
+        float expected = 1000f + SlicePressureBuilder.RememberedPressureWeight * 0.5f * 400f;
+        AssertNear(expected, BattleWriterPolicy.SnapshotPressure(s, 0), 0.01f, "visible + discounted remembered");
+        AssertEqual(0f, BattleWriterPolicy.SnapshotPressure(s, -1), "a group outside the snapshot reads no pressure");
+        AssertEqual(0f, BattleWriterPolicy.SnapshotPressure(null, 0), "no snapshot reads no pressure");
     }
 
     // ------------------------------------------------------------------ fixtures

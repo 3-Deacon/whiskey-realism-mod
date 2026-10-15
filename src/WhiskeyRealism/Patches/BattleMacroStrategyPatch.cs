@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -56,6 +57,10 @@ namespace WhiskeyRealism.Patches
     // (scenario file 88254, honoured as an override at 6383). Such a save
     // keeps that side on the stale value and this patch defers to it; only
     // mid-battle dev saves from pre-T3 builds are affected.
+    // Battle core (BC5b): the legacy scorer's enemy pressure (sector and
+    // inferred strength) is the battle snapshot's slice pressure
+    // (BattleWriterPolicy.SnapshotPressure), no longer vanilla's
+    // enemystrengthwithinangle over true enemy positions (122719-122733).
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
@@ -236,7 +241,8 @@ namespace WhiskeyRealism.Patches
             AIBattle battle)
         {
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
-            var odds = BuildRuntimeOdds(bunits, side, units);
+            BattleCore.TryGetSnapshot(ResolveAllianceId(bunits, side), out BattleSnapshot snapshot);
+            var odds = BuildRuntimeOdds(bunits, side, units, snapshot);
             var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
                 vanillaMacro,
                 scriptedAiStrategy,
@@ -273,11 +279,16 @@ namespace WhiskeyRealism.Patches
             catch { return -1; }
         }
 
-        private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units)
+        // Enemy terms come from the battle snapshot (fog-honest): visible strength
+        // and per-group slice pressure. Own terms stay vanilla's own side
+        // information — totalactiveforce and reinforcementarrivalswithin24hrs
+        // (the side's OWN arrivals, read by vanilla for its own retreat test at
+        // 6414) — which the side legitimately knows.
+        private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units, BattleSnapshot snapshot)
         {
             float own = Math.Max(1f, SideInfoTotalActiveForce(bunits, side));
             float confirmedEnemy = EstimateVisibleEnemyStrength(units);
-            float inferredEnemy = EstimateInferredEnemyStrength(units);
+            float inferredEnemy = EstimateInferredEnemyStrength(units, snapshot);
             float reinforcements = SideInfoReinforcementsWithin24Hours(bunits, side);
             var contact = TacticalContactLedger.Classify(new TacticalContactInput(
                 confirmedEnemy,
@@ -295,7 +306,7 @@ namespace WhiskeyRealism.Patches
                 reinforcements,
                 0f,
                 contact,
-                BuildSectorAssessments(units)));
+                BuildSectorAssessments(units, snapshot)));
         }
 
         private static void LogDecision(
@@ -353,7 +364,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static TacticalSectorAssessment[] BuildSectorAssessments(IList units)
+        private static TacticalSectorAssessment[] BuildSectorAssessments(IList units, BattleSnapshot snapshot)
         {
             if (units == null) return Array.Empty<TacticalSectorAssessment>();
 
@@ -369,7 +380,7 @@ namespace WhiskeyRealism.Patches
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
                     group.groupenemiesinrange,
-                    EnemyAngleStrength(group),
+                    BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, group)),
                     closest != null ? closest.strength : 0f,
                     closest != null ? closest.unittyp : -1,
                     closest != null ? SafeName(closest) : string.Empty,
@@ -387,38 +398,22 @@ namespace WhiskeyRealism.Patches
             return TacticalFogOfWarContact.VisibleEnemyStrength(units);
         }
 
-        private static float EstimateInferredEnemyStrength(IList units)
+        private static float EstimateInferredEnemyStrength(IList units, BattleSnapshot snapshot)
         {
-            if (units == null) return 0f;
+            if (units == null || snapshot == null) return 0f;
 
             float total = 0f;
             for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                total += EnemyAngleStrength(unit);
-            }
-
+                total += BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, units[i] as Regiment));
             return total;
         }
 
-        private static float EnemyAngleStrength(Regiment unit)
+        // The unit's record in the side's snapshot (keyed by GameObject id), or -1.
+        private static int OwnIndex(BattleSnapshot snapshot, Regiment unit)
         {
-            try
-            {
-                if (unit == null ||
-                    unit.unitrange == null ||
-                    unit.unitrange.enemystrengthwithinangle == null ||
-                    !TacticalFogOfWarContact.HasVisibleEnemy(unit))
-                    return 0f;
-                float total = 0f;
-                for (int i = 0; i < unit.unitrange.enemystrengthwithinangle.Length; i++)
-                    total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[i]);
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
+            if (snapshot == null || (UnityEngine.Object)unit == null) return -1;
+            GameObject go = ((Component)unit).gameObject;
+            return go != null ? snapshot.IndexOfOwn(go.GetInstanceID()) : -1;
         }
 
         private static bool AnyReceivedFire(IList units)

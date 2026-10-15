@@ -204,6 +204,23 @@ namespace WhiskeyRealism.Tactical
             return !endBattleActive && currentMacro != 3;
         }
 
+        // #44 legacy odds: a group's angular enemy pressure from the battle
+        // snapshot (SlicePressureBuilder: visible in full, remembered weighted by
+        // confidence, never-seen excluded) instead of vanilla's
+        // unitrange.enemystrengthwithinangle, which bins true enemy positions
+        // (UpdateUnitRangeFast 122719-122733). 0 for a unit outside the snapshot.
+        public static float SnapshotPressure(BattleSnapshot s, int ownIndex)
+        {
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 0f;
+            float total = 0f;
+            for (int k = 0; k < s.SliceCount; k++)
+            {
+                float p = s.SlicePressure(ownIndex, k);
+                if (p > 0f) total += p;
+            }
+            return total;
+        }
+
         public static bool IsWritableMacro(int value)
         {
             return value >= 0 && value <= 2;
