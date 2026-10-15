@@ -3880,6 +3880,15 @@ static class Program
         if (!first) throw new Exception("expected first tactical signature emit");
         if (second) throw new Exception("expected repeated tactical signature to be throttled");
         if (!third) throw new Exception("expected tactical signature to emit after throttle window");
+
+        // Verbose shortens the window to 1 s but still throttles same-second repeats.
+        var verboseEmitted = new Dictionary<string, float>();
+        bool vFirst = TacticalTelemetry.ShouldEmit(verboseEmitted, "macro", "sig", 10f, 30f, verbose: true);
+        bool vSameSecond = TacticalTelemetry.ShouldEmit(verboseEmitted, "macro", "sig", 10.5f, 30f, verbose: true);
+        bool vNextSecond = TacticalTelemetry.ShouldEmit(verboseEmitted, "macro", "sig", 11f, 30f, verbose: true);
+        if (!vFirst) throw new Exception("expected first verbose tactical signature emit");
+        if (vSameSecond) throw new Exception("expected verbose repeat within 1 s to be throttled");
+        if (!vNextSecond) throw new Exception("expected verbose repeat after 1 s to emit");
     }
 
     private static void TacticalTelemetryDeltaFormatsBeforeAfterCounts()
