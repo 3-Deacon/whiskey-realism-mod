@@ -55,6 +55,8 @@ namespace WhiskeyRealism.Patches
                 if (faction == null) return;
 
                 int runthrough = Runthrough();
+                var cache = _siteCaches[alliance];
+                cache.ObserveRunthrough(runthrough);
                 var unit = UnitAt(faction, runthrough);
                 var gate = new FortConstructionCallGate
                 {
@@ -66,8 +68,7 @@ namespace WhiskeyRealism.Patches
                 };
                 if (!FortConstructionGovernor.ShouldEvaluateSites(gate)) return;
 
-                var cache = _siteCaches[alliance];
-                cache.BeginCall(runthrough == 0, FortSiteDecisionCache.Signature(original.Count, FortCount(), OrderCount()));
+                cache.BeginCall(FortSiteDecisionCache.Signature(original.Count, FortCount(), OrderCount()));
 
                 Vector3 unitPosition = ((Component)unit).transform.position;
                 float range = GamePrefs.rangefortconstructionsite;

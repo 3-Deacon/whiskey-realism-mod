@@ -39,7 +39,7 @@ namespace WhiskeyRealism.Strategic.Construction
 
     // Site decisions depend on the site and world state, not on the unit job 21 is
     // visiting, so they are reused across one faction's job-21 cycle and rescored when a
-    // new cycle starts or forts/orders/sites change.
+    // new cycle starts (ObserveRunthrough) or forts/orders/sites change (BeginCall).
     public sealed class FortSiteDecisionCache
     {
         private readonly System.Collections.Generic.Dictionary<int, FortConstructionGovernorDecision> _decisions =
@@ -51,9 +51,21 @@ namespace WhiskeyRealism.Strategic.Construction
             return ((long)(siteCount & 0xFFFFF) << 40) | ((long)(fortCount & 0xFFFFF) << 20) | (uint)(orderCount & 0xFFFFF);
         }
 
-        public void BeginCall(bool newCycle, long signature)
+        private int _lastRunthrough = -1;
+
+        // Call on every CheckFortConstruction call, before vanilla's unit gate:
+        // currentfortconstructionunitrunthrough only grows within a cycle and is reset
+        // to 0 when job 21 completes (16398-16402, 11522-11525).
+        public void ObserveRunthrough(int runthrough)
         {
-            if (!newCycle && signature == _signature) return;
+            if (runthrough == 0 || runthrough < _lastRunthrough)
+                _decisions.Clear();
+            _lastRunthrough = runthrough;
+        }
+
+        public void BeginCall(long signature)
+        {
+            if (signature == _signature) return;
             _decisions.Clear();
             _signature = signature;
         }

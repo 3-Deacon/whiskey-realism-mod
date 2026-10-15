@@ -53,6 +53,7 @@ internal static class CampaignEconomyFixTests
         FortGovernorScoresEligibleUnit();
         FortSiteCacheReusesDecisionsWithinJobCycle();
         FortSiteCacheInvalidatesOnNewCycleOrWorldChange();
+        FortSiteCacheDetectsCycleRestartOnIneligibleUnit();
         FortGovernorLetsHighThreatExceedSoftCap();
 
         PerkCandidateWindowMatchesVanillaRandomRange();
@@ -689,9 +690,11 @@ internal static class CampaignEconomyFixTests
     {
         var cache = new FortSiteDecisionCache();
         long sig = FortSiteDecisionCache.Signature(siteCount: 40, fortCount: 12, orderCount: 0);
-        cache.BeginCall(newCycle: true, signature: sig);
+        cache.ObserveRunthrough(0);
+        cache.BeginCall(sig);
         cache.Store(3, new FortConstructionGovernorDecision { Allow = false, Reason = "hard-cap" });
-        cache.BeginCall(newCycle: false, signature: sig);
+        cache.ObserveRunthrough(1);
+        cache.BeginCall(sig);
         TestHarness.AssertTrue(cache.TryGet(3, out var d) && d.Reason == "hard-cap", "same cycle reuses site decision");
         TestHarness.AssertFalse(cache.TryGet(4, out _), "unscored site misses");
         LogPass("c2b fort site cache reuses decisions within job cycle");
@@ -701,14 +704,29 @@ internal static class CampaignEconomyFixTests
     {
         var cache = new FortSiteDecisionCache();
         long sig = FortSiteDecisionCache.Signature(40, 12, 0);
-        cache.BeginCall(true, sig);
+        cache.ObserveRunthrough(2);
+        cache.BeginCall(sig);
         cache.Store(3, new FortConstructionGovernorDecision { Allow = true, Reason = "allowed" });
-        cache.BeginCall(false, FortSiteDecisionCache.Signature(40, 13, 0));
+        cache.ObserveRunthrough(3);
+        cache.BeginCall(FortSiteDecisionCache.Signature(40, 13, 0));
         TestHarness.AssertFalse(cache.TryGet(3, out _), "new fort built => rescore");
-        cache.Store(3, new FortConstructionGovernorDecision { Allow = true, Reason = "allowed" });
-        cache.BeginCall(true, FortSiteDecisionCache.Signature(40, 13, 0));
-        TestHarness.AssertFalse(cache.TryGet(3, out _), "new job-21 cycle => rescore");
         LogPass("c2b fort site cache invalidates on new cycle or world change");
+    }
+
+    // Job 21 visits one unit per call; the cycle can restart on a unit that fails the
+    // eligibility gate (no BeginCall). The cycle boundary must still be seen.
+    private static void FortSiteCacheDetectsCycleRestartOnIneligibleUnit()
+    {
+        var cache = new FortSiteDecisionCache();
+        long sig = FortSiteDecisionCache.Signature(40, 12, 0);
+        cache.ObserveRunthrough(4);
+        cache.BeginCall(sig);
+        cache.Store(3, new FortConstructionGovernorDecision { Allow = false, Reason = "hard-cap" });
+        cache.ObserveRunthrough(0); // gate fails for unit 0: no BeginCall
+        cache.ObserveRunthrough(1);
+        cache.BeginCall(sig);
+        TestHarness.AssertFalse(cache.TryGet(3, out _), "previous cycle's decision dropped");
+        LogPass("c2b fort site cache detects cycle restart on ineligible unit");
     }
 
     // The soft cap binds only under low threat (Decide): a threatened local area may
