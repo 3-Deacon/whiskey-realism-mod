@@ -194,6 +194,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public float Confidence01, UncertaintyRadius;
         public DetectionSource LastSource;
         public EnemyTraits Traits;
+        // The last review day the group was seen Embarked, -1 never (G1): a group seen ashore on
+        // own soil within 3 days of being seen afloat is a landing (sea-invasion inference, C25).
+        public int LastEmbarkedDay;
     }
 
     public struct CommanderRecord

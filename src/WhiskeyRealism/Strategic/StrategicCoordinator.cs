@@ -688,7 +688,8 @@ namespace WhiskeyRealism.Strategic
         }
 
         // C-HardWired: capital threat per vanilla AssignUnitToDefendCapital's need score
-        // (decompile 11668-11760) and the consecutive-day streak the pace ledger reads.
+        // (decompile 11668-11760) and the consecutive-day streak the pace ledger reads. The enemy
+        // side is the fog-honest belief picture (G1; read before today's ReviewPlan: P1's one-day lag).
         private void UpdateCapitalThreat(int alliance, int daySerial)
         {
             bool threatened = false;
@@ -701,25 +702,11 @@ namespace WhiskeyRealism.Strategic
                 var faction = index >= 0 ? AICampaignReflect.GetFaction(index) : null;
                 if (capital != null && faction != null)
                 {
-                    var factionType = faction.GetType();
-                    if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
-                    {
-                        _ownUnitsField = AccessTools.Field(factionType, "ownunits");
-                        _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
-                    }
                     Vector3 center = capital.transform.position;
                     var enemies = new List<CapitalForceSample>();
                     var own = new List<CapitalForceSample>();
-                    var enemyUnits = _enemyUnitsField?.GetValue(faction) as IList;
-                    var ownUnits = _ownUnitsField?.GetValue(faction) as IList;
-                    if (enemyUnits != null)
-                    {
-                        for (int i = 0; i < enemyUnits.Count; i++)
-                        {
-                            if (!(enemyUnits[i] is Regiment r) || r == null) continue;
-                            enemies.Add(new CapitalForceSample { Distance = XZDistance(r.transform.position, center), Strength = r.groupstrengthactive, Morale = r.groupmorale });
-                        }
-                    }
+                    EnemyBeliefReadings.CapitalSamples(EnemyDetectionRuntime.BeliefsFor(alliance), center.x, center.z, enemies);
+                    var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                     if (ownUnits != null)
                     {
                         for (int i = 0; i < ownUnits.Count; i++)
@@ -938,11 +925,9 @@ namespace WhiskeyRealism.Strategic
                 DefenseIntents[alliance] = output;
 
                 // Refresh the per-alliance "seen this tick" SIF set so the NEXT
-                // tick can detect collapsed entries via VanillaCollapsed. Source
-                // from input.Threats — the runtime's observation of vanilla
-                // seainvasionforce is the ground truth, not the builder output
-                // (which may filter Recovered/expired entries before they reach
-                // output.Responses).
+                // tick can mark a threat whose belief expired (BeliefExpired, G1).
+                // Source from input.Threats, not the builder output (which may
+                // filter Recovered/expired entries before output.Responses).
                 _previousSifSignatures[alliance] = CollectSifSignatures(input);
 
                 bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
@@ -1039,8 +1024,7 @@ namespace WhiskeyRealism.Strategic
             {
                 if (t == null) continue;
                 if (t.Kind != DefenseThreatSourceKind.SeaInvasion) continue;
-                string sig = DefenseThreatSignature.ForSeaInvasion(
-                    t.InvasionForceInstanceId, t.SpotName, t.SourcePortName);
+                string sig = DefenseThreatSignature.ForSeaInvasion(t.EnemyUnitKey);
                 set.Add(sig);
             }
             return set;

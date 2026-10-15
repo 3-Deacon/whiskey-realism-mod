@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -175,9 +176,23 @@ namespace WhiskeyRealism.Patches
             catch { return 0f; }
         }
 
+        // Vanilla GetStrengthRatio's shape (12366-12404) on fog-honest beliefs (G1): own direct
+        // strength - contract expiries + recruits in training (own knowledge) over the believed
+        // enemy. The enemy's recruits in training and chapter-0 neutrals are not seen and drop out.
+        // Called inside ZoneRecruiting, so _activeAifaction is this alliance's faction.
         private static float SafeStrengthRatio(int alliance)
         {
-            try { return AICampaign.GetStrengthRatio(alliance); }
+            try
+            {
+                var ownUnits = VanillaFieldCache.List(AICampaignReflect.GetFaction(_activeAifaction), "ownunits");
+                if (ownUnits == null) return 1f;
+                float own = 0f;
+                for (int i = 0; i < ownUnits.Count; i++)
+                    if (ownUnits[i] is Regiment unit && unit != null) own += unit.groupstrengthdirect;
+                var state = GameVars.alliance[alliance];
+                own += state.troopsinrecruitment - state.recruitscontractexpiries;
+                return EnemyBeliefReadings.StrengthRatio(own, EnemyDetectionRuntime.BeliefsFor(alliance));
+            }
             catch { return 1f; }
         }
 

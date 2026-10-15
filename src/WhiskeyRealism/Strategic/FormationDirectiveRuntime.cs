@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -33,15 +34,17 @@ namespace WhiskeyRealism.Strategic
 
                 bool grandArmyStructure = GrandArmyStructure(allianceId);
 
-                // Build spatial area index once per call — avoids O(n²) campaignunitlist scan in PopulateLocalPressure.
-                var unitsByArea = BuildAreaIndex();
+                // Own top formations by area once per call (friendly support), and the side's
+                // fog-honest beliefs (G1) for the enemy pressure.
+                var unitsByArea = BuildAreaIndex(allianceId);
+                var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
 
                 var snapshots = new List<FormationSnapshot>();
                 for (int i = 0; i < ownUnits.Count; i++)
                 {
                     var unit = ownUnits[i];
                     if (unit == null) continue;
-                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea);
+                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea, beliefs);
                     if (snapshot != null)
                     {
                         snapshot.IsPlanTargetArea = !string.IsNullOrEmpty(planTargetAreaKey) &&
@@ -71,9 +74,10 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Builds a Dictionary<areaKey, List<Regiment>> over top-formation top-units only.
-        // Used to turn the O(n²) PopulateLocalPressure scan into an O(bucket) scan.
-        private static Dictionary<string, List<Regiment>> BuildAreaIndex()
+        // Builds a Dictionary<areaKey, List<Regiment>> over this alliance's top-formation top-units
+        // only (own side: the enemy enters only as beliefs, G1). Used to turn the O(n²)
+        // PopulateLocalPressure friendly-support scan into an O(bucket) scan.
+        private static Dictionary<string, List<Regiment>> BuildAreaIndex(int allianceId)
         {
             var index = new Dictionary<string, List<Regiment>>(StringComparer.Ordinal);
             try
@@ -82,6 +86,7 @@ namespace WhiskeyRealism.Strategic
                 for (int i = 0; i < BattleUnits.campaignunitlist.Count; i++)
                 {
                     var u = BattleUnits.campaignunitlist[i];
+                    if (u == null || u.alliance != allianceId) continue;
                     if (!IsTopFormation(u)) continue;
                     string key = ArmyAreaRuntime.AreaKey(u.transform.position);
                     if (!index.TryGetValue(key, out var bucket))
@@ -100,7 +105,7 @@ namespace WhiskeyRealism.Strategic
         }
 
         internal static FormationSnapshot SnapshotUnit(int allianceId, Regiment unit, bool grandArmyStructure,
-            Dictionary<string, List<Regiment>> unitsByArea = null)
+            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
         {
             try
             {
@@ -141,7 +146,7 @@ namespace WhiskeyRealism.Strategic
                 snapshot.SectorKey = FrontSectorRuntime.SectorKey(unit.transform.position);
                 PopulateFrontContext(allianceId, snapshot);
 
-                PopulateLocalPressure(snapshot, unit, allianceId, unitsByArea);
+                PopulateLocalPressure(snapshot, unit, unitsByArea, beliefs);
                 return snapshot;
             }
             catch (Exception ex)
@@ -222,41 +227,38 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Populates local pressure from same-area bucket only (avoids full campaignunitlist scan).
-        private static void PopulateLocalPressure(FormationSnapshot snapshot, Regiment unit, int allianceId,
-            Dictionary<string, List<Regiment>> unitsByArea)
+        // Friendly support from the formation's own area bucket; the enemy from the believed
+        // armies within 2 x bugle range (G1: confidence-weighted strength, strength + guns x 65
+        // exchange pressure, the largest believed unit type).
+        private static void PopulateLocalPressure(FormationSnapshot snapshot, Regiment unit,
+            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
         {
             try
             {
-                if (unitsByArea == null || string.IsNullOrEmpty(snapshot.AreaKey)) return;
-                if (!unitsByArea.TryGetValue(snapshot.AreaKey, out var bucket)) return;
-
                 Vector3 position = unit.transform.position;
                 float supportRange = snapshot.CommandRange > 0f ? snapshot.CommandRange : snapshot.BugleRange;
                 float enemyRange = snapshot.BugleRange > 0f ? snapshot.BugleRange * 2f : snapshot.CommandRange;
 
-                for (int i = 0; i < bucket.Count; i++)
+                if (unitsByArea != null && !string.IsNullOrEmpty(snapshot.AreaKey) && unitsByArea.TryGetValue(snapshot.AreaKey, out var bucket))
                 {
-                    var other = bucket[i];
-                    if (ReferenceEquals(other, unit)) continue;
-                    float distance = Vector3.Distance(position, other.transform.position);
-                    if (other.alliance == allianceId)
+                    for (int i = 0; i < bucket.Count; i++)
                     {
-                        if (supportRange > 0f && distance <= supportRange)
+                        var other = bucket[i];
+                        if (ReferenceEquals(other, unit)) continue;
+                        if (supportRange > 0f && Vector3.Distance(position, other.transform.position) <= supportRange)
                         {
                             snapshot.LocalFriendlySupportStrength += Math.Max(0f, other.groupstrengthactive);
                             snapshot.SupportCanReach = true;
                         }
                     }
-                    else if (enemyRange > 0f && distance <= enemyRange)
-                    {
-                        snapshot.LocalEnemyStrength += Math.Max(0f, other.groupstrengthactive);
-                        snapshot.LocalEnemyExchangePressure += EstimateEnemyExchangePressure(other);
-                        var level = FormationSnapshot.LevelFromUnitType(other.unittyp);
-                        if ((int)level > (int)snapshot.VisibleEnemyLevel)
-                            snapshot.VisibleEnemyLevel = level;
-                    }
                 }
+
+                EnemyBeliefReadings.LocalPressure(beliefs, position.x, position.z, enemyRange,
+                    out float strength, out float exchange, out FormationLevel level);
+                snapshot.LocalEnemyStrength += strength;
+                snapshot.LocalEnemyExchangePressure += exchange;
+                if ((int)level > (int)snapshot.VisibleEnemyLevel)
+                    snapshot.VisibleEnemyLevel = level;
             }
             catch (Exception ex)
             {
@@ -397,14 +399,6 @@ namespace WhiskeyRealism.Strategic
 
             float guns = Math.Max(0, unit.groupstatsgunsactive);
             return Math.Max(1f, direct + guns * 65f);
-        }
-
-        private static float EstimateEnemyExchangePressure(Regiment unit)
-        {
-            if (unit == null) return 0f;
-            float strength = Math.Max(0f, unit.groupstrengthactive);
-            float guns = Math.Max(0, unit.groupstatsgunsactive);
-            return strength + guns * 65f;
         }
 
         private static float Sum(int[] values)

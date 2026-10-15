@@ -8,7 +8,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // The planner's two calls per AI alliance in the daily strategic review (plan P1), from
     // StrategicCoordinator.RunStrategicReviewCore inside `if (operationalRuntimeReady)`:
     //   ReviewPlan    after the fiscal and policy steps, before the front ledger: snapshot ->
-    //                 (G1 beliefs, G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
+    //                 G1 detection and beliefs -> (G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
     //                 recon mission sync) -> CampaignPlanStore.Publish.
     //   ReviewExecute after the defense intent: (G2 appointments, then the G5b, G5a, G5c, G5d
     //                 executors). Executors write vanilla state only from here.
@@ -16,7 +16,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // alliance's faction, and for the W&L CIC player's own alliance (vanilla job 36 skips it,
     // 11620-11628). While vanilla's job machine is paused (UpdateUnitAI 11368: a W&L player with
     // no command) every faction's jobs are frozen, so ReviewExecute returns for every alliance and
-    // ReviewPlan keeps only its bookkeeping (snapshot; G1 detection/beliefs and ledger aging insert
+    // ReviewPlan keeps only its bookkeeping (snapshot, G1 detection and beliefs; ledger aging inserts
     // before that return): no replan, no publish, and the last published plan ages out (spec C5).
     internal static class CampaignPlannerRuntime
     {
@@ -38,6 +38,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
                     var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),
                         player, in chain, tempo, Snapshots[alliance]);
+
+                    // G1: fog-honest detection and the belief update (bookkeeping: runs during the pause).
+                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());
+                    var beliefs = EnemyDetectionRuntime.ModelFor(alliance);
+                    beliefs.Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance));
+                    snapshot.Beliefs.AddRange(beliefs.Beliefs);
+                    EnemyDetectionRuntime.Report(snapshot, beliefs);
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);

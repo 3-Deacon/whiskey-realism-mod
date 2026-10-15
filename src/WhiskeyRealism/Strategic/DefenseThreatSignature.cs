@@ -5,17 +5,18 @@ namespace WhiskeyRealism.Strategic
 {
     public static class DefenseThreatSignature
     {
-        public static string ForSeaInvasion(int invasionForceInstanceId, string spotName, string sourcePortName)
+        // Sea invasions and raids are keyed on the believed enemy group's UnitKey (G1: inferred
+        // from seen forces only; never vanilla's landing spot, source port or force instance).
+        public static string ForSeaInvasion(string enemyUnitKey)
         {
-            string spot = string.IsNullOrEmpty(spotName) ? "<no-spot>" : spotName;
-            string port = string.IsNullOrEmpty(sourcePortName) ? "<no-port>" : sourcePortName;
-            return $"sif:{invasionForceInstanceId}:{spot}:{port}";
+            return "sif:" + (string.IsNullOrEmpty(enemyUnitKey) ? "<no-key>" : enemyUnitKey);
         }
 
-        public static string ForRaid(int raidGroupInstanceId, string nearestAssetName)
+        public static string ForRaid(string enemyUnitKey, string nearestAssetName)
         {
+            string key = string.IsNullOrEmpty(enemyUnitKey) ? "<no-key>" : enemyUnitKey;
             string asset = string.IsNullOrEmpty(nearestAssetName) ? "<no-asset>" : nearestAssetName;
-            return $"raid:{raidGroupInstanceId}:{asset}";
+            return $"raid:{key}:{asset}";
         }
 
         public static string ForAsset(

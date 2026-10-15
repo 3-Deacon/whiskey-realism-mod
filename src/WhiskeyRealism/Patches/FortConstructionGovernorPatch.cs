@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Construction;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -236,7 +237,7 @@ namespace WhiskeyRealism.Patches
                 ExistingFortCount = CountExistingForts(site, radius),
                 ActiveOrderCount = CountActiveOrders(site, radius),
                 NearCapital = IsNearCapital(site, alliance),
-                ThreatRatio = LocalThreatRatio(site, radius * 1.5f, faction)
+                ThreatRatio = LocalThreatRatio(site, radius * 1.5f, faction, alliance)
             };
         }
 
@@ -296,12 +297,14 @@ namespace WhiskeyRealism.Patches
             catch { return false; }
         }
 
-        private static float LocalThreatRatio(Vector3 site, float radius, object faction)
+        // Believed enemy (G1: fog-honest, confidence-weighted; a sighting shows no morale) over own
+        // strength x morale near the site. The beliefs are read-only mod state.
+        private static float LocalThreatRatio(Vector3 site, float radius, object faction, int alliance)
         {
             try
             {
                 float own = SumStrength(ReadList(faction, "ownunits"), site, radius);
-                float enemy = SumStrength(ReadList(faction, "enemyunits"), site, radius);
+                float enemy = EnemyBeliefQuery.StrengthWithin(EnemyDetectionRuntime.BeliefsFor(alliance), site.x, site.z, radius);
                 if (enemy <= 0f) return 0f;
                 return enemy / Math.Max(1f, own);
             }

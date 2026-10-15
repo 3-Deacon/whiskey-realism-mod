@@ -207,8 +207,6 @@ namespace WhiskeyRealism.Strategic.Planner
             }
 
             bool fixPerkIds = FixPerkIds();
-            float layDown = GamePrefs.fow_lineofsightreduction_layndown;
-            float rainSnow = GamePrefs.influenceofrainsnowonvisibilitycampaign;
             bool career = DLC_WL.dlc_scenarioactive;
             Weather weather = ResolveWeather();
             for (int i = 0; i < OwnUnits.Count; i++)
@@ -219,11 +217,6 @@ namespace WhiskeyRealism.Strategic.Planner
                     Vector3 position = reg.GetPosition();
                     Vector3 waypoint = reg.GetLastWaypointPos();
                     int unitTyp = reg.unittyp;
-                    float los = At(GamePrefs.maximumlineofsight, unitTyp);
-                    bool hasEight = reg.HasPerk(VanillaPerkTables.BattleExpertScouts);
-                    float eightFactor = hasEight ? At(GamePrefs.perk_expertscoutsvisibilityrangefactor, reg.GetPerkLevel(VanillaPerkTables.BattleExpertScouts)) : 1f;
-                    float climate = (UnityEngine.Object)weather != null ? weather.GetClimateData(((Component)reg).transform.position, 105) : 0f;
-                    float incident63 = career && reg.dlcw_isundercommander && DLC_WL.IsIncidentActive(63) ? GamePrefs.dlcwl_incidentscoutingaheadrange : 1f;
                     bool hasDirectCorps = unitTyp == 16
                         && reg.GetAttachedUnitsReg(excludedechainedunits: false, excludeskirmishers: true, searchonlytype: 15, directonly: true, includenonactiveunits: false).Length != 0;
 
@@ -251,8 +244,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         Name = ((UnityEngine.Object)reg).name,
                         Chain = WlStrategicOrderBridge.ChainClassOf(in chain, alliance, reg),
                         CavalryShare = SnapshotRules.CavalryShare(reg.groupstrengthperunittypcampaigndirect),
-                        SightRadius = SightRadiusFormula.Campaign(unitTyp, los, hasEight, eightFactor, climate, rainSnow,
-                            reg.liedown, layDown, incident63, fixPerkIds),
+                        SightRadius = SightRadiusOf(reg, weather, fixPerkIds, career),
                         ParentInstanceId = -1,
                         UseRails = reg.userails,
                         UseRivers = reg.userivers
@@ -265,6 +257,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             ResolveParents(s);
+        }
+
+        // The radius that paints the unit's fog grid (FogOfWar.UpdateViewRange 101296-101309), the
+        // same for the snapshot's formations and G1's viewer check (EnemyDetectionRuntime).
+        internal static float SightRadiusOf(Regiment reg, Weather weather, bool fixPerkIds, bool career)
+        {
+            int unitTyp = reg.unittyp;
+            float los = At(GamePrefs.maximumlineofsight, unitTyp);
+            bool hasEight = reg.HasPerk(VanillaPerkTables.BattleExpertScouts);
+            float eightFactor = hasEight ? At(GamePrefs.perk_expertscoutsvisibilityrangefactor, reg.GetPerkLevel(VanillaPerkTables.BattleExpertScouts)) : 1f;
+            float climate = (UnityEngine.Object)weather != null ? weather.GetClimateData(((Component)reg).transform.position, 105) : 0f;
+            float incident63 = career && reg.dlcw_isundercommander && DLC_WL.IsIncidentActive(63) ? GamePrefs.dlcwl_incidentscoutingaheadrange : 1f;
+            return SightRadiusFormula.Campaign(unitTyp, los, hasEight, eightFactor, climate, GamePrefs.influenceofrainsnowonvisibilitycampaign,
+                reg.liedown, GamePrefs.fow_lineofsightreduction_layndown, incident63, fixPerkIds);
         }
 
         private static FormationFlags FlagsOf(Regiment reg, int unitTyp, bool hasDirectCorps, float minStrength)
@@ -696,7 +702,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // FogPerkSightPatch.Enabled: the perk-id sight fix applies with the plugin and the flag on.
-        private static bool FixPerkIds()
+        internal static bool FixPerkIds()
         {
             try
             {
@@ -706,7 +712,7 @@ namespace WhiskeyRealism.Strategic.Planner
             catch { return false; }
         }
 
-        private static Weather ResolveWeather()
+        internal static Weather ResolveWeather()
         {
             if ((UnityEngine.Object)_weather != null) return _weather;
             var go = GameObject.Find("WeatherObj");

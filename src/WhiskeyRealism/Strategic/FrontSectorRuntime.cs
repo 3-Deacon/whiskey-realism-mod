@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -34,12 +35,11 @@ namespace WhiskeyRealism.Strategic
 
                 var factionType = faction.GetType();
                 var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
-                var enemyUnits = AccessTools.Field(factionType, "enemyunits")?.GetValue(faction) as IList;
-                if (ownUnits == null || enemyUnits == null)
+                if (ownUnits == null)
                 {
                     OnceLog.Warning(
                         "front-ledger:no-unit-lists:" + allianceId,
-                        $"[FrontLedger] build skipped: ownunits/enemyunits unavailable for alliance={allianceId}");
+                        $"[FrontLedger] build skipped: ownunits unavailable for alliance={allianceId}");
                     return null;
                 }
 
@@ -49,8 +49,19 @@ namespace WhiskeyRealism.Strategic
                     targetTheater = TheaterFromPosition(targetPosition.Value);
 
                 var acc = new Dictionary<Theater, Accumulator>();
-                AddUnits(acc, ownUnits, own: true);
-                AddUnits(acc, enemyUnits, own: false);
+                AddOwnUnits(acc, ownUnits);
+                // Enemy strength per theater from the fog-honest beliefs (G1; confidence-weighted).
+                var enemyByTheater = new Dictionary<Theater, float>();
+                EnemyBeliefReadings.SumByKey(EnemyDetectionRuntime.BeliefsFor(allianceId), TheaterAt, enemyByTheater);
+                foreach (var pair in enemyByTheater)
+                {
+                    if (!acc.TryGetValue(pair.Key, out var a))
+                    {
+                        a = new Accumulator();
+                        acc[pair.Key] = a;
+                    }
+                    a.Enemy += pair.Value;
+                }
 
                 var inputs = new List<FrontSectorInput>();
                 foreach (Theater theater in new[] { Theater.East, Theater.West, Theater.TransMiss, Theater.Coast, Theater.River, Theater.Unknown })
@@ -137,7 +148,9 @@ namespace WhiskeyRealism.Strategic
             return null;
         }
 
-        private static void AddUnits(Dictionary<Theater, Accumulator> acc, IList units, bool own)
+        private static readonly Func<float, float, Theater> TheaterAt = (x, z) => TheaterFromPosition(new Vector3(x, 0f, z));
+
+        private static void AddOwnUnits(Dictionary<Theater, Accumulator> acc, IList units)
         {
             if (units == null) return;
             for (int i = 0; i < units.Count; i++)
@@ -154,19 +167,11 @@ namespace WhiskeyRealism.Strategic
                     acc[theater] = a;
                 }
 
-                float strength = ReadFloat(unit, "groupstrengthactive", "groupstrengthdirect", "groupstrength", "strength");
-                if (own)
-                {
-                    a.Own += strength;
-                    a.Morale += Clamp01(ReadFloat(1f, unit, "groupmorale", "morale"));
-                    a.Supply += Clamp01(ReadSupply(unit));
-                    a.Readiness += Clamp01(ReadFloat(1f, unit, "readiness"));
-                    a.OwnCount++;
-                }
-                else
-                {
-                    a.Enemy += strength;
-                }
+                a.Own += ReadFloat(unit, "groupstrengthactive", "groupstrengthdirect", "groupstrength", "strength");
+                a.Morale += Clamp01(ReadFloat(1f, unit, "groupmorale", "morale"));
+                a.Supply += Clamp01(ReadSupply(unit));
+                a.Readiness += Clamp01(ReadFloat(1f, unit, "readiness"));
+                a.OwnCount++;
             }
         }
 

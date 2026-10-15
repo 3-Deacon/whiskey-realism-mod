@@ -213,11 +213,9 @@ namespace WhiskeyRealism.Strategic
             switch (src.Kind)
             {
                 case DefenseThreatSourceKind.SeaInvasion:
-                    return DefenseThreatSignature.ForSeaInvasion(
-                        src.InvasionForceInstanceId, src.SpotName, src.SourcePortName);
+                    return DefenseThreatSignature.ForSeaInvasion(src.EnemyUnitKey);
                 case DefenseThreatSourceKind.RaidForce:
-                    return DefenseThreatSignature.ForRaid(
-                        src.RaidGroupInstanceId, src.AssetName);
+                    return DefenseThreatSignature.ForRaid(src.EnemyUnitKey, src.AssetName);
                 case DefenseThreatSourceKind.AssetProximity:
                     return DefenseThreatSignature.ForAsset(
                         src.AssetKind, src.AssetName, src.EnemyInstanceIds, topN: 3);
@@ -231,15 +229,13 @@ namespace WhiskeyRealism.Strategic
             switch (src.Kind)
             {
                 case DefenseThreatSourceKind.SeaInvasion:
-                    if (src.VanillaCollapsed) return DefensePosture.Recovered;
+                    if (src.BeliefExpired) return DefensePosture.Recovered;
                     return src.LandedSignal
                         ? DefensePosture.ActiveInvasion
                         : DefensePosture.InvasionWatch;
 
                 case DefenseThreatSourceKind.RaidForce:
-                    return src.RaidCurrentState >= 5
-                        ? DefensePosture.Recovered
-                        : DefensePosture.ActiveInvasion;
+                    return DefensePosture.ActiveInvasion;
 
                 case DefenseThreatSourceKind.AssetProximity:
                     return DefensePosture.ActiveInvasion;
