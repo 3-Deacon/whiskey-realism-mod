@@ -29,6 +29,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot direct-child and command-tree probes agree on parents", DirectChildAndCommandTreeAgreeOnParents),
             ("battle snapshot strength bucket reads ai-group and in-range strength", StrengthBucketReadsAiGroupAndInRangeStrength),
             ("battle snapshot begin build resets the perception summary to nothing seen", BeginBuildResetsPerceptionSummary),
+            ("battle snapshot front axis group fallback weights by ai-group strength", FrontAxisGroupFallbackWeightsByAiGroupStrength),
         });
     }
 
@@ -502,5 +503,23 @@ internal static class BattleSnapshotTests
         AssertEqual(0f, s.VisibleReinforcementStrength, "no reinforcement strength");
         AssertEqual(0f, s.VisibleEnemyStrength, "no visible enemy");
         AssertEqual(0, s.ObservationCount, "no observations");
+    }
+
+    // With no combat leaf in the sample, the axis origin is the groups' centroid weighted
+    // like the shipped ArmyEvidenceBuilder: max(0, groupstrengthaigroup) per group, then
+    // max(1, weight) in Centroid, so a group with no AI-group strength still counts once.
+    private static void FrontAxisGroupFallbackWeightsByAiGroupStrength()
+    {
+        var f = new Fixture();
+        f.Add(Div1, TacticalUnitType.BattleGroupDivision, 0f, 0f, 0);
+        f.Add(Div2, TacticalUnitType.BattleGroupDivision, 100f, 0f, 0);
+        SetStrengths(f, Div1, direct: 10000f, strength: 0, ownInRange: 0, aiGroup: 0);
+        SetStrengths(f, Div2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 9000);
+        f.Load(); f.Assemble();
+        f.Snapshot.SetEnemySummary(5000f, 0f, 50f, 1000f);
+        var axis = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None);
+        AssertTrue(axis.IsValid, "axis fitted from groups only");
+        AssertNear(100f * 9000f / 9001f, axis.OriginX, 0.01f, "origin weighted by ai-group strength, zero counts as 1");
+        AssertNear(0f, axis.OriginZ, 0.01f, "origin z");
     }
 }

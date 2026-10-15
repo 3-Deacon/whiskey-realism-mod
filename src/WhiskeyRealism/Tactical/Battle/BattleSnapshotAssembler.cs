@@ -176,8 +176,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // Own-centroid -> visible-enemy-centroid axis, stabilized against the previous
         // tick (TacticalFrontAxis.Stabilize, FrontAxisMinHeadingChangeDegrees), with lateral
         // bands over the own combat line. Mirrors ArmyEvidenceBuilder.BareAxis/FitAxis
-        // (own combat leaves weighted by max(1, strength); groups when no leaf qualifies;
-        // nothing visible keeps facing the last way), minus the objective fallback, which
+        // (own combat leaves weighted by max(1, strength); groups when no leaf qualifies,
+        // weighted by max(1, max(0, groupstrengthaigroup)) as its group samples and Centroid
+        // were; nothing visible keeps facing the last way), minus the objective fallback, which
         // needs map data the snapshot does not carry. Must run after perception has set
         // the visible-enemy summary for the tick.
         internal static TacticalFrontAxis FitFrontAxis(BattleSnapshot s, TacticalFrontAxis previous)
@@ -189,7 +190,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 ref UnitRecord u = ref s.Own[i];
                 if (!InFrontSample(in u, leaves)) continue;
-                double weight = Math.Max(1f, leaves ? u.Strength : u.GroupStrengthDirect);
+                double weight = Math.Max(1f, leaves ? u.Strength : Math.Max(0, u.GroupStrengthAiGroup));
                 sx += u.X * weight;
                 sz += u.Z * weight;
                 w += weight;
