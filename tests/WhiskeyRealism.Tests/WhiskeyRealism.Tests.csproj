@@ -115,6 +115,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalProbeLedger.cs" Link="OperationalProbeLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationPackageLedger.cs" Link="CoordinatedOperationPackageLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationRuntime.cs" Link="CoordinatedOperationRuntime.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOffensiveScratch.cs" Link="CoordinatedOffensiveScratch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\AICampaignReflect.cs" Link="AICampaignReflect.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
@@ -363,6 +364,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\PatchFirstFire.cs" Link="Util\PatchFirstFire.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\ScopedState.cs" Link="Util\ScopedState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\KeyedResolveCache.cs" Link="Util\KeyedResolveCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalRegimentDiagnosticsPatch.cs" Link="Patches\TacticalRegimentDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleWriterPolicy.cs" Link="Tactical\BattleWriterPolicy.cs" />
