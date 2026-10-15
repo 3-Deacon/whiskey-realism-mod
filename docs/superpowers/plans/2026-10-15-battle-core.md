@@ -126,6 +126,8 @@ namespace WhiskeyRealism.Tactical.Battle {
     public IntentSource Source; public double AtHours; public int Retries; }
 }
 ```
+BC7 removed `UnitRecord.GroupStrengthDirect` and `UnitRecord.Experience` (never read) and `IntentSource.Play` (no producer); `OrderOutcomeKind.Superseded` is produced by `OrderExecutor.RecordSuperseded`.
+
 `BattleSnapshot` itself is declared by BC1. BC0 adds a stub `public sealed partial class BattleSnapshot { }` so the interfaces compile, and BC1 fills it in.
 
 - [ ] Add `Plugin.cs` binds:
@@ -563,7 +565,7 @@ All bound at the BC4 merge:
 
 ## BC5 — Migration (three parallel, disjoint sub-workstreams)
 
-Every mover's private guard, dedupe, cooldown, waypoint and ownership code is deleted. Its decision logic becomes an `IBattleIntentProducer`, registered from that producer's static constructor through `BattleCoreTick.RegisterProducer`. Producers read the `BattleSnapshot` only. Fixed producer order in `BattleCoreTick`: Withdrawal, ArtilleryDoctrine, ArtilleryPointBlank, GroupStance, ChargeDemotion, Posture, FacingPulse, FireControl, Play, DivisionPlay, ReserveRelease, Charge.
+Every mover's private guard, dedupe, cooldown, waypoint and ownership code is deleted. Its decision logic becomes an `IBattleIntentProducer`, registered from that producer's static constructor through `BattleCoreTick.RegisterProducer`. Producers read the `BattleSnapshot` only. Fixed producer order in `BattleCoreTick`: Withdrawal, ArtilleryDoctrine, ArtilleryPointBlank, GroupStance, ChargeDemotion, Posture, FacingPulse, FireControl, Play, DivisionPlay, ReserveRelease, Charge. (BC7: static-constructor registration never ran; `BattleCoreTick` now builds every producer from `BattleProducerRegistry.Order`, which has no "Play" slot. See BC7 As built.)
 
 ### Prefix-skip / snapshot-restore battle patch inventory (binding decisions)
 
@@ -892,55 +894,63 @@ PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is `ChargeDo
 
 ## BC7 — Integration (integrator, sequential, last)
 
-**Owned files:** `Plugin.cs`, `docs/*`, `AGENTS.md`, `MEMORY.md`, the Stage B `tools/smoke-check.py` / `tools/smoke-situational.txt` (extend; create only if Stage B has not landed them), the test csproj (final reconciliation).
+**Owned files:** `Plugin.cs`, `docs/*`, `AGENTS.md`, `MEMORY.md`, the Stage B `tools/smoke-check.py` / `tools/smoke-situational.txt`, the test csproj (final reconciliation), and any file a cross-slice item below needs.
 
-- [ ] Wiring checks:
-  - Every producer is registered: `BattleCoreTick` logs `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…` on first tick.
-  - `TacticalBattleCoordinatorRuntime.Tick` calls `EnsureSnapshot` before any evidence read.
+- [x] Wiring checks:
+  - Every producer runs: `BattleCoreTick` builds them from one explicit registry and logs `[once:tactical-battle-core:producers] [BattleCore] producers count=11 order=…` on the first arbiter tick of each battle (see As built).
+  - `TacticalBattleCoordinatorRuntime.Tick` calls `EnsureSnapshot` before any evidence read (BC2b: `EnsureBattleCoreSnapshots` first in the `CheckGlobalAIStrategy` postfix and in `Tick`).
   - The heavy path receives the snapshot.
-  - `TacticalObserverPatch` no longer re-decides posture.
-- [ ] `Plugin.cs`:
-  - Remove `EnableArtilleryWaypointVeto`, `BattleGroupStanceMinIntervalSeconds`, `EnableSinglePassObjectiveRecords` (binds, fields, every reader).
-  - Confirm `EnableBattleFogHonestPerception` and `EnableInfantryChargeDoctrine` are read.
-  - Update the descriptions of `EnableTacticalReserveOrderDelayGuard` ("re-issues through the order executor"), `EnableWlTacticalChargeGuard` (#42 feud replay via executor) and `EnableTacticalArtilleryDoctrine` (arbiter producer) to the real behavior.
-- [ ] Gates:
-  - `python3 -I tools/orphan-sweep.py .` returns 0, and `--include-test-only` has nothing new.
-  - `python3 -I tools/config-audit.py .` returns 0.
-  - `./build.sh` gives 0 warnings; the harness is all PASS.
-- [ ] Grep gates (must return nothing outside `Tactical/Battle/OrderExecutorRuntime.cs`, `Util/TacticalStanceWriter.cs`, `Util/TacticalCombatBehaviorWriter.cs`, #59/#56 restore code, #60 and #44):
-  - `rg -n "\.SetWaypoint\(|\.SetGroupFormation\(|\.RegimentSetPath\(|\.RotateRegiment\(|\.ChangeStance\(|\.ChangeCombatBehavior\(|\.MountUnits\(" src/WhiskeyRealism`
-  - `rg -n "transform\.parent|GrabNextParentUnit" src/WhiskeyRealism/Tactical src/WhiskeyRealism/Patches` → nothing.
-  - `rg -n "Environment\.TickCount|realtimeSinceStartup" src/WhiskeyRealism/Tactical/Battle` → telemetry throttles only.
-- [ ] First-fire markers. Use the Stage B helper if present. Otherwise add `Util/PatchFirstFire.cs` with `internal static void Mark(string patchId) => OnceLog.Info("first-fire:" + patchId, "[PatchFirstFire] " + patchId)` (patchId is a static literal), called first thing in every patch body, plus `tools/smoke-check.py <LogOutput.log>`, which lists ids in `tools/smoke-patches.txt` without a `[once:first-fire:<id>]` line and exits 1. Battle ids to list:
-  - `battle-core-arbiter`
-  - `reserve-commit-gate` (#59)
-  - `reserve-order-delay-guard` (#56)
-  - `feud-action-gate` (#42)
-  - `macro-strategy` (#44)
-  - `hq-auto-link-guard` (#55)
-  - `pathfinder-discipline` (#53)
-  - `reserve-doctrine` (#57)
-  - `fallback-retreat-null-guard` (#43)
-  - `deployment-terrain-discipline` (#60)
-  - `player-subordinate-order` (#62)
-  - `observer-check-global-ai-strategy` (coordinator driver)
-  Remove the deleted patches from the list: `posture-executor`, `group-stance`, `b7-bombardment`, `b8-check-line-fallbacks`, `b8-use-of-reserves`, `artillery-waypoint-veto`.
-- [ ] Expected telemetry in a 20× smoke battle (tuning sidecar plus LogOutput):
-  - `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…`.
-  - `[once:tactical-battle-core:arbiter-first-fire] [OrderArbiter] first vanilla order issued channel=<channel> source=<source>`.
-  - `[once:tactical.battle-perception:mode:RangeOnly] [BattlePerception] alliance=<a> mode=RangeOnly reason=GridNotPainted visible=<n> remembered=<n>` at the first perception tick, then `[once:tactical.battle-perception:mode:FogGrid] [BattlePerception] alliance=<a> mode=FogGrid reason=None visible=<n> remembered=<n>` for the enemy AI side within 5 battle-seconds of its first perception tick. With HQ-in-the-saddle, `… mode=RangeOnly reason=HqInTheSaddle …` and no FogGrid line. A W&L / `ai_vs_ai` player-alliance side logs `mode=OwnSideWithinFog reason=None`. Each line fires once per mode per battle; every per-side mode change is the `BattlePerception` Decision event in the tuning sidecar.
-  - `[OrderArbiter]` rows with `moved > 0`, `failed/issued < 0.2`, and no `gaveUp` storm (≤ 5 per side per 30 s).
-  - Perf: `tactical.snapshot.build` p95 ≤ 1.5 ms per side, `tactical.arbiter.resolve` p95 ≤ 0.5 ms, no `tactical.patch.battle-core-arbiter` row above 5 ms more than 1 % of calls.
-  - `[once:tactical-battle-core:charge-first-fire] [ChargeDoctrine] first infantry charge armed: combat behavior 3 issued to a leading regiment of an assault group` in an infantry assault. It is rare by vanilla's design: the brigade HQ must be within `maxchargeradius` (50 m shipped) of the regiment's visible `enemyinrangereg[0]`. Charge demotion only reaches it once BC7 registers the BC5b producers.
-  - A W&L brigade career shows: player units never in `[OrderArbiter]` issued counts; a dispatch panel naming the superior when the parent division is moved; `[once:tactical-battle-core:ancestry-mismatch] [BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance=<a> groups=<n>` absent, or explained.
-  - BC3 PROVE-MODE check: in a W&L battle with the player's command detached, the AI parent is ordered and rotated (RotateInPlace) and no player-owned regiment receives a Whiskey write (no movement, rotation, stance or formation change on the player's regiments); then, with the AI parent holding a stance (`ai_stanceordered > 0`; `ChangeStance` then sets the parent's own `permanentlydetached`, 90788-90791, which must not shield the re-attached player command below it), press the player's stance-off (re-attach) and confirm the parent is no longer ordered as a group (fan-out, or `TacticalPlayerProtected reason=owned-descendant-attached`).
-- [ ] Docs:
-  - `docs/patch-catalog.md`: remove #41, #46, #45, #48, #49, #52, #61, veto; add the arbiter; note #59/#56/#42 as executor-inline.
-  - `docs/tactical-orchestrator.md` and `docs/tactical-operations-ledger.md`: battle core section, D3/D4/D8.
-  - `docs/vanilla-vision-and-movement.md`: R1/R2/R4/R5 status → implemented; z-bounds correction.
-  - `docs/wl-player-model.md`: "Rules for Whiskey code" 1-2 now enforced by `PlayerOwnership`/chain planner.
-  - `docs/telemetry.md`: new scopes and rows.
-  - `docs/bug-fixes/`: `MicroAICheckForCharges` dead compare.
-  - `AGENTS.md`: writer list → "battle writes only through OrderExecutor"; soften the `transform.parent` rule to the D5 statement with anchors.
-  - `docs/handoff.md`; `MEMORY.md`.
-- [ ] Build, deploy and hash-verify per AGENTS.md (BepInEx 5.4.23.5 was reinstalled 2026-10-15 with the user's authorization; deploying the built DLL is authorized), then hand the smoke checklist to the user.
+  - `TacticalObserverPatch` no longer re-decides posture (BC5a: it reads the executor's last outcome).
+- [x] `Plugin.cs`: removed `EnableArtilleryWaypointVeto`, `BattleGroupStanceMinIntervalSeconds`, `EnableSinglePassObjectiveRecords` and the orphan `TacticalOperationsLedgerAllowsWrites`; `EnableBattleFogHonestPerception` (`BattlePerceptionProbe`) and `EnableInfantryChargeDoctrine` (`ChargeIntentProducer`) are read; descriptions rewritten (see As built).
+- [x] Gates: orphan-sweep 0 and `--include-test-only` lists nothing battle core added; config-audit 0; `./build.sh` 0 warnings; harness all PASS; test build 0 warnings.
+- [x] Grep gates (outputs in the BC7 report):
+  - `rg -n "\.SetWaypoint\(|\.SetGroupFormation\(|\.RegimentSetPath\(|\.RotateRegiment\(|\.ChangeStance\(|\.ChangeCombatBehavior\(|\.MountUnits\(|\.SetMovementMode\(|BlockedMovingOrder\(" src/WhiskeyRealism`: only `OrderExecutorRuntime.cs`, `Util/TacticalStanceWriter.cs`, `Util/TacticalCombatBehaviorWriter.cs`, #60 and #42's no-snapshot `DirectGuarded` `SetWaypoint`, plus comments and the name `OrderExecutor.TakesBlockedMovingOrder`. #59/#56 restore code calls none of them.
+  - `rg -n "transform\.parent|GrabNextParentUnit" src/WhiskeyRealism/Tactical src/WhiskeyRealism/Patches`: two comments and the regiment diagnostics' scene-graph parent name for a log label (annotated); no command relation.
+  - `rg -n "Environment\.TickCount|realtimeSinceStartup" src/WhiskeyRealism/Tactical/Battle`: the `[OrderArbiter]` row and the posture telemetry throttles only.
+  - Fog: every remaining unfiltered enemy-derived read is own-side vanilla parity or telemetry and says so in a comment (see As built).
+- [x] First-fire markers: Stage B landed `Util/PatchFirstFire.cs` and `tools/smoke-check.py`, which collects the ids from the `PatchFirstFire.Mark("<scope name>")` calls in `src/` (no `tools/smoke-patches.txt`). The plan's short ids are scope names there: `tactical.patch.battle-core-arbiter`, `tactical.patch.reserve-commit-gate(-prefix)` (#59), `tactical.patch.reserve-order-delay(-prefix)` (#56), `tactical.patch.feud-action-gate` (#42), `tactical.patch.battle-macro-strategy.prefix/.postfix` (#44), `tactical.patch.hq-link-guard(-prefix)` (#55), `tactical.patch.pathfinder-discipline(-prefix)` (#53), `tactical.patch.reserve-doctrine` (#57), `tactical.patch.fallback-retreat-guard.*` (#43), `tactical.patch.deployment-terrain` (#60), `tactical.patch.player-subordinate-order(-prefix)` (#62), `tactical.patch.observer.check-global` (coordinator driver). The deleted patches' ids are gone with their Mark calls; `tools/smoke-situational.txt` lost `tactical.patch.b8-retreats-observer`. `python3 -I tools/test_smoke_check.py` passes.
+- [x] Docs (see As built).
+- [ ] Build, deploy and hash-verify, then hand the smoke checklist below to the user (integrator, after review).
+- [ ] After smoke: archive this plan and the battle-core spec (`docs/superpowers/{plans,specs}/archive/`), rewrite cross-references, record the smoke result in `docs/handoff.md`.
+
+**As built (BC7):**
+- **Producer registry.** The producers' static constructors never ran (nothing referenced the types), so only the four posture producers and the charge producer ran, through BC5a's temporary `PostureProducers.EnsureRegistered`. `BattleProducerRegistry` (pure, test csproj) walks `BattleProducerRegistry.Order` — Withdrawal, ArtilleryDoctrine, ArtilleryPointBlank, GroupStance, ChargeDemotion, Posture, FacingPulse, FireControl, DivisionPlay, ReserveRelease, Charge (11; no "Play": the geometric play is no mover) — and asks `BattleCoreTick.CreateProducer(name)` for each, once, in `BattleCoreTick`'s type initializer. A null, misnamed or throwing producer leaves its slot out and is logged once per battle (`tactical-battle-core:producers-missing`), so it cannot fail the type that also builds every snapshot. `RegisterProducer`, `Rank`, every self-registration, the `Instance`/`Register()` touches and `EnsureRegistered` are deleted; producer static constructors keep only their `BattleScope` registrations. Tests: `BattleCoreIntegrationTests` (order, build, missing/misnamed/throwing, and a source pin of the factory cases and producer names).
+- **Plugin.cs.** Descriptions now state the battle-core behaviour of Enable Battle Fog-Honest Perception, Enable Infantry Charge Doctrine (BC6b, incl. the outflanked/flanking-fire pref and the restored stance-drop cancel), Enable Tactical Withdrawal Doctrine, Enable Tactical Orchestrator Reserve Commit Gate, Enable Tactical Reserve Order Delay Guard, Enable Artillery All-Stance Audit, Artillery Audit Min Hold Seconds, Enable Tactical Artillery Doctrine (either artillery flag runs the point-blank watchdog), Enable W&L Tactical Charge Guard, Enable Tactical Contact Facing Pulse and Tactical Commander Mode.
+- **Dead code.** `TacticalDivisionPlayDecision.OrderFor`; the duplicated group range reach (now `BattlePerception.GroupRangeReach`); the Operations `CommandWaypointWritePolicy` forwarder; `UnitRecord.GroupStrengthDirect` and `UnitRecord.Experience` (written, never read; the sweep missed them on name collisions); `IntentSource.Play`; `B8MicroAICheckForRetreatsObserverPatch` (duplicated `tactical.patch.observer.retreats`); five tag routes whose emitters battle core deleted; `TestLog.ThrowOnWarning`. `OrderOutcomeKind.Superseded` is now produced (`OrderExecutor.RecordSuperseded`, the source's last outcome instead of a stale `Retried`). `UnitRecord.FirstEnemyInRangeId` is read (charge target, withdrawal under-fire, evidence contact). The test build suppresses CS0649 (fields the runtime halves assign); `./build.sh` still reports it.
+- **Write-gate scanner** also matches `SetMovementMode(` and `BlockedMovingOrder(`.
+- **Plan corrections.** No `TacticalPlayerProtected`, `TacticalChargeDeny` or `TacticalChargePreserved` row exists any more (their emitters were #61 and #45): the re-attach check reads the decision matrix's `wlGuard=deny:owned-descendant-attached`. The telemetry pipeline has no percentiles: the perf thresholds below read `PerformanceAggregate` rows (count, meanMs, maxMs, slowCount per 5 s window).
+
+PROVE-MODE: harness for the registry, range reach, superseded outcome and write-gate scanner (`BattleCoreIntegrationTests`, `OrderArbiterTests.SupersededRetryIsReportedToTheSource`, `BattleWriteGateTests`; red first: the runtime registry pin before `BattleCoreTick` used the registry, `GroupRangeReach` and `RecordSuperseded` before they existed, the two new scanner cases before the regex). Runtime proof of the whole battle core is the smoke checklist below.
+
+### BC7 smoke checklist (consolidated, in order)
+
+Paths: `LOG` = `<GTCW>/BepInEx/LogOutput.log` (truncated each launch); `SESSION` = the newest `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session-id>/` (JSONL sidecars, default `Logging Profile = TacticalTuning`). Lines tagged `[BattleCore]`, `[OrderArbiter]`, `[BattlePerception]`, `[ChargeDoctrine]`, `[BattleSnapshot]` and `[first-fire]` go to `LOG`; `Tactical*` rows (and every `Tactical*` OnceLog line) go to `SESSION/tactical*.jsonl`; `PerformanceAggregate` rows to `SESSION/performance*.jsonl`. Every `tactical…` OnceLog key re-arms at battle end, so each `[once:…]` line below appears once per battle.
+
+0. **Precondition.** The deployed `WhiskeyRealism.dll` hash equals `dist/WhiskeyRealism.dll` (AGENTS.md deploy check). An existing `dev.kyle.whiskey-realism.cfg` keeps its values: confirm `Tactical Commander Mode = Active` and every battle-core flag `true`; the three removed keys may linger in the cfg and are ignored.
+1. **Session A — custom battle or campaign battle, AI on both sides (`ai_vs_ai` off), 20x, through one night.**
+   1. Launch, load, fight to the end of day 1 and into day 2, quit. Run `python3 -I tools/smoke-check.py "$LOG"`: exit 0. Every battle id in the list above shows `[first-fire]` (feud, reserve and #62 ids fire once their vanilla method runs, which `UpdateAITasks` 5857-5872 and the micro AI do every battle).
+   2. Deployment (day 1, #60): `[first-fire] tactical.patch.deployment-terrain`; `TacDeployTerrain` rows in `SESSION/tactical*.jsonl`; **absent** from `LOG`: `[once:tactical-battle-core:snapshot-degraded]`, `[once:tactical-battle-core:snapshot-missing]`, `[once:tactical-battle-core:snapshot-failed]`, `[once:tactical-battle-core:ensure-snapshots]`.
+   3. Perception: first `[once:tactical.battle-perception:mode:RangeOnly] [BattlePerception] alliance=<a> mode=RangeOnly reason=GridNotPainted visible=<n> remembered=<n>` (the #60 build precedes the painted grid), then `[once:tactical.battle-perception:mode:FogGrid] [BattlePerception] alliance=<a> mode=FogGrid reason=None visible=<n> remembered=<n>` within about 5 battle seconds of the AI side's first perception tick; `[once:tactical.battle-perception:intelligence-map] [BattlePerception] side grid UseIntelligenceMap=<true|false>`. With HQ in the saddle: `mode=RangeOnly reason=HqInTheSaddle` and no FogGrid line. **Absent:** `tactical.battle-perception:probe-failed`, `fog-probe-failed`, `firstrun-field-missing`, `bunits-field-missing`.
+   4. Producers and arbiter: `[once:tactical-battle-core:producers] [BattleCore] producers count=11 order=Withdrawal,ArtilleryDoctrine,ArtilleryPointBlank,GroupStance,ChargeDemotion,Posture,FacingPulse,FireControl,DivisionPlay,ReserveRelease,Charge`; `[once:tactical-battle-core:arbiter-first-fire] [OrderArbiter] first vanilla order issued channel=<channel> source=<source>`. **Absent:** `tactical-battle-core:producers-missing`, `tactical-battle-core:producer-threw:<Name>`, `tactical-battle-core:arbiter-failed`, `tactical-battle-core:snapshot-unavailable`, `tactical-battle-core:inline-failed`, `tactical-battle-core:bunits-missing`, `tactical-battle-core:terrain-*`, `tactical-battle-core:bfs-missing`.
+   5. `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> superseded=<n> topSkip=<reason>` every 30 s real time per AI side: `moved > 0` once the armies move, `failed / issued < 0.2`, `gaveUp ≤ 5` per row, no row where `superseded` dominates `retried`.
+   6. Performance (`SESSION/performance*.jsonl`, `PerformanceAggregate`): `tactical.snapshot.build` meanMs ≤ 1.5 and slowCount (≥ 5 ms) near 0; `tactical.arbiter.resolve` meanMs ≤ 0.5 with slowCount/count ≤ 5 %; `tactical.patch.battle-core-arbiter` slowCount/count ≤ 1 % at its 5 ms threshold; note `tactical.arbiter.execute`, `tactical.perception` and each `tactical.producer.*`. E.g. `cat "$SESSION"/performance*.jsonl | jq -r 'select(.event=="PerformanceAggregate" and (.fields.scope|startswith("tactical.snapshot.build") or startswith("tactical.arbiter") or startswith("tactical.patch.battle-core-arbiter"))) | [.fields.scope,.fields.count,.fields.meanMs,.fields.maxMs,.fields.slowCount] | @tsv'`.
+   7. Posture (`SESSION/tactical*.jsonl`): `TacticalCommandPosture` rows with `writeResult=submitted` for both AI alliances, `TacticalLeafCascade` rows, `TacticalFacingPulse` rows; `TacticalDecisionMatrix` battle rows with a known force balance (own / (visible + remembered)).
+   8. Night: the doctrine clock is frozen across the end-of-day cycle; on day 2 the arbiter resumes (`[OrderArbiter]` rows again, `moved > 0`) with none of the warnings listed in 1.2-1.4.
+2. **Watch items in Session A** (code-only proxies; note what you see, they decide tuning, not pass/fail):
+   1. Close engagement = melee in the subtree or a visible enemy within 250 m (narrower than shipped #61): brigades in a firefight at 250-600 m — formation holds, approach moves, `FallBackToLine` courier vs immediate.
+   2. Flank risk weights remembered enemies (0.5 × confidence) with no friendly term: a stale remembered enemy should not keep driving a local flank emergency, a refused flank or the division play's "in trouble".
+   3. Leaf brigades: after the parent moves or wheels the leaf goes to its layout slot; after a Whiskey refuse wheel it holds the skewed slot; a leaf whose division moved as part of its corps is pulled toward the division's old anchor (stale `lastsetwaypointposition`); leaves on a terrain-shaped line more than 60 m off the straight slot are pulled onto it (`adjustbyterrainshape` is not applied).
+   4. Refused flank: a refuse wheel on a threatened flank, its children skewed back, no thrash between refuse and plain re-form.
+   5. Covered ford/bridge: an AI attack over a crossing the enemy covers goes around or through via the obstacle path; `[OrderArbiter]` shows it `moved`; **absent:** `tactical-battle-core:blocked-crossings-missing`, `blocked-crossings-failed`.
+   6. Artillery point-blank watchdog: a battery that vanilla's delayed group move keeps sending forward is pulled back once, not back and forth every tick (watch the battery; `[OrderArbiter] issued` does not climb steadily for an idle front).
+   7. Withdrawal: an AI regiment under pressure falls back by vanilla's distance and turns to fire (behavior 2), never toward a hidden enemy.
+   8. Charge: `[once:tactical-battle-core:charge-first-fire] [ChargeDoctrine] first infantry charge armed: combat behavior 3 issued to a leading regiment of an assault group` in an infantry assault. Rare by design (brigade HQ within 50 m of the visible `enemyinrangereg[0]`); a whole battle without it is not a failure. A charge demotion (an assault brigade the doctrine holds in reserve or falling back drops from stance 4; no telemetry row records the demotion since #45 was deleted) followed by its regiments leaving charge mode is the BC6b precedence check. **Absent:** `tactical-battle-core:charge-prefs`, `charge-enabled`, `charge-config`.
+   9. Reserves: `[TacticalReserveOrderDelayGuard] converted direct reserve path to delayed order unit=…` (with order delays on), `[TacticalReserveDrift] surface=CheckUseOfReserves …` for a Reserve-role rollback, `[OrderArbiter]` activity from a released reserve; **absent:** `tactical-battle-core:reserve-release-enabled`, `withdrawal-enabled`.
+3. **Session B — W&L brigade career battle (W&L forces `ai_vs_ai`).**
+   1. `[BattlePerception] alliance=<player alliance> mode=OwnSideWithinFog reason=None …` for the player's AI side, FogGrid for the enemy.
+   2. No Whiskey write on a player regiment: the player's units never move, rotate, change stance or formation on their own; `TacticalCommandPosture` rows never name a player unit with `writeResult=submitted`.
+   3. When the AI moves the player's parent division, a dispatch panel names the superior (one per executed move, no spam).
+   4. `[once:tactical-battle-core:ancestry-mismatch] [BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance=<a> groups=<n>` absent, or explained.
+   5. Detached command (BC3): with the player's command detached, its AI parent is ordered and rotated in place, and none of the player's regiments is written. Then, with the AI parent holding a stance (`ai_stanceordered > 0`; `ChangeStance` sets the parent's own `permanentlydetached`, 90788-90791), press the player's stance-off (re-attach): the parent is no longer ordered as a group — its children are ordered instead, or the decision matrix's group row shows `wlGuard=deny:owned-descendant-attached`.
+   6. Feud: `[first-fire] tactical.patch.feud-action-gate`; a feud move goes through the executor; **absent:** the `TacticalFeudGuard` rows `[once:tactical-feud-guard:no-snapshot]` and `[once:tactical-feud-guard:no-snapshot-refused]` (`SESSION`). A player-owned feuding group never moves on its own.
+4. **Rollback spot check (optional).** `Tactical Commander Mode = MonitorOnly`: perception lines, `TacticalDecisionMatrix` and operations-ledger rows still appear, but no `producers` / `arbiter-first-fire` line, no `[OrderArbiter]` row and no `TacticalCommandPosture` row (the arbiter and its producers stand down).
