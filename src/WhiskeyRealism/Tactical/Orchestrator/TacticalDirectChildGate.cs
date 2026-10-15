@@ -64,12 +64,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float NearestEnemyBearingFromGroupRadians { get; }
             public float FeudMaxDistance { get; }
             public int IntendedTargetSector { get; }
-
-            public Input WithIntendedTargetSector(int sector) => new Input(
-                GateEnabled, SideIsAi, Role, AxisSector, PrimarySector,
-                IntendedTargetBearingFromGroupRadians,
-                IntendedTargetDistanceFromGroup, NearestEnemyBearingFromGroupRadians,
-                FeudMaxDistance, sector);
         }
 
         public static DirectChildGateDecision Decide(Input input)

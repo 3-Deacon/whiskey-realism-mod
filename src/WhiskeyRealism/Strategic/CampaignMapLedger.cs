@@ -159,11 +159,6 @@ namespace WhiskeyRealism.Strategic
             return false;
         }
 
-        public Theater GetStateTheaterOrUnknown(int stateId)
-        {
-            return TryGetStateTheater(stateId, out var theater) ? theater : Theater.Unknown;
-        }
-
         public CampaignMapTown BestDefenseTown(int alliance)
         {
             CampaignMapTown best = null;

@@ -109,28 +109,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>Recorded by the tick cycle right after a replan.</summary>
         public void RecordReplanBaseline(ReplanBaseline baseline) => _replanBaseline = baseline;
 
-        /// <summary>
-        /// AIBattle.macroai derived from current plan + phase + commander aggression.
-        /// Returns -1 (dynamic) when no plan picked yet — signals the rewired #44
-        /// patch to leave vanilla's macroai alone.
-        /// </summary>
-        public int CurrentMacroAi
-        {
-            get
-            {
-                if (!HasPlan) return -1;
-                switch (_plan.Phase)
-                {
-                    case BattlePhase.Probe:        return _commanderPersonality.Aggression > 0.3f ? 1 : -1;
-                    case BattlePhase.MainEffort:   return _commanderPersonality.Aggression > 0.0f ? 1 : 0;
-                    case BattlePhase.Exploit:      return 0;
-                    case BattlePhase.Consolidate:  return 2;
-                    case BattlePhase.Withdraw:     return 3;
-                    default:                       return -1;
-                }
-            }
-        }
-
         public void PickInitialPlan(ArmyEvidence evidence)
         {
             if (TryPickPlan(evidence, opposingCommanderHint: 0f, out var nextPlan))

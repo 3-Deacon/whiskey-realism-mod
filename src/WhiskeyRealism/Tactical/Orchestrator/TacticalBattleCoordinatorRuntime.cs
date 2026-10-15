@@ -450,8 +450,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (side == null) return;
             if (!ShouldRunTacticalCommanderForSide(side.AllianceId, _playerAllianceId, aiVsAi)) return;
 
-            side.Tick();
-
             // Every per-side read (snapshot, objective records, objectivechain,
             // macroai) uses this side's own AIBattle, not whichever instance fired
             // the tick: each AIBattle's objectivechain holds only its own side's

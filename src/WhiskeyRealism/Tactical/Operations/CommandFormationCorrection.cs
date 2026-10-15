@@ -112,19 +112,6 @@ namespace WhiskeyRealism.Tactical.Operations
             return Math.Abs(delta) > tolerance;
         }
 
-        public static float RecentOrderCooldownSeconds(
-            bool closeEngaged,
-            bool visibleFormationMismatch,
-            CommandTaskType task,
-            float defaultSeconds,
-            float urgentSeconds)
-        {
-            if (closeEngaged && visibleFormationMismatch && ShouldFaceThreat(task))
-                return Math.Max(0f, urgentSeconds);
-
-            return Math.Max(0f, defaultSeconds);
-        }
-
         public static CommandTaskType TaskForLocalFlankEmergency(
             CommandTaskType currentTask,
             bool closeEngaged,
@@ -143,24 +130,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 default:
                     return currentTask;
             }
-        }
-
-        public static bool CanBypassPendingOrderForLocalFormation(
-            bool closeEngaged,
-            bool flankRisk,
-            bool visibleFormationMismatch,
-            CommandTaskType task)
-        {
-            if (!closeEngaged || !visibleFormationMismatch) return false;
-            if (task == CommandTaskType.GuardFlank) return flankRisk;
-            return ShouldFaceThreat(task);
-        }
-
-        public static bool ShouldUseNewPathForFormationCorrection(
-            bool closeEngaged,
-            bool needsFormation)
-        {
-            return needsFormation && !closeEngaged;
         }
 
         public static int TargetFormationForTask(CommandTaskType task, int currentGroupFormation)

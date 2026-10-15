@@ -33,13 +33,6 @@ namespace WhiskeyRealism.Tactical.Operations
         Secured
     }
 
-    public enum TacticalReassessmentTier
-    {
-        Continue,
-        SoftAbortReview,
-        HardAbort
-    }
-
     public readonly struct ObjectiveRecord
     {
         public ObjectiveObservationInput Observation { get; }
@@ -144,42 +137,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 default:
                     return -1;
             }
-        }
-
-        public static TacticalReassessmentTier ReassessCommittedOperation(
-            float progressStalledSeconds,
-            float confidence,
-            float odds,
-            bool forceCollapsed,
-            bool objectiveSecured)
-        {
-            if (forceCollapsed || objectiveSecured)
-            {
-                return TacticalReassessmentTier.HardAbort;
-            }
-
-            float stalledSeconds = SanitizeElapsedSeconds(progressStalledSeconds);
-            float sanitizedConfidence = SanitizeFiniteOrZero(confidence);
-            float sanitizedOdds = SanitizeFiniteOrZero(odds);
-
-            if (stalledSeconds >= 300f || sanitizedConfidence < 0.35f || sanitizedOdds < 0.65f)
-            {
-                return TacticalReassessmentTier.SoftAbortReview;
-            }
-
-            return TacticalReassessmentTier.Continue;
-        }
-
-        private static float SanitizeElapsedSeconds(float value)
-        {
-            if (float.IsPositiveInfinity(value)) return float.MaxValue;
-            if (float.IsNaN(value) || float.IsNegativeInfinity(value)) return 0f;
-            return value < 0f ? 0f : value;
-        }
-
-        private static float SanitizeFiniteOrZero(float value)
-        {
-            return float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
         }
     }
 }

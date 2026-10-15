@@ -10,8 +10,7 @@ namespace WhiskeyRealism.Tactical
         RefuseRight = 2,
         RefuseLeft = 3,
         ProbeAndFix = 4,
-        WeakPointPressure = 5,
-        LineRelief = 7
+        WeakPointPressure = 5
     }
 
     public enum TacticalRefusedFlank

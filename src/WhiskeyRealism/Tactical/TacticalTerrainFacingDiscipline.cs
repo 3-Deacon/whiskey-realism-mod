@@ -134,9 +134,6 @@ namespace WhiskeyRealism.Tactical
         public bool RequireDeploymentZone { get; }
         public bool RequireVisibleEnemyForFacing { get; }
 
-        public static TacticalTerrainRules DeploymentDefault =>
-            new TacticalTerrainRules(60f, 90f, requireDeploymentZone: true, requireVisibleEnemyForFacing: false);
-
         private static float ClampPositive(float value, float fallback)
         {
             if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f) return fallback;

@@ -11,7 +11,6 @@ namespace WhiskeyRealism.Tactical.Operations
         Ridge = 6,
         ChokePoint = 7,
         EnemyLine = 8,
-        FriendlyLine = 9,
         FallbackLine = 10,
         StagingArea = 11
     }

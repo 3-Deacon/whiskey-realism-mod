@@ -35,40 +35,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             AllianceId = allianceId;
             Roster = roster;
-            Echelons = new List<EchelonOrchestrator>();
             OperationsLedger = new TacticalOperationsLedgerRuntime();
         }
 
         public int AllianceId { get; }
         public TacticalCommanderRoster Roster { get; }
-        public List<EchelonOrchestrator> Echelons { get; }
-        public int TickCount { get; private set; }
         public ArmyOrchestrator Army { get; private set; }
         internal TacticalOperationsLedgerRuntime OperationsLedger { get; }
 
         /// <summary>
         /// Attach the per-side ArmyOrchestrator. No-op if <paramref name="army"/> is null.
-        /// Idempotent: re-attaching the same instance does not duplicate it in <see cref="Echelons"/>.
         /// </summary>
         public void AttachArmy(ArmyOrchestrator army)
         {
             if (army == null) return;
             Army = army;
-            if (!Echelons.Contains(army)) Echelons.Add(army);
-        }
-
-        public void Tick()
-        {
-            using (TelemetryPerf.Scope("tactical.orchestrator-side-tick", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
-            {
-                TickCount++;
-                for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.Tick();
-            }
-        }
-
-        public void PropagateIntent()
-        {
-            for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.PropagateIntent();
         }
 
         internal void TickOperationsLedger(

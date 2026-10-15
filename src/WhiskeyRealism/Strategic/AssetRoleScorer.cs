@@ -47,14 +47,5 @@ namespace WhiskeyRealism.Strategic
 
             return role;
         }
-
-        public static AssetStrategicRole ScoreTown(
-            CampaignMapTown town,
-            GrandStrategyProfile profile,
-            float capitalDistance)
-        {
-            if (town == null || profile == null) return AssetStrategicRole.None;
-            return capitalDistance < CapitalApproachKm ? AssetStrategicRole.CapitalApproach : AssetStrategicRole.None;
-        }
     }
 }

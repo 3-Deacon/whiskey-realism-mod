@@ -147,29 +147,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Walks the tree from the given root and returns active leaf-tier nodes.
-        /// A "leaf" for the role cascade is a brigade-tier node (unittyp ==
-        /// BattleGroupBrigade = 14), NOT a regiment-tier combat unit below it.
-        /// Brigades are the SoW-equivalent of `eRankBrig` — the tier orders are
-        /// issued to; the regiments below them (Infantry/Cavalry/Artillery/
-        /// Skirmisher unittyps 0-3) inherit orders from their brigade via
-        /// vanilla.
-        ///
-        /// If a non-brigade node has no active brigade-or-above descendants we
-        /// also consider it a leaf, so degenerate hierarchies (a lone corps with
-        /// no brigades) still produce assignments.
-        /// </summary>
-        public static IReadOnlyList<ProbeNode> EnumerateLeaves(
-            int rootInstanceId,
-            IReadOnlyDictionary<int, ProbeNode> tree)
-        {
-            var leaves = new List<ProbeNode>();
-            if (tree == null || !tree.TryGetValue(rootInstanceId, out var root)) return leaves;
-            CollectLeaves(root, tree, leaves);
-            return leaves;
-        }
-
-        /// <summary>
         /// Returns direct active children of the parent node, sorted by world X (legacy;
         /// see the front-axis overload) so the role-cascade can assign Main/SupportMain/Refuse
         /// based on geometric position. Filters out combat-unit children

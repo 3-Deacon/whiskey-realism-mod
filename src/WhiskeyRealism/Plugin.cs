@@ -92,8 +92,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalHeavyPathThrottling;
         internal ConfigEntry<float> TacticalHeavyReviewCycleHours;
         internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
-        public const int TacticalMoraleSnapshotLedgerCapacity = 4;
-        public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -787,8 +785,6 @@ namespace WhiskeyRealism
             // never see a null Instance on their first invocation.
             StrategicCoordinator.Bootstrap();
 
-            MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
-            Util.BattleScope.Register("morale-snapshots", () => MoraleSnapshotLedger?.Clear());
 
             StartTelemetryRuntime();
 

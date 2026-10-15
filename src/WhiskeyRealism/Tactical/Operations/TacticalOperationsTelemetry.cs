@@ -76,22 +76,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 + " confidence=" + FormatFloat(order.Confidence01);
         }
 
-        public static string CommandPosture(
-            int side,
-            CommandNodeOperationalState state,
-            PostureExecutionDecision decision,
-            TacticalIdleClassification idle)
-        {
-            return "[TacticalCommandPosture] side=" + side
-                + " node=" + SafeToken(state.NodeId)
-                + " task=" + state.Task
-                + " decision=" + decision.Action
-                + " reason=" + SafeToken(decision.Reason)
-                + " target=" + decision.Target
-                + " clearInterruptedPaths=" + decision.ClearInterruptedPaths
-                + " idle=" + idle;
-        }
-
         public static string PostureSummary(
             int side,
             int validIdle,
@@ -181,23 +165,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 + "|" + decision.Target
                 + "|" + decision.ClearInterruptedPaths
                 + "|" + idle;
-        }
-
-        public static bool ShouldEmitSignatureChange(
-            IDictionary<string, string> lastSignatures,
-            string key,
-            string signature)
-        {
-            if (lastSignatures == null) return true;
-            string safeKey = SafeToken(key);
-            string safeSignature = SafeToken(signature);
-            if (lastSignatures.TryGetValue(safeKey, out var last) && last == safeSignature)
-            {
-                return false;
-            }
-
-            lastSignatures[safeKey] = safeSignature;
-            return true;
         }
 
         public static bool ShouldEmitInterval(

@@ -205,14 +205,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             BuildAndActivate(suppressedAllianceId, roster);
         }
 
-        public static void OnBattleEndForTest()
-        {
-            side0 = null;
-            side1 = null;
-            active = false;
-            ResetDoctrineClock();
-        }
-
         // ---- Internal builder (used by both test and runtime paths) ----
 
         /// <summary>

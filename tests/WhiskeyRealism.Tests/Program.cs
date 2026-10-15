@@ -90,8 +90,6 @@ static class Program
             ("telemetry validator rejects empty session directory", TelemetryValidatorRejectsEmptySessionDirectory),
             ("telemetry validator rejects session without valid rows", TelemetryValidatorRejectsSessionWithoutValidRows),
             ("telemetry validator cli rejects missing path", TelemetryValidatorCliRejectsMissingPath),
-            ("telemetry issue bundle writes redacted manifest", TelemetryIssueBundleWritesRedactedManifest),
-            ("telemetry issue bundle manifest requires existing session directory", TelemetryIssueBundleManifestRequiresExistingSessionDirectory),
             ("telemetry profile off does not allocate session", TelemetryProfileOffDoesNotAllocateSession),
             ("telemetry runtime full tuning writes sidecars and drains shutdown", TelemetryRuntimeFullTuningWritesSidecarsAndDrainsShutdown),
             ("telemetry runtime budget drops oversized detail rows", TelemetryRuntimeBudgetDropsOversizedDetailRows),
@@ -109,7 +107,6 @@ static class Program
             ("telemetry perf scope emits slow event", TelemetryPerfScopeEmitsSlowEvent),
             ("telemetry perf scope swallows sink failure", TelemetryPerfScopeSwallowsSinkFailure),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
-            ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("telemetry tag policy routes tactical matrix to state", TelemetryTagPolicyRoutesTacticalMatrixToState),
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
@@ -183,26 +180,14 @@ static class Program
             ("tactical objective unverified bridge downgrades to generic", TacticalObjectiveUnverifiedBridgeDowngrades),
             ("tactical objective verified bridge drives typed scoring", TacticalObjectiveVerifiedBridgeDrivesTypedScoring),
             ("tactical objective input sanitizes nonfinite values", TacticalObjectiveInputSanitizesNonfiniteValues),
-            ("battlefield picture visible formed enemy raises objective confidence", BattlefieldPictureVisibleFormedEnemyRaisesObjectiveConfidence),
-            ("battlefield picture skirmisher contact does not expose main line", BattlefieldPictureSkirmisherContactDoesNotExposeMainLine),
-            ("battlefield picture repeated screens do not become main body confidence", BattlefieldPictureRepeatedScreensDoNotBecomeMainBodyConfidence),
-            ("battlefield picture duplicate contact ids do not double count strength", BattlefieldPictureDuplicateContactIdsDoNotDoubleCountStrength),
-            ("battlefield picture nonfinite now fails stale not fresh", BattlefieldPictureNonfiniteNowFailsStaleNotFresh),
-            ("battlefield picture stale contacts decay but do not vanish instantly", BattlefieldPictureStaleContactsDecayButDoNotVanishInstantly),
             ("tactical commander mode active allows writes", TacticalCommanderModeActiveAllowsWrites),
             ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
             ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
             ("tactical commander mode active emits ledger telemetry", TacticalCommanderModeActiveEmitsLedgerTelemetry),
             ("tactical commander active remains configured default", TacticalCommanderActiveRemainsConfiguredDefault),
-            ("tactical vision visual contact high confidence", TacticalVisionVisualContactHighConfidence),
-            ("tactical vision stale recent fire decays", TacticalVisionStaleRecentFireDecays),
-            ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
-            ("tactical vision default input is low confidence", TacticalVisionDefaultInputIsLowConfidence),
-            ("tactical vision infinite age is stale", TacticalVisionInfiniteAgeIsStale),
             ("tactical operations parallel requires per objective advantage", TacticalOperationsParallelRequiresPerObjectiveAdvantage),
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
             ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
-            ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("operation director picks parallel attack only with advantage", OperationDirectorParallelRequiresAdvantage),
             ("operation director preserves committed push through noise", OperationDirectorPreservesCommittedPush),
             ("operation director low reserve continues high odds committed attack", OperationDirectorLowReserveContinuesHighOddsCommittedAttack),
@@ -245,15 +230,9 @@ static class Program
             ("grand tactician recon doctrine uses cavalry scout and infantry probe", GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe),
             ("grand tactician recon doctrine prevents no contact blind assault", GrandTacticianReconDoctrinePreventsNoContactBlindAssault),
             ("scourge artillery micro doctrine limbers retreats and wheels", ScourgeArtilleryMicroDoctrineLimbersRetreatsAndWheels),
-            ("scourge melee fear doctrine gates charge by pressure not just headcount", ScourgeMeleeFearDoctrineGatesChargeByPressure),
-            ("scourge skirmisher doctrine recalls tired distant screens", ScourgeSkirmisherDoctrineRecallsTiredDistantScreens),
             ("scourge infantry fire discipline holds bad shots and blocks premature charge", ScourgeInfantryFireDisciplineHoldsBadShots),
             ("infantry fire control prefers historical close medium bands", InfantryFireControlPrefersHistoricalCloseMediumBands),
             ("cavalry fire control maps to vanilla cavalry behaviors", CavalryFireControlMapsToVanillaBehaviors),
-            ("scourge attribute matrix adjusts fallback fire and melee thresholds", ScourgeAttributeMatrixAdjustsFallbackFireAndMelee),
-            ("tactical endurance gate blocks assault but permits fallback", TacticalEnduranceGateBlocksAssaultButPermitsFallback),
-            ("tactical support request ledger dedupes and prioritizes", TacticalSupportRequestLedgerDedupesAndPrioritizes),
-            ("player subordinate order doctrine maps without direct movement", PlayerSubordinateOrderDoctrineMapsWithoutDirectMovement),
             ("operation director scouts screen contact before committing", OperationDirectorScoutsScreenContactBeforeCommitting),
             ("operation director keeps high confidence screen in scouting", OperationDirectorKeepsHighConfidenceScreenInScouting),
             ("operation director downgrades committed attack when contact becomes screen", OperationDirectorDowngradesCommittedAttackWhenContactBecomesScreen),
@@ -261,10 +240,8 @@ static class Program
             ("operation director fix and flank exposed weak point with reserve", OperationDirectorFixAndFlankExposedWeakPointWithReserve),
             ("operation macro ai maps soft abort to defend", OperationMacroAiMapsSoftAbortToDefend),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
-            ("tactical FOW contact rejects broad closest enemy leak", TacticalFowContactRejectsBroadClosestEnemyLeak),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
             ("tactical vision fallback objective uses vanilla movement waypoint", TacticalVisionFallbackObjectiveUsesVanillaMovementWaypoint),
-            ("tactical vision scene objectives beat movement fallback", TacticalVisionSceneObjectivesBeatMovementFallback),
             ("tactical vision appends visible enemy line to objective chain picture", TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture),
             ("tactical vision fallback objective carries committed attack confidence", TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
@@ -382,7 +359,6 @@ static class Program
             ("doctrine assignment unknown role has no legal idle", DoctrineAssignmentUnknownRoleHasNoLegalIdle),
             ("doctrine assignment fallback target remains finite for large coordinates", DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates),
             ("doctrine consumer attack order permits assault stance", DoctrineConsumerAttackOrderPermitsAssaultStance),
-            ("doctrine consumer battlefield picture screen does not expose line", DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine),
             ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
             ("doctrine reserve releases to support endangered main effort", DoctrineReserveReleasesToSupportEndangeredMainEffort),
             ("doctrine reserve seals threatened flank from operational mission", DoctrineReserveSealsThreatenedFlankFromOperationalMission),
@@ -397,10 +373,7 @@ static class Program
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
             ("command formation correction bounds repeated facing refreshes", CommandFormationCorrectionBoundsRepeatedFacingRefreshes),
-            ("command formation correction shortens retry when close engaged and still wrong", CommandFormationCorrectionShortensRetryWhenCloseEngagedAndStillWrong),
             ("command formation correction overrides attack posture under flank emergency", CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency),
-            ("command formation correction allows pending order bypass for close defensive formation", CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation),
-            ("command formation correction avoids new path when close engaged", CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged),
             ("command formation correction targets line for committed attack", CommandFormationCorrectionTargetsLineForCommittedAttack),
             ("command formation correction maps flank refusal to vanilla parameter", CommandFormationCorrectionMapsRefuseFlankParameter),
             ("tactical facing pulse observes division axis without write", TacticalFacingPulseObservesDivisionAxisWithoutWrite),
@@ -476,8 +449,6 @@ static class Program
             ("tactical b6c reaction context clear discards all entries", TacticalB6cReactionContextClearDiscardsAllEntries),
             ("tactical b6c reaction context missing key returns default maintain", TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain),
             ("tactical gate helpers W&L ownership", TacticalGateHelpersWlOwnership),
-            ("tactical gate helpers alliance bounds", TacticalGateHelpersAllianceBounds),
-            ("tactical score cache roundtrip", TacticalScoreCacheRoundtrip),
             ("tactical support screen supported and steady", TacticalSupportScreenSupportedAndSteady),
             ("tactical support screen shaken with screen", TacticalSupportScreenShakenWithScreen),
             ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
@@ -494,12 +465,6 @@ static class Program
             ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
             ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
             ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
-            ("tactical destination discipline clear", TacticalDestinationDisciplineClearDestination),
-            ("tactical destination discipline gun crowded on gun", TacticalDestinationDisciplineGunCrowdedOnGun),
-            ("tactical destination discipline line crowded on line", TacticalDestinationDisciplineLineCrowdedOnLine),
-            ("tactical destination discipline enemy on destination", TacticalDestinationDisciplineEnemyOnDestination),
-            ("tactical destination discipline path risk unknown", TacticalDestinationDisciplinePathRiskUnknown),
-            ("tactical destination discipline skirmisher in motion skips check", TacticalDestinationDisciplineSkirmisherInMotionSkipsCheck),
             ("tactical morale pressure stable", TacticalMoralePressureStable),
             ("tactical morale pressure under pressure from outflanked tier", TacticalMoralePressureUnderPressureFromOutflankedTier),
             ("tactical morale pressure fallback candidate", TacticalMoralePressureFallbackCandidate),
@@ -576,7 +541,6 @@ static class Program
             ("tactical diagnostics detect objective chain movement mutation proof", TacticalDiagnosticsDetectObjectiveChainMovementMutationProof),
             ("tactical diagnostics detect reserve direct path delay bypass", TacticalDiagnosticsDetectReserveDirectPathDelayBypass),
             ("tactical diagnostics detect pathfinder backtrack shape", TacticalDiagnosticsDetectPathfinderBacktrackShape),
-            ("tactical diagnostics classify pathfinder add path outcome", TacticalDiagnosticsClassifyPathfinderAddPathOutcome),
             ("tactical diagnostics suppress only tactical null fallback exceptions", TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions),
             ("tactical diagnostics handle empty null and sanitized values", TacticalDiagnosticsHandleEmptyNullAndSanitizedValues),
             ("tactical hq link guard clears cross command auto link", TacticalHqLinkGuardClearsCrossCommandAutoLink),
@@ -653,7 +617,6 @@ static class Program
             ("asset role scorer returns none when no rules match", AssetRoleScorerReturnsNoneWhenNoRulesMatch),
             ("asset role scorer flags union forward base from profile", AssetRoleScorerFlagsUnionForwardBaseFromProfile),
             ("asset role scorer rejects union forward base when enemy owned", AssetRoleScorerRejectsUnionForwardBaseEnemyOwned),
-            ("asset role scorer score town flags capital approach by distance", AssetRoleScorerScoreTownFlagsCapitalApproach),
             ("asset role catalog overrides scorer for named anchor", AssetRoleCatalogOverridesScorer),
             ("asset role catalog returns none for unknown name", AssetRoleCatalogReturnsNoneForUnknown),
             ("asset role catalog distinguishes known neutral anchors from unknown names", AssetRoleCatalogDistinguishesKnownNeutralAnchors),
@@ -664,7 +627,6 @@ static class Program
             ("csa early policy scorer favors trade and recognition over naval parity", CsaEarlyPolicyScorerFavorsTradeAndRecognition),
             ("theater classifier maps wl capitals to east", TheaterClassifierMapsWlCapitalsToEast),
             ("army area classifier maps W&L northwest Virginia towns", ArmyAreaClassifierMapsWlNorthwestVirginiaTowns),
-            ("theater classifier uses state names before broad coordinates", TheaterClassifierUsesStateNamesBeforeCoordinates),
             ("campaign map ledger only maps states represented by towns", CampaignMapLedgerOnlyMapsRepresentedStates),
             ("campaign map ledger ranks owned capitals for defense", CampaignMapLedgerRanksOwnedCapitalsForDefense),
             ("campaign map ledger tracks ports and forts", CampaignMapLedgerTracksPortsAndForts),
@@ -715,11 +677,7 @@ static class Program
             ("project doctrine log gate ignores empty signatures", ProjectDoctrineLogGateIgnoresEmptySignatures),
             ("project doctrine starved lane signature includes funding trajectory", ProjectDoctrineStarvedLaneSignatureIncludesFundingTrajectory),
             ("project lane intent estimates days from observed rate", ProjectLaneIntentEstimatesDaysFromObservedRate),
-            ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
-            ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
-            ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
             ("formation level maps vanilla unit types", FormationLevelMapsVanillaUnitTypes),
-            ("independent top division requires top unit and strength floor", IndependentTopDivisionRequiresTopAndStrengthFloor),
             ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable),
             ("division refuses enemy army without support", DivisionRefusesEnemyArmyWithoutSupport),
             ("csa coherent outnumbered division delays instead of retreating", CsaCoherentOutnumberedDivisionDelays),
@@ -825,7 +783,6 @@ static class Program
             ("campaign filter map guard detects assign-filters bootstrap needs", CampaignFilterMapGuardDetectsAssignFiltersBootstrapNeeds),
             ("state handover guard requires decisive support", StateHandoverGuardRequiresDecisiveSupport),
             ("fleet patrol guard resets completed AI patrol", FleetPatrolGuardResetsCompletedAiPatrol),
-            ("artillery combine gun transfer preserves source guns", ArtilleryCombineGunTransferPreservesSourceGuns),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
@@ -955,20 +912,10 @@ static class Program
             ("tactical b6b aggressive policy permits weak point charge", TacticalB6bAggressivePolicyPermitsWeakPointCharge),
             ("tactical b6b conservative policy blocks defend counterstroke", TacticalB6bConservativePolicyBlocksDefendCounterstroke),
             ("tactical b6b standard policy permits defend counterstroke", TacticalB6bStandardPolicyPermitsDefendCounterstroke),
-            ("tactical morale snapshot ledger stores and reads", TacticalMoraleSnapshotLedgerStoresAndReads),
-            ("tactical morale snapshot ledger ring buffer drops oldest", TacticalMoraleSnapshotLedgerRingBufferDropsOldest),
-            ("tactical morale snapshot ledger name fallback resolves across InstanceID roll", TacticalMoraleSnapshotLedgerNameFallbackResolvesAcrossInstanceIdRoll),
-            ("tactical morale snapshot ledger skips when last update unchanged", TacticalMoraleSnapshotLedgerSkipsWhenLastUpdateUnchanged),
-            ("tactical morale snapshot ledger prune", TacticalMoraleSnapshotLedgerPrune),
             ("tactical quadrant threat computes arcs", TacticalQuadrantThreatScorerComputesArcs),
             ("tactical quadrant threat detects rear pressure", TacticalQuadrantThreatScorerDetectsRearPressure),
             ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully),
             ("tactical withdrawal input adapter to quadrant input", TacticalWithdrawalInputAdapterToQuadrantInput),
-            ("tactical charge viability refuse on cooldown", TacticalChargeViabilityRefuseOnCooldown),
-            ("tactical charge viability refuse on morale high", TacticalChargeViabilityRefuseOnMoraleHigh),
-            ("tactical charge viability allow at threshold", TacticalChargeViabilityAllowAtThreshold),
-            ("tactical charge viability encourage on flanked target", TacticalChargeViabilityEncourageOnFlankedTarget),
-            ("tactical charge viability artillery target ignores morale gate", TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate),
             ("tactical refuse flank intent no refuse when balanced", TacticalRefuseFlankIntentNoRefuseWhenBalanced),
             ("tactical refuse flank intent refuse left when left threatened", TacticalRefuseFlankIntentRefuseLeftWhenLeftThreatened),
             ("tactical refuse flank intent refuse right when right threatened", TacticalRefuseFlankIntentRefuseRightWhenRightThreatened),
@@ -976,20 +923,14 @@ static class Program
             ("tactical fatigue state bands", TacticalFatigueStateBands),
             ("tactical fatigue state clamps below", TacticalFatigueStateClampsBelow),
             ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove),
-            ("echelon orchestrator empty tick is no-op", EchelonOrchestratorEmptyTickIsNoOp),
-            ("echelon orchestrator propagate intent dispatches to children", EchelonOrchestratorPropagateIntentDispatchesToChildren),
-            ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional),
             ("tactical commander roster falls back to faction defaults for unknown", TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown),
             ("tactical commander roster partitions by side", TacticalCommanderRosterPartitionsBySide),
             ("tactical commander roster rank tier bias increases caution for corps", TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps),
             ("tactical battle orchestrator owns alliance and roster", TacticalBattleOrchestratorOwnsAllianceAndRoster),
-            ("tactical battle orchestrator empty children in O0", TacticalBattleOrchestratorEmptyChildrenInO0),
-            ("tactical battle orchestrator empty tick is no-op", TacticalBattleOrchestratorEmptyTickIsNoOp),
-            ("tactical battle orchestrator attach army exposes army and adds to echelons", TacticalBattleOrchestratorAttachArmyExposesArmyAndAddsToEchelons),
+            ("tactical battle orchestrator attach army exposes army", TacticalBattleOrchestratorAttachArmyExposesArmy),
             ("tactical battle orchestrator attach army idempotent", TacticalBattleOrchestratorAttachArmyIdempotent),
             ("tactical battle plan records id phase main effort and age", TacticalBattlePlanRecordsIdPhaseMainEffortAndAge),
             ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
-            ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
@@ -1000,7 +941,6 @@ static class Program
             ("tactical playbook catalog personality weight dominates terrain", TacticalPlaybookCatalogPersonalityWeightDominatesTerrain),
             ("tactical playbook catalog opposing hint changes ranking", TacticalPlaybookCatalogOpposingHintChangesRanking),
             ("tactical playbook catalog jitter deterministic for same seed", TacticalPlaybookCatalogJitterDeterministicForSameSeed),
-            ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
             ("tactical battle coordinator activates on battle start with synthetic inputs", TacticalBattleCoordinatorActivatesOnBattleStartWithSyntheticInputs),
             ("tactical battle coordinator suppresses player cic side", TacticalBattleCoordinatorSuppressesPlayerCicSide),
@@ -1092,8 +1032,6 @@ static class Program
             ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
-            ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
-            ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
             ("army orchestrator records history on initial plan", ArmyOrchestratorRecordsHistoryOnInitialPlan),
             ("army orchestrator tick advances age without replanning", ArmyOrchestratorTickAdvancesAgeWithoutReplanning),
             ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
@@ -1129,9 +1067,7 @@ static class Program
             ("role cascade fallback all children fallback", RoleCascadeFallbackAllChildrenFallback),
             ("role cascade leaf task mapping is exhaustive", RoleCascadeLeafTaskMappingIsExhaustive),
             ("command tree probe builds parent links", CommandTreeProbeBuildsParentLinks),
-            ("command tree probe enumerates leaves three tier", CommandTreeProbeEnumeratesLeavesThreeTier),
             ("command tree probe sorts siblings left to right", CommandTreeProbeSortsSiblingsLeftToRight),
-            ("command tree probe empty input returns empty map", CommandTreeProbeEmptyInputReturnsEmptyMap),
             ("leaf brigade map flat army four brigades main", LeafBrigadeMapFlatArmyFourBrigadesMain),
             ("leaf brigade map three tier cascade main into division", LeafBrigadeMapThreeTierCascadeMainIntoDivision),
             ("leaf brigade map reserve cascades to all leaves", LeafBrigadeMapReserveCascadesToAllLeaves),
@@ -2283,31 +2219,6 @@ static class Program
         AssertEqual(TelemetryProfile.FullTuning, TelemetryRouter.ParseProfile("full_tuning"), "full underscored profile");
     }
 
-    private static void TelemetryBehaviorGatesAreIndependentFromProfile()
-    {
-        AssertTrue(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.Off, behaviorEnabled: true), "off profile does not disable enabled behavior");
-        AssertTrue(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.TacticalTuning, behaviorEnabled: true), "tactical profile leaves behavior enabled");
-        AssertFalse(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.FullTuning, behaviorEnabled: false), "logging profile does not enable disabled behavior");
-
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Campaign, TelemetryCategory.Decision), "tactical tuning excludes campaign decisions");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision), "tactical tuning includes tactical decisions");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Campaign, TelemetryCategory.Failure), "tactical tuning includes cross-layer campaign failure");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.State), "campaign tuning excludes tactical state");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Campaign, TelemetryCategory.State), "campaign tuning includes campaign state");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.Failure), "campaign tuning includes cross-layer tactical failure");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.System, TelemetryCategory.Performance), "tactical tuning includes system performance");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.System, TelemetryCategory.Failure), "campaign tuning includes system failure");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Trace), "full tuning includes trace");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Decision), "off excludes decision");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Campaign, TelemetryCategory.State), "off excludes state");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Trace), "off excludes trace");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Campaign, TelemetryCategory.Write), "off excludes write");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Gate), "off excludes gate");
-        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Performance), "off excludes performance");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Health), "off allows bounded health");
-        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Failure), "off allows bounded failure");
-    }
-
     private static void TelemetryTagPolicyRoutesTacticalMatrixToState()
     {
         var route = TelemetryTagPolicy.Route("[once:tactical-matrix] [TacticalDecisionMatrix] battle=alpha side=1 decision=Probe reason=odds");
@@ -2680,7 +2591,7 @@ static class Program
         try
         {
             string sessionId = "20260515-120000-000-p12-abcdef123456";
-            string sessionDirectory = TelemetrySession.CreateSessionDirectory(gameRoot, sessionId);
+            string sessionDirectory = TestFixtures.CreateSessionDirectory(gameRoot, sessionId);
             string expected = Path.Combine(gameRoot, "BepInEx", "WhiskeyRealism", "tuning-logs", sessionId);
 
             AssertTrue(Directory.Exists(sessionDirectory), "session directory created");
@@ -2713,7 +2624,7 @@ static class Program
             string root = Path.GetFullPath(TelemetrySession.TuningLogRoot(gameRoot)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             foreach (string hostileId in hostileIds)
             {
-                string sessionDirectory = TelemetrySession.CreateSessionDirectory(gameRoot, hostileId);
+                string sessionDirectory = TestFixtures.CreateSessionDirectory(gameRoot, hostileId);
                 string fullPath = Path.GetFullPath(sessionDirectory);
                 AssertTrue(IsUnderDirectory(fullPath, root), "hostile id remains under tuning root: " + hostileId);
                 AssertFalse(fullPath.Contains(".."), "hostile id does not retain traversal: " + hostileId);
@@ -2790,7 +2701,7 @@ static class Program
             string middleSession = "20260515-110000-000-p1-middle0000";
             string malformedSession = "20260515-070000-000-p1-badmanifest";
 
-            string currentDir = TelemetrySession.CreateSessionDirectory(gameRoot, currentSession);
+            string currentDir = TestFixtures.CreateSessionDirectory(gameRoot, currentSession);
             string newestDir = CreateTelemetrySessionDirectory(gameRoot, newestSession, "2026-05-15T12:00:00Z");
             string middleDir = CreateTelemetrySessionDirectory(gameRoot, middleSession, "2026-05-15T11:00:00Z");
             string malformedDir = CreateTelemetrySessionDirectory(gameRoot, malformedSession, null);
@@ -3516,68 +3427,6 @@ static class Program
         AssertEqual(1, Main(new[] { "--unknown-telemetry-arg" }), "validator cli unknown arg exit code");
     }
 
-    private static void TelemetryIssueBundleWritesRedactedManifest()
-    {
-        string sessionDirectory = CreateTempDirectory();
-        try
-        {
-            string sessionId = "bundle-session";
-            string manifestPath = Path.Combine(sessionDirectory, "manifest.json");
-            string summaryPath = Path.Combine(sessionDirectory, "summary.md");
-            string failuresPath = Path.Combine(sessionDirectory, "failures.jsonl");
-            File.WriteAllText(manifestPath, "{}");
-            File.WriteAllText(summaryPath, "summary token=secret");
-            File.WriteAllText(failuresPath, "{}");
-            File.WriteAllText(Path.Combine(sessionDirectory, "notes.txt"), "token=do-not-include");
-
-            string bundlePath = TelemetrySummary.WriteIssueBundleManifest(
-                sessionDirectory,
-                sessionId,
-                @"C:\Users\Kyle\AppData token=secret");
-            string json = File.ReadAllText(bundlePath);
-            JObject bundle = JObject.Parse(json);
-            var files = (JArray)bundle["files"];
-
-            AssertEqual(sessionId, (string)bundle["sessionId"], "bundle session id");
-            AssertTrue(JsonArrayContainsSubstring(files, "manifest.json"), "bundle includes manifest");
-            AssertTrue(JsonArrayContainsSubstring(files, "summary.md"), "bundle includes summary");
-            AssertTrue(JsonArrayContainsSubstring(files, "failures.jsonl"), "bundle includes failures");
-            AssertFalse(JsonArrayContainsSubstring(files, "notes.txt"), "bundle excludes non telemetry file");
-            AssertFalse(json.Contains("Kyle"), "bundle note redacts username");
-            AssertFalse(json.Contains("secret"), "bundle note redacts secret");
-            AssertContains((string)bundle["note"], @"C:\Users\<redacted>", "bundle note keeps redacted path context");
-        }
-        finally
-        {
-            DeleteDirectoryQuietly(sessionDirectory);
-        }
-    }
-
-    private static void TelemetryIssueBundleManifestRequiresExistingSessionDirectory()
-    {
-        string sessionDirectory = CreateTempDirectory();
-        string missingDirectory = Path.Combine(sessionDirectory, "missing-session");
-        try
-        {
-            bool threw = false;
-            try
-            {
-                TelemetrySummary.WriteIssueBundleManifest(missingDirectory, "missing-session", "note");
-            }
-            catch (DirectoryNotFoundException)
-            {
-                threw = true;
-            }
-
-            AssertTrue(threw, "missing session directory throws");
-            AssertFalse(Directory.Exists(missingDirectory), "missing session directory is not created");
-        }
-        finally
-        {
-            DeleteDirectoryQuietly(sessionDirectory);
-        }
-    }
-
     private static void WriteJsonLines(string path, params string[] rows)
     {
         File.WriteAllText(path, string.Join(Environment.NewLine, rows) + Environment.NewLine);
@@ -4163,7 +4012,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             candidate,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4171,7 +4020,7 @@ static class Program
             0f,
             new[] { candidate },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(TacticalTerrainDecisionReason.WaterCenter, reason, "water center rejection");
         AssertFalse(decision.Accepted, "water center should not be accepted");
@@ -4185,7 +4034,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             candidate,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4193,7 +4042,7 @@ static class Program
             0f,
             new[] { candidate },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(TacticalTerrainDecisionReason.WaterFootprint, reason, "water footprint rejection");
         AssertFalse(decision.Accepted, "water footprint should not be accepted");
@@ -4206,7 +4055,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             candidate,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4214,7 +4063,7 @@ static class Program
             0f,
             new[] { candidate },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(TacticalTerrainDecisionReason.OutsideDeploymentZone, reason, "outside zone rejection");
         AssertFalse(decision.Accepted, "outside deployment zone should not be accepted");
@@ -4235,7 +4084,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             candidate,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4243,7 +4092,7 @@ static class Program
             0f,
             new[] { candidate },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(TacticalTerrainDecisionReason.OutsideDeploymentZone, reason, "footprint outside zone rejection");
         AssertFalse(decision.Accepted, "footprint outside deployment zone should not be accepted");
@@ -4260,7 +4109,7 @@ static class Program
                 TerrainCandidate(110f, 100f, 90f)
             },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertTrue(decision.Accepted, "safe candidate should be accepted");
         AssertNear(110f, decision.Candidate.Point.X, 0.01f, "closest x");
@@ -4277,7 +4126,7 @@ static class Program
                 TerrainCandidate(111f, 100f, 90f)
             },
             VisibleEnemy(bearing: 90f),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertTrue(decision.Accepted, "visible enemy candidate should be accepted");
         AssertNear(90f, decision.Candidate.FacingDegrees, 0.01f, "enemy-facing candidate");
@@ -4294,7 +4143,7 @@ static class Program
                 TerrainCandidate(100f, 100f, 90f, centerWater: true)
             },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertFalse(decision.Accepted, "unsafe candidates should not be accepted");
         AssertEqual(TacticalTerrainDecisionReason.NoSafeCandidate, decision.Reason, "reason");
@@ -4330,7 +4179,7 @@ static class Program
             45f,
             new[] { TerrainCandidate(100f, 100f, 90f) },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertFalse(decision.Accepted, "nonfinite vanilla baseline should fail closed");
         AssertEqual(TacticalTerrainDecisionReason.NonFiniteBaseline, decision.Reason, "nonfinite baseline reason");
@@ -4344,7 +4193,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             candidate,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4352,7 +4201,7 @@ static class Program
             45f,
             new[] { candidate },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(TacticalTerrainDecisionReason.NonFiniteCandidate, reason, "nonfinite candidate rejection");
         AssertFalse(decision.Accepted, "nonfinite candidate should not be accepted");
@@ -4398,7 +4247,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             unknownCenter,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
 
@@ -4413,7 +4262,7 @@ static class Program
             new TacticalPoint2(100f, 100f),
             unknownFootprint,
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault,
+            TestFixtures.DeploymentTerrainRules,
             out _,
             out _);
         var decision = TacticalTerrainFacingDiscipline.Choose(
@@ -4421,7 +4270,7 @@ static class Program
             45f,
             new[] { unknownFootprint },
             VisibleEnemy(),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertEqual(1, unknownFootprint.Footprint.Count, "unknown footprint retained");
         AssertEqual(TacticalTerrainDecisionReason.UnknownTerrain, unknownFootprintReason, "unknown footprint rejection");
@@ -4435,7 +4284,7 @@ static class Program
             45f,
             new[] { TerrainCandidate(100f, 100f, 180f) },
             new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f),
-            TacticalTerrainRules.DeploymentDefault);
+            TestFixtures.DeploymentTerrainRules);
 
         AssertTrue(decision.Accepted, "safe terrain candidate can be accepted without visible enemy under default rules");
         AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved without visible enemy");
@@ -4456,7 +4305,6 @@ static class Program
 
         AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, result.Type, "type");
         AssertTrue(result.Value <= 0.35f, "unverified POI value capped");
-        AssertFalse(TacticalObjectiveSourceModel.CanDriveTypedOperationScoring(result), "typed scoring");
     }
 
     private static void TacticalObjectiveVerifiedBridgeDrivesTypedScoring()
@@ -4473,7 +4321,6 @@ static class Program
         var result = TacticalObjectiveSourceModel.Normalize(input);
 
         AssertEqual(TacticalObjectiveType.Bridge, result.Type, "type");
-        AssertTrue(TacticalObjectiveSourceModel.CanDriveTypedOperationScoring(result), "typed scoring");
     }
 
     private static void TacticalObjectiveInputSanitizesNonfiniteValues()
@@ -4492,118 +4339,6 @@ static class Program
         AssertEqual(0f, input.Location.Z, "z");
         AssertEqual(0f, input.SourceConfidence, "confidence");
         AssertEqual(0f, input.Value, "value");
-    }
-
-    private static void BattlefieldPictureVisibleFormedEnemyRaisesObjectiveConfidence()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
-
-        AssertEqual(1, snapshot.Objectives.Length, "objective count");
-        AssertEqual("ridge-a", snapshot.Objectives[0].ObjectiveId, "objective id");
-        AssertTrue(snapshot.Objectives[0].EnemyStrength > 0f, "enemy strength");
-        AssertTrue(snapshot.Objectives[0].Confidence01 >= 0.75f, "confidence");
-        AssertTrue(snapshot.Objectives[0].MainLineExposed, "main line exposed");
-    }
-
-    private static void BattlefieldPictureSkirmisherContactDoesNotExposeMainLine()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("screen", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 100f, 200f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
-
-        AssertTrue(snapshot.Objectives[0].EnemyStrength > 0f, "enemy strength");
-        AssertFalse(snapshot.Objectives[0].MainLineExposed, "main line exposed");
-        AssertTrue(snapshot.Objectives[0].Confidence01 < 0.75f, "confidence");
-    }
-
-    private static void BattlefieldPictureRepeatedScreensDoNotBecomeMainBodyConfidence()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("screen-a", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 100f, 200f),
-            new BattlefieldContactInput("screen-b", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 110f, 200f),
-            new BattlefieldContactInput("screen-c", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 120f, 200f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
-
-        AssertFalse(snapshot.Objectives[0].MainLineExposed, "main line exposed");
-        AssertTrue(snapshot.Objectives[0].Confidence01 < 0.75f, "screen-only confidence cap");
-    }
-
-    private static void BattlefieldPictureDuplicateContactIdsDoNotDoubleCountStrength()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
-            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 101f, 201f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
-
-        AssertEqual(800f, snapshot.Objectives[0].EnemyStrength, "duplicate strength");
-    }
-
-    private static void BattlefieldPictureNonfiniteNowFailsStaleNotFresh()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var infinite = TacticalBattlefieldPicture.Build(contacts, objectives, float.PositiveInfinity);
-        var nan = TacticalBattlefieldPicture.Build(contacts, objectives, float.NaN);
-
-        AssertTrue(infinite.Objectives[0].Confidence01 < 0.75f, "infinite time confidence");
-        AssertTrue(nan.Objectives[0].Confidence01 < 0.75f, "nan time confidence");
-        AssertFalse(infinite.Objectives[0].MainLineExposed, "infinite time exposure");
-        AssertFalse(nan.Objectives[0].MainLineExposed, "nan time exposure");
-    }
-
-    private static void BattlefieldPictureStaleContactsDecayButDoNotVanishInstantly()
-    {
-        var contacts = new[]
-        {
-            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 600f, 0f, true, true, 100f, 200f),
-        };
-        var objectives = new[]
-        {
-            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
-        };
-
-        var fresh = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
-        var stale = TacticalBattlefieldPicture.Build(contacts, objectives, 260f);
-
-        AssertTrue(fresh.Objectives[0].Confidence01 > stale.Objectives[0].Confidence01, "confidence decays");
-        AssertTrue(stale.Objectives[0].EnemyStrength > 0f, "stale strength remains");
     }
 
     private static void TacticalOperationsParallelRequiresPerObjectiveAdvantage()
@@ -4679,62 +4414,6 @@ static class Program
         AssertTrue(nonfiniteEnemy != TacticalOperationShape.ParallelObjectives, "nonfinite enemy strength does not drive parallel");
     }
 
-    private static void TacticalOperationsSoftAbortBeforeCollapse()
-    {
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(300f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "stalled");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.34f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "low confidence");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 0.64f, forceCollapsed: false, objectiveSecured: false),
-            "low odds");
-        AssertEqual(
-            TacticalReassessmentTier.HardAbort,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 1.0f, forceCollapsed: true, objectiveSecured: false),
-            "collapse");
-        AssertEqual(
-            TacticalReassessmentTier.HardAbort,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: true),
-            "secured");
-        AssertEqual(
-            TacticalReassessmentTier.Continue,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(120f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "normal");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.PositiveInfinity, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "infinite stalled");
-        AssertEqual(
-            TacticalReassessmentTier.Continue,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.NaN, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "nan progress is zero");
-        AssertEqual(
-            TacticalReassessmentTier.Continue,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(-10f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "negative progress is zero");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, float.NaN, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "nan confidence is zero");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, float.PositiveInfinity, 1.0f, forceCollapsed: false, objectiveSecured: false),
-            "infinite confidence is zero");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.NaN, forceCollapsed: false, objectiveSecured: false),
-            "nan odds is zero");
-        AssertEqual(
-            TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
-            "infinite odds is zero");
-    }
-
     private static void OperationDirectorParallelRequiresAdvantage()
     {
         TacticalOperationDirectorInput strong = TacticalOperationDirectorInput.ForTest(
@@ -4753,7 +4432,9 @@ static class Program
         TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(strong);
         AssertEqual(TacticalOperationShape.ParallelObjectives, decision.Operation.Shape, "parallel shape");
 
-        TacticalOperationDirectorDecision weak = TacticalOperationDirector.Decide(strong.WithOwnStrength(2200f));
+        TacticalOperationDirectorDecision weak = TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(
+            strong.Current, strong.CurrentTimeSeconds, 2200f, strong.ReserveFraction,
+            strong.Aggression01, strong.Caution01, strong.Objectives));
         AssertTrue(weak.Operation.Shape != TacticalOperationShape.ParallelObjectives, "weak force cannot parallel attack");
     }
 
@@ -5710,51 +5391,6 @@ static class Program
         AssertEqual(TacticalArtilleryAmmoMission.Preserve, displace.AmmoMission, "displace ammo");
     }
 
-    private static void TacticalEnduranceGateBlocksAssaultButPermitsFallback()
-    {
-        TacticalEnduranceDecision decision = TacticalEnduranceGate.Evaluate(new TacticalEnduranceInput(
-            infantryAmmo01: 0.12f,
-            artilleryAmmo01: 0.7f,
-            fatigue01: 0.85f,
-            morale01: 0.42f,
-            casualtyPressure01: 0.65f));
-
-        AssertFalse(decision.CanAssault, "assault gate");
-        AssertTrue(decision.CanFallback, "fallback gate");
-        AssertTrue(decision.NeedsRelief, "relief");
-    }
-
-    private static void TacticalSupportRequestLedgerDedupesAndPrioritizes()
-    {
-        var ledger = new TacticalSupportRequestLedger();
-        ledger.AddOrUpdate(new TacticalSupportRequest("main", TacticalSupportRequestType.LineRelief, "ridge", 0.70f, 100f, 300f));
-        ledger.AddOrUpdate(new TacticalSupportRequest("main", TacticalSupportRequestType.LineRelief, "ridge", 0.90f, 120f, 300f));
-        ledger.AddOrUpdate(new TacticalSupportRequest("screen", TacticalSupportRequestType.ArtillerySupport, "ridge", 0.60f, 110f, 300f));
-
-        TacticalSupportRequest next = ledger.PeekHighestPriority(nowSeconds: 130f);
-
-        AssertEqual(2, ledger.Count, "dedupe count");
-        AssertEqual("main", next.SourceNodeId, "source");
-        AssertNear(0.90f, next.Priority01, 0.001f, "priority");
-    }
-
-    private static void PlayerSubordinateOrderDoctrineMapsWithoutDirectMovement()
-    {
-        PlayerSubordinateOrderDecision decision = PlayerSubordinateOrderDoctrine.Decide(new PlayerSubordinateOrderInput(
-            wlScenarioActive: true,
-            playerIsCommander: false,
-            playerUnderCommander: true,
-            existingOrderFresh: false,
-            order: DoctrineOrder(
-                CommandTaskType.FallBackToLine,
-                role: CommandNodeRole.FallbackGuard,
-                fallback: DoctrineTargetPoint.From(100f, 200f))));
-
-        AssertEqual(PlayerSubordinateOrderIntent.Fallback, decision.Intent, "intent");
-        AssertTrue(decision.ShouldIssueWlOrder, "issue");
-        AssertFalse(decision.AllowsDirectMovementWrite, "direct movement");
-    }
-
     private static void OperationDirectorScoutsScreenContactBeforeCommitting()
     {
         TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
@@ -5900,33 +5536,6 @@ static class Program
         AssertEqual(0f, snapshot.CommanderPersonality.Audacity, "commander audacity");
     }
 
-    private static void TacticalFowContactRejectsBroadClosestEnemyLeak()
-    {
-        AssertFalse(TacticalFogOfWarContact.AcceptContactEvidence(
-                inVanillaVisibleRange: false,
-                inVanillaFireRange: false,
-                receivedFire: false),
-            "broad closest-enemy evidence is not visual contact");
-
-        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
-                inVanillaVisibleRange: true,
-                inVanillaFireRange: false,
-                receivedFire: false),
-            "vanilla FOW-visible range is contact");
-
-        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
-                inVanillaVisibleRange: false,
-                inVanillaFireRange: true,
-                receivedFire: false),
-            "vanilla FOW fire range is contact");
-
-        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
-                inVanillaVisibleRange: false,
-                inVanillaFireRange: false,
-                receivedFire: true),
-            "recent fire remains contact");
-    }
-
     private static void TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint()
     {
         var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithFallback(
@@ -5970,39 +5579,6 @@ static class Program
         AssertEqual(1886f, objectives[0].Observation.Location.X, "movement fallback x");
         AssertEqual(-619f, objectives[0].Observation.Location.Z, "movement fallback z");
         AssertEqual(2400f, objectives[0].FriendlyAssignedStrength, "movement fallback friendly strength");
-    }
-
-    private static void TacticalVisionSceneObjectivesBeatMovementFallback()
-    {
-        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithSceneObjectivesAndMovementFallback(
-            Array.Empty<ObjectiveObservationInput>(),
-            Array.Empty<TacticalObjectiveStatus>(),
-            Array.Empty<float>(),
-            Array.Empty<float>(),
-            new[]
-            {
-                new ObjectiveObservationInput(
-                    "map-objective-crossroads",
-                    TacticalObjectiveType.VictoryPoint,
-                    TacticalObjectiveSource.VerifiedSceneObject,
-                    new TacticalMapPoint(720f, -1580f),
-                    sourceConfidence: 0.90f,
-                    value: 0.80f,
-                    typeAnchorVerified: true),
-            },
-            new[] { TacticalObjectiveStatus.Scouting },
-            visibleEnemyLine: null,
-            visibleEnemyStrength: 0f,
-            visibleFriendlyStrength: 0f,
-            movementAnchor: new TacticalMapPoint(1886f, -619f),
-            movementAnchorFriendlyStrength: 2400f,
-            allianceId: 1);
-
-        AssertEqual(1, objectives.Length, "objective count");
-        AssertEqual("map-objective-crossroads", objectives[0].Observation.ObjectiveId, "scene objective id");
-        AssertEqual(TacticalObjectiveSource.VerifiedSceneObject, objectives[0].Observation.Source, "scene objective source");
-        AssertEqual(720f, objectives[0].Observation.Location.X, "scene objective x");
-        AssertEqual(-1580f, objectives[0].Observation.Location.Z, "scene objective z");
     }
 
     private static void TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture()
@@ -6422,11 +5998,7 @@ static class Program
             CommandEchelonKind.DivisionLike,
             CommandNodeRole.MainEffort,
             CommandTaskType.AttackObjective,
-            CommandTaskState.MovingToAssembly);
-        var decision = new PostureExecutionDecision(
-            PostureExecutionAction.NoWrite,
-            "mode monitor only",
-            PostureExecutionTarget.ObjectiveApproach);
+            CommandTaskState.Planning);
 
         string ledger = TacticalOperationsTelemetry.OpsLedger(
             1,
@@ -6435,11 +6007,6 @@ static class Program
             strategic,
             commandCount: 3);
         string assignment = TacticalOperationsTelemetry.CommandAssignment(1, state, operation);
-        string posture = TacticalOperationsTelemetry.CommandPosture(
-            1,
-            state,
-            decision,
-            TacticalIdleClassification.IllegalIdle);
         string summary = TacticalOperationsTelemetry.PostureSummary(
             1,
             validIdle: 2,
@@ -6454,20 +6021,12 @@ static class Program
         AssertContains(assignment, "[TacticalCommandAssignment]", "assignment prefix");
         AssertContains(assignment, "node=node_A/1", "assignment node token");
         AssertContains(assignment, "objective=ridge_A/left", "assignment objective token");
-        AssertContains(posture, "[TacticalCommandPosture]", "posture prefix");
-        AssertContains(posture, "reason=mode_monitor_only", "posture reason token");
-        AssertContains(posture, "idle=IllegalIdle", "posture idle classification");
         AssertContains(summary, "[TacticalPostureSummary]", "summary prefix");
         AssertContains(summary, "illegalIdle=1", "summary illegal count");
     }
 
     private static void TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop()
     {
-        var signatures = new Dictionary<string, string>();
-        AssertTrue(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=a"), "first signature emits");
-        AssertFalse(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=a"), "same signature suppressed");
-        AssertTrue(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=b"), "changed signature emits");
-
         var emittedAt = new Dictionary<string, float>();
         AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 10f, 15f, verbose: false), "first interval emits");
         AssertFalse(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 20f, 15f, verbose: false), "interval suppresses early repeat");
@@ -7525,7 +7084,19 @@ static class Program
             0.7f,
             "reserve");
 
-        CommandDoctrineOrder stalled = reserve.WithAllowedIdle(DoctrineAllowedIdleReason.None);
+        CommandDoctrineOrder stalled = CommandDoctrineOrder.Create(
+            "node-r",
+            CommandNodeRole.Reserve,
+            CommandTaskType.ReserveWait,
+            "ridge-a",
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.None,
+            1200f,
+            10f,
+            0.7f,
+            "reserve");
 
         AssertTrue(reserve.AllowsIdle, "reserve wait is legal idle");
         AssertTrue(!stalled.AllowsIdle, "no idle reason is illegal idle");
@@ -7944,27 +7515,6 @@ static class Program
         AssertEqual("doctrine-attack", decision.Reason, "reason");
     }
 
-    private static void DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.AttackObjective,
-            primary: DoctrineTargetPoint.From(100f, 200f));
-        BattlefieldPictureSnapshot picture = TacticalBattlefieldPicture.Build(
-            new[]
-            {
-                new BattlefieldContactInput("cavalry-screen", "objective-1", TacticalContactKind.CavalryScreen, 900f, 10f, true, false, 100f, 200f),
-            },
-            new[]
-            {
-                new BattlefieldObjectiveInput("objective-1", TacticalObjectiveType.EnemyLine, 0.8f, 100f, 200f, 0.2f, 0.2f, 0.8f),
-            },
-            nowSeconds: 20f);
-
-        bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
-
-        AssertFalse(exposed, "screen contact should not expose formed line");
-    }
-
     private static void DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch()
     {
         CommandDoctrineOrder order = DoctrineOrder(
@@ -8205,42 +7755,6 @@ static class Program
         AssertTrue(CommandFormationCorrection.NeedsFacingCorrection(180f, 0f, 15f), "opposite facing needs correction");
     }
 
-    private static void CommandFormationCorrectionShortensRetryWhenCloseEngagedAndStillWrong()
-    {
-        AssertNear(
-            5f,
-            CommandFormationCorrection.RecentOrderCooldownSeconds(
-                closeEngaged: true,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.FallBackToLine,
-                defaultSeconds: 30f,
-                urgentSeconds: 5f),
-            0.001f,
-            "close fallback mismatch should retry faster");
-
-        AssertNear(
-            30f,
-            CommandFormationCorrection.RecentOrderCooldownSeconds(
-                closeEngaged: true,
-                visibleFormationMismatch: false,
-                task: CommandTaskType.FallBackToLine,
-                defaultSeconds: 30f,
-                urgentSeconds: 5f),
-            0.001f,
-            "matched formation should keep normal cooldown");
-
-        AssertNear(
-            30f,
-            CommandFormationCorrection.RecentOrderCooldownSeconds(
-                closeEngaged: true,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.AttackObjective,
-                defaultSeconds: 30f,
-                urgentSeconds: 5f),
-            0.001f,
-            "attack movement should keep normal cooldown");
-    }
-
     private static void CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency()
     {
         AssertEqual(
@@ -8266,70 +7780,6 @@ static class Program
                 closeEngaged: true,
                 flankRisk: true),
             "fallback task is already defensive");
-    }
-
-    private static void CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation()
-    {
-        AssertTrue(
-            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged: true,
-                flankRisk: true,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.GuardFlank),
-            "local flank formation emergency can bypass a pending courier");
-
-        AssertTrue(
-            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged: true,
-                flankRisk: false,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.FallBackToLine),
-            "close fallback formation correction can bypass a pending courier");
-
-        AssertTrue(
-            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged: true,
-                flankRisk: false,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.HoldObjective),
-            "close hold formation correction can bypass a pending courier");
-
-        AssertTrue(
-            !CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged: true,
-                flankRisk: true,
-                visibleFormationMismatch: true,
-                task: CommandTaskType.AttackObjective),
-            "attack objective cannot bypass pending order");
-
-        AssertTrue(
-            !CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged: true,
-                flankRisk: true,
-                visibleFormationMismatch: false,
-                task: CommandTaskType.GuardFlank),
-            "already-formed unit cannot bypass pending order");
-    }
-
-    private static void CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged()
-    {
-        AssertTrue(
-            !CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
-                closeEngaged: true,
-                needsFormation: true),
-            "close formation correction should reform in place");
-
-        AssertTrue(
-            CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
-                closeEngaged: false,
-                needsFormation: true),
-            "unengaged formation correction can use vanilla formation path");
-
-        AssertTrue(
-            !CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
-                closeEngaged: false,
-                needsFormation: false),
-            "no formation mismatch should not create a path");
     }
 
     private static void CommandFormationCorrectionTargetsLineForCommittedAttack()
@@ -8614,7 +8064,7 @@ static class Program
             CommandEchelonKind.DivisionLike,
             CommandNodeRole.Reserve,
             CommandTaskType.ReserveWait,
-            CommandTaskState.WaitingForCommit);
+            CommandTaskState.Planning);
         var physical = new CommandPhysicalState(
             routed: false,
             playerProtected: false,
@@ -8787,68 +8237,6 @@ static class Program
         AssertTrue(TacticalCommanderModePolicy.AllowsWrites(configuredDefault), "default allows writes");
         AssertEqual(TacticalCommanderMode.Off, TacticalCommanderModePolicy.Parse("Off", configuredDefault), "off still available");
         AssertEqual(TacticalCommanderMode.MonitorOnly, TacticalCommanderModePolicy.Parse("MonitorOnly", configuredDefault), "monitor-only still available");
-    }
-
-    private static void TacticalVisionVisualContactHighConfidence()
-    {
-        var report = TacticalVisionModel.BuildContact(
-            new ContactObservationInput(TacticalContactSource.VisualContact, 1200f, 0f, true, true, true),
-            staleAfterSeconds: 600f);
-
-        AssertTrue(report.Confidence > 0.95f, "confidence");
-    }
-
-    private static void TacticalVisionStaleRecentFireDecays()
-    {
-        var fresh = TacticalVisionModel.BuildContact(
-            new ContactObservationInput(TacticalContactSource.RecentFire, 800f, 0f, false, false, false),
-            staleAfterSeconds: 300f);
-        var stale = TacticalVisionModel.BuildContact(
-            new ContactObservationInput(TacticalContactSource.RecentFire, 800f, 240f, false, false, false),
-            staleAfterSeconds: 300f);
-
-        AssertTrue(fresh.Confidence > stale.Confidence, "decay");
-        AssertTrue(stale.Confidence < 0.25f, "stale confidence");
-    }
-
-    private static void TacticalVisionSanitizesNonfiniteInputs()
-    {
-        var report = TacticalVisionModel.BuildContact(
-            new ContactObservationInput(
-                TacticalContactSource.InferredMovement,
-                float.PositiveInfinity,
-                float.NaN,
-                currentlyVisible: false,
-                objectiveLinked: true,
-                scoutTaskLinked: false),
-            staleAfterSeconds: float.NegativeInfinity);
-
-        AssertEqual(0f, report.Input.EstimatedStrength, "strength");
-        AssertEqual(0f, report.Input.SecondsSinceObserved, "seconds");
-        AssertTrue(!float.IsNaN(report.Confidence) && !float.IsInfinity(report.Confidence), "finite confidence");
-        AssertTrue(report.Confidence >= 0f && report.Confidence <= 1f, "bounded confidence");
-    }
-
-    private static void TacticalVisionDefaultInputIsLowConfidence()
-    {
-        var report = TacticalVisionModel.BuildContact(default(ContactObservationInput), staleAfterSeconds: 600f);
-
-        AssertTrue(report.Confidence <= 0.25f, "default confidence");
-    }
-
-    private static void TacticalVisionInfiniteAgeIsStale()
-    {
-        var report = TacticalVisionModel.BuildContact(
-            new ContactObservationInput(
-                TacticalContactSource.VisualContact,
-                1200f,
-                float.PositiveInfinity,
-                currentlyVisible: true,
-                objectiveLinked: true,
-                scoutTaskLinked: true),
-            staleAfterSeconds: 600f);
-
-        AssertEqual(0f, report.Confidence, "infinite age confidence");
     }
 
     private static void TacticalContactNoSightingIsNone()
@@ -9941,45 +9329,6 @@ static class Program
         AssertEqual("non-ui-path", aiPath.Reason, "ai reason");
     }
 
-    private static void TacticalDiagnosticsClassifyPathfinderAddPathOutcome()
-    {
-        var nearEndpoint = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
-            vanillaResult: 0,
-            pathCountBefore: 0,
-            pathCountAfter: 1,
-            cornerCount: 8,
-            navStatus: "PathComplete",
-            finalDistanceToTarget: 1.25f,
-            endpointTolerance: 5f);
-        var nonComplete = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
-            vanillaResult: 1,
-            pathCountBefore: 0,
-            pathCountAfter: 1,
-            cornerCount: 8,
-            navStatus: "PathPartial",
-            finalDistanceToTarget: 1.25f,
-            endpointTolerance: 5f);
-        var failedFarEndpoint = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
-            vanillaResult: 0,
-            pathCountBefore: 0,
-            pathCountAfter: 1,
-            cornerCount: 8,
-            navStatus: "PathComplete",
-            finalDistanceToTarget: 75f,
-            endpointTolerance: 5f);
-
-        AssertTrue(nearEndpoint.ShouldOverrideResult, "near endpoint mismatch should override vanilla failure");
-        AssertEqual(1, nearEndpoint.OverrideResult, "near endpoint override result");
-        AssertTrue(!nearEndpoint.ShouldRemoveAddedPath, "near endpoint path should be kept");
-        AssertEqual("endpoint-within-tolerance", nearEndpoint.Reason, "near endpoint reason");
-        AssertTrue(nonComplete.ShouldRemoveAddedPath, "non-complete path should be removed");
-        AssertEqual(0, nonComplete.OverrideResult, "non-complete override result");
-        AssertEqual("navmesh-noncomplete", nonComplete.Reason, "non-complete reason");
-        AssertTrue(failedFarEndpoint.ShouldRemoveAddedPath, "failed far endpoint path should be removed");
-        AssertEqual(0, failedFarEndpoint.OverrideResult, "far endpoint override result");
-        AssertEqual("failed-endpoint-mismatch", failedFarEndpoint.Reason, "far endpoint reason");
-    }
-
     private static void TacticalHqLinkGuardClearsCrossCommandAutoLink()
     {
         bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
@@ -10970,26 +10319,6 @@ static class Program
         AssertFalse(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 0), "neither passes");
     }
 
-    private static void TacticalGateHelpersAllianceBounds()
-    {
-        AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(0, factionLength: 2), "0 in range");
-        AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(1, factionLength: 2), "1 in range");
-        AssertFalse(TacticalGateHelpers.IsValidAllianceIndex(2, factionLength: 2), "2 (Europe) out of bounds");
-        AssertFalse(TacticalGateHelpers.IsValidAllianceIndex(-1, factionLength: 2), "negative out of bounds");
-    }
-
-    private static void TacticalScoreCacheRoundtrip()
-    {
-        var cache = new TacticalScoreCache<int>();
-        var key = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-A");
-        AssertFalse(cache.TryGet(key, out _), "miss before write");
-        cache.Set(key, 7);
-        AssertTrue(cache.TryGet(key, out int value), "hit after write");
-        AssertEqual(7, value, "round-tripped value");
-        var staleKey = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-B");
-        AssertFalse(cache.TryGet(staleKey, out _), "different signature misses");
-    }
-
     private static void TacticalSupportScreenSupportedAndSteady()
     {
         var input = new TacticalSupportScreen.Input
@@ -11420,82 +10749,6 @@ static class Program
         AssertEqual(TacticalArtilleryAmmoMission.SolidShot, wheel.AmmoMission, "long target selects solid shot");
     }
 
-    private static void ScourgeMeleeFearDoctrineGatesChargeByPressure()
-    {
-        TacticalMeleeFearDecision flankAttack = TacticalMeleeFearDoctrine.Decide(new TacticalMeleeFearInput(
-            ownKind: TacticalCloseCombatKind.Infantry,
-            enemyKind: TacticalCloseCombatKind.Infantry,
-            ownMen: 900f,
-            enemyMen: 750f,
-            ownMorale01: 0.78f,
-            enemyMorale01: 0.45f,
-            leaderAggression01: 0.70f,
-            flanking01: 0.80f,
-            rearThreat01: 0.20f,
-            ownHighGround01: 0.30f,
-            enemyHighGround01: 0.0f,
-            enemyDefensiveTerrain01: 0.0f,
-            ownUnderFire01: 0.10f,
-            enemyUnderFire01: 0.60f,
-            ownChargingOrRunning: true,
-            targetRouted: false));
-
-        TacticalMeleeFearDecision badAttack = TacticalMeleeFearDoctrine.Decide(new TacticalMeleeFearInput(
-            ownKind: TacticalCloseCombatKind.Infantry,
-            enemyKind: TacticalCloseCombatKind.Infantry,
-            ownMen: 900f,
-            enemyMen: 750f,
-            ownMorale01: 0.42f,
-            enemyMorale01: 0.80f,
-            leaderAggression01: 0.20f,
-            flanking01: 0f,
-            rearThreat01: 0f,
-            ownHighGround01: 0f,
-            enemyHighGround01: 0.65f,
-            enemyDefensiveTerrain01: 0.85f,
-            ownUnderFire01: 0.70f,
-            enemyUnderFire01: 0f,
-            ownChargingOrRunning: false,
-            targetRouted: false));
-
-        AssertTrue(flankAttack.AllowsCharge, "flank pressure should allow charge");
-        AssertTrue(flankAttack.EncouragesCharge, "large fear advantage encourages charge");
-        AssertFalse(flankAttack.RequiresFallbackPressure, "winning pressure does not fallback");
-        AssertFalse(badAttack.AllowsCharge, "defensive terrain and fire should block charge");
-        AssertTrue(badAttack.RequiresFallbackPressure, "bad fear ratio should request fallback pressure");
-        AssertEqual(TacticalMeleeFearPosture.FallbackPressure, badAttack.Posture, "bad posture");
-    }
-
-    private static void ScourgeSkirmisherDoctrineRecallsTiredDistantScreens()
-    {
-        TacticalSkirmisherDecision recall = TacticalSkirmisherDoctrine.Decide(new TacticalSkirmisherInput(
-            hasParent: true,
-            parentMoving: true,
-            hasEnemyTarget: false,
-            enemyDistance: 0f,
-            parentDistance: 520f,
-            maxParentDistance: 300f,
-            ammo01: 0.18f,
-            fatigue01: 0.82f,
-            morale01: 0.52f,
-            underCloseThreat: false));
-        TacticalSkirmisherDecision hold = TacticalSkirmisherDoctrine.Decide(new TacticalSkirmisherInput(
-            hasParent: true,
-            parentMoving: false,
-            hasEnemyTarget: true,
-            enemyDistance: 450f,
-            parentDistance: 140f,
-            maxParentDistance: 300f,
-            ammo01: 0.70f,
-            fatigue01: 0.20f,
-            morale01: 0.72f,
-            underCloseThreat: false));
-
-        AssertEqual(TacticalSkirmisherAction.RecallToParent, recall.Action, "tired distant skirmishers recall");
-        AssertContains(recall.Reason, "parent", "recall reason");
-        AssertEqual(TacticalSkirmisherAction.HoldScreen, hold.Action, "healthy skirmishers hold");
-    }
-
     private static void ScourgeInfantryFireDisciplineHoldsBadShots()
     {
         TacticalInfantryFireDecision badShot = TacticalInfantryFireDoctrine.Decide(new TacticalInfantryFireInput(
@@ -11663,29 +10916,6 @@ static class Program
         AssertEqual(TacticalFireControlDoctrine.CavalryCharge, attack.RecommendedCombatBehavior, "close attack charge");
     }
 
-    private static void ScourgeAttributeMatrixAdjustsFallbackFireAndMelee()
-    {
-        TacticalBattlefieldAttributeDecision elite = TacticalBattlefieldAttributeMatrix.Evaluate(
-            new TacticalBattlefieldAttributeInput(
-                experience01: 0.90f,
-                morale01: 0.88f,
-                fatigue01: 0.12f,
-                commanderAggression01: 0.65f));
-        TacticalBattlefieldAttributeDecision broken = TacticalBattlefieldAttributeMatrix.Evaluate(
-            new TacticalBattlefieldAttributeInput(
-                experience01: 0.10f,
-                morale01: 0.18f,
-                fatigue01: 0.92f,
-                commanderAggression01: 0.15f));
-
-        AssertTrue(elite.FallbackChance01 < 0.10f, "elite steady units resist fallback");
-        AssertTrue(elite.FireModifier01 > 0.65f, "elite steady units shoot better");
-        AssertTrue(elite.MeleeModifier01 > 0.55f, "elite steady units melee better");
-        AssertTrue(broken.FallbackChance01 > 0.80f, "broken exhausted units are fallback prone");
-        AssertTrue(broken.RetreatChance01 > 0.65f, "broken exhausted units are retreat prone");
-        AssertTrue(broken.FireModifier01 < elite.FireModifier01, "broken fire worse than elite");
-    }
-
     private static void TacticalArtilleryDoctrineCancelBombardWhenUnsupported()
     {
         var input = new TacticalArtilleryDoctrine.Input
@@ -11840,106 +11070,6 @@ static class Program
             AiFeudStance = -1,
         };
         AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "routed rejected");
-    }
-
-    private static void TacticalDestinationDisciplineClearDestination()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 0,
-            NearestSameTypePeerDistance = 9999f,
-            NearestOtherCombatPeerDistance = 9999f,
-            EnemyOnDestinationDistance = 9999f,
-            MoverFireRange = 200f,
-            MoverWidth = 50f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.ClearDestination,
-            TacticalDestinationDiscipline.Score(input), "clear");
-    }
-
-    private static void TacticalDestinationDisciplineGunCrowdedOnGun()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 2,
-            PeerUnitTyp = 2,
-            NearestSameTypePeerDistance = 4f,
-            NearestOtherCombatPeerDistance = 9999f,
-            EnemyOnDestinationDistance = 9999f,
-            MoverFireRange = 1500f,
-            MoverWidth = 30f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.CrowdedSameType,
-            TacticalDestinationDiscipline.Score(input), "gun on gun within 5m");
-    }
-
-    private static void TacticalDestinationDisciplineLineCrowdedOnLine()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 0,
-            PeerUnitTyp = 0,
-            NearestSameTypePeerDistance = 70f,
-            NearestOtherCombatPeerDistance = 9999f,
-            EnemyOnDestinationDistance = 9999f,
-            MoverFireRange = 200f,
-            MoverWidth = 50f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.CrowdedSameType,
-            TacticalDestinationDiscipline.Score(input), "line on line within firerange-scaled tier");
-    }
-
-    private static void TacticalDestinationDisciplineEnemyOnDestination()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 0,
-            NearestSameTypePeerDistance = 9999f,
-            NearestOtherCombatPeerDistance = 9999f,
-            EnemyOnDestinationDistance = 50f,
-            MoverFireRange = 200f,
-            MoverWidth = 50f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.EnemyOnDestination,
-            TacticalDestinationDiscipline.Score(input), "enemy on destination");
-    }
-
-    private static void TacticalDestinationDisciplinePathRiskUnknown()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 0,
-            NearestSameTypePeerDistance = 9999f,
-            NearestOtherCombatPeerDistance = 9999f,
-            EnemyOnDestinationDistance = 9999f,
-            MoverFireRange = -1f,
-            MoverWidth = 50f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.PathRiskUnknown,
-            TacticalDestinationDiscipline.Score(input), "unknown on bad firerange");
-    }
-
-    private static void TacticalDestinationDisciplineSkirmisherInMotionSkipsCheck()
-    {
-        var input = new TacticalDestinationDiscipline.Input
-        {
-            MoverUnitTyp = 0,
-            PeerUnitTyp = 3,
-            PeerHasActivePath = true,
-            NearestSameTypePeerDistance = 9999f,
-            NearestOtherCombatPeerDistance = 30f,
-            EnemyOnDestinationDistance = 9999f,
-            MoverFireRange = 200f,
-            MoverWidth = 50f,
-            VanillaInterruptThreshold = 100f,
-        };
-        AssertEqual(TacticalDestinationDiscipline.Result.ClearDestination,
-            TacticalDestinationDiscipline.Score(input), "skirmisher in motion exempt");
     }
 
     private static void TacticalMoralePressureStable()
@@ -13012,16 +12142,12 @@ static class Program
     {
         var context = new TacticalReactionContext();
         context.SetReaction(12, new TacticalLocalReactionDecision(LocalReaction.Screen, false, 0.5f, "stored"));
-        context.SetReserveIntent(1, new TacticalReserveIntentDecision(TacticalReserveIntent.ExploitWeakPoint, true, 0.7f, "stored"));
 
         context.Clear();
 
         var reaction = context.GetReaction(12);
-        var reserveIntent = context.GetReserveIntent(1);
         AssertEqual(LocalReaction.MaintainLine, reaction.Reaction, "reaction");
         AssertEqual("no-decision", reaction.Reason, "reaction reason");
-        AssertEqual(TacticalReserveIntent.None, reserveIntent.Intent, "reserve intent");
-        AssertEqual("no-decision", reserveIntent.Reason, "reserve reason");
     }
 
     private static void TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain()
@@ -14285,14 +13411,6 @@ static class Program
         AssertEqual("OhioValley", ArmyAreaClassifier.FromPosition(552f, -310f));
     }
 
-    private static void TheaterClassifierUsesStateNamesBeforeCoordinates()
-    {
-        AssertEqual(Theater.East, TheaterClassifier.FromStateNameOrPosition("Virginia", 1263f, -1010f));
-        AssertEqual(Theater.Coast, TheaterClassifier.FromStateNameOrPosition("North Carolina", 998f, -1492f));
-        AssertEqual(Theater.Unknown, TheaterClassifier.FromStateName("Mississippi"));
-        AssertEqual(Theater.Unknown, TheaterClassifier.FromStateName("Alabama"));
-    }
-
     private static void CampaignMapLedgerOnlyMapsRepresentedStates()
     {
         var ledger = CampaignMapLedger.Build(new[]
@@ -14324,9 +13442,9 @@ static class Program
             }
         });
 
-        AssertEqual(Theater.East, ledger.GetStateTheaterOrUnknown(38));
-        AssertEqual(Theater.West, ledger.GetStateTheaterOrUnknown(29));
-        AssertEqual(Theater.Unknown, ledger.GetStateTheaterOrUnknown(21));
+        AssertTrue(ledger.TryGetStateTheater(38, out var virginia) && virginia == Theater.East, "Virginia east");
+        AssertTrue(ledger.TryGetStateTheater(29, out var ohio) && ohio == Theater.West, "Ohio west");
+        AssertFalse(ledger.TryGetStateTheater(21, out _), "unrepresented state");
     }
 
     private static void CampaignMapLedgerRanksOwnedCapitalsForDefense()
@@ -15591,89 +14709,12 @@ static class Program
         AssertEqual(true, decision.LaneIntent.ConstructionCurrentlyWins);
     }
 
-    private static void ProjectScorerReplacesWeakCandidate()
-    {
-        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
-        var candidates = new[]
-        {
-            new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, VanillaWeight = 0.2f },
-            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.6f }
-        };
-
-        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 96, vanillaWeight: 0.6f, candidates);
-
-        AssertEqual(true, decision.ShouldReplace);
-        AssertEqual(41, decision.ProjectId);
-        AssertEqual("strategy-margin", decision.Reason);
-    }
-
-    private static void ProjectScorerKeepsCloseCandidate()
-    {
-        var profile = GrandStrategyRegistry.Resolve(1, EraStage.Amateur1861);
-        var candidates = new[]
-        {
-            new ProjectCandidateInput { ProjectId = 1, SubsidyType = 5, VanillaWeight = 1.0f },
-            new ProjectCandidateInput { ProjectId = 6, SubsidyType = 5, VanillaWeight = 0.9f }
-        };
-
-        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 1, vanillaWeight: 1.0f, candidates);
-
-        AssertEqual(false, decision.ShouldReplace);
-        AssertEqual(1, decision.ProjectId);
-    }
-
-    private static void ProjectScorerRequiresMarginForEmptyVanillaSlot()
-    {
-        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
-        var candidates = new[]
-        {
-            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.1f }
-        };
-
-        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: -1, vanillaWeight: 0f, candidates);
-
-        AssertEqual(false, decision.ShouldReplace);
-        AssertEqual(-1, decision.ProjectId);
-
-        var strongCandidates = new[]
-        {
-            new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, VanillaWeight = 0.2f }
-        };
-
-        var strongDecision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: -1, vanillaWeight: 0f, strongCandidates);
-
-        AssertEqual(true, strongDecision.ShouldReplace);
-        AssertEqual(41, strongDecision.ProjectId);
-        AssertEqual("vanilla-empty-strategy-margin", strongDecision.Reason);
-    }
-
     private static void FormationLevelMapsVanillaUnitTypes()
     {
         AssertEqual(FormationLevel.Division, FormationSnapshot.LevelFromUnitType(14));
         AssertEqual(FormationLevel.Corps, FormationSnapshot.LevelFromUnitType(15));
         AssertEqual(FormationLevel.Army, FormationSnapshot.LevelFromUnitType(16));
         AssertEqual(FormationLevel.Unknown, FormationSnapshot.LevelFromUnitType(17));
-    }
-
-    private static void IndependentTopDivisionRequiresTopAndStrengthFloor()
-    {
-        var snap = new FormationSnapshot
-        {
-            UnitKey = "div:1",
-            UnitType = 14,
-            IsTopUnit = true,
-            IsGarrisoned = false,
-            GroupStrengthDirect = 1500f
-        };
-
-        AssertEqual(true, snap.IsIndependentTopDivision);
-
-        snap.IsTopUnit = false;
-        AssertEqual(false, snap.IsIndependentTopDivision);
-
-        snap.IsTopUnit = true;
-        snap.GroupStrengthDirect = 999f;
-        AssertEqual(false, snap.IsIndependentTopDivision);
     }
 
     private static void AttachedDivisionIsNotDirectlyControllable()
@@ -17930,19 +16971,6 @@ static class Program
             "csa-owned port must not flag UnionForwardBase even when union profile has the tag");
     }
 
-    private static void AssetRoleScorerScoreTownFlagsCapitalApproach()
-    {
-        var profile = GrandStrategyRegistry.Resolve(allianceId: 1, stage: EraStage.Amateur1861);
-        var town = new CampaignMapTown { CityName = "norfolk", Theater = Theater.Coast };
-
-        var near = AssetRoleScorer.ScoreTown(town, profile, capitalDistance: 100f);
-        AssertTrue((near & AssetStrategicRole.CapitalApproach) != 0,
-            "town within 120 of capital should score capital-approach via ScoreTown");
-
-        var far = AssetRoleScorer.ScoreTown(town, profile, capitalDistance: 500f);
-        AssertEqual(AssetStrategicRole.None, far);
-    }
-
     private static void AssetRoleCatalogOverridesScorer()
     {
         var role = AssetRoleCatalog.Lookup("wilmington-harbor");
@@ -19746,14 +18774,6 @@ static class Program
             "moving patrol should not be reset");
     }
 
-    private static void ArtilleryCombineGunTransferPreservesSourceGuns()
-    {
-        AssertEqual(6, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 100));
-        AssertEqual(3, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 50));
-        AssertEqual(1, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 1));
-        AssertEqual(0, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: false, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 100));
-    }
-
     // -----------------------------------------------------------------------
     // Helper: build a minimal DefenseIntentInput.
     // -----------------------------------------------------------------------
@@ -20308,62 +19328,6 @@ static class Program
             "Union late-war pressure can slightly lower guard for source-sector concentration");
     }
 
-    private static void TacticalMoraleSnapshotLedgerStoresAndReads()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
-        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
-        ledger.RecordSample(key, morale: 0.85f, timeFromStart: 10f);
-        ledger.RecordSample(key, morale: 0.80f, timeFromStart: 20f);
-        AssertTrue(ledger.TryGetLatest(key, out float morale, out float time), "has latest");
-        AssertEqual(0.80f, morale, "latest morale");
-        AssertEqual(20f, time, "latest time");
-    }
-
-    private static void TacticalMoraleSnapshotLedgerRingBufferDropsOldest()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 2);
-        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
-        ledger.RecordSample(key, morale: 0.9f, timeFromStart: 10f);
-        ledger.RecordSample(key, morale: 0.8f, timeFromStart: 20f);
-        ledger.RecordSample(key, morale: 0.7f, timeFromStart: 30f);
-        AssertEqual(2, ledger.SampleCount(key), "buffer capped at 2");
-        AssertTrue(ledger.TryGetOldestRetained(key, out float oldestMorale, out float oldestTime),
-            "has oldest retained");
-        AssertEqual(0.8f, oldestMorale, "10f sample dropped");
-        AssertEqual(20f, oldestTime, "oldest retained time");
-    }
-
-    private static void TacticalMoraleSnapshotLedgerNameFallbackResolvesAcrossInstanceIdRoll()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
-        var oldKey = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
-        ledger.RecordSample(oldKey, morale: 0.9f, timeFromStart: 10f);
-        var newKey = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 200, unitName: "1stVA");
-        AssertTrue(ledger.TryGetLatest(newKey, out float morale, out _),
-            "name fallback resolves after InstanceID roll");
-        AssertEqual(0.9f, morale, "fallback returns prior sample");
-    }
-
-    private static void TacticalMoraleSnapshotLedgerSkipsWhenLastUpdateUnchanged()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
-        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
-        bool firstWrote = ledger.RecordSampleIfNew(key, morale: 0.9f, timeFromStart: 10f, vanillaLastMoraleUpdate: 5f);
-        bool secondWrote = ledger.RecordSampleIfNew(key, morale: 0.85f, timeFromStart: 11f, vanillaLastMoraleUpdate: 5f);
-        AssertTrue(firstWrote, "first sample writes");
-        AssertFalse(secondWrote, "skipped when vanilla timestamp unchanged");
-        AssertEqual(1, ledger.SampleCount(key), "single sample");
-    }
-
-    private static void TacticalMoraleSnapshotLedgerPrune()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
-        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
-        ledger.RecordSample(key, morale: 0.9f, timeFromStart: 10f);
-        ledger.PruneRouted(key);
-        AssertFalse(ledger.TryGetLatest(key, out _, out _), "prune removes entry");
-    }
-
     private static void TacticalWithdrawalInputAdapterToMoralePressureInput()
     {
         var snapshot = new TacticalWithdrawalInputAdapter.Snapshot
@@ -20448,104 +19412,6 @@ static class Program
         AssertEqual(90f, input.UnitFacingDegrees, "facing carried");
     }
 
-    private static void TacticalChargeViabilityRefuseOnCooldown()
-    {
-        var input = new TacticalChargeViability.Input
-        {
-            ChargeScore = 5f,
-            ScoreThreshold = 1f,
-            TargetMorale = 0.4f,
-            TargetMoraleThreshold = 0.7f,
-            TargetUnitTyp = 0,
-            DistanceToTarget = 50f,
-            MaxChargeRadius = 200f,
-            TimeSinceLastCharge = 1f,
-            ChargeCooldown = 5f,
-            VolleyDwellRemaining = 0f,
-            TargetOutflanked = 0,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalChargeViability.Result.Refuse,
-            TacticalChargeViability.Score(input), "cooldown refuses");
-    }
-
-    private static void TacticalChargeViabilityRefuseOnMoraleHigh()
-    {
-        var input = new TacticalChargeViability.Input
-        {
-            ChargeScore = 5f,
-            ScoreThreshold = 1f,
-            TargetMorale = 0.9f,
-            TargetMoraleThreshold = 0.7f,
-            TargetUnitTyp = 0,
-            DistanceToTarget = 50f,
-            MaxChargeRadius = 200f,
-            TimeSinceLastCharge = 99f,
-            ChargeCooldown = 5f,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalChargeViability.Result.Refuse,
-            TacticalChargeViability.Score(input), "high target morale refuses");
-    }
-
-    private static void TacticalChargeViabilityAllowAtThreshold()
-    {
-        var input = new TacticalChargeViability.Input
-        {
-            ChargeScore = 1.1f,
-            ScoreThreshold = 1f,
-            TargetMorale = 0.5f,
-            TargetMoraleThreshold = 0.7f,
-            TargetUnitTyp = 0,
-            DistanceToTarget = 50f,
-            MaxChargeRadius = 200f,
-            TimeSinceLastCharge = 99f,
-            ChargeCooldown = 5f,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalChargeViability.Result.Allow,
-            TacticalChargeViability.Score(input), "score just above threshold -> allow");
-    }
-
-    private static void TacticalChargeViabilityEncourageOnFlankedTarget()
-    {
-        var input = new TacticalChargeViability.Input
-        {
-            ChargeScore = 2f,
-            ScoreThreshold = 1f,
-            TargetMorale = 0.5f,
-            TargetMoraleThreshold = 0.7f,
-            TargetUnitTyp = 0,
-            TargetOutflanked = 4,
-            DistanceToTarget = 50f,
-            MaxChargeRadius = 200f,
-            TimeSinceLastCharge = 99f,
-            ChargeCooldown = 5f,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalChargeViability.Result.Encourage,
-            TacticalChargeViability.Score(input), "flanked target + high score -> encourage");
-    }
-
-    private static void TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate()
-    {
-        var input = new TacticalChargeViability.Input
-        {
-            ChargeScore = 1.1f,
-            ScoreThreshold = 1f,
-            TargetMorale = 0.95f,
-            TargetMoraleThreshold = 0.7f,
-            TargetUnitTyp = 2,
-            DistanceToTarget = 50f,
-            MaxChargeRadius = 200f,
-            TimeSinceLastCharge = 99f,
-            ChargeCooldown = 5f,
-            AiFeudStance = -1,
-        };
-        AssertEqual(TacticalChargeViability.Result.Allow,
-            TacticalChargeViability.Score(input), "artillery target bypasses morale gate");
-    }
-
     private static void TacticalRefuseFlankIntentNoRefuseWhenBalanced()
     {
         var input = new TacticalRefuseFlankIntent.Input
@@ -20620,40 +19486,6 @@ static class Program
         AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(2.0f), "above 1 clamps exhausted");
     }
 
-    private static void EchelonOrchestratorEmptyTickIsNoOp()
-    {
-        var stub = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
-        stub.Tick();
-        AssertEqual(1, stub.TickCount, "tick count after one Tick");
-    }
-
-    private static void EchelonOrchestratorPropagateIntentDispatchesToChildren()
-    {
-        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
-        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
-        parent.AddChild(child);
-        parent.PropagateIntent();
-        AssertEqual(1, child.PropagateCount, "child propagate count");
-    }
-
-    private static void EchelonOrchestratorParentChildLinkBidirectional()
-    {
-        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
-        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
-        parent.AddChild(child);
-        AssertTrue(ReferenceEquals(parent, child.Parent), "child.Parent is parent");
-        AssertEqual(1, parent.Children.Count, "parent.Children.Count");
-    }
-
-    private sealed class StubEchelonOrchestrator : EchelonOrchestrator
-    {
-        public StubEchelonOrchestrator(EchelonKind kind, int allianceId) : base(kind, allianceId) { }
-        public int TickCount { get; private set; }
-        public int PropagateCount { get; private set; }
-        public override void Tick() { TickCount++; base.Tick(); }
-        public override void PropagateIntent() { PropagateCount++; base.PropagateIntent(); }
-    }
-
     // ---- TacticalCommanderRoster tests ----
 
     private static void TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown()
@@ -20718,29 +19550,13 @@ static class Program
         AssertTrue(ReferenceEquals(roster, orch.Roster), "roster is same reference");
     }
 
-    private static void TacticalBattleOrchestratorEmptyChildrenInO0()
-    {
-        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
-        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
-        AssertEqual(0, orch.Echelons.Count, "echelons count is zero in O0");
-    }
-
-    private static void TacticalBattleOrchestratorEmptyTickIsNoOp()
-    {
-        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
-        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
-        orch.Tick();
-        AssertEqual(1, orch.TickCount, "tick count after one Tick");
-    }
-
-    private static void TacticalBattleOrchestratorAttachArmyExposesArmyAndAddsToEchelons()
+    private static void TacticalBattleOrchestratorAttachArmyExposesArmy()
     {
         var roster = new TacticalCommanderRoster();
         var side = new TacticalBattleOrchestrator(allianceId: 0, roster);
         var army = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), default);
         side.AttachArmy(army);
         AssertTrue(side.Army == army, "Army property exposes attached army");
-        AssertEqual(1, side.Echelons.Count, "Army added to Echelons exactly once");
     }
 
     private static void TacticalBattleOrchestratorAttachArmyIdempotent()
@@ -20751,23 +19567,7 @@ static class Program
         side.AttachArmy(army);
         side.AttachArmy(army);
         side.AttachArmy(null);
-        AssertEqual(1, side.Echelons.Count, "duplicate or null AttachArmy does not grow Echelons");
-    }
-
-    // ---- TacticalSectorLedger.ClearHelpRequests tests ----
-
-    // ---- TacticalMoraleSnapshotLedger.Clear tests ----
-
-    private static void TacticalMoraleSnapshotLedgerClearEmptiesState()
-    {
-        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
-        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 10, unitName: "IronBrigade");
-        ledger.RecordSample(key, morale: 0.8f, timeFromStart: 1f);
-        AssertEqual(1, ledger.SampleCount(key), "sample recorded before clear");
-        ledger.Clear();
-        AssertEqual(0, ledger.SampleCount(key), "sample count should be 0 after Clear");
-        float m, t;
-        AssertTrue(!ledger.TryGetLatest(key, out m, out t), "TryGetLatest should return false after Clear");
+        AssertTrue(side.Army == army, "null AttachArmy keeps the attached army");
     }
 
     // ---- TacticalBattleCoordinator tests ----
@@ -20815,7 +19615,7 @@ static class Program
         TacticalBattleCoordinator.ResetForTest();
         TacticalBattleCoordinator.OnBattleStartForTest(-1, new SyntheticCommanderInput[0]);
         AssertTrue(TacticalBattleCoordinator.IsActive, "should be active after start");
-        TacticalBattleCoordinator.OnBattleEndForTest();
+        TacticalBattleCoordinator.ResetForTest();
         AssertTrue(!TacticalBattleCoordinator.IsActive, "should be inactive after end");
         AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(0) == null, "side0 should be null after end");
         AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(1) == null, "side1 should be null after end");
@@ -20984,22 +19784,6 @@ static class Program
             jitterSeed: 1).WithPhase(BattlePhase.MainEffort);
         AssertEqual(BattlePhase.MainEffort, plan.Phase, "phase advanced");
         AssertNear(0f, plan.AgeSeconds, 1e-5f, "age reset");
-    }
-
-    private static void TacticalBattlePlanWithAgeChangesAgeOnly()
-    {
-        var plan = new TacticalBattlePlan(
-            BattlePlanId.GenericMethodical,
-            BattlePhase.Probe,
-            mainEffortSector: 2,
-            fixingSectors: null,
-            screeningSectors: null,
-            reserveCommitTriggerOdds: 1.0f,
-            ageSeconds: 0f,
-            jitterSeed: 1).WithAge(45.5f);
-        AssertNear(45.5f, plan.AgeSeconds, 1e-5f, "age");
-        AssertEqual(BattlePhase.Probe, plan.Phase, "phase preserved");
-        AssertEqual(2, plan.MainEffortSector, "main effort preserved");
     }
 
     private static void TacticalBattlePlanSanitizesNanAndInfinityFloats()
@@ -22531,7 +21315,6 @@ static class Program
     {
         var orch = new ArmyOrchestrator(allianceId: 0, catalog: SeedCatalog.AllHistoricalAndGeneric(), commanderPersonality: default);
         AssertFalse(orch.HasPlan, "new orchestrator has no plan");
-        AssertEqual(-1, orch.CurrentMacroAi, "no plan -> CurrentMacroAi = -1 (dynamic)");
     }
 
     private static void ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment()
@@ -22542,24 +21325,6 @@ static class Program
         AssertTrue(orch.HasPlan, "plan picked");
         AssertEqual(BattlePlanId.DoubleEnvelopment, orch.CurrentPlan.PlanId, "Lee personality + wooded + 1.1 odds picks lee-envelopment");
         AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "initial phase is Probe");
-    }
-
-    private static void ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality()
-    {
-        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.2f, TerrainKind.Open, 0));
-        orch.AdvancePhase(BattlePhase.MainEffort);
-        AssertEqual(1, orch.CurrentMacroAi, "MainEffort + aggressive personality -> macroai 1 (attack)");
-    }
-
-    private static void ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality()
-    {
-        var mcc = new PersonalityVector(-0.6f, 0.8f, -0.7f, 0.7f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), mcc);
-        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
-        orch.AdvancePhase(BattlePhase.Consolidate);
-        AssertEqual(2, orch.CurrentMacroAi, "Consolidate phase -> macroai 2 (defend)");
     }
 
     private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
@@ -24513,30 +23278,6 @@ static class Program
         AssertEqual(-100, tree[-10].ParentInstanceId, "brigade -10 links to army -100");
     }
 
-    private static void CommandTreeProbeEnumeratesLeavesThreeTier()
-    {
-        // Build a 3-tier tree (Union shape): top corps -100, two divisions
-        // -200 / -300, each with 2 brigade leaves. EnumerateLeaves(-100, tree)
-        // should return all 4 brigades, no divisions.
-        var probes = new[]
-        {
-            Probe(-100, 16, "3rd_Division_top", 0, isDirectChild: false),
-            Probe(-200, 15, "5th_Division", -100),
-            Probe(-300, 15, "2nd_Division", -100),
-            Probe(-201, 14, "5d_1st_Brigade", -200, x: -100f),
-            Probe(-202, 14, "5d_2nd_Brigade", -200, x: -50f),
-            Probe(-301, 14, "2d_1st_Brigade", -300, x: 50f),
-            Probe(-302, 14, "2d_2nd_Brigade", -300, x: 100f),
-        };
-        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
-        var leaves = TacticalCommandTreeProbe.EnumerateLeaves(-100, tree);
-        AssertEqual(4, leaves.Count, "3-tier tree has 4 leaves");
-        var names = new HashSet<string>();
-        foreach (var leaf in leaves) names.Add(leaf.Name);
-        AssertTrue(names.Contains("5d_1st_Brigade"), "5d_1st_Brigade leaf present");
-        AssertTrue(names.Contains("2d_2nd_Brigade"), "2d_2nd_Brigade leaf present");
-    }
-
     private static void CommandTreeProbeSortsSiblingsLeftToRight()
     {
         // Children should come back sorted by WorldX ascending so cascade
@@ -24554,18 +23295,6 @@ static class Program
         AssertEqual("leftmost", children[0].Name, "leftmost first");
         AssertEqual("center",   children[1].Name, "center next");
         AssertEqual("rightmost", children[2].Name, "rightmost last");
-    }
-
-    private static void CommandTreeProbeEmptyInputReturnsEmptyMap()
-    {
-        var emptyTree = TacticalCommandTreeProbe.BuildTree(
-            System.Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>(), 1);
-        AssertEqual(0, emptyTree.Count, "empty input builds empty tree");
-        AssertEqual(0, TacticalCommandTreeProbe.EnumerateLeaves(-100, emptyTree).Count,
-            "leaves from empty tree is empty");
-        AssertEqual(0, TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(-100, emptyTree).Count,
-            "children from empty tree is empty");
-        AssertEqual(0, TacticalCommandTreeProbe.BuildTree(null, 1).Count, "null probes returns empty tree");
     }
 
     // ====== Leaf brigade map tests (Task 3) ======

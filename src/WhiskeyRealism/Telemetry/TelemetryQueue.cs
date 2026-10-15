@@ -65,11 +65,6 @@ namespace WhiskeyRealism.Telemetry
             get { return Interlocked.Read(ref _protectedOverflowCount); }
         }
 
-        internal bool TryEnqueue(TelemetryEvent ev)
-        {
-            return Enqueue(ev) == TelemetryQueueResult.Enqueued;
-        }
-
         internal TelemetryQueueResult Enqueue(TelemetryEvent ev)
         {
             lock (_gate)

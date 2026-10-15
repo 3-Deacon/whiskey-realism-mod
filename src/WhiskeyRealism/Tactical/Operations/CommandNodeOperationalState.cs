@@ -39,8 +39,6 @@ namespace WhiskeyRealism.Tactical.Operations
     public enum CommandTaskState
     {
         Planning,
-        MovingToAssembly,
-        WaitingForCommit,
         Committed
     }
 

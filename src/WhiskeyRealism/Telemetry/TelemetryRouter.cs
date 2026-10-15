@@ -71,11 +71,6 @@ namespace WhiskeyRealism.Telemetry
             return false;
         }
 
-        internal static bool ShouldBehaviorRun(TelemetryProfile profile, bool behaviorEnabled)
-        {
-            return behaviorEnabled;
-        }
-
         internal static void AttachRuntime(TelemetryRuntime runtime)
         {
             lock (Gate)

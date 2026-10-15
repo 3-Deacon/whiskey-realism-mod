@@ -55,19 +55,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 objectives);
         }
 
-        public TacticalOperationDirectorInput WithOwnStrength(float ownStrength)
-        {
-            return new TacticalOperationDirectorInput(
-                Current,
-                CurrentTimeSeconds,
-                ownStrength,
-                ReserveFraction,
-                Aggression01,
-                Caution01,
-                Objectives,
-                OperationAssignedStrength);
-        }
-
         public TacticalOperationDirectorInput WithOperationAssignedStrength(float assignedStrength)
         {
             return new TacticalOperationDirectorInput(

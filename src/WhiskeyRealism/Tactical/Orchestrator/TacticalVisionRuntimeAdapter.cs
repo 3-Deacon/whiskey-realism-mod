@@ -146,61 +146,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return BuildObjectiveRecords(fallbackObservations, fallbackStatuses, fallbackEnemyStrengths, fallbackFriendlyStrengths);
         }
 
-        internal static ObjectiveRecord[] BuildObjectiveRecordsWithSceneObjectivesAndMovementFallback(
-            IReadOnlyList<ObjectiveObservationInput> observations,
-            IReadOnlyList<TacticalObjectiveStatus> statuses,
-            IReadOnlyList<float> enemyStrengths,
-            IReadOnlyList<float> friendlyAssignedStrengths,
-            IReadOnlyList<ObjectiveObservationInput> sceneObjectives,
-            IReadOnlyList<TacticalObjectiveStatus> sceneStatuses,
-            TacticalMapPoint? visibleEnemyLine,
-            float visibleEnemyStrength,
-            float visibleFriendlyStrength,
-            TacticalMapPoint? movementAnchor,
-            float movementAnchorFriendlyStrength,
-            int allianceId)
-        {
-            var mergedObservations = new List<ObjectiveObservationInput>();
-            var mergedStatuses = new List<TacticalObjectiveStatus>();
-            var mergedEnemyStrengths = new List<float>();
-            var mergedFriendlyStrengths = new List<float>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-
-            CopyObjectiveInputs(
-                observations,
-                statuses,
-                enemyStrengths,
-                friendlyAssignedStrengths,
-                mergedObservations,
-                mergedStatuses,
-                mergedEnemyStrengths,
-                mergedFriendlyStrengths,
-                seen);
-
-            CopyObjectiveInputs(
-                sceneObjectives,
-                sceneStatuses,
-                Array.Empty<float>(),
-                Array.Empty<float>(),
-                mergedObservations,
-                mergedStatuses,
-                mergedEnemyStrengths,
-                mergedFriendlyStrengths,
-                seen);
-
-            return BuildObjectiveRecordsWithMovementFallback(
-                mergedObservations,
-                mergedStatuses,
-                mergedEnemyStrengths,
-                mergedFriendlyStrengths,
-                visibleEnemyLine,
-                visibleEnemyStrength,
-                visibleFriendlyStrength,
-                movementAnchor,
-                movementAnchorFriendlyStrength,
-                allianceId);
-        }
-
         private static void AddVisibleEnemyLineFallback(
             List<ObjectiveObservationInput> observations,
             List<TacticalObjectiveStatus> statuses,
@@ -592,32 +537,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return default(TacticalAvenueSourceSignature);
-            }
-        }
-
-        private static void CopyObjectiveInputs(
-            IReadOnlyList<ObjectiveObservationInput> sourceObservations,
-            IReadOnlyList<TacticalObjectiveStatus> sourceStatuses,
-            IReadOnlyList<float> sourceEnemyStrengths,
-            IReadOnlyList<float> sourceFriendlyStrengths,
-            List<ObjectiveObservationInput> targetObservations,
-            List<TacticalObjectiveStatus> targetStatuses,
-            List<float> targetEnemyStrengths,
-            List<float> targetFriendlyStrengths,
-            HashSet<string> seenObjectiveIds)
-        {
-            if (sourceObservations == null || sourceObservations.Count == 0) return;
-
-            for (int i = 0; i < sourceObservations.Count; i++)
-            {
-                ObjectiveObservationInput observation = sourceObservations[i];
-                if (!IsUsableMapPoint(observation.Location)) continue;
-                if (seenObjectiveIds != null && !seenObjectiveIds.Add(observation.ObjectiveId)) continue;
-
-                targetObservations.Add(observation);
-                targetStatuses.Add(GetOrDefault(sourceStatuses, i, TacticalObjectiveStatus.Scouting));
-                targetEnemyStrengths.Add(GetOrDefault(sourceEnemyStrengths, i, 0f));
-                targetFriendlyStrengths.Add(GetOrDefault(sourceFriendlyStrengths, i, 0f));
             }
         }
 

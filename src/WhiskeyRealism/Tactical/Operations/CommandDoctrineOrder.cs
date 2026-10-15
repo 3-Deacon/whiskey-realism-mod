@@ -105,27 +105,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 reason);
         }
 
-        public CommandDoctrineOrder WithAllowedIdle(DoctrineAllowedIdleReason reason)
-        {
-            return new CommandDoctrineOrder(
-                NodeId,
-                Role,
-                Task,
-                ObjectiveId,
-                PrimaryTarget,
-                SupportTarget,
-                FallbackTarget,
-                reason,
-                MinCommitUntilSeconds,
-                IssuedAtSeconds,
-                Confidence01,
-                Sop,
-                Delivery,
-                ParentNodeId,
-                CourierIntervalSeconds,
-                Reason);
-        }
-
         public CommandDoctrineOrder WithSop(TacticalSopDecision sop)
         {
             return new CommandDoctrineOrder(

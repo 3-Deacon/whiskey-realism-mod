@@ -384,44 +384,6 @@ namespace WhiskeyRealism.Tactical
             return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "path-shape-normal", signature);
         }
 
-        public static TacticalPathfinderAddPathDecision ClassifyAddPathOutcome(
-            int vanillaResult,
-            int pathCountBefore,
-            int pathCountAfter,
-            int cornerCount,
-            string navStatus,
-            float finalDistanceToTarget,
-            float endpointTolerance)
-        {
-            int before = TacticalCurrentOrderSignature.ClampCount(pathCountBefore);
-            int after = TacticalCurrentOrderSignature.ClampCount(pathCountAfter);
-            int corners = TacticalCurrentOrderSignature.ClampCount(cornerCount);
-            int result = vanillaResult == 0 ? 0 : 1;
-            float finalDistance = Threshold(finalDistanceToTarget);
-            float tolerance = Math.Max(0.1f, Threshold(endpointTolerance));
-            string status = TacticalCurrentOrderSignature.Safe(navStatus);
-            bool pathAdded = after > before;
-            string signature = "result=" + result +
-                " paths=" + before + "->" + after +
-                " corners=" + corners +
-                " navStatus=" + status +
-                " finalDelta=" + TacticalCurrentOrderSignature.Bucket(finalDistance) +
-                " tolerance=" + TacticalCurrentOrderSignature.Bucket(tolerance);
-
-            if (!pathAdded)
-                return AddPathDecision(false, result, false, "no-added-path", signature);
-            if (corners <= 0)
-                return AddPathDecision(true, 0, true, "no-corners", signature);
-            if (!string.IsNullOrEmpty(status) && status != "-" && status != "PathComplete")
-                return AddPathDecision(true, 0, true, "navmesh-noncomplete", signature);
-            if (result == 0 && finalDistance <= tolerance)
-                return AddPathDecision(true, 1, false, "endpoint-within-tolerance", signature);
-            if (result == 0)
-                return AddPathDecision(true, 0, true, "failed-endpoint-mismatch", signature);
-
-            return AddPathDecision(false, result, false, "vanilla-accepted", signature);
-        }
-
         private static TacticalBugDiagnosticDecision Decision(
             TacticalBattlefieldBugObservationKind kind,
             bool risk,
