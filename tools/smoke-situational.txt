@@ -22,6 +22,7 @@ campaign.patch.save-load.save                      # AICampaign.Save: only when 
 campaign.patch.save-load.load                      # AICampaign.Load: only when a save is loaded
 
 # W&L career (DLC_WL) only.
+tactical.patch.good-ground-cover-cap               # Regiment.CheckCoyCovers: marks only for a W&L player's unit in battle
 campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L career camp and diary only
 campaign.patch.wl-operation-null-guard             # DLC_WL.CommanderRelations.Operation.UpdateOperation: W&L operations only
 campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMessageContent: W&L dispatches only
@@ -48,6 +49,9 @@ campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim
 campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
 campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
+campaign.patch.pontoon-creek.speed                 # Regiment.GetTerrainSpeedAdjustment: only while a campaign group stands on a creek cell
+campaign.patch.engineer-branch.autocalc.*          # Autocalc.CalculateEngineeringPoints: only when a battle is autoresolved
+campaign.patch.autocalc-entrenchment-side.*        # Autocalc.FightUnit: only when a battle is autoresolved
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
