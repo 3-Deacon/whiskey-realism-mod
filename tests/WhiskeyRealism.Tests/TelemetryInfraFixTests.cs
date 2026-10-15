@@ -700,6 +700,16 @@ internal static class TelemetryInfraFixTests
             queue.Enqueue(Decision("w", 6));
             writer.Signal();
             TestHarness.AssertTrue(WaitUntil(() => CountLines(Path.Combine(dir, "tactical.jsonl")) == 7, 5000), "rows written");
+            // Real time passes well beyond the 40 ms interval while the writer keeps
+            // looping: with MaybeWriteManifest on the real clock this rewrites the
+            // manifest; on TelemetryWriter.Clock it must not.
+            int idleBefore = System.Threading.Volatile.Read(ref manifestCalls);
+            for (int i = 0; i < 4; i++)
+            {
+                System.Threading.Thread.Sleep(60);
+                writer.Signal();
+            }
+            TestHarness.AssertEqual(idleBefore, System.Threading.Volatile.Read(ref manifestCalls), "real time alone never rewrites the manifest");
             TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
             TestHarness.AssertEqual(7, manifestCalls, "new file + five elapsed intervals + shutdown; a batch inside the interval writes none");
         }
@@ -725,7 +735,11 @@ internal static class TelemetryInfraFixTests
                 queue.Enqueue(Decision("w", i));
             queue.Enqueue(TelemetryEvent.Create("w", TelemetryProfile.FullTuning, TelemetryLayer.System, TelemetryCategory.Health, "PTestHealth", TelemetrySeverity.Info));
             writer.Signal();
-            TestHarness.AssertTrue(WaitUntil(() => queue.Count == 0 && CountLines(Path.Combine(dir, "tactical.jsonl")) == 12, 3000), "rows flushed to disk while stream stays open");
+            // Both files must be written (their streams open) before counting streams:
+            // with flushRows 4 the health row lands in a later batch than the queue
+            // drain the first condition sees.
+            TestHarness.AssertTrue(WaitUntil(() => queue.Count == 0 && CountLines(Path.Combine(dir, "tactical.jsonl")) == 12
+                && CountLines(Path.Combine(dir, "health.jsonl")) == 1, 5000), "rows flushed to disk while stream stays open");
             TestHarness.AssertEqual(2, writer.OpenStreamCount, "one open stream per output file");
             TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
             TestHarness.AssertEqual(0, writer.OpenStreamCount, "streams closed on stop");

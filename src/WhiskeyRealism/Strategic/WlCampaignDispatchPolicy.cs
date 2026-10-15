@@ -115,47 +115,82 @@ namespace WhiskeyRealism.Strategic
     // queues its move (17928, movearoundenemyunits: true), and UpdateOrders later
     // re-enters MoveUnitTo for it as a direct move (10048) with no vanilla caller to
     // mark it: that execution is the same correction and gives no dispatch either.
-    internal sealed class WlCorrectionMemory
+    // An entry lives only while it can still be that execution: it is dropped at the
+    // first flush after the unit's queued order is gone (executed, or cancelled by
+    // RemoveOrder 9949) and after one game day at most. TUnit is Regiment at runtime.
+    internal sealed class WlCorrectionMemory<TUnit> where TUnit : class
     {
         public const int Capacity = 4;
+        public const double ExpiryDays = 1.0;
 
-        private readonly int[] _unit = new int[Capacity];
+        private readonly TUnit[] _unit = new TUnit[Capacity];
         private readonly float[] _x = new float[Capacity];
         private readonly float[] _z = new float[Capacity];
-        private readonly bool[] _used = new bool[Capacity];
+        private readonly double[] _day = new double[Capacity];
         private int _next;
 
-        public void Record(int unit, float x, float z)
+        public int Count
         {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < Capacity; i++) if (_unit[i] != null) n++;
+                return n;
+            }
+        }
+
+        // Called for every skipped pending move; remembers only a terrain correction.
+        public void NoteSkip(TUnit unit, float x, float z, double nowDays, in WlMoveContext context, string skipReason)
+        {
+            if (unit == null || context.Source != WlMoveSource.FinalPositions
+                || !string.Equals(skipReason, WlCampaignDispatchPolicy.PositionCorrection, StringComparison.Ordinal)) return;
             _unit[_next] = unit;
             _x[_next] = x;
             _z[_next] = z;
-            _used[_next] = true;
+            _day[_next] = nowDays;
             _next = (_next + 1) % Capacity;
         }
 
-        // True (and forgotten) when this direct move executes a remembered correction:
-        // same unit, target within the same-target radius (the queued destination is
-        // re-stacked, 14498).
-        public bool ConsumeExecution(int unit, float x, float z)
+        // True (and forgotten) when this direct move executes a live remembered
+        // correction: same unit, target within the same-target radius (the queued
+        // destination is re-stacked, 14498), younger than ExpiryDays.
+        public bool ConsumeExecution(TUnit unit, float x, float z, double nowDays)
         {
+            if (unit == null) return false;
             float r = WlCampaignDispatchPolicy.DedupeUnits;
             for (int i = 0; i < Capacity; i++)
             {
-                if (!_used[i] || _unit[i] != unit) continue;
+                if (!ReferenceEquals(_unit[i], unit) || !Live(i, nowDays)) continue;
                 float dx = x - _x[i];
                 float dz = z - _z[i];
                 if (dx * dx + dz * dz >= r * r) continue;
-                _used[i] = false;
+                _unit[i] = null;
                 return true;
             }
             return false;
         }
 
+        // End of each flush: drops entries whose queued order is gone or that aged out.
+        public void Expire(double nowDays, Func<TUnit, bool> queuedOrderRunning)
+        {
+            for (int i = 0; i < Capacity; i++)
+            {
+                if (_unit[i] == null) continue;
+                if (!Live(i, nowDays) || queuedOrderRunning == null || !queuedOrderRunning(_unit[i]))
+                    _unit[i] = null;
+            }
+        }
+
         public void Clear()
         {
-            for (int i = 0; i < Capacity; i++) _used[i] = false;
+            for (int i = 0; i < Capacity; i++) _unit[i] = null;
             _next = 0;
+        }
+
+        private bool Live(int i, double nowDays)
+        {
+            double age = nowDays - _day[i];
+            return !double.IsNaN(age) && age >= 0.0 && age < ExpiryDays;
         }
     }
 

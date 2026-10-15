@@ -41,6 +41,10 @@ internal static class WlCampaignDispatchTests
             ("wl campaign dispatch issue line reaches the main log", IssueLineReachesMainLog),
             ("wl campaign dispatch skips the queued execution of a skipped terrain correction", SkipsQueuedCorrectionExecution),
             ("wl campaign dispatch correction memory matches unit and target once", CorrectionMemoryMatchesOnce),
+            ("wl campaign dispatch correction memory drops an entry once the queued order is gone", CorrectionMemoryExpiresWithOrder),
+            ("wl campaign dispatch correction memory drops an entry after one game day", CorrectionMemoryExpiresAfterDay),
+            ("wl campaign dispatch correction memory remembers only a skipped terrain correction", CorrectionMemoryNotesOnlyCorrections),
+            ("wl campaign dispatch runtime feeds and expires the correction memory", RuntimeFeedsCorrectionMemory),
             ("wl campaign dispatch #69 Prefix hands the caller's target to the Postfix", MoveUnitToPrefixWiring),
         });
     }
@@ -301,38 +305,117 @@ internal static class WlCampaignDispatchTests
 
     // n2: CheckFinalPositions queues its move (17928); UpdateOrders re-enters
     // MoveUnitTo for it as a direct move (10048) with no source mark.
+    private static readonly WlMoveContext FinalPositionsQueued = new WlMoveContext
+    {
+        Source = WlMoveSource.FinalPositions, Queued = true, QueuedStillRunning = true,
+    };
+
     private static void SkipsQueuedCorrectionExecution()
     {
-        var memory = new WlCorrectionMemory();
-        var first = new WlMoveContext { Source = WlMoveSource.FinalPositions, Queued = true, QueuedStillRunning = true };
-        AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in first));
-        memory.Record(unit: 7, x: 500f, z: 500f);
+        var memory = new WlCorrectionMemory<object>();
+        var corps = new object();
+        var first = FinalPositionsQueued;
+        string skip = WlCampaignDispatchPolicy.PendingSkipReason(in first);
+        AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, skip);
+        memory.NoteSkip(corps, 500f, 500f, nowDays: 10.0, in first, skip);
+        memory.Expire(10.0, u => true); // end of that flush: its queued order still runs
 
         var execution = new WlMoveContext
         {
             Source = WlMoveSource.Other,
             Queued = false,
-            ExecutesSkippedCorrection = memory.ConsumeExecution(7, 512f, 497f), // re-stacked destination
+            ExecutesSkippedCorrection = memory.ConsumeExecution(corps, 512f, 497f, 10.1), // re-stacked destination
         };
         AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in execution));
 
-        var later = new WlMoveContext { Source = WlMoveSource.Other, ExecutesSkippedCorrection = memory.ConsumeExecution(7, 512f, 497f) };
+        var later = new WlMoveContext { Source = WlMoveSource.Other, ExecutesSkippedCorrection = memory.ConsumeExecution(corps, 512f, 497f, 10.2) };
         AssertEqual(null, WlCampaignDispatchPolicy.PendingSkipReason(in later), "a later move to the same spot is an order again");
     }
 
     private static void CorrectionMemoryMatchesOnce()
     {
-        var memory = new WlCorrectionMemory();
-        memory.Record(7, 0f, 0f);
-        AssertFalse(memory.ConsumeExecution(8, 0f, 0f), "another unit");
-        AssertFalse(memory.ConsumeExecution(7, 200f, 0f), "another target");
-        AssertTrue(memory.ConsumeExecution(7, 50f, 0f), "same unit, same target");
-        AssertFalse(memory.ConsumeExecution(7, 50f, 0f), "consumed");
-        for (int i = 0; i < WlCorrectionMemory.Capacity + 1; i++) memory.Record(100 + i, 0f, 0f);
-        AssertFalse(memory.ConsumeExecution(100, 0f, 0f), "oldest overwritten");
-        AssertTrue(memory.ConsumeExecution(100 + WlCorrectionMemory.Capacity, 0f, 0f), "newest kept");
+        var memory = new WlCorrectionMemory<object>();
+        var a = new object();
+        var b = new object();
+        var ctx = FinalPositionsQueued;
+        string pc = WlCampaignDispatchPolicy.PositionCorrection;
+        memory.NoteSkip(a, 0f, 0f, 1.0, in ctx, pc);
+        AssertFalse(memory.ConsumeExecution(b, 0f, 0f, 1.0), "another unit");
+        AssertFalse(memory.ConsumeExecution(a, 200f, 0f, 1.0), "another target");
+        AssertTrue(memory.ConsumeExecution(a, 50f, 0f, 1.0), "same unit, same target");
+        AssertFalse(memory.ConsumeExecution(a, 50f, 0f, 1.0), "consumed");
+        var units = new object[WlCorrectionMemory<object>.Capacity + 1];
+        for (int i = 0; i < units.Length; i++)
+        {
+            units[i] = new object();
+            memory.NoteSkip(units[i], 0f, 0f, 1.0, in ctx, pc);
+        }
+        AssertFalse(memory.ConsumeExecution(units[0], 0f, 0f, 1.0), "oldest overwritten");
+        AssertTrue(memory.ConsumeExecution(units[units.Length - 1], 0f, 0f, 1.0), "newest kept");
         memory.Clear();
-        AssertFalse(memory.ConsumeExecution(101, 0f, 0f), "cleared");
+        AssertEqual(0, memory.Count, "cleared");
+    }
+
+    // A cancelled (RemoveOrder 9949) or already executed queued order cannot be
+    // executed again: its entry goes at the next flush.
+    private static void CorrectionMemoryExpiresWithOrder()
+    {
+        var memory = new WlCorrectionMemory<object>();
+        var running = new object();
+        var cancelled = new object();
+        var ctx = FinalPositionsQueued;
+        memory.NoteSkip(running, 0f, 0f, 5.0, in ctx, WlCampaignDispatchPolicy.PositionCorrection);
+        memory.NoteSkip(cancelled, 0f, 0f, 5.0, in ctx, WlCampaignDispatchPolicy.PositionCorrection);
+        memory.Expire(5.1, u => ReferenceEquals(u, running));
+        AssertEqual(1, memory.Count, "the cancelled order's entry is gone");
+        AssertFalse(memory.ConsumeExecution(cancelled, 0f, 0f, 5.2), "a later direct move of that corps is an order");
+        AssertTrue(memory.ConsumeExecution(running, 0f, 0f, 5.2), "the running order's execution is still matched");
+        memory.Expire(5.3, null);
+        AssertEqual(0, memory.Count, "nothing left");
+    }
+
+    private static void CorrectionMemoryExpiresAfterDay()
+    {
+        var memory = new WlCorrectionMemory<object>();
+        var corps = new object();
+        var ctx = FinalPositionsQueued;
+        memory.NoteSkip(corps, 0f, 0f, 20.0, in ctx, WlCampaignDispatchPolicy.PositionCorrection);
+        AssertFalse(memory.ConsumeExecution(corps, 0f, 0f, 20.0 + WlCorrectionMemory<object>.ExpiryDays), "a day later it no longer matches");
+        memory.Expire(20.0 + WlCorrectionMemory<object>.ExpiryDays, u => true);
+        AssertEqual(0, memory.Count, "aged out although the order still runs");
+        memory.NoteSkip(corps, 0f, 0f, 30.0, in ctx, WlCampaignDispatchPolicy.PositionCorrection);
+        AssertFalse(memory.ConsumeExecution(corps, 0f, 0f, 29.0), "clock regress never matches");
+    }
+
+    private static void CorrectionMemoryNotesOnlyCorrections()
+    {
+        var memory = new WlCorrectionMemory<object>();
+        var corps = new object();
+        var cancelledCorrection = new WlMoveContext { Source = WlMoveSource.FinalPositions, Queued = true, QueuedStillRunning = false };
+        memory.NoteSkip(corps, 0f, 0f, 1.0, in cancelledCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in cancelledCorrection));
+        AssertEqual(0, memory.Count, "a cancelled correction will never execute");
+        var other = new WlMoveContext { Source = WlMoveSource.Other, Queued = true, QueuedStillRunning = false };
+        memory.NoteSkip(corps, 0f, 0f, 1.0, in other, WlCampaignDispatchPolicy.QueuedOrderCancelled);
+        AssertEqual(0, memory.Count, "another skip");
+        var ctx = FinalPositionsQueued;
+        memory.NoteSkip(corps, 0f, 0f, 1.0, in ctx, WlCampaignDispatchPolicy.PendingSkipReason(in ctx));
+        AssertEqual(1, memory.Count, "the skipped correction");
+    }
+
+    // The runtime (compiled here, not runnable: Unity objects) must feed every
+    // skip to NoteSkip, match executions before the skip decision, and expire
+    // entries on every flush, also one with no pending moves.
+    private static void RuntimeFeedsCorrectionMemory()
+    {
+        string runtime = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/WlCampaignDispatchRuntime.cs"));
+        AssertTrue(runtime.Contains("_corrections.NoteSkip(move.Unit, move.Destination.x, move.Destination.z, NowDays(), in context, skip);"), "skips are noted");
+        AssertTrue(runtime.Contains("_corrections.ConsumeExecution(move.Unit, move.Destination.x, move.Destination.z, NowDays())"), "executions are matched");
+        AssertTrue(runtime.Contains("_corrections.Expire(NowDays(), QueuedOrderRunning);"), "entries expire");
+        int flush = runtime.IndexOf("internal static void Flush()", StringComparison.Ordinal);
+        int end = runtime.IndexOf("\n        }\n", flush, StringComparison.Ordinal);
+        string body = runtime.Substring(flush, end - flush);
+        AssertEqual(2, Regex.Matches(body, @"ExpireCorrections\(\);").Count, "expired on a flush with and without pending moves");
+        AssertTrue(runtime.Contains("AICampaign.DefensiveMovingOrder.OrderRunning(unit)"), "expiry asks vanilla's queued-order state");
     }
 
     // R16 wiring: vanilla reassigns `position` (14498) before the Postfix reads it,

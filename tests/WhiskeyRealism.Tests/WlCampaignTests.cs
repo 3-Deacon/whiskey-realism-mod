@@ -63,6 +63,7 @@ internal static class WlCampaignTests
             ("wl chain ordinary units are movable and count", WlChainOrdinaryUnits),
             ("wl bridge moves the AI group carrying a player below map-group level", WlBridgeMovesCarryingGroup),
             ("wl chain classification does no reflection lookups", WlChainClassificationDoesNoReflection),
+            ("wl chain captured context carries a CIC player", WlChainContextCarriesCicPlayer),
             ("wl defense ledger never counts a player-controlled candidate (threat and guard pools)", WlDefenseLedgerSkipsPlayerControlled),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
@@ -942,17 +943,64 @@ internal static class WlCampaignTests
         foreach (string banned in new[] { "TypeByName", "AccessTools", ".Invoke(" })
             AssertFalse(body.Contains(banned), "IsPlayerCICOf uses " + banned);
 
-        foreach (string loop in new[]
+        // Each consumer: the per-unit block that classifies (the loop, or the probe's
+        // pause branch) has no reflection lookup; loops classify with a context
+        // captured before the loop.
+        foreach (var (path, opener, captured) in new (string, string, bool)[]
         {
-            "src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs",
-            "src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs",
-            "src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs",
-            "src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs",
+            ("src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
+            ("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
+            ("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "for (int i = defOps.Count - 1; i >= 0; i--)", true),
+            ("src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs", "foreach (var candidate in response.SelectedPackage)", true),
+            ("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "if (output.Decision == OperationalProbeDecision.Pause ||", false),
         })
         {
-            string text = File.ReadAllText(FindRepoPath(loop));
-            AssertTrue(text.Contains("WlChainContext.Capture()"), loop + " captures the context once");
-            AssertTrue(text.Contains("ChainClassOf(in "), loop + " classifies with the captured context");
+            string text = File.ReadAllText(FindRepoPath(path));
+            int call = text.IndexOf(captured ? "ChainClassOf(in " : "ChainClassOf(", StringComparison.Ordinal);
+            AssertTrue(call >= 0, path + " classifies");
+            int open = text.LastIndexOf(opener, call, StringComparison.Ordinal);
+            AssertTrue(open >= 0, path + " block found");
+            string block = BlockFrom(text, open);
+            AssertTrue(open + block.Length > call, path + " the classification is inside the block");
+            foreach (string banned in new[] { "TypeByName", "AccessTools", "GetMethod(", "GetField(", "GetType(\"", "Activator" })
+                AssertFalse(block.Contains(banned), path + " per-unit block uses " + banned);
+            if (captured)
+            {
+                int capture = text.LastIndexOf("WlChainContext.Capture()", call, StringComparison.Ordinal);
+                AssertTrue(capture >= 0 && capture < open, path + " captures the context once, before the loop");
+            }
         }
+    }
+
+    // The opener's statement through its matching closing brace.
+    private static string BlockFrom(string text, int start)
+    {
+        int brace = text.IndexOf('{', start);
+        int depth = 0;
+        for (int i = brace; i < text.Length; i++)
+        {
+            if (text[i] == '{') depth++;
+            else if (text[i] == '}' && --depth == 0) return text.Substring(start, i - start + 1);
+        }
+        return text.Substring(start);
+    }
+
+    // The CIC fact comes from the captured context: Capture reads vanilla's
+    // IsCommanderInChief (47475) and every unit's facts start from PlayerFacts.
+    private static void WlChainContextCarriesCicPlayer()
+    {
+        var context = new WlChainContext { WlActive = true, PlayerAlliance = 0, PlayerIsCic = true };
+        var facts = context.PlayerFacts();
+        AssertTrue(facts.WlActive && facts.IsPlayerCic, "player-level facts");
+        facts.IsPlayerAlliance = true;
+        facts.IsPartOfPlayerUnit = true;
+        facts.IsPlayerCampaignGroup = true;
+        AssertEqual(WlChainClass.CicSide, WlChainRules.Classify(in facts), "a CIC context stands the side down, even for the carrying group");
+        var notCic = new WlChainContext { WlActive = true, PlayerAlliance = 0 }.PlayerFacts();
+        AssertFalse(notCic.IsPlayerCic, "not CIC");
+
+        string bridge = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs"));
+        AssertTrue(bridge.Contains("context.PlayerIsCic = DLC_WL.IsCommanderInChief();"), "Capture reads the CIC fact");
+        AssertTrue(bridge.Contains("var facts = context.PlayerFacts();"), "per-unit facts start from the context");
     }
 }

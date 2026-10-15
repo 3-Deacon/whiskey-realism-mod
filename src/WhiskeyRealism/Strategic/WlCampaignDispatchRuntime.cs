@@ -54,7 +54,8 @@ namespace WhiskeyRealism.Strategic
         private static WlMoveSource _moveSource;
         private static readonly HashSet<string> _loggedSignatures = new HashSet<string>(StringComparer.Ordinal);
         private static readonly WlDispatchHistory _history = new WlDispatchHistory();
-        private static readonly WlCorrectionMemory _corrections = new WlCorrectionMemory();
+        private static readonly WlCorrectionMemory<Regiment> _corrections = new WlCorrectionMemory<Regiment>();
+        private static readonly Func<Regiment, bool> QueuedOrderRunning = QueuedOrderRunningOf;
         private static CareerInformationPanel _panel;
         private static bool _terrainResolved;
         private static PropertyInfo _activeTerrain;
@@ -151,7 +152,11 @@ namespace WhiskeyRealism.Strategic
         // #69 UpdateUnitAI Postfix: the vanilla caller has listed the unit by now.
         internal static void Flush()
         {
-            if (_pending.Count == 0) return;
+            if (_pending.Count == 0)
+            {
+                ExpireCorrections();
+                return;
+            }
             try
             {
                 int count = _pending.Count;
@@ -170,7 +175,29 @@ namespace WhiskeyRealism.Strategic
             finally
             {
                 _pending.Clear();
+                ExpireCorrections();
             }
+        }
+
+        // After this pass's executions were matched: drop remembered corrections
+        // whose queued order is gone or that aged out (WlCorrectionMemory).
+        private static void ExpireCorrections()
+        {
+            if (_corrections.Count == 0) return;
+            try
+            {
+                _corrections.Expire(NowDays(), QueuedOrderRunning);
+            }
+            catch (Exception ex)
+            {
+                _corrections.Clear();
+                OnceLog.Warning("wl-campaign-dispatch:expire", "[W&LCampaignDispatch] correction expiry failed: " + ex.Message);
+            }
+        }
+
+        private static bool QueuedOrderRunningOf(Regiment unit)
+        {
+            return (UnityEngine.Object)unit != null && AICampaign.DefensiveMovingOrder.OrderRunning(unit);
         }
 
         // Trigger 2 (WlStrategicOrderBridge): Whiskey's own order to the player's group.
@@ -201,7 +228,7 @@ namespace WhiskeyRealism.Strategic
                 Queued = move.Queued,
                 QueuedStillRunning = move.Queued && AICampaign.DefensiveMovingOrder.OrderRunning(move.Unit),
                 ExecutesSkippedCorrection = !move.Queued && move.Source == WlMoveSource.Other
-                    && _corrections.ConsumeExecution(move.Unit.GetInstanceID(), move.Destination.x, move.Destination.z),
+                    && _corrections.ConsumeExecution(move.Unit, move.Destination.x, move.Destination.z, NowDays()),
                 WasInOffensive = move.WasInOffensive,
                 InOffensive = ListContains(faction, "unitsinoffensiveoperations", move.Unit),
                 InDefensive = ListContains(faction, "unitsindefensiveoperations", move.Unit),
@@ -211,8 +238,7 @@ namespace WhiskeyRealism.Strategic
             string skip = WlCampaignDispatchPolicy.PendingSkipReason(in context);
             if (skip != null)
             {
-                if (move.Source == WlMoveSource.FinalPositions && skip == WlCampaignDispatchPolicy.PositionCorrection)
-                    _corrections.Record(move.Unit.GetInstanceID(), move.Destination.x, move.Destination.z);
+                _corrections.NoteSkip(move.Unit, move.Destination.x, move.Destination.z, NowDays(), in context, skip);
                 LogBounded(VanillaMoveTrigger + ":" + skip,
                     "[W&LCampaignDispatch] trigger=" + VanillaMoveTrigger + " unit=" + SafeName(move.Unit) +
                     " target=" + Fmt(move.Destination) + " action=skip reason=" + skip);

@@ -137,6 +137,12 @@ namespace WhiskeyRealism.Strategic
         public Regiment CommandParent;
         public bool CommandIsCampaignGroup;
 
+        // The player-level facts every unit's classification starts from.
+        internal WlStrategicRoleFacts PlayerFacts()
+        {
+            return new WlStrategicRoleFacts { WlActive = WlActive, IsPlayerCic = PlayerIsCic };
+        }
+
         internal static WlChainContext Capture()
         {
             var context = new WlChainContext { PlayerAlliance = -1 };
@@ -268,7 +274,7 @@ namespace WhiskeyRealism.Strategic
         // reflection (the player-level facts come from the context).
         private static WlStrategicRoleFacts FactsFor(in WlChainContext context, int allianceId, Regiment unit)
         {
-            var facts = new WlStrategicRoleFacts { WlActive = context.WlActive, IsPlayerCic = context.PlayerIsCic };
+            var facts = context.PlayerFacts();
             if (unit == null) return facts;
             try
             {
