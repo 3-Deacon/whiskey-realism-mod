@@ -195,6 +195,30 @@ namespace WhiskeyRealism.Tactical
             return value >= 0 && value <= 2;
         }
 
+        // #44 per-instance shadow. Whiskey's value lives in AIBattle.macroai
+        // only between its Postfix and the next CheckGlobalAIStrategy; before
+        // vanilla runs, the Prefix puts back vanilla's own value captured when
+        // Whiskey overwrote it, so vanilla's pipeline never sees Whiskey's value:
+        //   6388  newmacroaitoset != macroai && timer expired reverts macroai
+        //         (and logs through the ungated Debug.Log in DebugOwnLog 66964)
+        //         -> without the shadow it reverted Whiskey's 1/2 every cycle;
+        //   6438  newmacroaitoset >= 0 && macroai <= 0 re-stamps
+        //         timertosetnewmacroai each cycle, so 6388 never fires again
+        //         -> without the shadow a Whiskey 0 locked vanilla in assault.
+        // When Whiskey has no opinion the Postfix writes nothing, so the value
+        // left is vanilla's own (handed back once; the shadow is consumed).
+        // A value someone else wrote in between (current != written, e.g. the
+        // debug panel at 189257) is left alone.
+        public static int MacroAiRestoreBeforeVanilla(
+            bool shadowActive,
+            int shadowWritten,
+            int shadowVanillaMacro,
+            int currentMacro)
+        {
+            if (!shadowActive || currentMacro != shadowWritten) return NoMacroWrite;
+            return shadowVanillaMacro;
+        }
+
         // XZ part of BattlefieldSetup.GetAngleTerrainPosStatic (26891). The mod
         // assembly does not reference UnityEngine.TerrainModule, so patches use
         // this and sample the height through BattlefieldSetup.GetTerrainHeight.

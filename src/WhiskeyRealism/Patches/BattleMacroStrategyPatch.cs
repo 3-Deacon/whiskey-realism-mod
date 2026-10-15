@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
@@ -29,7 +30,15 @@ namespace WhiskeyRealism.Patches
     //              so the value written here drives this cycle's group stances.
     // The instance macroai is not persisted (only sideinformation.macroai is,
     // sideinfo.dat 74819/74689), so re-asserting it each cycle leaves no trace
-    // in saves. The former BattleMacroAIOverridePatch wrote the persisted
+    // in saves.
+    // Shadow (BattleWriterPolicy.MacroAiRestoreBeforeVanilla): when the
+    // Postfix overwrites macroai it records vanilla's own value per AIBattle;
+    // the Prefix puts that value back before vanilla runs, so vanilla's
+    // 6388/6438 timer logic only ever sees its own state - no per-cycle revert
+    // (and ungated Debug.Log) of Whiskey's 1/2, no assault-0 lock - and when
+    // Whiskey stops having an opinion vanilla's own value simply stays. The
+    // Prefix runs whatever the flags/mode, so turning Whiskey off hands back.
+    // The former BattleMacroAIOverridePatch wrote the persisted
     // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
     // is consumed here as the fallback when the operations ledger has none.
     // Deliberately no reset of sideinformation.macroai: a mid-battle save made
@@ -46,14 +55,40 @@ namespace WhiskeyRealism.Patches
     internal static class BattleMacroStrategyPatch
     {
         private static readonly Dictionary<string, float> _lastLoggedAt = new Dictionary<string, float>();
+        private static readonly ConditionalWeakTable<AIBattle, MacroShadow> _shadows = new ConditionalWeakTable<AIBattle, MacroShadow>();
         private static FieldInfo _bunitsField;
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _receivedFireField;
 
+        private sealed class MacroShadow
+        {
+            public int Written;
+            public int VanillaMacro;
+        }
+
+        [HarmonyPrefix]
+        internal static void Prefix(AIBattle __instance)
+        {
+            using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    if (__instance == null || !_shadows.TryGetValue(__instance, out MacroShadow shadow)) return;
+                    _shadows.Remove(__instance);
+                    int restore = BattleWriterPolicy.MacroAiRestoreBeforeVanilla(true, shadow.Written, shadow.VanillaMacro, __instance.macroai);
+                    if (restore != BattleWriterPolicy.NoMacroWrite) __instance.macroai = restore;
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-macro:restore-failed", "Tactical macro shadow restore failed: " + ex.Message);
+                }
+            }
+        }
+
         [HarmonyPostfix]
         internal static void Postfix(AIBattle __instance)
         {
-            using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy.postfix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 if (!Enabled() || __instance == null) return;
 
@@ -124,6 +159,8 @@ namespace WhiskeyRealism.Patches
             if (write == BattleWriterPolicy.NoMacroWrite) return;
 
             battle.macroai = write;
+            _shadows.Remove(battle);
+            _shadows.Add(battle, new MacroShadow { Written = write, VanillaMacro = vanillaMacro });
             LogWrite(allianceId, vanillaMacro, write, ledgerOpinion, doctrineOpinion, source);
         }
 

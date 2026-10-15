@@ -16,6 +16,8 @@ internal static class BattleWriterFixTests
         MacroAiSkipsWhenAlreadyAligned();
         MacroAiEarlyGateMatchesResolver();
         MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange();
+        MacroAiShadowHandsBackVanillaValueOnce();
+        MacroAiShadowKeepsVanillaOffWhiskeyValue();
         VanillaAnglePointMatchesGetAngleTerrainPos();
         VanillaAnglePointXYMatchesGetAngleTerrainPosXY();
         B8MapsWithdrawalDecisionsToVanillaFallbackShapes();
@@ -87,6 +89,58 @@ internal static class BattleWriterFixTests
         TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, current: 2, wlPlayerSide: true, wlPlayerIsCic: true), "player CIC");
         TestHarness.AssertEqual(2, Macro(doctrine: 2, current: 1, pending: 2), "AI side keeps the doctrine fallback");
         Pass("battle writers: macroai on the W&L player side only writes a genuine ledger change");
+    }
+
+    // One #44 cycle against the shadow: the Prefix restore (the value vanilla
+    // starts from is checked against seenByVanilla), vanilla moving to
+    // vanillaOwn, then the Postfix write. Returns the macroai left.
+    private static int MacroCycle(ref bool shadow, ref int written, ref int shadowVanilla, int current, int seenByVanilla, int vanillaOwn, int ledger)
+    {
+        int restore = BattleWriterPolicy.MacroAiRestoreBeforeVanilla(shadow, written, shadowVanilla, current);
+        shadow = false;
+        int beforeVanilla = restore != BattleWriterPolicy.NoMacroWrite ? restore : current;
+        TestHarness.AssertEqual(seenByVanilla, beforeVanilla, "vanilla starts from its own value");
+        int write = Macro(ledger: ledger, current: vanillaOwn);
+        if (write == BattleWriterPolicy.NoMacroWrite) return vanillaOwn;
+        shadow = true;
+        written = write;
+        shadowVanilla = vanillaOwn;
+        return write;
+    }
+
+    // 6438 re-stamps timertosetnewmacroai while newmacroaitoset >= 0 &&
+    // macroai <= 0, so a Whiskey 0 seen by vanilla never reverts at 6388. The
+    // shadow hands vanilla's own value back the first cycle Whiskey has no
+    // opinion, and only once.
+    private static void MacroAiShadowHandsBackVanillaValueOnce()
+    {
+        bool shadow = false;
+        int written = 0, shadowVanilla = 0;
+        TestHarness.AssertEqual(0, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 1, seenByVanilla: 1, vanillaOwn: 1, ledger: 0), "whiskey writes assault");
+        TestHarness.AssertEqual(1, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 0, seenByVanilla: 1, vanillaOwn: 1, ledger: -1), "no opinion hands back vanilla's 1");
+        TestHarness.AssertFalse(shadow, "shadow consumed");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(false, 0, 1, 1), "never wrote: nothing restored");
+        TestHarness.AssertEqual(-1,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(true, 2, -1, 2), "vanilla's unset -1 comes back as vanilla had it");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(true, 0, 1, 3), "foreign write (debug 189257) left alone");
+        Pass("battle writers: #44 shadow hands vanilla's own macroai back once");
+    }
+
+    // 6388 reverts macroai to newmacroaitoset once the timer expires; with the
+    // shadow vanilla only ever sees its own value, so Whiskey's 2 is not
+    // reverted (and re-logged) every cycle while vanilla's own state advances.
+    private static void MacroAiShadowKeepsVanillaOffWhiskeyValue()
+    {
+        bool shadow = false;
+        int written = 0, shadowVanilla = 0;
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 1, seenByVanilla: 1, vanillaOwn: 1, ledger: 2), "cycle 1");
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 1, vanillaOwn: 1, ledger: 2), "cycle 2: vanilla sees 1, whiskey keeps 2");
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 1, vanillaOwn: 0, ledger: 2), "vanilla's own transition is tracked");
+        TestHarness.AssertEqual(0, shadowVanilla, "shadow follows vanilla's own value");
+        TestHarness.AssertEqual(0, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 0, vanillaOwn: 0, ledger: -1), "hand back the value vanilla reached");
+        Pass("battle writers: #44 shadow keeps vanilla's pipeline off Whiskey's value");
     }
 
     // CheckGlobalAIStrategy 6355/6362: startoffallback is stamped only on
