@@ -87,5 +87,94 @@ namespace WhiskeyRealism.Tactical
         {
             return value >= 0 && value <= 2;
         }
+
+        // XZ part of BattlefieldSetup.GetAngleTerrainPosStatic (26891). The mod
+        // assembly does not reference UnityEngine.TerrainModule, so patches use
+        // this and sample the height through BattlefieldSetup.GetTerrainHeight.
+        // (Vanilla also clamps to the terrain bounds; callers move < 1 km.)
+        public static void AnglePointXZ(float x, float z, float angleDegrees, float distance, out float outX, out float outZ)
+        {
+            double a = (angleDegrees - 90.0) * System.Math.PI / 180.0;
+            outX = (float)(x + System.Math.Cos(a) * distance);
+            outZ = (float)(z - System.Math.Sin(a) * distance);
+        }
+
+        // XZ part of BattlefieldSetup.GetAngleTerrainPosXYStatic (26937).
+        public static void AnglePointXYXZ(
+            float x,
+            float z,
+            float angleDegrees,
+            float distanceX,
+            float distanceZ,
+            out float outX,
+            out float outZ)
+        {
+            double a = (angleDegrees - 90.0) * System.Math.PI / 180.0;
+            double b = angleDegrees * System.Math.PI / 180.0;
+            outX = (float)(x - System.Math.Cos(a) * distanceZ - System.Math.Cos(b) * distanceX);
+            outZ = (float)(z + System.Math.Sin(a) * distanceZ + System.Math.Sin(b) * distanceX);
+        }
+
+        // #60: BattleUnits.SetGroupFormation (92044-92058) treats targetpos as
+        // the line front and places the HQ at
+        // GetAngleTerrainPosXY(targetpos, rot, 0, groupdepth + groupunitdistancetoback);
+        // with a default targetpos it derives the front from the HQ with the
+        // negated offset. A corrected HQ position must be converted the same way
+        // or the whole group shifts forward by depth + back.
+        public static void DeploymentLineFrontFromHq(
+            float hqX,
+            float hqZ,
+            float facingDegrees,
+            float groupDepth,
+            float groupUnitDistanceToBack,
+            out float frontX,
+            out float frontZ)
+        {
+            AnglePointXYXZ(hqX, hqZ, facingDegrees, 0f, -(groupDepth + groupUnitDistanceToBack), out frontX, out frontZ);
+        }
+
+        // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
+        // commits a reserve when an attached unit (unittyp <= 2, no paths, not
+        // routed) is outflanked (1|5 left, 2|6 right) on a side its own flank
+        // unit (ownonflank) does not cover. Otherwise it returns before writing,
+        // so there is nothing to snapshot or deny.
+        public static bool IsEndangeredForReserveSupport(
+            int unitTyp,
+            int regimentPaths,
+            bool routed,
+            int outflanked,
+            int ownOnFlank)
+        {
+            if (unitTyp > 2 || regimentPaths > 0 || routed || outflanked <= 0) return false;
+            if ((outflanked == 1 || outflanked == 5) && ownOnFlank != 1) return true;
+            return (outflanked == 2 || outflanked == 6) && ownOnFlank != 2;
+        }
+
+        // CheckUseOfReserves 6121: the support unit vanilla may send is
+        // unittyp <= 1, idle, not routed, not outflanked and not engaged (the
+        // distance/cover/W&L terms only narrow this set further).
+        public static bool IsReserveSupportCandidate(
+            int unitTyp,
+            int regimentPaths,
+            bool routed,
+            int outflanked,
+            bool inEngagement)
+        {
+            return unitTyp <= 1 && regimentPaths <= 0 && !routed && outflanked <= 0 && !inEngagement;
+        }
+
+        // Vanilla's RegimentSetPath(newpath: true) (6170 -> 130836) runs
+        // StopRegiment(manualstop: true), which removes the unit from pontoon /
+        // obstacle construction and re-forms it out of march column through
+        // ChangeRegimentFormation. A field snapshot cannot undo those, so the
+        // gate only rolls back units where they could not have happened.
+        public static bool ReserveRollbackIsSafe(
+            bool hasPontoonConstruction,
+            bool hasObstacleConstruction,
+            int formation,
+            int lastFormation)
+        {
+            return !hasPontoonConstruction && !hasObstacleConstruction && formation == lastFormation;
+        }
     }
 }
