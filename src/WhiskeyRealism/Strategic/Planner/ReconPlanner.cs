@@ -62,7 +62,10 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const int BeliefExpireDays = 30;      // G1 EnemyArmyModel.ExpireDays
         internal const float PicketHoldRatio = 0.6f;   // G3 TheaterPlanner.HoldRatio (G4's hold need)
 
-        private const float ProbeStaleConfidence = 0.5f;
+        // A belief below this is stale: it sends a probe, and the probe's verdict never escalates on it.
+        internal const float ProbeStaleConfidence = ContactEvidenceLedger.MinEscalationConfidence;
+        // The reasons of the tasks that exist because an approach is unwatched (the [Recon] row counts them).
+        internal const string ReasonMainAxis = "main-axis", ReasonCapitalApproach = "capital-approach", ReasonFrontApproach = "front-approach";
         private const float SampleSpacingFraction = 0.5f; // approach samples, of the sight radius
         private const float SameSpotFraction = 0.5f;      // screens closer than this share one post
         private const float StandoffStepFraction = 0.25f; // pull-back step, of the standoff
@@ -198,7 +201,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var m = ctx.Main;
 
             if (ctx.Unwatched(m.FrontX, m.FrontZ, m.TargetX, m.TargetZ))
-                TryAdd(ctx, into, ReconKind.Screen, m.Sector, m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, PriorityMainAxis, "main-axis");
+                TryAdd(ctx, into, ReconKind.Screen, m.Sector, m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, PriorityMainAxis, ReasonMainAxis);
 
             if (ProbeWanted(ctx))
             {
@@ -229,13 +232,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     float d = Distance(ctx.S.CapitalX, ctx.S.CapitalZ, tx, tz);
                     TryAdd(ctx, into, ReconKind.Screen, -1, ctx.S.CapitalX, ctx.S.CapitalZ, tx, tz,
-                        PriorityCapitalApproach + 0.5f / (1f + d / scale), "capital-approach");
+                        PriorityCapitalApproach + 0.5f / (1f + d / scale), ReasonCapitalApproach);
                 }
                 if (ctx.HasMain && ctx.Unwatched(ctx.Main.FrontX, ctx.Main.FrontZ, tx, tz))
                 {
                     float d = Distance(ctx.Main.FrontX, ctx.Main.FrontZ, tx, tz);
                     TryAdd(ctx, into, ReconKind.Screen, -1, ctx.Main.FrontX, ctx.Main.FrontZ, tx, tz,
-                        PriorityFrontApproach + 0.5f / (1f + d / scale), "front-approach");
+                        PriorityFrontApproach + 0.5f / (1f + d / scale), ReasonFrontApproach);
                 }
             }
         }
@@ -405,14 +408,20 @@ namespace WhiskeyRealism.Strategic.Planner
             m.Sector = plan.MainSectorId;
             m.TargetX = target.TargetX;
             m.TargetZ = target.TargetZ;
-            m.RequiredRatio = plan.MainRequiredRatio > 0f ? plan.MainRequiredRatio
-                            : target.RequiredRatio > 0f ? target.RequiredRatio : s.OffensiveDominance;
+            m.RequiredRatio = RequiredRatioOf(s, plan, target);
             if (!OwnMean(s, sectors, m.Sector, out m.FrontX, out m.FrontZ) && !NearestOwn(s, m.TargetX, m.TargetZ, out m.FrontX, out m.FrontZ))
                 return false;
             for (int i = 0; i < s.Own.Count; i++)
                 if (InMainBody(s, m, s.Own[i]) && WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain))
                     m.BodyStrength += Math.Max(0f, s.Own[i].Strength);
             return true;
+        }
+
+        // The odds the main effort needs: the plan's, else the sector's own, else vanilla's offensive dominance.
+        internal static float RequiredRatioOf(CampaignSnapshot s, TheaterPlan plan, SectorPlan target)
+        {
+            return plan.MainRequiredRatio > 0f ? plan.MainRequiredRatio
+                 : target.RequiredRatio > 0f ? target.RequiredRatio : s.OffensiveDominance;
         }
 
         private static bool InMainBody(CampaignSnapshot s, in MainEffort m, in FormationRecord f)

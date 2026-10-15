@@ -37,7 +37,8 @@ namespace WhiskeyRealism.Strategic
             PersonalityVector personality,
             IReadOnlyList<BattleHistoryRecord> battleHistory,
             float localOwnStrength,
-            float localEnemyStrength)
+            float localEnemyStrength,
+            float localEnemyConfidence01)
         {
             int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
@@ -59,6 +60,7 @@ namespace WhiskeyRealism.Strategic
                 // theater sector (one probe formation vs. a theater total always withdrew).
                 CurrentEnemyStrength = target.HasValue ? localEnemyStrength : -1f,
                 CurrentFriendlyStrength = target.HasValue ? localOwnStrength : -1f,
+                BeliefConfidence01 = localEnemyConfidence01,
                 Options = OperationalTempoDoctrine.For(
                     allianceId,
                     era,
@@ -107,6 +109,7 @@ namespace WhiskeyRealism.Strategic
                     TargetPosition = target.Value,
                     CurrentEnemyStrength = input.CurrentEnemyStrength,
                     CurrentFriendlyStrength = input.CurrentFriendlyStrength,
+                    BeliefConfidence01 = localEnemyConfidence01,
                     PreviousObservedEnemyStrength = previous?.LastObservedEnemyStrength ?? 0f,
                     EnemyReactionMultiplier = input.Options.EnemyReactionMultiplier,
                     EscalateFriendlyRatio = input.Options.EscalateFriendlyRatio,

@@ -44,6 +44,7 @@ internal static class StrategicOperationsTests
             ("operational probe assigns one bounded same-area formation", OperationalProbeAssignsOneBoundedSameAreaFormation),
             ("operational probe pauses on enemy reaction", OperationalProbePausesOnEnemyReaction),
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
+            ("operational probe stale belief cannot escalate", OperationalProbeStaleBeliefCannotEscalate),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
             ("operational probe escalates with support package", OperationalProbeEscalatesWithSupportPackage),
@@ -487,6 +488,35 @@ internal static class StrategicOperationsTests
 
         AssertEqual(OperationalProbeDecision.Escalate, output.Decision);
         AssertEqual(true, output.RequiresMassCommitment);
+    }
+
+    // G1b runtime step: the surviving probe layer reads beliefs, whose strength is confidence-weighted, so a
+    // decayed army reads small. The same fixture that escalates on a current picture holds on a stale one.
+    private static void OperationalProbeStaleBeliefCannotEscalate()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 104;
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 4000f;
+        input.CurrentFriendlyStrength = 9000f;
+        AssertEqual(OperationalProbeDecision.Escalate, OperationalProbeLedger.Build(input).Decision);
+
+        input.BeliefConfidence01 = ContactEvidenceLedger.MinEscalationConfidence - 0.01f;
+        var stale = OperationalProbeLedger.Build(input);
+        AssertTrue(stale.Decision != OperationalProbeDecision.Escalate, "a stale belief must not escalate");
+        AssertFalse(stale.RequiresMassCommitment, "and commits no mass");
+
+        input.CurrentEnemyStrength = 100000f;
+        input.BeliefConfidence01 = 0.1f;
+        AssertEqual(OperationalProbeDecision.Withdraw, OperationalProbeLedger.Build(input).Decision);
     }
 
     private static void OperationalProbeRefusesCriticalHoldDonor()

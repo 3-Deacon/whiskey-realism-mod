@@ -24,6 +24,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public int IssuedDay;
         public int LastContactDay; // -1 never
         public string Reason;
+        // The confidence-weighted enemy strength near the objective at the probe's last verdict (the
+        // reference for the enemy-reaction test); -1 before the first look. Probes only.
+        public float ObservedEnemyStrength;
     }
 
     // One alliance's recon missions (plan § G1b), written only inside the daily review: OnReview
@@ -56,6 +59,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private const float ArrivalSightFraction = 0.25f;
 
         private readonly List<ReconMission> _missions = new List<ReconMission>();
+        private readonly List<int> _kept = new List<int>(); // Sync's scratch, so a steady review allocates nothing
         private int _nextMissionId = 1;
 
         public IReadOnlyList<ReconMission> Missions => _missions;
@@ -63,7 +67,8 @@ namespace WhiskeyRealism.Strategic.Planner
         public void Sync(CampaignSnapshot s, IReadOnlyList<ReconTask> tasks, Allocation a)
         {
             if (s == null || a == null) return;
-            var kept = new List<int>();
+            var kept = _kept;
+            kept.Clear();
             for (int i = 0; i < a.Assignments.Count; i++)
             {
                 var assignment = a.Assignments[i];
@@ -104,12 +109,15 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The probe's ContactEvidenceLedger verdict (fed by beliefs and battle history).
-        internal void OnProbeContact(int instanceId, ContactEvidenceOutput evidence, int daySerial)
+        // observedEnemyStrength (>= 0) is the strength this verdict was judged on; it becomes the next
+        // verdict's reference for the enemy-reaction test.
+        internal void OnProbeContact(int instanceId, ContactEvidenceOutput evidence, int daySerial, float observedEnemyStrength = -1f)
         {
             if (evidence == null) return;
             int i = ActiveIndexOf(instanceId);
             if (i < 0 || _missions[i].Kind != ReconKind.Probe) return;
             var m = _missions[i];
+            if (observedEnemyStrength >= 0f) m.ObservedEnemyStrength = observedEnemyStrength;
             if (evidence.Evidence != ContactEvidence.NoContact) m.LastContactDay = daySerial;
             if (evidence.AllowsEscalation)
             {
@@ -287,7 +295,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 State = ReconState.Assigned,
                 IssuedDay = s.DaySerial,
                 LastContactDay = -1,
-                Reason = task.Reason
+                Reason = task.Reason,
+                ObservedEnemyStrength = -1f
             };
             _missions.Add(mission);
             return mission.MissionId;

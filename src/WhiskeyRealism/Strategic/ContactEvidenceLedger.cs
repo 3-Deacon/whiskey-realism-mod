@@ -29,6 +29,8 @@ namespace WhiskeyRealism.Strategic
         public float SpatialMaxDistance;
         public int CurrentDaySerial;
         public int WithinDays = 7;
+        // How current the beliefs behind CurrentEnemyStrength are (EnemyBeliefQuery.ConfidenceWithin).
+        public float BeliefConfidence01 = 1f;
     }
 
     internal sealed class ContactEvidenceOutput
@@ -40,7 +42,22 @@ namespace WhiskeyRealism.Strategic
 
     internal static class ContactEvidenceLedger
     {
+        // Below this a stale picture cannot clear a probe: the enemy strength is a confidence-weighted
+        // belief, so a decayed army reads smaller than it was. Withdrawing is never gated.
+        internal const float MinEscalationConfidence = 0.5f;
+
         internal static ContactEvidenceOutput Build(ContactEvidenceInput input)
+        {
+            var output = Classify(input);
+            if (input != null && output.AllowsEscalation && !(input.BeliefConfidence01 >= MinEscalationConfidence))
+            {
+                output.AllowsEscalation = false;
+                output.Reason += "-stale-belief";
+            }
+            return output;
+        }
+
+        private static ContactEvidenceOutput Classify(ContactEvidenceInput input)
         {
             var output = new ContactEvidenceOutput();
             if (input == null) return Reject(output, ContactEvidence.NoContact, "missing-input");

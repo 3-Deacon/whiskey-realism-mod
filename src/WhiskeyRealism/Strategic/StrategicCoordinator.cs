@@ -955,7 +955,7 @@ namespace WhiskeyRealism.Strategic
                     int battleDay = battle.Year * 372 + battle.Month * 31 + battle.Day;
                     if (battleDay > lastEngagementDay) lastEngagementDay = battleDay;
                 }
-                ReadLocalForceBalance(alliance, targetPos.Value, radius, out localOwn, out localEnemy);
+                ReadLocalForceBalance(alliance, targetPos.Value, radius, out localOwn, out localEnemy, out _);
             }
 
             var input = new PhaseTruthInput
@@ -1058,33 +1058,38 @@ namespace WhiskeyRealism.Strategic
             return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
-        // Sums own / enemy campaign strength (groupstrengthactive, same field FrontSectorRuntime
-        // reads) for units of this alliance's AIFaction ownunits/enemyunits lists within
-        // `radius` of `center`. Zeroes on any reflection failure.
-        private static void ReadLocalForceBalance(int alliance, Vector3 center, float radius, out float own, out float enemy)
+        // Own / enemy campaign strength within `radius` of `center`. Own: groupstrengthactive of this
+        // alliance's AIFaction ownunits (same field FrontSectorRuntime reads). Enemy: the side's
+        // fog-honest beliefs (G1: confidence-weighted strength, last-seen positions), never vanilla's
+        // omniscient enemyunits; enemyConfidence01 says how current that picture is (1 when nothing is
+        // remembered there) so a stale belief cannot clear a probe (ContactEvidenceLedger). The own
+        // sum zeroes on any reflection failure.
+        private static void ReadLocalForceBalance(int alliance, Vector3 center, float radius,
+                                                  out float own, out float enemy, out float enemyConfidence01)
         {
             own = 0f;
             enemy = 0f;
+            enemyConfidence01 = 1f;
             try
             {
+                var beliefs = EnemyDetectionRuntime.BeliefsFor(alliance);
+                enemy = EnemyBeliefQuery.StrengthWithin(beliefs, center.x, center.z, radius);
+                enemyConfidence01 = EnemyBeliefQuery.ConfidenceWithin(beliefs, center.x, center.z, radius);
                 int index = ResolveAifactionIndexForAlliance(alliance);
                 if (index < 0) return;
                 var faction = AICampaignReflect.GetFaction(index);
                 if (faction == null) return;
                 var factionType = faction.GetType();
                 if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
-                {
                     _ownUnitsField = AccessTools.Field(factionType, "ownunits");
-                    _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
-                }
                 own = SumStrengthWithin(_ownUnitsField?.GetValue(faction) as IList, center, radius);
-                enemy = SumStrengthWithin(_enemyUnitsField?.GetValue(faction) as IList, center, radius);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("coordinator:local-force", "[Coordinator] local force read failed: " + ex.Message);
                 own = 0f;
                 enemy = 0f;
+                enemyConfidence01 = 1f;
             }
         }
 
@@ -1107,7 +1112,6 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static FieldInfo _ownUnitsField;
-        private static FieldInfo _enemyUnitsField;
 
         private static bool ShouldLogStrategicPerf(double elapsedMs)
         {
@@ -1536,13 +1540,13 @@ namespace WhiskeyRealism.Strategic
                 int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
                 var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
                 int legacySerial = year * 372 + month * 31 + day;
-                float localOwn = 0f, localEnemy = 0f;
+                float localOwn = 0f, localEnemy = 0f, localEnemyConfidence = 1f;
                 if (targetPosition.HasValue)
                 {
                     HistoricalOperationProfile profile = null;
                     if (!string.IsNullOrEmpty(cic?.ActivePlan?.OperationId))
                         HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out profile);
-                    ReadLocalForceBalance(alliance, targetPosition.Value, HistoricalOperationContextBuilder.NearTargetRadius(profile), out localOwn, out localEnemy);
+                    ReadLocalForceBalance(alliance, targetPosition.Value, HistoricalOperationContextBuilder.NearTargetRadius(profile), out localOwn, out localEnemy, out localEnemyConfidence);
                 }
                 var eraManager = alliance < _work.Eras.Length ? _work.Eras[alliance] : null;
                 EraStage era = eraManager != null ? eraManager.Stage : EraStage.Amateur1861;
@@ -1562,7 +1566,8 @@ namespace WhiskeyRealism.Strategic
                     personality,
                     BattleHistory,
                     localOwn,
-                    localEnemy);
+                    localEnemy,
+                    localEnemyConfidence);
 
                 var posture = _work.DirectorMemories[alliance]?.LastPosture;
                 if (posture != null)

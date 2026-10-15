@@ -65,7 +65,7 @@ namespace WhiskeyRealism.Strategic
                     CorpsAttackRatio      = Clamp(1.2f  + (posture?.MassRatioModifier   ?? 0f), 1.00f, 1.50f),
                     ArmyAttackRatio       = Clamp(1.05f + (posture?.MassRatioModifier   ?? 0f), 0.90f, 1.30f)
                 };
-                return FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey, options);
+                return FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey, options, CampaignPlannerRuntime.ReconFilterFor(allianceId));
             }
             catch (Exception ex)
             {

@@ -27,6 +27,29 @@ namespace WhiskeyRealism.Strategic.Planner
             return total;
         }
 
+        // How current the believed strength within radius of (x, z) is: the Strength-weighted mean of
+        // Confidence01 over the live beliefs there, 1 when there is none (nothing remembered, nothing
+        // stale). StrengthWithin is confidence-weighted, so a decayed army reads as a small one; this is
+        // the other half of that picture (ContactEvidenceLedger refuses to escalate on a low value).
+        public static float ConfidenceWithin(IReadOnlyList<EnemyBelief> b, float x, float z, float radius)
+        {
+            if (b == null || radius < 0f) return 1f;
+            float radiusSq = radius * radius;
+            float strength = 0f, weighted = 0f;
+            for (int i = 0; i < b.Count; i++)
+            {
+                var belief = b[i];
+                if (!IsLive(belief)) continue;
+                float dx = belief.X - x;
+                float dz = belief.Z - z;
+                if (dx * dx + dz * dz > radiusSq) continue;
+                float s = Math.Max(0f, belief.Strength);
+                strength += s;
+                weighted += s * Math.Min(1f, belief.Confidence01);
+            }
+            return strength > 0f ? weighted / strength : 1f;
+        }
+
         // Index of the nearest live belief, -1 (distance float.MaxValue) when there is none.
         public static int Nearest(IReadOnlyList<EnemyBelief> b, float x, float z, out float distance)
         {
