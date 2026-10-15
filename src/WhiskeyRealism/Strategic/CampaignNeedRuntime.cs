@@ -10,7 +10,7 @@ namespace WhiskeyRealism.Strategic
     // degrades to its neutral default on failure with one bounded warning.
     internal static class CampaignNeedRuntime
     {
-        internal static NeedSnapshot Read(int alliance, EraStage era, FiscalInput fiscalInput, FiscalOutput fiscalOutput,
+        internal static NeedSnapshot Read(int alliance, EraStage era, int day, int month, int year, FiscalInput fiscalInput, FiscalOutput fiscalOutput,
             bool emergencyCredit, bool emergencyManpower)
         {
             var s = new NeedSnapshot
@@ -32,6 +32,8 @@ namespace WhiskeyRealism.Strategic
                     + Math.Abs(fiscalInput.SupplyDepotPurchases);
                 s.SupplyPressure = fiscalInput.SupplyPressure;
             }
+
+            ReadElection(s, day, month, year);
 
             try
             {
@@ -61,6 +63,23 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning("campaign-need:read", "[CampaignNeedRuntime] alliance state read failed: " + ex.Message);
             }
             return s;
+        }
+
+        // The 1864 election (ElectionMorale): live while vanilla's objective 26 is not deactivated,
+        // which it is outside chapter 2 and its dates (IsDeactivated 178914-178946). The line is
+        // vanilla's own pref. Stays unset (no election) when the objective is not live.
+        private static void ReadElection(NeedSnapshot s, int day, int month, int year)
+        {
+            try
+            {
+                if (CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId)) return;
+                s.ElectionMoraleThreshold = GamePrefs.lincolnmaintainmoraleabove;
+                s.ElectionDaysToVerdict = ElectionMorale.DaysToVerdict(day, month, year);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-need:election", "[CampaignNeedRuntime] election objective read failed (no election pressure this review): " + ex.Message);
+            }
         }
 
         // Same count vanilla's recruiting-emergency test uses (GetAIPersonality 62716-62731):

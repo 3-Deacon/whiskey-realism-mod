@@ -734,7 +734,7 @@ internal static class DailyReviewSchedulerTests
             "UpdateCampaignMapLedger(d.Day, d.LogHeartbeat, d.WeeklyCatchUp)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: true)",
-            "UpdatePolicyPlan(alliance, a.Era.Stage, d.ReviewSerial)",
+            "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial)",
             "frontChanged = UpdateFrontLedger(alliance, a.Cic)",
             "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.DaySerial;",
             "a.FrontChanged = frontChanged;",

@@ -568,7 +568,7 @@ namespace WhiskeyRealism.Strategic
                 if (job.Kind == DailyReviewJobKind.Fiscal)
                     d.FiscalMs += Measure(() => UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false));
                 else if (job.Kind == DailyReviewJobKind.Policy)
-                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.ReviewSerial));
+                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial));
                 return;
             }
             if (a.Mode != AllianceReviewMode.Ai) return;
@@ -582,7 +582,7 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Policy:
                     if (ready)
-                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.ReviewSerial));
+                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial));
                     break;
 
                 case DailyReviewJobKind.Front:
@@ -1341,16 +1341,20 @@ namespace WhiskeyRealism.Strategic
         // and posture it reuses, and only once AICampaign.aifaction exists (vanilla
         // GetAIPersonality 62716 can reach GetStrengthRatio, which indexes it). Spec
         // docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
-        private void UpdatePolicyPlan(int alliance, EraStage era, int reviewSerial)
+        private void UpdatePolicyPlan(int alliance, EraStage era, int day, int month, int year, int reviewSerial)
         {
             using (TelemetryPerf.Scope("campaign.policy-plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdatePolicyPlanCore(alliance, era, reviewSerial);
+                UpdatePolicyPlanCore(alliance, era, day, month, year, reviewSerial);
         }
 
-        private void UpdatePolicyPlanCore(int alliance, EraStage era, int reviewSerial)
+        private void UpdatePolicyPlanCore(int alliance, EraStage era, int day, int month, int year, int reviewSerial)
         {
             int[] personality = PolicyRuntime.ReadPersonalityList(alliance, out bool emergencyCredit, out bool emergencyManpower);
-            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
+            var snapshot = CampaignNeedRuntime.Read(alliance, era, day, month, year, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
+            float electionBoost = CampaignNeedBuilder.ElectionBoost(snapshot);
+            if (electionBoost > 0f)
+                OnceLog.Info("campaign-need:election-pressure",
+                    $"[CampaignNeed] election pressure alliance={alliance} daysToVerdict={snapshot.ElectionDaysToVerdict} morale={snapshot.NationalMorale:F2} line={snapshot.ElectionMoraleThreshold:F2} boost={electionBoost:F2}");
             int days = _needDaySerial[alliance] >= 0 ? reviewSerial - _needDaySerial[alliance] : 1;
             var previous = _work.Needs[alliance];
             var need = CampaignNeedBuilder.Next(previous, snapshot, days);

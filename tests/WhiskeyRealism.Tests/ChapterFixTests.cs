@@ -1,5 +1,6 @@
 using System;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Policies;
 using static TestHarness;
 
 // Chapter fixes (docs/superpowers/plans/2026-10-15-chapters.md): the late-war era stage follows
@@ -25,6 +26,15 @@ internal static class ChapterFixTests
             ("chapter project window uses the calendar year for a project dated 1864", ProjectDatedYearWindowUsesTheCalendar),
             ("chapter project window flags a project dated 1864 before 1864", ProjectDatedBeforeItsYearIsOutOfWindow),
             ("chapter project selection patch reads the campaign year once and hands it to the facts", ProjectPatchPassesTheCampaignYear),
+            ("chapter election countdown counts days to the 9 Nov 1864 verdict", ElectionCountsDaysToTheVerdict),
+            ("chapter election countdown ends after the verdict day and for bad dates", ElectionCountdownEndsAfterVerdictAndForBadDates),
+            ("chapter election boost grows as the deadline nears", ElectionBoostGrowsTowardTheDeadline),
+            ("chapter election boost needs a morale shortfall and an open ramp", ElectionBoostNeedsShortfallAndOpenRamp),
+            ("chapter election boost ignores non-finite input", ElectionBoostIgnoresNonFiniteInput),
+            ("chapter election pressure raises the union morale need only", ElectionRaisesTheUnionMoraleNeedOnly),
+            ("chapter election pressure stays in unit range and off without a verdict day", ElectionNeedStaysInRangeAndOffWithoutVerdict),
+            ("chapter election pressure reaches the policy score of a morale policy", ElectionReachesThePolicyScore),
+            ("chapter election runtime reads objective 26 and threads the review date", ElectionRuntimeWiring),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -185,5 +195,107 @@ internal static class ChapterFixTests
         AssertContains(src, "int campaignYear = ReadCampaignYear();", "read once per selection");
         AssertContains(src, "projectId => BuildRuntimeFacts(projectId, subsidyType, alliance, campaignYear),", "handed to every facts read");
         AssertContains(src, "CampaignYear = campaignYear", "stored on the facts");
+    }
+
+    // ---- election pressure (objective 26, 179386-179418) ----
+
+    private static void ElectionCountsDaysToTheVerdict()
+    {
+        // Vanilla measures morale while the date is before 9 Nov 1864 + 1 day (179393-179394), so
+        // 9 Nov is the last measured day.
+        AssertEqual(0, ElectionMorale.DaysToVerdict(9, 11, 1864), "verdict day");
+        AssertEqual(8, ElectionMorale.DaysToVerdict(1, 11, 1864), "1 Nov");
+        AssertEqual(161, ElectionMorale.DaysToVerdict(1, 6, 1864), "1 Jun");
+    }
+
+    private static void ElectionCountdownEndsAfterVerdictAndForBadDates()
+    {
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(10, 11, 1864), "day after the verdict");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(1, 1, 1865), "1865");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(0, 0, 0), "vanilla cannot say");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(31, 2, 1864), "no 31 Feb");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(1, 13, 1864), "month 13");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.DaysToVerdict(1, 6, 10000), "year out of DateTime range");
+        AssertTrue(ElectionMorale.DaysToVerdict(29, 2, 1864) > 0, "1864 is a leap year");
+    }
+
+    private static void ElectionBoostGrowsTowardTheDeadline()
+    {
+        AssertNear(0.2f, ElectionMorale.Boost(0.45f, 0.5f, 0), 1e-5f, "verdict day, 0.45 against 0.50 (+0.05 margin)");
+        AssertNear(0.1f, ElectionMorale.Boost(0.45f, 0.5f, ElectionMorale.RampDays / 2), 1e-5f, "half the ramp left");
+        float far = ElectionMorale.Boost(0.45f, 0.5f, 100);
+        float near = ElectionMorale.Boost(0.45f, 0.5f, 10);
+        AssertTrue(near > far && far > 0f, "closer is stronger");
+        AssertEqual(ElectionMorale.RampDays, 150, "the ramp is Jun-Nov");
+        AssertNear(0.05f, ElectionMorale.SafetyMargin, 1e-6f, "margin pin");
+    }
+
+    private static void ElectionBoostNeedsShortfallAndOpenRamp()
+    {
+        AssertNear(0f, ElectionMorale.Boost(0.45f, 0.5f, ElectionMorale.RampDays), 1e-6f, "ramp opens 150 days out");
+        AssertNear(0f, ElectionMorale.Boost(0.45f, 0.5f, ElectionMorale.RampDays + 40), 1e-6f, "before the ramp");
+        AssertNear(0f, ElectionMorale.Boost(0.45f, 0.5f, ElectionMorale.NoVerdictAhead), 1e-6f, "after the verdict");
+        AssertNear(0f, ElectionMorale.Boost(0.55f, 0.5f, 0), 1e-6f, "at threshold plus margin there is no shortfall");
+        AssertNear(0f, ElectionMorale.Boost(0.9f, 0.5f, 0), 1e-6f, "comfortable");
+        AssertTrue(ElectionMorale.Boost(0.5f, 0.5f, 0) > 0f, "just meeting the threshold still leaves the margin to cover");
+        AssertNear(1f, ElectionMorale.Boost(-1f, 0.5f, 0), 1e-6f, "capped at 1");
+    }
+
+    private static void ElectionBoostIgnoresNonFiniteInput()
+    {
+        AssertNear(0f, ElectionMorale.Boost(float.NaN, 0.5f, 0), 1e-6f, "nan morale");
+        AssertNear(0f, ElectionMorale.Boost(0.4f, float.NaN, 0), 1e-6f, "nan threshold");
+        AssertNear(0f, ElectionMorale.Boost(0.4f, 0f, 0), 1e-6f, "zero threshold");
+        AssertNear(0f, ElectionMorale.Boost(float.NegativeInfinity, float.PositiveInfinity, 0), 1e-6f, "infinite input");
+    }
+
+    private static NeedSnapshot ElectionSnapshot(int alliance, float morale, int daysToVerdict)
+    {
+        return new NeedSnapshot
+        {
+            Alliance = alliance,
+            NationalMorale = morale,
+            ElectionMoraleThreshold = 0.5f,
+            ElectionDaysToVerdict = daysToVerdict
+        };
+    }
+
+    private static void ElectionRaisesTheUnionMoraleNeedOnly()
+    {
+        AssertNear(0.55f, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.45f, ElectionMorale.NoVerdictAhead))[NeedKind.Morale], 1e-5f, "no election pending: 1 - morale");
+        AssertNear(0.75f, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.45f, 0))[NeedKind.Morale], 1e-5f, "Union on the verdict day");
+        AssertNear(0.55f, CampaignNeedBuilder.Raw(ElectionSnapshot(1, 0.45f, 0))[NeedKind.Morale], 1e-5f, "the CSA's morale need is not the election's");
+        AssertNear(0.1f, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.9f, 0))[NeedKind.Morale], 1e-5f, "comfortable morale: no boost");
+    }
+
+    private static void ElectionNeedStaysInRangeAndOffWithoutVerdict()
+    {
+        AssertNear(1f, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.05f, 0))[NeedKind.Morale], 1e-6f, "clamped to 1");
+        var plain = new NeedSnapshot { Alliance = 0, NationalMorale = 0.45f };
+        AssertEqual(ElectionMorale.NoVerdictAhead, plain.ElectionDaysToVerdict, "a snapshot starts with no election");
+        AssertNear(0.55f, CampaignNeedBuilder.Raw(plain)[NeedKind.Morale], 1e-5f, "default snapshot");
+    }
+
+    private static void ElectionReachesThePolicyScore()
+    {
+        // Policy 44 (Abolition of Slavery) meets a Morale need (PolicyEffectCatalog); the plan
+        // consumes the same NeedVector, so the election reaches the pick with no new wiring.
+        var facts = new WhiskeyRealism.Strategic.Policies.PolicyCandidateFacts { PolicyId = 44, IsAct = true, ResearchDuration = 0.1f };
+        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Decisive1863);
+        var calm = WhiskeyRealism.Strategic.Policies.PolicyNeedScorer.Score(
+            facts, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.45f, ElectionMorale.NoVerdictAhead)), new int[0], profile, 0, 0, id => new int[0]);
+        var pressed = WhiskeyRealism.Strategic.Policies.PolicyNeedScorer.Score(
+            facts, CampaignNeedBuilder.Raw(ElectionSnapshot(0, 0.45f, 0)), new int[0], profile, 0, 0, id => new int[0]);
+        AssertTrue(pressed.Need > calm.Need, "the election raises what a morale policy is worth");
+    }
+
+    private static void ElectionRuntimeWiring()
+    {
+        string runtime = Flat("src/WhiskeyRealism/Strategic/CampaignNeedRuntime.cs");
+        AssertContains(runtime, "CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId)", "vanilla decides whether objective 26 is live");
+        AssertContains(runtime, "s.ElectionDaysToVerdict = ElectionMorale.DaysToVerdict(day, month, year);", "countdown from the review's date");
+        AssertContains(runtime, "s.ElectionMoraleThreshold = GamePrefs.lincolnmaintainmoraleabove;", "vanilla's own threshold");
+        string coordinator = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertContains(coordinator, "CampaignNeedRuntime.Read(alliance, era, day, month, year,", "the review date reaches the read");
     }
 }
