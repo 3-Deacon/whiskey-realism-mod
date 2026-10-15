@@ -329,7 +329,7 @@ namespace WhiskeyRealism.Patches
                 TacticalTerrainRuntimeSample centerSample = TacticalTerrainProbe.SampleCenter(regiment, null, position);
                 IReadOnlyList<TacticalTerrainRuntimeSample> footprintSamples = TacticalTerrainProbe.SampleFootprint(regiment, null);
                 bool footprintWater = footprintSamples.Any(sample => sample.Water);
-                TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, position);
+                TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetAssumedEnemyBearing(regiment, position);
 
                 return new TacticalDeploymentGroupSnapshot(
                     snapshot.Key,

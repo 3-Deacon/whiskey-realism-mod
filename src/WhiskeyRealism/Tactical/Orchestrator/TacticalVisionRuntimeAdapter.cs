@@ -650,9 +650,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (battleUnits == null) return Array.Empty<TacticalApproachAvenueObservation>();
 
                 var observations = new List<TacticalApproachAvenueObservation>();
-                AddEntryPointAvenues(battleUnits, observations);
-                AddScheduledArrivalAvenues(battleUnits, observations);
-                AddDeploymentGroupAvenues(battleUnits, observations);
+                BattleTerrainGrid grid = BattleTerrainGrid.Current();
+                AddEntryPointAvenues(battleUnits, grid, observations);
+                AddScheduledArrivalAvenues(battleUnits, grid, observations);
+                AddDeploymentGroupAvenues(battleUnits, grid, observations);
                 return observations.ToArray();
             }
             catch
@@ -663,6 +664,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void AddEntryPointAvenues(
             BattleUnits battleUnits,
+            BattleTerrainGrid grid,
             List<TacticalApproachAvenueObservation> observations)
         {
             EntryPoint[] entryPoints = SafeEntryPoints(battleUnits);
@@ -674,6 +676,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (entryPoint == null) continue;
                 if (!TryEntryPointAvenue(
                     entryPoint,
+                    grid,
                     out TacticalMapPoint origin,
                     out TacticalMapPoint target,
                     out bool roadAnchored,
@@ -698,6 +701,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void AddScheduledArrivalAvenues(
             BattleUnits battleUnits,
+            BattleTerrainGrid grid,
             List<TacticalApproachAvenueObservation> observations)
         {
             IList arrivals = SafeObjectList(battleUnits, "scheduledarrival");
@@ -711,6 +715,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (entryPoint == null) continue;
                 if (!TryEntryPointAvenue(
                     entryPoint,
+                    grid,
                     out TacticalMapPoint origin,
                     out TacticalMapPoint target,
                     out bool roadAnchored,
@@ -737,6 +742,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void AddDeploymentGroupAvenues(
             BattleUnits battleUnits,
+            BattleTerrainGrid grid,
             List<TacticalApproachAvenueObservation> observations)
         {
             IList groups = SafeObjectList(battleUnits, "grp");
@@ -765,13 +771,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     target.Z,
                     0.60f,
                     roadAnchored: false,
-                    crossingAnchored: IsCrossingAnchored(origin, target),
+                    crossingAnchored: AvenueAnchors.CrossingAnchored(grid, origin.X, origin.Z, target.X, target.Z),
                     "deployment-group-" + i));
             }
         }
 
         private static bool TryEntryPointAvenue(
             EntryPoint entryPoint,
+            BattleTerrainGrid grid,
             out TacticalMapPoint origin,
             out TacticalMapPoint target,
             out bool roadAnchored,
@@ -797,7 +804,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 !IsDefaultVector(targetVector))
             {
                 target = new TacticalMapPoint(targetVector.x, targetVector.z);
-                roadAnchored = true;
             }
             else
             {
@@ -806,7 +812,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (!IsUsableMapPoint(origin) || !IsUsableMapPoint(target)) return false;
 
-            crossingAnchored = IsCrossingAnchored(origin, target);
+            // Anchors come from the terrain grid (BC10): road samples along the segment, ford or bridge
+            // cells or a listed crossing near it. A missing grid anchors nothing.
+            roadAnchored = AvenueAnchors.RoadAnchored(grid, origin.X, origin.Z, target.X, target.Z);
+            crossingAnchored = AvenueAnchors.CrossingAnchored(grid, origin.X, origin.Z, target.X, target.Z);
             return true;
         }
 
@@ -1156,25 +1165,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 !float.IsInfinity(point.X) &&
                 !float.IsInfinity(point.Z) &&
                 (Math.Abs(point.X) >= 0.01f || Math.Abs(point.Z) >= 0.01f);
-        }
-
-        private static bool IsCrossingAnchored(TacticalMapPoint origin, TacticalMapPoint target)
-        {
-            if (!IsUsableMapPoint(origin) || !IsUsableMapPoint(target)) return false;
-
-            var originVector = new Vector3(origin.X, 0f, origin.Z);
-            var targetVector = new Vector3(target.X, 0f, target.Z);
-            var midpoint = new Vector3((origin.X + target.X) * 0.5f, 0f, (origin.Z + target.Z) * 0.5f);
-
-            return SafeSearchCrossingTerrain(originVector) ||
-                SafeSearchCrossingTerrain(targetVector) ||
-                SafeSearchCrossingTerrain(midpoint);
-        }
-
-        private static bool SafeSearchCrossingTerrain(Vector3 point)
-        {
-            try { return BattlefieldSetup.SearchTerrainInRangePos(point, new[] { 4, 8 }, 3) != null; }
-            catch { return false; }
         }
 
         internal static bool IsDefaultVector(Vector3 value)

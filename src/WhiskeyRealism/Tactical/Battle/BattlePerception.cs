@@ -41,6 +41,11 @@ namespace WhiskeyRealism.Tactical.Battle
         public float[] ArrivalHours;   // reinforcement rows: ScheduledArrival.durationleft
         public float[] Experience;     // true Experience() of the row (BC8); memory keeps its star value when visible
         public float[] Morale;         // true morale of the row (BC8); memory keeps it when visible
+        // BC10: the row's facing, fire range, cover and standing flag (no paths); memory keeps
+        // them while the row is visible.
+        public float[] Heading, FireRange, CoverValue;
+        public int[] CoverObject;
+        public bool[] Standing;
 
         public static PerceptionProbeResult Create(int capacity)
         {
@@ -67,6 +72,11 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Resize(ref result.ArrivalHours, size);
             Array.Resize(ref result.Experience, size);
             Array.Resize(ref result.Morale, size);
+            Array.Resize(ref result.Heading, size);
+            Array.Resize(ref result.FireRange, size);
+            Array.Resize(ref result.CoverValue, size);
+            Array.Resize(ref result.CoverObject, size);
+            Array.Resize(ref result.Standing, size);
         }
     }
 
@@ -280,6 +290,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 // Fog rule (BC8): only a visible regiment's stars and morale reach memory.
                 memory[index].Experience = probe.IsReinforcement[i] ? 0f : TroopQuality.PerceivedExperience(probe.Experience[i]);
                 memory[index].Morale = probe.IsReinforcement[i] ? 0f : probe.Morale[i];
+                memory[index].Heading = probe.Heading[i];
+                memory[index].FireRange = probe.FireRange[i];
+                memory[index].CoverValue = probe.CoverValue[i];
+                memory[index].CoverObject = probe.CoverObject[i];
+                memory[index].Standing = probe.Standing[i];
             }
 
             int write = 0;

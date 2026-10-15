@@ -106,6 +106,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 unchecked { _tickId++; }
                 BattleSnapshot built = BattleSnapshotBuilder.Build(battle, alliance, reuse, _tickId, TacticalDoctrineTime.NowBattleHours);
                 if (built != null) BattlePerceptionProbe.Probe(built, battle);
+                // The battle's terrain grid exists from the first snapshot (deployment) on.
+                BattleTerrainGridRuntime.Get();
                 _builtFrame[alliance] = frame;
                 _builtBattleKey[alliance] = battleKey;
                 return built;

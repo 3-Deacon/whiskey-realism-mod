@@ -64,7 +64,9 @@ namespace WhiskeyRealism.Tactical.Operations
         private const double FixApproachDistance = 170d;
         private const double ScreenApproachDistance = 235d;
         private const double AssemblyDistance = 210d;
-        private const double ReserveDistance = 425d;
+        // The reserve stand-off and lane: also the deployment reserve echelon's (DeploymentDoctrine).
+        internal const double ReserveDistance = 425d;
+        internal const double ReserveLaneMeters = 90d;
         private const double FallbackDistance = 300d;
         private const double SupportLateral = 180d;
         private const double FixLateral = 160d;
@@ -259,7 +261,7 @@ namespace WhiskeyRealism.Tactical.Operations
         private static double ReserveLane(int commandIndex)
         {
             int side = commandIndex % 2 == 0 ? -1 : 1;
-            return 90d * side;
+            return ReserveLaneMeters * side;
         }
 
         private static float ClampToFloat(double value)

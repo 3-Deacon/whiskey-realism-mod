@@ -34,8 +34,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //     (111408), friendlyroutednear (111158, <= 0 per 128253), pathinterrupted
     //     (111012; set on contact 117330, cleared 117195/123680). Field reads only.
     //   - Charge doctrine inputs (BC6b): lastaichargetime (110798, stamped on an odds
-    //     refusal at 122292), outflanked (111488, UpdateFlanking 122959-123175),
-    //     firefromflank (111492, 123208-123264) and groupaiobject (110820, the AI group
+    //     refusal at 122292), firefromflank (111492, 123208-123264) and groupaiobject (110820, the AI group
     //     ActivateFeud's AddUnitToPool points every descendant at, 116613 / 7637-7648).
     //   - W&L ownership inputs: dlcw_isundercommander (110360, set by
     //     BattleUnits.IsUnitUnderCommander 91168-91222), DLC_WL.IsUnitTakenOver (45840),
@@ -297,8 +296,8 @@ namespace WhiskeyRealism.Tactical.Battle
             record.CoverValue = reg.covervalue;
             record.CoverObject = reg.coverobject;
             record.FriendlyRoutedNear = reg.friendlyroutednear;
+            record.FireRange = reg.firerange;
             record.LastAiChargeTime = reg.lastaichargetime;
-            record.Outflanked = reg.outflanked;
             record.FireFromFlank = reg.firefromflank;
             var aiGroup = reg.groupaiobject;
             record.AiGroupId = aiGroup != null ? aiGroup.GetInstanceID() : 0;

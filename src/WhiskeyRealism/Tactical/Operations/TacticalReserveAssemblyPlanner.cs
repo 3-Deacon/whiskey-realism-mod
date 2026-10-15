@@ -88,7 +88,7 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class TacticalReserveAssemblyPlanner
     {
-        private const float PreferredReserveDistance = 425f;
+        private const float PreferredReserveDistance = (float)TacticalBattleLinePlanner.ReserveDistance;
         private const float DeepReserveDistance = 575f;
         private const float LateralReserveOffset = 180f;
         private const float MinimumBehindObjective = 275f;

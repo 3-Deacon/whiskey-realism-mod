@@ -83,10 +83,15 @@ namespace WhiskeyRealism.Tactical.Battle
         public float CoverValue;
         public int CoverObject;
         public float FriendlyRoutedNear;
+        // BC10, additive: vanilla firerange (the unit's effective fire distance), captured for
+        // own and enemy rows. CoveredCrossings reads an enemy's through its observation.
+        public float FireRange;
         // Charge doctrine inputs (BC6b): lastaichargetime (110798), the battle hour of
         // vanilla's last odds refusal (UpdateChargeTarget 122290-122292; 0 = never), and
-        // outflanked (111488), the flank-sector code UpdateFlanking sets from the unit's
-        // own enemyinrangereg and facing (122959-123175; 0 = not outflanked).
+        // the flank-sector code UpdateFlanking computes (122959-123175; 0 = not outflanked).
+        // BC10: the builder no longer copies vanilla's outflanked (111488), which reads the
+        // unfogged enemyinrangereg; PerceivedFlanking.Apply fills it from the units the side
+        // sees (own rows and Visible enemy rows; every other row reads 0).
         public float LastAiChargeTime;
         public int Outflanked;
         // firefromflank (111492): flank code of fire this unit received recently
@@ -142,6 +147,15 @@ namespace WhiskeyRealism.Tactical.Battle
         // Reinforcement columns carry neither.
         public float Experience;
         public float Morale;
+        // BC10, additive, last seen while Visible (a Remembered entry keeps them; BC8
+        // precedent): the facing (eulerAngles.y), fire range, cover and whether the
+        // regiment stood still (no paths). CoveredCrossings reads them, vanilla's
+        // UpdateBlockedCrossings (7917-7973) inputs without its omniscient unit scan.
+        public float Heading;
+        public float FireRange;
+        public float CoverValue;
+        public int CoverObject;
+        public bool Standing;
     }
 
     public enum OrderChannel
@@ -185,6 +199,8 @@ namespace WhiskeyRealism.Tactical.Battle
         ChargeDoctrine,
         FeudReplay,
         Recon, // BC9: the recon producer's scout moves and stops
+        Deployment,        // BC10: #60's fog-honest deployment placement (an immediate-placement Move)
+        DeploymentReserve, // BC10: #60's deployment reserve echelon placement; the allocator reads its outcome
     }
 
     [System.Flags]
@@ -201,13 +217,17 @@ namespace WhiskeyRealism.Tactical.Battle
         PerRegiment = 128,
         // BC5a, additive: route the move through vanilla AIBattle.BlockedMovingOrder
         // (3054-3150: NavMeshObstacles over the enemy-covered crossings of the
-        // side's blockedcrossings, then SetWaypoint two frames later, UpdateOrders
+        // side's perceived covered points (CoveredCrossings), then SetWaypoint two frames later, UpdateOrders
         // 3382), as vanilla's own line-group moves over 150 m do (6953-6956).
         AvoidCoveredCrossings = 256,
         // CombatBehavior, charge doctrine Disarm (BC6b): after the behavior write the
         // executor also leaves charge movement mode 3 with SetMovementMode(0), as
         // vanilla's own refusal does (122290); behavior alone never ends mode 3.
         LeaveChargeMode = 512,
+        // BC10, Move only: the executor issues SetGroupFormation(immediateplacement: true,
+        // newpath: true, ignoredeplyomentzone: false) and clears the placed tree's
+        // lastsetwaypointposition and immediateunitplacement (85873-85883), #60's call.
+        ImmediatePlacement = 1024,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -235,6 +255,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public WhiskeyRealism.Tactical.Operations.CommandTaskType Task;
         public string Reason;     // static literal only
         public RefuseFlank Refuse; // Formation / Facing on a group (BC5a)
+        // BC10 road march, Move only (additive): up to two via points the executor sends the
+        // group through before the target (RoadRoutePlanner). ViaCount 0 = a plain move.
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
     }
 
     public interface IIntentSink

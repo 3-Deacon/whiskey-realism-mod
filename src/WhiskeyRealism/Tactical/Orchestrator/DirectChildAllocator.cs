@@ -125,6 +125,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < snapshots.Count; i++)
                 {
                     if (snapshots[i].ChildId == null) continue;
+                    // BC10: a deployed reserve keeps the Reserve role; a play's rect does not claim it
+                    // (it would draw Main from a wing) until the child is released.
+                    if (evidence[i].DeployedReserve) continue;
                     if (zoneByChildId.TryGetValue(snapshots[i].ChildId, out var za))
                     {
                         roles[i] = PlayCorpsAssignment.RoleForRectKind(za.RectKind);
@@ -170,6 +173,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (ShouldFallbackUnderSevereOvermatch(ev, perChildEnemyIntent[i]))
                 {
                     roles[i] = DirectChildRole.Fallback;
+                    continue;
+                }
+
+                // BC10: a child the executor placed as a deployment reserve stays one until
+                // ReleaseReserves (crisis, Exploit, odds) changes it, or another source moves it.
+                // The safety check above still comes first.
+                if (ev.DeployedReserve)
+                {
+                    roles[i] = DirectChildRole.Reserve;
                     continue;
                 }
 
@@ -433,6 +445,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
+                if (ev[i].DeployedReserve) continue;
                 if (ev[i].PrimarySector != plan.MainEffortSector) continue;
                 // Local-odds gate (2026-05-22): cautious/mid-band commanders
                 // refuse Main assignment to a brigade that is locally
@@ -467,7 +480,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
-                if (!snaps[i].Active) continue;
+                if (!snaps[i].Active || ev[i].DeployedReserve) continue;
                 if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
                 if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
                 if (!ev[i].ContactFlag && ev[i].Confidence01 < 0.6f) continue;
@@ -502,7 +515,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
-                if (!snaps[i].Active) continue;
+                if (!snaps[i].Active || ev[i].DeployedReserve) continue;
                 if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
                 if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
                 // Provisional attack axis allows EnemyBucket = OwnBucket+1 only

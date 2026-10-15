@@ -67,6 +67,7 @@ tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroA
 tactical.patch.observer.retreats                   # same MicroAICheckForRetreats gate
 tactical.patch.observer.order-queue                # Regiment.AddToOrderQueue: player/UI order path; the battle AI does not call it
 tactical.patch.observer.courier*                   # Regiment.AddOrderCourierline: courier-delivered (player) orders only
+tactical.patch.arrival-guard.*                   # BattleUnits.SetInitialPathForEntryPoint: only when a scheduled reinforcement unit arrives (SetGroupArrival 87662)
 tactical.patch.observer.battle-units-destroy       # BattleUnits.OnDestroy: only when the battle scene is left
 tactical.patch.perk-ids.hq.cover.*                # Regiment.GetCoverValueFromID: only when a unit stands at a cover object (fence, wall, building)
 campaign.patch.battle-result-observer              # BattleMonument.UpdateAllianceWon: only when a finished battle is imported back to the campaign

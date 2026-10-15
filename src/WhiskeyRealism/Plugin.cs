@@ -94,6 +94,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
         public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
         public static ConfigEntry<bool> EnableBattleReconnaissance;
+        public static ConfigEntry<bool> EnableDeploymentAndMarchDoctrine;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -221,6 +222,7 @@ namespace WhiskeyRealism
         {
             Instance = this;
             Log = Logger;
+            Tactical.Battle.BattleTerrainGrid.Provider = Tactical.Battle.BattleTerrainGridRuntime.Get;
 
             Enabled = Config.Bind(
                 "General", "Enabled", true,
@@ -780,6 +782,16 @@ namespace WhiskeyRealism
                 "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
                 "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
                 "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
+            EnableDeploymentAndMarchDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Deployment And March Doctrine",
+                true,
+                "Default ON. The battle AI marches and deploys on what it can know. March: a long move (400 m or more) through woods or swamp is " +
+                "routed over a road when that is at least 20% faster than the way vanilla's pathfinder takes (up to two via points; the group takes " +
+                "march column first). Deployment (#60): the AI's objective-path groups are re-placed from the nearest enemy-owned entry point (never " +
+                "the player's hidden deployment) and about a third of the eligible direct children are placed 425 m back as a reserve echelon. " +
+                "OFF = vanilla's own pathing and placement. The slice's bug fixes (perceived covered crossings and flanking, the non-mutating path " +
+                "probe, #60 writing through the order executor, the reinforcement re-path measurement) are not behind this flag.");
             EnableBattleReconnaissance = Config.Bind(
                 "Tactical",
                 "Enable Battle Reconnaissance",
@@ -808,9 +820,11 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Deployment Terrain Discipline",
                 true,
-                "Default ON. #60: after vanilla AI deployment, moves AI groups standing in water or outside the deployment zone to the best nearby " +
-                "safe point through SetGroupFormation. Visible enemy bearing only adds a facing bonus to candidate points. Fortification-line " +
-                "placements and the player's side are left alone.");
+                "Default ON. #60: after vanilla AI deployment, moves AI groups that vanilla placed in this pass and that stand in water or outside " +
+                "the deployment zone to the best nearby safe point (an immediate placement through the battle core's order executor). The assumed " +
+                "enemy bearing (what the side sees, else the nearest enemy entry point) only adds a facing bonus to candidate points. Fortification-line " +
+                "placements, the player's side and the W&L command's AI group are left alone. Independent of Enable Deployment And March Doctrine, " +
+                "which governs the fog-honest re-placement and the reserve echelon.");
             TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Correction Meters",

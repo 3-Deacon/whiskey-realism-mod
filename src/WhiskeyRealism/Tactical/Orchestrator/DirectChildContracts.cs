@@ -69,7 +69,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool contactFlag,
             int primarySector,
             int flankExposureBucket,
-            float confidence01)
+            float confidence01,
+            bool deployedReserve = false)
         {
             OwnStrengthBucket = NonNeg(ownStrengthBucket);
             EnemyStrengthBucket = NonNeg(enemyStrengthBucket);
@@ -77,6 +78,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             PrimarySector = primarySector;
             FlankExposureBucket = NonNeg(flankExposureBucket);
             Confidence01 = Clamp01(confidence01);
+            DeployedReserve = deployedReserve;
         }
 
         public int OwnStrengthBucket { get; }
@@ -86,13 +88,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int FlankExposureBucket { get; }
         public float Confidence01 { get; }
 
+        /// <summary>
+        /// BC10: the executor placed this child as a deployment reserve and has issued no other
+        /// Move to it since (DeploymentDoctrine.IsDeployedReserve). The allocator gives it the
+        /// Reserve role ahead of the main-effort pick; the first Move any other source issues
+        /// to its groups clears the flag, and ReleaseReserves releases it like any Reserve child.
+        /// </summary>
+        public bool DeployedReserve { get; }
+
         public bool SignatureEquals(DirectChildEvidence other)
         {
             return OwnStrengthBucket == other.OwnStrengthBucket
                 && EnemyStrengthBucket == other.EnemyStrengthBucket
                 && ContactFlag == other.ContactFlag
                 && PrimarySector == other.PrimarySector
-                && FlankExposureBucket == other.FlankExposureBucket;
+                && FlankExposureBucket == other.FlankExposureBucket
+                && DeployedReserve == other.DeployedReserve;
         }
 
         private static int NonNeg(int v) => v < 0 ? 0 : v;
