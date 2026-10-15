@@ -57,6 +57,7 @@ internal static class TacticalLifecycleFixTests
         Pass("t14 operation strength counts AI combat units only", OperationStrengthCountsAiCombatUnitsOnly);
 
         Pass("t9 feud instance never drives the orchestrator", FeudInstanceNeverDrivesOrchestrator);
+        Pass("t9 coordinator doctrine clock exposed, frozen overnight, reset at battle end", CoordinatorDoctrineClockExposed);
     }
 
     private static void Pass(string name, Action test)
@@ -499,5 +500,33 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertTrue(TacticalBattleCoordinator.DrivesOrchestrator(0), "enemy ai");
         TestHarness.AssertTrue(TacticalBattleCoordinator.DrivesOrchestrator(1), "player side (ai_vs_ai)");
         TestHarness.AssertFalse(TacticalBattleCoordinator.DrivesOrchestrator(2), "feud");
+    }
+
+    private static void CoordinatorDoctrineClockExposed()
+    {
+        TacticalBattleCoordinator.ResetDoctrineClock();
+        TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "zero before first tick");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "not suspended before first tick");
+
+        TestHarness.AssertEqual(EndOfDayPhase.Fighting, TacticalBattleCoordinator.AdvanceDoctrineClock(8.0, 0), "start");
+        TacticalBattleCoordinator.AdvanceDoctrineClock(10.0, 0);
+        TestHarness.AssertEqual(10.0, TacticalBattleCoordinator.DoctrineBattleHours, "day");
+
+        // eodcycle 1..6 (CheckTimeIssues 86369-86470): doctrine paused, clock frozen.
+        TestHarness.AssertEqual(EndOfDayPhase.Suspended, TacticalBattleCoordinator.AdvanceDoctrineClock(20.0, 1), "evening");
+        TestHarness.AssertTrue(TacticalBattleCoordinator.IsEndOfDaySuspended, "suspended");
+        TacticalBattleCoordinator.AdvanceDoctrineClock(23.9, 2);
+        // Hour wraps before battlepasseddays++ (86382-86384): raw clock drops ~24h.
+        TacticalBattleCoordinator.AdvanceDoctrineClock(0.2, 2);
+        TacticalBattleCoordinator.AdvanceDoctrineClock(31.0, 5);
+        TestHarness.AssertEqual(10.0, TacticalBattleCoordinator.DoctrineBattleHours, "frozen overnight");
+
+        TestHarness.AssertEqual(EndOfDayPhase.Resumed, TacticalBattleCoordinator.AdvanceDoctrineClock(31.5, 0), "morning");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "fighting again");
+        TestHarness.AssertEqual(10.5, TacticalBattleCoordinator.DoctrineBattleHours, "resumes without a jump");
+
+        TacticalBattleCoordinator.ResetDoctrineClock();
+        TestHarness.AssertEqual(0.0, TacticalBattleCoordinator.DoctrineBattleHours, "reset at battle end");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.IsEndOfDaySuspended, "reset clears suspension");
     }
 }

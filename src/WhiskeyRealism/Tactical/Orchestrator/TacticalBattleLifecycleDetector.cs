@@ -215,6 +215,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private bool suspended;
 
+        public bool IsSuspended => suspended;
+
         public EndOfDayPhase Observe(int eodcycle)
         {
             if (eodcycle != 0)
@@ -231,21 +233,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// Monotonic battle clock for doctrine timers (phase budgets, commit windows,
-    /// replan cadence). Follows GameVars.currenttimefromstart forward, but does not
-    /// advance while suspended (overnight the clock races at game speed 1000) and
-    /// ignores backward jumps (midnight passing without battlepasseddays++).
+    /// replan cadence). Follows GameVars.currenttimefromstart (Hour + battlepasseddays*24,
+    /// SetTimeVariables 93545) forward, but does not advance while suspended (overnight
+    /// the clock races at game speed 1000) and ignores backward jumps (the hour wraps at
+    /// midnight before battlepasseddays++, CheckTimeIssues 86382-86384).
     /// </summary>
     public sealed class TacticalDoctrineClock
     {
         private bool started;
-        private float lastRawHours;
-        private float doctrineHours;
+        private double lastRawHours;
+        private double doctrineHours;
 
-        public float Hours => doctrineHours;
+        public double Hours => doctrineHours;
 
-        public float Advance(float rawBattleHours, bool suspended)
+        public double Advance(double rawBattleHours, bool suspended)
         {
-            if (float.IsNaN(rawBattleHours) || float.IsInfinity(rawBattleHours)) return doctrineHours;
+            if (double.IsNaN(rawBattleHours) || double.IsInfinity(rawBattleHours)) return doctrineHours;
             if (!started)
             {
                 started = true;
@@ -254,9 +257,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return doctrineHours;
             }
 
-            float delta = rawBattleHours - lastRawHours;
+            double delta = rawBattleHours - lastRawHours;
             lastRawHours = rawBattleHours;
-            if (!suspended && delta > 0f) doctrineHours += delta;
+            if (!suspended && delta > 0.0) doctrineHours += delta;
             return doctrineHours;
         }
     }

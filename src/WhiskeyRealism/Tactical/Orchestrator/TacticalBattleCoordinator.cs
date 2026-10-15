@@ -29,6 +29,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static bool IsActive => active;
 
+        // ---- Doctrine clock ----
+        //
+        // End-of-day handling: vanilla keeps all AI state across the night
+        // (battlepasseddays++ at 86384 is mid-night, eodcycle 2->3). While eodcycle != 0
+        // doctrine Ticks pause and the doctrine clock stops (the game clock races at
+        // speed 1000 overnight); when fighting resumes (eodcycle back to 0 at 164881)
+        // both sides rebuild their snapshot and replan, keeping their orchestrators.
+        private static TacticalEndOfDayGate _endOfDayGate = new TacticalEndOfDayGate();
+        private static TacticalDoctrineClock _doctrineClock = new TacticalDoctrineClock();
+
+        /// <summary>
+        /// THE doctrine clock for every tactical doctrine timer (phase budgets, commit
+        /// windows, replan cadence, hold/delay timers): battle hours that follow
+        /// GameVars.currenttimefromstart forward while fighting, are frozen while
+        /// BattleUnits.eodcycle != 0 (end-of-day sequence, CheckTimeIssues 86369-86470),
+        /// never run backwards (midnight hour wrap before battlepasseddays++,
+        /// 86382-86384 / SetTimeVariables 93545) and are 0 before the first observation
+        /// of a battle and after battle end. Do not read currenttimefromstart or
+        /// realtimeSinceStartup for doctrine timing.
+        /// </summary>
+        public static double DoctrineBattleHours => _doctrineClock.Hours;
+
+        /// <summary>True while the end-of-day sequence runs (eodcycle != 0); doctrine
+        /// ticks are paused and DoctrineBattleHours is frozen.</summary>
+        public static bool IsEndOfDaySuspended => _endOfDayGate.IsSuspended;
+
+        /// <summary>Feeds one vanilla side-stat cycle into the end-of-day gate and the
+        /// doctrine clock. Called once per coordinator Tick.</summary>
+        internal static EndOfDayPhase AdvanceDoctrineClock(double rawBattleHours, int eodcycle)
+        {
+            EndOfDayPhase phase = _endOfDayGate.Observe(eodcycle);
+            _doctrineClock.Advance(rawBattleHours, phase == EndOfDayPhase.Suspended);
+            return phase;
+        }
+
+        /// <summary>Starts the doctrine clock at battle bootstrap (first sample, no
+        /// end-of-day observation).</summary>
+        internal static void StartDoctrineClock(double rawBattleHours)
+        {
+            _doctrineClock.Advance(rawBattleHours, suspended: false);
+        }
+
+        /// <summary>Battle end / failure: clock back to 0, no suspension.</summary>
+        internal static void ResetDoctrineClock()
+        {
+            _endOfDayGate = new TacticalEndOfDayGate();
+            _doctrineClock = new TacticalDoctrineClock();
+        }
+
         /// <summary>
         /// Returns the per-side orchestrator for the given alliance id, or null if
         /// that side is suppressed (player-CIC) or not yet activated.
@@ -50,6 +99,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             side0 = null;
             side1 = null;
             active = false;
+            ResetDoctrineClock();
         }
 
         public static void OnBattleStartForTest(int suppressedAllianceId, IEnumerable<SyntheticCommanderInput> commanders)
@@ -64,6 +114,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             side0 = null;
             side1 = null;
             active = false;
+            ResetDoctrineClock();
         }
 
         // ---- Internal builder (used by both test and runtime paths) ----
