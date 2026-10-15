@@ -313,5 +313,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\IObservationSource.cs" Link="Orchestrator\IObservationSource.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalUnitObservationAggregate.cs" Link="Orchestrator\TacticalUnitObservationAggregate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
   </ItemGroup>
 </Project>
