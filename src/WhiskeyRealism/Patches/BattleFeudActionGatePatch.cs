@@ -4,25 +4,35 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // #42 — B1 W&L guard for AIBattle.CheckForFeudGroupActions (decompile 4931).
-    // Vanilla can move a feuding formation toward the closest enemy through a
-    // delayed SetWaypoint without PerformAIActionDLCWL; this Prefix mirrors the
-    // vanilla method and blocks only protected player-subordinate group
-    // movement and orchestrator direct-child denials.
+    // #42 — W&L feud replay for AIBattle.CheckForFeudGroupActions (4931-4960).
     //
-    // Vanilla rules mirrored (WS T3):
-    //   - target = closest enemy within GamePrefs.neededdistancefeudgroupmovement
-    //     (4952 GetClosestEnemyUnit(cap)); Whiskey keeps the FOW-visible lookup
-    //     but restores the cap;
-    //   - lastfeudactiontime is stamped only with the actual SetWaypoint (4955-4957);
-    //   - no ChangeStance: vanilla's feud move never sets a stance (BR-L1);
-    //   - Tactical Commander Mode != Active: return true, vanilla runs.
+    // Vanilla: for each assigned group (unittyp > 13) that feuds (ai_feudstance
+    // >= 0, or every group on the feud instance, isplayeraiorfeud == 2), is idle
+    // (no paths, not interrupted) and still able to fight, it rolls
+    // initiative^2 * probfeudgroupmovement (scaled for political / volunteer
+    // commanders) and moves the group toward GetClosestEnemyUnit(
+    // neededdistancefeudgroupmovement) with a delayed SetWaypoint (useorderdelay:
+    // true, 4957), stamping lastfeudactiontime. It never sets a stance and has
+    // no W&L ownership check (PerformAIActionDLCWL is not called).
+    //
+    // This Prefix (kept as a Prefix-skip, plan BC5 inventory) replays that body
+    // with three changes: the target is the closest VISIBLE enemy of the battle
+    // snapshot (fog-honest; remembered enemies are not targets) inside the same
+    // cap; the move is a FeudReplay intent run through the battle-core executor
+    // (OrderExecutorRuntime.ExecuteInline: guard, chain fan-out, validation,
+    // dedupe, cooldown, refusal under a higher arbiter claim), where the Feud
+    // refusal is exempt for FeudReplay but PlayerOwned never is; and the
+    // orchestrator's direct-child gate may deny it. lastfeudactiontime is stamped
+    // only when the executor issued the move. Vanilla runs instead when Tactical
+    // Commander Mode is not Active, the flag is off, a vanilla anchor is missing
+    // or the side has no battle snapshot (the battle core is not running).
     [HarmonyPatch(typeof(AIBattle), "CheckForFeudGroupActions")]
     internal static class BattleFeudActionGatePatch
     {
@@ -50,7 +60,9 @@ namespace WhiskeyRealism.Patches
                     if (!isPlayerAiOrFeud.HasValue) return true;
                     if (!HasIsGroupStillAbleToFight()) return true;
                     if (groups == null || bunits == null) return true;
+                    if (!SnapshotsAvailable(groups)) return true;
 
+                    tookOwnership = true;
                     for (int i = 0; i < groups.Count; i++)
                     {
                         var group = groups[i] as Regiment;
@@ -76,46 +88,32 @@ namespace WhiskeyRealism.Patches
                             probability *= GamePrefs.chanceoffeudsvolunteercommanders;
                         }
 
-                        TacticalFogOfWarContact.TryClosestVisibleEnemy(group, out Regiment visibleEnemyRegiment, out float enemyDistance);
-                        bool targetAllowed = BattleWriterPolicy.FeudMoveTargetAllowed(
-                            visibleEnemyRegiment != null,
-                            enemyDistance,
-                            GamePrefs.neededdistancefeudgroupmovement);
-                        GameObject closestEnemy = targetAllowed ? visibleEnemyRegiment.gameObject : null;
-                        if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
-
-                        bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
-                        var wlDecision = TacticalWlActionGuard.Decide(
-                            configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
-                            dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                            unitUnderCommander: group.dlcw_isundercommander,
-                            groupUnderCommander: group.dlcw_isundercommander,
-                            attachedUnitUnderCommander: attachedUnderCommander);
-
-                        tookOwnership = true;
-
-                        if (!wlDecision.Allow)
-                        {
-                            LogDenied(group, wlDecision.Reason);
+                        // Vanilla rolls for every eligible group before testing its target (4953).
+                        if (UnityEngine.Random.Range(0f, 1f) > probability) continue;
+                        if (!BattleCore.TryGetSnapshot(group.alliance, out BattleSnapshot snapshot)) continue;
+                        int index = snapshot.IndexOfOwn(((Component)group).gameObject.GetInstanceID());
+                        if (index < 0) continue;
+                        if (!BattleWriterPolicy.TryFeudReplayIntent(snapshot, index, GamePrefs.neededdistancefeudgroupmovement, out BattleOrderIntent intent))
                             continue;
-                        }
 
-                        var orchDecision = DecideDirectChildGate(__instance, bunits, group, closestEnemy, isPlayerAiOrFeud.Value);
+                        var orchDecision = DecideDirectChildGate(__instance, bunits, group, new Vector3(intent.TargetX, 0f, intent.TargetZ));
                         if (!orchDecision.Allow)
                         {
                             LogDeniedOrch(group, orchDecision);
                             continue;
                         }
 
+                        if (!OrderExecutorRuntime.ExecuteInline(bunits, group, intent, out OrderOutcome outcome))
+                        {
+                            LogRefused(group, outcome.Reason);
+                            continue;
+                        }
+
+                        group.lastfeudactiontime = CurrentBattleHour(bunits);
                         GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
-                            " is under feud and moving towards closest enemy: " +
-                            ((object)closestEnemy)?.ToString() +
-                            " curr pos:" + ((object)((Component)group).gameObject.transform.position).ToString() +
-                            " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
+                            " is under feud and moving towards closest visible enemy at " + intent.TargetX + "," + intent.TargetZ +
                             " prob:" + probability +
                             " init:" + commanderInitiative);
-                        group.lastfeudactiontime = CurrentBattleHour(bunits);
-                        bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                     }
                 }
                 catch (Exception ex)
@@ -132,6 +130,24 @@ namespace WhiskeyRealism.Patches
 
                 return false;
             }
+        }
+
+        // Every assigned group's side has a battle snapshot this battle; without
+        // one the battle core is not running and vanilla keeps its feud body.
+        private static bool SnapshotsAvailable(IList groups)
+        {
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var group = groups[i] as Regiment;
+                if (group == null) continue;
+                if (!BattleCore.TryGetSnapshot(group.alliance, out _))
+                {
+                    OnceLog.Info("tactical-feud-guard:no-snapshot",
+                        "[TacticalFeudGuard] no battle snapshot for a feud side; vanilla CheckForFeudGroupActions runs");
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static bool Enabled()
@@ -209,22 +225,10 @@ namespace WhiskeyRealism.Patches
             return value is bool result && result;
         }
 
-        private static bool ContainsAttachedUnderCommander(Regiment group)
+        private static void LogRefused(Regiment group, SkipReason reason)
         {
-            if (group == null || group.allattachedunits == null) return false;
-            for (int i = 0; i < group.allattachedunits.Length; i++)
-            {
-                var unit = group.allattachedunits[i];
-                if (unit != null && unit.dlcw_isundercommander) return true;
-            }
-            return false;
-        }
-
-        private static void LogDenied(Regiment group, string reason)
-        {
-            OnceLog.Info("tactical-feud-guard", "BattleFeudActionGatePatch wired");
-            OnceLog.Info("tactical-feud-guard:deny", "[TacticalFeudGuard] action=deny reason=" + reason +
-                " group=" + SafeName(group));
+            OnceLog.Info("tactical-feud-guard:refused", "[TacticalFeudGuard] feud replay refused by the order executor reason=" + reason +
+                " group=" + SafeName(group) + " (first occurrence)");
         }
 
         private static void LogMissingRequiredAnchor(string anchor)
@@ -246,7 +250,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _sideOfAiField;
 
         private static DirectChildGateDecision DecideDirectChildGate(
-            AIBattle battle, BattleUnits bunits, Regiment group, GameObject closestEnemy, int isPlayerAiOrFeud)
+            AIBattle battle, BattleUnits bunits, Regiment group, Vector3 targetPos)
         {
             try
             {
@@ -287,10 +291,8 @@ namespace WhiskeyRealism.Patches
                 int primarySector = maybeIntent.HasValue ? maybeIntent.Value.PrimarySector : 0;
 
                 Vector3 groupPos = ((Component)group).gameObject.transform.position;
-                Vector3 targetPos = closestEnemy.transform.position;
                 // Both bearings are relative to the group's position so DecideAxis / DecideFallback
-                // compare like-with-like. The target is the nearest vanilla FOW-visible enemy, not
-                // the broad closest-enemy cache.
+                // compare like-with-like. The target is the snapshot's closest visible enemy.
                 float intendedBearingFromGroup = Mathf.Atan2(targetPos.z - groupPos.z, targetPos.x - groupPos.x);
                 float dist = Vector3.Distance(groupPos, targetPos);
                 float enemyBearingFromGroup = intendedBearingFromGroup;

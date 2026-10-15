@@ -823,6 +823,34 @@ namespace WhiskeyRealism.Tactical
             return hasVisibleEnemy && distance <= neededDistance;
         }
 
+        // #42's replay of vanilla's feud move (4955-4957) for own record `index`:
+        // toward the closest VISIBLE enemy (the snapshot's, never a remembered one)
+        // inside the feud cap, delayed like vanilla (useorderdelay: true). Support
+        // priority: an arbiter claim above it on the group's Move refuses it
+        // (OrderExecutor.InlineClaimCheck). Executed only through
+        // OrderExecutorRuntime.ExecuteInline (the arbiter drops FeudReplay intents).
+        public static bool TryFeudReplayIntent(BattleSnapshot s, int index, float neededDistance, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if (s == null || index < 0 || index >= s.OwnCount) return false;
+            int closest = s.ClosestVisibleEnemy(index, out float distance);
+            if (!FeudMoveTargetAllowed(closest >= 0, distance, neededDistance)) return false;
+            intent = new BattleOrderIntent
+            {
+                GroupId = s.Own[index].InstanceId,
+                Channel = OrderChannel.Move,
+                TargetX = s.Observations[closest].X,
+                TargetZ = s.Observations[closest].Z,
+                Heading = -1f,
+                FireTargetId = s.Observations[closest].InstanceId,
+                Priority = IntentPriority.Support,
+                Source = IntentSource.FeudReplay,
+                Flags = IntentFlags.UseOrderDelay,
+                Reason = "feud-replay",
+            };
+            return true;
+        }
+
         // #60: BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew sets
         // num3 = 1 for a defender (GetBattleType == 2) or an attacker (== 1)
         // whose groupmorale <= minimummoraleforaistances[1]; fewer than 3

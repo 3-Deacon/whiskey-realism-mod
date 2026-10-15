@@ -19,6 +19,8 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core ChargeDemotionIsSafetyStance", ChargeDemotionIsSafetyStance),
             ("battle-core ChargeDemotionBeatsExecutorAssault", ChargeDemotionBeatsExecutorAssault),
             ("battle-core FeudReplayNeverEntersTheArbiter", FeudReplayNeverEntersTheArbiter),
+            ("battle-core FeudReplayUsesInlineExecutor", FeudReplayUsesInlineExecutor),
+            ("battle-core FeudReplayRefusedForPlayerOwned", FeudReplayRefusedForPlayerOwned),
             ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
             ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
             ("battle-core ArtilleryLimberUnlimberFaceAreFormationAndFacing", ArtilleryLimberUnlimberFaceAreFormationAndFacing),
@@ -394,6 +396,80 @@ internal static class StanceArtilleryMigrationTests
         var winners = new BattleOrderIntent[2];
         AssertEqual(0, arbiter.Resolve(winners), "nothing to execute");
         AssertFalse(arbiter.TryGetClaim(31, OrderChannel.Move, out _), "no claim published");
+    }
+
+    // Vanilla CheckForFeudGroupActions (4931-4960) moves a feuding group toward
+    // the closest enemy within neededdistancefeudgroupmovement with a delayed
+    // SetWaypoint (useorderdelay: true, 4957). #42 replays it as a FeudReplay
+    // intent through the executor pipeline: the Feud refusal is exempt for it.
+    private static void FeudReplayUsesInlineExecutor()
+    {
+        BattleSnapshot s = FeudSnapshot(UnitFlags.Feud, enemyDistance: 300f, enemyState: ObservationState.Visible);
+        AssertTrue(BattleWriterPolicy.TryFeudReplayIntent(s, 0, 400f, out BattleOrderIntent intent), "visible enemy inside the feud cap");
+        AssertEqual(OrderChannel.Move, intent.Channel, "a move");
+        AssertEqual(IntentSource.FeudReplay, intent.Source, "source");
+        AssertEqual(IntentPriority.Support, intent.Priority, "Support (plan inventory)");
+        AssertTrue((intent.Flags & IntentFlags.UseOrderDelay) != 0, "vanilla's courier delay (4957)");
+        AssertNear(-800f, intent.TargetZ, 0.01f, "targets the visible enemy");
+
+        AssertFalse(BattleWriterPolicy.TryFeudReplayIntent(s, 0, 250f, out _), "beyond neededdistancefeudgroupmovement");
+        AssertFalse(BattleWriterPolicy.TryFeudReplayIntent(FeudSnapshot(UnitFlags.Feud, 300f, ObservationState.Remembered), 0, 400f, out _),
+            "a remembered enemy is not a feud target");
+
+        var executor = new OrderExecutor();
+        executor.Bind(new FeudAwareGuard(), null);
+        ExecutionPlan plan = executor.Plan(s, intent, 1.0);
+        AssertTrue(plan.Execute, "the feud replay passes the Feud refusal");
+        AssertTrue(plan.UseOrderDelay, "courier delay kept");
+
+        BattleOrderIntent other = intent;
+        other.Source = IntentSource.PostureExecutor;
+        AssertEqual(SkipReason.Feud, executor.Plan(s, other, 1.0).Skip, "any other source is refused on a feuding group");
+
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(new BattleOrderIntent { GroupId = intent.GroupId, Channel = OrderChannel.Move, TargetX = 1f, TargetZ = -1f, Heading = -1f, Priority = IntentPriority.Safety, Source = IntentSource.Withdrawal, Reason = "test" });
+        arbiter.Resolve(new BattleOrderIntent[2]);
+        AssertEqual(SkipReason.LowerPriorityThanClaim, OrderExecutor.InlineClaimCheck(arbiter, intent), "refused under a higher arbiter claim (D4)");
+    }
+
+    private static void FeudReplayRefusedForPlayerOwned()
+    {
+        BattleSnapshot s = FeudSnapshot(UnitFlags.Feud | UnitFlags.PlayerOwned, 300f, ObservationState.Visible);
+        AssertTrue(BattleWriterPolicy.TryFeudReplayIntent(s, 0, 400f, out BattleOrderIntent intent), "intent built");
+        var executor = new OrderExecutor();
+        executor.Bind(new FeudAwareGuard(), null);
+        ExecutionPlan plan = executor.Plan(s, intent, 1.0);
+        AssertFalse(plan.Execute, "never on a player-owned group");
+        AssertEqual(SkipReason.PlayerOwned, plan.Skip, "PlayerOwned is never exempt");
+    }
+
+    // A feuding brigade at (500, -500) and one enemy `enemyDistance` due south.
+    private static BattleSnapshot FeudSnapshot(UnitFlags flags, float enemyDistance, ObservationState enemyState)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        var group = Group(51, Brigade, 3);
+        group.X = 500f;
+        group.Z = -500f;
+        group.Flags |= flags;
+        s.AddOwn(group);
+        s.IndexCommandTree(null);
+        s.AddObservation(new EnemyObservation { InstanceId = 901, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -500f - enemyDistance, Strength = 800f, State = enemyState, Confidence01 = 1f });
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+        return s;
+    }
+
+    // TacticalWriteGuard.CanWrite(in UnitRecord) without the Commander Mode read.
+    private sealed class FeudAwareGuard : IOrderGuard
+    {
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason)
+        {
+            reason = (unit.Flags & UnitFlags.PlayerOwned) != 0 ? SkipReason.PlayerOwned
+                : (unit.Flags & UnitFlags.Feud) != 0 ? SkipReason.Feud : SkipReason.None;
+            return reason == SkipReason.None;
+        }
     }
 
     // ------------------------------------------------------------------ fixtures

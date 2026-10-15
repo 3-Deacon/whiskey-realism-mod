@@ -1829,12 +1829,10 @@ namespace WhiskeyRealism.Patches
             if (group == null || context == null) return;
 
             var sector = BuildMatrixSector(group, index);
-            var wlGuard = TacticalWlActionGuard.Decide(
-                true,
-                SafeDlcWlActive(),
-                group.dlcw_isundercommander,
-                group.dlcw_isundercommander,
-                CountAttachedUnderCommander(group) > 0);
+            // Battle-core ownership (TacticalWriteGuard / PlayerOwnership): a
+            // player-owned or feuding group, or one whose order would reach an
+            // exposed player-owned descendant, is not Whiskey's to change.
+            bool wlAllows = !TacticalWriteGuard.IsPlayerProtected(group, out string wlReason);
             bool orderFrictionAllows = MatrixOrderFrictionAllowsChange(group);
             int vanillaStance = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
             var stanceDecision = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)
@@ -1843,10 +1841,10 @@ namespace WhiskeyRealism.Patches
                     context.MacroAi,
                     sector,
                     orderFrictionAllows,
-                    wlGuard.Allow))
+                    wlAllows))
                 : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
-            EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlGuard, orderFrictionAllows, vanillaStance, stanceDecision);
+            EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlAllows, wlReason, orderFrictionAllows, vanillaStance, stanceDecision);
         }
 
         private static void EmitDecisionMatrixBattle(
@@ -1918,7 +1916,8 @@ namespace WhiskeyRealism.Patches
             int index,
             bool focus,
             TacticalSectorAssessment sector,
-            TacticalWlGuardDecision wlGuard,
+            bool wlAllows,
+            string wlReason,
             bool orderFrictionAllows,
             int vanillaStance,
             TacticalGroupStanceDecision stanceDecision)
@@ -1936,7 +1935,7 @@ namespace WhiskeyRealism.Patches
                 sector.Mission,
                 sector.Odds,
                 sector.Confidence,
-                wlGuard.Allow,
+                wlAllows,
                 orderFrictionAllows,
                 SafeOrderState(group));
 
@@ -1952,8 +1951,8 @@ namespace WhiskeyRealism.Patches
                     .WithField("confidence", sector.Confidence)
                     .WithField("score", sector.Odds)
                     .WithField("selectedTarget", sector.SectorId)
-                    .WithField("gateResult", (wlGuard.Allow && orderFrictionAllows) ? "allow" : "deny")
-                    .WithField("gateReason", (wlGuard.Allow ? "wl-allow" : wlGuard.Reason) + "|" + (orderFrictionAllows ? "order-friction-allow" : "order-friction-deny"))
+                    .WithField("gateResult", (wlAllows && orderFrictionAllows) ? "allow" : "deny")
+                    .WithField("gateReason", (wlAllows ? "wl-allow" : "player-protected-" + wlReason) + "|" + (orderFrictionAllows ? "order-friction-allow" : "order-friction-deny"))
                     .WithField("writeAction", "none")
                     .WithField("writeResult", "not-attempted")
                     .WithField("row", "group")
@@ -1968,7 +1967,7 @@ namespace WhiskeyRealism.Patches
                     .WithField("aiStance", group.ai_stance)
                     .WithField("orderedStance", vanillaStance)
                     .WithField("whiskeyStance", stanceDecision.GroupStance)
-                    .WithField("wlGuard", (wlGuard.Allow ? "allow" : "deny") + ":" + wlGuard.Reason)
+                    .WithField("wlGuard", wlAllows ? "allow:ai-chain" : "deny:" + wlReason)
                     .WithField("orderFrictionAllows", orderFrictionAllows)
                     .WithField("sector", sector.SectorId)
                     .WithField("mission", sector.Mission.ToString())
