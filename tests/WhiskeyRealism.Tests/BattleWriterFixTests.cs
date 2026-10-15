@@ -38,6 +38,7 @@ internal static class BattleWriterFixTests
         GatesFailOpenOutsideActiveMode();
         ObjectiveChainCycleGateMatchesVanilla();
         ObjectiveChainMovementGateMatchesVanilla();
+        ObjectiveChainGuardLetsPlayerAncestorsAdvance();
         DeploymentSkipsVanillaFortifiedPlacement();
         DeploymentSkipsFleetsAndMissingZones();
         HqLinkSameCommandUsesVanillaHierarchy();
@@ -363,6 +364,17 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(assaultMove: true)), "assault move");
         TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainWouldReachMovement(Chain(ableToFight: false)), "unable to fight");
         Pass("battle writers: #46 movement gate matches UpdateMovingTargets");
+    }
+
+    // UpdateMovingTargets 6951: only a center that is itself the player's
+    // is skipped; an ancestor carrying the player's (detached) unit advances.
+    private static void ObjectiveChainGuardLetsPlayerAncestorsAdvance()
+    {
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainGuardRemovesCenter(false, false, false), "ancestor of the player advances");
+        TestHarness.AssertFalse(BattleWriterPolicy.ObjectiveChainGuardRemovesCenter(true, true, false), "flagged center: vanilla's own branch");
+        TestHarness.AssertTrue(BattleWriterPolicy.ObjectiveChainGuardRemovesCenter(false, true, false), "player's command not yet flagged");
+        TestHarness.AssertTrue(BattleWriterPolicy.ObjectiveChainGuardRemovesCenter(false, false, true), "taken-over center not yet flagged");
+        Pass("battle writers: #46 skips only player-owned centers, ancestors advance");
     }
 
     // #34: Regiment.Initialize sets guns = GetSollGuns(forinitialization: true)

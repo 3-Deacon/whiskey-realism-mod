@@ -13,10 +13,15 @@ namespace WhiskeyRealism.Patches
     // Vanilla skips objective-chain MOVEMENT when the chain center itself is
     // under the player's command (6951: !dlc | !center.dlcw_isundercommander),
     // but still runs CheckCurrentOrderUpdate (6995-7003) so the player's
-    // superior issues the order. It does not skip a center that merely carries
-    // player-commanded attached units, which drags the player's brigade along.
+    // superior issues the order. Ancestors of the player advance: the
+    // player's command is protected by its permanentlydetached subtree, not
+    // by freezing the parent chain (docs/wl-player-model.md).
     //
-    // The Prefix removes such chains so vanilla does not move them, and for
+    // The guard applies the same rule to a center that is itself player-owned
+    // (the player's current command or a battle take-over) but whose cached
+    // dlcw_isundercommander flag is not set (pure
+    // BattleWriterPolicy.ObjectiveChainGuardRemovesCenter). The Prefix
+    // removes such chains so vanilla does not move them, and for
     // each removed chain that vanilla would have reached (pure
     // BattleWriterPolicy.ObjectiveChainWouldReachMovement, 6872-6936) replays
     // vanilla's non-movement side: UpdateGroupStrength, unitlinkedto = null,
@@ -70,24 +75,25 @@ namespace WhiskeyRealism.Patches
                     if (chain == null || chain.Count <= 0) return;
                     state.Chain = chain;
                     __state = state;
+                    Regiment playerCommand = PlayerCommand();
 
                     for (int i = chain.Count - 1; i >= 0; i--)
                     {
                         AIBattle.ObjectiveChain entry = chain[i];
                         Regiment center = entry != null ? entry.linegroup_centerunit : null;
                         if ((UnityEngine.Object)center == null) continue;
-                        if (center.dlcw_isundercommander) continue; // vanilla's own branch handles it
-
-                        int attachedUnderCommander = CountAttachedUnderCommander(center);
-                        if (attachedUnderCommander <= 0) continue;
+                        if (!BattleWriterPolicy.ObjectiveChainGuardRemovesCenter(
+                                center.dlcw_isundercommander,
+                                (UnityEngine.Object)center == (UnityEngine.Object)playerCommand,
+                                DLC_WL.IsUnitTakenOver(center)))
+                            continue;
 
                         state.Removed.Add(new RemovedObjectiveChain(i, entry));
                         chain.RemoveAt(i);
                         OnceLog.Info(
                             "tactical-objective-chain-guard:deny",
-                            "[TacticalObjectiveGuard] suppressed objective-chain movement center=" +
-                            TacticalCurrentOrderSignature.Safe(center.name) +
-                            " attachedUnderCommander=" + attachedUnderCommander);
+                            "[TacticalObjectiveGuard] suppressed objective-chain movement of player-owned center=" +
+                            TacticalCurrentOrderSignature.Safe(center.name));
                     }
 
                     // Vanilla iterates chains in index order; replay in the same order.
@@ -193,18 +199,11 @@ namespace WhiskeyRealism.Patches
             return _isGroupStillAbleToFight.Invoke(battle, new object[] { center, true }) is bool able && able;
         }
 
-        private static int CountAttachedUnderCommander(Regiment group)
+        private static Regiment PlayerCommand()
         {
-            if (group.allattachedunits == null) return 0;
-
-            int count = 0;
-            for (int i = 0; i < group.allattachedunits.Length; i++)
-            {
-                Regiment unit = group.allattachedunits[i];
-                if ((UnityEngine.Object)unit != null && unit.dlcw_isundercommander) count++;
-            }
-
-            return count;
+            int id = DLC_WL.dlc_chosencommander;
+            if (GameVars.commander == null || id < 0 || id >= GameVars.commander.Count) return null;
+            return GameVars.commander[id].currentcommand;
         }
 
         private static void Restore(ObjectiveChainFilterState state)

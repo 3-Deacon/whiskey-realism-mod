@@ -386,6 +386,24 @@ namespace WhiskeyRealism.Tactical
             return state >= 4 && macroAi != 3 && macroAi != -1;
         }
 
+        // #46: UpdateMovingTargets 6951 skips the movement only for a center
+        // that is itself under the player's command; ancestors of the player
+        // advance, the player's command being shielded by its own
+        // permanentlydetached subtree (deployment 85321-85336, group orders
+        // drop detached children via GetAttachedUnitsReg 119857). The guard
+        // removes a chain only for a center that is itself player-owned (the
+        // player's current command or a battle take-over) but not flagged;
+        // a flagged center is left to vanilla's own branch. Player-owned units
+        // attached below the center do not count.
+        public static bool ObjectiveChainGuardRemovesCenter(
+            bool centerUnderCommander,
+            bool centerIsPlayerCommand,
+            bool centerTakenOver)
+        {
+            if (centerUnderCommander) return false;
+            return centerIsPlayerCommand || centerTakenOver;
+        }
+
         // #46: UpdateMovingTargets 6877-6936 - the per-chain "continue"
         // conditions before the movement branch. When this is true vanilla
         // would move the chain center (and then run CheckCurrentOrderUpdate);
