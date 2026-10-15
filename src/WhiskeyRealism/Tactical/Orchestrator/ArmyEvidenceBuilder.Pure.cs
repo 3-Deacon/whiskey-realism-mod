@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -202,47 +204,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// One value per side per frame for one battle. Build runs from up to
-        /// four call sites per side per coordinator tick (replan, heavy path,
-        /// snapshot, parity cycle); the memo lets every site after the first
-        /// share the result instead of re-walking completeunitlist.
-        /// </summary>
-        internal sealed class PerSideFrameMemo<T>
-        {
-            private readonly T[] _values = new T[2];
-            private readonly int[] _frames = { -1, -1 };
-            private readonly WeakReference<object>[] _owners = new WeakReference<object>[2];
-
-            internal bool TryGet(object owner, int side, int frame, out T value)
-            {
-                value = default(T);
-                if (owner == null || side < 0 || side > 1 || frame < 0) return false;
-                if (_frames[side] != frame || _owners[side] == null) return false;
-                if (!_owners[side].TryGetTarget(out var cached) || !ReferenceEquals(cached, owner)) return false;
-                value = _values[side];
-                return true;
-            }
-
-            internal void Store(object owner, int side, int frame, T value)
-            {
-                if (owner == null || side < 0 || side > 1 || frame < 0) return;
-                _values[side] = value;
-                _frames[side] = frame;
-                _owners[side] = new WeakReference<object>(owner);
-            }
-
-            internal void Reset()
-            {
-                for (int i = 0; i < 2; i++)
-                {
-                    _values[i] = default(T);
-                    _frames[i] = -1;
-                    _owners[i] = null;
-                }
-            }
-        }
-    
-        /// <summary>
         /// Vanilla's weight for a <c>Regiment.outflanked</c> state (set 123151-123175:
         /// 1/2 one flank, 3 both flanks, 4-6 rear, 7 surrounded), as
         /// UpdateGroupStrength adds it to <c>flanksthreated</c> (120568-120580).
@@ -259,22 +220,238 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // ---------- snapshot consumers (BC2b) ----------
+
         /// <summary>
-        /// A group's flank threat on vanilla's 0-4 scale: the mean outflanked
-        /// weight over its combat regiments. Vanilla's own
-        /// <c>flanksthreated</c> cannot be used: UpdateGroupStrength adds the
-        /// group's OWN outflanked weight once per active subordinate
-        /// (120273 loop over allattachedunits, 120568-120582), so it scales with
-        /// the size of the formation, and a corps of forty read as surrounded
-        /// whenever its HQ had one enemy on a flank.
+        /// Enemy samples for one evidence build, from the snapshot's observations only (the
+        /// side's fog-honest picture, BC2a). <paramref name="visible"/>: visible enemies at full
+        /// strength, RecentFire set when the id is in <paramref name="engagedIds"/> (an own
+        /// unit's fire-range list). <paramref name="sectorWeighted"/>: visible at full strength
+        /// plus remembered weighted by confidence, the band strengths.
+        /// <paramref name="known"/>: every visible or remembered position (coverage bands).
+        /// Reinforcement columns are off the map and feed none of them. Lists are cleared first.
         /// </summary>
-        internal static float MeanOutflankedWeight(int[] outflankedStates, int count)
+        internal static void CollectEnemySamples(IObservationSource source, HashSet<int> engagedIds,
+            List<FrontUnitSample> visible, List<FrontUnitSample> sectorWeighted, List<FrontUnitSample> known)
         {
-            if (outflankedStates == null || count <= 0) return 0f;
-            if (count > outflankedStates.Length) count = outflankedStates.Length;
-            float sum = 0f;
-            for (int i = 0; i < count; i++) sum += VanillaOutflankedWeight(outflankedStates[i]);
-            return sum / count;
+            visible.Clear();
+            sectorWeighted.Clear();
+            known.Clear();
+            if (source == null) return;
+            EnemyObservation[] observations = source.Observations;
+            for (int i = 0; i < source.ObservationCount; i++)
+            {
+                ref EnemyObservation o = ref observations[i];
+                if (o.IsReinforcement) continue;
+                known.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, 0f, false));
+                if (o.State == ObservationState.Visible)
+                {
+                    bool engaged = engagedIds != null && engagedIds.Contains(o.InstanceId);
+                    visible.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged));
+                    sectorWeighted.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged));
+                }
+                else
+                {
+                    sectorWeighted.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength * o.Confidence01, false));
+                }
+            }
+        }
+
+        /// <summary>
+        /// The evidence's front axis: the snapshot's (BattleSnapshotAssembler.FitFrontAxis,
+        /// refit on what is seen by the perception probe), which the sector bands, the
+        /// instance map and the coverage frame all share. Until any enemy has given the
+        /// snapshot a target (axis degenerate: forward +z, TargetDistance 0) the side faces
+        /// the nearest objective it does not hold instead, from the snapshot's own centroid,
+        /// stabilized against <paramref name="previous"/> and banded over
+        /// <paramref name="ownSample"/>. An invalid snapshot axis (no own sample) stays invalid.
+        /// </summary>
+        internal static TacticalFrontAxis EvidenceFrontAxis(TacticalFrontAxis snapshotAxis, TacticalFrontAxis previous,
+            bool hasOpenObjective, float objectiveX, float objectiveZ,
+            IReadOnlyList<FrontUnitSample> ownSample, IReadOnlyList<FrontUnitSample> enemyVisible)
+        {
+            if (!snapshotAxis.IsValid || snapshotAxis.TargetDistance > 0f || !hasOpenObjective) return snapshotAxis;
+            var toward = TacticalFrontAxis.FromCentroids(snapshotAxis.OriginX, snapshotAxis.OriginZ, objectiveX, objectiveZ);
+            var bare = TacticalFrontAxis.Stabilize(previous, toward, TacticalFrontAxis.DefaultMinHeadingChangeDegrees);
+            return EnemyVisibleSectorBuilder.FitAxis(bare, ownSample, enemyVisible);
+        }
+
+        /// <summary>
+        /// Army-wide average fatigue and ammo (vanilla rule already applied by the snapshot,
+        /// UnitRecord.Ammo01) and morale relative to battle start, over alive combat
+        /// regiments (unittyp 0-3; strength &gt; 0, active, not routed: vanilla unitsonfield,
+        /// 84800). Defaults 0.2 / 0.9 / 1 when nothing is sampled.
+        /// </summary>
+        internal static void OwnAverages(UnitRecord[] own, int count, out float avgFatigue01, out float avgAmmo01, out float moraleRatio01)
+        {
+            avgFatigue01 = 0.2f;
+            avgAmmo01 = 0.9f;
+            moraleRatio01 = 1f;
+            if (own == null) return;
+            if (count > own.Length) count = own.Length;
+            float fatigueSum = 0f, ammoSum = 0f, moraleSum = 0f, startMoraleSum = 0f;
+            int sampled = 0;
+            for (int i = 0; i < count; i++)
+            {
+                ref UnitRecord u = ref own[i];
+                if (u.UnitTyp > 3) continue;
+                if (!IsAliveCombatUnit(u.Strength, (u.Flags & UnitFlags.Active) != 0, (u.Flags & UnitFlags.Routed) != 0)) continue;
+                float fatigue = u.Fatigue;
+                if (float.IsNaN(fatigue) || float.IsInfinity(fatigue)) continue;
+                fatigueSum += fatigue < 0f ? 0f : fatigue > 1f ? 1f : fatigue;
+                ammoSum += u.Ammo01;
+                if (u.BattleStartMorale > 0f && !float.IsNaN(u.Morale))
+                {
+                    moraleSum += u.Morale;
+                    startMoraleSum += u.BattleStartMorale;
+                }
+                sampled++;
+            }
+            if (sampled == 0) return;
+            avgFatigue01 = fatigueSum / sampled;
+            avgAmmo01 = ammoSum / sampled;
+            moraleRatio01 = NormalizedMorale01(moraleSum, startMoraleSum, 1f);
+        }
+
+        /// <summary>
+        /// Own strength due within the AI's retreat-decision window: vanilla sums own units
+        /// whose arrival is in (0, GamePrefs.reinforcementmaxtimeforairetreatdecisions) hours
+        /// (CalculateSideStats 84764-84767). The side knows its own schedule.
+        /// </summary>
+        internal static float ReinforcementsArrivingWithin(IReadOnlyList<ReinforcementArrival> arrivals, float maxHours)
+        {
+            if (arrivals == null) return 0f;
+            float total = 0f;
+            for (int i = 0; i < arrivals.Count; i++)
+            {
+                float hours = arrivals[i].HoursUntilArrival;
+                if (hours > 0f && hours < maxHours) total += arrivals[i].EstimatedStrength;
+            }
+            return total;
+        }
+
+        /// <summary>The soonest own arrival (hours, strength); (0, 0) when none is scheduled.</summary>
+        internal static void NearestReinforcement(IReadOnlyList<ReinforcementArrival> arrivals, out float hours, out float strength)
+        {
+            hours = 0f;
+            strength = 0f;
+            if (arrivals == null || arrivals.Count == 0) return;
+            float best = float.MaxValue;
+            for (int i = 0; i < arrivals.Count; i++)
+            {
+                if (arrivals[i].HoursUntilArrival >= best) continue;
+                best = arrivals[i].HoursUntilArrival;
+                strength = arrivals[i].EstimatedStrength;
+            }
+            hours = best;
+        }
+
+        /// <summary>
+        /// Vanilla's outflanked state (set 123151-123175) as a bit mask over the three flank
+        /// slots: 1 one side, 2 the other, 4 rear, so 3 = both sides and 7 = surrounded.
+        /// Here the slots are the snapshot's perceived flank pressure, not vanilla's
+        /// range-list enemies (UpdateUnitRangeFast 122990-123015).
+        /// </summary>
+        internal static int OutflankedState(float leftPressure, float rightPressure, float rearPressure)
+        {
+            return (leftPressure > 0f ? 1 : 0) | (rightPressure > 0f ? 2 : 0) | (rearPressure > 0f ? 4 : 0);
+        }
+
+        /// <summary>
+        /// Per own group, its flank threat on vanilla's 0-4 scale: the mean
+        /// <see cref="VanillaOutflankedWeight"/> of its unrouted combat regiments at any depth
+        /// (the descendants vanilla's group pass walks through allattachedunits, 120148), each
+        /// regiment's state taken from the snapshot's flank pressure. Vanilla's own
+        /// <c>flanksthreated</c> cannot be used: UpdateGroupStrength adds the group's OWN
+        /// outflanked weight once per active subordinate (120273, 120568-120582), so a corps of
+        /// forty read as surrounded whenever its HQ had one enemy on a flank. One walk up the
+        /// parent chain per regiment. <paramref name="mean"/> and
+        /// <paramref name="count"/> must hold OwnCount entries; units with no sampled
+        /// regiment read 0.
+        /// </summary>
+        internal static void MeanFlankThreatByGroup(BattleSnapshot s, float[] mean, int[] count)
+        {
+            if (s == null || mean == null || count == null) return;
+            int n = Math.Min(s.OwnCount, Math.Min(mean.Length, count.Length));
+            Array.Clear(mean, 0, n);
+            Array.Clear(count, 0, n);
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < n; i++)
+            {
+                ref UnitRecord u = ref own[i];
+                if (u.UnitTyp > TacticalUnitType.MaxCombat || u.Strength <= 0 || (u.Flags & UnitFlags.Routed) != 0) continue;
+                float weight = VanillaOutflankedWeight(OutflankedState(s.FlankPressure(i, 0), s.FlankPressure(i, 1), s.FlankPressure(i, 2)));
+                int parent = u.ParentIndex;
+                for (int steps = 0; parent >= 0 && parent < n && steps < n; steps++)
+                {
+                    mean[parent] += weight;
+                    count[parent]++;
+                    parent = own[parent].ParentIndex;
+                }
+            }
+            for (int i = 0; i < n; i++)
+                if (count[i] > 0) mean[i] /= count[i];
+        }
+
+        /// <summary>Men per bucket of known enemy strength in the heavy-gate signature.</summary>
+        internal const float KnownEnemyStrengthBucketMen = 500f;
+
+        /// <summary>
+        /// The heavy-gate signature's enemy term: the side's visible enemy strength in
+        /// <see cref="KnownEnemyStrengthBucketMen"/> buckets, so only a meaningful change in
+        /// what is seen re-runs the heavy path (the enemy's true totalactiveforce is unknowable).
+        /// </summary>
+        internal static int KnownEnemyStrengthBucket(float visibleEnemyStrength)
+        {
+            if (!(visibleEnemyStrength > 0f) || float.IsInfinity(visibleEnemyStrength)) return 0;
+            return (int)(visibleEnemyStrength / KnownEnemyStrengthBucketMen);
+        }
+
+        /// <summary>
+        /// The heavy-gate signature's contact term over the side's own units: a unit counts
+        /// when its path was interrupted (own-side pathinterrupted, set with StopRegiment on
+        /// contact 117330 - the shipped trigger), when in melee, or when the first enemy of
+        /// its range list (UnitRecord.FirstEnemyInRangeId, enemyinrangereg[0]) is visible.
+        /// Buckets: 0 none, 1 for 1-3, 2 for 4-10, 3 above.
+        /// </summary>
+        internal static int ContactBucket(BattleSnapshot s)
+        {
+            if (s == null) return 0;
+            int contacts = 0;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((own[i].Flags & (UnitFlags.InMelee | UnitFlags.PathInterrupted)) != 0
+                    || (own[i].FirstEnemyInRangeId != 0 && s.IsVisible(own[i].FirstEnemyInRangeId)))
+                    contacts++;
+            }
+            if (contacts <= 0) return 0;
+            if (contacts <= 3) return 1;
+            if (contacts <= 10) return 2;
+            return 3;
+        }
+
+        /// <summary>
+        /// Enemy pressure around one own unit: the sum of its snapshot slice pressure (visible
+        /// enemies plus discounted remembered ones within aidefensivemaxrange, BC2a). Replaces
+        /// the total of vanilla's unfiltered per-unit angle slices (122707-122732).
+        /// </summary>
+        internal static float SlicePressureTotal(BattleSnapshot s, int ownIndex)
+        {
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 0f;
+            float total = 0f;
+            for (int k = 0; k < s.SliceCount; k++) total += s.SlicePressure(ownIndex, k);
+            return total;
+        }
+
+        /// <summary>
+        /// Any perceived pressure on the unit's left, right or rear flank point. Replaces
+        /// vanilla's flanksthreated / outflanked, which come from unfiltered range lists.
+        /// </summary>
+        internal static bool HasFlankPressure(BattleSnapshot s, int ownIndex)
+        {
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return false;
+            return s.FlankPressure(ownIndex, 0) > 0f || s.FlankPressure(ownIndex, 1) > 0f || s.FlankPressure(ownIndex, 2) > 0f;
         }
     }
 }

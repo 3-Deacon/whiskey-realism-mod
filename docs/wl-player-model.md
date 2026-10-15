@@ -81,16 +81,24 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 
 ## Rules for Whiskey code
 
-1. Never move, stop, re-stance, re-form, or change combat behavior of a `dlcw_isundercommander` unit (use `TacticalWriteGuard` in battle; mirror vanilla's order-instead-of-move on the campaign map).
-2. Superiors and peers of the player are AI and may be commanded — **before ordering an ancestor of the player's command, ensure `currentcommand.permanentlydetached == true`** (re-assert it), order via `BattleUnits.SetWaypoint(group, pos, …, showmovementoptions: false)`, and deliver the player's share through `AIBattle.CheckCurrentOrderUpdate` with the matching type.
+1. Never move, stop, re-stance, re-form, or change combat behavior of a `dlcw_isundercommander` unit (use `TacticalWriteGuard` in battle; mirror vanilla's order-instead-of-move on the campaign map). **Battle: enforced by the battle core** (below).
+2. Superiors and peers of the player are AI and may be commanded, but a group order on an ancestor reaches every non-detached descendant. **Battle: enforced by the battle core's chain planner** (below) — it never re-asserts `permanentlydetached`; it orders the ancestor only when the player's command is detached from it, otherwise it orders the ancestor's children instead, and it delivers the player's share of the move through `AIBattle.CheckCurrentOrderUpdate` with the matching type.
 3. If Whiskey replaces a vanilla movement path that normally emits a dispatch (`UpdateMovingTargets`, `AssaultMove`, `MarchToSoundOfGuns`, `CheckForSeparatedEnemy`, campaign offensives/defensive ops/capital defense), it must emit the same dispatch.
 4. Writing `macroai` on the player-side AIBattle in W&L produces dispatches: 2 → type-12 defend orders; 3 → type-15 retreat and a battle-ending retreat timer.
-5. Filter `dlcw_isundercommander` units out of every enumeration of `allgroupsassigned` / `allattachedunits` used for AI decisions (pool leak).
+5. Filter `dlcw_isundercommander` units out of every enumeration of `allgroupsassigned` / `allattachedunits` used for AI decisions (pool leak). Battle: the snapshot carries `UnitFlags.PlayerOwned`; the posture inputs drop player-owned probes (`PostureProbeFilter`) and every per-regiment walk checks the flag or `TacticalWriteGuard.CanWrite`.
 6. Campaign dispatches have no vanilla dedupe — rate-limit and dedupe any Whiskey-issued campaign orders (type + target + ~110 m).
 7. Treat the player's group as an unreliable executor (disobedience is free); don't put it in must-succeed roles without a fallback.
 8. Gate Whiskey campaign writers on vanilla's hierarchy −1 pause (11368), or accept the asymmetry deliberately.
 9. A CIC player is a different regime: Whiskey's CIC for that side stands down; every unit on the player's side is player-owned.
 10. Respect `DLC_WL.IsMovedByPlayer` (player Operations) everywhere, not just capital defense.
+
+### Battle-core enforcement (2026-10-15)
+
+- **`PlayerOwnership`** (pure, `Tactical/Battle/`) computes `UnitFlags.PlayerOwned` per snapshot unit: in a career `dlcw_isundercommander`, a battle take-over, or a CIC player's whole alliance (covering the lag before the cached flag refreshes); outside a career the player alliance unless `ai_vs_ai`/debug all-armies-AI. Ancestors are never owned. `ApplyChainFlags` marks the player's command, its detached state and its ancestors.
+- **Feud is a group state.** `ActivateFeud` (116613) sets `ai_feudstance` on the group, and `AddUnitToPool(overwriteaigroups)` points every descendant's `groupaiobject` at it (7637-7648). The snapshot marks `UnitFlags.Feud` on a unit whose own state, AI group or command ancestor feuds (`PlayerOwnership.ApplyFeudGroups`; only a unit's own `ai_feudstance` is a source), and `TacticalWriteGuard`'s `Regiment` overloads apply the same rule. Whiskey never writes a feuding unit, except #42's replay of vanilla's own feud move (never on a player-owned unit).
+- **Chain rule** (`TacticalChainOrderPlanner`): a player-owned descendant is *exposed* to a group order when neither it nor any node between it and the group is `permanentlydetached` (vanilla's group orders skip a detached subtree, 119865). A group with no exposed owned descendant is ordered itself; otherwise its direct children are ordered (owned children skipped, children with exposed owned descendants fanned out again). In-place rotations walk the same exclusion (`PostureSense.CollectRotatableRegiments`) and re-check `CanWrite` per regiment.
+- **Dispatch:** when the executor moves an ancestor of the player's command, `TacticalPlayerDispatchRuntime.Emit` sends one `CheckCurrentOrderUpdate` per executed plan (`TacticalDispatchTypeMapper`: attack/exploit 0, assault 4, support 2, hold/defend 12, reserve 11, screen/probe/guard 1, fix 3; never 13-15), sharing #62's dedupe (same type within 110 m).
+- **Guard:** the executor refuses `PlayerOwned` at plan time (`OrderExecutor.Plan` step 1) and re-checks every live target with `TacticalWriteGuard.CanWrite`; writers that cannot fan out (#59, #60, #42's fallback) refuse a group with an exposed owned descendant.
 
 ## Candidate vanilla bugs (not yet tracked)
 

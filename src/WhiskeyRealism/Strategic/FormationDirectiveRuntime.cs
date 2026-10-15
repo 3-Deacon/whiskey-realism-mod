@@ -122,7 +122,6 @@ namespace WhiskeyRealism.Strategic
                     X = unit.transform.position.x,
                     Z = unit.transform.position.z,
                     GroupStrengthActive = Math.Max(0f, unit.groupstrengthactive),
-                    GroupStrengthDirect = Math.Max(0f, unit.groupstrengthdirect),
                     Morale = FormationSnapshot.Clamp01(unit.groupmorale),
                     Readiness = FormationSnapshot.Clamp01(unit.readiness),
                     RifleAmmo = ReadSupplyState(unit, 0, unit.groupammo),

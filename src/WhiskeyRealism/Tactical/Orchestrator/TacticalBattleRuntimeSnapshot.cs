@@ -30,52 +30,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// and Tactical/AGENTS.md (pure DTO in Orchestrator/, explicit Compile Include for tests).
     /// </summary>
     // ============================================================
-    // URGENT RECOVERY SAFETY BOUNDARY (Task 8)
+    // HEAVY SNAPSHOT vs PER-TICK BATTLE SNAPSHOT
     // ============================================================
-    // Heavy snapshot (TacticalBattleRuntimeSnapshot) is built ONLY when TacticalHeavyPathGate.Decide returns Run
-    // (in coordinator Drive* paths). It is the atomic unit: OwnEvidence + EnemyVisible + scalars + Objectives (w/ avenues)
+    // This heavy snapshot is built ONLY when TacticalHeavyPathGate.Decide returns Run (coordinator
+    // Drive* paths). It is the atomic unit: OwnEvidence + EnemyVisible + scalars + Objectives (w/ avenues)
     // + CommandTree + DirectChildSnapshots.
     //
-    // Urgent recovery (#61 BattleCommandPostureExecutorPatch on AdjustGroupFormations, CommandFormationCorrection
-    // local flank/fallback/formation fixes, CommandPostureExecutor Decide + physical, TacticalCommandMonitor idle,
-    // RecoverInterruptedOrder, FallbackToLine, charge local logic, etc.) runs on *frequent* vanilla cadence.
+    // Live movement and order state comes from the per-tick battle snapshot, not from vanilla.
+    // Tactical/Battle/BattleSnapshot (BC1, plan docs/superpowers/plans/2026-10-15-battle-core.md) is
+    // built once per side per doctrine tick from one pass over BattleUnits.completeunitlist, on the main
+    // thread inside the coordinator tick (CheckGlobalAIStrategy, UpdateAITasks 5866), in the same frame
+    // the arbiter acts in (AdjustGroupFormations 5870). Its UnitRecord carries, per unit and fresh every
+    // tick: position and rotation, regimentpaths, queued courier orders, lastsetwaypointposition,
+    // formation, ai_stance / ai_stanceordered, combatbehaviorordered, movementmode, strength,
+    // morale, fatigue, ammo (T1 rule), routed / onretreat / inmelee / garrison / detached flags,
+    // ownership flags, and the command parent from the single parent map (allattachedunits,
+    // plan D5). Frequent-cadence readers take that snapshot (BattleCore.TryGetSnapshot) instead of
+    // reading live Regiment fields themselves; the movers still reading live fields move onto it in
+    // the BC5 migration.
     //
-    // These paths MAY SAFELY READ (without triggering heavy Build or full vision/evidence walks):
-    //   - Live vanilla per-Regiment physical/order state (from bunits.unitsused Regiment objects via safe reflection):
-    //     pathinterrupted, groupsubordinatesmoving, groupsubordinatesmovingnotfar, regimentpaths,
-    //     lastsetwaypointposition, formation fields (SafeFormation/SafeFormationOrdered/SafeGroupFormation),
-    //     rotationY, position, routed, morale, fatigue, ammo, combatbehaviorordered, unittyp, mounted,
-    //     allattachedunits, permanentlydetached, HasPendingOrder, HasActiveMoveMakingProgress.
-    //   - Local contacts / immediate threats (cheap FOW + proximity, NOT full ArmyEvidence sectors or objective records):
-    //     TacticalFogOfWarContact.ClosestVisibleEnemy/HasFowVisibleEnemy, HasCloseEngagement, HasLocalFlankRisk,
-    //     SafeEnemyDistance, ClosestEnemy, UnitInCover, EnemyAdvancing, IsAlignedToTarget, blockedcrossings.
-    //   - Recent formation/order + cooldown state (patch-local dicts + vanilla timers): HasRecentReceivedFire,
-    //     HasRecentExecutorOrder, CanBypassStaleQueuedOrder, RecentOrderCooldownSeconds, visible mismatch,
-    //     allowPendingLocalFormation.
-    //   - Vanilla battle cheap context (AIBattle/BattleUnits via Safe*): macroai, state, sideofai, isplayeraiorfeud,
-    //     bunits.sideinformation force totals, GameVars.* (ai_vs_ai, currenttimefromstart for cooldowns).
-    //   - LAST published snapshot ONLY (coordinator _lastPublishedSnapshots[side], when HasData) for high-level:
-    //     Objectives (doctrine target resolution), CommandTree/DirectChildSnapshots (runtime play orders),
-    //     EnemyVisible/scalars (coarse morale/effort at build time). Guard with snapshot.HasData; degrade when !HasData.
+    // What stays here: the throttled, expensive derivations (evidence sectors, objective records with
+    // approach avenues, the CommandTreeSnapshot / DirectChildSnapshot views of the parent map), all
+    // derived from that per-tick snapshot (BC2b): own figures from its Own records, enemy figures
+    // only from its visible and remembered observations. Readers of
+    // this struct guard with HasData and degrade to the per-tick BattleSnapshot when it is Empty
+    // (heavy throttling off, no orchestrator/ledger yet, Commander Mode Off).
     //
-    // MUST DEGRADE to live-vanilla-only (or prior pre-Task6 behavior) when:
-    //   - !IsHeavyThrottlingEnabled() (preserve-off exact match).
-    //   - No orchestrator/ledger active (TacticalCommanderMode Off or pre-bootstrap).
-    //   - Last snapshot == Empty or !HasData (no objectives/nodes).
-    //   - In cheap ExtractCurrentSignature path (frequent gate input; bounded scan only for anyInterruptedPathsOrNewContact).
-    //   - Reflection failure (Safe* already return defaults + bounded warn; never throw).
-    //
-    // INVARIANT (Tasks 6/7): ONLY coordinator gate logic ever calls expensive builder. Urgent paths (#61 + local fixes)
-    // are independent, always reuse last snapshot (or Empty) + fresh live vanilla per-group reads. This guarantees
-    // immediate responsiveness for pathinterrupted recovery, flank emergencies, formation corrections even under heavy throttle.
-    //
-    // See: TacticalHeavyPathGate.Decide, TacticalBattleCoordinatorRuntime (DriveTick/DirectChild/OperationsLedger gate paths
-    // + ExtractCurrentSignature calls), BattleCommandPostureExecutorPatch (Apply/TryApplyGroup/BuildPhysicalState/TryResolveTarget),
-    // CommandFormationCorrection (TaskForLocalFlankEmergency, NeedsCorrection, RecentOrderCooldownSeconds, ShouldUseNewPathForFormationCorrection),
-    // CommandPostureExecutor (Decide/ShouldSkipDuplicateWaypoint using pathInterrupted), TacticalBattleOrchestrator.TickOperationsLedger,
-    // TacticalOperationsLedgerRuntime.Update (HasData guard).
-    //
-    // Authoritative: plan Task 8 + Tactical/AGENTS.md (runtime safety: try/catch, degrade, bounded logging, no throw).
+    // INVARIANT: only coordinator gate logic calls the expensive builder (TacticalBattleSnapshotBuilder).
     // ============================================================
     internal readonly struct TacticalBattleRuntimeSnapshot
     {
@@ -160,10 +141,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float OwnArmyMorale { get; }
         public float OwnReservesCommittedFraction { get; }
         /// <summary>
-        /// Own reinforcement strength due within 24 h
-        /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
-        /// the enemy's schedule is not known; enemy arrivals count once in
-        /// range, through the contact ledger.
+        /// Own reinforcement strength due inside vanilla's retreat-decision window
+        /// (ArmyEvidenceBuilder.OwnReinforcementsArriving, 84764-84767). Own side only:
+        /// the enemy's schedule is not known; enemy arrivals count once seen,
+        /// through the contact ledger.
         /// </summary>
         public float OwnReinforcementsArriving { get; }
         public IReadOnlyList<ObjectiveRecord> Objectives { get; }

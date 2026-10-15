@@ -21,8 +21,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //   - CommandTreeRuntime: the cached roster signature equals the live one
     //     (completeunitlist identity/count, active/routed/marked counts, id set), and
     //     the cached snapshot has nodes when the side has active regiments.
-    //   - _resolvedDecisionsBySide has at least one entry per side with active
-    //     commandable regiments (catches the case where pre-populate failed silently).
     //
     // Cadence: ValidateIfDue() is called from Tick() body. Internally rate-limited
     // to once per ValidationIntervalSeconds (default 30s wallclock) so the validation
@@ -62,7 +60,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int mismatches = 0;
                     mismatches += ValidateSceneCache();
                     mismatches += ValidateCommandTreeCache();
-                    mismatches += ValidateResolvedDecisionsCache();
                     _validationsRun++;
                     _mismatchesFound += mismatches;
 
@@ -200,67 +197,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return count;
             }
             catch { return 0; }
-        }
-
-        // Validates that _resolvedDecisionsBySide has at least one entry per side
-        // that has active commandable regiments. If it's empty, the patch falls
-        // through to tier-3 ApplyGroup for every group — exactly the spike pattern
-        // Stage C was designed to eliminate. Detection means pre-populate or
-        // refresh missed; emit warning so smoke catches the regression.
-        private static int ValidateResolvedDecisionsCache()
-        {
-            int mismatches = 0;
-            try
-            {
-                for (int allianceId = 0; allianceId < 2; allianceId++)
-                {
-                    int activeRegiments = CountActiveRegimentsForAlliance(allianceId);
-                    if (activeRegiments == 0) continue;
-
-                    // Probe by looking up a known regiment via TryGetResolvedGroupDecision.
-                    // We don't have direct access to the dict size, so we probe the FIRST
-                    // active regiment's instanceId. Miss means the cache is empty for
-                    // this side (a fault either in pre-populate or in heavy-gate refresh).
-                    int probedInstanceId = ProbeFirstActiveRegimentInstanceId(allianceId);
-                    if (probedInstanceId == 0) continue;
-
-                    TacticalResolvedGroupDecision dummy;
-                    bool hit = TacticalBattleCoordinator.TryGetResolvedGroupDecision(
-                        allianceId, probedInstanceId, out dummy);
-                    if (!hit)
-                    {
-                        mismatches++;
-                        OnceLog.Warning(
-                            "tactical-cache-validator:resolved-cache-miss",
-                            "[TacticalCacheValidator] resolved-decisions cache MISS for alliance="
-                            + allianceId + " probedInstanceId=" + probedInstanceId
-                            + " activeRegiments=" + activeRegiments
-                            + " — tier-3 ApplyGroup fallback active; perf regression likely");
-                    }
-                }
-            }
-            catch { }
-            return mismatches;
-        }
-
-        private static int ProbeFirstActiveRegimentInstanceId(int allianceId)
-        {
-            try
-            {
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null) return 0;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg == null) continue;
-                    if (reg.alliance != allianceId) continue;
-                    if (reg.isrouted || reg.markedforrout || reg.permanentlydetached) continue;
-                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(reg.unittyp)) continue;
-                    try { return reg.GetInstanceID(); } catch { continue; }
-                }
-            }
-            catch { }
-            return 0;
         }
 
         private static float SafeRealtimeSeconds()

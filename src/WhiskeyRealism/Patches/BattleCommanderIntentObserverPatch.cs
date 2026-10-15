@@ -23,7 +23,8 @@ namespace WhiskeyRealism.Patches
     // observer (its only producer), rebuilt from scratch every AdjustGroupAIStance
     // cycle (5866) and written only while the army orchestrator is off; with the
     // orchestrator on (default) the observer is telemetry-only. Its reader
-    // (BattleGroupStancePatch) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
+    // (TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide, legacy
+    // charge denial) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
@@ -257,6 +258,9 @@ namespace WhiskeyRealism.Patches
             if (unit == null) return;
 
             unitCount++;
+            // Vanilla's own unfiltered group state, as AdjustGroupAIStance reads it:
+            // this legacy observer is telemetry while the orchestrator army is on and
+            // feeds a decision (legacy charge denial) only with the army off.
             own += Math.Max(0f, Math.Max(unit.groupowninrange, unit.groupstrengthaigroup));
             enemy += Math.Max(0f, unit.groupenemiesinrange);
             flank = flank || unit.flanksthreated > 0f || unit.outflanked > 0;
@@ -361,6 +365,7 @@ namespace WhiskeyRealism.Patches
             TacticalIntentDecision intent,
             TacticalPlaybookDecision playbook)
         {
+            // Vanilla's own unfiltered group state (see AccumulatePlaybookSectorUnit).
             float own = Math.Max(0f, group.groupowninrange);
             float enemy = Math.Max(0f, group.groupenemiesinrange);
             float odds = enemy <= 0f ? 0f : own / Math.Max(1f, enemy);

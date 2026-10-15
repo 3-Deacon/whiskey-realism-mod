@@ -211,7 +211,6 @@ internal static class TestFixtures
             UnitType = unitType,
             IsTopUnit = true,
             GroupStrengthActive = strength,
-            GroupStrengthDirect = strength,
             Morale = 0.8f,
             Readiness = 0.8f,
             RifleAmmo = 0.8f,
@@ -363,4 +362,16 @@ internal static class TestFixtures
 
     internal static string ReadRepoFile(string relativePath)
         => File.ReadAllText(FindRepoPath(relativePath));
+
+    // The division play's order for one child node, default when it has none
+    // (the producer walks decision.Orders itself).
+    internal static TacticalDivisionPlayOrder PlayOrderFor(TacticalDivisionPlayDecision decision, string nodeId)
+    {
+        for (int i = 0; i < decision.Orders.Count; i++)
+        {
+            if (string.Equals(decision.Orders[i].NodeId, nodeId, StringComparison.Ordinal))
+                return decision.Orders[i];
+        }
+        return default;
+    }
 }

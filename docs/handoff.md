@@ -8,13 +8,27 @@
 
 | | |
 |---|---|
-| **Branch** | `feat/orchestrator-worker-thread` (despite the name, the worker thread is deleted). Review remediation merged at `08f4a3c`. Not yet merged to `main`. |
-| **`main`** | `262a50d` — last released line is v0.2.2 (2026-05-04); `main` carries later Slice B / orchestrator work but none of the 2026-10-14/15 remediation. |
-| **Build** | `./build.sh` — 0 warnings, 0 errors at `08f4a3c`. |
-| **Harness** | 1680 PASS / 0 FAIL at `08f4a3c`. The harness restructure (auto-discovered `*Tests.Run()`, `Program.cs` split) is in flight on `fix/integ-tests` and may change the count. |
-| **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 102 entries) and `python3 -I tools/orphan-sweep.py . [--include-test-only]` (0 findings). See AGENTS.md § Testing. |
+| **Branch** | `feat/battle-core` (worktree `.worktrees/feat-battle-core`): roadmap stage D, slices BC0-BC7 complete, BC7 awaiting review. Not merged to `main`, not deployed. |
+| **`main`** | `6695ecd` — the 2026-10-15 checkpoint (review remediation + Stage B integration); last released line is v0.2.2 (2026-05-04). |
+| **Build** | `./build.sh` — 0 warnings, 0 errors on `feat/battle-core`; the test build is 0 warnings too. |
+| **Harness** | 1917 PASS / 0 FAIL on `feat/battle-core` (auto-discovered `*Tests.Run()`; exit 0). `main`: 1688. |
+| **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
 | **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` (checkpoint tag `checkpoint-2026-10-15`): `WhiskeyRealism.dll` 1,593,856 bytes, SHA-256 `0831547f9835e3f084953e64bed7cd049c26c68f96ce22c2a0134c35fee17638` (dist and plugins match); harness 1688 PASS / 0 FAIL. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
+
+### What the battle core adds (stage D, `feat/battle-core`)
+
+Spec [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md), plan [`superpowers/plans/2026-10-15-battle-core.md`](superpowers/plans/2026-10-15-battle-core.md) (decisions D1-D11, per-slice As built, PROVE-MODE, the BC7 smoke checklist). Architecture: [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core.
+
+- **BC1 snapshot.** One pooled `BattleSnapshot` per AI side per frame, built at `CheckGlobalAIStrategy` (5866): own/enemy `UnitRecord`s, the D5 command parent map (smallest containing `allattachedunits`), derived arrays; `DirectChildDiscoveryRuntime` and `CommandTreeRuntime` read it.
+- **BC2 perception.** Vanilla's AI-side fog grid (`UnitIsHidden`, 127225) or `iswithinfog` for a player-alliance AI side, range-only fallback; remembered enemies decay; every Whiskey battle reader (evidence, contact ledger, objective records, plays, posture, artillery, charge, #42/#44) reads observations.
+- **BC3 ownership.** `PlayerOwnership` (player-owned, chain flags, group-level feud), `TacticalChainOrderPlanner` (fan-out around exposed player-owned descendants), `TacticalPlayerDispatchRuntime.Emit` (one W&L dispatch emitter shared with #62).
+- **BC4 arbiter/executor.** #68 `BattleCoreArbiterPatch` (Postfix on `AdjustGroupFormations` 5870): `OrderArbiter` (one winner per group and channel) and `OrderExecutor` (guard, chain, `WaypointValidator`, silent-exit pre-check, dedupe, cooldowns; outcomes Moved/Failed/Retried/GaveUp/Superseded).
+- **BC5 migration.** #61 → Posture, FacingPulse, FireControl, DivisionPlay producers; #45/B7/veto → GroupStance, ChargeDemotion, ArtilleryDoctrine, ArtilleryPointBlank; B8/#52 → Withdrawal and #59's merged deny; reserve release producer; #42 and #56 run the executor inline.
+- **BC6 charge doctrine.** AI infantry in assault arms combat behavior 3 for the two leading regiments under vanilla's charge rules, restores vanilla's dead stance-drop cancel (`BUG-TAC-016/017`).
+- **BC7 integration.** Explicit producer registry (`BattleProducerRegistry`; the producers' static constructors had never run), dead flags/code removed, Plugin descriptions rewritten, grep gates, one smoke checklist, docs.
+
+Patches deleted: #45, #48, #49, #50, #52, #61, #65 (see [`patch-catalog.md`](patch-catalog.md) § Removed patches). Flags deleted: `Enable Single-Pass Objective Records`, `Battle Group Stance Min Interval Seconds`, `Enable Artillery Waypoint Veto`. Flags added (BC0): `Enable Battle Fog-Honest Perception`, `Enable Infantry Charge Doctrine`.
 
 ### What the remediation shipped
 
@@ -35,18 +49,17 @@ Inputs: [`reviews/2026-10-14-full-mod-review.md`](reviews/2026-10-14-full-mod-re
 
 Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found along the way: [`bug-fixes/`](bug-fixes/README.md).
 
-### Open items on this branch
+### Open items
 
-- Harness auto-discovery / `Program.cs` split (roadmap B.4) — in flight on `fix/integ-tests`.
-- Patch first-fire registry + session-log smoke check (roadmap B.7) — not started.
-- No in-game smoke of the remediated DLL yet (deployed 2026-10-15, awaiting smoke: `python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"`).
+- **Battle core:** BC7 review, then merge `feat/battle-core` → `main`, build, deploy with the user's go-ahead (BepInEx 5.4.23.5 is installed), and run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
+- No in-game smoke of the 2026-10-15 checkpoint DLL on `main` yet (deployed, awaiting smoke).
 
 ## Next stages
 
 From [`superpowers/plans/2026-10-15-full-overhaul-roadmap.md`](superpowers/plans/2026-10-15-full-overhaul-roadmap.md). Each stage ends with a clean build, all-PASS harness, clean `config-audit`/`orphan-sweep`, and an independent review.
 
-1. **C — Checkpoint.** Merge `feat/orchestrator-worker-thread` → `main`, build from `main`, record the DLL SHA-256 here. Ask the user before deploying.
-2. **D — Battle core.** Per-side `BattleSnapshot`, fog-honest perception from vanilla's AI fog grid, one `PlayerOwnership` model, one `OrderArbiter` for every battle mover, infantry charge doctrine. Spec: [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md).
+1. **C — Checkpoint.** Done: `main` at `6695ecd`, deployed 2026-10-15 (SHA-256 `0831547f…`).
+2. **D — Battle core.** Built on `feat/battle-core` (BC0-BC7); in review, then merge, deploy and smoke (see Open items). Spec: [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md).
 3. **E — Need-driven policy.** Plan: [`superpowers/plans/2026-10-14-need-driven-policy.md`](superpowers/plans/2026-10-14-need-driven-policy.md); spec [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md).
 4. **F — W&L chain of command** on the arbiter. Spec: [`superpowers/specs/2026-10-14-wl-chain-of-command-design.md`](superpowers/specs/2026-10-14-wl-chain-of-command-design.md) (§D-§F; §A-§C moved to battle core).
 5. **G — Live theater campaign planner.** Spec: [`superpowers/specs/2026-10-14-campaign-planner-design.md`](superpowers/specs/2026-10-14-campaign-planner-design.md). Supersedes locked design choices #3-#6 once it ships.
@@ -101,7 +114,7 @@ Archived design rationale: [`superpowers/specs/archive/2026-05-02-strategic-brai
 
 ## Tactical layer — durable architecture
 
-Per battle: `TacticalBattleCoordinator` → per-side `TacticalBattleOrchestrator` → `ArmyOrchestrator` → command-node tree and direct-child roles, ticked on the coordinator's doctrine clock. Writes into vanilla battle state go through `TacticalWriteGuard`; `ai_stance` only through `Util/TacticalStanceWriter`; `macroai` only through #44. `Tactical Commander Mode`: `Active` (release default), `MonitorOnly` (ledger and telemetry run, nothing is written), `Off` (rollback: no ledger). Details: [`tactical-orchestrator.md`](tactical-orchestrator.md).
+Per battle: `TacticalBattleCoordinator` → per-side `TacticalBattleOrchestrator` → `ArmyOrchestrator` → command-node tree and direct-child roles, ticked on the coordinator's doctrine clock. With the battle core (`feat/battle-core`): one `BattleSnapshot` per AI side per tick (fog-honest perception, the D5 parent map, ownership flags) feeds every battle reader, and every Whiskey movement, stance, formation, facing and combat-behavior write is an intent resolved by the arbiter (#68) and issued by the order executor behind `TacticalWriteGuard`; `ai_stance` only through `Util/TacticalStanceWriter`; `macroai` only through #44. `Tactical Commander Mode`: `Active` (release default), `MonitorOnly` (snapshot, perception, ledger and telemetry run, nothing is written), `Off` (rollback: no ledger). Details: [`tactical-orchestrator.md`](tactical-orchestrator.md).
 
 ---
 

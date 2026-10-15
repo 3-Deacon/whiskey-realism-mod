@@ -1,10 +1,12 @@
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical
 {
-    // Single gate for every Whiskey write into vanilla battle state
-    // (stance, formation, combat behavior, waypoints, macroai, withdrawal).
+    // Single gate for every Whiskey write into vanilla battle state (stance,
+    // formation, combat behavior, waypoints, macroai, withdrawal). A thin reader of
+    // the battle-core ownership model (Tactical/Battle/PlayerOwnership.cs).
     //
     // Vanilla anchors (decompile, build 14703111):
     //   AIBattle.SetSide (3408): isplayeraiorfeud = 0 for the enemy AI side,
@@ -12,18 +14,31 @@ namespace WhiskeyRealism.Tactical
     //   AIBattle.UpdateAITasks (5857): runs only when isplayeraiorfeud == 0
     //     or GameVars.ai_vs_ai. W&L sets ai_vs_ai = true, so the player-side
     //     instance (1) and the feud instance (2) also run the macro cycle there.
-    //   BattleUnits.ChangeStance (90772): any stance > 0 sets
-    //     permanentlydetached and, for the player alliance outside ai_vs_ai,
-    //     hands the unit to aibattle[1]'s pool — so player-owned units must
-    //     never reach a Whiskey stance write.
+    //   BattleUnits.IsUnitUnderCommander (91168-91222) → Regiment.dlcw_isundercommander:
+    //     the player's command, its descendants, take-overs (IsUnitTakenOver 45840),
+    //     CIC/army-group cases. That is the W&L ownership set; ancestors are not in it.
+    //   AIBattle.PerformAIActionDLCWL (5101): vanilla's own micro-AI gate refuses
+    //     dlcw_isundercommander units and nothing else.
+    //   Deployment 85321-85336 detaches the player's command, TakeOverUnitBattle
+    //     164455 a taken-over unit; ChangeStance(…, 0) (90786-90793) clears it.
+    //     SetGroupFormation (91988-92030) skips a detached subtree (119865) and has
+    //     no dlcw filter.
     //
     // Contract:
     //   - Tactical Commander Mode must be Active (MonitorOnly/Off write nothing).
-    //   - The unit must be AI-controlled: enemy alliance, or ai_vs_ai /
-    //     debug_allarmiesai for the player's alliance.
-    //   - W&L: the player's directly-commanded unit, its command chain, any
-    //     unit with dlcw_isundercommander attached, and DLC-taken-over units
-    //     are protected.
+    //   - PlayerOwned units (W&L player's command + descendants, take-overs, CIC;
+    //     outside W&L the player alliance unless ai_vs_ai/debug_allarmiesai) and
+    //     feuding units are never written. Feud is the vanilla AI group's state
+    //     (ActivateFeud 116613 + AddUnitToPool 7637-7648; aigroup.ai_feudstance at
+    //     4917/4922): the unit, its AI group (groupaiobject) or a command ancestor.
+    //   - Ancestors of the player's command are AI and are not PlayerOwned. The
+    //     battle-core executor resolves orders on them through
+    //     TacticalChainOrderPlanner. The Regiment overloads serve writers that
+    //     cannot fan out (deployment #60, #59's rollback, the executor's per-target
+    //     re-check, #42's no-snapshot fallback): both
+    //     refuse a group with an exposed player-owned descendant — the player's
+    //     attached command or an attached take-over — because a group write there
+    //     would reach player-owned units.
     //   - Fail closed: any exception means "do not write".
     public static class TacticalWriteGuard
     {
@@ -31,8 +46,11 @@ namespace WhiskeyRealism.Tactical
         {
             try
             {
+                // The master Enabled switch can be turned off at runtime; every
+                // battle write (executor plan guard, live CanWrite) fails closed then.
                 var plugin = Plugin.Instance;
-                return plugin != null && TacticalCommanderModePolicy.AllowsWrites(plugin.TacticalCommanderModeValue);
+                return plugin != null && plugin.Enabled != null && plugin.Enabled.Value
+                    && TacticalCommanderModePolicy.AllowsWrites(plugin.TacticalCommanderModeValue);
             }
             catch
             {
@@ -49,13 +67,33 @@ namespace WhiskeyRealism.Tactical
             catch { return true; }
         }
 
-        public static bool IsAiControlled(Regiment unit)
+        // Snapshot path (battle-core executor): flags were computed by the builder.
+        public static bool CanWrite(in UnitRecord unit, out SkipReason reason)
         {
+            return PlayerOwnership.CanWrite(unit.Flags, ModeAllowsWrites(), out reason);
+        }
+
+        // Direct writers and paths without a snapshot (deployment #60, inline
+        // patch writes).
+        public static bool CanWrite(Regiment unit)
+        {
+            return CanWrite(unit, feudReplay: false);
+        }
+
+        // feudReplay: the battle-core executor's live re-check for #42's replay of
+        // vanilla's own feud move (IntentSource.FeudReplay). The Feud refusal is
+        // exempt for it; PlayerOwned never is.
+        public static bool CanWrite(Regiment unit, bool feudReplay)
+        {
+            if (!ModeAllowsWrites()) return false;
             try
             {
                 if ((Object)unit == null) return false;
-                if (unit.alliance != GameVars.playeralliance) return true;
-                return GameVars.ai_vs_ai || GameVars.debug_allarmiesai;
+                PlayerOwnershipInput input = ReadOwnershipInput();
+                UnitFlags flags = OwnershipFlags(unit, input) | GroupFeudFlags(unit);
+                if (feudReplay) flags &= ~UnitFlags.Feud;
+                return PlayerOwnership.CanWrite(flags, modeAllowsWrites: true, out _) &&
+                    !PlayerOwnership.DirectWriteProtected(flags, HasExposedOwnedDescendant(unit, input), out _);
             }
             catch
             {
@@ -63,22 +101,31 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
-        public static bool IsPlayerProtected(Regiment group)
+        public static bool IsPlayerProtected(Regiment unit)
         {
-            return IsPlayerProtected(group, out _);
+            return IsPlayerProtected(unit, out _);
         }
 
-        public static bool IsPlayerProtected(Regiment group, out string reason)
+        // PlayerOwned units, feuding units, and groups whose order would reach an
+        // exposed player-owned descendant. An ancestor of a detached player command
+        // is not protected.
+        public static bool IsPlayerProtected(Regiment unit, out string reason)
         {
             reason = null;
             try
             {
-                if ((Object)group == null) { reason = "null"; return true; }
-                if (!IsAiControlled(group)) { reason = "player-owned"; return true; }
-                if (!WlOwnershipSafe(group)) { reason = "wl-ownership"; return true; }
-                if (IsWlCurrentCommandOrChain(group)) { reason = "wl-current-command"; return true; }
-                if (DLC_WL.dlc_scenarioactive && DLC_WL.IsUnitTakenOver(group)) { reason = "dlc-taken-over"; return true; }
-                return false;
+                if ((Object)unit == null) { reason = "null"; return true; }
+                PlayerOwnershipInput input = ReadOwnershipInput();
+                UnitFlags flags = OwnershipFlags(unit, input) | GroupFeudFlags(unit);
+                bool exposed = (flags & UnitFlags.PlayerOwned) == 0 && HasExposedOwnedDescendant(unit, input);
+                if (!PlayerOwnership.DirectWriteProtected(flags, exposed, out SkipReason skip)) return false;
+                if (skip == SkipReason.Feud) reason = "feud";
+                else if (exposed) reason = "owned-descendant-attached";
+                else if (!input.WlActive) reason = "player-side";
+                else if (unit.dlcw_isundercommander) reason = "wl-under-commander";
+                else if (input.PlayerIsCic) reason = "wl-cic";
+                else reason = "dlc-taken-over";
+                return true;
             }
             catch
             {
@@ -87,45 +134,99 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
-        public static bool CanWrite(Regiment unit)
+        // Per-battle-tick ownership context; BC1's snapshot builder passes it to
+        // PlayerOwnership.Compute/ApplyChainFlags.
+        internal static PlayerOwnershipInput ReadOwnershipInput()
         {
-            return ModeAllowsWrites() && !IsPlayerProtected(unit);
-        }
-
-        private static bool WlOwnershipSafe(Regiment group)
-        {
-            // dlcw_isundercommander marks the W&L player's own command and its
-            // attached units (DLC_WL.AppointCommand 44269, 45827). The prior
-            // copy in #61 returned "safe" whenever ai_vs_ai was set, but W&L
-            // always sets ai_vs_ai (29789), so this check never ran in W&L.
-            if (!DLC_WL.dlc_scenarioactive) return true;
-            if (group.dlcw_isundercommander) return false;
-            if (group.allattachedunits == null) return true;
-
-            for (int i = 0; i < group.allattachedunits.Length; i++)
+            bool wl = DLC_WL.dlc_scenarioactive;
+            Regiment current = wl ? PlayerCurrentCommand() : null;
+            return new PlayerOwnershipInput
             {
-                Regiment unit = group.allattachedunits[i];
-                if ((Object)unit != null && unit.dlcw_isundercommander) return false;
-            }
-
-            return true;
+                WlActive = wl,
+                AiVsAi = GameVars.ai_vs_ai,
+                DebugAllArmiesAi = GameVars.debug_allarmiesai,
+                PlayerAlliance = GameVars.playeralliance,
+                PlayerCommandInstanceId = (Object)current != null ? current.gameObject.GetInstanceID() : 0,
+                // IsCommanderInChief (47475) indexes GameVars.commander unchecked.
+                PlayerIsCic = wl && HasValidChosenCommander() && DLC_WL.IsCommanderInChief(),
+            };
         }
 
-        private static bool IsWlCurrentCommandOrChain(Regiment group)
+        // PlayerOwned / Feud for one unit; the snapshot builder captures the same bits.
+        internal static UnitFlags OwnershipFlags(Regiment unit, in PlayerOwnershipInput input)
         {
-            if (!DLC_WL.dlc_scenarioactive) return false;
-            if (DLC_WL.dlc_chosencommander < 0) return false;
-            if (GameVars.commander == null || DLC_WL.dlc_chosencommander >= GameVars.commander.Count) return true;
+            bool takenOver = input.WlActive && DLC_WL.IsUnitTakenOver(unit);
+            return PlayerOwnership.Compute(input, unit.alliance, unit.dlcw_isundercommander, takenOver, unit.ai_feudstance);
+        }
 
-            Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
-            if ((Object)current == null) return false;
-            if ((Object)current == (Object)group) return true;
+        // Feud is the AI group's state (PlayerOwnership.ApplyFeudGroups): the unit's AI
+        // group (groupaiobject, 110820) feuding, or the side's latest snapshot marking
+        // the unit (a command ancestor feuds). Read live for writers without a snapshot
+        // record; a missing snapshot falls back to the live AI-group read.
+        private static UnitFlags GroupFeudFlags(Regiment unit)
+        {
+            GameObject groupObject = unit.groupaiobject;
+            Regiment group = (Object)groupObject != null ? groupObject.GetComponent<Regiment>() : null;
+            int groupStance = (Object)group != null ? group.ai_feudstance : -1;
+            bool snapshotFeud = false;
+            if (BattleCore.TryGetSnapshot(unit.alliance, out BattleSnapshot snapshot))
+            {
+                int index = snapshot.IndexOfOwn(unit.gameObject.GetInstanceID());
+                snapshotFeud = index >= 0 && (snapshot.Own[index].Flags & UnitFlags.Feud) != 0;
+            }
+            return PlayerOwnership.DirectFeudFlags(unit.ai_feudstance, groupStance, snapshotFeud);
+        }
 
-            Transform currentTransform = current.transform;
-            Transform groupTransform = group.transform;
-            if ((Object)currentTransform == null || (Object)groupTransform == null) return true;
+        // Whether a group order on `group` would reach a player-owned descendant
+        // (PlayerOwnership.IsExposedOwned). Descendants come from allattachedunits
+        // (all descendants, the D5 command-tree source), never transform.parent; a
+        // detached node shields a descendant when that descendant is in the node's
+        // own allattachedunits. Outside a career ownership is alliance-wide, so a
+        // descendant is never owned unless the group is.
+        private static bool HasExposedOwnedDescendant(Regiment group, in PlayerOwnershipInput input)
+        {
+            if (!input.WlActive) return false;
+            Regiment[] attached = group.allattachedunits;
+            if (attached == null) return false;
+            for (int i = 0; i < attached.Length; i++)
+            {
+                Regiment d = attached[i];
+                if ((Object)d == null || (Object)d == (Object)group) continue;
+                UnitFlags flags = OwnershipFlags(d, input) & UnitFlags.PlayerOwned;
+                if (flags == UnitFlags.None) continue;
+                if (d.permanentlydetached) flags |= UnitFlags.PermanentlyDetached;
+                if (PlayerOwnership.IsExposedOwned(flags, DetachedNodeBetween(group, attached, d))) return true;
+            }
+            return false;
+        }
 
-            return currentTransform.IsChildOf(groupTransform) || groupTransform.IsChildOf(currentTransform);
+        // groupDescendants includes the group itself (GetComponentsInChildren,
+        // 129574); the group's own detach never shields its subtree.
+        private static bool DetachedNodeBetween(Regiment group, Regiment[] groupDescendants, Regiment descendant)
+        {
+            for (int i = 0; i < groupDescendants.Length; i++)
+            {
+                Regiment node = groupDescendants[i];
+                if ((Object)node == null || (Object)node == (Object)group || (Object)node == (Object)descendant || !node.permanentlydetached) continue;
+                Regiment[] below = node.allattachedunits;
+                if (below == null) continue;
+                for (int j = 0; j < below.Length; j++)
+                    if ((Object)below[j] == (Object)descendant) return true;
+            }
+            return false;
+        }
+
+        private static Regiment PlayerCurrentCommand()
+        {
+            return HasValidChosenCommander() ? GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand : null;
+        }
+
+        private static bool HasValidChosenCommander()
+        {
+            int chosen = DLC_WL.dlc_chosencommander;
+            // A null entry would throw in the snapshot builder and empty the snapshot.
+            return chosen >= 0 && GameVars.commander != null && chosen < GameVars.commander.Count &&
+                GameVars.commander[chosen] != null;
         }
     }
 }

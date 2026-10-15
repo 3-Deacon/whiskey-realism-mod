@@ -1,4 +1,6 @@
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -54,11 +56,13 @@ namespace WhiskeyRealism.Tactical
     //   AdjustCavalryBehavior 5047: cavalry charge targets only while
     //     ai_stance != 1 && != 2, so a group at 3 still charges with its
     //     cavalry and a group at 2 does not.
-    //   Infantry charges are not stance-driven: MicroAICheckForCharges is dead
-    //     (4910 compares the groupaiobject GameObject with the aigroup
-    //     Regiment), UpdateChargeTarget needs combatbehavior 3 (122214) which
-    //     only the UI sets (203769), and melee comes from contact
-    //     (MoveIntoMelee 125990 -> AssignChargeTarget).
+    //   Vanilla infantry charges are not stance-driven: MicroAICheckForCharges
+    //     is dead (4910 compares the groupaiobject GameObject with the aigroup
+    //     Regiment), UpdateChargeTarget needs combatbehavior 3 (122214) which in
+    //     vanilla only the UI sets (203769), and melee comes from contact
+    //     (MoveIntoMelee 125990 -> AssignChargeTarget). The battle-core charge
+    //     doctrine (BC6b) arms behavior 3 only in assault stance, so a demotion
+    //     also makes it hand its charges back.
     //
     // So the denial demotes the assault stance itself. The doctrine's Deny
     // (reserve held, fallback to line) demotes to its own defend stance (2),
@@ -83,6 +87,38 @@ namespace WhiskeyRealism.Tactical
             if (!input.OrchestratorArmyOn && input.LegacyReactionDeniesCharge)
                 return new ChargeDenialDecision(true, LegacyDemoteStance, "charge-demote");
             return Preserve("vanilla-charge-preserved");
+        }
+
+        // The charge-demotion intent (battle core, ChargeDemotionIntentProducer):
+        // an AI brigade that vanilla holds in assault (ai_stanceordered 4) and
+        // whose cached answer (TacticalBattleCoordinatorRuntime
+        // .PopulateResolvedDecisionsForSide, this class's decision) is
+        // DemoteToHold gets a Safety intent on the Stance channel to the cached
+        // stance (1-3, else LegacyDemoteStance). Safety outranks every other
+        // stance source on the arbiter, so it also beats the posture executor's
+        // assault and denies the infantry charge doctrine (BC6b reverts its
+        // charge once the group is out of assault). Not gated on the group being
+        // settled: a demotion that waits for the march to end is too late.
+        internal static bool TryDemotionIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
+            if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
+            if (group.AiStanceOrdered != TacticalCommandTaskToStanceMapper.StanceAssault) return false;
+            if (resolved.ChargeAction != ChargeOverrideAction.DemoteToHold) return false;
+
+            int stance = resolved.FinalStance >= 1 && resolved.FinalStance <= 3 ? resolved.FinalStance : LegacyDemoteStance;
+            intent = new BattleOrderIntent
+            {
+                GroupId = group.InstanceId,
+                Channel = OrderChannel.Stance,
+                Value = stance,
+                Heading = -1f,
+                Priority = IntentPriority.Safety,
+                Source = IntentSource.ChargeDemotion,
+                Reason = "charge-demotion",
+            };
+            return true;
         }
 
         private static ChargeDenialDecision Preserve(string reason)

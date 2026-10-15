@@ -613,9 +613,12 @@ namespace WhiskeyRealism.Strategic
             });
         }
 
+        // Sidecar-routed rows ([Plan:*]) go to the sidecar only; a row whose tag
+        // has no sidecar route ([CIC:diag]) is written to the main log, which
+        // LegacyInfo alone never does.
         private static void EmitCampaignInfo(string line)
         {
-            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfoToMainLogIfAllowed(line, TelemetryLayer.Campaign);
         }
 
         private static IList GetAvailableObjectivesViaReflection(int allianceId, int minTownObjectives)

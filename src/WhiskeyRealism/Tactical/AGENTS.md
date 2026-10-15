@@ -13,7 +13,7 @@ The rules are identical to [`../Strategic/AGENTS.md`](../Strategic/AGENTS.md) �
 - Prefer deterministic inputs/outputs that can be covered by the console test harness.
 - Use focused DTOs for telemetry signatures so logs can be bounded and compared. `OnceLog.Info(key, message)` already wraps the message with `[once:KEY]` — do not duplicate the prefix in the message body. OnceLog keys are static strings: never embed instance ids or unit names in a key.
 - Per-battle static state (caches, stamps, cooldowns, latches) registers its reset with `BattleScope.Register(name, reset)` from the owner's static constructor (`Util/ScopedState.cs`); per-campaign state uses `CampaignScope.Register`. Coordinator teardown calls `BattleScope.ResetAll()` — never add a hand-wired reset call to a teardown path. Caches hold only immutable data; read live owner/rout/active flags each tick.
-- Battle writes go through `TacticalWriteGuard` and the single owners (`Util/TacticalStanceWriter` for `ai_stance`, #44 for `macroai`); see root `AGENTS.md` § Patch hygiene.
+- Battle writes go through the battle core's order executor (`Battle/OrderExecutorRuntime`) behind `TacticalWriteGuard`, and the single owners (`Util/TacticalStanceWriter` for `ai_stance`, #44 for `macroai`); see root `AGENTS.md` § Patch hygiene. A battle mover is an `IBattleIntentProducer`: it reads the `BattleSnapshot` only, submits intents, writes nothing, and is added to `BattleProducerRegistry.Order` and `BattleCoreTick.CreateProducer` (no static-constructor registration). Read enemies only through the snapshot's observations (fog-honest), never vanilla's unfiltered enemy fields.
 
 ## Cadence Rules
 

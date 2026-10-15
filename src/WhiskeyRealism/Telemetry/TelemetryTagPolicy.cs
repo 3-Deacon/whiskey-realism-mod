@@ -59,7 +59,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalMacro", TelemetryCategory.State);
             AddTactical("TacticalMacroDecision", TelemetryCategory.Decision);
             AddTactical("TacticalGroup", TelemetryCategory.State);
-            AddTactical("TacticalGroupDecision", TelemetryCategory.Decision);
             AddTactical("TacticalSector", TelemetryCategory.State);
             AddTactical("TacticalOdds", TelemetryCategory.State);
             AddTactical("TacticalFormationChange", TelemetryCategory.Write);
@@ -80,8 +79,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalReserveDrift", TelemetryCategory.Trace);
             AddTactical("TacticalReserveCommitGate", TelemetryCategory.Gate);
             AddTactical("TacticalReserveOrderDelayGuard", TelemetryCategory.Gate);
-            AddTactical("TacticalChargeDeny", TelemetryCategory.Gate);
-            AddTactical("TacticalChargePreserved", TelemetryCategory.Gate);
             AddTactical("TacticalFeud", TelemetryCategory.Gate);
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
@@ -98,13 +95,9 @@ namespace WhiskeyRealism.Telemetry
             // Unregistered tags fall through to default routing which can
             // dump them into the main log instead of the tactical sidecar.
             AddTactical("TacticalStanceWrite", TelemetryCategory.Write);
-            AddTactical("TacticalArtilleryDecision", TelemetryCategory.Decision);
-            AddTactical("TacticalBrigadeTaskHold", TelemetryCategory.Gate);
             AddTactical("TacticalBrigadePosture", TelemetryCategory.Decision);
-            AddTactical("TacticalArtilleryWaypointVeto", TelemetryCategory.Gate);
             AddTactical("TacticalReinforcementOpportunity", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
-            AddTactical("TacticalPlayerProtected", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
             AddTactical("TacticalOrchestrator", TelemetryCategory.State);

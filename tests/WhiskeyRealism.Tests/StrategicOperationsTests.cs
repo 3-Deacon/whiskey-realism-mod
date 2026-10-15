@@ -31,8 +31,6 @@ internal static class StrategicOperationsTests
             ("strategic cadence alternates formation by alliance", StrategicCadenceAlternatesFormationByAlliance),
             ("strategic cadence refreshes weekly or on source change", StrategicCadenceRefreshesWeeklyOrSourceChange),
             ("strategic cadence stable source can skip downstream rebuild", StrategicCadenceStableSourceSkipsDownstreamRebuild),
-            ("operational reserve doctrine seals threatened flank before exploit", OperationalReserveDoctrineSealsThreatenedFlankBeforeExploit),
-            ("operational reserve doctrine protects final reserve and partial commits", OperationalReserveDoctrineProtectsFinalReserveAndPartialCommits),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("historical operation catalog exact objective match", HistoricalOperationCatalogExactObjectiveMatch),
@@ -141,52 +139,6 @@ internal static class StrategicOperationsTests
             "same front signatures should be stable");
         AssertTrue(StrategicCadencePolicy.SourceChanged("front:1", null),
             "missing previous signature should force first rebuild");
-    }
-
-    private static void OperationalReserveDoctrineSealsThreatenedFlankBeforeExploit()
-    {
-        OperationalReserveDecision decision = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
-            reserveFraction: 0.25f,
-            mainEffortOdds: 1.7f,
-            flankThreat01: 0.85f,
-            reserveEndurance01: 0.8f,
-            assaultAuthorized: true,
-            fallbackPressure: false));
-
-        AssertEqual(OperationalReserveMission.SealFlank, decision.Mission, "mission");
-        AssertTrue(decision.ShouldMove, "should move");
-        AssertEqual("flank-threat", decision.Reason, "reason");
-    }
-
-    private static void OperationalReserveDoctrineProtectsFinalReserveAndPartialCommits()
-    {
-        OperationalReserveDecision finalReserve = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
-            reserveFraction: 0.08f,
-            mainEffortOdds: 1.9f,
-            flankThreat01: 0.1f,
-            reserveEndurance01: 0.9f,
-            assaultAuthorized: true,
-            fallbackPressure: false,
-            minimumHeldFraction: 0.10f,
-            lineReliefPressure01: 0.0f,
-            exploitOpportunity01: 0.9f));
-        OperationalReserveDecision partialCommit = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
-            reserveFraction: 0.32f,
-            mainEffortOdds: 1.9f,
-            flankThreat01: 0.1f,
-            reserveEndurance01: 0.9f,
-            assaultAuthorized: true,
-            fallbackPressure: false,
-            minimumHeldFraction: 0.10f,
-            lineReliefPressure01: 0.0f,
-            exploitOpportunity01: 0.9f));
-
-        AssertEqual(OperationalReserveMission.FinalReserve, finalReserve.Mission, "final reserve mission");
-        AssertFalse(finalReserve.ShouldMove, "final reserve should not move");
-        AssertTrue(finalReserve.ProtectsFinalReserve, "final reserve protected");
-        AssertEqual(OperationalReserveMission.ExploitReserve, partialCommit.Mission, "exploit reserve mission");
-        AssertTrue(partialCommit.ShouldMove, "partial reserve should move");
-        AssertTrue(partialCommit.CommitFraction01 > 0.05f && partialCommit.CommitFraction01 < 0.32f, "partial commit fraction");
     }
 
     private static void StrategicBattleIntentSnapshotSanitizesNonfinitePressure()

@@ -22,7 +22,6 @@ namespace WhiskeyRealism
     internal sealed class TestLog
     {
         internal bool ThrowOnInfo;
-        internal bool ThrowOnWarning;
         internal int InfoCount;
         internal string LastInfo;
         internal int WarningCount;
@@ -39,9 +38,6 @@ namespace WhiskeyRealism
 
         internal void LogWarning(string message)
         {
-            if (ThrowOnWarning)
-                throw new System.InvalidOperationException("test warning logger unavailable");
-
             WarningCount++;
         }
 

@@ -46,8 +46,7 @@ internal static class IntegrationWiringTests
         TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(Resolved(DirectChildRole.Main), Resolved(DirectChildRole.SupportMain)), "not held");
 
         bool released = TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain));
-        var decision = TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(
-            true, held, false, false, 1f, 1f, reserveReleased: released));
+        var decision = TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: released));
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Allow, decision.Action, "gate lets vanilla commit");
         TestHarness.AssertEqual("reserve-released", decision.Reason, "reason");
     }

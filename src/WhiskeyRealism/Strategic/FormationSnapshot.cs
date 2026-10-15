@@ -19,7 +19,6 @@ namespace WhiskeyRealism.Strategic
         public float X;
         public float Z;
         public float GroupStrengthActive;
-        public float GroupStrengthDirect;
         public float Morale = 1f;
         public float Readiness = 1f;
         public float RifleAmmo = 1f;

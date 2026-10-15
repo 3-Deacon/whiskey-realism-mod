@@ -6,10 +6,8 @@ namespace WhiskeyRealism.Tactical.Operations
     /// <summary>
     /// Resolves the per-Regiment <see cref="CommandNodeOperationalState"/> from
     /// the side orchestrator's active operations ledger. Extracted from the
-    /// inline <c>BattleGroupStancePatch.TryResolveLedgerState</c> so the
-    /// heavy-gate-fire pre-compute in
-    /// <see cref="TacticalBattleCoordinatorRuntime"/> and the legacy patch
-    /// fallback path call the same code.
+    /// inline #45 ledger lookup; the heavy-gate-fire pre-compute in
+    /// <see cref="TacticalBattleCoordinatorRuntime"/> calls it.
     ///
     /// Stateless. All exceptions degrade silently to "no state".
     /// </summary>

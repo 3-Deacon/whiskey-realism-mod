@@ -299,9 +299,11 @@ Whiskey takes option (b): it never writes to player-commanded units. `TacticalWr
 | Support detection | Radial (any inf/cav within EnemyCloseYds) | Broken (any friendly inc. artillery) | Geometric: on-axis interposition only | More correct than both |
 | Anti-cavalry | No special case | No special case | No special case | Match |
 | Forward-movement initiation | None | Multiple paths | None (Whiskey is reactive) | Match Scourge |
-| Forward-movement veto | n/a | None | **NEW: SetWaypoint Postfix veto** | Closes vanilla's gap |
+| Forward-movement veto | n/a | None | SetWaypoint Postfix veto (2026-05-22); since the battle core, `WaypointValidator` point-blank refusal + `ArtilleryPointBlank` producer | Closes vanilla's gap |
 
-### `ArtillerySetWaypointVetoPatch` (shipped 2026-05-22)
+### `ArtillerySetWaypointVetoPatch` (shipped 2026-05-22; removed by the battle core, 2026-10-15)
+
+**Removed.** Battle-core slice BC5b deleted the patch, its `Enable Artillery Waypoint Veto` flag, the `TacticalArtilleryWaypointVeto` row and `ApplyArtilleryAudit`. The point-blank rule now lives in two places. `WaypointValidator` refuses an artillery target near a visible enemy. The `ArtilleryPointBlank` producer (`ArtilleryIntentProducer`) pulls back a battery that vanilla's own move sent to point blank, as a Safety intent through the order executor (`docs/superpowers/plans/2026-10-15-battle-core.md` § BC5b). The text below records the shipped design.
 
 Postfix on `BattleUnits.SetWaypoint(Regiment, ...)`:
 - Filtered to artillery (unittyp == 2)

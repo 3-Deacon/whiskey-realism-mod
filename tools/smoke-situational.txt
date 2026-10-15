@@ -39,8 +39,7 @@ campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: o
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
 
 # Battle paths a single battle may not reach.
-tactical.patch.b8-retreats-observer                # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
-tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # same MicroAICheckForRetreats gate
+tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
 tactical.patch.observer.retreats                   # same MicroAICheckForRetreats gate
 tactical.patch.observer.order-queue                # Regiment.AddToOrderQueue: player/UI order path; the battle AI does not call it
 tactical.patch.observer.courier*                   # Regiment.AddOrderCourierline: courier-delivered (player) orders only

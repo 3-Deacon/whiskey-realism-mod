@@ -5,6 +5,11 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
+    <!-- CS0649 (field never assigned): the harness compiles only the pure src
+         files, so fields their runtime halves assign (e.g. BattleArtilleryState,
+         SuccessionScheduler.WarStateView, AreaOrderBusyFlags) look unassigned here.
+         ./build.sh compiles every file and still reports CS0649. -->
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="HarmonyX" Version="2.10.2" />
@@ -184,6 +189,23 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalNavMeshPlanner.cs" Link="Operations\TacticalNavMeshPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFormationCorrection.cs" Link="Operations\CommandFormationCorrection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalFacingPulseDoctrine.cs" Link="Operations\TacticalFacingPulseDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleCoreContracts.cs" Link="Battle\BattleCoreContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ChargeDoctrine.cs" Link="Battle\ChargeDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshot.cs" Link="Battle\BattleSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshotAssembler.cs" Link="Battle\BattleSnapshotAssembler.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PlayerOwnership.cs" Link="Battle\PlayerOwnership.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TacticalChainOrderPlanner.cs" Link="Battle\TacticalChainOrderPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TacticalDispatchTypeMapper.cs" Link="Battle\TacticalDispatchTypeMapper.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderExecutor.cs" Link="Battle\OrderExecutor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SilentExitPrecheck.cs" Link="Battle\SilentExitPrecheck.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\WaypointValidator.cs" Link="Battle\WaypointValidator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderArbiter.cs" Link="Battle\OrderArbiter.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleProducerRegistry.cs" Link="Battle\BattleProducerRegistry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattlePerception.cs" Link="Battle\BattlePerception.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SlicePressureBuilder.cs" Link="Battle\SlicePressureBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\WithdrawalIntentProducer.Plan.cs" Link="Battle\Producers\WithdrawalIntentProducer.Plan.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeDemotionTracker.cs" Link="Battle\Producers\ChargeDemotionTracker.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeIntentProducer.Plan.cs" Link="Battle\Producers\ChargeIntentProducer.Plan.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRoleCascade.cs" Link="Orchestrator\TacticalRoleCascade.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalCommandTreeProbe.cs" Link="Orchestrator\TacticalCommandTreeProbe.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalLeafBrigadeMap.cs" Link="Orchestrator\TacticalLeafBrigadeMap.cs" />
@@ -196,7 +218,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalSupportScreen.cs" Link="TacticalSupportScreen.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalArtilleryInputAdapter.cs" Link="TacticalArtilleryInputAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalArtilleryDoctrine.cs" Link="TacticalArtilleryDoctrine.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalWlActionGuard.cs" Link="TacticalWlActionGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOrderFriction.cs" Link="TacticalOrderFriction.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOrderSettlementGate.cs" Link="TacticalOrderSettlementGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommanderProfile.cs" Link="TacticalCommanderProfile.cs" />
@@ -243,7 +264,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleStateSignature.cs" Link="Orchestrator\TacticalBattleStateSignature.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalHeavyPathGate.cs" Link="Orchestrator\TacticalHeavyPathGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalSideLogFormatter.cs" Link="Orchestrator\TacticalSideLogFormatter.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalFogOfWarContact.cs" Link="Orchestrator\TacticalFogOfWarContact.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalVisionRuntimeAdapter.cs" Link="Orchestrator\TacticalVisionRuntimeAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\MapObjectiveCapture.cs" Link="Orchestrator\MapObjectiveCapture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandTaskToStanceMapper.cs" Link="Tactical\TacticalCommandTaskToStanceMapper.cs" />
@@ -282,6 +302,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayTemplateCatalog.cs" Link="Orchestrator\Plays\PlayTemplateCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayProjection.cs" Link="Orchestrator\Plays\PlayProjection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayCorpsAssignment.cs" Link="Orchestrator\Plays\PlayCorpsAssignment.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayAnchor.cs" Link="Orchestrator\Plays\PlayAnchor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyOrchestrator.cs" Link="Orchestrator\ArmyOrchestrator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyReplanTriggers.cs" Link="Orchestrator\ArmyReplanTriggers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyTickCycle.cs" Link="Orchestrator\ArmyTickCycle.cs" />
@@ -306,9 +327,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" Link="Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\DelayingDefensePlaybook.cs" Link="Orchestrator\Playbooks\DelayingDefensePlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\BuiltInPlaybooks.cs" Link="Orchestrator\BuiltInPlaybooks.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalUnitObservation.cs" Link="Orchestrator\TacticalUnitObservation.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\IObservationSource.cs" Link="Orchestrator\IObservationSource.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalUnitObservationAggregate.cs" Link="Orchestrator\TacticalUnitObservationAggregate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyEvidenceBuilder.Pure.cs" Link="Orchestrator\ArmyEvidenceBuilder.Pure.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalFrontAxis.cs" Link="Orchestrator\TacticalFrontAxis.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalEnemyContactLedger.cs" Link="Orchestrator\TacticalEnemyContactLedger.cs" />

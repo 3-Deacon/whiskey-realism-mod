@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
@@ -86,8 +87,8 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool CloseEngaged { get; }
     }
 
-    // Battle-level gate for the #61 posture executor (Postfix on
-    // AIBattle.AdjustGroupFormations).
+    // Battle-level gate of the battle-core arbiter tick (BattleCoreArbiterPatch,
+    // Postfix on AIBattle.AdjustGroupFormations; plan D3).
     // Vanilla anchors: AdjustGroupFormations itself returns for state < 5 or
     // macroai < 0 (5879); CheckGlobalAIStrategy returns once macroai == 3
     // (6374) and vanilla sets every group to screen for the army retreat (4258);
@@ -108,6 +109,26 @@ namespace WhiskeyRealism.Tactical.Operations
             reason = "allow";
             return true;
         }
+
+        // The battle-core arbiter tick (#68). The master Enabled switch (it can be
+        // turned off at runtime) and Tactical Commander Mode come first: with either
+        // off the side stands down and writes nothing, not even the retreat
+        // release (which lowers lastaistancechangetime). Then the battle gate
+        // above; an army retreat (macroai 3) releases Whiskey-held stances.
+        public static ArbiterTickAction ArbiterAction(bool pluginEnabled, bool modeAllowsWrites,
+            int state, int macroAi, int eodCycle, int isPlayerAiOrFeud, bool aiVsAi)
+        {
+            if (!pluginEnabled || !modeAllowsWrites) return ArbiterTickAction.StandDown;
+            if (Allows(state, macroAi, eodCycle, isPlayerAiOrFeud, aiVsAi, out string reason)) return ArbiterTickAction.Run;
+            return reason == "vanilla-retreat" ? ArbiterTickAction.StandDownAndReleaseRetreat : ArbiterTickAction.StandDown;
+        }
+    }
+
+    public enum ArbiterTickAction
+    {
+        Run,
+        StandDown,
+        StandDownAndReleaseRetreat,
     }
 
     public enum FormationWriteKind
@@ -328,65 +349,13 @@ namespace WhiskeyRealism.Tactical.Operations
             bool pendingOrder,
             bool activeMove)
         {
-            if (!CommandWaypointWritePolicy.IsMovementTask(task)) return new LeafMoveDecision(false, "non-movement-task");
+            if (!Battle.CommandWaypointWritePolicy.IsMovementTask(task)) return new LeafMoveDecision(false, "non-movement-task");
             if (parentHasActiveOrder) return new LeafMoveDecision(false, "parent-ordered");
             if (!hasFormationSlot) return new LeafMoveDecision(false, "no-slot");
             if (closeEngaged) return new LeafMoveDecision(false, "close-engaged");
             if (pendingOrder) return new LeafMoveDecision(false, "order-pending");
             if (activeMove) return new LeafMoveDecision(false, "movement-in-progress");
             return new LeafMoveDecision(true, "move-to-slot");
-        }
-    }
-
-    // Slot position math of BattlefieldSetup.GetAngleTerrainPosXYStatic
-    // (26937-26949) without the terrain clamp/height sample: rotate an
-    // (x, z) formation offset by the group's facing.
-    public static class LeafFormationSlot
-    {
-        public static void OffsetXZ(float anchorX, float anchorZ, float angleDegrees, float distanceX, float distanceZ, out float x, out float z)
-        {
-            double a = (angleDegrees - 90.0) * Math.PI / 180.0;
-            double b = angleDegrees * Math.PI / 180.0;
-            x = (float)(anchorX - Math.Cos(a) * distanceZ - Math.Cos(b) * distanceX);
-            z = (float)(anchorZ + Math.Sin(a) * distanceZ + Math.Sin(b) * distanceX);
-        }
-    }
-
-    // NavMesh area costs are global and Regiment.AddPath rewrites them for every
-    // path (130364-130394), so a Whiskey NavMesh.CalculatePath otherwise runs
-    // on whatever the last AddPath left (Roads/Bridges 1 or 2, fences 2 or
-    // 500). These are AddPath's battle values for a normal move: roads
-    // allowed, path not interrupted.
-    public static class VanillaPathAreaCosts
-    {
-        public const string RoadsAreaName = "Roads";
-        public const string BridgesAreaName = "Bridges";
-        public const string FencesWallsAreaName = "FencesWalls, Sea (C)";
-        public const string RiversAreaName = "Rivers";
-        public const float Roads = 1f;
-        public const float Bridges = 1f;
-        public const float FencesWalls = 2f;
-
-        public static float Rivers(bool frozen)
-        {
-            return frozen ? 2f : 500000f;
-        }
-    }
-
-    // The map clamp vanilla applies to every path target in
-    // Regiment.RegimentSetPath (131054-131071): x in [1, size.x - 2],
-    // z in [-(size.z - 2), -1] (battle maps run along negative z).
-    public static class VanillaMapBounds
-    {
-        public static void ClampXZ(float x, float z, float sizeX, float sizeZ, out float clampedX, out float clampedZ)
-        {
-            clampedX = x;
-            clampedZ = z;
-            if (sizeX <= 3f || sizeZ <= 3f) return;
-            if (clampedX < 1f) clampedX = 1f;
-            if (clampedX > sizeX - 2f) clampedX = sizeX - 2f;
-            if (clampedZ > -1f) clampedZ = -1f;
-            if (clampedZ < -sizeZ + 2f) clampedZ = -sizeZ + 2f;
         }
     }
 
@@ -426,261 +395,6 @@ namespace WhiskeyRealism.Tactical.Operations
             unchecked
             {
                 return ((AllianceId * 397 ^ UnitCount) * 397 ^ RoutedCount) * 397 ^ BattleKey;
-            }
-        }
-    }
-
-    // W&L: the player's command is marked dlcw_isundercommander on the command
-    // and every attached unit (DLC_WL.AppointCommand 44269, 45827), so removing
-    // the marked probes removes a whole subtree. Filtering with
-    // TacticalWriteGuard.IsPlayerProtected instead would also drop the AI
-    // parents above the player (their allattachedunits hold the player's
-    // units) and orphan their AI brigades.
-    public static class PlayerCommandProbeFilter
-    {
-        public static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Without(
-            IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes,
-            ICollection<int> playerCommandIds)
-        {
-            if (probes == null || playerCommandIds == null || playerCommandIds.Count == 0) return probes;
-            var kept = new List<TacticalCommandTreeProbe.ExtendedProbe>(probes.Count);
-            for (int i = 0; i < probes.Count; i++)
-            {
-                if (!playerCommandIds.Contains(probes[i].InstanceId)) kept.Add(probes[i]);
-            }
-            return kept;
-        }
-    }
-
-    // Battle clock helpers. Doctrine timers run on the doctrine clock
-    // (TacticalBattleCoordinator.DoctrineBattleHours), which follows
-    // GameVars.currenttimefromstart — in battle game hours (uniStormSystem.Hour +
-    // battlepasseddays * 24, 86379 / 93545) — frozen overnight. The macro AI
-    // cycle is sidestatupdatecycle = 0.015 game-hours ≈ 9 s real at 1x, so
-    // 1 game-hour ≈ 600 s real at 1x; old wall-clock constants tuned at 1x
-    // convert with RealSecondsAtOneXToHours.
-    public static class TacticalBattleClock
-    {
-        public const float RealSecondsPerBattleHourAtOneX = 600f;
-        public const float BattleSecondsPerHour = 3600f;
-
-        public static float HoursToBattleSeconds(float hours)
-        {
-            if (float.IsNaN(hours) || float.IsInfinity(hours) || hours <= 0f) return 0f;
-            return hours * BattleSecondsPerHour;
-        }
-
-        public static float RealSecondsAtOneXToHours(float seconds)
-        {
-            if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds <= 0f) return 0f;
-            return seconds / RealSecondsPerBattleHourAtOneX;
-        }
-    }
-
-    public static class CommandWaypointWritePolicy
-    {
-        private const float MovementFlagThreshold = 0.05f;
-
-        // B-61clock (2026-10-14): vanilla AI group moves go through the courier
-        // queue — UpdateMovingTargets (6959), RepositionAIGroupMicroTowardsEnemy
-        // (4146), CheckDefensiveFacing (4768) and feud attacks (4957) all pass
-        // useorderdelay: true. Vanilla skips the delay only for in-contact
-        // reactions: AssaultMove (3643), MarchToSoundOfGuns (3763), the
-        // CheckIfOutflanked retreat (6235) and CheckForSeparatedEnemy (8188).
-        // The executor's only in-contact reaction is a withdrawal under contact
-        // or flank risk; everything else is a planned group move.
-        public static bool ShouldUseOrderDelayForExecutorWaypoint(
-            CommandTaskType task,
-            bool battleActive,
-            bool inContactWithdrawal = false)
-        {
-            if (!battleActive) return true;
-            if (task == CommandTaskType.FallBackToLine && inContactWithdrawal) return false;
-            return true;
-        }
-
-        // A move was issued when the group (or a subordinate) gained paths or a
-        // courier order was queued (SetWaypoint → AddToOrderQueue, 91470-91500).
-        public static bool MovementIssued(int movingPathsBefore, int movingPathsAfter, int queuedBefore, int queuedAfter)
-        {
-            return movingPathsAfter > movingPathsBefore || queuedAfter > queuedBefore;
-        }
-
-        // M3: a write that did not materialize backs off on battle time instead
-        // of retrying every macro cycle.
-        public const float FailedWriteBackoffHours = 0.05f;
-
-        public static float FailedWriteBackoffUntil(float nowHours)
-        {
-            return nowHours + FailedWriteBackoffHours;
-        }
-
-        public static bool IsBackedOff(float nowHours, float backoffUntilHours)
-        {
-            if (backoffUntilHours <= 0f) return false;
-            if (nowHours < backoffUntilHours - FailedWriteBackoffHours) return false;
-            return nowHours < backoffUntilHours;
-        }
-
-        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(
-            CommandTaskType task,
-            float distance,
-            float threshold,
-            bool hasBlockedCrossingData,
-            bool battleActive)
-        {
-            if (!battleActive) return false;
-            if (!hasBlockedCrossingData) return false;
-            if (!IsFinite(distance) || !IsFinite(threshold)) return false;
-            if (threshold <= 0f || distance <= threshold) return false;
-
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.AdvanceToAssembly:
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
-        {
-            return IsExecutorMovementTask(task);
-        }
-
-        public static bool IsMovementTask(CommandTaskType task)
-        {
-            return IsExecutorMovementTask(task);
-        }
-
-        public static bool IsExecutorMovementActive(
-            bool pathInterrupted,
-            int regimentPaths,
-            int movementMode,
-            float groupSubordinatesMoving,
-            float groupSubordinatesMovingNonAi,
-            bool hasLastWaypoint,
-            float distanceToLastWaypoint,
-            float minWaypointDistance)
-        {
-            if (pathInterrupted) return false;
-            if (regimentPaths <= 0) return false;
-            if (movementMode > 0) return true;
-            if (groupSubordinatesMoving > MovementFlagThreshold ||
-                groupSubordinatesMovingNonAi > MovementFlagThreshold)
-                return true;
-            if (!hasLastWaypoint) return false;
-            if (!IsFinite(distanceToLastWaypoint) || !IsFinite(minWaypointDistance)) return false;
-            return distanceToLastWaypoint > minWaypointDistance;
-        }
-
-        public static bool ShouldSkipDuplicateWaypoint(
-            float currentWaypointX,
-            float currentWaypointZ,
-            float targetX,
-            float targetZ,
-            float tolerance,
-            bool pathInterrupted)
-        {
-            return ShouldSkipDuplicateWaypoint(
-                currentWaypointX,
-                currentWaypointZ,
-                targetX,
-                targetZ,
-                tolerance,
-                pathInterrupted,
-                regimentPaths: 1,
-                activeMove: true,
-                currentX: targetX,
-                currentZ: targetZ);
-        }
-
-        public static bool ShouldSkipDuplicateWaypoint(
-            float currentWaypointX,
-            float currentWaypointZ,
-            float targetX,
-            float targetZ,
-            float tolerance,
-            bool pathInterrupted,
-            int regimentPaths,
-            bool activeMove,
-            float currentX,
-            float currentZ)
-        {
-            // Microshift fix (2026-05-21): the old "if (pathInterrupted) return false" bypass
-            // unconditionally allowed re-writes whenever vanilla flagged the path as
-            // interrupted (which happens frequently during active combat: terrain, friendly
-            // unit-in-way, momentary path-recompute). Each re-write triggered vanilla's
-            // pathfinder to recompute, causing the visible "brief move and revert" microshift
-            // for units that were logically pursuing the same target across many cycles.
-            //
-            // New behavior: even when pathInterrupted, still apply distance-based dedup —
-            // if the new target is within InterruptedReissueDistance of the current waypoint,
-            // skip the re-write and let vanilla resolve the interrupt on its own path. Only
-            // a TRUE target relocation (genuinely different objective) bypasses dedup.
-            if (!IsFinite(currentWaypointX) || !IsFinite(currentWaypointZ)) return false;
-            if (!IsFinite(targetX) || !IsFinite(targetZ)) return false;
-            if (currentWaypointX == 0f && currentWaypointZ == 0f) return false;
-
-            float safeTolerance = IsFinite(tolerance) && tolerance > 0f ? tolerance : 1f;
-            float dx = currentWaypointX - targetX;
-            float dz = currentWaypointZ - targetZ;
-            float distanceSq = (dx * dx) + (dz * dz);
-
-            // When path is interrupted, use a larger threshold so genuinely-different
-            // targets still bypass dedup but probe-drift (~20-50m off the existing target)
-            // does not. InterruptedReissueDistance is intentionally larger than tolerance
-            // because path interrupt is signal that vanilla wants a fresh decision; we
-            // honor that for real relocations.
-            float effectiveTolerance = pathInterrupted
-                ? (safeTolerance > InterruptedReissueDistance ? safeTolerance : InterruptedReissueDistance)
-                : safeTolerance;
-            if (distanceSq > effectiveTolerance * effectiveTolerance) return false;
-
-            if (!activeMove && regimentPaths <= 0 && IsFinite(currentX) && IsFinite(currentZ))
-            {
-                float currentDx = currentX - targetX;
-                float currentDz = currentZ - targetZ;
-                if ((currentDx * currentDx) + (currentDz * currentDz) > effectiveTolerance * effectiveTolerance)
-                    return false;
-            }
-
-            return true;
-        }
-
-        // Microshift fix tunable. When pathInterrupted is set, the new-target must be at
-        // least this far from the current waypoint before dedup releases. Calibrated to
-        // ~3x the standard MinWaypointDistance so probe targets that drift by tens of
-        // meters as a unit moves still resolve to "same logical target" rather than
-        // triggering a new path recompute every cycle.
-        private const float InterruptedReissueDistance = 60f;
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-
-        private static bool IsExecutorMovementTask(CommandTaskType task)
-        {
-            switch (task)
-            {
-                case CommandTaskType.FormUp:
-                case CommandTaskType.AdvanceToAssembly:
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.Scout:
-                case CommandTaskType.Probe:
-                case CommandTaskType.Screen:
-                case CommandTaskType.FallBackToLine:
-                case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
-                    return true;
-                default:
-                    return false;
             }
         }
     }
@@ -1063,6 +777,670 @@ namespace WhiskeyRealism.Tactical.Operations
                     return "recover-stuck-order";
                 default:
                     return "unknown";
+            }
+        }
+    }
+
+    // ---- BC5a: the #61 posture executor as battle-core intent producers ----
+    //
+    // The producers (Tactical/Battle/Producers) read the BattleSnapshot only.
+    // #61 read live Regiment fields the snapshot does not carry; these are the
+    // snapshot proxies that replace them (plan BC5a, recorded in the commit):
+    //   combatstatussubordinates / groupenemiesinrange (close engagement) →
+    //     InMelee on the group or a descendant, or the closest visible enemy
+    //     within CloseContactMeters (vanilla aidefensivemaxrange 250, the AI's
+    //     own pressure radius, 122719);
+    //   flanksthreated / outflanked → #44's perceived flank-risk rule
+    //     (BattleWriterPolicy.PerceivedFlankRisk: the group's own outflanked
+    //     state over the snapshot's flank pressure, or a positive mean vanilla
+    //     outflanked weight of its regiments, ArmyEvidenceBuilder.MeanFlankThreatByGroup);
+    //   orderqueue / orderstate → UnitRecord.QueuedOrders (own queue + move
+    //     orders in flight to the unit or a descendant, 124998/124878);
+    //   groupsubordinatesmoving → moving descendants (regimentpaths > 0);
+    //   pathinterrupted → UnitFlags.PathInterrupted (111012; contact stopped
+    //     the move, 117330), so Decide's interrupted/recovery branches fire;
+    //   covervalue / coverobject → UnitRecord.CoverValue / CoverObject with
+    //     vanilla's no-cover rule (covervalue <= 0 or coverobject 3,
+    //     CheckLineFallbacks 5167);
+    //   receivedfire → close engagement;
+    //   ClosestVisibleEnemy (TacticalFogOfWarContact) → the snapshot's
+    //     fog-honest closest visible observation.
+    public static class PostureSense
+    {
+        public const float CloseContactMeters = 250f;
+        // = #61 MinWaypointDistance / OrderArbiter.DedupeMeters.
+        public const float MinWaypointMeters = OrderArbiter.DedupeMeters;
+        // = #61 MaxConservativeWaypointDistance.
+        public const float MaxWaypointMeters = 2500f;
+        // = #61 FacingRefreshToleranceDegrees.
+        public const float FacingToleranceDegrees = OrderExecutor.FacingToleranceDegrees;
+
+        /// <summary>
+        /// Per own unit: the OR of its descendants' flags (self excluded) and the
+        /// number of units in its subtree (self included) with regimentpaths &gt; 0.
+        /// Grow-only buffers; O(units x depth).
+        /// </summary>
+        public static void AggregateDescendants(BattleSnapshot s, ref UnitFlags[] descendantFlags, ref int[] movingUnits)
+        {
+            int n = s != null ? s.OwnCount : 0;
+            if (descendantFlags == null || descendantFlags.Length < n) descendantFlags = new UnitFlags[Math.Max(n, 64)];
+            if (movingUnits == null || movingUnits.Length < n) movingUnits = new int[Math.Max(n, 64)];
+            if (n == 0) return;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < n; i++)
+            {
+                descendantFlags[i] = UnitFlags.None;
+                movingUnits[i] = own[i].RegimentPaths > 0 ? 1 : 0;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                bool moving = own[i].RegimentPaths > 0;
+                int p = own[i].ParentIndex;
+                for (int steps = 0; p >= 0 && p < n && steps < n; steps++)
+                {
+                    descendantFlags[p] |= own[i].Flags;
+                    if (moving) movingUnits[p]++;
+                    p = own[p].ParentIndex;
+                }
+            }
+        }
+
+        public static bool CloseEngaged(BattleSnapshot s, int index, UnitFlags descendantFlags)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount) return false;
+            if (((s.Own[index].Flags | descendantFlags) & UnitFlags.InMelee) != 0) return true;
+            return s.ClosestVisibleEnemy(index, out float distance) >= 0 && distance <= CloseContactMeters;
+        }
+
+        public static bool Routed(in UnitRecord unit)
+        {
+            return (unit.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0;
+        }
+
+        public static bool PathInterrupted(in UnitRecord unit)
+        {
+            return (unit.Flags & UnitFlags.PathInterrupted) != 0;
+        }
+
+        /// <summary>In cover by vanilla's rule: not (covervalue &lt;= 0 or coverobject 3) (5167).</summary>
+        public static bool InCover(in UnitRecord unit)
+        {
+            return unit.CoverValue > 0f && unit.CoverObject != 3;
+        }
+
+        // #61 HasActiveMoveMakingProgress over the snapshot (the movement-flag
+        // input groupsubordinatesmoving is the moving-descendant count here). An
+        // interrupted path is no active move (IsExecutorMovementActive).
+        public static bool ActiveMove(in UnitRecord unit, int movingUnits)
+        {
+            if (PathInterrupted(unit)) return false;
+            if (movingUnits <= 0) return false;
+            if (unit.MovementMode > 0) return true;
+            // #61 read groupsubordinatesmoving > 0.05: a moving subordinate counts.
+            if (movingUnits > (unit.RegimentPaths > 0 ? 1 : 0)) return true;
+            if (!HasPoint(unit.LastWaypointX, unit.LastWaypointZ)) return false;
+            return Distance(unit.X, unit.Z, unit.LastWaypointX, unit.LastWaypointZ) > MinWaypointMeters;
+        }
+
+        // #61 HasPendingOrder: the settlement gate over the queued orders and the
+        // interrupted path the snapshot carries (orderstate is not carried).
+        public static bool PendingOrder(in UnitRecord unit, bool activeMove, bool allowStaleQueuedBypass)
+        {
+            return TacticalOrderSettlementGate.HasBlockingPendingOrder(new TacticalOrderSettlementGate.Input
+            {
+                OrderQueueCount = unit.QueuedOrders,
+                OrderState = 0,
+                RegimentPaths = unit.RegimentPaths,
+                PathInterrupted = PathInterrupted(unit),
+                MovementMode = unit.MovementMode,
+                ActiveMove = activeMove,
+                AllowStaleQueuedBypass = allowStaleQueuedBypass,
+            });
+        }
+
+        /// <summary>
+        /// #61 ResolveRefusedFlank: a close-engaged group with flank risk on a
+        /// holding/guarding task refuses the flank its closest visible threat
+        /// is on (CommandFormationCorrection.RefuseDecisionForThreatFacing, 45-150
+        /// degrees off its facing); vanilla skews the slots (SetGroupFormation
+        /// refuseflank, 92095-92097).
+        /// </summary>
+        public static RefuseFlank RefuseFor(BattleSnapshot s, int index, CommandTaskType task, bool closeEngaged, bool flankRisk)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount || !closeEngaged || !flankRisk) return RefuseFlank.None;
+            if (CommandFormationCorrection.RefuseFlankParameter(TacticalRefuseFlankIntent.Decision.RefuseLeft, task, closeEngaged) < 0)
+                return RefuseFlank.None;
+            int k = s.ClosestVisibleEnemy(index, out _);
+            if (k < 0) return RefuseFlank.None;
+            ref UnitRecord rec = ref s.Own[index];
+            float threatRotation = CommandFormationCorrection.ThreatFacingRotationDegrees(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+            TacticalRefuseFlankIntent.Decision decision = CommandFormationCorrection.RefuseDecisionForThreatFacing(rec.RotationY, threatRotation);
+            switch (CommandFormationCorrection.RefuseFlankParameter(decision, task, closeEngaged))
+            {
+                case 0: return RefuseFlank.Left;
+                case 1: return RefuseFlank.Right;
+                default: return RefuseFlank.None;
+            }
+        }
+
+        /// <summary>
+        /// The floor half of #61's safe-waypoint band (60 m): a target closer than
+        /// that is where the unit already stands. The executor dedupes a repeat of
+        /// the last waypoint but has no floor, and a move onto the unit's own
+        /// position adds no path (Failed, then a rotated retry of a ~0 m vector).
+        /// </summary>
+        public static bool IsMoveAway(in UnitRecord unit, float x, float z)
+        {
+            return HasPoint(x, z) && Distance(unit.X, unit.Z, x, z) >= MinWaypointMeters;
+        }
+
+        /// <summary>
+        /// The regiments #61 fire control orders (TryApplyFireControlToUnit):
+        /// infantry, skirmishers and cavalry. Never a battery — BC5b's artillery
+        /// doctrine owns battery combat behavior (7/8) on the same channel and
+        /// priority.
+        /// </summary>
+        public static bool IsFireControlUnit(in UnitRecord unit)
+        {
+            if ((unit.Flags & (UnitFlags.IsArtillery | UnitFlags.IsGroup)) != 0) return false;
+            return unit.UnitTyp == TacticalUnitType.Infantry ||
+                unit.UnitTyp == TacticalUnitType.Skirmisher ||
+                unit.UnitTyp == TacticalUnitType.Cavalry;
+        }
+
+        public static CommandPhysicalState Physical(in UnitRecord unit, int movingUnits)
+        {
+            return new CommandPhysicalState(
+                routed: Routed(unit),
+                playerProtected: (unit.Flags & UnitFlags.PlayerOwned) != 0,
+                pathInterrupted: PathInterrupted(unit),
+                paths: unit.RegimentPaths,
+                activeMove: ActiveMove(unit, movingUnits),
+                formation: unit.Formation);
+        }
+
+        /// <summary>Vanilla facing degrees (0 = +z, 90 = +x) from one point to another, in [0, 360).</summary>
+        public static float HeadingTo(float fromX, float fromZ, float toX, float toZ)
+        {
+            return NormalizeHeading(CommandFormationCorrection.ThreatFacingRotationDegrees(fromX, fromZ, toX, toZ));
+        }
+
+        public static float NormalizeHeading(float degrees)
+        {
+            if (float.IsNaN(degrees) || float.IsInfinity(degrees)) return -1f;
+            float d = degrees % 360f;
+            return d < 0f ? d + 360f : d;
+        }
+
+        /// <summary>
+        /// A group Facing order may go to the group itself only when no descendant
+        /// is player-owned or detached: vanilla's group cascades skip detached
+        /// subordinates (GetAttachedUnitsReg(excludedechainedunits) 119865,
+        /// SetGroupFormation 91988-92030), and the executor's in-place rotation
+        /// walks every descendant. Otherwise the regiments are faced one by one.
+        /// </summary>
+        public static bool SubtreeAcceptsGroupFacing(UnitFlags descendantFlags)
+        {
+            return (descendantFlags & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached)) == 0;
+        }
+
+        /// <summary>
+        /// The regiments a group's in-place rotation may turn (#61
+        /// RotateRegimentsInPlace): combat, non-artillery regiments that are
+        /// standing (no path, not charging), alive and active, reached from the
+        /// group without passing a detached or player-owned node — vanilla's group
+        /// orders skip a detached subtree (119865). Writes own indices to result;
+        /// queue is the walk's scratch. Returns the count.
+        /// </summary>
+        public static int CollectRotatableRegiments(BattleSnapshot s, int groupIndex, int[] queue, int[] result)
+        {
+            if (s == null || queue == null || result == null || queue.Length == 0) return 0;
+            if (groupIndex < 0 || groupIndex >= s.OwnCount) return 0;
+            UnitRecord[] own = s.Own;
+            int n = s.OwnCount;
+            int count = 0, head = 0, tail = 0;
+            queue[tail++] = groupIndex;
+            while (head < tail)
+            {
+                int node = queue[head++];
+                for (int j = 0; j < n; j++)
+                {
+                    if (j == node || own[j].ParentIndex != node) continue;
+                    UnitFlags f = own[j].Flags;
+                    if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached)) != 0) continue;
+                    if ((f & UnitFlags.IsGroup) != 0)
+                    {
+                        if (tail < queue.Length) queue[tail++] = j;
+                        continue;
+                    }
+                    if (!Rotatable(own[j])) continue;
+                    if (count < result.Length) result[count++] = j;
+                }
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Every descendant of <paramref name="root"/> (breadth-first over the
+        /// snapshot's command tree), the set #61 fire control read from
+        /// allattachedunits. Writes own indices to result; returns the count.
+        /// Grow-only buffers, bounded by the roster.
+        /// </summary>
+        public static int CollectDescendants(BattleSnapshot s, int root, ref int[] result, ref int[] children)
+        {
+            int n = s != null ? s.OwnCount : 0;
+            if (result == null || result.Length < n) result = new int[Math.Max(n, 64)];
+            if (children == null || children.Length < n) children = new int[Math.Max(n, 64)];
+            if (root < 0 || root >= n) return 0;
+            int count = 0;
+            int node = root;
+            for (int head = 0; ; head++)
+            {
+                int c = s.DirectChildren(node, children);
+                for (int k = 0; k < c && count < n; k++) result[count++] = children[k];
+                if (head >= count) break;
+                node = result[head];
+            }
+            return count;
+        }
+
+        private static bool Rotatable(in UnitRecord unit)
+        {
+            if (unit.UnitTyp > TacticalUnitType.MaxCombat || unit.UnitTyp == TacticalUnitType.Artillery) return false;
+            if ((unit.Flags & UnitFlags.IsArtillery) != 0) return false;
+            if ((unit.Flags & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) return false;
+            if (Routed(unit)) return false;
+            return unit.RegimentPaths <= 0 && unit.MovementMode != 3;
+        }
+
+        internal static bool HasPoint(float x, float z)
+        {
+            return !(x == 0f && z == 0f) && !float.IsNaN(x) && !float.IsNaN(z) && !float.IsInfinity(x) && !float.IsInfinity(z);
+        }
+
+        internal static float Distance(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return (float)Math.Sqrt(dx * dx + dz * dz);
+        }
+    }
+
+    // One posture decision of a group, ready to become intents.
+    public struct PostureIntentRequest
+    {
+        public int GroupId;
+        public PostureExecutionAction Action;
+        public CommandTaskType Task;
+        public bool HasTarget;
+        public float TargetX, TargetZ;
+        public int TargetFormation;
+        public bool NeedsFormation;
+        // A FallBackToLine under close engagement or flank risk: immediate, line-checked.
+        public bool InContactWithdrawal;
+        // An objective-type move over 150 m: through vanilla BlockedMovingOrder
+        // (PostureIntentPlan.AvoidsCoveredCrossings).
+        public bool AvoidCoveredCrossings;
+        // #61 refused flank, carried on the formation and facing intents.
+        public RefuseFlank Refuse;
+        // #61 threat facing (holding tasks with a visible threat): the wheel's
+        // manualfinalrotation on the formation intent.
+        public bool HasThreatHeading;
+        public float ThreatHeading;
+        public IntentPriority Priority;
+        public IntentSource Source;
+        public string Reason; // static literal
+    }
+
+    // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
+    // (#61 changed stance before SetWaypoint, L768-774); a formation (and the
+    // threat facing, SubmitFacing) go with formation decisions and with SetFormationAndWaypoint,
+    // where the executor's formation policy refuses them while the group moves —
+    // vanilla re-forms only a settled group (AdjustGroupFormations 5886), and #61
+    // re-formed only when no move went out (L976-988).
+    public static class PostureIntentPlan
+    {
+        public const string ExecutorReason = "posture-executor";
+        public const string LeafReason = "leaf-brigade";
+        public const string DivisionPlayReason = "division-play";
+        public const string FacingPulseReason = "facing-pulse";
+        public const string FireControlReason = "fire-control";
+
+        public static int Submit(IIntentSink sink, in PostureIntentRequest r)
+        {
+            if (sink == null || r.GroupId == 0) return 0;
+            switch (r.Action)
+            {
+                case PostureExecutionAction.ChangeStance:
+                    return SubmitStance(sink, r);
+                case PostureExecutionAction.SetFormation:
+                    return SubmitFormation(sink, r);
+                case PostureExecutionAction.SetFormationAndWaypoint:
+                    if (!r.HasTarget) return 0;
+                    return SubmitStance(sink, r) + SubmitMove(sink, r) + SubmitFormation(sink, r);
+                case PostureExecutionAction.SetWaypoint:
+                case PostureExecutionAction.ReleaseReserve:
+                case PostureExecutionAction.FallbackToLine:
+                case PostureExecutionAction.RecoverInterruptedOrder:
+                    if (!r.HasTarget) return 0;
+                    return SubmitStance(sink, r) + SubmitMove(sink, r);
+                default:
+                    return 0;
+            }
+        }
+
+        /// <summary>
+        /// A group's threat facing. On a clean subtree (no player-owned or
+        /// detached descendant) one group Facing intent, which the executor turns
+        /// into the shipped rotate-in-place or wheel (CommandFormationWritePolicy);
+        /// otherwise one Facing intent per regiment the group's order may reach
+        /// (PostureSense.CollectRotatableRegiments). Returns the intents submitted.
+        /// </summary>
+        public static int SubmitFacing(IIntentSink sink, BattleSnapshot s, int groupIndex, UnitFlags descendantFlags, float heading,
+            CommandTaskType task, RefuseFlank refuse, IntentPriority priority, IntentSource source, string reason,
+            int[] queue, int[] regiments)
+        {
+            heading = PostureSense.NormalizeHeading(heading);
+            if (sink == null || s == null || heading < 0f || groupIndex < 0 || groupIndex >= s.OwnCount) return 0;
+            if (PostureSense.SubtreeAcceptsGroupFacing(descendantFlags))
+            {
+                sink.Submit(GroupFacing(s.Own[groupIndex].InstanceId, heading, task, refuse, priority, source, reason));
+                return 1;
+            }
+
+            int count = PostureSense.CollectRotatableRegiments(s, groupIndex, queue, regiments);
+            for (int k = 0; k < count; k++)
+                sink.Submit(GroupFacing(s.Own[regiments[k]].InstanceId, heading, task, RefuseFlank.None, priority, source, reason));
+            return count;
+        }
+
+        private static BattleOrderIntent GroupFacing(int id, float heading, CommandTaskType task, RefuseFlank refuse,
+            IntentPriority priority, IntentSource source, string reason)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = id, Channel = OrderChannel.Facing, Heading = heading, Task = task, Refuse = refuse,
+                Priority = priority, Source = source, Reason = reason,
+            };
+        }
+
+        /// <summary>
+        /// Shipped #61 TryQueueBlockedMovingOrder over the snapshot: an
+        /// Attack/Support/Fix/AdvanceToAssembly group move farther than 150 m
+        /// avoids the crossings the enemy covers (vanilla line-group moves,
+        /// 6953-6956).
+        /// </summary>
+        public static bool AvoidsCoveredCrossings(CommandTaskType task, float fromX, float fromZ, float toX, float toZ)
+        {
+            return Battle.CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(task, PostureSense.Distance(fromX, fromZ, toX, toZ));
+        }
+
+        /// <summary>
+        /// A nested leaf brigade's move to its slot, facing <paramref name="heading"/>
+        /// (-1 none): no stance (it is not an AI group), and never through
+        /// BlockedMovingOrder (#61's leaf path called SetWaypoint directly).
+        /// </summary>
+        public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, float heading, bool inContactWithdrawal)
+        {
+            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false,
+                IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
+        }
+
+        public static BattleOrderIntent FacingPulse(int unitId, float heading)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = unitId, Channel = OrderChannel.Facing, Heading = PostureSense.NormalizeHeading(heading),
+                Priority = IntentPriority.Scorer, Source = IntentSource.FacingPulse, Reason = FacingPulseReason,
+            };
+        }
+
+        public static BattleOrderIntent FacingPulseFormation(int groupId, int formation)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Formation, Value = formation, Heading = -1f,
+                Priority = IntentPriority.Scorer, Source = IntentSource.FacingPulse, Reason = FacingPulseReason,
+            };
+        }
+
+        public static BattleOrderIntent FireControl(int regimentId, int combatBehavior)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = regimentId, Channel = OrderChannel.CombatBehavior, Value = combatBehavior, Heading = -1f,
+                Flags = IntentFlags.PerRegiment, Priority = IntentPriority.Executor, Source = IntentSource.FireControl,
+                Reason = FireControlReason,
+            };
+        }
+
+        /// <summary>
+        /// Doctrine cooldowns (#61 facing pulse, fire control, formation writes)
+        /// read the executor's record of what it actually issued for that source,
+        /// instead of a producer-side stamp set at submission.
+        /// </summary>
+        public static bool IssuedWithin(OrderExecutor executor, int unitId, OrderChannel channel, IntentSource source,
+            double nowHours, double windowHours)
+        {
+            if (executor == null || !executor.TryGetLastOutcome(unitId, channel, out OrderOutcome outcome)) return false;
+            if (outcome.Kind != OrderOutcomeKind.Issued || outcome.Source != source) return false;
+            double age = nowHours - outcome.AtHours;
+            return age >= 0.0 && age < windowHours;
+        }
+
+        private static int SubmitStance(IIntentSink sink, in PostureIntentRequest r)
+        {
+            int stance = TacticalCommandTaskToStanceMapper.Map(r.Task);
+            if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = r.GroupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = r.Task,
+                Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+            });
+            return 1;
+        }
+
+        private static int SubmitMove(IIntentSink sink, in PostureIntentRequest r)
+        {
+            sink.Submit(MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
+                r.Priority, r.Source, r.Reason));
+            return 1;
+        }
+
+        private static int SubmitFormation(IIntentSink sink, in PostureIntentRequest r)
+        {
+            int n = 0;
+            // #61 SetFormation wrote for a formation change or a refused flank
+            // alone (CommandFormationWritePolicy needsRefuse → wheel).
+            if ((r.NeedsFormation || r.Refuse != RefuseFlank.None) && r.TargetFormation >= 0 && r.TargetFormation <= 4)
+            {
+                sink.Submit(new BattleOrderIntent
+                {
+                    GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation,
+                    Heading = r.HasThreatHeading ? PostureSense.NormalizeHeading(r.ThreatHeading) : -1f, Task = r.Task,
+                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                });
+                n++;
+            }
+            return n;
+        }
+
+        // B-61clock: planned moves go by courier like vanilla AI group moves; an
+        // in-contact withdrawal is immediate (CheckIfOutflanked 6235). A move
+        // through BlockedMovingOrder is immediate too once the executor takes
+        // that path (UpdateOrders' SetWaypoint has useorderdelay:false); the
+        // courier flag stays for its plain-SetWaypoint fallback.
+        private static BattleOrderIntent MoveIntent(int groupId, CommandTaskType task, float x, float z, float heading,
+            bool inContactWithdrawal, bool avoidCoveredCrossings, IntentPriority priority, IntentSource source, string reason)
+        {
+            bool withdrawal = inContactWithdrawal && task == CommandTaskType.FallBackToLine;
+            IntentFlags flags = IntentFlags.None;
+            if (Battle.CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: withdrawal))
+                flags |= IntentFlags.UseOrderDelay;
+            if (withdrawal) flags |= IntentFlags.InContactWithdrawal;
+            if (avoidCoveredCrossings) flags |= IntentFlags.AvoidCoveredCrossings;
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z,
+                Heading = heading >= 0f ? PostureSense.NormalizeHeading(heading) : -1f, Task = task,
+                Flags = flags, Priority = priority, Source = source, Reason = reason,
+            };
+        }
+    }
+
+    // B-leaf target (plan BC5a): shipped #61 TryFormationSlot over the snapshot.
+    // SetGroupFormation stores the group's waypoint and rotation (92067-92068), stands
+    // its commander groupdepth + groupunitdistancetoback behind that waypoint (92050),
+    // and paths each child group k to
+    // GetAngleTerrainPosXY(waypoint, rotation, -offset[k].x, offset[k].z + child
+    // groupdepth) (92086: num + groupdepth2 / 2 = the full groupdepth2), facing the
+    // rotation. Shipped read those live (LeafFormationSlot.OffsetXZ = the formula of
+    // GetAngleTerrainPosXYStatic 26937-26949, without its terrain clamp; the executor's
+    // validator clamps to the map, 131057-131068); the snapshot now carries them
+    // (UnitRecord.LastWaypointRotation, GroupDepth, SlotOffsetX/Z with
+    // UnitFlags.HasLayoutSlot). The parent's commander position never enters it.
+    // A leaf within 60 m of its slot has no move. A refused flank
+    // (refuseflank, 92095-92101) moves a child straight back by SkewedPosition's
+    // depth (78109-78130) and turns it to the skewed line. Vanilla keeps no refuse
+    // state and its AI never refuses (the player UI does: RefuseFlank 91742 ->
+    // SetGroupFormation 91790; SetWaypoint forwards direction as refuseflank,
+    // 91559), so the refused slot counts only for the flank the order executor
+    // last refused on the parent (OrderExecutor.LastIssuedRefuse); a leaf within
+    // 60 m of it holds and keeps its facing. Terrain-shape interpolation
+    // (adjustbyterrainshape, 92089-92093) is not applied, as shipped. The parent's
+    // waypoint is current only while it was the top unit of its last
+    // SetGroupFormation (92065-92068): a division moved with its corps keeps a
+    // stale one.
+    public static class LeafSlotTarget
+    {
+        public static bool TryResolve(IBattleUnitView s, int leafIndex, float refuseFlankDepth, float refuseFlankSkew,
+            RefuseFlank parentRefuse, out int parentIndex, out float x, out float z, out float heading)
+        {
+            parentIndex = -1;
+            x = 0f;
+            z = 0f;
+            heading = -1f;
+            if (s == null || leafIndex < 0 || leafIndex >= s.OwnCount) return false;
+            UnitRecord[] own = s.Own;
+            ref UnitRecord leaf = ref own[leafIndex];
+            int parent = leaf.ParentIndex;
+            if (parent < 0 || parent >= s.OwnCount || parent == leafIndex) return false;
+            parentIndex = parent;
+            if ((leaf.Flags & UnitFlags.HasLayoutSlot) == 0) return false;
+            ref UnitRecord p = ref own[parent];
+            // No waypoint yet also covers the -999 rotation sentinel (112527): the
+            // rotation is stored together with the waypoint.
+            if (!PostureSense.HasPoint(p.LastWaypointX, p.LastWaypointZ)) return false;
+            float rotation = p.LastWaypointRotation;
+            if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
+
+            OffsetXZ(p.LastWaypointX, p.LastWaypointZ, rotation, -leaf.SlotOffsetX, leaf.SlotOffsetZ + leaf.GroupDepth, out x, out z);
+            heading = PostureSense.NormalizeHeading(rotation);
+            // A leaf already at its slot has no move to make.
+            if (!PostureSense.IsMoveAway(leaf, x, z)) return false;
+            float back = RefusedSetback(leaf.SlotOffsetX, p.GroupWidth, refuseFlankDepth, refuseFlankSkew, parentRefuse);
+            if (back > 0f)
+            {
+                OffsetXZ(x, z, rotation, 0f, back, out float rx, out float rz);
+                if (!PostureSense.IsMoveAway(leaf, rx, rz)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// SkewedPosition's setback of a refused child (78109-78130): with
+        /// t = clamp01((offsetX + width / 2) / width), pow(t, skew) for the right
+        /// flank (refuseflank 1), pow(1 - t, skew) for the left (0), times
+        /// width * depthFactor (GamePrefs.refuseflankdepth). The executor refuses
+        /// only Left or Right (vanilla's both-flanks 2 is a player-UI value).
+        /// </summary>
+        public static float RefusedSetback(float offsetX, float groupWidth, float depthFactor, float skew, RefuseFlank refuse)
+        {
+            if (!(groupWidth > 0f) || !(depthFactor > 0f) || float.IsInfinity(groupWidth)) return 0f;
+            float t = (offsetX + groupWidth / 2f) / groupWidth;
+            if (t < 0f) t = 0f;
+            if (t > 1f) t = 1f;
+            float u;
+            switch (refuse)
+            {
+                case RefuseFlank.Left: u = 1f - t; break;
+                case RefuseFlank.Right: u = t; break;
+                default: return 0f;
+            }
+            return (float)Math.Pow(u, skew) * groupWidth * depthFactor;
+        }
+
+        // GetAngleTerrainPosXYStatic (26937-26949) without the terrain clamp: distZ is
+        // rearward, distX to the left of a unit facing angle (0 = +z, 90 = +x).
+        private static void OffsetXZ(float anchorX, float anchorZ, float angle, float distX, float distZ, out float x, out float z)
+        {
+            double a = (angle - 90.0) * Math.PI / 180.0;
+            double b = angle * Math.PI / 180.0;
+            x = (float)(anchorX - Math.Cos(a) * distZ - Math.Cos(b) * distX);
+            z = (float)(anchorZ + Math.Sin(a) * distZ + Math.Sin(b) * distX);
+        }
+    }
+
+    // Spec §3: the role cascade (leaf map) leaves out player-owned units — the
+    // W&L player's command and its descendants, take-overs, and the player side
+    // outside W&L — by the snapshot's PlayerOwned flag. The player's AI ancestors
+    // stay (they are not protected), so their AI brigades keep their roles.
+    // Replaces the old dlcw_isundercommander id-set probe filter.
+    public static class PostureProbeFilter
+    {
+        public static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> WithoutPlayerOwned(
+            IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes,
+            IBattleUnitView s)
+        {
+            if (probes == null) return probes;
+            if (s == null) return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
+            List<TacticalCommandTreeProbe.ExtendedProbe> kept = null;
+            for (int i = 0; i < probes.Count; i++)
+            {
+                bool owned = IsPlayerOwned(s, probes[i].InstanceId);
+                if (kept == null)
+                {
+                    if (!owned) continue;
+                    kept = new List<TacticalCommandTreeProbe.ExtendedProbe>(probes.Count);
+                    for (int k = 0; k < i; k++) kept.Add(probes[k]);
+                    continue;
+                }
+                if (!owned) kept.Add(probes[i]);
+            }
+            return kept ?? probes;
+        }
+
+        private static bool IsPlayerOwned(IBattleUnitView s, int instanceId)
+        {
+            int index = s.IndexOfOwn(instanceId);
+            return index >= 0 && (s.Own[index].Flags & UnitFlags.PlayerOwned) != 0;
+        }
+    }
+
+    // R5: NavMesh area costs are global and Regiment.AddPath rewrites them for
+    // every path (130364-130394), so the posture producer's path-quality probe
+    // sets AddPath's battle costs (roads allowed, path not interrupted) before
+    // every NavMesh.CalculatePath instead of running on whatever the last
+    // AddPath left.
+    public static class PostureNavAreaCosts
+    {
+        public static readonly string[] AreaNames =
+        {
+            VanillaPathAreaCosts.RiversAreaName,
+            VanillaPathAreaCosts.RoadsAreaName,
+            VanillaPathAreaCosts.BridgesAreaName,
+            VanillaPathAreaCosts.FencesWallsAreaName,
+        };
+
+        public static float Cost(int area, bool frozen)
+        {
+            switch (area)
+            {
+                case 0: return VanillaPathAreaCosts.Rivers(frozen);
+                case 1: return VanillaPathAreaCosts.Roads;
+                case 2: return VanillaPathAreaCosts.Bridges;
+                case 3: return VanillaPathAreaCosts.FencesWalls;
+                default: return 1f;
             }
         }
     }
