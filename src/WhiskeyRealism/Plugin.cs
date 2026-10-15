@@ -141,6 +141,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ConstructionTelemetryEnabled;
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
+        public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -693,6 +694,9 @@ namespace WhiskeyRealism
             MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
                 "Construction", "Max Active Telegraph Constructions Per Faction", 1,
                 "Caps simultaneously active Whiskey telegraph constructions per faction when Telegraph AI is enabled.");
+            EnableArtilleryCombineGunSync = Config.Bind(
+                "Campaign", "Enable Artillery Combine Gun Sync", true,
+                "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
@@ -805,6 +809,21 @@ namespace WhiskeyRealism
             _harmony.PatchAll(typeof(Plugin).Assembly);
 
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
+        }
+
+        // Per-frame hitch probe for the telemetry sidecar. Tick never throws, but a
+        // Unity message must not either, so the guard stays.
+        private void Update()
+        {
+            try
+            {
+                if (Enabled == null || !Enabled.Value) return;
+                WhiskeyRealism.Telemetry.TelemetryFrameProbe.Tick(UnityEngine.Time.unscaledDeltaTime);
+            }
+            catch
+            {
+                // Telemetry must never break the frame.
+            }
         }
 
         private void OnDestroy()

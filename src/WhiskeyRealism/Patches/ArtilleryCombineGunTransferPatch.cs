@@ -14,7 +14,7 @@ namespace WhiskeyRealism.Patches
     // same derivation right after the combine on the campaign map (pure
     // BattleWriterPolicy.GunsAfterCombine), so the UI and the next load agree.
     // The previous proportional "guns += delta" edit was not durable: Initialize
-    // overwrote it on load. Rollback: see the integrator's config request.
+    // overwrote it on load. Rollback: Campaign / Enable Artillery Combine Gun Sync.
     [HarmonyPatch(typeof(BattleUnits), "CombineUnits")]
     internal static class ArtilleryCombineGunTransferPatch
     {
@@ -60,7 +60,12 @@ namespace WhiskeyRealism.Patches
 
         private static bool Enabled()
         {
-            try { return Plugin.Instance != null && Plugin.Instance.Enabled.Value; }
+            try
+            {
+                return Plugin.Instance != null && Plugin.Instance.Enabled.Value
+                    && Plugin.EnableArtilleryCombineGunSync != null
+                    && Plugin.EnableArtilleryCombineGunSync.Value;
+            }
             catch { return false; }
         }
     }
