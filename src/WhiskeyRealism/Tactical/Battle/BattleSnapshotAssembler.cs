@@ -269,7 +269,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (leaves)
             {
                 if ((u.Flags & UnitFlags.IsGroup) != 0) return false;
-                if (u.UnitTyp > TacticalUnitType.MaxCombat || u.UnitTyp == TacticalUnitType.Excluded) return false;
+                if (u.UnitTyp > TacticalUnitType.MaxCombat || u.UnitTyp == TacticalUnitType.Courier) return false;
                 return u.Strength > 0 && (u.Flags & UnitFlags.Active) != 0;
             }
             return u.UnitTyp >= commandMin && (u.Flags & UnitFlags.PlayerOwned) == 0;
@@ -372,7 +372,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (p < 0 || s.Own[p].UnitTyp < commandMin) return false;
             const UnitFlags excluded = UnitFlags.PermanentlyDetached | UnitFlags.Routed;
             if ((u.Flags & excluded) != 0 || (u.Flags & UnitFlags.Active) == 0) return false;
-            return u.UnitTyp != TacticalUnitType.Skirmisher && u.UnitTyp != TacticalUnitType.Officer;
+            return u.UnitTyp != TacticalUnitType.Skirmisher && u.UnitTyp != TacticalUnitType.Scout;
         }
 
         private static int ParentId(BattleSnapshot s, int i)

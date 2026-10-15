@@ -63,13 +63,15 @@ namespace WhiskeyRealism.Tactical
             int macroAi,
             TacticalSectorAssessment sector,
             bool orderFrictionAllowsChange,
-            bool wlAllowsControl)
+            bool wlAllowsControl,
+            bool sideDefending = false)
         {
             VanillaStance = vanillaStance;
             MacroAi = macroAi;
             Sector = sector;
             OrderFrictionAllowsChange = orderFrictionAllowsChange;
             WlAllowsControl = wlAllowsControl;
+            SideDefending = sideDefending;
         }
 
         public int VanillaStance { get; }
@@ -77,6 +79,9 @@ namespace WhiskeyRealism.Tactical
         public TacticalSectorAssessment Sector { get; }
         public bool OrderFrictionAllowsChange { get; }
         public bool WlAllowsControl { get; }
+        // BC9: the side is the battle's Defender (ArmyOrchestrator.CurrentBattleStance):
+        // the scorer never returns attack stance for it.
+        public bool SideDefending { get; }
     }
 
     public readonly struct TacticalGroupStanceDecision

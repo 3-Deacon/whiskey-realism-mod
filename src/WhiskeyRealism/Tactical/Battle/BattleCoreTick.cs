@@ -82,6 +82,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 case "FacingPulse": return new FacingPulseIntentProducer();
                 case "FireControl": return new FireControlIntentProducer();
                 case "DivisionPlay": return new DivisionPlayIntentProducer();
+                case "Recon": return new ReconIntentProducer();
                 case "ReserveRelease": return new ReserveReleaseIntentProducer();
                 case "Charge": return new ChargeIntentProducer();
                 default: return null;

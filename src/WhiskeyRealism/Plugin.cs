@@ -53,6 +53,14 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
+        internal static ConfigEntry<bool> EnableWlAttritionScopeFix;
+        internal static ConfigEntry<bool> EnableWlBuySuppliesFix;
+        internal static ConfigEntry<bool> EnableWlStaffScopeFix;
+        internal static ConfigEntry<bool> EnableWlStaffPanelScopeFix;
+        internal static ConfigEntry<bool> EnableWlSupplyEfficiencySignFix;
+        internal static ConfigEntry<bool> EnableWlActionOnceEffectsFix;
+        internal static ConfigEntry<bool> EnableBattleEntrenchmentAverageFix;
+        internal static ConfigEntry<bool> EnableBattleHqConditionFix;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
@@ -85,6 +93,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
         public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
+        public static ConfigEntry<bool> EnableBattleReconnaissance;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -107,6 +116,17 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
+        public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
+        public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableOrphanCampCleanup;
+        public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
+        public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
+        public static ConfigEntry<bool> EnableSupplyDepotBuilderFix;
+        public static ConfigEntry<bool> EnableSubordinateStrengthGrabFix;
+        public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
+        public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
+        public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
@@ -373,6 +393,74 @@ namespace WhiskeyRealism
                 "Enable Player Order Doctrine Diagnostics",
                 true,
                 "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
+            EnableWlAttritionScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Attrition Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla Regiment.UpdateCampaignUnitStats applies the player's attrition effect (Camp Rules, " +
+                "Provost Marshal) to the sickness and desertion of every regiment in the game, enemies included. With this on it applies only " +
+                "where vanilla scopes medical care, training and readiness: regiments of a campaign group the player owns, and the player's " +
+                "own regiments, which always keep it whether or not Enable W&L Staff Scope Fix is on. Off: vanilla.");
+            EnableWlBuySuppliesFix = Config.Bind(
+                "W&L",
+                "Enable W&L Buy Supplies Fix",
+                true,
+                "Default ON. W&L career only. Vanilla \"Buy Supplies\" (and the average-supply value it and its conditions read) tests the " +
+                "player's command type instead of each subordinate's, so a division, corps or army commander pays 1000 money and no unit gets " +
+                "supplies. With this on, an HQ commander's owned basic units are filled the way vanilla fills a brigade commander's. Off: vanilla.");
+            EnableWlStaffScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Staff Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla applies several of the player's staff, camp and action effects only when the player's " +
+                "command is itself a campaign-map group, so a brigade or regiment commander, or a division inside an AI corps, gets nothing " +
+                "from them. With this on: supply (Quartermaster, Subsistence, Ordnance, reinforcement speed, camp station Inspect Logistics) " +
+                "applies to the map group carrying the player's command (supply is one pool per map group); medical care, training, " +
+                "readiness (camp station Readiness) and morale apply to the player's own regiments inside that group. No other AI group is " +
+                "affected. With Enable W&L Supply Efficiency Sign Fix off, supply efficiency and Inspect Logistics stay neutral for that " +
+                "group rather than slowing its resupply. Off: vanilla.");
+            EnableWlStaffPanelScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Staff Panel Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla's campaign army panel lists the player's staff effects on supply, morale and fighting " +
+                "spirit for whichever group is selected, enemies included. With this on they are listed only for the player's own groups " +
+                "and the map group carrying the player's command. Display only. Off: vanilla.");
+            EnableWlSupplyEfficiencySignFix = Config.Bind(
+                "W&L",
+                "Enable W&L Supply Efficiency Sign Fix",
+                true,
+                "Default ON. W&L career only. Vanilla multiplies the resupply duration by the player's supply-efficiency bonus and by Inspect " +
+                "Logistics, so a better Quartermaster or camp result makes resupply slower. With this on the same bonus shortens the duration " +
+                "instead (a +25% bonus resupplies in 1/1.25 of the time; a camp malus still lengthens it). Off: vanilla direction.");
+            EnableWlActionOnceEffectsFix = Config.Bind(
+                "W&L",
+                "Enable W&L Action Once-Effects Fix",
+                true,
+                "Default ON. W&L career only. A sweep of every quality of every type (actions, items, companions, injuries, staff, career " +
+                "events) against what vanilla reads found paid actions whose bonus lands where vanilla never reads it: Logistics Corps and " +
+                "Not Yet Ready (supply efficiency), Signal Corps (battle and campaign order delays), High Spirits (fighting spirit), " +
+                "Recruitment Campaign, Organize Recruitment, Camp Pleasures, Uncle Sam and Irish Legion (contract renewals), Engineer Corps " +
+                "(engineering points), Staff Standards and Examine Details (staff efficiency, the rate at which staff skills grow toward " +
+                "yours), and Gamble (its incident-chance cost). With this on each applies where vanilla reads it, in the direction the " +
+                "action states. The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow " +
+                "resupply). Left vanilla because their texts promise something else: the attrition values of Harsh Punishments, Ample " +
+                "Rewards and Purge, and the prestige values on items, injuries and one career event; three companions' rank values use a " +
+                "quality type vanilla has no meaning for. Off: vanilla.");
+            EnableBattleEntrenchmentAverageFix = Config.Bind(
+                "Tactical",
+                "Enable Battle Entrenchment Average Fix",
+                true,
+                "Default ON. Vanilla BattleUnits.CalculateAllUnitsOfAlliance averages the AI side's entrenchment level over the player side's " +
+                "group count, which sets the AI's battle fortification tier and engineering time. With this on it is averaged over the AI " +
+                "side's own groups, as readiness beside it is. A stat correction, not an order. Off: vanilla.");
+            EnableBattleHqConditionFix = Config.Bind(
+                "Tactical",
+                "Enable Battle HQ Condition Fix",
+                true,
+                "Default ON. Vanilla BattleUnits.AssignConditionToSubordinates sets each group HQ's horse and gun condition from the men " +
+                "value at battle start. With this on the HQ gets the horse and gun values its sub-units get, and the side's gun-condition " +
+                "average is recomputed from them. A stat correction, not an order. Off: vanilla.");
             EnableCampaignChainDispatches = Config.Bind(
                 "W&L",
                 "Enable Campaign Chain Dispatches",
@@ -670,6 +758,25 @@ namespace WhiskeyRealism
                 "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
                 "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
                 "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
+            EnableBattleReconnaissance = Config.Bind(
+                "Tactical",
+                "Enable Battle Reconnaissance",
+                true,
+                "Default ON. The fog-honest battle AI goes and looks. Cavalry reconnaissance: when an enemy-side entry point has not been " +
+                "watched for an hour, a stretch of the front has gone unobserved, or intel confidence is below 0.35 (straight ahead " +
+                "before any contact, the nearest remembered enemy after it), one standing AI cavalry regiment of a settled brigade rides to look (150 m short of an " +
+                "entry point, vanilla's out-of-contact distance), stops on first sight, watches for 3 battle minutes and rides back to its " +
+                "brigade; never toward a visible enemy at least as strong, at most 4 missions per side per battle hour. Reconnaissance in " +
+                "force: in the army's Probe phase, a side that is not the battle's defender advances one AI group per front band with no " +
+                "visible enemy 200 m (infantry sight) in screen stance and stops it on contact, once per band per battle hour; a probe " +
+                "that met no enemy at least its size holds the ground it gained until its ledger task changes. Scout and " +
+                "Probe tasks advance by such bounds along the front (toward the objective before any sighting) instead of to an " +
+                "objective stand-off; screening and probing brigades (and their regiments) with nothing in sight turn to face the " +
+                "stalest unwatched enemy entry point, flank guards too; holding and reserve tasks keep their front facing. Skirmisher screen: AI " +
+                "skirmisher companies of a screening (or advancing attack-stance) line stand 100 m ahead (vanilla's contact distance) " +
+                "instead of 30 m while nothing is in their range, and fall back to vanilla's 30 m on contact. Never W&L player-owned " +
+                "units; orders go through the battle-core order executor (Tactical Commander Mode = Active). Off: no recon or probe " +
+                "moves, the shipped objective stand-off for Scout/Probe tasks, vanilla's 30 m skirmish line.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
@@ -761,6 +868,40 @@ namespace WhiskeyRealism
             EnableArtilleryCombineGunSync = Config.Bind(
                 "Campaign", "Enable Artillery Combine Gun Sync", true,
                 "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
+            // Campaign logistics vanilla bug fixes (docs/bug-fixes/vanilla-campaign-logistics.md).
+            EnableRaidSupplyThresholdFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Raid Supply Threshold Fix", true,
+                "Default ON. Vanilla raid forces never pick a target: RaidForce.SearchObjective needs GetGroupSupplyState >= 'minimum supply level to continue offensive operations' (0.75), but that function halves its 0-1 inputs and never exceeds 0.5. During the search the threshold is put on the same halved scale, so a raid force sets out once its real supply reaches the configured level. Raid groups under the W&L player's command stay vanilla. Off: vanilla (raid forces wait forever).");
+            EnableFoggedAiCampFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
+                "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiEmbarkationFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
+                "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableOrphanCampCleanup = Config.Bind(
+                "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
+                "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");
+            EnableAiAreaMembershipRefresh = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Area Membership Refresh", true,
+                "Default ON. Vanilla fills each AI area's IIP, building and town lists only during the first two AI runs, so depots and other buildings created later never count toward the area's supply capacity or as offensive objectives. Registers them into their area with vanilla's own position rule (no duplicates) and drops destroyed buildings once per full pass. Off: vanilla.");
+            EnableWinterOffensiveModifierFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Winter Offensive Modifier Fix", true,
+                "Default ON. Vanilla's winter roll for AI offensives uses the 'Probability modifier for defensive operations in winter' (0.2) and never reads the offensive one (0.05). Uses the offensive modifier for vanilla's offensive roll and for Whiskey's coordinated-offensive mirror of it; it scales the roll's time term (the idle-time term is not scaled, as in vanilla). Off: vanilla.");
+            EnableSupplyDepotBuilderFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Supply Depot Builder Fix", true,
+                "Default ON. In vanilla's depot job a unit near any depot its side started, even a finished, empty or captured one, is skipped (no move to resupply, no depot wish), and depot 'builders' (kept out of offensive, defensive and fort jobs) are counted within command range and several per depot, while construction only advances with a unit inside bugle range. Only depots still under construction skip a unit, and each such depot keeps one builder, its smallest unit inside bugle range. Off: vanilla.");
+            EnableSubordinateStrengthGrabFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Subordinate Strength Grab Fix", true,
+                "Default ON. Vanilla's BattleUnits.GrabSubordinateByStrength compares each brigade only with the last one picked instead of the running total, so AI transfers between armies move more than the deficit they were sized for. The pick now stops at the requested strength, with vanilla's other filters. Off: vanilla.");
+            EnableOffensiveWeaponTrimFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Offensive Weapon Trim Fix", true,
+                "Default ON. When vanilla trims surplus units from an AI offensive it credits each with its weapon factor squared into the blend instead of the blended factor used when the unit was added. A narrow IL rewrite of AICampaign.CheckOffensiveMovements (left as vanilla if the code pattern is not found) applies the same blend; this flag switches it live. Off: vanilla.");
+            EnableAiRandomCandidatePickFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Random Candidate Pick Fix", true,
+                "Default ON. Eight vanilla campaign-AI random picks (fleet port, fleet, ship type, recruit division and corps, recruiting IIP, army for a new corps, raid-force town) use Random.Range(0, Count - 1), which never returns the last candidate. A narrow IL rewrite (left as vanilla where the code pattern is not found) lets the pick include it; this flag switches it live. Off: vanilla.");
+            EnableConfiscationSupplyFlowFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
+                "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +

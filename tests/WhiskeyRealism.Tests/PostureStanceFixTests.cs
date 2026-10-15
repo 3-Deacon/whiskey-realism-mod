@@ -243,17 +243,17 @@ internal static class PostureStanceFixTests
 
     private static void GroupStanceScorerUsesSharedTaskMapping()
     {
-        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.AttackObjective, false), "attack");
-        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.SupportAttack, false), "support");
+        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.AttackObjective, false, BattleStance.Meeting), "attack");
+        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.SupportAttack, false, BattleStance.Meeting), "support");
         AssertEqual(TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy),
-            TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.FixEnemy, false), "fix agrees with #61");
-        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, false), "hold");
-        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, true), "hold commits on visible weak point");
-        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldChoke, false), "hold choke");
-        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.ReserveWait, false), "reserve");
-        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.FallBackToLine, false), "fallback");
-        AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.Screen, false), "screen is the executor's call");
-        AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.None, true), "none");
+            TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.FixEnemy, false, BattleStance.Meeting), "fix agrees with #61");
+        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, false, BattleStance.Meeting), "hold");
+        AssertEqual(3, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, true, BattleStance.Meeting), "hold commits on visible weak point");
+        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldChoke, false, BattleStance.Meeting), "hold choke");
+        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.ReserveWait, false, BattleStance.Meeting), "reserve");
+        AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.FallBackToLine, false, BattleStance.Meeting), "fallback");
+        AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.Screen, false, BattleStance.Meeting), "screen is the executor's call");
+        AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.None, true, BattleStance.Meeting), "none");
     }
 
     private static void SettlementGateMarchingUnitIsNotSettled()

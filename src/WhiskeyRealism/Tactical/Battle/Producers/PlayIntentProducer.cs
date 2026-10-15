@@ -56,7 +56,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (t == null || army == null || sink == null) return;
 
                 Collect(s, t, side, army);
-                bool defending = ArmyPostureInputsRuntime.SideDefending(s.Alliance);
+                bool defending = army.CurrentBattleStance == BattleStance.Defender;
                 for (int p = 0; p < _parents.Count; p++)
                 {
                     List<Child> children = _byParent[_parents[p]];

@@ -7,6 +7,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Telemetry;
 using TroopQualityRuntime = WhiskeyRealism.Tactical.Battle.TroopQualityRuntime;
 using WhiskeyRealism.Util;
@@ -683,9 +684,14 @@ namespace WhiskeyRealism.Patches
             var bunits = _bunitsField?.GetValue(null) as BattleUnits;
             var storm = bunits != null ? bunits.uniStormSystem : null;
             if (storm == null) return 1f;
-            int month = storm.monthCounter;
-            bool winter = month <= GamePrefs.winterquartersmonthuntil || month >= GamePrefs.winterquartersmonthfrom;
-            return winter ? GamePrefs.winterdefensiveoperationsmodifier : 1f;
+            // Vanilla rolls with winterdefensiveoperationsmodifier (14310-14312); with the
+            // winter fix on (BUG-LOG-004, WinterOffensiveModifierPatch) the offensive one.
+            bool winter = WinterOperationsModifier.IsWinterMonth(storm.monthCounter, GamePrefs.winterquartersmonthuntil, GamePrefs.winterquartersmonthfrom);
+            return WinterOperationsModifier.OffensiveRollModifier(
+                winter,
+                WinterOffensiveModifierPatch.Enabled(),
+                GamePrefs.winteroffensiveoperationsmodifier,
+                GamePrefs.winterdefensiveoperationsmodifier);
         }
 
         private static float AverageTimeOfNotMoving(CoordinatedOperationOutput output, IList ownUnits)

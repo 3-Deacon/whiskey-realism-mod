@@ -685,7 +685,7 @@ namespace WhiskeyRealism.Tactical
             {
                 if (j == index) continue;
                 ref UnitRecord f = ref own[j];
-                if (f.UnitTyp != TacticalUnitType.Infantry && f.UnitTyp != TacticalUnitType.Cavalry && f.UnitTyp != TacticalUnitType.Officer) continue;
+                if (f.UnitTyp != TacticalUnitType.Infantry && f.UnitTyp != TacticalUnitType.Cavalry && f.UnitTyp != TacticalUnitType.Scout) continue;
                 if ((f.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.PermanentlyDetached)) != 0) continue;
                 if ((f.Flags & UnitFlags.Alive) == 0) continue;
                 float fx = f.X - ax;
