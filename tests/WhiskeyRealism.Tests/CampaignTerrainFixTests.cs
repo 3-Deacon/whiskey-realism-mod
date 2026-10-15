@@ -385,7 +385,13 @@ internal static class CampaignTerrainFixTests
         AssertTrue(speed.Contains("int ownLevel = ownHas ? __instance.GetPerkLevel("), "own level read only for a holder");
         AssertTrue(speed.Contains("int parentLevel = parentHas ? army.GetPerkLevel("), "parent level read only for a holder");
         AssertFalse(speed.Contains("HasPerkParent(") || speed.Contains("GetPerkLevelParent("), "no per-frame parent-name read");
-        AssertTrue(Body(pontoon, "private static Regiment ParentArmy(Regiment unit)").Contains("TerrainBugFixes.ReadsParentPerk(unit.calledfromcampaign, unit.unittyp)"), "parent read only where vanilla's is");
+        string parentArmy = Body(pontoon, "private static Regiment ParentArmy(Regiment unit)");
+        AssertTrue(parentArmy.Contains("TerrainBugFixes.ReadsParentPerk(unit.calledfromcampaign, unit.unittyp)"), "parent read only where vanilla's is");
+        AssertTrue(parentArmy.Contains("UnityEngine.Transform parent = unit.transform.parent;"), "reads the corps' current parent");
+        AssertTrue(parentArmy.Contains("if (!_armyOf.TryGetValue(parent, out Regiment army))") && parentArmy.Contains("_armyOf[parent] = army;"),
+            "cache keyed by the parent transform, so a re-parented corps reads its new army");
+        AssertTrue(speed.Contains("bool parentHas = (UnityEngine.Object)army != null && army.HasPerk(TerrainBugFixes.CampaignPontoonTrain);"),
+            "the parent army's own Pontoon Train counts (AddPath's parent precedence)");
         string pathPrefix = Body(pontoon, "internal static void Prefix(Regiment __instance)");
         AssertTrue(pathPrefix.Contains("PontoonApplies(Enabled(),"), "path cost passes the flag");
         AssertTrue(pathPrefix.IndexOf("Swap.Restore()", StringComparison.Ordinal) < pathPrefix.IndexOf("Swap.Apply(", StringComparison.Ordinal), "path Prefix restores before it applies");
