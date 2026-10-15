@@ -42,12 +42,12 @@ Dispatcher (chain-of-command spec §D, decompile build 14703111):
 
 ## Invariants
 
-- No direct movement of a W&L player-owned unit. The subordinate player's parent group is not moved by Whiskey yet (`IsPlayerPartOfUnit` → ineligible); stage G5a lifts that for the parent group and relies on #69 for the dispatch.
+- One classifier, `WlChainRules` (stage G decision C4, applied in stage F 2026-10-15): a CIC side → Whiskey stands down; the player's own command and units under it (player-owned, in his operation, inside the group carrying him, an army-group player's units) → never moved, stopped or re-tasked; the player's command is itself a map group → order-only by dispatch, never a committed defender or must-hold holder; the AI map group above a player below map-group level → moved as an AI asset (`DirectMovementAllowed`, reason `carrying-group`) through `AICampaign.MoveUnitTo`, which #69 turns into the player's dispatch.
 - No Transpiler.
 - No edit to `GameVars.groupstancename[0]`.
 - No direct movement fallback for W&L player-chain/player-involved units when the bridge rejects, fails, or the dispatcher skips.
 - Null requests fail closed: no direct movement and no operation-list mutation.
-- `IsMovedByPlayer`, player-CIC, and `IsPlayerPartOfUnit` cases block Whiskey movement.
+- `IsMovedByPlayer`, player-CIC, player-owned and `IsPlayerPartOfUnit` cases block Whiskey movement, except the carrying group itself (`IsPlayerPartOfUnit` and `GetCampaignGroup(command) == unit` while the command is below map-group level). The same classifier gates #4's capital pre-pledge, #25's forbidden-commit revert, the coastal runner, the probe pause/withdraw stop and defense coverage.
 - `IssuedWlCurrentOrder` does not mutate vanilla offensive/defensive operation lists.
 - Failed or skipped dispatches log and skip; callers must not reattempt direct movement for that unit in the same path.
 - Rollback: `[W&L] Enable Campaign Chain Dispatches = false` (no Whiskey campaign orders; the bridge reports `campaign-dispatch:dispatch-disabled`).
