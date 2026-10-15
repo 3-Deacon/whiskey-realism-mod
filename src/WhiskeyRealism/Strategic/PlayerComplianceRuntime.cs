@@ -17,22 +17,19 @@ namespace WhiskeyRealism.Strategic
     //
     // Writers: the #69 UpdateUnitAI Postfix on the campaign map (ObserveCampaign) and
     // the battle coordinator tick (ObserveBattle). The ledger is keyed by career
-    // (commander id + campaign level) and deliberately not CampaignScope-reset: a
-    // return from battle reloads the campaign, and the ledger measures the human
+    // (ComplianceCareerKey: commander id + SceneManagement.currentcampaignscenario,
+    // which a campaign battle leaves alone) and deliberately not CampaignScope-reset:
+    // a return from battle reloads the campaign, and the ledger measures the human
     // player, not the save. Battle end drops the pending battle order (BattleScope).
+    // Vanilla's re-issue of the same order is one sample (ComplianceOrderStream).
     internal static class PlayerComplianceRuntime
     {
         private const double HoursPerYear = 8760.0;
 
-        private static PlayerComplianceLedger _ledger = new PlayerComplianceLedger();
-        private static string _careerKey;
-        private static int _lastSeenSession = int.MinValue;
+        private static readonly PlayerComplianceCareers _careers = new PlayerComplianceCareers();
+        private static readonly ComplianceOrderStream _orders = new ComplianceOrderStream();
         // The order object each scope's pending ledger entry stands for.
         private static readonly DLC_WL.GivenOrders[] _tracked = new DLC_WL.GivenOrders[2];
-
-        private static string _savedKey;
-        private static float _savedReliability;
-        private static int _savedSamples;
 
         static PlayerComplianceRuntime()
         {
@@ -53,7 +50,7 @@ namespace WhiskeyRealism.Strategic
                 try
                 {
                     if (!Enabled() || !DLC_WL.dlc_scenarioactive) return 1f;
-                    return _ledger.Reliability;
+                    return _careers.Ledger.Reliability;
                 }
                 catch { return 1f; }
             }
@@ -92,66 +89,68 @@ namespace WhiskeyRealism.Strategic
         private static void Observe(ComplianceScope scope, double nowHours, bool playerDecides)
         {
             EnsureCareer();
+            var ledger = _careers.Ledger;
             var order = DLC_WL.givenorder;
             int session = DLC_WL.GivenOrders.givenorderssession;
+            ComplianceOrderKey orderKey = KeyOf(order);
+            ComplianceOrderEvent seen = _orders.See(order != null, session, in orderKey);
 
             int s = (int)scope;
             var tracked = _tracked[s];
             if (tracked != null)
             {
                 if (tracked.firstunitreached)
-                    Report(scope, _ledger.OnReached(scope, _ledger.PendingSession(scope)));
+                    Report(scope, ledger.OnReached(scope, ledger.PendingSession(scope)));
                 else if (!ReferenceEquals(order, tracked))
-                    _ledger.DropPending(scope);
+                {
+                    // Vanilla's re-issue of the pending order: follow the new object
+                    // and keep the issue time; anything else ends the order unreached.
+                    ComplianceOrderKey trackedKey = KeyOf(tracked);
+                    if (order != null && ComplianceOrderKey.Same(in orderKey, in trackedKey))
+                        _tracked[s] = order;
+                    else
+                        ledger.DropPending(scope);
+                }
             }
             else
             {
                 // Pending without a watched order (scene change): no fair verdict.
-                _ledger.DropPending(scope);
+                ledger.DropPending(scope);
             }
-            if (!_ledger.HasPending(scope)) _tracked[s] = null;
+            if (!ledger.HasPending(scope)) _tracked[s] = null;
 
-            if (_lastSeenSession == int.MinValue)
+            if (seen == ComplianceOrderEvent.New)
             {
-                // First look at this career: an order already standing has an unknown age.
-                _lastSeenSession = session;
-            }
-            else if (order != null && session != _lastSeenSession)
-            {
-                _lastSeenSession = session;
                 bool battleOrder = order.IsBattleOrder();
                 if (playerDecides && order.showzone && battleOrder == (scope == ComplianceScope.Battle))
                 {
-                    _ledger.OnDispatch(scope, session, nowHours);
+                    ledger.OnDispatch(scope, session, nowHours);
                     _tracked[s] = order;
                 }
             }
 
-            Report(scope, _ledger.Tick(scope, nowHours));
-            if (!_ledger.HasPending(scope)) _tracked[s] = null;
+            Report(scope, ledger.Tick(scope, nowHours));
+            if (!ledger.HasPending(scope)) _tracked[s] = null;
+        }
+
+        private static ComplianceOrderKey KeyOf(DLC_WL.GivenOrders order)
+        {
+            if (order == null) return default(ComplianceOrderKey);
+            int unit = (UnityEngine.Object)order.groupunit != null ? order.groupunit.GetInstanceID() : 0;
+            return new ComplianceOrderKey(unit, order.type, order.position.x, order.position.z);
         }
 
         private static void EnsureCareer()
         {
-            string key = CareerKey();
-            if (string.Equals(key, _careerKey, StringComparison.Ordinal)) return;
-            _careerKey = key;
-            _ledger = new PlayerComplianceLedger();
-            _lastSeenSession = int.MinValue;
+            if (!_careers.Ensure(DLC_WL.dlc_chosencommander, SceneManagement.currentcampaignscenario)) return;
+            _orders.Reset();
             _tracked[0] = null;
             _tracked[1] = null;
-            if (_savedKey != null && string.Equals(_savedKey, key, StringComparison.Ordinal))
-                _ledger.Restore(_savedReliability, _savedSamples);
-        }
-
-        private static string CareerKey()
-        {
-            return DLC_WL.dlc_chosencommander + ":" + (GamePrefs.leveltoload ?? string.Empty) + "/" + (GamePrefs.subleveltoload ?? string.Empty);
         }
 
         private static void DropBattle()
         {
-            _ledger.DropPending(ComplianceScope.Battle);
+            _careers.Ledger.DropPending(ComplianceScope.Battle);
             _tracked[(int)ComplianceScope.Battle] = null;
         }
 
@@ -168,31 +167,34 @@ namespace WhiskeyRealism.Strategic
             TelemetryRouter.LegacyInfoToMainLogIfAllowed(
                 "[PlayerCompliance] scope=" + (scope == ComplianceScope.Battle ? "battle" : "campaign") +
                 " outcome=" + (outcome == ComplianceOutcome.Complied ? "complied" : "missed") +
-                " reliability=" + _ledger.Reliability.ToString("0.00") + " samples=" + _ledger.Samples,
+                " reliability=" + _careers.Ledger.Reliability.ToString("0.00") + " samples=" + _careers.Ledger.Samples,
                 scope == ComplianceScope.Battle ? TelemetryLayer.Tactical : TelemetryLayer.Campaign);
         }
 
-        // Sidecar: the current career's estimate, or what a load brought in and no
-        // observation has replaced yet.
+        // Sidecar: the current career's estimate only (a saved estimate for it was
+        // adopted by EnsureCareer); null outside a W&L career or without samples.
         internal static PlayerComplianceDto Export()
         {
-            if (_careerKey != null && _ledger.Samples > 0)
-                return new PlayerComplianceDto { CareerKey = _careerKey, Reliability = _ledger.Reliability, Samples = _ledger.Samples };
-            if (_savedKey != null)
-                return new PlayerComplianceDto { CareerKey = _savedKey, Reliability = _savedReliability, Samples = _savedSamples };
-            return null;
+            try
+            {
+                if (!DLC_WL.dlc_scenarioactive) return null;
+                EnsureCareer();
+                if (!_careers.TryExport(out string key, out float reliability, out int samples)) return null;
+                return new PlayerComplianceDto { CareerKey = key, Reliability = reliability, Samples = samples };
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("player-compliance:export", "[PlayerCompliance] export failed: " + ex.Message);
+                return null;
+            }
         }
 
         // Sidecar load: adopted when its career is observed and this session has no
         // samples for it (PlayerComplianceLedger.Restore).
         internal static void Restore(PlayerComplianceDto saved)
         {
-            if (saved == null || string.IsNullOrEmpty(saved.CareerKey)) return;
-            _savedKey = saved.CareerKey;
-            _savedReliability = saved.Reliability;
-            _savedSamples = saved.Samples;
-            if (string.Equals(_careerKey, saved.CareerKey, StringComparison.Ordinal))
-                _ledger.Restore(saved.Reliability, saved.Samples);
+            if (saved == null) return;
+            _careers.Restore(saved.CareerKey, saved.Reliability, saved.Samples);
         }
     }
 }
