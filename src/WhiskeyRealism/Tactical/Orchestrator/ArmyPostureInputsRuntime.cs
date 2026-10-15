@@ -81,7 +81,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (forceBalance.HasValue)
                 {
                     army.UpdateReinforcementOpportunity(forceBalance.Value);
-                    EmitReinforcementOpportunityTelemetry(side, army.CurrentReinforcementOpportunity);
+                    EmitReinforcementOpportunityTelemetry(side, army.CurrentReinforcementOpportunity, forceBalance.Value.QualityFactor);
                 }
             }
             catch (Exception ex)
@@ -206,7 +206,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision)
+        // qualityFactor: the BC8 force-balance quality factor in CurrentRatio (84862), 1 when
+        // either side's quality is unknown or the weighting is off.
+        private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision, float qualityFactor)
         {
             try
             {
@@ -214,6 +216,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + "|outcome=" + decision.Opportunity
                     + "|reason=" + decision.Reason
                     + "|ratio=" + decision.CurrentRatio.ToString("0.00")
+                    + "|quality=" + qualityFactor.ToString("0.00")
                     + "|enemyParityHrs=" + (decision.ParityHoursForEnemy >= 999f ? "never" : decision.ParityHoursForEnemy.ToString("0.0"))
                     + "|ownParityHrs=" + (decision.ParityHoursForOwn >= 999f ? "never" : decision.ParityHoursForOwn.ToString("0.0"))
                     + "|threshold=" + decision.AttackThreshold.ToString("0.00")
@@ -233,6 +236,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("outcome", decision.Opportunity.ToString())
                         .WithField("reason", decision.Reason)
                         .WithField("currentRatio", decision.CurrentRatio)
+                        .WithField("qualityFactor", qualityFactor)
                         .WithField("enemyParityHours", decision.ParityHoursForEnemy >= 999f ? -1f : decision.ParityHoursForEnemy)
                         .WithField("ownParityHours", decision.ParityHoursForOwn >= 999f ? -1f : decision.ParityHoursForOwn)
                         .WithField("attackThreshold", decision.AttackThreshold)

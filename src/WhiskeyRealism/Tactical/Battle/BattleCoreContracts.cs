@@ -46,6 +46,20 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Strength;
         public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
         public float Morale, BattleStartMorale, Ammo01, Fatigue;
+        // BC8 troop quality: a regiment's Experience() (140114, W&L player-unit effects
+        // applied) and raw training (never GetTraining(), which writes training under W&L,
+        // 140537-140549); a group's groupexperience / grouptraining (UpdateGroupStrength
+        // 120473 / 120508, divided 120671 / 120674).
+        public float Experience, Training;
+        // BC8, groups only (0 for a regiment): groupmorale, the mean morale of the group's
+        // unrouted units (UpdateGroupStrength 120158 / 120670), GetGroupStrength's own morale
+        // term (6054). A group record's Morale stays its own morale field.
+        public float GroupMorale;
+        // BC8 break tolerance, own infantry/cavalry regiments only (0 otherwise or with the
+        // weighting off): the loss fraction vanilla's rout test reads (LossesAreUnbearable
+        // 139829-139843, the detached regiment's strength included) and the fraction at which it routs (GetUnbearableLossesTrigger 113363-113400,
+        // TroopQuality.BreakLossFraction).
+        public float LossFraction, BreakLossFraction;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
         // BC5a, additive (the leaf slot, shipped #61 TryFormationSlot): a group's
@@ -111,6 +125,12 @@ namespace WhiskeyRealism.Tactical.Battle
         public float Confidence01;
         public int HiddenTicks;
         public bool IsReinforcement;
+        // BC8, last seen while Visible (a Remembered entry keeps them): the star experience
+        // the player sees (TroopQuality.PerceivedExperience, UpdateUnitIcon 121832-121852)
+        // and the regiment's morale (BC6b precedent: a visible target's morale is read).
+        // Reinforcement columns carry neither.
+        public float Experience;
+        public float Morale;
     }
 
     public enum OrderChannel

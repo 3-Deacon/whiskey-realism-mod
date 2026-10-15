@@ -8,6 +8,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
+using TroopQualityRuntime = WhiskeyRealism.Tactical.Battle.TroopQualityRuntime;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -34,6 +35,12 @@ namespace WhiskeyRealism.Patches
     //     failed roll empties ownunits for the call so vanilla does not roll again;
     //   - ownunits is emptied only when the package actually committed; a failed
     //     or deferred package leaves vanilla's own offensive logic untouched.
+    //   - BC8: vanilla scales its dominance requirement by the commander in chief's live
+    //     initiative, x (1 + (1 - initiative) x commanderinfluenceinitiativeforoperations)
+    //     (14250 over the lead's own group, re-read 14281 over the gathered list; tested at
+    //     14256 / 14298). The package's required attack and reinforce ratios get the same
+    //     factor from the lead's commander (the CIC of the lead's own group, 14250; the
+    //     14281 re-read is not reproduced). Rollback: Enable Experience And Drill AI Weighting.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
     internal static class CoordinatedOffensiveOperationsPatch
     {
@@ -60,6 +67,7 @@ namespace WhiskeyRealism.Patches
             internal string TargetName;
             internal string PackageSignature;
             internal float TargetEnemyWeight;
+            internal float RequiredAttackRatio;
         }
 
         private static readonly Dictionary<int, Snapshot> _snapshots = new Dictionary<int, Snapshot>();
@@ -317,6 +325,7 @@ namespace WhiskeyRealism.Patches
                     .WithField("decision", decision?.Output != null ? decision.Output.Decision.ToString() : "-")
                     .WithField("target", decision?.TargetName ?? "-")
                     .WithField("ratio", decision?.Output != null ? decision.Output.Ratio : 0.0)
+                    .WithField("requiredAttackRatio", decision != null ? decision.RequiredAttackRatio : 0.0)
                     .WithField("lead", decision?.Output?.LeadDisplayUnitKey ?? "-")
                     .WithField("support", decision?.Output?.SupportStableUnitIds != null ? decision.Output.SupportStableUnitIds.Count : 0));
         }
@@ -382,6 +391,8 @@ namespace WhiskeyRealism.Patches
             }
 
             float targetStrength = Math.Max(1f, leadAssignment?.LocalEnemyStrength ?? lead.groupstrengthactive);
+            var options = CoordinatedOperationOptions.StableDefaults(targetStrength)
+                .ScaledByCommanderInitiative(LeadInitiative(lead), TroopQualityRuntime.CampaignOffensiveInitiativeInfluence());
             var input = new CoordinatedOperationInput
             {
                 AllianceId = allianceId,
@@ -394,7 +405,7 @@ namespace WhiskeyRealism.Patches
                 TargetZ = vanillaTarget.Value.z,
                 TargetEnemyStrength = targetStrength,
                 PreferredLeadStableUnitId = StableId(lead),
-                Options = CoordinatedOperationOptions.StableDefaults(targetStrength),
+                Options = options,
                 Candidates = candidates
             };
 
@@ -406,11 +417,31 @@ namespace WhiskeyRealism.Patches
 
             decision.PackageSelected = true;
             decision.TargetEnemyWeight = targetEnemyWeight;
+            decision.RequiredAttackRatio = options.RequiredAttackRatio;
             decision.Output = output;
             decision.Target = vanillaTarget.Value;
             decision.TargetName = targetName;
             decision.PackageSignature = output.Signature();
             return decision;
+        }
+
+        // The lead's commander's live initiative (GetCommanderInitiative 61173); NaN when
+        // unreadable, which ScaledByCommanderInitiative reads as 0 (most cautious).
+        private static float LeadInitiative(Regiment lead)
+        {
+            try
+            {
+                var commanders = GameVars.commander;
+                int id = lead != null ? lead.commander : -1;
+                if (commanders == null || id < 0 || id >= commanders.Count || commanders[id] == null) return float.NaN;
+                return commanders[id].GetCommanderInitiative();
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinated-ops:offensive:initiative",
+                    "Patch CoordinatedOps: lead commander initiative unreadable; read as 0: " + ex.Message);
+                return float.NaN;
+            }
         }
 
         private static IList GetOwnUnits(object faction)

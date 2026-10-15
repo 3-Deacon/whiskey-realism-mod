@@ -41,6 +41,11 @@
 //   flankpositionshift (unitprefs, 53300), read once per battle; the slice count is the
 //   snapshot's (aidefensiveslices, set by the builder).
 //
+// - Troop quality (BC8): each enemy row carries its record's Experience() and morale; only a
+//   visible row's star experience and morale reach memory (BattlePerception.Update; the
+//   player sees a visible regiment's stars, UpdateUnitIcon 121832-121852). Reinforcement
+//   columns carry none.
+//
 // Ids are GameObject.GetInstanceID(), the id UnitRecord.InstanceId carries.
 
 using System;
@@ -174,7 +179,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (enemies[i].UnitTyp > 13 || enemies[i].UnitTyp == 5) continue;
                     AddRow(ref side.Result, enemies[i].InstanceId, IsEnemyVisible(mode, grid, s, i), enemies[i].X, enemies[i].Z,
                         enemies[i].Strength, enemies[i].UnitTyp, (enemies[i].Flags & UnitFlags.Routed) != 0,
-                        reinforcement: false, arrivalHours: 0f);
+                        reinforcement: false, arrivalHours: 0f, experience: enemies[i].Experience, morale: enemies[i].Morale);
                 }
                 AddReinforcements(side, battle, s.Alliance, mode, grid);
                 return true;
@@ -232,12 +237,12 @@ namespace WhiskeyRealism.Tactical.Battle
                     ? BattlePerception.WithinAnyReach(_ownX, _ownZ, _ownReach, _ownReachCount, pos.x, pos.z)
                     : (UnityEngine.Object)grid != null && !grid.UnitIsHidden(pos);
                 AddRow(ref side.Result, column.gameObject.GetInstanceID(), visible, pos.x, pos.z, column.groupstrength,
-                    column.unittyp, routed: false, reinforcement: true, arrivalHours: arrival.durationleft);
+                    column.unittyp, routed: false, reinforcement: true, arrivalHours: arrival.durationleft, experience: 0f, morale: 0f);
             }
         }
 
         private static void AddRow(ref PerceptionProbeResult result, int id, bool visible, float x, float z, float strength,
-            int unitTyp, bool routed, bool reinforcement, float arrivalHours)
+            int unitTyp, bool routed, bool reinforcement, float arrivalHours, float experience, float morale)
         {
             int i = result.Count;
             PerceptionProbeResult.EnsureCapacity(ref result, i + 1);
@@ -250,6 +255,8 @@ namespace WhiskeyRealism.Tactical.Battle
             result.Routed[i] = routed;
             result.IsReinforcement[i] = reinforcement;
             result.ArrivalHours[i] = arrivalHours;
+            result.Experience[i] = experience; // true values; BattlePerception.Update keeps the star value of a visible row
+            result.Morale[i] = morale;
             result.Count = i + 1;
         }
 

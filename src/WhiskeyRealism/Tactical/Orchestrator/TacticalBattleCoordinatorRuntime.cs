@@ -1950,12 +1950,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // vanilla's unfiltered angle-slice strength and in-range enemy count), the closest
         // enemy is the nearest one the side sees, flank risk is perceived flank pressure
         // (replacing flanksthreated / outflanked). Own strength, cover and fort stay own reads.
+        // Troop quality (BC8): own strength and the enemy terms are weighed by vanilla's
+        // experience blend (GetGroupStrength 6057, as AdjustGroupAIStance 4238 reads it):
+        // the group's groupexperience against the closest visible enemy's stars.
         private static TacticalSectorAssessment BuildSectorForGroup(Battle.BattleSnapshot snapshot, int ownIndex, Regiment group, int band)
         {
             try
             {
                 ref Battle.UnitRecord unit = ref snapshot.Own[ownIndex];
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                Battle.TroopQuality.SectorBlends(snapshot, ownIndex, Battle.TroopQualityRuntime.Prefs.ExpInfluence,
+                    Battle.TroopQualityRuntime.Prefs.MoraleInfluence, out float ownBlend, out float enemyBlend);
                 return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     band,
                     Math.Max(unit.GroupOwnInRange, unit.GroupStrengthAiGroup),
@@ -1967,7 +1972,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     closestEnemyRouted: closest != null && closest.isrouted,
                     closestEnemyPermanentlyDetached: closest != null && closest.permanentlydetached,
                     flankRisk: ArmyEvidenceBuilder.HasFlankPressure(snapshot, ownIndex),
-                    strongPoint: group.covervalue > 0.5f || group.fortinrange));
+                    strongPoint: group.covervalue > 0.5f || group.fortinrange,
+                    ownExperienceBlend: ownBlend,
+                    enemyExperienceBlend: enemyBlend));
             }
             catch
             {

@@ -9,6 +9,9 @@ using WhiskeyRealism.Tactical;
 using BattleCore = WhiskeyRealism.Tactical.Battle.BattleCore;
 using BattleSnapshot = WhiskeyRealism.Tactical.Battle.BattleSnapshot;
 using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
+using TroopQuality = WhiskeyRealism.Tactical.Battle.TroopQuality;
+using TroopQualityPrefs = WhiskeyRealism.Tactical.Battle.TroopQualityPrefs;
+using TroopQualityRuntime = WhiskeyRealism.Tactical.Battle.TroopQualityRuntime;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -2023,10 +2026,12 @@ namespace WhiskeyRealism.Patches
         // Enemy inputs come from the group's side snapshot (BC2b): slice pressure for the
         // enemy strength, perceived flank pressure for the flank risk, the nearest enemy the
         // side sees for the line contact.
+        // Troop quality (BC8): the experience blends the coordinator's sector uses (6057).
         private static TacticalSectorAssessment BuildPerceivedSector(Regiment group, int sectorId)
         {
             int ownIndex = SnapshotIndex(group, out BattleSnapshot snapshot);
             Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+            TroopQuality.SectorBlends(snapshot, ownIndex, TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out float ownBlend, out float enemyBlend);
             return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 sectorId,
                 group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
@@ -2038,7 +2043,9 @@ namespace WhiskeyRealism.Patches
                 closestEnemyRouted: closest != null && closest.isrouted,
                 closestEnemyPermanentlyDetached: closest != null && closest.permanentlydetached,
                 flankRisk: ArmyEvidenceBuilder.HasFlankPressure(snapshot, ownIndex),
-                strongPoint: group != null && (group.covervalue > 0.5f || group.fortinrange)));
+                strongPoint: group != null && (group.covervalue > 0.5f || group.fortinrange),
+                ownExperienceBlend: ownBlend,
+                enemyExperienceBlend: enemyBlend));
         }
 
         // The unit's own index in its side's battle snapshot; -1 (and a null snapshot when
@@ -2168,6 +2175,13 @@ namespace WhiskeyRealism.Patches
                 AnyReceivedFire(unitsUsed),
                 confirmedEnemy <= 0f));
 
+            // Troop quality (BC8): #44's legacy odds weigh both sides by vanilla's experience
+            // blend (6057); the decision matrix reads the same.
+            float ownBlend = 1f, enemyBlend = 1f;
+            if (BattleCore.TryGetSnapshot(SafeAlliance(bunits, side), out BattleSnapshot snapshot))
+                TroopQuality.SideBlends(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount), snapshot.PerceivedEnemyQuality,
+                    TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out ownBlend, out enemyBlend);
+
             return TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
                 own,
                 confirmedEnemy,
@@ -2176,7 +2190,9 @@ namespace WhiskeyRealism.Patches
                 ArmyEvidenceBuilder.OwnReinforcementsArriving(bunits, side),
                 0f,
                 contact,
-                BuildSectorAssessments(battle, unitsUsed)));
+                BuildSectorAssessments(battle, unitsUsed),
+                ownBlend,
+                enemyBlend));
         }
 
         private static TacticalSectorAssessment[] BuildSectorAssessments(AIBattle battle, IList units)
@@ -2553,7 +2569,13 @@ namespace WhiskeyRealism.Patches
                 if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot snapshot)) return 0f;
                 float known = snapshot.VisibleEnemyStrength + snapshot.RememberedEnemyStrength;
                 if (!(known > 0f)) return 0f;
-                return Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce")) / known;
+                // Vanilla's shape (84862): × (1 + Δmorale) × (1 + Δexperience), own regiments
+                // against the perceived enemy (BC8).
+                TroopQualityPrefs prefs = TroopQualityRuntime.Prefs;
+                float quality = TroopQuality.ForceBalanceFactor(
+                    prefs.Quality(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount)),
+                    prefs.Quality(snapshot.PerceivedEnemyQuality));
+                return Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce")) / known * quality;
             }
             catch
             {
