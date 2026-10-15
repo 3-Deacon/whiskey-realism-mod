@@ -50,7 +50,13 @@ namespace WhiskeyRealism.Strategic
 
         // Seams for the vanilla reads Replan needs. Defaults are the reflection paths;
         // the harness swaps them for fixtures.
-        internal static Func<int, IList> AvailableObjectivesProvider = GetAvailableObjectivesViaReflection;
+        // Candidates for scoring/historical matching: mintownobjectives = 0, because the Union
+        // operations target abstract objective 3 (Richmond, no towns in campaignobjectives.dat)
+        // through its catalog position.
+        internal static Func<int, IList> AvailableObjectivesProvider = alliance => GetAvailableObjectivesViaReflection(alliance, 0);
+        // Exactly vanilla's own PickCampaignObjective call (decompile 17782): default
+        // mintownobjectives = 1, i.e. at least one enemy-held town/IIP (178827).
+        internal static Func<int, IList> VanillaPickableObjectivesProvider = alliance => GetAvailableObjectivesViaReflection(alliance, 1);
         internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
         internal static Func<int, bool> TargetPositionResolves = id => ObjectiveAdapter.ResolveObjectivePosition(id).HasValue;
         internal static Func<object, bool> ObjectiveHasGround = ReadObjectiveHasGroundViaReflection;
@@ -170,16 +176,24 @@ namespace WhiskeyRealism.Strategic
                 // PickCampaignObjective and freeze followedcampaignobjective).
             }
 
-            // Generic fallback only over objectives vanilla itself can act on: candidates already
-            // come from GetAvailableObjectives (alliance/scenario/chapter, decompile 178827), and
-            // the objective must own at least one town/IIP — followedcampaignobjective only adds
-            // importance through the objective's towns/IIPs (UpdateImportanceValues 14922/14961).
-            // Abstract objectives 0-28 (e.g. 4 "Capture Washington") have none; with no such
+            // Generic fallback only over objectives vanilla itself would pick and can act on:
+            //  - in vanilla's own candidate set, GetAvailableObjectives(alliance) with the default
+            //    mintownobjectives = 1 (PickCampaignObjective 17782 / 178827), and
+            //  - owning at least one town/IIP: followedcampaignobjective only adds importance
+            //    through the objective's towns/IIPs (UpdateImportanceValues 14922/14961). This is
+            //    checked separately because vanilla's IIP counter (num2) is not reset per
+            //    objective, so an abstract objective can slip through mintownobjectives = 1.
+            // Abstract objectives 0-28 (e.g. 4 "Capture Washington") never qualify; with no such
             // candidate there is no plan and vanilla's PickCampaignObjective runs.
+            var vanillaPickable = new HashSet<int>();
+            var pickableList = VanillaPickableObjectivesProvider(AllianceId);
+            if (pickableList != null)
+                foreach (var obj in pickableList) vanillaPickable.Add(GetObjectiveId(obj));
             var reachable = new List<(object obj, float score, ObjectiveMetadata meta)>();
             for (int i = 0; i < scored.Count; i++)
             {
-                if (ObjectiveHasGround(scored[i].obj) && TargetPositionResolves(GetObjectiveId(scored[i].obj)))
+                int id = GetObjectiveId(scored[i].obj);
+                if (vanillaPickable.Contains(id) && ObjectiveHasGround(scored[i].obj) && TargetPositionResolves(id))
                     reachable.Add(scored[i]);
             }
             if (reachable.Count == 0)
@@ -604,7 +618,7 @@ namespace WhiskeyRealism.Strategic
             TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
 
-        private static IList GetAvailableObjectivesViaReflection(int allianceId)
+        private static IList GetAvailableObjectivesViaReflection(int allianceId, int minTownObjectives)
         {
             try
             {
@@ -620,7 +634,7 @@ namespace WhiskeyRealism.Strategic
                 // mintownobjectives=0 lets abstract win-condition objectives pass.
                 var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
                 if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives(int,bool,int) not found"); return null; }
-                return m.Invoke(null, new object[] { allianceId, false, 0 }) as IList;
+                return m.Invoke(null, new object[] { allianceId, false, minTownObjectives }) as IList;
             }
             catch (Exception ex)
             {

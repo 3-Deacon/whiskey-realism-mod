@@ -52,6 +52,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r5 generic fallback only targets objectives with towns or IIPs", R5GenericFallbackRequiresVanillaGround);
         Check("c1 r5 generic fallback skips abstract objectives like capture washington", R5GenericFallbackSkipsAbstractObjectives);
         Check("c1 r5 scenario 001 csa gets no plan and vanilla picks", R5Scenario001CsaGetsNoPlan);
+        Check("c1 r5 generic fallback only uses objectives vanilla would pick", R5GenericFallbackUsesVanillaPickableSet);
         Check("c1 r5 objective steering lets vanilla pick without a plan", R5ObjectiveSteeringLetsVanillaPickWithoutPlan);
 
         // PER — sidecar persistence
@@ -599,7 +600,15 @@ internal static class CampaignLifecycleFixTests
 
     private static OperationalPlan ReplanWith(int alliance, EraStage stage, int month, int year, params FakeObjective[] objectives)
     {
+        return ReplanWith(alliance, stage, month, year, null, objectives);
+    }
+
+    // vanillaPickable: ids GetAvailableObjectives(alliance, false, mintownobjectives: 1) returns
+    // (vanilla's own PickCampaignObjective call); null = same as the available list.
+    private static OperationalPlan ReplanWith(int alliance, EraStage stage, int month, int year, int[] vanillaPickable, params FakeObjective[] objectives)
+    {
         var savedProvider = CIC.AvailableObjectivesProvider;
+        var savedPickable = CIC.VanillaPickableObjectivesProvider;
         var savedPosition = CIC.TargetPositionResolves;
         var savedDoctrine = CicSettings.HistoricalOperationDoctrine;
         try
@@ -607,6 +616,10 @@ internal static class CampaignLifecycleFixTests
             var list = new List<object>();
             list.AddRange(objectives);
             CIC.AvailableObjectivesProvider = _ => list;
+            var pickable = new List<object>();
+            foreach (var o in objectives)
+                if (vanillaPickable == null || Array.IndexOf(vanillaPickable, o.UniqueObjectiveID) >= 0) pickable.Add(o);
+            CIC.VanillaPickableObjectivesProvider = _ => pickable;
             CIC.TargetPositionResolves = id => ObjectiveCatalog.TryResolvePosition(id, out _, out _);
             CicSettings.HistoricalOperationDoctrine = true;
             var cic = new CIC { AllianceId = alliance, OfficerName = "Test" };
@@ -617,6 +630,7 @@ internal static class CampaignLifecycleFixTests
         finally
         {
             CIC.AvailableObjectivesProvider = savedProvider;
+            CIC.VanillaPickableObjectivesProvider = savedPickable;
             CIC.TargetPositionResolves = savedPosition;
             CicSettings.HistoricalOperationDoctrine = savedDoctrine;
         }
@@ -638,6 +652,14 @@ internal static class CampaignLifecycleFixTests
         // not become a permanent generic offensive.
         var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, new FakeObjective(25), new FakeObjective(4));
         TestHarness.AssertTrue(plan == null, "no plan => PickCampaignObjective lets vanilla choose");
+    }
+
+    private static void R5GenericFallbackUsesVanillaPickableSet()
+    {
+        // 30 has towns but none enemy-held any more, so vanilla's mintownobjectives=1 call
+        // (PickCampaignObjective 17782, GetAvailableObjectives 178827) would not offer it.
+        var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, new int[0], new FakeObjective(30, towns: 4));
+        TestHarness.AssertTrue(plan == null, "objective vanilla would not pick is not a fallback target");
     }
 
     private static void R5Scenario001CsaGetsNoPlan()
