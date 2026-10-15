@@ -59,6 +59,9 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _operationalProbeSignatures = new string[2];
         private readonly OperationalProbeState[] _operationalProbeStates = new OperationalProbeState[2];
         private readonly ProbeHysteresis[] _probeHysteresis = { new ProbeHysteresis(), new ProbeHysteresis() };
+        private readonly bool[] _capitalThreatened = new bool[2];
+        private readonly int[] _capitalStreakDay = { -1, -1 };
+        private readonly int[] _frontChangedDay = { -1, -1 };
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
@@ -149,6 +152,9 @@ namespace WhiskeyRealism.Strategic
                 _operationalProbeSignatures[a] = null;
                 _operationalProbeStates[a] = null;
                 _probeHysteresis[a] = new ProbeHysteresis();
+                _capitalThreatened[a] = false;
+                _capitalStreakDay[a] = -1;
+                _frontChangedDay[a] = -1;
                 _fiscalSignatures[a] = null;
                 _constructionSignatures[a] = null;
                 _formationSourceSignatures[a] = null;
@@ -374,7 +380,10 @@ namespace WhiskeyRealism.Strategic
                 var cic = CICs[alliance];
                 int daySerial = year * 372 + month * 31 + day;
                 if (operationalRuntimeReady)
+                {
+                    UpdateCapitalThreat(alliance, daySerial);
                     PublishDirectorPosture(alliance, cic, era, day, month, year, daySerial);
+                }
 
                 var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
                 if (!cic.ReviewPlanWithTruth(day, month, year, phaseTruth))
@@ -397,6 +406,8 @@ namespace WhiskeyRealism.Strategic
                 bool frontChanged = false;
                 if (operationalRuntimeReady)
                     frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
+                if (frontChanged || _frontChangedDay[alliance] < 0)
+                    _frontChangedDay[alliance] = daySerial;
 
                 defenseMs += Measure(() => UpdateDefenseIntent(alliance, era.Stage, day, month, year));
 
@@ -598,9 +609,90 @@ namespace WhiskeyRealism.Strategic
                     fronts != null ? TheaterPressureView.From(fronts) : null,
                     alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
                     alliance < OperationMemories.Length ? OperationMemories[alliance] : null,
-                    BattleHistory);
+                    BattleHistory,
+                    new HistoricalOperationLocalSignals
+                    {
+                        HasTarget = targetPos.HasValue,
+                        TargetX = targetPos.HasValue ? targetPos.Value.x : 0f,
+                        TargetZ = targetPos.HasValue ? targetPos.Value.z : 0f,
+                        TargetTheater = targetPos.HasValue ? CampaignMapTheaterRuntime.FromPosition(targetPos.Value) : Theater.Unknown,
+                        LocalOwnStrength = localOwn,
+                        LocalEnemyStrength = localEnemy,
+                        EnemyThreatensCapital = alliance < _capitalThreatened.Length && _capitalThreatened[alliance]
+                    });
             }
             return PhaseTruthLedger.Evaluate(input);
+        }
+
+        // C-HardWired: capital threat per vanilla AssignUnitToDefendCapital's need score
+        // (decompile 11668-11760) and the consecutive-day streak the pace ledger reads.
+        private void UpdateCapitalThreat(int alliance, int daySerial)
+        {
+            bool threatened = false;
+            try
+            {
+                var capital = GameVars.alliance != null && alliance < GameVars.alliance.Length
+                    ? GameVars.alliance[alliance].capital
+                    : null;
+                int index = ResolveAifactionIndexForAlliance(alliance);
+                var faction = index >= 0 ? AICampaignReflect.GetFaction(index) : null;
+                if (capital != null && faction != null)
+                {
+                    var factionType = faction.GetType();
+                    if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
+                    {
+                        _ownUnitsField = AccessTools.Field(factionType, "ownunits");
+                        _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
+                    }
+                    Vector3 center = capital.transform.position;
+                    var enemies = new List<CapitalForceSample>();
+                    var own = new List<CapitalForceSample>();
+                    var enemyUnits = _enemyUnitsField?.GetValue(faction) as IList;
+                    var ownUnits = _ownUnitsField?.GetValue(faction) as IList;
+                    if (enemyUnits != null)
+                    {
+                        for (int i = 0; i < enemyUnits.Count; i++)
+                        {
+                            if (!(enemyUnits[i] is Regiment r) || r == null) continue;
+                            enemies.Add(new CapitalForceSample { Distance = XZDistance(r.transform.position, center), Strength = r.groupstrengthactive, Morale = r.groupmorale });
+                        }
+                    }
+                    if (ownUnits != null)
+                    {
+                        for (int i = 0; i < ownUnits.Count; i++)
+                        {
+                            if (!(ownUnits[i] is Regiment r) || r == null) continue;
+                            own.Add(new CapitalForceSample { Distance = XZDistance(r.GetLastWaypointPos(), center), Strength = r.groupstrengthactive, Morale = r.groupmorale });
+                        }
+                    }
+                    threatened = CampaignResponsivenessSignals.EnemyThreatensCapital(
+                        enemies,
+                        own,
+                        GamePrefs.aimaximumdistancetosearchforunitrelocations,
+                        GamePrefs.aiminimumstrengthformovement);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinator:capital-threat", "[Coordinator] capital threat read failed: " + ex.Message);
+                threatened = false;
+            }
+
+            _capitalThreatened[alliance] = threatened;
+            var memory = DirectorMemories[alliance] ?? (DirectorMemories[alliance] = new DirectorMemory());
+            memory.CapitalDangerStreakDays = CampaignResponsivenessSignals.NextCapitalStreak(
+                memory.CapitalDangerStreakDays,
+                threatened,
+                _capitalStreakDay[alliance],
+                daySerial,
+                out _capitalStreakDay[alliance]);
+        }
+
+        private static float XZDistance(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
         // Sums own / enemy campaign strength (groupstrengthactive, same field FrontSectorRuntime
@@ -1226,8 +1318,8 @@ namespace WhiskeyRealism.Strategic
                 MinNationalMoraleSurrender   = minSurrender,
                 BattlesIn14Days              = battles,
                 MajorBattlesIn14Days         = majorBattles,
-                CapitalDangerStreakDays       = 0,  // TODO: track streak when infra added
-                DaysSinceFrontSignatureChange = 0,  // TODO: stamp when _frontSignatures changes
+                CapitalDangerStreakDays       = DirectorMemories[alliance]?.CapitalDangerStreakDays ?? 0,
+                DaysSinceFrontSignatureChange = CampaignResponsivenessSignals.DaysSince(_frontChangedDay[alliance], daySerial),
                 IsWinter                     = month == 12 || month == 1 || month == 2,
                 TheaterPressure              = TheaterPressureView.From(Fronts[alliance])
             };

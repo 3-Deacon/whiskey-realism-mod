@@ -69,6 +69,13 @@ internal static class CampaignLifecycleFixTests
         Check("c1 probe new probe blocked during reprobe cooldown", ProbeNewProbeBlockedDuringCooldown);
         Check("c1 probe state resets when plan target changes", ProbeStateResetsWhenTargetChanges);
         Check("c1 probe stop mirrors vanilla operation-ended guard", ProbeStopMirrorsVanillaGuard);
+
+        // C-HardWired
+        Check("c1 hardwired capital threat mirrors vanilla defend-capital score", HardWiredCapitalThreatMirrorsVanilla);
+        Check("c1 hardwired capital streak advances once per day and counts skipped days", HardWiredCapitalStreakAdvancesPerDay);
+        Check("c1 hardwired days since front change", HardWiredDaysSinceFrontChange);
+        Check("c1 hardwired context uses live local signals", HardWiredContextUsesLiveLocalSignals);
+        Check("c1 hardwired profile near-target radius narrows vanilla radius", HardWiredProfileRadiusNarrowsVanilla);
     }
 
     private static void Check(string name, Action test)
@@ -756,6 +763,69 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertTrue(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: false, wlUnderCommander: true, wlScenarioActive: false), "flag ignored outside W&L");
         TestHarness.AssertFalse(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: true, wlUnderCommander: false, wlScenarioActive: false), "never stop a unit in battle");
         TestHarness.AssertFalse(ProbeHysteresis.ShouldStopUnit(inOffensive: false, inBattle: false, wlUnderCommander: false, wlScenarioActive: false), "already released");
+    }
+
+    // ------------------------------------------------------------------
+    // C-HardWired
+    // ------------------------------------------------------------------
+
+    private static void HardWiredCapitalThreatMirrorsVanilla()
+    {
+        var enemies = new List<CapitalForceSample> { new CapitalForceSample { Distance = 100f, Strength = 20000f, Morale = 0.8f } };
+        var own = new List<CapitalForceSample> { new CapitalForceSample { Distance = 50f, Strength = 30000f, Morale = 1f } };
+        var none = new List<CapitalForceSample>();
+        TestHarness.AssertTrue(CampaignResponsivenessSignals.EnemyThreatensCapital(enemies, none, 275f, 1500f), "uncovered enemy near capital threatens");
+        TestHarness.AssertFalse(CampaignResponsivenessSignals.EnemyThreatensCapital(enemies, own, 275f, 1500f), "covered by stronger own forces closer than the enemy");
+        var far = new List<CapitalForceSample> { new CapitalForceSample { Distance = 400f, Strength = 50000f, Morale = 1f } };
+        TestHarness.AssertFalse(CampaignResponsivenessSignals.EnemyThreatensCapital(far, none, 275f, 1500f), "enemy outside vanilla relocation radius is no threat");
+    }
+
+    private static void HardWiredCapitalStreakAdvancesPerDay()
+    {
+        int day = Serial(1, 6, 1862);
+        int streak = CampaignResponsivenessSignals.NextCapitalStreak(0, true, -1, day, out int last);
+        TestHarness.AssertEqual(1, streak, "first threatened day");
+        streak = CampaignResponsivenessSignals.NextCapitalStreak(streak, true, last, day, out last);
+        TestHarness.AssertEqual(1, streak, "same day counted once");
+        streak = CampaignResponsivenessSignals.NextCapitalStreak(streak, true, last, day + 3, out last);
+        TestHarness.AssertEqual(4, streak, "skipped days count");
+        streak = CampaignResponsivenessSignals.NextCapitalStreak(streak, false, last, day + 4, out last);
+        TestHarness.AssertEqual(0, streak, "threat cleared");
+    }
+
+    private static void HardWiredDaysSinceFrontChange()
+    {
+        int day = Serial(1, 6, 1862);
+        TestHarness.AssertEqual(0, CampaignResponsivenessSignals.DaysSince(-1, day), "never stamped");
+        TestHarness.AssertEqual(61, CampaignResponsivenessSignals.DaysSince(day, day + 61), "61 days static");
+    }
+
+    private static void HardWiredContextUsesLiveLocalSignals()
+    {
+        var signals = new HistoricalOperationLocalSignals
+        {
+            HasTarget = true,
+            TargetX = 760f,
+            TargetZ = 60f,
+            TargetTheater = Theater.East,
+            LocalOwnStrength = 12000f,
+            LocalEnemyStrength = 6000f,
+            EnemyThreatensCapital = true
+        };
+        var context = HistoricalOperationContextBuilder.Build(0, Serial(1, 6, 1862), 3, null, null, null, null, null, null, null, null, null, null, signals);
+        TestHarness.AssertTrue(context.TargetPositionResolves, "position from live signals");
+        TestHarness.AssertEqual(12000f, context.TargetSectorOwnStrength, "local own");
+        TestHarness.AssertEqual(6000f, context.TargetSectorEnemyStrength, "local enemy");
+        TestHarness.AssertTrue(Math.Abs(context.TargetSectorRatio - 2f) < 0.001f, "local ratio");
+        TestHarness.AssertTrue(context.EnemyThreatensCapitalCorridor, "capital threat wired");
+    }
+
+    private static void HardWiredProfileRadiusNarrowsVanilla()
+    {
+        TestHarness.AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var profile), "profile");
+        float radius = HistoricalOperationContextBuilder.NearTargetRadius(profile);
+        TestHarness.AssertTrue(radius > 0f && radius <= profile.NearTargetRadius, "profile radius is used as a cap: " + radius);
+        TestHarness.AssertTrue(profile.NearTargetRadius <= 275f, "catalog radius no wider than vanilla relocation radius (275)");
     }
 
     // ------------------------------------------------------------------

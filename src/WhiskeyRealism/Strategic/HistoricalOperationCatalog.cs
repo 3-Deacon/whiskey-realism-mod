@@ -551,7 +551,9 @@ namespace WhiskeyRealism.Strategic
                 Phases = phases,
                 DynamicRules = StandardDynamicRules(),
                 AlternateOperationIds = Array.Empty<string>(),
-                NearTargetRadius = 50000f
+                // Vanilla's "nearby" for campaign AI relocations: campaignprefs.txt
+                // aimaximumdistancetosearchforunitrelocations = 275 (GamePrefs, loader 56220).
+                NearTargetRadius = 275f
             };
         }
 

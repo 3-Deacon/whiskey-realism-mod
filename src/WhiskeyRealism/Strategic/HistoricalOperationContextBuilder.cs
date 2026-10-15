@@ -4,6 +4,92 @@ using UnityEngine;
 
 namespace WhiskeyRealism.Strategic
 {
+    // Live inputs the coordinator resolves once per review so PhaseTruth and the operation
+    // context see the same target position, classifier and LOCAL strengths (C-HardWired).
+    internal sealed class HistoricalOperationLocalSignals
+    {
+        public bool HasTarget;
+        public float TargetX;
+        public float TargetZ;
+        public Theater TargetTheater = Theater.Unknown;
+        public float LocalOwnStrength;
+        public float LocalEnemyStrength;
+        public bool EnemyThreatensCapital;
+    }
+
+    internal struct CapitalForceSample
+    {
+        public float Distance;
+        public float Strength;
+        public float Morale;
+    }
+
+    // Responsiveness signals that used to be hard-wired off (C-HardWired).
+    internal static class CampaignResponsivenessSignals
+    {
+        // Mirrors vanilla AICampaign.AssignUnitToDefendCapital (decompile 11668-11760):
+        // need = aiminimumstrengthformovement
+        //      + sum over enemies within aimaximumdistancetosearchforunitrelocations of
+        //        min(str, str*morale) / max(10, dist)^0.3 * 0.5
+        //      - sum over own units whose last waypoint is closer than the nearest enemy of
+        //        str*morale.
+        // Vanilla adds capital defenders while need > 0; we call the capital threatened when an
+        // enemy is inside that radius and need is still positive.
+        internal static bool EnemyThreatensCapital(
+            IList<CapitalForceSample> enemies,
+            IList<CapitalForceSample> own,
+            float relocationRadius,
+            float minimumStrengthForMovement)
+        {
+            if (enemies == null || enemies.Count == 0) return false;
+            float nearestEnemy = 9999f;
+            float need = minimumStrengthForMovement;
+            bool enemyInRange = false;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                float d = Math.Max(1f, enemies[i].Distance);
+                if (d < nearestEnemy) nearestEnemy = d;
+                if (d < relocationRadius)
+                {
+                    enemyInRange = true;
+                    float s = Math.Max(0f, enemies[i].Strength);
+                    need += Math.Min(s, s * enemies[i].Morale) / (float)Math.Pow(Math.Max(10f, d), 0.3) * 0.5f;
+                }
+            }
+            if (!enemyInRange) return false;
+            if (own != null)
+            {
+                for (int i = 0; i < own.Count; i++)
+                {
+                    if (own[i].Distance < nearestEnemy)
+                        need -= Math.Max(0f, own[i].Strength) * own[i].Morale;
+                }
+            }
+            return need > 0f;
+        }
+
+        // Consecutive threatened days, advanced at most once per game day; days skipped by
+        // fast-forward between reviews count toward the streak.
+        internal static int NextCapitalStreak(int streak, bool threatened, int lastDaySerial, int todaySerial, out int newLastDaySerial)
+        {
+            if (lastDaySerial >= 0 && todaySerial == lastDaySerial)
+            {
+                newLastDaySerial = lastDaySerial;
+                return streak;
+            }
+            newLastDaySerial = todaySerial;
+            if (!threatened) return 0;
+            int elapsed = lastDaySerial >= 0 ? Math.Max(1, todaySerial - lastDaySerial) : 1;
+            return Math.Max(0, streak) + elapsed;
+        }
+
+        internal static int DaysSince(int stampDaySerial, int todaySerial)
+        {
+            if (stampDaySerial < 0) return 0;
+            return Math.Max(0, todaySerial - stampDaySerial);
+        }
+    }
+
     internal static class HistoricalOperationContextBuilder
     {
         internal static HistoricalOperationContext Build(
@@ -19,7 +105,8 @@ namespace WhiskeyRealism.Strategic
             TheaterPressureView pressure,
             DirectorPosture posture,
             OperationDecisionMemory memory,
-            IReadOnlyList<BattleHistoryRecord> battleHistory)
+            IReadOnlyList<BattleHistoryRecord> battleHistory,
+            HistoricalOperationLocalSignals signals = null)
         {
             var context = new HistoricalOperationContext
             {
@@ -48,39 +135,51 @@ namespace WhiskeyRealism.Strategic
                     context.TargetPositionResolves = false;
             }
 
-            Vector3? position = ResolveObjectivePosition(objectiveId);
+            HistoricalOperationProfile profile = null;
+            if (!string.IsNullOrEmpty(plan?.OperationId))
+                HistoricalOperationCatalog.TryGetById(plan.OperationId, out profile);
+
+            Vector3? position;
+            Theater theater;
+            if (signals != null)
+            {
+                // Same target position (ObjectiveAdapter), classifier (CampaignMapTheaterRuntime)
+                // and local strengths PhaseTruth used this review.
+                position = signals.HasTarget ? new Vector3(signals.TargetX, 0f, signals.TargetZ) : (Vector3?)null;
+                theater = signals.TargetTheater;
+            }
+            else
+            {
+                position = ResolveObjectivePosition(objectiveId);
+                theater = position.HasValue ? TheaterClassifier.FromPosition(position.Value.x, position.Value.z) : Theater.Unknown;
+            }
             context.TargetPositionResolves = position.HasValue;
             if (!position.HasValue)
                 return context;
 
-            Theater theater = TheaterClassifier.FromPosition(position.Value.x, position.Value.z);
-            string sectorKey = theater.ToString();
-            FrontSector sector = null;
-            if (fronts == null)
-            {
-            }
-            else
-            {
-                sector = fronts.GetSector(sectorKey);
-            }
-
+            FrontSector sector = fronts?.GetSector(theater.ToString());
             theater = sector?.Theater ?? theater;
-            if (sector != null)
+            if (signals != null)
+            {
+                context.TargetSectorOwnStrength = Math.Max(0f, signals.LocalOwnStrength);
+                context.TargetSectorEnemyStrength = Math.Max(0f, signals.LocalEnemyStrength);
+            }
+            else if (sector != null)
             {
                 context.TargetSectorOwnStrength = Math.Max(0f, sector.OwnStrength);
                 context.TargetSectorEnemyStrength = Math.Max(0f, sector.EnemyStrength);
-                context.TargetSectorRatio = context.TargetSectorOwnStrength /
-                    Math.Max(1f, context.TargetSectorEnemyStrength);
             }
+            context.TargetSectorRatio = context.TargetSectorOwnStrength /
+                Math.Max(1f, context.TargetSectorEnemyStrength);
 
             FillTheaterPressure(context, pressure, fronts, theater);
-            FillBattleSignals(context, allianceId, position.Value, daySerial, battleHistory);
+            FillBattleSignals(context, allianceId, position.Value, daySerial, battleHistory, NearTargetRadius(profile));
 
             context.EnemyConcentratesInTheater =
                 context.TheaterEnemyPressure > context.TheaterOwnPressure &&
                 context.TheaterEnemyPressure >= Math.Max(1f, context.TargetSectorEnemyStrength);
 
-            context.EnemyThreatensCapitalCorridor = false;
+            context.EnemyThreatensCapitalCorridor = signals != null && signals.EnemyThreatensCapital;
             return context;
         }
 
@@ -105,9 +204,9 @@ namespace WhiskeyRealism.Strategic
             int allianceId,
             Vector3 position,
             int daySerial,
-            IReadOnlyList<BattleHistoryRecord> battleHistory)
+            IReadOnlyList<BattleHistoryRecord> battleHistory,
+            float radius)
         {
-            float radius = NearTargetRadius(null);
             foreach (var battle in BattleHistoryQuery.Near(battleHistory, position, radius, daySerial, 14))
             {
                 if (battle == null || !battle.IsLandBattle)
