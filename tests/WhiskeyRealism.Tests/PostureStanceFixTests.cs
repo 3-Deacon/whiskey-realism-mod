@@ -27,6 +27,7 @@ internal static class PostureStanceFixTests
         Pass("write and a healthy claim stamp the vanilla hold", WriteAndHealthyClaimStampVanillaHold);
         Pass("vanilla per-group stance ports AdjustGroupAIStance 4239-4252", VanillaPerGroupStancePortsAdjustGroupAIStance);
         Pass("stance owner yields to vanilla weak-group defend and screen", StanceOwnerYieldsToVanillaWeakGroup);
+        Pass("stance owner yields to vanilla assault only when Whiskey wants attack", StanceOwnerYieldsToAssaultOnlyForAttack);
         Pass("stance owner claim without vanilla stance does not stamp", StanceOwnerClaimWithoutVanillaStanceDoesNotStamp);
         Pass("retreat release lets vanilla re-evaluate immediately", RetreatReleaseLetsVanillaReevaluate);
         Pass("group stance scorer uses the shared task mapping", GroupStanceScorerUsesSharedTaskMapping);
@@ -723,8 +724,8 @@ internal static class PostureStanceFixTests
 
     private static void StanceOwnerRespectsVanillaAssault()
     {
-        // Assault (4) is vanilla's strength-triggered escalation (4239) and the
-        // only route to AI charges (MicroAICheckForCharges, 4913).
+        // Assault (4) is vanilla's strength-triggered escalation (4240); its
+        // visible effect is the micro AI's assault placement (5694).
         var exec = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.Executor));
         AssertEqual(StanceWriteAction.Refuse, exec.Action, "#61 does not demote a vanilla assault");
         AssertEqual("vanilla-assault", exec.Reason, "reason");
@@ -795,8 +796,28 @@ internal static class PostureStanceFixTests
         var agree = TacticalStanceOwnership.Decide(Input(target: 2, current: 2, vanilla: 2));
         AssertEqual(StanceWriteAction.Claim, agree.Action, "Whiskey agrees with vanilla's defend");
 
-        var assault = TacticalStanceOwnership.Decide(Input(target: 3, current: 3, vanilla: 4));
-        AssertEqual(StanceWriteAction.Claim, assault.Action, "assault is not in the yield set (defend/screen only)");
+    }
+
+    private static void StanceOwnerYieldsToAssaultOnlyForAttack()
+    {
+        var attack = Input(target: 3, current: 3, vanilla: 4);
+        var d = TacticalStanceOwnership.Decide(attack);
+        AssertEqual(StanceWriteAction.Yield, d.Action, "Whiskey attack + vanilla assault escalation → yield");
+        AssertEqual("vanilla-assault-escalation", d.Reason, "reason");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(d, attack), "no stamp");
+        AssertFalse(TacticalStanceOwnership.Next(d, attack).HasValue, "record dropped");
+
+        var held = new StanceHoldRecord(3, 1.0f, StanceWriteSource.Executor);
+        var inside = TacticalStanceOwnership.Decide(Input(target: 3, current: 3, now: 1.01f, record: held, source: StanceWriteSource.Executor, vanilla: 4));
+        AssertEqual(StanceWriteAction.Yield, inside.Action, "escalation yields inside a hold too");
+
+        foreach (int target in new[] { 1, 2 })
+        {
+            var hold = Input(target: target, current: target, vanilla: 4);
+            var h = TacticalStanceOwnership.Decide(hold);
+            AssertEqual(StanceWriteAction.Claim, h.Action, "Whiskey " + target + " + vanilla assault → keep holding");
+            AssertTrue(TacticalStanceOwnership.StampsVanillaHold(h, hold), "hold re-stamped for " + target);
+        }
     }
 
     private static void StanceOwnerClaimWithoutVanillaStanceDoesNotStamp()

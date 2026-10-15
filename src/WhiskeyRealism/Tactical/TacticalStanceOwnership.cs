@@ -40,7 +40,10 @@ namespace WhiskeyRealism.Tactical
     // When that says defend (2) or screen (1) and Whiskey wants something
     // else, Whiskey yields: no stamp, the stamp is released (ReleaseStamp),
     // the record is dropped, and no reassert — so vanilla's weak-group
-    // defend/screen fires on its next macro cycle. Army retreat (macroai 3)
+    // defend/screen fires on its next macro cycle. Vanilla's assault
+    // escalation (4240 → 4) also gets a yield, but only when Whiskey's own
+    // target is attack (3): escalation agrees with that intent. When Whiskey
+    // wants screen or defend, it keeps holding. Army retreat (macroai 3)
     // yields the same way (4258; MicroAICheckForRetreats needs macroai 3 and
     // ai_stance 1, 5641).
     //
@@ -50,13 +53,14 @@ namespace WhiskeyRealism.Tactical
     // under its value Whiskey's group opinion stands.
     //
     // Design cost (remaining): while Whiskey holds a group, vanilla's
-    // per-group re-decision is suppressed except through the yield above.
-    // In particular vanilla's assault escalation (4240) cannot happen during
-    // a Whiskey hold, and AI group charges need ai_stance 4
-    // (MicroAICheckForCharges 4913). A vanilla assault set before Whiskey's
-    // claim, or during a yield/release window, is never replaced except by an
-    // explicit charge denial. Extending YieldsToVanilla to stance 4 would
-    // restore the escalation. The caller's steady-state short-circuit
+    // per-group re-decision is suppressed except through the yields above —
+    // so a group Whiskey holds at screen or defend never escalates to assault.
+    // The visible effect of stance 4 is the micro AI's assault placement
+    // (5694: distanceofmaxformicroaiplacement[ai_stance]); AI group charges
+    // via MicroAICheckForCharges are effectively dead in vanilla (4910
+    // compares the groupaiobject GameObject with the aigroup Regiment, never
+    // equal). A vanilla assault is never replaced except by an explicit
+    // charge denial. The caller's steady-state short-circuit
     // re-checks the carve-out at most every HoldHours * 0.5, so a group that
     // turns weak may wait that long before Whiskey yields.
     //
@@ -214,9 +218,12 @@ namespace WhiskeyRealism.Tactical
             return stance;
         }
 
-        // The vanilla per-group stances Whiskey yields to: defend and screen.
+        // The vanilla per-group stances Whiskey yields to: defend and screen
+        // whenever Whiskey wants something else; assault only when Whiskey
+        // wants attack (escalation agrees with its intent).
         public static bool YieldsToVanilla(int vanillaGroupStance, int targetStance)
         {
+            if (vanillaGroupStance == 4) return targetStance == 3;
             return (vanillaGroupStance == 1 || vanillaGroupStance == 2) &&
                 vanillaGroupStance != targetStance;
         }
@@ -237,7 +244,9 @@ namespace WhiskeyRealism.Tactical
             if (input.MacroAi < 0) return Refuse("macro-inactive");
             if (input.MacroAi == 3) return new StanceWriteDecision(StanceWriteAction.Yield, "vanilla-retreat");
             if (YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
-                return new StanceWriteDecision(StanceWriteAction.Yield, "vanilla-weak-group");
+                return new StanceWriteDecision(
+                    StanceWriteAction.Yield,
+                    input.VanillaGroupStance == 4 ? "vanilla-assault-escalation" : "vanilla-weak-group");
             if (input.CurrentOrderedStance == 4 && input.Source != StanceWriteSource.ChargeDemotion)
                 return Refuse("vanilla-assault");
 
