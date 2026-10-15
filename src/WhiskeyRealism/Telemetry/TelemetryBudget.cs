@@ -45,12 +45,13 @@ namespace WhiskeyRealism.Telemetry
             return Allow(category, estimatedBytes, lowPriority, protectedSummary: false);
         }
 
-        internal bool Allow(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
+        internal bool Allow(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary,
+            TelemetrySeverity severity = TelemetrySeverity.Info)
         {
             lock (_gate)
             {
                 long safeBytes = Math.Max(0L, estimatedBytes);
-                bool allowed = CanEmitLocked(category, safeBytes, lowPriority, protectedSummary);
+                bool allowed = CanEmitLocked(category, severity, safeBytes, lowPriority, protectedSummary);
                 if (!allowed)
                     RecordDroppedLocked(category);
                 return allowed;
@@ -62,12 +63,13 @@ namespace WhiskeyRealism.Telemetry
             return TryReserve(category, estimatedBytes, lowPriority, protectedSummary: false);
         }
 
-        internal bool TryReserve(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
+        internal bool TryReserve(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary,
+            TelemetrySeverity severity = TelemetrySeverity.Info)
         {
             lock (_gate)
             {
                 long safeBytes = Math.Max(0L, estimatedBytes);
-                if (!CanEmitLocked(category, safeBytes, lowPriority, protectedSummary))
+                if (!CanEmitLocked(category, severity, safeBytes, lowPriority, protectedSummary))
                 {
                     RecordDroppedLocked(category);
                     return false;
@@ -134,7 +136,7 @@ namespace WhiskeyRealism.Telemetry
             _droppedByCategory[category] = count + 1L;
         }
 
-        private bool CanEmitLocked(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
+        private bool CanEmitLocked(TelemetryCategory category, TelemetrySeverity severity, long estimatedBytes, bool lowPriority, bool protectedSummary)
         {
             if (protectedSummary && IsCapSurvivingSummary(category))
                 return WithinProtectedSummaryReserve(estimatedBytes);
@@ -142,7 +144,7 @@ namespace WhiskeyRealism.Telemetry
             if (IsProtected(category))
                 return WithinTotalCap(estimatedBytes);
 
-            return lowPriority ? WithinCategoryCut(category, estimatedBytes) : WithinTotalCap(estimatedBytes);
+            return lowPriority ? WithinCategoryCut(category, severity, estimatedBytes) : WithinTotalCap(estimatedBytes);
         }
 
         private static bool IsProtected(TelemetryCategory category)
@@ -157,10 +159,10 @@ namespace WhiskeyRealism.Telemetry
                 || category == TelemetryCategory.Performance;
         }
 
-        private bool WithinCategoryCut(TelemetryCategory category, long estimatedBytes)
+        private bool WithinCategoryCut(TelemetryCategory category, TelemetrySeverity severity, long estimatedBytes)
         {
             decimal projected = (decimal)_emittedBytes + estimatedBytes;
-            return projected * 100m <= (decimal)_totalBytes * CutPercent(category);
+            return projected * 100m <= (decimal)_totalBytes * CutPercent(category, severity);
         }
 
         private bool WithinTotalCap(long estimatedBytes)
@@ -182,25 +184,27 @@ namespace WhiskeyRealism.Telemetry
             return Math.Max(64L * 1024L, Math.Min(twoPercent, 5L * 1024L * 1024L));
         }
 
-        // Low-priority cut order matches TelemetryQueue.Rank: Trace, Performance, State,
-        // Decision, then Gate/Write at the total cap. Performance summaries still land in
-        // the protected reserve (CanEmitLocked), so only per-sample perf rows go early.
-        private static int CutPercent(TelemetryCategory category)
+        // Low-priority cut order matches TelemetryQueue.Rank: Trace rows first, then Info
+        // rows (State, Decision, Gate/Write); Performance rows and Warning/Error rows of any
+        // category are never cut before the total cap. Performance summaries also keep the
+        // protected reserve (CanEmitLocked). Debug severity cuts like Info.
+        private static int CutPercent(TelemetryCategory category, TelemetrySeverity severity)
         {
+            if (category == TelemetryCategory.Performance || severity >= TelemetrySeverity.Warning)
+                return 100;
+
             switch (category)
             {
-                case TelemetryCategory.Trace:
-                    return 90;
-                case TelemetryCategory.Performance:
-                    return 93;
                 case TelemetryCategory.State:
-                    return 95;
+                    return 93;
                 case TelemetryCategory.Decision:
-                    return 98;
+                    return 95;
                 case TelemetryCategory.Gate:
                 case TelemetryCategory.Write:
+                    return 98;
+                case TelemetryCategory.Trace:
                 default:
-                    return 100;
+                    return 90;
             }
         }
     }

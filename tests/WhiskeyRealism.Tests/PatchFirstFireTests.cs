@@ -14,6 +14,7 @@ internal static class PatchFirstFireTests
             ("patch first-fire keeps distinct ids independent", KeepsDistinctIdsIndependent),
             ("patch first-fire retries after logger failure", RetriesAfterLoggerFailure),
             ("patch first-fire concurrent marks log once", ConcurrentMarksLogOnce),
+            ("patch first-fire id built per call logs once", IdBuiltPerCallLogsOnce),
         });
     }
 
@@ -75,5 +76,18 @@ internal static class PatchFirstFireTests
         Task.WaitAll(tasks);
 
         TestHarness.AssertEqual(1, log.InfoCount, "concurrent marks log once");
+    }
+
+    // F3 identity fast path: an id built per call (a new instance each time) is still
+    // one id, past the alias cap too.
+    private static void IdBuiltPerCallLogsOnce()
+    {
+        var log = FreshLog();
+        char[] text = "test.patch.first-fire.per-call".ToCharArray();
+        for (int i = 0; i < PatchFirstFire.MaxAliases + 100; i++)
+            PatchFirstFire.Mark(new string(text));
+
+        TestHarness.AssertEqual(1, log.InfoCount, "one line for an id built per call");
+        TestHarness.AssertTrue(PatchFirstFire.HasFired("test.patch.first-fire.per-call"), "id recorded");
     }
 }

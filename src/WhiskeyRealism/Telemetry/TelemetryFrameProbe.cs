@@ -73,6 +73,7 @@ namespace WhiskeyRealism.Telemetry
             }
 
             TelemetryPerf.FlushDueAggregates();
+            TelemetryProfilerMarkers.Refresh();
         }
 
         // Boehm (Unity Mono) is non-generational; if a generation query is unsupported the
@@ -260,13 +261,26 @@ namespace WhiskeyRealism.Telemetry
             _scopeTotalMs += durationMs;
             _scopeCallTotal++;
 
+            // Scope names are literals: match by reference first, then ordinally (an equal
+            // name with another identity still shares the slot).
             int slot = -1;
             for (int i = 0; i < _distinctScopes; i++)
             {
-                if (string.Equals(_scopeNames[i], name, StringComparison.Ordinal))
+                if ((object)_scopeNames[i] == (object)name)
                 {
                     slot = i;
                     break;
+                }
+            }
+            if (slot < 0)
+            {
+                for (int i = 0; i < _distinctScopes; i++)
+                {
+                    if (string.Equals(_scopeNames[i], name, StringComparison.Ordinal))
+                    {
+                        slot = i;
+                        break;
+                    }
                 }
             }
 
