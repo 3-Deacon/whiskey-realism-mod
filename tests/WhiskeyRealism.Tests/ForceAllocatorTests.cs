@@ -31,6 +31,7 @@ internal static class ForceAllocatorTests
             ("TempoHoldModifierRaisesHoldNeed", TempoHoldModifierRaisesHoldNeed),
             ("NullTempoIsNeutral", NullTempoIsNeutral),
             ("EconomyOfForceKeepsMinimumGarrison", EconomyOfForceKeepsMinimumGarrison),
+            ("HoldReleasedIntoTheMassMasses", HoldReleasedIntoTheMassMasses),
             ("HoldWithheldWhileSectorAtNeed", HoldWithheldWhileSectorAtNeed),
             ("HoldReleasedAboveNeed", HoldReleasedAboveNeed),
             ("ImmobileFormationsCountButAreNeverWithheld", ImmobileFormationsCountButAreNeverWithheld),
@@ -285,6 +286,26 @@ internal static class ForceAllocatorTests
         }
     }
 
+    // A sector's hold is released for a target its own threat sits at (attacking that army is holding against
+    // it): the main target is in the threatened sector, so the corps that G3's hold reserve picked there masses.
+    private static void HoldReleasedIntoTheMassMasses()
+    {
+        var s = Wide();
+        s.Objectives.Clear();
+        s.Objectives.Add(Target(98, 100f, 0f));
+        s.Objectives.Add(Target(99, 300f, 0f));
+        s.Objectives.Add(Target(97, 500f, 1f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(4, 550f, 8000f));
+        s.Beliefs.Add(Belief(600f, 0f, 10000f));
+        var plan = PlanOf(s);
+        AssertEqual(97, plan.MainObjectiveId, "the main target stands in the threatened sector");
+        AssertTrue(plan.MassInstanceIds.Contains(4), "the planner massed the sector's own hold for its own target");
+        var x = Of(Alloc(plan, s), 4);
+        AssertEqual(FormationRole.MainEffort, x.Role, "so the allocator makes it the main effort, not Hold");
+        AssertFalse(x.Withheld, "and does not withhold it");
+    }
+
     // Raising the director's MinimumHoldRatioModifier raises the plan's HoldNeed (G3) and so the
     // allocator's hold: with 0 the second corps masses, with +0.2 (8000 needed) it holds.
     private static void TempoHoldModifierRaisesHoldNeed()
@@ -507,6 +528,21 @@ internal static class ForceAllocatorTests
         AssertEqual(FormationRole.MainEffort, Of(a, 2).Role, "raw 0.45 is not Recover");
         AssertEqual(FormationRole.Recover, Of(a, 3).Role, "raw 0.35 is Recover");
         AssertEqual(ForceAllocator.ReasonRecover, Of(a, 3).Reason, "reason");
+
+        // The allocator's own test, on formations the mass never counted (beyond the march horizon).
+        var t = Wide();
+        t.Own.Add(Corps(1, 200f, 20000f));
+        var farFine = Corps(2, 20000f, 8000f);
+        farFine.Supply01 = 0.45f;
+        farFine.UseRails = false;
+        var farStarved = Corps(3, 20100f, 8000f);
+        farStarved.Supply01 = 0.35f;
+        farStarved.UseRails = false;
+        t.Own.Add(farFine);
+        t.Own.Add(farStarved);
+        var b = Alloc(PlanOf(t), t);
+        AssertTrue(b.TryGet(2, out var farRole) && farRole.Role != FormationRole.Recover, "raw 0.45 outside the mass is not Recover either");
+        AssertEqual(FormationRole.Recover, Of(b, 3).Role, "raw 0.35 outside the mass is");
     }
 
     private static void RecoverIsPerFormationAndWalksToSupply()
@@ -1084,6 +1120,7 @@ internal static class ForceAllocatorTests
         string reset = BodyOf(src, "private static void ResetPlanState(");
         AssertContains(reset, "LastAllocationRow[a] = null;", "the row memory is per campaign");
         AssertContains(reset, "NonCompliance[a].Reset();", "the unreliable-day run is per campaign");
+        AssertContains(BodyOf(src, "private static bool HasMapGroupFormation("), "if (s.Own[i].Chain == WlChainClass.PlayerMapGroup) return true;", "the run belongs to the side that carries a map-group player");
         string emitBody = BodyOf(src, "private static void EmitAllocation(");
         AssertContains(emitBody, "TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);", "the [Allocation] row, on change");
     }

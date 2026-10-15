@@ -35,7 +35,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 the mass qualified, and less the Reserve below. Target = the main sector's target.
     //   Reserve       force above ReserveSurplusMargin x the required force at the main target (the
     //                 plan's MainRequiredRatio x the believed land enemy there, straight distances),
-    //                 farthest from the target first; withheld. None when no enemy is believed there.
+    //                 farthest from the target first, stopping at the first formation the main effort
+    //                 cannot spare; withheld. None when no enemy is believed there.
     //   Support       the remainder in a Support (or the main) sector: toward the main target.
     //   Hold (rest)   the remainder anywhere else, Hold in place (EconomyOfForce garrison).
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
@@ -444,7 +445,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     int i = members[k];
                     float strength = Math.Max(0f, _s.Own[i].Strength);
-                    if (massStrength - strength < keep) continue;
+                    if (massStrength - strength < keep) break; // the reserve is a suffix by distance: never a nearer formation than one kept
                     massStrength -= strength;
                     Assign(i, FormationRole.Reserve, _sector[i], _s.Own[i].X, _s.Own[i].Z, ReasonReserve, true);
                 }
