@@ -1898,6 +1898,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 bool chargeDenialOn = false;
                 bool localReactionsOn = false;
                 bool groupSectorStanceOn = false;
+                bool orchestratorArmyOn = Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value;
                 try
                 {
                     var p = Plugin.Instance;
@@ -1956,67 +1957,59 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                     // 1) Doctrine. When doctrine produces Allow/Deny, that's
                     //    the final answer for this Regiment — overrides
-                    //    charge AND ledger AND default scorer.
+                    //    the charge branch AND ledger AND default scorer.
+                    //    ChargeAction carries what to do if vanilla is (or
+                    //    races) to assault 4: a doctrine Deny demotes it.
+                    DoctrineConsumerAction doctrineAction = DoctrineConsumerAction.Observe;
+                    int dStance = -1;
+                    string dReason = null;
                     if (macro != 3 && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
                     {
                         DoctrineStanceDecision dDec = DoctrineConsumerDecisions.DecideStance(
                             order,
                             DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
                             sector.Odds);
-                        if (dDec.Action != DoctrineConsumerAction.Observe)
-                        {
-                            int dStance = dDec.Action == DoctrineConsumerAction.Allow ? 3 : 2;
-                            cache[instanceId] = new TacticalResolvedGroupDecision(
-                                finalStance: dStance,
-                                kind: TacticalDoctrineDecisionKind.Apply,
-                                reason: "doctrine-" + dDec.Reason,
-                                fromDoctrine: true,
-                                fromLedger: false,
-                                isChargeOverride: false,
-                                chargeAction: ChargeOverrideAction.None);
-                            continue;
-                        }
+                        doctrineAction = dDec.Action;
+                        dStance = dDec.Action == DoctrineConsumerAction.Allow ? 3 : 2;
+                        dReason = dDec.Reason;
                     }
 
-                    // 2) Charge override. Mirrors BattleGroupStancePatch's
-                    //    vanillaOrdered==4 branch. Cache freezes WHETHER to
-                    //    demote; the apply path re-reads the live reaction
-                    //    only to fill the demote-telemetry detail.
+                    ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
+                        chargeDenialOn,
+                        orchestratorArmyOn,
+                        doctrineAction,
+                        chargeDenialOn && !orchestratorArmyOn && localReactionsOn && LegacyReactionDeniesCharge(instanceId)));
+                    ChargeOverrideAction chargeAction = ifAssault.Demotes
+                        ? ChargeOverrideAction.DemoteToHold
+                        : ChargeOverrideAction.PreserveVanilla;
+
+                    if (doctrineAction != DoctrineConsumerAction.Observe)
+                    {
+                        cache[instanceId] = new TacticalResolvedGroupDecision(
+                            finalStance: dStance,
+                            kind: TacticalDoctrineDecisionKind.Apply,
+                            reason: "doctrine-" + dReason,
+                            fromDoctrine: true,
+                            fromLedger: false,
+                            isChargeOverride: vanillaOrdered == 4,
+                            chargeAction: chargeAction);
+                        continue;
+                    }
+
+                    // 2) Charge override without a doctrine opinion. Cache
+                    //    freezes WHETHER to demote and to which stance
+                    //    (FinalStance); Kind stays Skip so a group vanilla
+                    //    takes out of assault before apply is left alone.
                     if (vanillaOrdered == 4)
                     {
-                        ChargeOverrideAction action;
-                        string reason;
-                        if (!chargeDenialOn || !localReactionsOn)
-                        {
-                            action = ChargeOverrideAction.PreserveVanilla;
-                            reason = "vanilla-charge-preserved";
-                        }
-                        else
-                        {
-                            TacticalLocalReactionDecision reaction;
-                            try { reaction = TacticalReactionContext.Shared.GetReaction(instanceId); }
-                            catch { reaction = new TacticalLocalReactionDecision(LocalReaction.MaintainLine, false, 0f, "no-decision"); }
-                            bool explicitDeny = reaction.Reason != "no-decision" && reaction.Reaction == LocalReaction.DenyCharge;
-                            if (explicitDeny)
-                            {
-                                action = ChargeOverrideAction.DemoteToHold;
-                                reason = "charge-demote";
-                            }
-                            else
-                            {
-                                action = ChargeOverrideAction.PreserveVanilla;
-                                reason = "vanilla-charge-preserved";
-                            }
-                        }
-
                         cache[instanceId] = new TacticalResolvedGroupDecision(
-                            finalStance: -1,
+                            finalStance: ifAssault.DemoteStance,
                             kind: TacticalDoctrineDecisionKind.Skip,
-                            reason: reason,
+                            reason: ifAssault.Reason,
                             fromDoctrine: false,
                             fromLedger: false,
                             isChargeOverride: true,
-                            chargeAction: action);
+                            chargeAction: chargeAction);
                         continue;
                     }
 
@@ -2096,6 +2089,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 Plugin.Log.LogWarning("[TacticalOrchestrator] PopulateResolvedDecisionsForSide degraded side="
                     + (side == null ? "null" : side.AllianceId.ToString())
                     + ": " + e.GetType().Name + " " + e.Message);
+            }
+        }
+
+        // The legacy B6c producer's explicit DenyCharge for the group (only
+        // written while the orchestrator army is off).
+        private static bool LegacyReactionDeniesCharge(int instanceId)
+        {
+            try
+            {
+                TacticalLocalReactionDecision reaction = TacticalReactionContext.Shared.GetReaction(instanceId);
+                return reaction.Reason != "no-decision" && reaction.Reaction == LocalReaction.DenyCharge;
+            }
+            catch
+            {
+                return false;
             }
         }
 

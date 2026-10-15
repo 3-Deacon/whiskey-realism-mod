@@ -517,41 +517,24 @@ namespace WhiskeyRealism.Patches
             if (!WlAllowsControl(group)) return;
             if (!OrderFrictionAllowsChange(group)) return;
 
-            // Charge-override branch. Cache decided WHETHER to demote at
-            // gate-fire time; live reaction context is consulted here only
-            // for the demote telemetry detail. If vanilla raced from 4 to
-            // something else, fall through to FinalStance (the cached
-            // charge override no longer applies).
-            if (resolved.IsChargeOverride && vanillaOrdered == 4)
-            {
-                switch (resolved.ChargeAction)
-                {
-                    case ChargeOverrideAction.PreserveVanilla:
-                    case ChargeOverrideAction.DenyExplicit:
-                    case ChargeOverrideAction.None:
-                        LogChargePreserved(side, group, resolved.Reason);
-                        return;
-                    case ChargeOverrideAction.DemoteToHold:
-                        if (!AllowsVanillaWrites())
-                        {
-                            LogChargePreserved(side, group, "mode-monitor-only");
-                            return;
-                        }
-                        var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-                        DemoteCharge(bunits, group, side, reaction);
-                        return;
-                }
-                return;
-            }
-
-            // If vanilla raced INTO charge (vanillaOrdered == 4) but the
-            // cache didn't flag this group as a charge override (because
-            // it wasn't at 4 at gate-fire time), preserve vanilla's
-            // charge. The cached FinalStance would write a non-charge
-            // value over the fresh vanilla write, which is wrong.
+            // Vanilla assault (4) — cached at gate-fire time or raced into
+            // since. ChargeAction is the cached TacticalChargeDenial answer
+            // for this group; FinalStance holds the demotion stance. Any other
+            // answer keeps the assault: a cached FinalStance decided for a
+            // non-assault group must not overwrite a fresh vanilla escalation.
             if (vanillaOrdered == 4)
             {
-                LogChargePreserved(side, group, "vanilla-charge-preserved");
+                if (resolved.ChargeAction == ChargeOverrideAction.DemoteToHold)
+                {
+                    if (!AllowsVanillaWrites())
+                    {
+                        LogChargePreserved(side, group, "mode-monitor-only");
+                        return;
+                    }
+                    DemoteCharge(bunits, group, side, resolved.FinalStance, resolved.Reason);
+                    return;
+                }
+                LogChargePreserved(side, group, resolved.IsChargeOverride ? resolved.Reason : "vanilla-charge-preserved");
                 return;
             }
 
@@ -627,31 +610,31 @@ namespace WhiskeyRealism.Patches
             int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
             var sector = BuildGroupSector(group, index);
 
-            if (TryApplyDoctrineStance(bunits, side, macro, group, sector))
-                return;
+            bool hasDoctrine = TryResolveDoctrineStance(macro, group, sector, out CommandDoctrineOrder order, out DoctrineStanceDecision doctrine);
 
             if (vanillaOrdered == 4)
             {
-                if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
+                ChargeDenialDecision denial = DecideChargeDenial(group, hasDoctrine ? doctrine.Action : DoctrineConsumerAction.Observe);
+                if (!denial.Demotes)
                 {
-                    LogChargePreserved(side, group, "vanilla-charge-preserved");
+                    LogChargePreserved(side, group, denial.Reason);
+                    return;
+                }
+                if (!AllowsVanillaWrites())
+                {
+                    LogChargePreserved(side, group, "mode-monitor-only");
                     return;
                 }
 
-                var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-                if (IsExplicitChargeDenial(reaction))
-                {
-                    if (!AllowsVanillaWrites())
-                    {
-                        LogChargePreserved(side, group, "mode-monitor-only");
-                        return;
-                    }
+                DemoteCharge(bunits, group, side, denial.DemoteStance, denial.Reason);
+                return;
+            }
 
-                    DemoteCharge(bunits, group, side, reaction);
-                    return;
-                }
-
-                LogChargePreserved(side, group, "vanilla-charge-preserved");
+            if (hasDoctrine)
+            {
+                int stance = doctrine.Action == DoctrineConsumerAction.Allow ? 3 : 2;
+                if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
+                    LogDoctrineStanceDecision(side, group, order, doctrine, stance);
                 return;
             }
 
@@ -674,26 +657,32 @@ namespace WhiskeyRealism.Patches
                 LogDecision(side, group, sector, decision);
         }
 
-        private static bool TryApplyDoctrineStance(
-            BattleUnits bunits,
-            int side,
+        private static bool TryResolveDoctrineStance(
             int macro,
             Regiment group,
-            TacticalSectorAssessment sector)
+            TacticalSectorAssessment sector,
+            out CommandDoctrineOrder order,
+            out DoctrineStanceDecision decision)
         {
+            decision = default(DoctrineStanceDecision);
+            order = default(CommandDoctrineOrder);
             if (macro == 3) return false;
-            if (!TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture)) return false;
+            if (!TacticalDoctrineOrderResolver.TryResolve(group, out order, out BattlefieldPictureSnapshot picture)) return false;
 
-            DoctrineStanceDecision decision = DoctrineConsumerDecisions.DecideStance(
+            decision = DoctrineConsumerDecisions.DecideStance(
                 order,
                 DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
                 sector.Odds);
-            if (decision.Action == DoctrineConsumerAction.Observe) return false;
+            return decision.Action != DoctrineConsumerAction.Observe;
+        }
 
-            int stance = decision.Action == DoctrineConsumerAction.Allow ? 3 : 2;
-            if (TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.Scorer))
-                LogDoctrineStanceDecision(side, group, order, decision, stance);
-            return true;
+        private static ChargeDenialDecision DecideChargeDenial(Regiment group, DoctrineConsumerAction doctrineAction)
+        {
+            bool enabled = Plugin.Instance.EnableTacticalChargeDenial.Value;
+            bool armyOn = Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value;
+            bool legacyDeny = enabled && !armyOn && LocalReactionProducerEnabled() &&
+                IsExplicitChargeDenial(TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group)));
+            return TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(enabled, armyOn, doctrineAction, legacyDeny));
         }
 
         private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, TacticalSectorAssessment sector)
@@ -755,18 +744,20 @@ namespace WhiskeyRealism.Patches
             BattleUnits bunits,
             Regiment group,
             int side,
-            TacticalLocalReactionDecision reaction)
+            int stance,
+            string reason)
         {
-            if (!TacticalStanceWriter.EnsureStance(bunits, group, 3, null, StanceWriteSource.ChargeDemotion)) return;
+            if (stance < 1 || stance > 3) stance = TacticalChargeDenial.LegacyDemoteStance;
+            if (!TacticalStanceWriter.EnsureStance(bunits, group, stance, null, StanceWriteSource.ChargeDemotion)) return;
 
-            string signature = side + "|" + SafeInstanceId(group) + "|" + reaction.Reaction + "|" + reaction.Reason;
+            string signature = side + "|" + SafeInstanceId(group) + "|" + stance + "|" + reason;
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-deny-stance", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
             TelemetryRouter.LegacyInfo("[TacticalChargeDeny] surface=stance side=" + side +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
-                " reaction=" + reaction.Reaction +
-                " reason=" + reaction.Reason, TelemetryLayer.Tactical);
+                " stance=" + stance +
+                " reason=" + reason, TelemetryLayer.Tactical);
         }
 
         private static void LogChargePreserved(int side, Regiment group, string reason)

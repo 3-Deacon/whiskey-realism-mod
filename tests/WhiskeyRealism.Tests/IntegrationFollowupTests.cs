@@ -16,6 +16,10 @@ internal static class IntegrationFollowupTests
         TelegraphWishChargeMeasuresWhatPlaceTook();
         TelegraphWishChargeWithoutSpendIsNoCharge();
         TelegraphRefundsOnlyWhiskeyRejections();
+        ChargeDenialDemotesDoctrineDeniedAssaultWithArmyOn();
+        ChargeDenialPreservesAssaultDoctrineAgreesWith();
+        ChargeDenialLegacyReactionOnlyWithArmyOff();
+        ChargeDenialFlagOffPreservesEverything();
     }
 
     private static void Pass(string name)
@@ -132,6 +136,77 @@ internal static class IntegrationFollowupTests
         TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.Placed), "kept placement");
         TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.CancelledByVanilla), "vanilla cancellation");
         Pass("telegraph refunds only Whiskey rejections");
+    }
+
+    private static ChargeDenialDecision Deny(
+        bool enabled = true,
+        bool armyOn = true,
+        DoctrineConsumerAction doctrine = DoctrineConsumerAction.Observe,
+        bool legacyDeny = false)
+    {
+        return TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(enabled, armyOn, doctrine, legacyDeny));
+    }
+
+    // Vanilla assault (ai_stance 4, AdjustGroupAIStance 4240) differs from
+    // attack (3) by the assault micro placement (5694-5728: skipcover) and
+    // skirmisher reattachment (5363/5374); cavalry charges (AdjustCavalryBehavior
+    // 5047) need ai_stance != 1 && != 2. The doctrine denies attack for
+    // reserve-held / fallback groups (DecideStance -> stance 2), and
+    // ChargeDemotion is the only source TacticalStanceOwnership lets replace a 4.
+    private static void ChargeDenialDemotesDoctrineDeniedAssaultWithArmyOn()
+    {
+        var d = Deny(doctrine: DoctrineConsumerAction.Deny);
+        TestHarness.AssertTrue(d.Demotes, "doctrine deny demotes");
+        TestHarness.AssertEqual(2, d.DemoteStance, "demotes to the doctrine's defend stance");
+        TestHarness.AssertEqual("charge-demote-doctrine", d.Reason, "reason");
+
+        var armyOff = Deny(armyOn: false, doctrine: DoctrineConsumerAction.Deny);
+        TestHarness.AssertTrue(armyOff.Demotes, "doctrine deny also demotes with the army off");
+
+        var stance = TacticalStanceOwnership.Decide(new StanceWriteInput(
+            isAiGroup: true,
+            targetStance: d.DemoteStance,
+            currentOrderedStance: 4,
+            macroAi: 0,
+            nowHours: 1f,
+            record: default(StanceHoldRecord),
+            source: StanceWriteSource.ChargeDemotion,
+            vanillaGroupStance: 4));
+        TestHarness.AssertEqual(StanceWriteAction.Write, stance.Action, "ownership lets the demotion replace the assault");
+        Pass("charge denial demotes a doctrine-denied assault with the army on");
+    }
+
+    private static void ChargeDenialPreservesAssaultDoctrineAgreesWith()
+    {
+        var allow = Deny(doctrine: DoctrineConsumerAction.Allow, legacyDeny: true);
+        TestHarness.AssertFalse(allow.Demotes, "doctrine attack keeps the assault");
+        TestHarness.AssertEqual("doctrine-attack-agrees", allow.Reason, "allow reason");
+
+        var observe = Deny();
+        TestHarness.AssertFalse(observe.Demotes, "no doctrine opinion keeps the assault");
+        TestHarness.AssertEqual("vanilla-charge-preserved", observe.Reason, "observe reason");
+        Pass("charge denial preserves an assault the doctrine agrees with");
+    }
+
+    // The legacy local-reaction producer (BattleCommanderIntentObserverPatch)
+    // only writes TacticalReactionContext while the orchestrator army is off.
+    private static void ChargeDenialLegacyReactionOnlyWithArmyOff()
+    {
+        var legacy = Deny(armyOn: false, legacyDeny: true);
+        TestHarness.AssertTrue(legacy.Demotes, "legacy DenyCharge demotes with the army off");
+        TestHarness.AssertEqual(3, legacy.DemoteStance, "legacy demotion keeps stance 3");
+        TestHarness.AssertEqual("charge-demote", legacy.Reason, "legacy reason");
+
+        TestHarness.AssertFalse(Deny(armyOn: true, legacyDeny: true).Demotes, "army on ignores legacy reactions");
+        Pass("charge denial uses legacy reactions only with the army off");
+    }
+
+    private static void ChargeDenialFlagOffPreservesEverything()
+    {
+        var off = Deny(enabled: false, doctrine: DoctrineConsumerAction.Deny, armyOn: false, legacyDeny: true);
+        TestHarness.AssertFalse(off.Demotes, "flag off");
+        TestHarness.AssertEqual("vanilla-charge-preserved", off.Reason, "flag off reason");
+        Pass("charge denial flag off preserves every assault");
     }
 
     private static void AssertNear(float expected, float actual, string label)

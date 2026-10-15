@@ -8,14 +8,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// without re-walking the orchestrator state.
     ///
     /// Values:
-    ///   None             — not a charge override (vanillaOrdered != 4 at
-    ///                       cache time). Apply path uses FinalStance directly.
-    ///   PreserveVanilla  — the charge-denial doctrine is off OR the local
-    ///                       reaction producer is disabled OR no explicit denial
-    ///                       was raised. Patch logs "vanilla-charge-preserved"
-    ///                       and returns without writing.
-    ///   DemoteToHold     — explicit charge denial; patch demotes to stance=3
-    ///                       (offensive hold) via <c>DemoteCharge</c>.
+    ///   None             — no charge answer (ledger / scorer entries). A
+    ///                       vanilla assault (4) at apply time is preserved.
+    ///   PreserveVanilla  — TacticalChargeDenial keeps the assault (flag off,
+    ///                       doctrine Allow, or no denial raised). Patch logs
+    ///                       the reason and returns without writing.
+    ///   DemoteToHold     — TacticalChargeDenial demotes the assault; the patch
+    ///                       writes FinalStance (doctrine Deny: 2, legacy
+    ///                       DenyCharge: 3) via <c>DemoteCharge</c>. Applies
+    ///                       whenever vanilla is at 4 at apply time, including
+    ///                       a doctrine entry vanilla escalated after caching.
     ///   DenyExplicit     — reserved for future denial reasons that don't
     ///                       demote; currently treated as PreserveVanilla at
     ///                       apply time.
@@ -70,8 +72,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Final stance to write at apply time (0..3), or -1 when the
         /// resolved decision is "no override" (e.g. doctrine + ledger both
         /// produced Observe and the default scorer returned Skip). When
-        /// IsChargeOverride is true, the apply path consults ChargeAction
-        /// instead of FinalStance.
+        /// vanilla is at assault (4) at apply time, the apply path consults
+        /// ChargeAction and FinalStance is the demotion stance.
         /// </summary>
         public int FinalStance { get; }
 
@@ -91,10 +93,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>True if the operations-ledger resolver produced this decision.</summary>
         public bool FromLedger { get; }
 
-        /// <summary>True if vanillaOrdered was 4 (charge) at cache time and ChargeAction applies.</summary>
+        /// <summary>True if vanillaOrdered was 4 (charge) at cache time; skips the apply fast path.</summary>
         public bool IsChargeOverride { get; }
 
-        /// <summary>Charge branch action — only meaningful when IsChargeOverride is true.</summary>
+        /// <summary>What to do with a vanilla assault (4) found at apply time.</summary>
         public ChargeOverrideAction ChargeAction { get; }
     }
 }
