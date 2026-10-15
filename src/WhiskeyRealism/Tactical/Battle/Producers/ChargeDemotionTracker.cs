@@ -22,8 +22,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private int _pendingCount;
         private float _lastTakeAt = float.NegativeInfinity;
 
-        public int Total { get; private set; }
-        public int Window { get; private set; }
+        private int _total;
+        private int _window;
 
         public void Submitted(in BattleOrderIntent intent, double nowHours)
         {
@@ -50,8 +50,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (executor == null || !executor.TryGetLastOutcome(d.GroupId, OrderChannel.Stance, out OrderOutcome outcome)) continue;
                 if (outcome.Kind != OrderOutcomeKind.Issued || outcome.Source != IntentSource.ChargeDemotion) continue;
                 if (outcome.AtHours < d.SubmittedAtHours) continue;
-                Total++;
-                Window++;
+                _total++;
+                _window++;
                 if (confirmed != null && written < confirmed.Length) confirmed[written++] = d;
             }
             _pendingCount = 0;
@@ -59,13 +59,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         // True at most once per periodSeconds, and only when a demotion was confirmed
-        // since the last take.
+        // since the last take. window and total are set either way.
         public bool TryTakeWindow(float nowSeconds, float periodSeconds, out int window, out int total)
         {
-            window = Window;
-            total = Total;
-            if (Window == 0 || nowSeconds - _lastTakeAt < periodSeconds) return false;
-            Window = 0;
+            window = _window;
+            total = _total;
+            if (_window == 0 || nowSeconds - _lastTakeAt < periodSeconds) return false;
+            _window = 0;
             _lastTakeAt = nowSeconds;
             return true;
         }
@@ -74,8 +74,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             _pendingCount = 0;
             _lastTakeAt = float.NegativeInfinity;
-            Total = 0;
-            Window = 0;
+            _total = 0;
+            _window = 0;
         }
     }
 }

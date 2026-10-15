@@ -51,8 +51,8 @@ internal static class ChargeDemotionTrackerTests
         var buffer = new ChargeDemotionTracker.Demotion[4];
         t.Submitted(Demote(10, 2), 1.0);
         AssertEqual(0, t.Confirm(executor, buffer), "no outcome, no demotion");
-        AssertEqual(0, t.Total, "total");
-        AssertFalse(t.TryTakeWindow(0f, Period, out _, out _), "empty window emits nothing");
+        AssertFalse(t.TryTakeWindow(0f, Period, out _, out int total), "empty window emits nothing");
+        AssertEqual(0, total, "total");
     }
 
     private static void IssuedDemotionIsConfirmedOnce()
@@ -68,12 +68,14 @@ internal static class ChargeDemotionTrackerTests
         AssertEqual(10, buffer[0].GroupId, "group");
         AssertEqual(2, buffer[0].Stance, "stance");
         AssertEqual(1.0, buffer[0].SubmittedAtHours, "submitted at");
-        AssertEqual(1, t.Total, "total");
-        AssertEqual(1, t.Window, "window");
+        AssertTrue(t.TryTakeWindow(0f, Period, out int window, out int total), "reported");
+        AssertEqual(1, window, "window");
+        AssertEqual(1, total, "total");
 
         // Pending is consumed: the same outcome is not counted again next tick.
         AssertEqual(0, t.Confirm(executor, buffer), "counted once");
-        AssertEqual(1, t.Total, "total unchanged");
+        AssertFalse(t.TryTakeWindow(100f, Period, out _, out total), "nothing new");
+        AssertEqual(1, total, "total unchanged");
     }
 
     // Vanilla re-escalates the group; the executor dedups or refuses the new
@@ -90,12 +92,14 @@ internal static class ChargeDemotionTrackerTests
 
         t.Submitted(intent, 1.25);
         AssertEqual(0, t.Confirm(executor, buffer), "stale issue");
-        AssertEqual(1, t.Total, "total");
+        t.TryTakeWindow(0f, Period, out _, out int total);
+        AssertEqual(1, total, "the stale issue adds nothing");
 
         t.Submitted(intent, 1.5);
         Issue(executor, intent, 1.5);
         AssertEqual(1, t.Confirm(executor, buffer), "second demotion issued");
-        AssertEqual(2, t.Total, "total");
+        t.TryTakeWindow(100f, Period, out _, out total);
+        AssertEqual(2, total, "total");
     }
 
     private static void AnotherSourceOnTheStanceChannelIsNotADemotion()
@@ -109,7 +113,8 @@ internal static class ChargeDemotionTrackerTests
         posture.Priority = IntentPriority.Executor;
         Issue(executor, posture, 1.0);
         AssertEqual(0, t.Confirm(executor, buffer), "posture stance is not a demotion");
-        AssertEqual(0, t.Total, "total");
+        AssertFalse(t.TryTakeWindow(0f, Period, out _, out int total), "nothing to report");
+        AssertEqual(0, total, "total");
     }
 
     private static void OnlyChargeDemotionStanceIntentsAreTracked()
@@ -141,7 +146,6 @@ internal static class ChargeDemotionTrackerTests
         AssertTrue(t.TryTakeWindow(5f, Period, out int window, out int total), "first demotion reports at once");
         AssertEqual(1, window, "window");
         AssertEqual(1, total, "total");
-        AssertEqual(0, t.Window, "window taken");
 
         BattleOrderIntent b = Demote(11, 1);
         t.Submitted(b, 1.1);
@@ -166,8 +170,9 @@ internal static class ChargeDemotionTrackerTests
             Issue(executor, intent, 1.0);
         }
         AssertEqual(1, t.Confirm(executor, buffer), "writes what the buffer holds");
-        AssertEqual(3, t.Total, "counts all three");
-        AssertEqual(3, t.Window, "window");
+        AssertTrue(t.TryTakeWindow(0f, Period, out int window, out int total), "reported");
+        AssertEqual(3, total, "counts all three");
+        AssertEqual(3, window, "window");
     }
 
     private static void ClearForgetsTheBattle()
@@ -183,8 +188,9 @@ internal static class ChargeDemotionTrackerTests
         t.Submitted(a, 1.2);
         t.Clear();
 
-        AssertEqual(0, t.Total, "total");
-        AssertEqual(0, t.Window, "window");
+        AssertFalse(t.TryTakeWindow(10f, Period, out int window, out int total), "nothing left to report");
+        AssertEqual(0, total, "total");
+        AssertEqual(0, window, "window");
         Issue(executor, a, 1.2);
         AssertEqual(0, t.Confirm(executor, buffer), "pending forgotten");
 
