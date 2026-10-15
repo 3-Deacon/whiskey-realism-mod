@@ -700,10 +700,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             t.NavDeferred = false;
-            // BC9: a Scout or Probe task looks where the recon planner says (its probe
-            // nomination, else BattleRecon.LookPoint), not at an objective stand-off.
-            if ((state.Task == CommandTaskType.Scout || state.Task == CommandTaskType.Probe) &&
-                ReconIntentProducer.TryLookTarget(s, i, out x, out z))
+            // BC9: a Scout or Probe task's forward target is where the recon planner looks
+            // (its probe nomination, else BattleRecon.LookPoint), not an objective
+            // stand-off; a break-off or recovery keeps its own target.
+            if (BattleRecon.UsesLookPoint(state.Task, kind) && ReconIntentProducer.TryLookTarget(s, i, out x, out z))
                 return PostureSense.IsMoveAway(s.Own[i], x, z);
             bool resolved;
             switch (kind)

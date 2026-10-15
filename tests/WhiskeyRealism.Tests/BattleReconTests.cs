@@ -55,6 +55,10 @@ internal static class BattleReconTests
             ("cavalry follow: a target in square or a command group is no raid target", CavalryFollowSquareAndOfficer),
             ("facing: an unwatched entry point faces a screen, never urgently", FacingEntryIsNotUrgent),
             ("facing: the stalest unwatched entry point is the screen's bearing", EntryBearingPicksStalest),
+            ("look points replace only the forward targets of a scout or probe", LookPointOnlyForForwardTargets),
+            ("probe stop is not swallowed while the group's regiments still walk", ProbeStopReachesWalkingRegiments),
+            ("recon looks at the nearest remembered enemy when confidence fell after contact", RememberedEnemyTargetAfterContact),
+            ("recon own rotated retry is not taken for a recall", RetryIsNotARecall),
         });
     }
 
@@ -782,5 +786,80 @@ internal static class BattleReconTests
         var q = Picture(s);
         q.AddEntry(900f, -1000f, 2.99);
         AssertFalse(BattleRecon.TryEntryBearing(s, s.IndexOfOwn(InfBrigade), q, out _), "a watched entry point is no threat bearing");
+    }
+
+    // ------------------------------------------------------------------ review fixes
+
+    private static void LookPointOnlyForForwardTargets()
+    {
+        AssertTrue(BattleRecon.UsesLookPoint(CommandTaskType.Probe, PostureExecutionTarget.DoctrinePrimaryTarget), "probe forward");
+        AssertTrue(BattleRecon.UsesLookPoint(CommandTaskType.Scout, PostureExecutionTarget.ObjectiveApproach), "scout forward");
+        AssertFalse(BattleRecon.UsesLookPoint(CommandTaskType.Probe, PostureExecutionTarget.DoctrineFallbackTarget), "a break-off stays a break-off");
+        AssertFalse(BattleRecon.UsesLookPoint(CommandTaskType.Scout, PostureExecutionTarget.RecoveryPath), "a recovery stays a recovery");
+        AssertFalse(BattleRecon.UsesLookPoint(CommandTaskType.AttackObjective, PostureExecutionTarget.DoctrinePrimaryTarget), "not a recon task");
+    }
+
+    private sealed class AllowGuard : IOrderGuard
+    {
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason) { reason = SkipReason.None; return true; }
+    }
+
+    private static void ProbeStopReachesWalkingRegiments()
+    {
+        var s = Field(3.0);
+        Own(s, InfA).RegimentPaths = 1; // the brigade HQ stands, its regiment walks on
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        var stop = new BattleOrderIntent
+        {
+            GroupId = InfBrigade, Channel = OrderChannel.Stop, Heading = -1f,
+            Priority = IntentPriority.Support, Source = IntentSource.Recon, Reason = BattleRecon.ProbeStopReason,
+        };
+        ExecutionPlan plan = executor.Plan(s, stop, 3.0);
+        AssertTrue(plan.Execute, "a stop is no duplicate while a descendant still moves: " + plan.Skip);
+        Own(s, InfA).RegimentPaths = 0;
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, stop, 3.0).Skip, "nothing moves: duplicate");
+    }
+
+    private static void SeeRemembered(BattleSnapshot s, float x, float z, float strength)
+    {
+        s.AddObservation(new EnemyObservation
+        {
+            InstanceId = 800 + s.ObservationCount, UnitTyp = TacticalUnitType.Infantry, X = x, Z = z, Strength = strength,
+            State = ObservationState.Remembered, Confidence01 = 0.4f, LastSeenHours = 2.0,
+        });
+    }
+
+    private static void RememberedEnemyTargetAfterContact()
+    {
+        var s = Field(3.0);
+        SeeRemembered(s, 0f, -300f, 3000f);
+        SeeRemembered(s, 900f, -300f, 3000f);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.1f, hadContact: true));
+        AssertEqual(ReconTargetKind.RememberedEnemy, rig.Memory.Kind, "the last known enemy is looked at again");
+        AssertNear(-450f, rig.Memory.TargetZ, 2f, "stand-off 150 m short of it");
+        AssertTrue(Math.Abs(rig.Memory.TargetX) < 20f, "the nearer remembered enemy");
+        var confident = new Rig();
+        confident.Plan(s, Picture(s, confidence: 0.6f, hadContact: true));
+        AssertEqual(ReconLeg.None, confident.Memory.Leg, "above the gate nobody rides to a remembered enemy");
+    }
+
+    private static void RetryIsNotARecall()
+    {
+        var rig = Outbound(out int scout);
+        var move = rig.Sink.Items[0];
+        // The executor issued the move, nothing moved: Failed, then a rotated retry ticket.
+        rig.Executor.RecordIssued(move, 3.0, Array.Empty<IssuedTarget>(), 0, Array.Empty<UnitWaypoint>(), 0, 0, 0);
+        var s = Field(3.01);
+        var outcomes = new OrderOutcome[8];
+        rig.Executor.ObserveOutcomes(s, 3.01, outcomes, out int count);
+        AssertTrue(rig.Executor.TryGetLastOutcome(scout, OrderChannel.Move, out OrderOutcome last) && last.Kind == OrderOutcomeKind.Retried, "retried");
+        var t = Field(3.02);
+        Own(t, scout).RegimentPaths = 1;
+        Own(t, scout).LastWaypointX = 400f; // the rotated target, far off ours
+        Own(t, scout).LastWaypointZ = -500f;
+        rig.Plan(t, WithEntry(Picture(t), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "our own retry is not a recall");
     }
 }

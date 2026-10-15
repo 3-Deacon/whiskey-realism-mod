@@ -631,8 +631,8 @@ namespace WhiskeyRealism
                 "Enable Battle Reconnaissance",
                 true,
                 "Default ON. The fog-honest battle AI goes and looks. Cavalry reconnaissance: when an enemy-side entry point has not been " +
-                "watched for an hour, a stretch of the front has gone unobserved, or (before any contact, with intel confidence below " +
-                "0.35) nothing at all is known, one standing AI cavalry regiment of a settled brigade rides to look (150 m short of an " +
+                "watched for an hour, a stretch of the front has gone unobserved, or intel confidence is below 0.35 (straight ahead " +
+                "before any contact, the nearest remembered enemy after it), one standing AI cavalry regiment of a settled brigade rides to look (150 m short of an " +
                 "entry point, vanilla's out-of-contact distance), stops on first sight, watches for 3 battle minutes and rides back to its " +
                 "brigade; never toward a visible enemy at least as strong, at most 4 missions per side per battle hour. Reconnaissance in " +
                 "force: in the army's Probe phase, a side that is not the battle's defender advances one AI group per front band with no " +

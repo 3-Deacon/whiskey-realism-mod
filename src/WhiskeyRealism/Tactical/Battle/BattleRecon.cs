@@ -52,6 +52,7 @@ namespace WhiskeyRealism.Tactical.Battle
         EntryPoint = 1,
         StaleBand = 2,
         Forward = 3,
+        RememberedEnemy = 4,
     }
 
     [Flags]
@@ -196,6 +197,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public float TargetX { get; private set; }
         public float TargetZ { get; private set; }
         public bool Confirmed { get; private set; }
+        // The executor retried this leg's move at a rotated bearing (Retried outcome):
+        // the scout's waypoint is then off our target by our own doing.
+        internal bool Retried { get; private set; }
         private double _startedHours, _legHours, _submittedHours;
 
         private readonly double[] _starts = new double[ReconSettings.MaxMissionStartsPerHour];
@@ -280,6 +284,7 @@ namespace WhiskeyRealism.Tactical.Battle
             TargetX = standX;
             TargetZ = standZ;
             Confirmed = false;
+            Retried = false;
             _startedHours = _legHours = _submittedHours = now;
             _starts[_startNext] = now;
             _startNext = (_startNext + 1) % _starts.Length;
@@ -299,10 +304,13 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 _submittedHours = now;
                 Confirmed = false;
+                Retried = false;
             }
         }
 
         internal void Confirm() { Confirmed = true; }
+
+        internal void NoteRetry() { Retried = true; }
 
         internal void End()
         {
@@ -411,6 +419,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         End(m, ref r, "gave-up");
                         return;
                     }
+                    if (outcome.Kind == OrderOutcomeKind.Retried) m.NoteRetry();
                     m.Confirm();
                 }
                 else if (m.Leg == ReconLeg.Outbound && !m.Confirmed && now > m.SubmittedHours)
@@ -441,7 +450,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         m.EnterLeg(ReconLeg.Observe, m.TargetX, m.TargetZ, now);
                         return;
                     }
-                    if (m.Confirmed && rec.RegimentPaths > 0 && PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ) &&
+                    if (m.Confirmed && !m.Retried && rec.RegimentPaths > 0 && PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ) &&
                         Distance(rec.LastWaypointX, rec.LastWaypointZ, m.TargetX, m.TargetZ) > OrderArbiter.DedupeMeters)
                     {
                         End(m, ref r, "recalled"); // vanilla re-laid the scout with its brigade
@@ -500,13 +509,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 float d = Distance(centroidX, centroidZ, ex, ez);
                 if (d >= bestDistance) continue;
                 int c = NearestScout(s, st, p, ex, ez);
-                if (c < 0) continue;
-                ref UnitRecord sr = ref s.Own[c];
-                float span = Distance(sr.X, sr.Z, ex, ez);
-                if (span <= st.ObservationStandOff + OrderArbiter.DedupeMeters) continue;
-                float sx = ex + (sr.X - ex) / span * st.ObservationStandOff;
-                float sz = ez + (sr.Z - ez) / span * st.ObservationStandOff;
-                if (!StandPointSafe(s, sr.X, sr.Z, sx, sz, Math.Max(1f, sr.Strength), st)) continue;
+                if (c < 0 || !TryStandOff(s, st, c, ex, ez, out float sx, out float sz)) continue;
                 bestDistance = d;
                 scout = c; kind = ReconTargetKind.EntryPoint;
                 lookX = ex; lookZ = ez; standX = sx; standZ = sz;
@@ -540,12 +543,46 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!m.RecentTarget(fx, fz, now)) TryTarget(s, st, p, fx, fz, ReconTargetKind.Forward, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
             }
 
+            // 4. After contact, below the action gate: look again at the nearest enemy
+            // last seen (a Remembered observation), from the stand-off.
+            if (scout < 0 && p.HadContact && p.IntelConfidence < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction)
+            {
+                EnemyObservation[] obs = s.Observations;
+                float nearest = float.MaxValue;
+                for (int k = 0; k < s.ObservationCount; k++)
+                {
+                    if (obs[k].State != ObservationState.Remembered || obs[k].IsReinforcement) continue;
+                    float d = Distance(centroidX, centroidZ, obs[k].X, obs[k].Z);
+                    if (d >= nearest || m.RecentTarget(obs[k].X, obs[k].Z, now)) continue;
+                    int c = NearestScout(s, st, p, obs[k].X, obs[k].Z);
+                    if (c < 0 || !TryStandOff(s, st, c, obs[k].X, obs[k].Z, out float sx, out float sz)) continue;
+                    nearest = d;
+                    scout = c; kind = ReconTargetKind.RememberedEnemy;
+                    lookX = obs[k].X; lookZ = obs[k].Z; standX = sx; standZ = sz;
+                }
+            }
+
             if (scout < 0) return;
             m.Start(s.Own[scout].InstanceId, kind, lookX, lookZ, standX, standZ, now);
             sink.Submit(Move(m.ScoutId, standX, standZ, OutboundReason));
             r.Intents++;
             r.Events |= ReconEvents.MissionStarted;
             r.StartedKind = kind;
+        }
+
+        // The point ObservationStandOff short of a target on the line from the scout,
+        // when the scout is farther than that (plus the 60 m move floor) and the point
+        // is safe.
+        private static bool TryStandOff(BattleSnapshot s, in ReconSettings st, int scout, float tx, float tz, out float sx, out float sz)
+        {
+            ref UnitRecord sr = ref s.Own[scout];
+            sx = 0f;
+            sz = 0f;
+            float span = Distance(sr.X, sr.Z, tx, tz);
+            if (span <= st.ObservationStandOff + OrderArbiter.DedupeMeters) return false;
+            sx = tx + (sr.X - tx) / span * st.ObservationStandOff;
+            sz = tz + (sr.Z - tz) / span * st.ObservationStandOff;
+            return StandPointSafe(s, sr.X, sr.Z, sx, sz, Math.Max(1f, sr.Strength), st);
         }
 
         private static void TryTarget(BattleSnapshot s, in ReconSettings st, ReconPicture p, float x, float z, ReconTargetKind kind,
@@ -732,6 +769,17 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!PostureSense.IsMoveAway(rec, x, z)) return false;
             float strength = Math.Max(1f, Math.Max(rec.Strength, rec.GroupStrengthAiGroup));
             return StandPointSafe(s, rec.X, rec.Z, x, z, strength, st);
+        }
+
+        /// <summary>
+        /// A Scout or Probe task's forward targets (the doctrine primary target, the
+        /// objective approach) are the look point; a break-off (DoctrineFallbackTarget,
+        /// ShouldBreakOffRecon) or a recovery path keeps the posture decision's own target.
+        /// </summary>
+        public static bool UsesLookPoint(CommandTaskType task, PostureExecutionTarget kind)
+        {
+            if (task != CommandTaskType.Scout && task != CommandTaskType.Probe) return false;
+            return kind == PostureExecutionTarget.DoctrinePrimaryTarget || kind == PostureExecutionTarget.ObjectiveApproach;
         }
 
         /// <summary>
