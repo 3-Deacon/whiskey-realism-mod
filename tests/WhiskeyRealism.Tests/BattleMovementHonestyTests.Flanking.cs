@@ -321,9 +321,7 @@ internal static partial class BattleMovementHonestyTests
         BattleSnapshot s = FlankFixture();
         for (int i = 0; i < 300; i++) AddOwnRegiment(s, 100 + i, rng.Next(0, 600), -rng.Next(0, 600), rng.Next(0, 360));
         for (int i = 0; i < 300; i++) AddEnemyRegiment(s, 1000 + i, rng.Next(0, 600), -rng.Next(0, 600), visible: true, facing: rng.Next(0, 360));
-        for (int k = 0; k < 3; k++) PerceivedFlanking.Apply(s, in g);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int k = 0; k < 10; k++) PerceivedFlanking.Apply(s, in g);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up (300 own x 300 enemy)");
+        FlankGeometry geometry = g;
+        AssertNoAllocation(() => PerceivedFlanking.Apply(s, in geometry), 10, "no allocation after warm-up (300 own x 300 enemy)");
     }
 }

@@ -87,9 +87,6 @@ internal static partial class BattleMovementHonestyTests
         BattleTerrainGrid none = GridOf(10, 10, (x, z) => Grass);
         AssertEqual(0, none.CrossingCount, "no crossings");
         var ids = new int[64];
-        for (int k = 0; k < 3; k++) { g.IdAt(5f, -5f); g.SampleLine(0f, -5f, 90f, -5f, 10f, ids); g.Passable(River); g.SpeedCost(Forest); } // warm-up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int k = 0; k < 100; k++) { g.IdAt(5f, -5f); g.SampleLine(0f, -5f, 90f, -5f, 10f, ids); g.Passable(River); g.SpeedCost(Forest); }
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "grid reads allocate nothing");
+        AssertNoAllocation(() => { g.IdAt(5f, -5f); g.SampleLine(0f, -5f, 90f, -5f, 10f, ids); g.Passable(River); g.SpeedCost(Forest); }, 100, "grid reads allocate nothing");
     }
 }

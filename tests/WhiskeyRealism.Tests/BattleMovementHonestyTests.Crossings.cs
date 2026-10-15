@@ -150,11 +150,8 @@ internal static partial class BattleMovementHonestyTests
         BattleSnapshot s = SnapshotWith(obs);
         var xs = new float[64];
         var zs = new float[64];
-        for (int k = 0; k < 3; k++) CoveredCrossings.BuildPoints(s, grid, xs, zs, out _);
-        long before = GC.GetAllocatedBytesForCurrentThread();
         int n = 0;
-        for (int k = 0; k < 20; k++) n = CoveredCrossings.BuildPoints(s, grid, xs, zs, out _);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up");
+        AssertNoAllocation(() => n = CoveredCrossings.BuildPoints(s, grid, xs, zs, out _), 20, "no allocation after warm-up");
         AssertTrue(n > 0 && n <= 64, "points found, bounded by the output arrays");
     }
 

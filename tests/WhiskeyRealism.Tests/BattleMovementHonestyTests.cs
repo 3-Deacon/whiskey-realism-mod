@@ -116,6 +116,23 @@ internal static partial class BattleMovementHonestyTests
 
     // ------------------------------------------------------------------ fixtures
 
+    // Zero allocation after warm-up, read without tiered-JIT noise: a real per-call allocation shows in
+    // every window, a runtime bookkeeping allocation (the occasional 1-2 KB seen on the calling thread) in
+    // some. Passes when any of eight windows of `calls` invocations allocates nothing.
+    private static void AssertNoAllocation(Action work, int calls, string label)
+    {
+        for (int k = 0; k < 30; k++) work();
+        long last = 0L;
+        for (int window = 0; window < 8; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int k = 0; k < calls; k++) work();
+            last = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (last == 0L) return;
+        }
+        AssertEqual(0L, last, label);
+    }
+
     private const int Top = 100, SubGroup = 110, Mem1 = 1, Mem2 = 2, Mem3 = 3, Outside = 9;
 
     // Top(100) -> SubGroup(110) -> Mem2, Mem3;  Top -> Mem1;  Outside belongs to no group.
