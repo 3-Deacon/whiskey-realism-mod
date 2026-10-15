@@ -112,9 +112,9 @@ Whiskey status:
 
 Whiskey status:
 
-- Implemented analogs: `Screen`, `Probe`, `Scout`, `FixEnemy`, `ReserveWait`, flank and fallback command roles, tactical contact kind `CavalryScreen`, strategic cavalry-capable formation tagging, and now `TacticalCavalryFollowDoctrine`.
-- Current conversion: #61 maps cavalry-capable commands into guard/scout/screen/raid follow modes, filters raid targets that are hidden/officer/fort/square/supported/unsafe, sends screens away from close enemies, and maps guard-behind/raid/screen decisions back into vanilla-safe command tasks.
-- Still partial: guard "behind target" uses the existing command target/fallback machinery rather than a bespoke Scourge `GetLocBehind` coordinate writer.
+- Implemented analogs: `Screen`, `Probe`, `Scout`, `FixEnemy`, `ReserveWait`, flank and fallback command roles, tactical contact kind `CavalryScreen`, strategic cavalry-capable formation tagging, and `TacticalCavalryFollowDoctrine`.
+- What ships (BC9 correction, 2026-10-15): the posture producer maps a command group with cavalry in its subtree into guard/scout/screen/raid follow modes; the raid filter reads the visible target's own record (in square = regiment formation 4, an officer = a command group or a courier, in a fort, supported by visible infantry/artillery); screens get away from close enemies. `RequestScoutLocation` resolves to the recon planner's look point (`BattleRecon.LookPoint`), and "hidden target" is gone (the follow target is the closest visible enemy, never hidden). Actual scouting is done by single cavalry regiments sent by the recon producer (`Battle/BattleRecon.cs`), not by the follow modes, and the follow modes act on a whole group.
+- Still partial: guard "behind target" uses the existing command target/fallback machinery rather than a bespoke Scourge `GetLocBehind` coordinate writer; the follow modes still steer whole groups (a group with a single cavalry regiment counts), unlike Scourge's per-unit cavalry AI.
 
 ### Campaign sandbox movement
 
@@ -181,7 +181,7 @@ After the 2026-05-14 Scourge conversion pass, the direct tactical Scourge gaps a
 
 1. Runtime division-play execution anchored on the best engaged subordinate: implemented in `TacticalDivisionPlayExecutor` and #61 runtime sibling grouping.
 2. Commander-to-subordinate outbound order cadence: implemented as `TacticalOutboundCourierCadence`, `TacticalOutboundOrderLedger`, #61 courier delivery throttling, and duplicate-pending command suppression for doctrine/runtime play orders.
-3. Cavalry-specific guard/scout/screen/raid follow modes: implemented in `TacticalCavalryFollowDoctrine` with raid filters and screen-away behavior.
+3. Cavalry-specific guard/scout/screen/raid follow modes: `TacticalCavalryFollowDoctrine` with raid filters and screen-away behavior, applied to whole command groups by the posture producer; real reconnaissance (single cavalry regiments to unwatched ground and entry points, probes in force, a farther skirmisher screen) is the BC9 recon producer (see [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core).
 4. Artillery limber/unlimber and per-battery wheel/fallback behavior: implemented in `TacticalArtilleryMicroDoctrine` and B7 vanilla-safe writes.
 5. Campaign advance-guard/picket/supply-base sandbox movement: specified only; runtime implementation remains a separate strategic slice.
 

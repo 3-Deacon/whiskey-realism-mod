@@ -102,6 +102,10 @@ All five recommendations are implemented on `feat/battle-core` (plan `docs/super
 - **Leaf target via `transform.parent` (:2946 above).** Replaced: `LeafSlotTarget` takes the parent from the snapshot's D5 parent map.
 - **Campaign `MoveUnitTo(…, true)` returns queued, not moved** (last table row): unchanged, campaign scope.
 
+## Scouting in vanilla (BC9, 2026-10-15)
+
+Vanilla's battle AI does no reconnaissance: it reads every enemy (above), so it never needs to. Its only scouts are side effects. `CheckSkirmishing` (5343-5406) detaches row-0 infantry as skirmisher companies (type 3, sight 250) only in front of a standing screen/defend line (or an interrupted group) with no enemy in fire range, and reattaches them when the line moves; it detaches cavalry scout companies (type 4, sight 450) only in screen stance while the cavalry moves. `DetachCompany` (90430-90515) parents the company to the brigade and records its source regiment (`parentregiment`). A type-3 company is linked to its regiment and held `unitlinkdistance + skirmisherdistance` = 30 m ahead (`GetUnitLinkData` 124208-124390, re-linked by `UpdateUnitLink` 124396-124500 while nothing is in its fire range); a type-4 company is re-pathed to its parent's destination or stopped with it (`CheckScoutMovingTargets` 124616-124660). Cavalry groups are screening reserves linked behind the centre or to an open flank (`LinkReservesToLineGroup` 6729-6742, `AssignReserves` 7102-7119). A screen-stance unit is not stopped by contact (`CheckEnemyContact` 117253). What the battle core does about it is in [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core (Reconnaissance, BC9).
+
 ## Open questions
 
 - `UseIntelligenceMap` is an inspector field. The battle core logs the AI side grid's value once per battle; the smoke answers whether `GetIntelligenceOnPos` is live in battle (campaign still unlogged).

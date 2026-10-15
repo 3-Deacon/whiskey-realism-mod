@@ -10,12 +10,13 @@ namespace WhiskeyRealism.Tactical.Operations
         Regiment
     }
 
+    // Visible: the closest visible enemy. Entry (BC9): with none visible, a screen
+    // faces the stalest unwatched enemy-side entry point (BattleRecon.TryEntryBearing),
+    // where unseen enemies come from; never urgent.
     public enum TacticalFacingThreatSource
     {
         None,
         Visible,
-        RecentFire,
-        Objective,
         Entry
     }
 
@@ -161,15 +162,21 @@ namespace WhiskeyRealism.Tactical.Operations
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "player-protected");
             if (input.Routed)
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "routed");
-            if (!input.HasValidTargetFacing || input.ThreatSource == TacticalFacingThreatSource.None)
+            // BC9: an unwatched entry point is a bearing only for the tasks that watch
+            // ground (Screen, Probe, GuardFlank); every other task keeps its front-axis
+            // facing and makes no write from it, as before BC9.
+            if (!input.HasValidTargetFacing || input.ThreatSource == TacticalFacingThreatSource.None ||
+                (input.ThreatSource == TacticalFacingThreatSource.Entry && !WatchesEntry(input.Task)))
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "no-threat-bearing");
-            if (!CommandFormationCorrection.ShouldFaceThreat(input.Task) && !input.CloseEngaged && !input.FlankRisk)
+            if (!CommandFormationCorrection.ShouldFaceThreat(input.Task, input.ThreatSource) && !input.CloseEngaged && !input.FlankRisk)
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "task-does-not-face-threat");
             if (input.Scope == TacticalFacingPulseScope.Regiment)
             {
                 if (input.IsArtillery)
                     return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "artillery-vanilla");
-                if (!input.ThreatWithinFireRange)
+                // An entry point is no enemy in range: the regiment takes its brigade's
+                // entry bearing (the producer hands it down).
+                if (!input.ThreatWithinFireRange && input.ThreatSource != TacticalFacingThreatSource.Entry)
                     return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "threat-out-of-range");
                 if (input.Task == CommandTaskType.FallBackToLine)
                     return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "withdrawing");
@@ -201,6 +208,15 @@ namespace WhiskeyRealism.Tactical.Operations
             if (needsFormation)
                 return new TacticalFacingPulseDecision(TacticalFacingPulseAction.CorrectFormationAndFacing, input.TargetFormation, input.TargetFacingDegrees, urgent, "formation");
             return new TacticalFacingPulseDecision(TacticalFacingPulseAction.CorrectFacing, input.TargetFormation, input.TargetFacingDegrees, urgent, "facing");
+        }
+
+        // Tasks that watch ground rather than a seen enemy: a screen, a probe and a
+        // flank guard face the unwatched entry point when nothing is visible.
+        public static bool WatchesEntry(CommandTaskType task)
+        {
+            return task == CommandTaskType.Screen ||
+                task == CommandTaskType.Probe ||
+                task == CommandTaskType.GuardFlank;
         }
     }
 }

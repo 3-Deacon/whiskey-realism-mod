@@ -602,7 +602,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (exit != SkipReason.None) return Skip(plan, exit);
 
             // 5. Dedupe. 6. Cooldown.
-            if (IsDuplicate(rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
+            if (IsDuplicate(s, idx, rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
             if (!retry && InCooldown(rec, w, nowHours)) return Skip(plan, SkipReason.Cooldown);
 
             plan.Execute = true;
@@ -839,7 +839,7 @@ namespace WhiskeyRealism.Tactical.Battle
             VanillaMapBounds.ClampXZ(x + child.X - group.X, z + child.Z - group.Z, sizeX, sizeZ, out childX, out childZ);
         }
 
-        private bool IsDuplicate(in UnitRecord rec, in BattleOrderIntent w, float x, float z)
+        private bool IsDuplicate(IBattleUnitView s, int idx, in UnitRecord rec, in BattleOrderIntent w, float x, float z)
         {
             switch (w.Channel)
             {
@@ -879,7 +879,11 @@ namespace WhiskeyRealism.Tactical.Battle
                     return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees &&
                         w.Refuse == RefuseFlank.None;
                 case OrderChannel.Stop:
-                    return !IsMoving(rec);
+                    // StopRegiment goes to the group and every unit on its level
+                    // (PerformActionForGroupForAllUnitsOnLevel): a group whose HQ stands
+                    // while its regiments still walk (a screen-stance probe, 117253) has
+                    // something to stop (BC9).
+                    return !IsMoving(rec) && !DescendantMoving(s, idx);
                 default:
                     return false;
             }
@@ -1103,6 +1107,14 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool UsesOrderDelay(in BattleOrderIntent i)
         {
             return (i.Flags & IntentFlags.UseOrderDelay) != 0 && (i.Flags & IntentFlags.InContactWithdrawal) == 0;
+        }
+
+        private static bool DescendantMoving(IBattleUnitView s, int idx)
+        {
+            UnitRecord[] own = s.Own;
+            for (int j = 0; j < s.OwnCount; j++)
+                if (j != idx && own[j].RegimentPaths > 0 && s.IsAncestorOf(idx, j)) return true;
+            return false;
         }
 
         private static bool IsMoving(in UnitRecord rec)

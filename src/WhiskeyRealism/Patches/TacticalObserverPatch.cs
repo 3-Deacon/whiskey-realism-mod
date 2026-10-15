@@ -1866,7 +1866,8 @@ namespace WhiskeyRealism.Patches
                     context.MacroAi,
                     sector,
                     orderFrictionAllows,
-                    wlAllows))
+                    wlAllows,
+                    sideDefending: TacticalBattleCoordinator.GetSideOrchestrator(group.alliance)?.Army?.CurrentBattleStance == BattleStance.Defender))
                 : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
             EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlAllows, wlReason, orderFrictionAllows, vanillaStance, stanceDecision);
