@@ -25570,12 +25570,19 @@ static class Program
         // OwnParity = 0 (already ahead) → fails WaitAndConsolidate's > 0 check
         // CurrentRatio above WithdrawalRatioThreshold (0.85) → not Withdraw
         // → DefensiveHold (own ahead now, future worse, no own relief, hold ground)
+        // BR-H1 (2026-10-14): only a Defender holds here. In a meeting
+        // engagement vanilla attacks regardless of force balance
+        // (CheckGlobalAIStrategy 6400-6408), so Meeting/Attacker cap the attack
+        // threshold at parity and this becomes a defeat-in-detail attack.
         var ev = MakeForceBalance(15000f, 13000f,
             enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
-            aggression: 0.5f);
+            aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
             "mid commander holds when current advantage thin and future worse without own relief, got reason=" + d.Reason);
+        var meeting = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(15000f, 13000f,
+            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) }, aggression: 0.5f));
+        AssertEqual(ReinforcementOpportunity.AttackNow, meeting.Opportunity, "meeting engagement strikes before the enemy concentrates");
     }
 
     private static void ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks()
@@ -25595,6 +25602,8 @@ static class Program
 
     private static void ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws()
     {
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
         // Same numbers, aggression=0.10 (McClellan-style)
         // AttackThreshold rises to ~1.20 * (1.30 - 0.10*0.40) = ~1.51
         // CurrentRatio 1.15 way below — won't attack
@@ -25603,7 +25612,7 @@ static class Program
         //   doesn't withdraw from a position where own > enemy currently)
         var ev = MakeForceBalance(15000f, 13000f,
             enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
-            aggression: 0.10f);
+            aggression: 0.10f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
             "cautious commander holds defensively (not attack, not withdraw with own ahead now), got reason=" + d.Reason);
@@ -25896,6 +25905,8 @@ static class Program
 
     private static void ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold()
     {
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
         // 13K vs 13K now, both reinforcing — enemy +8K in 14h, own +3K in 12h
         // CurrentRatio = 1.0 (below threshold)
         // OwnAt 12h = 16K, EnemyAt 12h = 13K → own briefly ahead 12-14h
@@ -25905,7 +25916,7 @@ static class Program
         var ev = MakeForceBalance(13000f, 13000f,
             ownArrivals: new[] { new ReinforcementArrival(12f, 3000f) },
             enemyArrivals: new[] { new ReinforcementArrival(14f, 8000f) },
-            aggression: 0.5f);
+            aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         // CurrentRatio 1.0 is below WithdrawalRatioThreshold(0.85)? No, 1.0 >= 0.85.
         // So withdrawal is NOT triggered. Hold is the right call.
@@ -26013,11 +26024,13 @@ static class Program
 
     private static void ReinforcementOpportunityCautiousStandingAdvantageDoesNotAttack()
     {
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
         // 15K vs 13K, no enemy growth, cautious commander (0.10).
         // AttackThreshold @ 0.10 = 1.20 * (1.30 - 0.10*0.40) = 1.512
         // CurrentRatio 1.154 < 1.512 → ratio check fails even though enemy static.
         // Decision: NOT AttackNow (cautious commander needs bigger margin).
-        var ev = MakeForceBalance(15000f, 13000f, aggression: 0.10f);
+        var ev = MakeForceBalance(15000f, 13000f, aggression: 0.10f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
             "cautious commander honors elevated attack threshold despite static enemy, got " + d.Opportunity + " reason=" + d.Reason);
@@ -27462,11 +27475,11 @@ static class Program
 
     private static void MacroAiDefensiveHoldMapsToDefend()
     {
+        // BR-H1 (2026-10-14): DefensiveHold is the doctrine's fall-through —
+        // no opinion, vanilla's CheckGlobalAIStrategy decides.
         int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
             ReinforcementOpportunity.DefensiveHold, currentRatio: 0.95f, commanderAggression01: 0.5f);
-        AssertTrue(result.HasValue, "DefensiveHold must return a macroai value");
-        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
-            "DefensiveHold → vanilla macroai = 2 (forms line of battle via AdjustGroupAIStance)");
+        AssertTrue(!result.HasValue, "DefensiveHold returns null (vanilla decides)");
     }
 
     private static void MacroAiWaitAndConsolidateMapsToDefend()
@@ -27485,8 +27498,8 @@ static class Program
         int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
             ReinforcementOpportunity.WithdrawalToFightLater, currentRatio: 0.60f, commanderAggression01: 0.5f);
         AssertTrue(result.HasValue, "WithdrawalToFightLater must return a macroai value");
-        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiRetreat, result.Value,
-            "WithdrawalToFightLater → vanilla macroai = 3 (retreat)");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
+            "WithdrawalToFightLater → defend (2); macroai 3 stays vanilla's (startoffallback 6355/6362)");
     }
 
     private static void MacroAiNoOpportunityReturnsNull()
@@ -27526,7 +27539,7 @@ static class Program
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(0), "0 is legal");
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(1), "1 is legal");
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(2), "2 is legal");
-        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is legal");
+        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 (retreat) is never a Whiskey write");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(-1), "-1 (unset) is NOT a legal write");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(4), "4 is out of range");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(99), "99 is out of range");
@@ -27917,10 +27930,10 @@ static class Program
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.DelayingDefense),
             "Attacker + DelayingDefense → demote to Defender");
-        AssertEqual(BattleStance.Defender,
+        AssertEqual(BattleStance.Attacker,
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.DefensiveHold),
-            "Attacker + DefensiveHold → demote to Defender");
+            "Attacker + DefensiveHold (no opinion, BR-H1) → stays Attacker");
         AssertEqual(BattleStance.Defender,
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.WaitAndConsolidate),

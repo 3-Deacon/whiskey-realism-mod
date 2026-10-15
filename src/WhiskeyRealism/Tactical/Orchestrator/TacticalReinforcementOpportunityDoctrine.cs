@@ -80,10 +80,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class TacticalReinforcementOpportunityDoctrine
     {
-        // Personality-tuned attack threshold:
-        //   aggression 0.0 (cautious)  → threshold ~1.56  ("need 56% advantage")
-        //   aggression 0.5 (mid-band)  → threshold ~1.20  ("need 20% advantage")
-        //   aggression 1.0 (aggressive)→ threshold ~1.08  ("need 8% advantage")
+        // Personality-tuned attack threshold
+        //   BaseAttackThreshold * (AggressionThresholdOffset - aggression * AggressionThresholdScale):
+        //   aggression 0.0 (cautious)  → 1.56  ("need 56% advantage")
+        //   aggression 0.5 (mid-band)  → 1.32  ("need 32% advantage")
+        //   aggression 1.0 (aggressive)→ 1.08  ("need 8% advantage")
+        // Capped at parity for Meeting/Attacker stances — see
+        // EffectiveAttackThreshold.
         public const float BaseAttackThreshold = 1.20f;
         public const float AggressionThresholdScale = 0.40f;
         public const float AggressionThresholdOffset = 1.30f;
@@ -153,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
         {
-            float attackThreshold = ComputeAttackThreshold(ev.CommanderAggression01);
+            float attackThreshold = EffectiveAttackThreshold(ev.CommanderAggression01, ev.Stance);
             float attackWindowHours = ComputeAttackWindowHours(ev.CommanderAggression01);
             float maxWaitHours = ComputeMaxWaitHours(ev.CommanderAggression01);
 
@@ -198,11 +201,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool defeatInDetailWindowOpen =
                 parityForEnemy <= 24f &&
                 parityForEnemy >= attackWindowHours;
-            if (stanceAllowsAttack && ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing))
+            // (c) Meeting/Attacker at parity or better: vanilla attacks
+            //     (6400-6408) as long as the enemy does not overtake us before
+            //     the attack can land (exact parity makes ParityHoursForEnemy 0,
+            //     which neither (a) nor (b) accepts).
+            bool parityHoldsThroughWindow = ev.Stance != BattleStance.Defender &&
+                ev.EnemyStrengthAtHour(attackWindowHours) <= ev.OwnStrengthAtHour(attackWindowHours);
+            if (stanceAllowsAttack && ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing || parityHoldsThroughWindow))
             {
                 string reason = enemyNotGrowing
                     ? "advantage-and-enemy-static"
-                    : "defeat-in-detail-window-open";
+                    : defeatInDetailWindowOpen ? "defeat-in-detail-window-open" : "parity-holds-through-attack-window";
                 return new ReinforcementOpportunityDecision(
                     ReinforcementOpportunity.AttackNow,
                     reason,
@@ -366,6 +375,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return BaseAttackThreshold * (AggressionThresholdOffset - agg * AggressionThresholdScale);
         }
 
+        /// <summary>
+        /// Attack threshold after the battle-type rule. Vanilla
+        /// CheckGlobalAIStrategy (6400-6408) attacks in a meeting engagement
+        /// (GetBattleType == 0) regardless of force balance, and attacks
+        /// whenever forcebalance ≥ forcebalancetriggerattack / (1 + initiative
+        /// × 0.7) = 0.80 / 1.35 ≈ 0.59 at mid initiative (battleprefs) — below
+        /// parity. Requiring 1.08-1.56x for every stance left both sides of a
+        /// near-even meeting in DefensiveHold (BR-H1). Meeting/Attacker cap at
+        /// parity; a Defender keeps the personality threshold (vanilla's
+        /// defender only assaults at overwhelming balance, 6408).
+        /// </summary>
+        public static float EffectiveAttackThreshold(float commanderAggression01, BattleStance stance)
+        {
+            float t = ComputeAttackThreshold(commanderAggression01);
+            if (stance != BattleStance.Defender && t > 1f) t = 1f;
+            return t;
+        }
+
         public static float ComputeAttackWindowHours(float commanderAggression01)
         {
             float agg = Clamp01(commanderAggression01);
@@ -377,10 +404,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static float ComputeMaxWaitHours(float commanderAggression01)
         {
             float agg = Clamp01(commanderAggression01);
-            // cautious 0.0 → BaseMaxWaitHoursForOwn + AggressionWaitScale = 9h
-            // aggressive 1.0 → BaseMaxWaitHoursForOwn - AggressionWaitScale*0 = 6h
-            // Actually we want aggressive shorter and cautious longer:
-            // base + (1-agg) * scale → 0.0→9, 0.5→7.5, 1.0→6
+            // base + (1 - agg) * scale: cautious 0.0 → 28 h, mid 0.5 → 23 h,
+            // aggressive 1.0 → 18 h.
             return BaseMaxWaitHoursForOwn + (1f - agg) * AggressionWaitScale;
         }
 

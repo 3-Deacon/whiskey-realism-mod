@@ -58,6 +58,10 @@ internal static class TacticalEvidenceFixTests
         Run("plan deadline runs on battle time", PlanDeadlineRunsOnBattleTime);
         Run("opportunity hysteresis holds on battle time", OpportunityHysteresisOnBattleTime);
         Run("main arrival hold budget is battle minutes", MainArrivalHoldIsBattleMinutes);
+        Run("defensive hold is no opinion and nothing maps to retreat", MacroMappingNoOpinionNoRetreat);
+        Run("meeting and attacker stances attack at parity like vanilla", DoctrineAttacksAtParityForMeetingAndAttacker);
+        Run("attack threshold formula pinned to its documented values", AttackThresholdPinned);
+        Run("stance reconciler keeps attacker on defensive hold", ReconcilerKeepsAttackerOnDefensiveHold);
     }
 
     private static void Run(string name, Action test)
@@ -684,5 +688,60 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(15f * 60f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds, "hold budget 15 battle-minutes");
         TestHarness.AssertTrue(TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(far, 0.5f, 600f, 500f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds), "10 battle-minutes in: still waiting");
         TestHarness.AssertFalse(TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(far, 0.5f, 1000f, 500f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds), "past 15 battle-minutes: release");
+    }
+
+    // ---- BR-H1 stalemate / T-comment ----
+
+    private static void MacroMappingNoOpinionNoRetreat()
+    {
+        TestHarness.AssertFalse(TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.DefensiveHold, 1f, 0.5f).HasValue, "DefensiveHold -> vanilla decides");
+        TestHarness.AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.WithdrawalToFightLater, 0.3f, 0.5f).Value, "withdrawal holds the line; the army retreat stays vanilla's");
+        foreach (ReinforcementOpportunity o in Enum.GetValues(typeof(ReinforcementOpportunity)))
+        {
+            var m = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(o, 3f, 0.5f);
+            TestHarness.AssertTrue(!m.HasValue || m.Value != 3, o + " must never map to macroai 3 (no startoffallback stamp, 6355/6362)");
+        }
+        TestHarness.AssertFalse(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is not a legal Whiskey write");
+    }
+
+    private static TacticalForceBalanceEvidence Stanced(float own, float enemy, BattleStance stance)
+        => new TacticalForceBalanceEvidence(own, enemy, null, null, 0.5f, 0.5f, 1f, stance: stance);
+
+    private static void DoctrineAttacksAtParityForMeetingAndAttacker()
+    {
+        // CheckGlobalAIStrategy 6400-6408: battleType 0 (meeting) -> attack
+        // regardless of forcebalance; attack also at forcebalance >= 0.80 /
+        // (1 + initiative * 0.7) (battleprefs), i.e. below parity.
+        TestHarness.AssertEqual(ReinforcementOpportunity.AttackNow,
+            TacticalReinforcementOpportunityDoctrine.Decide(Stanced(5000f, 5000f, BattleStance.Meeting)).Opportunity, "meeting at parity attacks");
+        TestHarness.AssertEqual(ReinforcementOpportunity.AttackNow,
+            TacticalReinforcementOpportunityDoctrine.Decide(Stanced(5000f, 5000f, BattleStance.Attacker)).Opportunity, "attacker at parity attacks");
+        TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(Stanced(5000f, 5000f, BattleStance.Defender)).Opportunity
+            != ReinforcementOpportunity.AttackNow, "defender at parity does not");
+        TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(Stanced(4500f, 5000f, BattleStance.Meeting)).Opportunity
+            != ReinforcementOpportunity.AttackNow, "meeting below parity does not");
+    }
+
+    private static void AttackThresholdPinned()
+    {
+        TestHarness.AssertTrue(Near(TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(0f), 1.56f), "cautious 1.56");
+        TestHarness.AssertTrue(Near(TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(0.5f), 1.32f), "mid 1.32");
+        TestHarness.AssertTrue(Near(TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(1f), 1.08f), "aggressive 1.08");
+        TestHarness.AssertTrue(Near(TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Meeting), 1f), "meeting capped at parity");
+        TestHarness.AssertTrue(Near(TacticalReinforcementOpportunityDoctrine.EffectiveAttackThreshold(0.5f, BattleStance.Defender), 1.32f), "defender keeps the personality threshold");
+        TestHarness.AssertEqual(28f, TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(0f), "cautious waits 28 h");
+        TestHarness.AssertEqual(18f, TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(1f), "aggressive waits 18 h");
+    }
+
+    private static void ReconcilerKeepsAttackerOnDefensiveHold()
+    {
+        TestHarness.AssertEqual(BattleStance.Attacker, TacticalStanceReconciler.ResolveEffectiveStance(
+            BattleStance.Attacker, ReinforcementOpportunity.DefensiveHold), "DefensiveHold is no opinion: keep Attacker");
+        TestHarness.AssertEqual(BattleStance.Meeting, TacticalStanceReconciler.ResolveEffectiveStance(
+            BattleStance.Meeting, ReinforcementOpportunity.DefensiveHold), "keep Meeting");
+        TestHarness.AssertEqual(BattleStance.Defender, TacticalStanceReconciler.ResolveEffectiveStance(
+            BattleStance.Attacker, ReinforcementOpportunity.DelayingDefense), "outnumbered DelayingDefense still demotes");
     }
 }
