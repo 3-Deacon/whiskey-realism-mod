@@ -114,16 +114,24 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        private static void Complete(PerfScope scope, long endTimestamp)
+        private static void Complete(
+            string name,
+            TelemetryLayer layer,
+            TelemetryCategory category,
+            double thresholdMs,
+            int depth,
+            bool recordOnly,
+            long startTimestamp,
+            long endTimestamp)
         {
-            double durationMs = (endTimestamp - scope.StartTimestamp) * TicksToMs;
-            if (scope.Depth == 0)
-                TelemetryFrameProbe.RecordTopLevelScope(scope.Name, durationMs);
-            if (scope.RecordOnly)
+            double durationMs = (endTimestamp - startTimestamp) * TicksToMs;
+            if (depth == 0)
+                TelemetryFrameProbe.RecordTopLevelScope(name, durationMs);
+            if (recordOnly)
                 return;
 
             ThreadAggregates aggregates = t_aggregates ?? (t_aggregates = new ThreadAggregates(endTimestamp));
-            ScopeAggregate aggregate = aggregates.Get(scope.Name, scope.Layer, scope.Category, scope.ThresholdMs);
+            ScopeAggregate aggregate = aggregates.Get(name, layer, category, thresholdMs);
             if (aggregate != null)
             {
                 aggregate.Count++;
@@ -131,7 +139,7 @@ namespace WhiskeyRealism.Telemetry
                 if (durationMs > aggregate.MaxMs)
                     aggregate.MaxMs = durationMs;
 
-                if (durationMs >= scope.ThresholdMs)
+                if (durationMs >= thresholdMs)
                 {
                     aggregate.SlowCount++;
                     if (TelemetryRouter.PerformanceWarningsEnabled
@@ -140,11 +148,11 @@ namespace WhiskeyRealism.Telemetry
                         aggregate.SlowRowsEmitted++;
                         TelemetryRuntimeDiagnostics counters = TelemetryRouter.DiagnosticsSnapshot();
                         EmitPerformance(
-                            scope.Name,
-                            scope.Layer,
-                            scope.Category,
+                            name,
+                            layer,
+                            category,
                             durationMs,
-                            scope.ThresholdMs,
+                            thresholdMs,
                             counters.EmittedCount,
                             counters.DroppedCount,
                             counters.EmittedBytes);
@@ -268,12 +276,22 @@ namespace WhiskeyRealism.Telemetry
                 if (!_active) return;
                 long end = Stopwatch.GetTimestamp();
                 _active = false;
+
+                // Copy before popping: once t_depth drops, any scope opened while Complete
+                // emits rows reuses this pooled instance and overwrites its fields.
+                string name = Name;
+                TelemetryLayer layer = Layer;
+                TelemetryCategory category = Category;
+                double thresholdMs = ThresholdMs;
+                bool recordOnly = RecordOnly;
+                long start = StartTimestamp;
+
                 // Pop to this scope's depth (also heals a non-LIFO dispose).
                 t_depth = Depth;
 
                 try
                 {
-                    Complete(this, end);
+                    Complete(name, layer, category, thresholdMs, Depth, recordOnly, start, end);
                 }
                 catch
                 {
