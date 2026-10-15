@@ -262,6 +262,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             _lastPlayExecutionTelemetryAt.Clear();
             for (int i = 0; i < SideCount; i++) _maneuvers[i].Clear();
+            _firstFlankMarchLogged = false;
         }
 
         // ---- BC11 decision 4: envelopment maneuvers --------------------------------------------
@@ -287,6 +288,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // Plan-scoped state per side (BattleScope "play-executor" clears it with the zone-assignment cache).
         private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(), new SideManeuvers() };
         private static readonly int[] _riverSamples = new int[4096];
+        private static bool _firstFlankMarchLogged;
         private static readonly Func<float, float, float> TerrainHeightAt = HeightAt;
 
         /// <summary>
@@ -325,6 +327,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     // A new plan, or the clock went back (reload, new battle): the maneuvers start over.
                     if (side.Plan != planId || now < side.ActivatedHours)
                     {
+                        EmitPlanChanged(allianceId, side);
                         side.Clear();
                         side.Plan = planId;
                         side.ActivatedHours = now;
@@ -368,6 +371,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     side.Orders.Clear();
                     return side.Orders;
                 }
+            }
+        }
+
+        // Children still maneuvering when their plan changed: one Abandoned row each (smoke item 2.28, reason plan-changed).
+        private static void EmitPlanChanged(int allianceId, SideManeuvers side)
+        {
+            if (side.Plan == BattlePlanId.Unknown) return;
+            foreach (KeyValuePair<string, ManeuverState> pair in side.States)
+            {
+                ManeuverPhase phase = pair.Value.Phase;
+                if (phase != ManeuverPhase.Hold && phase != ManeuverPhase.March && phase != ManeuverPhase.Turn && phase != ManeuverPhase.Attack) continue;
+                var abandoned = pair.Value;
+                abandoned.Phase = ManeuverPhase.Abandoned;
+                abandoned.AbandonReason = "plan-changed";
+                var order = new ManeuverOrder { Phase = ManeuverPhase.Abandoned, Heading = -1f, Reason = "plan-changed" };
+                EmitEnvelopment(allianceId, side.Plan, pair.Key, in order, in abandoned, default(ManeuverInput));
             }
         }
 
@@ -472,6 +491,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 string kind = input.Kind.ToString();
                 string phase = state.Phase.ToString();
+                if (state.Phase == ManeuverPhase.March && !_firstFlankMarchLogged)
+                {
+                    _firstFlankMarchLogged = true;
+                    OnceLog.Info("tactical-battle-core:envelopment-first-fire",
+                        "[Envelopment] first flank march: plan=" + planId + " rect=" + kind + " child=" + childId);
+                }
                 string reason = state.Phase == ManeuverPhase.Abandoned ? (state.AbandonReason ?? order.Reason) : order.Reason;
                 bool mirrored = state.Mirrored;
                 float targetX = order.TargetX, targetZ = order.TargetZ, anchorX = input.AnchorX, anchorZ = input.AnchorZ;

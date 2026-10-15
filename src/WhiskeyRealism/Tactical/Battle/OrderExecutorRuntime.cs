@@ -110,6 +110,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
         private static bool _coveredLogged;
+        private static bool _refuseLogged;
 
         /// <summary>Per-tick seams and settings for an executor.</summary>
         internal static void BindForTick(OrderExecutor executor)
@@ -609,6 +610,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (RotateInPlace(child, _rotationHeadings[k])) rotated++;
             }
             if (rotated > 0 || skipped > 0) PostureTelemetry.RefuseInPlace(view, groupIndex, w.Refuse, rotated, skipped);
+            if (rotated > 0) NoteRefuseFirstFire("InPlace", w.Refuse, rotated, skipped);
             return rotated > 0;
         }
 
@@ -636,7 +638,18 @@ namespace WhiskeyRealism.Tactical.Battle
                 placeentrenchments: false,
                 adjustbyterrainshape: true);
             NoteLayout(unit, refuse);
+            if (refuse != RefuseFlank.None)
+                NoteRefuseFirstFire("Wheel", refuse, unit.groupposition != null ? unit.groupposition.attachedunits : 0, 0);
             return true;
+        }
+
+        // Smoke item 2.26: the first refused flank of a battle, one line.
+        private static void NoteRefuseFirstFire(string mode, RefuseFlank side, int regiments, int skipped)
+        {
+            if (_refuseLogged) return;
+            _refuseLogged = true;
+            OnceLog.Info("tactical-battle-core:refuse-first-fire",
+                "[OrderExecutor] first refused flank: mode=" + mode + " flank=" + side + " regiments=" + regiments + " skipped=" + skipped);
         }
 
         private static void NoteLayout(Regiment unit, RefuseFlank refuse)
@@ -782,6 +795,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             _firstFireLogged = false;
             _coveredLogged = false;
+            _refuseLogged = false;
             for (int a = 0; a < _covered.Length; a++)
             {
                 _covered[a].Clear();

@@ -77,16 +77,17 @@ namespace WhiskeyRealism.Patches
                         points += FlankThreatTally.Weight(unit.outflanked);
                     }
 
-                    if (__instance.flanksthreated == points) return;
+                    float vanilla = __instance.flanksthreated;
+                    if (vanilla == points) return;
                     __instance.flanksthreated = points;
-                    if (_logged || points == 0) return;
+                    if (_logged) return;
                     _logged = true;
-                    OnceLog.Info("tactical.flank-threat-tally:first",
-                        "[Patch:FlankThreatTally] flanksthreated sums each subordinate's own outflanked weight (vanilla adds the group's own code): first group points=" + points);
+                    OnceLog.Info("tactical-flank-threat:first-correction",
+                        "[FlankThreatTally] group flanks threatened re-tallied per subordinate: vanilla=" + vanilla + " corrected=" + points);
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("tactical.flank-threat-tally:postfix", "[Patch:FlankThreatTally] UpdateGroupStrength postfix failed, vanilla tally kept: " + ex.Message);
+                    OnceLog.Warning("tactical-flank-threat:failed", "[FlankThreatTally] UpdateGroupStrength postfix failed, vanilla tally kept: " + ex.Message);
                 }
             }
         }
@@ -100,7 +101,7 @@ namespace WhiskeyRealism.Patches
                 FieldInfo field = AccessTools.Field(typeof(Regiment), "bui");
                 _bui = CompiledFieldGetter.Build<BattleUI>(field);
                 if (_bui == null)
-                    OnceLog.Warning("tactical.flank-threat-tally:bui", "[Patch:FlankThreatTally] Regiment.bui not found; vanilla tally kept");
+                    OnceLog.Warning("tactical-flank-threat:bui-missing", "[FlankThreatTally] Regiment.bui not found; vanilla tally kept");
             }
             return _bui != null;
         }

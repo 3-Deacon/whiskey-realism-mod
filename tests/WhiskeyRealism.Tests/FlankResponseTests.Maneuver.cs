@@ -346,7 +346,7 @@ internal static partial class FlankResponseTests
         input.InwardLegHitsRiver = true;
         order = EnvelopmentManeuver.Step(ref state, After(input, 10.77));
         AssertEqual(ManeuverPhase.Abandoned, order.Phase, "one mirrored try only");
-        AssertEqual("river-inward", order.Reason, "reason");
+        AssertEqual("river-on-leg", order.Reason, "reason");
         AssertEqual(ManeuverPhase.Abandoned, EnvelopmentManeuver.Step(ref state, After(Maneuver(), 11.5)).Phase, "abandoned stays abandoned for the plan");
 
         // The mirrored point is the reflection across the army's centre line.
@@ -367,7 +367,7 @@ internal static partial class FlankResponseTests
         var state = default(ManeuverState);
         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.75));
         AssertEqual(ManeuverPhase.Abandoned, order.Phase, "a failing wing of a double envelopment is abandoned");
-        AssertEqual("river-inward", order.Reason, "reason");
+        AssertEqual("river-on-leg", order.Reason, "reason");
         AssertFalse(order.Overrides, "the child returns to its allocator role");
         AssertFalse(state.Mirrored, "no mirror");
     }
@@ -378,7 +378,7 @@ internal static partial class FlankResponseTests
         input.MarchLegHitsRiver = true;
         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.8));
         AssertEqual(ManeuverPhase.Abandoned, order.Phase, "a river on the march leg abandons a double wing");
-        AssertEqual("river-march", order.Reason, "reason");
+        AssertEqual("river-on-leg", order.Reason, "reason");
     }
 
     private static void InwardLegClearReadsOnlyRiverId()
@@ -407,7 +407,7 @@ internal static partial class FlankResponseTests
         var state = default(ManeuverState);
         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.75));
         AssertEqual(ManeuverPhase.Abandoned, order.Phase, "enemy 5 m above the anchor: abandoned");
-        AssertEqual("high-ground", order.Reason, "reason");
+        AssertEqual("anchored-high-ground", order.Reason, "reason");
         input.MaxCorridorEnemyHeight = input.AnchorHeight + 4.99f;
         state = default(ManeuverState);
         AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref state, After(input, 10.75)).Phase, "4.99 m passes");
@@ -467,13 +467,17 @@ internal static partial class FlankResponseTests
         AssertEqual(ManeuverPhase.None, state.Phase, "the state is dropped");
         // The doctrine build ignores a table on a Defender side too, and the stance guard still applies to a task it sets.
         var nodes = new[] { new CommandNodeOperationalState("node-7", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, CommandTaskState.Planning) };
-        ManeuverOrder attack = new ManeuverOrder { Phase = ManeuverPhase.Attack, Task = CommandTaskType.AttackObjective, TargetX = 800f, TargetZ = 1500f, Heading = -1f, Reason = "attack-line-end" };
-        var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", attack, 1f, 0f) }, new[] { NodeIntent("node-7", "node-7") });
+        ManeuverOrder turn = new ManeuverOrder { Phase = ManeuverPhase.Turn, Task = CommandTaskType.AdvanceToAssembly, TargetX = 1000f, TargetZ = 500f, Heading = 345f, Reason = "turn-to-line-end" };
+        var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", turn, 1f, 0f) }, new[] { NodeIntent("node-7", "node-7") });
         CommandDoctrineOrder[] defender = DoctrineOrders(nodes, BattleStance.Defender, table);
-        AssertTrue(defender[0].Task != CommandTaskType.AttackObjective, "a Defender's order is never an attack");
-        AssertEqual(-1f, defender[0].ManeuverHeading, "no maneuver on a Defender side");
+        AssertEqual(-1f, defender[0].ManeuverHeading, "no maneuver heading on a Defender side");
+        AssertFalse(defender[0].PrimaryTarget.HasValue && defender[0].PrimaryTarget.X == 1000f && defender[0].PrimaryTarget.Z == 500f, "no maneuver target either");
+        ManeuverOrder attack = new ManeuverOrder { Phase = ManeuverPhase.Attack, Task = CommandTaskType.AttackObjective, TargetX = 800f, TargetZ = 1500f, Heading = -1f, Reason = "attack-line-end" };
+        var attackTable = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", attack, 1f, 0f) }, new[] { NodeIntent("node-7", "node-7") });
+        AssertTrue(DoctrineOrders(nodes, BattleStance.Defender, attackTable)[0].Task != CommandTaskType.AttackObjective, "a Defender's order is never an attack");
         CommandDoctrineOrder[] meeting = DoctrineOrders(nodes, BattleStance.Meeting, table);
-        AssertEqual(CommandTaskType.AttackObjective, meeting[0].Task, "the same table on a Meeting side attacks");
+        AssertEqual(345f, meeting[0].ManeuverHeading, "the same table on a Meeting side carries the heading");
+        AssertEqual(CommandTaskType.AttackObjective, DoctrineOrders(nodes, BattleStance.Meeting, attackTable)[0].Task, "and attacks");
     }
 
     private static CommandDoctrineOrder[] DoctrineOrders(CommandNodeOperationalState[] nodes, BattleStance stance, ManeuverNodeTable table)

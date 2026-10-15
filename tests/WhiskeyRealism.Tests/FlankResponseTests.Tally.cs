@@ -18,6 +18,7 @@ internal static partial class FlankResponseTests
             ("bc11 TallyPatchIsScopedFlaggedAndReadOnlyToVanillasField", TallyPatchIsScopedFlaggedAndReadOnlyToVanillasField),
             ("bc11 VanillaFlankMoveRowOnLastAiOrderChange", VanillaFlankMoveRowOnLastAiOrderChange),
             ("bc11 FlankMoveWatchAllocatesNothingAfterWarmup", FlankMoveWatchAllocatesNothingAfterWarmup),
+            ("bc11 SmokeLogLinesMatchTheChecklist", SmokeLogLinesMatchTheChecklist),
         };
     }
 
@@ -149,6 +150,34 @@ internal static partial class FlankResponseTests
         AssertPinned(row, ".WithField(\"stance\", stance)", "and stance");
         AssertPinned(row, "Plugin.Instance.EnableTacticalObserver.Value", "under Enable Tactical Observer");
         AssertPinned(tick, "WatchVanillaFlankMoves(battle, alliance, snapshot);", "called each arbiter tick");
+    }
+
+    // The BC7 smoke checklist (items 2.26-2.29) names these lines and fields; the greps in the checklist find them.
+    private static void SmokeLogLinesMatchTheChecklist()
+    {
+        string runtime = SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
+        AssertPinned(runtime, "OnceLog.Info(\"tactical-battle-core:refuse-first-fire\",", "2.26 key");
+        AssertPinned(runtime, "\"[OrderExecutor] first refused flank: mode=\" + mode + \" flank=\" + side + \" regiments=\" + regiments + \" skipped=\" + skipped);", "2.26 line");
+        AssertPinned(runtime, "NoteRefuseFirstFire(\"InPlace\", w.Refuse, rotated, skipped);", "2.26 in-place mode");
+        AssertPinned(runtime, "NoteRefuseFirstFire(\"Wheel\", refuse,", "2.26 wheel mode");
+        string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        AssertPinned(producers, "\"TacticalFacingPulse\", TelemetrySeverity.Info,", "the facing pulse row");
+        AssertPinned(producers, ".WithField(\"facingSource\", facingSource ?? PostureTargets.NoFacingSource)\n                        .WithField(\"writeResult\"", "2.27 facingSource on both rows");
+        string plays = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        AssertPinned(plays, "OnceLog.Info(\"tactical-battle-core:envelopment-first-fire\",", "2.28 key");
+        AssertPinned(plays, "\"[Envelopment] first flank march: plan=\" + planId + \" rect=\" + kind + \" child=\" + childId);", "2.28 line");
+        AssertPinned(plays, "abandoned.AbandonReason = \"plan-changed\";", "2.28 plan-changed");
+        AssertPinned(plays, ".WithField(\"mirrored\", mirrored)", "2.28 mirrored");
+        string pure = SourceText("Tactical", "Orchestrator", "Plays", "EnvelopmentManeuver.cs");
+        foreach (string reason in new[] { "river-on-leg", "anchored-high-ground", "lost-strength", "timeout" })
+            AssertTrue(pure.Contains("\"" + reason + "\""), "2.28 reason " + reason);
+        string patch = SourceText("Patches", "FlankThreatTallyFixPatch.cs");
+        AssertPinned(patch, "OnceLog.Info(\"tactical-flank-threat:first-correction\",", "2.29 key");
+        AssertPinned(patch, "\"[FlankThreatTally] group flanks threatened re-tallied per subordinate: vanilla=\" + vanilla + \" corrected=\" + points);", "2.29 line");
+        AssertPinned(patch, "OnceLog.Warning(\"tactical-flank-threat:failed\",", "2.29 failure key");
+        string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
+        AssertPinned(army, "\"TacticalReserveRelease\",", "2.29 reserve release row");
+        AssertPinned(army, ".WithField(\"reason\", \"flank-threat\")", "2.29 reason");
     }
 
     private static void FlankMoveWatchAllocatesNothingAfterWarmup()

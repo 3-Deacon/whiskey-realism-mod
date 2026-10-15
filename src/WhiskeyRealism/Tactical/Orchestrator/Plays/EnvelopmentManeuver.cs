@@ -309,12 +309,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // the inward corridor standing at least heightdifferencetoenemyunitanchored above the anchor.
         private static string FlankMoveCheck(in ManeuverInput input)
         {
-            if (input.MarchLegHitsRiver) return "river-march";
-            if (input.InwardLegHitsRiver) return "river-inward";
+            if (input.MarchLegHitsRiver || input.InwardLegHitsRiver) return "river-on-leg";
             Span<float> heights = stackalloc float[1];
             heights[0] = input.MaxCorridorEnemyHeight;
             if (AnchoredHighGround(input.AnchorHeight, heights, input.CorridorEnemyCount > 0 ? 1 : 0, input.HeightDifferenceAnchored))
-                return "high-ground";
+                return "anchored-high-ground";
             return null;
         }
 

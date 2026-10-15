@@ -1059,8 +1059,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         internal const string NoFacingSource = "none";
-        private const string PressureFacingSource = "pressure";
-        private const string ClosestFacingSource = "closest";
+        internal const string PressureFacingSource = "pressure";
+        internal const string ClosestFacingSource = "closest";
 
         /// <summary>
         /// BC11 decision 1: the bearing a holding group faces. The strongest perceived pressure within the slice
@@ -1523,7 +1523,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         internal static void Facing(BattleSnapshot s, int i, TacticalFacingPulseScope scope, CommandTaskType task,
-            TacticalFacingPulseDecision decision, bool submitted)
+            TacticalFacingPulseDecision decision, bool submitted, string facingSource = null)
         {
             try
             {
@@ -1545,6 +1545,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         .WithField("task", task.ToString())
                         .WithField("targetFormation", decision.TargetFormation)
                         .WithField("targetFacing", decision.TargetFacingDegrees)
+                        .WithField("facingSource", facingSource ?? PostureTargets.NoFacingSource)
                         .WithField("writeResult", submitted ? "submitted" : "none"));
             }
             catch (Exception ex)
@@ -1616,9 +1617,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     TacticalFacingPulseScope scope = ScopeFor(g.State.Echelon);
                     if (scope == TacticalFacingPulseScope.Division)
                     {
-                        TacticalFacingPulseDecision axis = TacticalFacingPulseDoctrine.Decide(
-                            Input(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk, -1f));
-                        PostureTelemetry.Facing(s, i, scope, g.State.Task, axis, false);
+                        TacticalFacingPulseInput axisInput = Input(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk, -1f);
+                        TacticalFacingPulseDecision axis = TacticalFacingPulseDoctrine.Decide(axisInput);
+                        PostureTelemetry.Facing(s, i, scope, g.State.Task, axis, false, FacingSourceOf(s, i, scope, axisInput));
                         continue;
                     }
                     if (scope != TacticalFacingPulseScope.Brigade) continue;
@@ -1635,7 +1636,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     // per-regiment pulses below.
                     bool cleanSubtree = PostureSense.SubtreeAcceptsGroupFacing(t.Descendants[i]);
                     bool submitted = PostureIntentPlan.SubmitBrigadePulse(sink, rec.InstanceId, brigadeInput, brigade, cleanSubtree) > 0;
-                    PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted);
+                    PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted, FacingSourceOf(s, i, scope, brigadeInput));
                     // BC9: regiments of a brigade turning to an entry point take the
                     // brigade's bearing; on a clean subtree the group facing turns them.
                     bool entry = brigade.ShouldWrite && brigadeInput.ThreatSource == TacticalFacingThreatSource.Entry;
@@ -1654,12 +1655,23 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                             TacticalFacingPulseScope.Regiment, s.Own[u].Formation, engaged, flank, entry ? entryHeading : -2f));
                         if (d.Action != TacticalFacingPulseAction.CorrectFacing) continue;
                         sink.Submit(PostureIntentPlan.FacingPulse(s.Own[u].InstanceId, d.TargetFacingDegrees));
-                        PostureTelemetry.Facing(s, u, TacticalFacingPulseScope.Regiment, g.State.Task, d, true);
+                        PostureTelemetry.Facing(s, u, TacticalFacingPulseScope.Regiment, g.State.Task, d, true, PostureTargets.ClosestFacingSource);
                         pulses++;
                     }
                     g.FacingSubmitted = submitted || pulses > 0;
                 }
             }
+        }
+
+        // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).
+        private static string FacingSourceOf(BattleSnapshot s, int u, TacticalFacingPulseScope scope, in TacticalFacingPulseInput input)
+        {
+            if (input.ThreatSource == TacticalFacingThreatSource.Entry) return "entry";
+            if (input.ThreatSource == TacticalFacingThreatSource.None) return PostureTargets.NoFacingSource;
+            return scope != TacticalFacingPulseScope.Regiment && Plugin.FlankResponseEnabled() &&
+                FlankFacing.MostPressuredBearing(s, u, s.Own[u].RotationY, out _, out _)
+                ? PostureTargets.PressureFacingSource
+                : PostureTargets.ClosestFacingSource;
         }
 
         // entryHeading: >= 0 a bearing handed down by the brigade (regiments of an

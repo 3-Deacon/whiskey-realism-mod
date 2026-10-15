@@ -41,6 +41,8 @@ internal static partial class FlankResponseTests
             ("bc11 RefuseInPlaceKeepsRegimentWithClosestEnemyOnFlank", RefuseInPlaceKeepsRegimentWithClosestEnemyOnFlank),
             ("bc11 RefuseInPlaceSkipsUnderFireRegimentWithoutFlankEnemy", RefuseInPlaceSkipsUnderFireRegimentWithoutFlankEnemy),
             ("bc11 RefuseInPlaceTakesFourDeepestSetbacksFirst", RefuseInPlaceTakesFourDeepestSetbacksFirst),
+            ("bc11 RefuseWingShareExcludesTheShallowEnd", RefuseWingShareExcludesTheShallowEnd),
+            ("bc11 RefuseInPlaceSkipsRegimentAlreadyOnTheSkewedLine", RefuseInPlaceSkipsRegimentAlreadyOnTheSkewedLine),
             ("bc11 RefuseSideFollowsFlankPressureNotClosestEnemy", RefuseSideFollowsFlankPressureNotClosestEnemy),
             ("bc11 RefuseNeedsEngagementOrFlankPressure", RefuseNeedsEngagementOrFlankPressure),
             ("bc11 RefuseGeometryRejectsFrontalPressure", RefuseGeometryRejectsFrontalPressure),
@@ -464,6 +466,53 @@ internal static partial class FlankResponseTests
             AssertTrue(setback <= previous + 0.001f, "deepest first");
             previous = setback;
         }
+    }
+
+    // A regiment already within the executor's 15 degree facing tolerance of its skewed rotation is no rotation to spend one of
+    // the four per-tick slots on (the executor would only report it as not rotated).
+    private static void RefuseInPlaceSkipsRegimentAlreadyOnTheSkewedLine()
+    {
+        BattleSnapshot s = BrigadeFixture();
+        float skewed = ExpectedRotation(240f, 0.5f, 4f, -90f, 60f, left: true);
+        s.Own[1].RotationY = skewed + 10f;
+        MicroTurnRule rule = ShippedRule;
+        var queue = new int[16]; var regiments = new int[16]; var headings = new float[16];
+        int count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 4f, in rule, queue, regiments, headings, out int skipped);
+        AssertEqual(1, count, "only the second left regiment still has a turn to make");
+        AssertEqual(Left2, s.Own[regiments[0]].InstanceId, "Left2");
+        AssertEqual(0, skipped, "being on the line is not a micro-turn skip");
+    }
+
+    // RefuseWingShare 0.1 of the refuse depth: with a linear skew (1.0) the shallow end still has a steep gradient, so only the
+    // setback share keeps a regiment that barely moves back out of the rotation.
+    private static void RefuseWingShareExcludesTheShallowEnd()
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
+        s.AddOwn(new UnitRecord { InstanceId = Brigade, UnitTyp = TacticalUnitType.BattleGroupBrigade, GroupWidth = 240f, Flags = live | UnitFlags.IsGroup });
+        float[] xs = { -90f, 100f };
+        for (int i = 0; i < xs.Length; i++)
+        {
+            s.AddOwn(new UnitRecord
+            {
+                InstanceId = 10 + i, UnitTyp = TacticalUnitType.Infantry, X = xs[i], FireRange = 150f, SlotOffsetX = xs[i], UnitWidth = 60f,
+                Flags = live | UnitFlags.IsInfantry | UnitFlags.HasLayoutSlot,
+            });
+            s.Own[i + 1].ParentIndex = 0;
+        }
+        s.IndexCommandTree(null);
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+        float shallow = FlankFacing.Setback(100f, 240f, 0.5f, 1f, RefuseFlank.Left);
+        AssertTrue(shallow > 0f && shallow < FlankFacing.RefuseWingShare * 120f, "the regiment at x=100 sets back " + shallow + " m, under 10% of the 120 m depth");
+        AssertTrue(AngleDiff(0f, FlankFacing.SkewedRotation(0f, 100f, 60f, 240f, 120f, RefuseFlank.Left, 1f)) > OrderExecutor.FacingToleranceDegrees,
+            "yet its skewed rotation is a real turn (so only the wing share excludes it)");
+        MicroTurnRule rule = ShippedRule;
+        var queue = new int[8]; var regiments = new int[8]; var headings = new float[8];
+        int count = FlankFacing.RefuseRotations(s, 0, RefuseFlank.Left, 240f, 0.5f, 1f, in rule, queue, regiments, headings, out _);
+        AssertEqual(1, count, "only the deep end rotates");
+        AssertEqual(10, s.Own[regiments[0]].InstanceId, "the regiment at x=-90");
     }
 
     // The side follows the flank with more perceived pressure, not the closest enemy: a small regiment close on the right,
