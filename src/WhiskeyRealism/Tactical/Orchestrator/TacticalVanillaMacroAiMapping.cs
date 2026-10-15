@@ -55,12 +55,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case ReinforcementOpportunity.WithdrawalToFightLater:
                     // Defensive posture for vanilla: form the line, hold
                     // ground, no offensive maneuver (macroai = 2). Withdrawal
-                    // maps here too: macroai 3 is irreversible in vanilla
-                    // (6374 returns while 3) and ends the battle once
-                    // currenttimefromstart >= startoffallback + retreat timer
-                    // (6362), and startoffallback is only stamped on vanilla's
-                    // OWN transition to 3 (6355). The army retreat stays
-                    // vanilla's decision.
+                    // maps here too and is a hold, not a retreat: #44 writes
+                    // the value only into the AIBattle instance macroai, in a
+                    // Postfix on CheckGlobalAIStrategy (6314), and never 3. A
+                    // Whiskey-written 3 would carry no startoffallback stamp
+                    // (vanilla stamps it only on its own transition, 6355),
+                    // so 6362 would end the battle on the next cycle.
+                    //
+                    // Vanilla's own retreat paths still run before the
+                    // Postfix each cycle, unaffected by the 2:
+                    //   6336-6349  victory bar below trigger -> SetEndOfBattle
+                    //              8/12 + retreat timer (does not read macroai);
+                    //   6351-6359  losing on points with >1% losses -> stamps
+                    //              startoffallback, macroai = 3; from then on
+                    //              6374 returns early, #44 takes no opinion
+                    //              while macroai == 3, and 6362 ends the battle
+                    //              after timetostartairetreattimer;
+                    //   6412-6418  attacker screening retreat (no arrivals in
+                    //              24 h, casualties > 5%, force balance below
+                    //              GetScreeningTrigger) -> macroai = 3 without a
+                    //              startoffallback stamp. Its num4 comes from
+                    //              newmacroaitoset and force balance, which #44
+                    //              does not write, so the 2 neither triggers
+                    //              nor blocks it.
+                    // When those paths do not fire, the instance 2 drives this
+                    // cycle's AdjustGroupAIStance (UpdateAITasks 5866/5869).
                     return MacroAiDefend;
 
                 case ReinforcementOpportunity.DefensiveHold:
