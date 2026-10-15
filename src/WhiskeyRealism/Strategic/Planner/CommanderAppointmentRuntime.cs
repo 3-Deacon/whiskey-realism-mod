@@ -18,8 +18,13 @@ namespace WhiskeyRealism.Strategic.Planner
     //   army group: ArmyGroup.AppointCommander(group, id, usefeudmechanism: false,
     //               resetcoordinationtime: true, ignoreprestige: true) (75559-75580), which first
     //               refills the appointee's old command through ReplaceCommanderOfUnit (75575).
-    //               A pickable appointee never leads an army group (60770), so no group is left
-    //               commanderless; the displaced commander is left without a command, as vanilla.
+    //               The displaced commander is left without a command, as vanilla.
+    //   succession reseat: a historical figure a fired event names who sits on another army
+    //               group (not pickable, 60770) moves only when CommanderAssignmentGuard
+    //               .ResolveReplacementAppointment says ReseatThenAppoint live (free apart from
+    //               the group, an idle successor in GetAvailableArmyGroupCommanders 75546 who is
+    //               himself CanBePickedForAIReplacement and not the W&L player): his old group is
+    //               reseated first (AppointCommander never clears it, 75559), then he is appointed.
     //   army/corps: ReplaceCommanderOfUnit(appointee.currentcommand) when he has one (81389: his
     //               best subordinate or GetSuitableCommander takes it, and AssignCommando removes
     //               him from it), then AssignCommando(target) (60343, removes the sitting
@@ -30,8 +35,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // [Appointment] row is written.
     internal static class CommanderAppointmentRuntime
     {
-        private static readonly AppointmentProtection[] Protections = { new AppointmentProtection(), new AppointmentProtection() };
-        private static readonly int[] LastReviewDay = { -1, -1 };
+        // The protection windows and each alliance's last review day (pure, tested).
+        internal static AppointmentProtectionBook Book { get; private set; } = new AppointmentProtectionBook();
 
         static CommanderAppointmentRuntime()
         {
@@ -40,11 +45,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static void Reset()
         {
-            for (int a = 0; a < Protections.Length; a++)
-            {
-                Protections[a] = new AppointmentProtection();
-                LastReviewDay[a] = -1;
-            }
+            Book = new AppointmentProtectionBook();
         }
 
         internal static bool Enabled()
@@ -53,20 +54,27 @@ namespace WhiskeyRealism.Strategic.Planner
                 && FlagOn(Plugin.EnableCommanderAppointmentPlanner);
         }
 
-        // Every review, bookkeeping included: today's serial for the #6 guard and the aging of the
-        // protection windows.
+        // Every review, bookkeeping included: the review day for the #6 guard and the aging of
+        // the protection windows.
         internal static void Age(int alliance, int daySerial)
         {
-            if (alliance < 0 || alliance >= Protections.Length) return;
-            LastReviewDay[alliance] = daySerial;
-            Protections[alliance].Prune(daySerial);
+            Book.Age(alliance, daySerial);
         }
 
-        // Read by the #6 guard inside vanilla's job 24 (between reviews: the last review's day).
-        internal static bool IsProtected(int alliance, int commanderId)
+        // CanBePickedForAIReplacement (60748-60779) minus its army-group-commander test (main's
+        // C-CmdrReplace rule): the snapshot's CommanderRecord.FreeApartFromArmyGroup and the live
+        // reseat check.
+        internal static bool FreeApartFromArmyGroup(GameVars.Commander commander, int alliance, int commanderId)
         {
-            if (alliance < 0 || alliance >= Protections.Length || LastReviewDay[alliance] < 0) return false;
-            return Protections[alliance].IsProtected(commanderId, LastReviewDay[alliance]);
+            try
+            {
+                if (commander == null || commander.alliance != alliance) return false;
+                if (!commander.IsAvailable() || commander.IsServingUnderPlayer()) return false;
+                if (commander.IsMemberOfStaff() || commander.IsMemberOfStaff(1)) return false;
+                var alliances = GameVars.alliance;
+                return alliances != null && alliance >= 0 && alliance < alliances.Length && alliances[alliance].commanderinchief != commanderId;
+            }
+            catch { return false; }
         }
 
         internal static void Execute(int alliance, CampaignSnapshot s)
@@ -76,9 +84,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 try
                 {
                     if (!Enabled()) return;
-                    if (alliance < 0 || alliance >= Protections.Length || s == null || s.Alliance != alliance) return;
+                    var protection = Book.For(alliance);
+                    if (protection == null || s == null || s.Alliance != alliance) return;
                     if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetSectors(alliance, out var sectors)) return;
-                    if (plan.DaySerial != s.DaySerial || LastReviewDay[alliance] != s.DaySerial) return;
+                    if (plan.DaySerial != s.DaySerial || Book.LastReviewDay(alliance) != s.DaySerial) return;
 
                     var succession = StrategicCoordinator.Instance != null ? StrategicCoordinator.Instance.Succession : null;
                     SuccessionPrior prior = (int id, string role, out int eventId) =>
@@ -86,14 +95,13 @@ namespace WhiskeyRealism.Strategic.Planner
                         eventId = -1;
                         return succession != null ? succession.PriorFor(alliance, NameOf(s, id), role, out eventId) : 0f;
                     };
-                    var protection = Protections[alliance];
                     if (!CommanderAppointmentPlanner.TryPlan(plan, s, sectors, prior, protection, i => VanillaAllows(alliance, i), out var intent))
                         return;
 
-                    string unitName;
-                    bool done = intent.TargetIsArmyGroup
+                    string unitName = "?", reseated = null;
+                    bool done = (intent.ReseatGroupInstanceId < 0 || Reseat(alliance, intent, out reseated)) && (intent.TargetIsArmyGroup
                         ? AppointToArmyGroup(intent, out unitName)
-                        : AppointToUnit(intent, out unitName);
+                        : AppointToUnit(intent, out unitName));
                     if (!done)
                     {
                         OnceLog.Warning("campaign-planner:appointment-failed",
@@ -108,7 +116,8 @@ namespace WhiskeyRealism.Strategic.Planner
                         " commander=" + NameOf(s, intent.CommanderId) +
                         " unit=" + unitName +
                         " reason=" + intent.Reason +
-                        " displaced=" + NameOf(s, intent.DisplacedId),
+                        " displaced=" + NameOf(s, intent.DisplacedId) +
+                        (reseated != null ? " reseated=" + reseated : ""),
                         TelemetryLayer.Campaign);
                 }
                 catch (Exception ex)
@@ -128,8 +137,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (DLC_WL.dlc_scenarioactive && intent.CommanderId == DLC_WL.dlc_chosencommander) return false;
                 var c = commanders[intent.CommanderId];
                 if (c == null || c.alliance != alliance || c.refreshcommand) return false;
-                if (!c.CanBePickedForAIReplacement(alliance, includeofficerswithcommand: true)) return false;
                 if ((UnityEngine.Object)c.currentcommand != null && c.currentcommand.inbattle) return false;
+                bool pickable = c.CanBePickedForAIReplacement(alliance, includeofficerswithcommand: true);
+                var decision = pickable ? ReplacementAppointment.AppointDirect : ReseatDecision(alliance, intent, c);
+                if (decision != (intent.ReseatGroupInstanceId < 0 ? ReplacementAppointment.AppointDirect : ReplacementAppointment.ReseatThenAppoint))
+                    return false;
 
                 if (intent.TargetIsArmyGroup)
                 {
@@ -143,6 +155,74 @@ namespace WhiskeyRealism.Strategic.Planner
             catch (Exception ex)
             {
                 OnceLog.Warning("campaign-planner:appointment-check-failed", "[CampaignPlanner] appointment check failed, appointee skipped: " + ex.Message);
+                return false;
+            }
+        }
+
+        // The live half of the succession reseat: the planner's group is still his, holds nothing
+        // of the W&L player's, he is free apart from it and an idle successor exists.
+        private static ReplacementAppointment ReseatDecision(int alliance, AppointmentIntent intent, GameVars.Commander c)
+        {
+            var group = intent.ReseatGroupInstanceId >= 0 ? FindArmyGroup(intent.ReseatGroupInstanceId) : null;
+            bool leads = (UnityEngine.Object)group != null && group.GetCommanderID() == intent.CommanderId && !GroupHoldsPlayer(group);
+            return CommanderAssignmentGuard.ResolveReplacementAppointment(
+                false, leads, FreeApartFromArmyGroup(c, alliance, intent.CommanderId), PickSuccessor(alliance, intent.CommanderId) >= 0);
+        }
+
+        private static bool GroupHoldsPlayer(ArmyGroup group)
+        {
+            if (!DLC_WL.dlc_scenarioactive || group.attachedunits == null) return false;
+            if (group.GetCommanderID() == DLC_WL.dlc_chosencommander) return true;
+            for (int i = 0; i < group.attachedunits.Count; i++)
+            {
+                var unit = group.attachedunits[i];
+                if ((UnityEngine.Object)unit != null && (unit.dlcw_isundercommander || DLC_WL.IsPlayerPartOfUnit(unit))) return true;
+            }
+            return false;
+        }
+
+        // Best-rated idle officer from vanilla's own army-group pool (GetAvailableArmyGroupCommanders
+        // 75546: available, no command, not refreshing, rank suitable for 18), also vanilla's AI
+        // pool (CanBePickedForAIReplacement 60748) and never the W&L player.
+        private static int PickSuccessor(int alliance, int excludeId)
+        {
+            var pool = ArmyGroup.GetAvailableArmyGroupCommanders(alliance);
+            if (pool == null) return -1;
+            int best = -1;
+            float bestValue = float.MinValue;
+            for (int i = 0; i < pool.Count; i++)
+            {
+                int id = pool[i];
+                if (id == excludeId || id < 0 || id >= GameVars.commander.Count) continue;
+                if (DLC_WL.dlc_scenarioactive && id == DLC_WL.dlc_chosencommander) continue;
+                var candidate = GameVars.commander[id];
+                if (!candidate.CanBePickedForAIReplacement(alliance)) continue;
+                float value = candidate.GetAverageAttributeValue();
+                if (value > bestValue)
+                {
+                    bestValue = value;
+                    best = id;
+                }
+            }
+            return best;
+        }
+
+        private static bool Reseat(int alliance, AppointmentIntent intent, out string reseated)
+        {
+            reseated = null;
+            try
+            {
+                var group = FindArmyGroup(intent.ReseatGroupInstanceId);
+                int successor = PickSuccessor(alliance, intent.CommanderId);
+                if ((UnityEngine.Object)group == null || successor < 0) return false;
+                ArmyGroup.AppointCommander(group, successor, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
+                if (group.GetCommanderID() != successor) return false;
+                reseated = ((UnityEngine.Object)group).name + ":" + GameVars.commander[successor].combinedname;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-planner:appointment-reseat-failed", "[CampaignPlanner] succession reseat failed: " + ex.Message);
                 return false;
             }
         }

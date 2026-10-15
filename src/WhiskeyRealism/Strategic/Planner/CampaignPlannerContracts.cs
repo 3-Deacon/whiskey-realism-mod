@@ -207,6 +207,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // includeofficerswithcommand: true) (60748-60779): available, not serving under the W&L
         // player, not on a staff, not an army-group commander, not the alliance CIC (G2).
         public bool Pickable;
+        // The same tests without the army-group one (main's C-CmdrReplace FreeApartFromArmyGroup):
+        // IsAvailable, not serving under the player, not on a staff, not the CIC. G2's succession
+        // reseat path for a historical figure vanilla seated on an auto-created army group (75653).
+        public bool FreeApartFromArmyGroup;
         public int CommandInstanceId;
         public int CommandUnitTyp;
         public string Name;

@@ -41,7 +41,15 @@ internal static class CommanderPlannerTests
             ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("NoVerticalSwapOnPlayerSideInCareer", NoVerticalSwapOnPlayerSideInCareer),
             ("RoleFollowsTheaterAndPrimacy", RoleFollowsTheaterAndPrimacy),
+            ("ValleyRoleNeedsAShenandoahCommand", ValleyRoleNeedsAShenandoahCommand),
             ("SuccessionPriorOnlyForFiredNotApplied", SuccessionPriorOnlyForFiredNotApplied),
+            ("SuccessionReseatMovesAFigureOffHisArmyGroup", SuccessionReseatMovesAFigureOffHisArmyGroup),
+            ("SuccessionReseatDefersWithoutIdleSuccessor", SuccessionReseatDefersWithoutIdleSuccessor),
+            ("SuccessionReseatNeverOnThePlayersSideOrGroup", SuccessionReseatNeverOnThePlayersSideOrGroup),
+            ("VanillaChecksCappedAtEight", VanillaChecksCappedAtEight),
+            ("ProtectionBookCountsFromTheLastReview", ProtectionBookCountsFromTheLastReview),
+            ("GuardClearsThisAlliancesProtectedOnly", GuardClearsThisAlliancesProtectedOnly),
+            ("VanillaWouldReplaceMirrorsJob24", VanillaWouldReplaceMirrorsJob24),
             ("GuardPatchNeverSkipsVanilla", GuardPatchNeverSkipsVanilla),
             ("AppointmentStepWiredIntoTheReview", AppointmentStepWiredIntoTheReview),
             ("ExecutorMirrorsVanillaRecipe", ExecutorMirrorsVanillaRecipe),
@@ -241,6 +249,8 @@ internal static class CommanderPlannerTests
         AssertFalse(p.IsProtected(5, 160), "expired after 60 days");
         AssertFalse(p.IsProtected(6, 100), "unknown commander");
         AssertEqual(60, AppointmentProtection.ProtectionDays, "ProtectionDays");
+        p.Prune(159);
+        AssertTrue(p.IsProtected(5, 159), "prune keeps an entry on its last protected day");
         p.Prune(160);
         foreach (var _ in p.ProtectedUntil) throw new Exception("prune drops expired entries");
     }
@@ -402,22 +412,45 @@ internal static class CommanderPlannerTests
         AssertEqual(3, normal.CommanderId, "normal campaign");
     }
 
+    // Main's ResolveRoleTargetGroup (dbc3a6f): ANV/AoP -> the principal eastern command outside
+    // the Shenandoah Valley, Valley -> a Valley command, Western -> the principal western one.
     private static void RoleFollowsTheaterAndPrimacy()
     {
-        AssertEqual("ANV", CommanderAppointmentPlanner.RoleOf(1, Theater.East, true), "CSA principal eastern command");
-        AssertEqual("AoP", CommanderAppointmentPlanner.RoleOf(0, Theater.East, true), "Union principal eastern command");
-        AssertEqual("Valley", CommanderAppointmentPlanner.RoleOf(0, Theater.East, false), "a secondary eastern command");
-        AssertEqual("Western", CommanderAppointmentPlanner.RoleOf(1, Theater.West, true), "principal western command");
-        AssertEqual(null, CommanderAppointmentPlanner.RoleOf(1, Theater.West, false), "secondary western command has no role");
-        AssertEqual(null, CommanderAppointmentPlanner.RoleOf(0, Theater.Coast, true), "no role elsewhere");
+        AssertEqual("ANV", CommanderAppointmentPlanner.RoleOf(1, Theater.East, true, false), "CSA principal eastern command");
+        AssertEqual("AoP", CommanderAppointmentPlanner.RoleOf(0, Theater.East, true, false), "Union principal eastern command");
+        AssertEqual("Valley", CommanderAppointmentPlanner.RoleOf(0, Theater.East, false, true), "an eastern command in the Valley");
+        AssertEqual(null, CommanderAppointmentPlanner.RoleOf(0, Theater.East, false, false), "a secondary eastern command outside the Valley has no role");
+        AssertEqual("Western", CommanderAppointmentPlanner.RoleOf(1, Theater.West, true, false), "principal western command");
+        AssertEqual(null, CommanderAppointmentPlanner.RoleOf(1, Theater.West, false, false), "secondary western command has no role");
+        AssertEqual(null, CommanderAppointmentPlanner.RoleOf(0, Theater.Coast, true, false), "no role elsewhere");
+        AssertTrue(CommanderAppointmentPlanner.InShenandoahValley(1107f, -555f), "the Shenandoah area anchor is in the box");
+        AssertFalse(CommanderAppointmentPlanner.InShenandoahValley(1263f, -1010f), "the Virginia capital corridor is not");
 
-        // The army (principal) carries ANV, the corps (secondary) Valley.
+        // The army (principal) carries ANV; the corps outside the Valley carries nothing.
         var f = new Fixture();
         f.Snapshot.Commanders.Add(Cmd(20, 7, 0.45f));
         var roles = new List<string>();
         f.Prior = (int id, string role, out int ev) => { roles.Add(role); ev = -1; return 0f; };
         f.Plan(out _);
-        AssertTrue(roles.Contains("ANV") && roles.Contains("Valley"), "roles passed to the prior: " + string.Join(",", roles));
+        AssertTrue(roles.Contains("ANV") && !roles.Contains("Valley"), "roles passed to the prior: " + string.Join(",", roles));
+    }
+
+    // Main's "no valley group -> defer": a Valley event needs a command in the Valley.
+    private static void ValleyRoleNeedsAShenandoahCommand()
+    {
+        var f = new Fixture(alliance: 0);
+        f.Snapshot.Commanders.Add(Cmd(20, 7, 0.40f, name: "Philip H. Sheridan"));
+        f.Prior = PriorFor(20, "Valley", 11);
+        AssertFalse(f.Plan(out _), "no Valley command -> the Valley event defers");
+
+        f = new Fixture(alliance: 0);
+        f.AddFormation(Fixture.ValleyCorps, 15, Fixture.EastArea, 10000f, commander: 31, parent: -1, x: 1107f, z: -555f);
+        f.Snapshot.Commanders.Add(CmdWithCommand(31, 7, 0.40f, Fixture.ValleyCorps, 15));
+        f.Snapshot.Commanders.Add(Cmd(20, 7, 0.40f, name: "Philip H. Sheridan"));
+        f.Prior = PriorFor(20, "Valley", 11);
+        AssertTrue(f.Plan(out var intent), "a Valley command takes the Valley figure");
+        AssertEqual(Fixture.ValleyCorps, intent.TargetInstanceId, "the Valley corps");
+        AssertEqual("succession:11", intent.Reason, "the Valley event");
     }
 
     private static void SuccessionPriorOnlyForFiredNotApplied()
@@ -438,22 +471,155 @@ internal static class CommanderPlannerTests
         AssertEqual(0.25f, CommanderAppointmentPlanner.SuccessionPriorBonus, "bonus constant");
     }
 
+    // ---- succession reseat (spec component 7; main's C-CmdrReplace ReseatThenAppoint) ----
+
+    // Lee sits on an auto-created western army group (not pickable, 60770); the fired ANV event
+    // may still bring him to the main-effort army, his group reseated first.
+    private static void SuccessionReseatMovesAFigureOffHisArmyGroup()
+    {
+        var f = new Fixture();
+        f.AddFigureOnWesternArmyGroup();
+        f.ReplaceCommander(40, c => { c.Average = 0.80f; return c; });
+        AssertFalse(f.Plan(out _), "without the event even a far better army-group commander stays outside vanilla's pool");
+        f.ReplaceCommander(40, c => { c.Average = 0.30f; return c; });
+
+        f.Prior = PriorFor(40, "ANV", 1);
+        f.Allows = i => i.ReseatGroupInstanceId < 0
+            || CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, successorAvailable: true) == ReplacementAppointment.ReseatThenAppoint;
+        AssertTrue(f.Plan(out var intent), "the named figure moves");
+        AssertEqual(40, intent.CommanderId, "Lee");
+        AssertEqual(Fixture.WestGroup, intent.ReseatGroupInstanceId, "his old group is reseated first");
+        AssertEqual(Fixture.Army, intent.TargetInstanceId, "onto the ANV command");
+        AssertEqual("succession:1", intent.Reason, "succession reason");
+
+        var plain = new Fixture();
+        plain.Snapshot.Commanders.Add(Cmd(20, 8, 0.90f));
+        AssertTrue(plain.Plan(out var direct) && direct.ReseatGroupInstanceId == -1, "a pickable appointee reseats nothing");
+    }
+
+    // "No successor -> never leave one man on two groups": the live check defers.
+    private static void SuccessionReseatDefersWithoutIdleSuccessor()
+    {
+        var f = new Fixture();
+        f.AddFigureOnWesternArmyGroup();
+        f.Prior = PriorFor(40, "ANV", 1);
+        f.Allows = i => i.ReseatGroupInstanceId < 0
+            || CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, successorAvailable: false) == ReplacementAppointment.ReseatThenAppoint;
+        AssertFalse(f.Plan(out _), "no idle successor for his group -> the event defers");
+
+        f.ReplaceCommander(40, c => { c.FreeApartFromArmyGroup = false; return c; });
+        f.Allows = i => true;
+        AssertFalse(f.Plan(out _), "a figure not free apart from his group (wounded, staff, CIC, the player's officer) stays put");
+    }
+
+    private static void SuccessionReseatNeverOnThePlayersSideOrGroup()
+    {
+        var f = new Fixture(PlayerCommandClass.BelowMapLevel);
+        f.AddPlayerElsewhere();
+        f.AddFigureOnWesternArmyGroup();
+        f.Prior = PriorFor(40, "ANV", 1);
+        AssertFalse(f.Plan(out _), "player's alliance: idle commanders only, no reseat");
+
+        f = new Fixture(PlayerCommandClass.BelowMapLevel);
+        f.AddFigureOnWesternArmyGroup();
+        f.SetChain(Fixture.WestCorps, WlChainClass.CarryingGroup);
+        f.Snapshot.Commanders.RemoveAll(c => c.IsPlayer); // not the player-side rule: the group rule alone
+        f.Prior = PriorFor(40, "ANV", 1);
+        AssertFalse(f.Plan(out _), "a group holding the player's command is never reseated");
+
+        // His group is itself a main-effort command (secondary to army group 300, the ANV
+        // command): he is not pulled off it.
+        f = new Fixture();
+        f.AddArmyGroup();
+        f.AddFigureOnWesternArmyGroup();
+        f.MoveWestGroupToMainEffort();
+        f.Prior = PriorFor(40, "ANV", 1);
+        AssertFalse(f.Plan(out var none) && none.CommanderId == 40, "a main-effort army group's commander is not pulled off it");
+    }
+
+    private static void VanillaChecksCappedAtEight()
+    {
+        var f = new Fixture();
+        for (int i = 0; i < 12; i++) f.Snapshot.Commanders.Add(Cmd(60 + i, 9, 0.90f - i * 0.01f));
+        int calls = 0;
+        f.Allows = i => { calls++; return i.CommanderId == 69; };
+        AssertFalse(f.Plan(out _), "the tenth candidate is beyond the cap");
+        AssertEqual(CommanderAppointmentPlanner.MaxVanillaChecks, calls, "at most MaxVanillaChecks live checks per review");
+        AssertEqual(8, CommanderAppointmentPlanner.MaxVanillaChecks, "cap");
+
+        calls = 0;
+        f.Allows = i => { calls++; return i.CommanderId == 67; };
+        AssertTrue(f.Plan(out var intent) && intent.CommanderId == 67, "the eighth candidate is still checked");
+    }
+
+    // P13: the guard tests protection as of each alliance's last review (Age), never before the
+    // first review, never another alliance's.
+    private static void ProtectionBookCountsFromTheLastReview()
+    {
+        var book = new AppointmentProtectionBook();
+        book.For(1).Protect(7, 100);
+        AssertFalse(book.IsProtected(1, 7), "before the first review nothing is protected");
+        book.Age(1, 120);
+        AssertEqual(120, book.LastReviewDay(1), "Age records the review day");
+        AssertTrue(book.IsProtected(1, 7), "protected as of the last review");
+        AssertFalse(book.IsProtected(0, 7), "the other alliance's book");
+        book.Age(1, 160);
+        AssertFalse(book.IsProtected(1, 7), "expired by the review of day 160");
+        AssertFalse(book.IsProtected(2, 7), "alliance 2 has no book");
+        AssertTrue(book.For(2) == null && book.LastReviewDay(2) == -1, "alliance bounds");
+        book.Age(2, 100); // no-op, no throw
+    }
+
+    private static void GuardClearsThisAlliancesProtectedOnly()
+    {
+        var book = new AppointmentProtectionBook();
+        book.For(1).Protect(5, 100);
+        book.For(0).Protect(7, 100);
+        book.Age(0, 100);
+        book.Age(1, 100);
+        var worst = new[] { 5, 7, 9 };
+        var state = AppointmentGuard.ClearProtected(worst, book, 1);
+        AssertEqual("-1,7,9", string.Join(",", worst), "only alliance 1's protected appointee is cleared");
+        AssertEqual(1, state.Count, "one slot");
+        AssertEqual(0, state.SlotAt(0), "slot 0");
+        AssertEqual(5, state.IdAt(0), "id 5");
+        AssertTrue(AppointmentGuard.ClearProtected(worst, null, 1) == null, "no book -> nothing");
+    }
+
+    // CheckAICommanderReplacements 17017-17020.
+    private static void VanillaWouldReplaceMirrorsJob24()
+    {
+        AssertTrue(AppointmentGuard.VanillaWouldReplace(2, 1, true, false, true, 0.6f, 0.4f, 0.1f), "vanilla swaps");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(2, 1, true, false, true, 0.5f, 0.4f, 0.1f), "not above the margin");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(-1, 1, true, false, true, 0.9f, 0.4f, 0.1f), "no best");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(1, 1, true, false, true, 0.9f, 0.4f, 0.1f), "same commander");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(2, 1, false, false, true, 0.9f, 0.4f, 0.1f), "worst has no command");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(2, 1, true, true, true, 0.9f, 0.4f, 0.1f), "garrison command");
+        AssertFalse(AppointmentGuard.VanillaWouldReplace(2, 1, true, false, false, 0.9f, 0.4f, 0.1f), "best not pickable");
+    }
+
     // ---- source pins (runtime wiring the harness cannot run) ----
 
     private static void GuardPatchNeverSkipsVanilla()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Patches/CommanderReplacementPatch.cs");
         AssertContains(src, "[HarmonyPatch(typeof(AICampaign), \"CheckAICommanderReplacements\")]", "patch target");
-        AssertFalse(src.Contains("return false"), "the Prefix never skips vanilla's job 24");
         AssertContains(src, "[HarmonyFinalizer]", "the restore runs in a Finalizer");
         AssertContains(src, "PatchFirstFire.Mark(\"campaign.patch.commander-replacement\")", "Prefix first-fire id kept");
         AssertContains(src, "PatchFirstFire.Mark(\"campaign.patch.commander-replacement.finalizer\")", "Finalizer first-fire id");
-        AssertContains(src, "AppointmentGuard.Clear(", "clears through the pure guard");
+        AssertContains(src, "__state = AppointmentGuard.ClearProtected(alliance.worstcommanderidperlevel, CommanderAppointmentRuntime.Book, allianceId);",
+            "clears this alliance's protected appointees through the pure guard and the runtime's book");
+        AssertContains(src, "OnceLog.Info(\"replace:blocked\"", "a real job-24 block is logged");
+        AssertContains(src, "AppointmentGuard.VanillaWouldReplace(", "with vanilla's own swap test");
         AssertContains(src, "AppointmentGuard.Restore(", "restores through the pure guard");
         AssertContains(src, "CommanderAppointmentRuntime.Enabled()", "gated on the appointment flags");
         foreach (string write in new[] { "MarkApplied(", ".Protect(", "AppointCommander(", "AssignCommando(", "ReplaceCommanderOfUnit(" })
             AssertFalse(src.Contains(write), "the patch writes no mod state and appoints nobody: " + write);
+        string finalizer = MethodBody(src, "internal static Exception Finalizer(");
+        AssertContains(finalizer, "return __exception;", "vanilla's exception passes through");
+        AssertFalse(finalizer.Contains("return null"), "the Finalizer never swallows vanilla's exception");
         string prefix = MethodBody(src, "internal static void Prefix(");
+        AssertFalse(prefix.Contains("return false"), "the Prefix is void and never skips vanilla's job 24");
         AssertContains(prefix, "allianceId < 0 || allianceId > 1", "alliance-2 bound");
     }
 
@@ -474,6 +640,7 @@ internal static class CommanderPlannerTests
         string enabled = MethodBody(runtime, "internal static bool Enabled(");
         foreach (string flag in new[] { "Plugin.EnableCampaignPlanner", "Plugin.EnableCampaignPlannerExecutors", "Plugin.EnableCommanderAppointmentPlanner" })
             AssertContains(enabled, flag, "appointments gated on " + flag);
+        AssertContains(MethodBody(runtime, "internal static void Age("), "Book.Age(alliance, daySerial);", "Age records the review day in the book");
         string execBody = MethodBody(runtime, "internal static void Execute(");
         AssertContains(execBody, "if (!Enabled()) return;", "Execute checks the gate first");
         AssertContains(execBody, "plan.DaySerial != s.DaySerial", "never on a stale plan");
@@ -487,6 +654,17 @@ internal static class CommanderPlannerTests
         AssertContains(allows, "CheckSuitableRank(", "vanilla's rank rule (60556)");
         AssertContains(allows, "refreshcommand", "vanilla's refresh rule");
         AssertContains(allows, "inbattle", "never mid-battle");
+        AssertContains(allows, "if (DLC_WL.dlc_scenarioactive && intent.CommanderId == DLC_WL.dlc_chosencommander) return false;", "never the W&L player, live");
+        AssertContains(allows, "ReseatDecision(alliance, intent, c)", "the reseat path is decided live");
+        string reseat = MethodBody(src, "private static ReplacementAppointment ReseatDecision(");
+        AssertContains(reseat, "CommanderAssignmentGuard.ResolveReplacementAppointment(", "main's reseat rule");
+        AssertContains(reseat, "!GroupHoldsPlayer(group)", "never the player's group");
+        string successor = MethodBody(src, "private static int PickSuccessor(");
+        AssertContains(successor, "ArmyGroup.GetAvailableArmyGroupCommanders(alliance)", "vanilla's idle army-group pool (75546)");
+        AssertContains(successor, "candidate.CanBePickedForAIReplacement(alliance)", "successor in vanilla's AI pool");
+        AssertContains(successor, "id == DLC_WL.dlc_chosencommander) continue;", "never the player as successor");
+        string execute0 = MethodBody(src, "internal static void Execute(");
+        AssertContains(execute0, "(intent.ReseatGroupInstanceId < 0 || Reseat(alliance, intent, out reseated)) &&", "reseat before appointing");
 
         string unit = MethodBody(src, "private static bool AppointToUnit(");
         int replace = unit.IndexOf("BattleUnits.ReplaceCommanderOfUnit(", StringComparison.Ordinal);
@@ -556,7 +734,7 @@ internal static class CommanderPlannerTests
     // (commander 4, MG 0.10).
     private sealed class Fixture
     {
-        internal const int Army = 100, Corps = 101, SecondArmy = 102, WestCorps = 200, Group = 300;
+        internal const int Army = 100, Corps = 101, SecondArmy = 102, ValleyCorps = 103, WestCorps = 200, Group = 300, WestGroup = 301;
         internal const int EastArea = 0, WestArea = 1;
 
         internal readonly CampaignSnapshot Snapshot = new CampaignSnapshot();
@@ -570,9 +748,9 @@ internal static class CommanderPlannerTests
         {
             Snapshot.Reset(alliance, alliance, Day, player, playerCommand, true, null);
             Snapshot.RelocationRange = 30f;
-            Snapshot.Areas.Add(new AreaRecord { Index = EastArea, X = 1000f, Z = -500f, EdgeX = new[] { 1000f }, EdgeZ = new[] { -500f }, SupplyCapacity = 100f });
+            Snapshot.Areas.Add(new AreaRecord { Index = EastArea, X = 1263f, Z = -1010f, EdgeX = new[] { 1263f }, EdgeZ = new[] { -1010f }, SupplyCapacity = 100f });
             Snapshot.Areas.Add(new AreaRecord { Index = WestArea, X = 0f, Z = 0f, EdgeX = new[] { 0f }, EdgeZ = new[] { 0f }, SupplyCapacity = 100f });
-            Snapshot.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 1000f, Z = -500f });
+            Snapshot.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 1263f, Z = -1010f });
             Snapshot.Objectives.Add(new ObjectiveRecord { ObjectiveId = 2, X = 0f, Z = 0f });
             Snapshot.RankBands.Add(new RankBand { UnitTyp = 15, MinRank = 7, MaxRank = 8 });
             Snapshot.RankBands.Add(new RankBand { UnitTyp = 16, MinRank = 8, MaxRank = 9 });
@@ -595,13 +773,13 @@ internal static class CommanderPlannerTests
             return CommanderAppointmentPlanner.TryPlan(TheaterPlan, Snapshot, Sectors, Prior, Protection, Allows, out intent);
         }
 
-        internal void AddFormation(int id, int unitTyp, int area, float strength, int commander, int parent)
+        internal void AddFormation(int id, int unitTyp, int area, float strength, int commander, int parent, float? x = null, float? z = null)
         {
-            var x = area == EastArea ? 1000f : 0f;
-            var z = area == EastArea ? -500f : 0f;
+            float px = x ?? (area == EastArea ? 1263f : 0f);
+            float pz = z ?? (area == EastArea ? -1010f : 0f);
             Snapshot.Own.Add(new FormationRecord
             {
-                InstanceId = id, UnitKey = "u" + id + ":" + commander, UnitTyp = unitTyp, X = x, Z = z, Strength = strength,
+                InstanceId = id, UnitKey = "u" + id + ":" + commander, UnitTyp = unitTyp, X = px, Z = pz, Strength = strength,
                 CommanderId = commander, AreaIndex = area, ParentInstanceId = parent, Name = "unit " + id, Flags = FormationFlags.FightingForce
             });
         }
@@ -609,9 +787,32 @@ internal static class CommanderPlannerTests
         // Army group 300 (commander 8, full general 0.40) over the eastern army.
         internal void AddArmyGroup()
         {
-            Snapshot.ArmyGroups.Add(new ArmyGroupRecord { InstanceId = Group, CommanderId = 8, X = 1000f, Z = -500f, Strength = 50000f, MemberInstanceIds = new[] { Army } });
+            Snapshot.ArmyGroups.Add(new ArmyGroupRecord { InstanceId = Group, CommanderId = 8, X = 1263f, Z = -1010f, Strength = 50000f, MemberInstanceIds = new[] { Army } });
             Snapshot.Commanders.Add(Cmd(8, 9, 0.40f));
             ReplaceCommander(8, c => { c.Pickable = false; return c; }); // vanilla: an army-group commander is not pickable
+        }
+
+        // Robert E. Lee (40, full general 0.30) on western army group 301 over the western corps:
+        // not pickable (an army-group commander), free apart from it.
+        internal void AddFigureOnWesternArmyGroup()
+        {
+            Snapshot.ArmyGroups.Add(new ArmyGroupRecord { InstanceId = WestGroup, CommanderId = 40, X = 0f, Z = 0f, Strength = 15000f, MemberInstanceIds = new[] { WestCorps } });
+            var lee = Cmd(40, 9, 0.30f, name: "Robert E. Lee");
+            lee.Pickable = false;
+            lee.FreeApartFromArmyGroup = true;
+            Snapshot.Commanders.Add(lee);
+        }
+
+        internal void MoveWestGroupToMainEffort()
+        {
+            for (int i = 0; i < Snapshot.ArmyGroups.Count; i++)
+            {
+                if (Snapshot.ArmyGroups[i].InstanceId != WestGroup) continue;
+                var g = Snapshot.ArmyGroups[i];
+                g.X = 1263f;
+                g.Z = -1010f;
+                Snapshot.ArmyGroups[i] = g;
+            }
         }
 
         // The W&L player commands a brigade somewhere on this side (makes this the player's alliance).

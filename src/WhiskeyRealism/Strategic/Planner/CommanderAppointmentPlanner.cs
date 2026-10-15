@@ -14,6 +14,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int TargetInstanceId;   // Regiment or ArmyGroup instance id
         public bool TargetIsArmyGroup;
         public int DisplacedId;        // the sitting commander
+        public int ReseatGroupInstanceId; // the army group the appointee leaves, reseated first; -1 none
         public int SuccessionEventId;  // -1 unless the succession prior named the appointee
         public string Reason;          // "competence" | "succession:<id>"
     }
@@ -28,7 +29,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // player's command (the formations stage F classes PlayerCommand / PlayerMapGroup /
     // CarryingGroup or CicSide, the snapshot's PlayerCommandInstanceId, and every ancestor of
     // those by ParentInstanceId), never one whose sitting commander is the player, serves under
-    // him (IsServingUnderPlayer 60695) or is protected. Candidates: vanilla's AI pool
+    // him (IsServingUnderPlayer 60695) or is protected. Candidates: vanilla's AI pool, plus the
+    // succession reseat path (ReseatPath: a named historical figure on another army group); the pool
     // (Pickable = CanBePickedForAIReplacement(alliance, true) 60748-60779, Available, not navy,
     // not a generated officer, !refreshcommand), rank within the target's band (CheckSuitableRank
     // 60577-60590: the maximum for every unit type, the minimum only for army groups, since
@@ -60,6 +62,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int UnitTyp;
             public float Strength;
             public int CommanderId;
+            public float X, Z;
             public string Role;
         }
 
@@ -68,6 +71,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int Id;
             public float Score;
             public int EventId;
+            public int ReseatGroup;
         }
 
         public static bool TryPlan(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, SuccessionPrior successionPrior,
@@ -101,9 +105,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < s.Commanders.Count; i++)
                 {
                     var c = s.Commanders[i];
-                    if (!Eligible(c, target, s, targets, protection, playerSide)) continue;
-                    float score = c.Average + Prior(successionPrior, c.Id, target.Role, out int eventId);
-                    ranked.Add(new Candidate { Id = c.Id, Score = score, EventId = eventId });
+                    float prior = Prior(successionPrior, c.Id, target.Role, out int eventId);
+                    if (!Eligible(c, target, s, targets, protection, playerSide, holdsPlayer, prior > 0f, out int reseatGroup)) continue;
+                    ranked.Add(new Candidate { Id = c.Id, Score = c.Average + prior, EventId = eventId, ReseatGroup = reseatGroup });
                 }
                 ranked.Sort((a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Id.CompareTo(b.Id));
 
@@ -117,6 +121,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         TargetInstanceId = target.InstanceId,
                         TargetIsArmyGroup = target.IsArmyGroup,
                         DisplacedId = current.Id,
+                        ReseatGroupInstanceId = ranked[k].ReseatGroup,
                         SuccessionEventId = ranked[k].EventId,
                         Reason = ranked[k].EventId >= 0 ? "succession:" + ranked[k].EventId : "competence"
                     };
@@ -129,14 +134,28 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The role a command plays for the succession events (SuccessionScheduler.Event
-        // .ReplacedRole): the main effort's principal command in the east is the alliance's main
-        // eastern army (ANV / AoP), a secondary eastern command the Valley army, the principal
-        // western command the Western army. GeneralInChief is never a command role (C18).
-        public static string RoleOf(int alliance, Theater theater, bool primary)
+        // .ReplacedRole), as the old #6 resolved it (ResolveRoleTargetGroup on main dbc3a6f): a
+        // command inside the Shenandoah Valley box is the Valley army; the main effort's principal
+        // eastern command outside it is the alliance's main eastern army (ANV / AoP); the
+        // principal western command is the Western army. A Valley event with no Valley command
+        // finds no role and defers. GeneralInChief is never a command role (C18).
+        public static string RoleOf(int alliance, Theater theater, bool primary, bool inValley)
         {
-            if (theater == Theater.East) return primary ? (alliance == 1 ? "ANV" : "AoP") : "Valley";
+            if (theater == Theater.East)
+            {
+                if (inValley) return "Valley";
+                return primary ? (alliance == 1 ? "ANV" : "AoP") : null;
+            }
             if (theater == Theater.West && primary) return "Western";
             return null;
+        }
+
+        // The Shenandoah Valley area box of the retired army-area classifier
+        // (ArmyAreaClassifier.FromPosition "ShenandoahValley", deleted in G6): x 950..1225,
+        // z -760..-400 on the campaign map.
+        public static bool InShenandoahValley(float x, float z)
+        {
+            return x > 950f && x < 1225f && z > -760f && z < -400f;
         }
 
         // A W&L career and this alliance holds the player (his record is among its commanders).
@@ -178,7 +197,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var g = s.ArmyGroups[i];
                 if (g.CommanderId < 0 || sectors.SectorAt(g.X, g.Z) != plan.MainSectorId) continue;
                 if (AnyMemberHoldsPlayer(g.MemberInstanceIds, holdsPlayer)) continue;
-                targets.Add(new Target { InstanceId = g.InstanceId, IsArmyGroup = true, UnitTyp = ArmyGroupTyp, Strength = g.Strength, CommanderId = g.CommanderId });
+                targets.Add(new Target { InstanceId = g.InstanceId, IsArmyGroup = true, UnitTyp = ArmyGroupTyp, Strength = g.Strength, CommanderId = g.CommanderId, X = g.X, Z = g.Z });
             }
             for (int i = 0; i < s.Own.Count; i++)
             {
@@ -187,7 +206,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (f.CommanderId < 0 || (f.Flags & FormationFlags.InBattle) != 0) continue;
                 if (holdsPlayer.Contains(f.InstanceId)) continue;
                 if (sectors.SectorOfArea(f.AreaIndex) != plan.MainSectorId) continue;
-                targets.Add(new Target { InstanceId = f.InstanceId, UnitTyp = f.UnitTyp, Strength = f.Strength, CommanderId = f.CommanderId });
+                targets.Add(new Target { InstanceId = f.InstanceId, UnitTyp = f.UnitTyp, Strength = f.Strength, CommanderId = f.CommanderId, X = f.X, Z = f.Z });
             }
             targets.Sort((a, b) =>
             {
@@ -206,27 +225,62 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // The first target (highest echelon, strongest) is the main effort's principal command.
+        // The principal command is the first target (highest echelon, strongest) outside the
+        // Valley, else the first target (main's "prefer non-Valley, else the largest eastern").
         private static void AssignRoles(int alliance, Theater theater, List<Target> targets)
         {
+            int primary = -1;
+            for (int i = 0; i < targets.Count && primary < 0; i++)
+                if (!InShenandoahValley(targets[i].X, targets[i].Z)) primary = i;
+            if (primary < 0) primary = 0;
             for (int i = 0; i < targets.Count; i++)
             {
                 var t = targets[i];
-                t.Role = RoleOf(alliance, theater, i == 0);
+                t.Role = RoleOf(alliance, theater, i == primary, i != primary && InShenandoahValley(t.X, t.Z));
                 targets[i] = t;
             }
         }
 
+        // reseatGroup: the army group a succession figure leaves (the reseat path), -1 none.
         private static bool Eligible(in CommanderRecord c, in Target target, CampaignSnapshot s, List<Target> targets,
-                                     AppointmentProtection protection, bool playerSide)
+                                     AppointmentProtection protection, bool playerSide, HashSet<int> holdsPlayer,
+                                     bool namedBySuccession, out int reseatGroup)
         {
+            reseatGroup = -1;
             if (c.Id == target.CommanderId) return false;
-            if (!c.Available || !c.Pickable || c.Navy || c.Dummy || c.RefreshCommand || c.ServingUnderPlayer || c.IsPlayer) return false;
+            if (!c.Available || c.Navy || c.Dummy || c.RefreshCommand || c.ServingUnderPlayer || c.IsPlayer) return false;
+            if (!c.Pickable && !ReseatPath(c, s, targets, playerSide, holdsPlayer, namedBySuccession, out reseatGroup)) return false;
             if (!RankFits(s, c.Rank, target.UnitTyp)) return false;
             if (protection.IsProtected(c.Id, s.DaySerial)) return false;
             if (playerSide && c.CommandInstanceId >= 0) return false;
             if (c.CommandInstanceId >= 0 && c.CommandUnitTyp >= target.UnitTyp && IsTarget(targets, c.CommandInstanceId)) return false;
             return true;
+        }
+
+        // The succession reseat (spec component 7; main's C-CmdrReplace ReseatThenAppoint):
+        // vanilla seats historical figures on auto-created army groups (CreateNewArmyGroup 75653),
+        // and CanBePickedForAIReplacement rejects every sitting army-group commander (60770). A
+        // figure a fired, unapplied succession event names may still move when he is free apart
+        // from his army group (available, not serving under the player, not staff, not the CIC),
+        // his group is not a main-effort command and holds nothing of the player's, and this is
+        // not the W&L player's alliance (idle commanders only there, P16). The executor reseats
+        // his group from vanilla's idle pool first and refuses when no idle successor exists.
+        private static bool ReseatPath(in CommanderRecord c, CampaignSnapshot s, List<Target> targets, bool playerSide,
+                                       HashSet<int> holdsPlayer, bool namedBySuccession, out int reseatGroup)
+        {
+            reseatGroup = -1;
+            if (!namedBySuccession || playerSide || !c.FreeApartFromArmyGroup) return false;
+            for (int i = 0; i < s.ArmyGroups.Count; i++)
+            {
+                var g = s.ArmyGroups[i];
+                if (g.CommanderId != c.Id) continue;
+                if (AnyMemberHoldsPlayer(g.MemberInstanceIds, holdsPlayer)) return false;
+                for (int t = 0; t < targets.Count; t++)
+                    if (targets[t].IsArmyGroup && targets[t].InstanceId == g.InstanceId) return false;
+                reseatGroup = g.InstanceId;
+                return true;
+            }
+            return false;
         }
 
         private static bool IsTarget(List<Target> targets, int instanceId)

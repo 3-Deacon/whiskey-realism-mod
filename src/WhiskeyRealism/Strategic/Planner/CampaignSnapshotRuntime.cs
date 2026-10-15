@@ -674,6 +674,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         ServingUnderPlayer = c.IsServingUnderPlayer(),
                         IsPlayer = career && id == chosen,
                         Pickable = c.CanBePickedForAIReplacement(alliance, includeofficerswithcommand: true),
+                        FreeApartFromArmyGroup = CommanderAppointmentRuntime.FreeApartFromArmyGroup(c, alliance, id),
                         CommandInstanceId = hasCommand ? command.GetInstanceID() : -1,
                         CommandUnitTyp = hasCommand ? command.unittyp : -1,
                         Name = c.combinedname

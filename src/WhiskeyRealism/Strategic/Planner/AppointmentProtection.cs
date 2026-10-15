@@ -56,12 +56,49 @@ namespace WhiskeyRealism.Strategic.Planner
         }
     }
 
+    // Both AI alliances' protection windows plus the day serial of each alliance's last review.
+    // Age runs every review (bookkeeping included, P1); the #6 guard runs inside vanilla's job 24
+    // between reviews, so a commander counts as protected as of that last review day, and never
+    // before the first review of the campaign. Owned by CommanderAppointmentRuntime (CampaignScope).
+    public sealed class AppointmentProtectionBook
+    {
+        private readonly AppointmentProtection[] _byAlliance = { new AppointmentProtection(), new AppointmentProtection() };
+        private readonly int[] _lastReviewDay = { -1, -1 };
+
+        public AppointmentProtection For(int alliance)
+        {
+            return alliance >= 0 && alliance < _byAlliance.Length ? _byAlliance[alliance] : null;
+        }
+
+        public int LastReviewDay(int alliance)
+        {
+            return alliance >= 0 && alliance < _lastReviewDay.Length ? _lastReviewDay[alliance] : -1;
+        }
+
+        public void Age(int alliance, int daySerial)
+        {
+            if (alliance < 0 || alliance >= _byAlliance.Length) return;
+            _lastReviewDay[alliance] = daySerial;
+            _byAlliance[alliance].Prune(daySerial);
+        }
+
+        public bool IsProtected(int alliance, int commanderId)
+        {
+            if (alliance < 0 || alliance >= _byAlliance.Length || _lastReviewDay[alliance] < 0) return false;
+            return _byAlliance[alliance].IsProtected(commanderId, _lastReviewDay[alliance]);
+        }
+    }
+
     // The slots the #6 guard cleared in GameVars.alliance[a].worstcommanderidperlevel, with the
     // ids it took out of them.
     public sealed class AppointmentGuardState
     {
         internal readonly int[] Slots;
         internal readonly int[] Ids;
+
+        public int Count => Slots.Length;
+        public int SlotAt(int k) => Slots[k];
+        public int IdAt(int k) => Ids[k];
 
         internal AppointmentGuardState(int[] slots, int[] ids)
         {
@@ -76,6 +113,24 @@ namespace WhiskeyRealism.Strategic.Planner
     // consumed to -1 (17027-17028), which Restore never touches.
     public static class AppointmentGuard
     {
+        // The #6 Prefix's whole decision: clear the slots of this alliance's protected appointees.
+        public static AppointmentGuardState ClearProtected(int[] worst, AppointmentProtectionBook book, int alliance)
+        {
+            if (book == null) return null;
+            return Clear(worst, id => book.IsProtected(alliance, id));
+        }
+
+        // Vanilla's own swap test for one rank slot (CheckAICommanderReplacements 17017-17020):
+        // both ids set and different, the worst one commands a unit outside a garrison, the best
+        // one is pickable and beats the worst by expdifferenceforverticalpromotion on
+        // GetAverageAttributeValue. True for a cleared slot = the guard really blocked a swap.
+        public static bool VanillaWouldReplace(int bestId, int worstId, bool worstHasCommand, bool worstInGarrison,
+                                               bool bestPickable, float bestAverage, float worstAverage, float margin)
+        {
+            return worstId >= 0 && bestId >= 0 && worstId != bestId && worstHasCommand && bestPickable
+                && !worstInGarrison && bestAverage > worstAverage + margin;
+        }
+
         public static AppointmentGuardState Clear(int[] worst, Func<int, bool> isProtected)
         {
             if (worst == null || isProtected == null) return null;

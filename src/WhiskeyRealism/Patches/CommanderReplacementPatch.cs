@@ -23,7 +23,9 @@ namespace WhiskeyRealism.Patches
     // job 24 runs unchanged for every unprotected commander. No skip, no mod-state write; the
     // restore runs in the Finalizer so it happens even when vanilla throws. The old scripted
     // succession swap (a Prefix-skip that also wrote mod state) is gone: succession events are a
-    // prior in the appointment planner. Alliances 0 and 1 only.
+    // prior in the appointment planner. Alliances 0 and 1 only. When a cleared slot is one vanilla
+    // would really have swapped (its own 17017-17020 test, AppointmentGuard.VanillaWouldReplace),
+    // the Prefix logs it once: the smoke proof of a real block.
     [HarmonyPatch(typeof(AICampaign), "CheckAICommanderReplacements")]
     internal static class CommanderReplacementPatch
     {
@@ -41,16 +43,42 @@ namespace WhiskeyRealism.Patches
                     if (allianceId < 0 || allianceId > 1) return;
                     var alliances = GameVars.alliance;
                     if (alliances == null || allianceId >= alliances.Length) return;
-                    __state = AppointmentGuard.Clear(alliances[allianceId].worstcommanderidperlevel,
-                        id => CommanderAppointmentRuntime.IsProtected(allianceId, id));
-                    if (__state != null)
-                        OnceLog.Info("replace:guard", "[Patch:Replace] job 24 skips the campaign planner's protected appointees (P13)");
+                    var alliance = alliances[allianceId];
+                    __state = AppointmentGuard.ClearProtected(alliance.worstcommanderidperlevel, CommanderAppointmentRuntime.Book, allianceId);
+                    if (__state == null) return;
+                    OnceLog.Info("replace:guard", "[Patch:Replace] job 24 skips the campaign planner's protected appointees (P13)");
+                    if (BlocksAVanillaSwap(alliance, allianceId, __state))
+                        OnceLog.Info("replace:blocked", "[Patch:Replace] job 24 would have replaced a protected appointee; the guard kept him (P13)");
                 }
                 catch (Exception ex)
                 {
                     OnceLog.Warning("replace:prefix", "[Patch:Replace] guard failed, vanilla runs unguarded: " + ex.Message);
                 }
             }
+        }
+
+        // Vanilla's own swap test (17017-17020) on each cleared slot: the smoke proof that the
+        // guard blocked a real job-24 replacement, not just an idle slot.
+        private static bool BlocksAVanillaSwap(GameVars.Alliance alliance, int allianceId, AppointmentGuardState state)
+        {
+            var commanders = GameVars.commander;
+            var best = alliance.bestcommanderidperlevel;
+            if (commanders == null || best == null) return false;
+            for (int k = 0; k < state.Count; k++)
+            {
+                int slot = state.SlotAt(k), worstId = state.IdAt(k);
+                int bestId = slot < best.Length ? best[slot] : -1;
+                if (bestId < 0 || bestId >= commanders.Count || worstId < 0 || worstId >= commanders.Count) continue;
+                var worst = commanders[worstId];
+                var candidate = commanders[bestId];
+                bool hasCommand = (UnityEngine.Object)worst.currentcommand != null;
+                if (AppointmentGuard.VanillaWouldReplace(bestId, worstId, hasCommand,
+                        hasCommand && (UnityEngine.Object)worst.currentcommand.garrisonreference != null,
+                        candidate.CanBePickedForAIReplacement(allianceId), candidate.GetAverageAttributeValue(),
+                        worst.GetAverageAttributeValue(), GamePrefs.expdifferenceforverticalpromotion))
+                    return true;
+            }
+            return false;
         }
 
         [HarmonyFinalizer]
