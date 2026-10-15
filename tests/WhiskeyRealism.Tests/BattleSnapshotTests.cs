@@ -30,6 +30,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot strength bucket reads ai-group and in-range strength", StrengthBucketReadsAiGroupAndInRangeStrength),
             ("battle snapshot begin build resets the perception summary to nothing seen", BeginBuildResetsPerceptionSummary),
             ("battle snapshot front axis group fallback weights by ai-group strength", FrontAxisGroupFallbackWeightsByAiGroupStrength),
+            ("battle snapshot front axis group fallback filter matches the shipped sample", FrontAxisGroupFallbackFilterMatchesShippedSample),
         });
     }
 
@@ -342,11 +343,11 @@ internal static class BattleSnapshotTests
         var seen = new EnemyObservation { InstanceId = 900001, X = 700f, Z = 2000f, Strength = 5000f, State = ObservationState.Visible };
 
         // Warm-up: a rebuild and a reuse pass grow every pooled buffer.
-        f.Load(1); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
-        f.Load(2); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(1); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
+        f.Load(2); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
-        f.Load(3); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(3); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
         long reuse = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, reuse, "second assembly (same roster) allocated bytes");
 
@@ -354,7 +355,7 @@ internal static class BattleSnapshotTests
         // pooled buffers.
         int generation = f.Scratch.TreeGeneration;
         before = GC.GetAllocatedBytesForCurrentThread();
-        f.Load(4); f.Scratch.SourceListIdentity = 4242; f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(4); f.Scratch.SourceListIdentity = 4242; f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
         long rebuild = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, rebuild, "roster-change rebuild allocated bytes");
         AssertEqual(generation + 1, f.Scratch.TreeGeneration, "the measured pass was a rebuild");
@@ -379,26 +380,26 @@ internal static class BattleSnapshotTests
         var s = f.Snapshot;
         // Own combat centroid sits near (x≈23, z=0); enemy due north (+Z).
         s.SetEnemySummary(5000f, 0f, 23f, 1000f);
-        var axis1 = BattleSnapshotAssembler.FitFrontAxis(s, TacticalFrontAxis.None);
+        var axis1 = BattleSnapshotAssembler.FitFrontAxis(s, TacticalFrontAxis.None, commandHierarchyShift: 0);
         AssertTrue(axis1.IsValid, "axis fitted toward the visible enemy");
         AssertNear(0f, axis1.HeadingDegrees, 1f, "heading north");
 
         // Enemy centroid swings ~5 degrees: below the 10-degree threshold, heading kept.
         f.Load(2); f.Assemble();
         s.SetEnemySummary(5000f, 0f, 23f + 1000f * (float)Math.Tan(5.0 * Math.PI / 180.0), 1000f);
-        var axis2 = BattleSnapshotAssembler.FitFrontAxis(s, axis1);
+        var axis2 = BattleSnapshotAssembler.FitFrontAxis(s, axis1, commandHierarchyShift: 0);
         AssertNear(axis1.HeadingDegrees, axis2.HeadingDegrees, 0.01f, "small swing keeps heading");
 
         // ~25 degree swing: the new heading is taken.
         f.Load(3); f.Assemble();
         s.SetEnemySummary(5000f, 0f, 23f + 1000f * (float)Math.Tan(25.0 * Math.PI / 180.0), 1000f);
-        var axis3 = BattleSnapshotAssembler.FitFrontAxis(s, axis2);
+        var axis3 = BattleSnapshotAssembler.FitFrontAxis(s, axis2, commandHierarchyShift: 0);
         AssertNear(25f, axis3.HeadingDegrees, 1.5f, "large swing re-heads");
 
         // Nothing visible: keep facing the last way.
         f.Load(4); f.Assemble();
         s.SetEnemySummary(0f, 0f, 0f, 0f);
-        var axis4 = BattleSnapshotAssembler.FitFrontAxis(s, axis3);
+        var axis4 = BattleSnapshotAssembler.FitFrontAxis(s, axis3, commandHierarchyShift: 0);
         AssertNear(axis3.HeadingDegrees, axis4.HeadingDegrees, 0.01f, "no visible enemy keeps heading");
         AssertTrue(axis4.BandCount == TacticalFrontAxis.DefaultBandCount, "bands spread over own extent");
     }
@@ -517,9 +518,35 @@ internal static class BattleSnapshotTests
         SetStrengths(f, Div2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 9000);
         f.Load(); f.Assemble();
         f.Snapshot.SetEnemySummary(5000f, 0f, 50f, 1000f);
-        var axis = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None);
+        var axis = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 0);
         AssertTrue(axis.IsValid, "axis fitted from groups only");
         AssertNear(100f * 9000f / 9001f, axis.OriginX, 0.01f, "origin weighted by ai-group strength, zero counts as 1");
         AssertNear(0f, axis.OriginZ, 0.01f, "origin z");
+    }
+
+    // The shipped group sample (ArmyEvidenceBuilder 615b672, ~668-683) takes units with
+    // unittyp >= the shifted command level, not routed, and not under the W&L player's
+    // command. The snapshot's PlayerOwned flag stands in for dlcw_isundercommander.
+    private static void FrontAxisGroupFallbackFilterMatchesShippedSample()
+    {
+        var f = new Fixture();
+        f.Add(Div1, TacticalUnitType.BattleGroupDivision, 0f, 0f, 0, UnitFlags.PlayerOwned);
+        f.Add(Div2, TacticalUnitType.BattleGroupDivision, 100f, 0f, 0);
+        f.Add(Brig1, TacticalUnitType.BattleGroupBrigade, -500f, 0f, 0);
+        f.Add(Brig2, TacticalUnitType.BattleGroupBrigade, 300f, 0f, 0, UnitFlags.Routed);
+        SetStrengths(f, Div1, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 9000);
+        SetStrengths(f, Div2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 10);
+        SetStrengths(f, Brig1, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 5000);
+        SetStrengths(f, Brig2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 5000);
+        f.Load(); f.Assemble();
+        f.Snapshot.SetEnemySummary(5000f, 0f, 50f, 1000f);
+
+        // Shift 1: command level starts at divisions (15); the brigade is below it.
+        var shifted = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 1);
+        AssertNear(100f, shifted.OriginX, 0.01f, "player-owned division, routed and below-command brigades left out");
+
+        // Shift 0: brigades (14) are command level; the routed one still is not sampled.
+        var unshifted = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 0);
+        AssertNear((100f * 10f - 500f * 5000f) / 5010f, unshifted.OriginX, 0.01f, "brigade joins at shift 0");
     }
 }

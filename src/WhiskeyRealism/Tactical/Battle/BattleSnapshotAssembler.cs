@@ -181,15 +181,24 @@ namespace WhiskeyRealism.Tactical.Battle
         // were; nothing visible keeps facing the last way), minus the objective fallback, which
         // needs map data the snapshot does not carry. Must run after perception has set
         // the visible-enemy summary for the tick.
-        internal static TacticalFrontAxis FitFrontAxis(BattleSnapshot s, TacticalFrontAxis previous)
+        //
+        // The group sample is the shipped one (ArmyEvidenceBuilder 615b672, ~668-683):
+        // unittyp at or above the shifted command level (ClampShiftedMin), not routed, and
+        // not under the W&L player's command. The shipped "routed" also counted
+        // markedforrout, which Rout sets only on leaves after returning for unittyp > 13
+        // (123547-123555), so for a group isrouted alone is the same test. The player-command
+        // test reads UnitFlags.PlayerOwned (BattleSnapshotBuilder.OwnershipFlags; BC3's
+        // PlayerOwnership.Compute at its merge) instead of dlcw_isundercommander.
+        internal static TacticalFrontAxis FitFrontAxis(BattleSnapshot s, TacticalFrontAxis previous, int commandHierarchyShift)
         {
             if (s == null) return previous;
+            int commandMin = ClampShiftedMin(commandHierarchyShift);
             bool leaves = HasCombatLeaf(s);
             double sx = 0, sz = 0, w = 0;
             for (int i = 0; i < s.OwnCount; i++)
             {
                 ref UnitRecord u = ref s.Own[i];
-                if (!InFrontSample(in u, leaves)) continue;
+                if (!InFrontSample(in u, leaves, commandMin)) continue;
                 double weight = Math.Max(1f, leaves ? u.Strength : Math.Max(0, u.GroupStrengthAiGroup));
                 sx += u.X * weight;
                 sz += u.Z * weight;
@@ -213,7 +222,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = 0; i < s.OwnCount; i++)
             {
                 ref UnitRecord u = ref s.Own[i];
-                if (!InFrontSample(in u, leaves)) continue;
+                if (!InFrontSample(in u, leaves, commandMin)) continue;
                 float lateral = bare.LateralOf(u.X, u.Z);
                 if (lateral < min) min = lateral;
                 if (lateral > max) max = lateral;
@@ -235,11 +244,11 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool HasCombatLeaf(BattleSnapshot s)
         {
             for (int i = 0; i < s.OwnCount; i++)
-                if (InFrontSample(in s.Own[i], leaves: true)) return true;
+                if (InFrontSample(in s.Own[i], leaves: true, commandMin: 0)) return true;
             return false;
         }
 
-        private static bool InFrontSample(in UnitRecord u, bool leaves)
+        private static bool InFrontSample(in UnitRecord u, bool leaves, int commandMin)
         {
             if ((u.Flags & UnitFlags.Routed) != 0) return false;
             if (leaves)
@@ -248,7 +257,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (u.UnitTyp > TacticalUnitType.MaxCombat || u.UnitTyp == TacticalUnitType.Excluded) return false;
                 return u.Strength > 0 && (u.Flags & UnitFlags.Active) != 0;
             }
-            return (u.Flags & UnitFlags.IsGroup) != 0 && (u.Flags & UnitFlags.PlayerOwned) == 0;
+            return u.UnitTyp >= commandMin && (u.Flags & UnitFlags.PlayerOwned) == 0;
         }
 
         // ---- probe converters (one parent map for every tree consumer) ------------------

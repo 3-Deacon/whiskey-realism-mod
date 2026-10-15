@@ -169,7 +169,7 @@ public sealed partial class BattleSnapshot : WhiskeyRealism.Tactical.Orchestrato
 internal static class BattleSnapshotAssembler {
   internal static void AssembleCommandTree(UnitRecord[] own, int count, int[][] attachedIds, int[] attachedCounts, BattleSnapshotScratch scratch); // sets ParentIndex
   internal static void ApplyOwnershipFlags(BattleSnapshot s, in PlayerOwnershipInput input); // delegates to BC3 PlayerOwnership.Compute
-  internal static WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis FitFrontAxis(BattleSnapshot s, WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis previous);
+  internal static WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis FitFrontAxis(BattleSnapshot s, WhiskeyRealism.Tactical.Orchestrator.TacticalFrontAxis previous, int commandHierarchyShift); // shift: group fallback sample starts at the shifted command level
 }
 internal static class BattleSnapshotBuilder { // runtime
   internal static BattleSnapshot Build(AIBattle battle, int alliance, BattleSnapshot reuse, long tickId, double doctrineHours);
@@ -193,6 +193,7 @@ internal static class BattleSnapshotBuilder { // runtime
   - `MoveUnitStaleSourceListYieldsToDestination`: after `MoveUnit` a deep source group keeps a stale list that still holds the moved unit; the claimant that was the unit's previous parent yields to the other one, and the move changes the attached-length sum
   - `BeginBuildResetsPerceptionSummary`: `NearestVisibleReinforcementHours` resets to `float.MaxValue` ("none seen", BC2a's sentinel), never 0
   - `FrontAxisGroupFallbackWeightsByAiGroupStrength`: with no combat leaf, groups weigh `max(1, max(0, groupstrengthaigroup))`, as the shipped `ArmyEvidenceBuilder` group samples and `Centroid` did
+  - `FrontAxisGroupFallbackFilterMatchesShippedSample`: the group fallback samples units at or above the shifted command level, not routed and not `PlayerOwned` (shipped `ArmyEvidenceBuilder` filter); a player-owned division is excluded
   - `StrengthBucketReadsAiGroupAndInRangeStrength`: the extended probe keeps the shipped bucket source `max(groupowninrange, groupstrengthaigroup)` (vanilla 120297, 120559-120564), so `ChooseEnvelopmentAnchorIndices` sees unchanged strengths; a non-AI-group division out of contact stays bucket 0
 - [ ] Implement `BattleSnapshot` with grow-only pooled arrays. Growth allocates only when the roster exceeds capacity, which the allocation test accepts as warm-up.
 - [ ] Implement the runtime builder. It does one pass over `BattleUnits.completeunitlist` (as `IList`, no LINQ). Own units of `alliance` go into `Own` and enemies into `EnemyRecords`. It caches `allattachedunits` id lists only when the roster signature changes. It sets `FirstEnemyInRangeId` from `unitrange.enemyinrangereg[0]`. On ancestry, it counts disagreements between the D5 parent map and `transform.IsChildOf` for the player chain only (cheap), and emits `OnceLog.Info("tactical-battle-core:ancestry-mismatch", …)` once per battle when the count is > 0. The key must start with `tactical` (`OnceLog.TacticalKeyPrefix`): `OnceLog.ResetTactical` releases only those keys at battle end, so a key without the prefix would fire once per process.
@@ -210,7 +211,7 @@ internal static class BattleSnapshotBuilder { // runtime
 PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the console harness: the pure assembler (parent map, stale-source rule, roster signature, probe converters, strength bucket, front axis) including zero allocation over 300 units after warm-up. Runtime proof of `BattleSnapshotBuilder.Build` is the BC7 in-game smoke, because nothing builds the snapshot before BC4 wires `BattleCoreTick.EnsureSnapshot`; until then `CommandTreeRuntime` / `DirectChildDiscoveryRuntime` read no snapshot and warn once (`battle-core:snapshot-missing`).
 
 **Merge items (BC1):**
-- **At the BC3 merge:** `BattleSnapshotBuilder.OwnershipFlags` sets `PlayerOwned` from `dlcw_isundercommander` even outside W&L (verify finding 5). Replace it with BC3's `PlayerOwnership.Compute`, as the seam comment in `OwnershipFlags` says, and add `ApplyChainFlags` after `AssembleCommandTree`.
+- **At the BC3 merge:** `BattleSnapshotBuilder.OwnershipFlags` sets `PlayerOwned` from `dlcw_isundercommander` even outside W&L (verify finding 5). Replace it with BC3's `PlayerOwnership.Compute`, as the seam comment in `OwnershipFlags` says, and add `ApplyChainFlags` after `AssembleCommandTree`. Two consumers read `PlayerOwned` and follow the change without edits: `FitFrontAxis`'s group fallback, which replaces the shipped `dlcw_isundercommander` test, and `ToRegimentProbes(excludePlayerOwned)`.
 - **At the BC4 merge:** `ArmyPostureInputsRuntime.ExtendedProbes` (`ArmyPostureInputsRuntime.cs:103-111`) caches the probe list against its own roster signature. Before the first snapshot build, `DirectChildDiscovery.BuildExtendedProbesForAlliance` returns an empty list, which would then be cached until the roster changes. BC4 must build the snapshot (`EnsureSnapshot`) before any reader runs, or the cache must not store an empty probe list taken before the first build.
 
 **Known limitations (BC1):**

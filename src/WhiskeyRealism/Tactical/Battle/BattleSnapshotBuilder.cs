@@ -208,7 +208,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             int alliance = snapshot != null ? snapshot.Alliance : -1;
             if (alliance < 0 || alliance >= Sides) return;
-            var axis = BattleSnapshotAssembler.FitFrontAxis(snapshot, _lastFrontAxis[alliance]);
+            var axis = BattleSnapshotAssembler.FitFrontAxis(snapshot, _lastFrontAxis[alliance], GamePrefs.commandhierarchyshift);
             _lastFrontAxis[alliance] = axis;
             snapshot.SetFrontAxis(axis);
         }
