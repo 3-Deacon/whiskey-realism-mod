@@ -72,6 +72,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // RefusalBackoffSeconds(GamePrefs.timetorenewaichargecheck); below the floor (0 when
         // unset) RearmAfterRefusalBattleSeconds applies.
         public double RefusalBackoffSeconds;
+        // permanentlydetached, isrouted or markedforrout: MicroAICheckForCharges' own unit
+        // filter (4917, 4922) bars arming and the stance-drop cancel.
+        public bool ExcludedByVanillaFilter;
     }
 
     public enum ChargeAction
@@ -111,8 +114,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Phased on who armed the regiment and its movement mode:
         // - not armed by the doctrine: Charge only at movementmode 0 while moving (the 122214 gate)
-        //   with every condition met and the refusal backoff elapsed; a mode 3/6 the doctrine did
-        //   not arm is vanilla's own.
+        //   with every condition met and the refusal backoff elapsed; mode 3 with the group out of
+        //   assault is Disarm (vanilla's dead 4922-4924 cancel); any other mode 3/6 the doctrine
+        //   did not arm is vanilla's own (4919's intent: AI regiments charge in assault stance).
         // - armed, any mode: revert on a resolved cycle or a demoted stance (charge denial wins).
         // - armed, mode 6: hold; vanilla's odds check already passed and the assault resolves itself.
         // - armed, mode 0 (courier carrying the order) or 3 (armed, including the stationary volley
@@ -137,6 +141,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
             if (!armed)
             {
+                if (input.ExcludedByVanillaFilter)
+                    return ChargeAction.None;
+                // Vanilla's intended stance-drop cancel (MicroAICheckForCharges 4922-4924, dead
+                // behind 4910): any AI regiment of the group in mode 3 while the group is out of
+                // assault. It also catches a charge courier that lands after the doctrine's
+                // revert (the 122214 gate fires on the next slow tick).
+                if (input.MovementMode == ArmedMovementMode && input.GroupAiStance >= 0 && input.GroupAiStance != AssaultStance)
+                    return ChargeAction.Disarm;
                 bool atGate = input.MovementMode == NormalMovementMode && input.Moving;
                 // Vanilla's own renew check (timetorenewaichargecheck, 4917) is dead code, so a
                 // fresh behavior 3 right after a refusal (122290-122292) would re-arm the 122214

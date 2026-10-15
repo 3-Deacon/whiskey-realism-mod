@@ -34,6 +34,7 @@ internal static class ChargeDoctrineTests
             ("charge doctrine never touches player-owned units", NoChargeOnPlayerOwned),
             ("charge doctrine is infantry in assault stance only", NoChargeOutsideInfantryAssault),
             ("charge doctrine does not re-arm a vanilla charge mode already running", NoChargeWhenVanillaChargeModeActive),
+            ("charge doctrine restores vanilla's stance-drop cancel for any AI regiment in mode 3", VanillaStanceDropDisarmsUnarmedChargeMode),
             ("charge doctrine only arms the vanilla 122214 gate and leaves the 122259 odds check to vanilla", ChargeComposesWithVanillaTrigger),
             ("charge doctrine holds while the courier carries the order", HoldsWhileCourierPending),
             ("charge doctrine sustains through the stationary volley pause", SustainsThroughVolleyPauseWhenStationary),
@@ -62,6 +63,7 @@ internal static class ChargeDoctrineTests
             ("charge producer never touches player-owned regiments", ProducerNeverTouchesPlayerOwned),
             ("charge producer disarms after a denied assault once vanilla returns to mode 3", ProducerDeferredDisarmAfterAssault),
             ("charge producer releases a regiment vanilla re-ordered to behavior 2", ProducerReleasesVanillaReorder),
+            ("charge producer disarms a charge courier that lands after the revert", ProducerLateChargeDeliveryIsDisarmed),
             ("charge producer config off releases its own arming", ProducerConfigOffReleases),
             ("charge producer plan does not allocate after warm-up", ProducerPlanAllocatesNothingAfterWarmup),
             ("charge executor leave-charge-mode is not a duplicate while in mode 3", LeaveChargeModeIsNotADuplicateInChargeMode),
@@ -296,6 +298,52 @@ internal static class ChargeDoctrineTests
             input.MovementMode = mode;
             AssertEqual(ChargeAction.None, Decide(input), "vanilla mode " + mode);
         }
+    }
+
+    // MicroAICheckForCharges' cancel (4922-4924: mode 3 and the group out of assault ->
+    // SetMovementMode()) applies to every regiment of the AI group, whoever armed it, but is
+    // dead behind the 4910 compare. The doctrine restores it; mode 6 waits for 6 -> 3.
+    private static void VanillaStanceDropDisarmsUnarmedChargeMode()
+    {
+        foreach (int stance in new[] { 0, 1, 2, 3 })
+        {
+            var input = Ready();
+            input.MovementMode = ChargeDoctrine.ArmedMovementMode;
+            input.GroupAiStance = stance;
+            AssertEqual(ChargeAction.Disarm, Decide(input), "unarmed mode 3, group stance " + stance);
+        }
+
+        var assault = Ready();
+        assault.MovementMode = ChargeDoctrine.AssaultMovementMode;
+        assault.GroupAiStance = 2;
+        AssertEqual(ChargeAction.None, Decide(assault), "mode 6 resolves first (4924 is mode 3 only)");
+
+        var inAssault = Ready();
+        inAssault.MovementMode = ChargeDoctrine.ArmedMovementMode;
+        AssertEqual(ChargeAction.None, Decide(inAssault), "stance 4: vanilla's own charge (4919's intent)");
+
+        var noGroup = inAssault;
+        noGroup.GroupAiStance = -1;
+        AssertEqual(ChargeAction.None, Decide(noGroup), "no AI group, no group stance");
+
+        var off = inAssault;
+        off.GroupAiStance = 2;
+        off.ConfigOn = false;
+        AssertEqual(ChargeAction.None, Decide(off), "off = vanilla (the cancel is dead there)");
+
+        var filtered = off;
+        filtered.ConfigOn = true;
+        filtered.ExcludedByVanillaFilter = true;
+        AssertEqual(ChargeAction.None, Decide(filtered), "permanentlydetached / routed / markedforrout skipped (4922)");
+
+        var player = filtered;
+        player.ExcludedByVanillaFilter = false;
+        player.PlayerOwned = true;
+        AssertEqual(ChargeAction.None, Decide(player), "player-owned never disarmed");
+
+        var filteredCharge = Ready();
+        filteredCharge.ExcludedByVanillaFilter = true;
+        AssertEqual(ChargeAction.None, Decide(filteredCharge), "vanilla's 4917 filters also bar arming");
     }
 
     // Exhaustive sweep: every Charge the doctrine emits lands exactly in the vanilla arming
@@ -713,22 +761,62 @@ internal static class ChargeDoctrineTests
         hold.Plan(s2, On());
         AssertFalse(hold.Sink.TryFind(RegB, out _), "armed in mode 3, conditions hold: no write");
 
-        // A confirmed Revert releases the regiment: a later mode 3 of its own (a contact melee
-        // ending 6 -> 3, 122302/122326) is vanilla's, never disarmed by the doctrine.
+        // A confirmed Revert releases the regiment. In assault stance a later mode 3 without
+        // a behavior-3 sighting (a contact melee ending 6 -> 3, 122302/122326) is vanilla's
+        // own charge (4919's intent) and is left alone even though this regiment's
+        // conditions fail (a friendly in its lane).
         Harness rev = Armed();
-        BattleSnapshot r1 = Line(1.01);
-        Own(r1, BrigadeId).AiStanceOrdered = 2;
-        Own(r1, RegB).CombatBehaviorOrdered = 3; // courier still carrying the charge order
+        BattleSnapshot r1 = LineWith(RegD, 500f, -550f);
+        Own(r1, RegB).CombatBehaviorOrdered = 0; // the gate fired and the regiment is back at 0
         rev.Plan(r1, On());
-        AssertTrue(rev.Sink.TryFind(RegB, out BattleOrderIntent pendingRevert) && (pendingRevert.Flags & IntentFlags.LeaveChargeMode) == 0,
-            "courier pending: plain revert");
-        rev.ExecuteAll(1.01);
-        BattleSnapshot r2 = Line(1.02);
-        Own(r2, BrigadeId).AiStanceOrdered = 2;
+        AssertTrue(rev.Sink.TryFind(RegB, out BattleOrderIntent laneRevert) && (laneRevert.Flags & IntentFlags.LeaveChargeMode) == 0,
+            "lane blocked at mode 0: plain revert");
+        rev.ExecuteAll(1.0);
+        BattleSnapshot r2 = LineWith(RegD, 500f, -550f);
         Own(r2, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
         Own(r2, RegB).CombatBehaviorOrdered = 0;
         rev.Plan(r2, On());
-        AssertFalse(rev.Sink.TryFind(RegB, out _), "released: vanilla's own mode 3 is left alone");
+        AssertFalse(rev.Sink.TryFind(RegB, out _), "released: vanilla's own mode 3 in assault is left alone");
+    }
+
+    // Under order delays the charge's courier (behavior 3, 90967) can land after the
+    // doctrine's Revert stamped ordered 2: the delivery (125401-125403) sets behavior and
+    // ordered 3, and the 122214 gate fires on the next slow tick, so the producer rarely
+    // sees the 3. The group being out of assault, vanilla's intended cancel disarms it.
+    private static void ProducerLateChargeDeliveryIsDisarmed()
+    {
+        Harness h = Armed();
+        BattleSnapshot r1 = Line(1.01);
+        Own(r1, BrigadeId).AiStanceOrdered = 2;
+        Own(r1, RegB).CombatBehaviorOrdered = 3; // courier still carrying the charge
+        h.Plan(r1, On());
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent revert) && (revert.Flags & IntentFlags.LeaveChargeMode) == 0,
+            "demoted while the courier is out: plain revert");
+        h.ExecuteAll(1.01);
+
+        BattleSnapshot r2 = Line(1.02);
+        Own(r2, BrigadeId).AiStanceOrdered = 2;
+        Own(r2, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode; // late 3 consumed by the gate
+        Own(r2, RegB).CombatBehaviorOrdered = 0;
+        h.Plan(r2, On());
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent disarm) && (disarm.Flags & IntentFlags.LeaveChargeMode) != 0,
+            "late charge disarmed");
+
+        // A stationary regiment shows the delivered 3 (the gate needs paths): behavior 3 on an
+        // AI regiment is only ever the doctrine's, so it is armed again and reverted.
+        Harness still = Armed();
+        BattleSnapshot s1 = Line(1.01);
+        Own(s1, BrigadeId).AiStanceOrdered = 2;
+        Own(s1, RegB).CombatBehaviorOrdered = 3;
+        still.Plan(s1, On());
+        still.ExecuteAll(1.01);
+        BattleSnapshot s2 = Line(1.02);
+        Own(s2, BrigadeId).AiStanceOrdered = 2;
+        Own(s2, RegB).CombatBehaviorOrdered = 3;
+        Own(s2, RegB).RegimentPaths = 0;
+        still.Plan(s2, On());
+        AssertTrue(still.Sink.TryFind(RegB, out BattleOrderIntent again) && again.Value == ChargeDoctrine.RevertBehavior,
+            "delivered 3 seen: reverted again");
     }
 
     private static void ProducerUnconfirmedChargeIsNotArmed()
@@ -738,7 +826,6 @@ internal static class ChargeDoctrineTests
         // The executor refused (guard, claim, cooldown): no Issued outcome.
         BattleSnapshot s = Line(1.01);
         Own(s, BrigadeId).AiStanceOrdered = 2;
-        Own(s, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode; // vanilla's own mode 3
         h.Plan(s, On());
         AssertEqual(0, h.Sink.Count, "nothing armed, nothing to revert");
 

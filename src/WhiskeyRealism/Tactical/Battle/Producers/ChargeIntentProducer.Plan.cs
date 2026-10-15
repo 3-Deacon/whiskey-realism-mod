@@ -49,7 +49,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // armed regiment reads 0 once vanilla's 122214 gate fires. The doctrine counts a
     // regiment armed when the executor reports its Charge Issued (last outcome on
     // (regiment, CombatBehavior), source ChargeDoctrine, at or after the submission);
-    // without that report nothing is armed (fail closed). The cycle is resolved
+    // without that report nothing is armed (fail closed). A behavior 3 seen on an AI regiment
+    // is the doctrine's (no other AI writer), so a charge courier landing after a revert
+    // re-arms the memory. A late courier the 122214 gate consumes between two ticks is never
+    // seen; ChargeDoctrine's restored stance-drop cancel (4922-4924) disarms it when the group
+    // left assault. The cycle is resolved
     // (ChargeDoctrine reverts) when the movement mode leaves the cycle
     // (ChargeDoctrine.ChargeCycleEnded), on a refusal, or when the regiment is back at
     // mode 0 without behavior 3 (the gate fired and the cycle ended between ticks, or
@@ -169,6 +173,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     m.Submitted = ChargeAction.None;
                 }
 
+                // Behavior 3 on an AI regiment has no other writer (the player UI 203769 and
+                // AssignChargeTarget(usechargeorder) 167621 are player-side; SetAIStance writes
+                // 0-2, 122099-122120): a charge courier that landed after a revert is the
+                // doctrine's again.
+                if (!m.Armed && r.CombatBehaviorOrdered == ChargeDoctrine.ChargeBehavior && (r.Flags & UnitFlags.PlayerOwned) == 0)
+                    m.Armed = true;
+
                 ChargeInput input = BuildInput(s, memory, i, in settings, in m, previous, refused, now);
                 ChargeAction action = ChargeDoctrine.Decide(in input);
                 if (action == ChargeAction.Revert && r.CombatBehaviorOrdered == ChargeDoctrine.RevertBehavior)
@@ -240,6 +251,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 WhiskeyArmed = m.Armed,
                 WhiskeyArmedPendingDisarm = m.PendingDisarm,
                 RefusalBackoffSeconds = ChargeDoctrine.RefusalBackoffSeconds(settings.VanillaRenewHours),
+                ExcludedByVanillaFilter = (r.Flags & (UnitFlags.PermanentlyDetached | UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0,
                 SecondsSinceLastAiChargeRefusal = m.HasRefusal
                     ? (now - m.RefusalAtHours) * TacticalBattleClock.BattleSecondsPerHour
                     : double.PositiveInfinity,
