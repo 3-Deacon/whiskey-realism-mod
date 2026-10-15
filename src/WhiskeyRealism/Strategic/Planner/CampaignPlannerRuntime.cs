@@ -114,7 +114,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
-                    EmitAllocation(allocation, plan, snapshot.Player, reliability);
+                    EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
                 }
                 catch (Exception ex)
                 {
@@ -182,11 +182,11 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // [Allocation] on change of its text (one row per alliance per change of roles or needs).
-        private static void EmitAllocation(Allocation allocation, TheaterPlan plan, PlayerCommandClass player, float reliability)
+        private static void EmitAllocation(Allocation allocation, TheaterPlan plan, PlayerCommandClass player, float reliability, int unreliableDays)
         {
             int a = allocation.Alliance;
             if (a < 0 || a >= LastAllocationRow.Length) return;
-            string row = ForceAllocator.Summary(allocation, plan, player, reliability);
+            string row = ForceAllocator.Summary(allocation, plan, player, reliability, unreliableDays);
             if (string.Equals(LastAllocationRow[a], row, StringComparison.Ordinal)) return;
             LastAllocationRow[a] = row;
             TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);

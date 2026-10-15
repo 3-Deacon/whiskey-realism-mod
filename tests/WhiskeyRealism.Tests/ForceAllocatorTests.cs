@@ -1039,8 +1039,8 @@ internal static class ForceAllocatorTests
         var plan = MainPlan(s, new[] { 1, 2, 3 }, 100f);
         plan.MassStrength = 24000f;
         var a = Alloc(plan, s);
-        string row = ForceAllocator.Summary(a, plan, PlayerCommandClass.MapGroup, 0.756f);
-        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 mass=24000 short=0 surplus=1", row,
+        string row = ForceAllocator.Summary(a, plan, PlayerCommandClass.MapGroup, 0.756f, 3);
+        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 short=0 surplus=1", row,
             "the [Allocation] row");
     }
 
@@ -1106,7 +1106,7 @@ internal static class ForceAllocatorTests
         int scope = review.IndexOf("TelemetryPerf.Scope(\"campaign.planner.allocate\"", StringComparison.Ordinal);
         int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
         int publish = review.IndexOf("CampaignPlanStore.Publish(alliance, plan, allocation, sectors);", StringComparison.Ordinal);
-        int emit = review.IndexOf("EmitAllocation(allocation, plan, snapshot.Player, reliability);", StringComparison.Ordinal);
+        int emit = review.IndexOf("EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);", StringComparison.Ordinal);
         AssertTrue(bookkeeping >= 0 && plan > bookkeeping && scope > plan && allocate > scope && publish > allocate && emit > publish,
             "bookkeeping return, plan, allocate scope, allocate, publish of that allocation, row");
         AssertEqual(1, review.Split(new[] { "ForceAllocator.Allocate(" }, StringSplitOptions.None).Length - 1, "one allocation per review");

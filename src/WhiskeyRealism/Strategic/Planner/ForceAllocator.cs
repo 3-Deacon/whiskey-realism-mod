@@ -121,7 +121,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The [Allocation] row (plan G4 Steps), changing only when the allocation does.
-        internal static string Summary(Allocation a, TheaterPlan plan, PlayerCommandClass player, float reliability01)
+        internal static string Summary(Allocation a, TheaterPlan plan, PlayerCommandClass player, float reliability01, int unreliableDays)
         {
             int main = 0, support = 0, hold = 0, reserve = 0, capital = 0, depot = 0, recover = 0, recon = 0, busy = 0;
             for (int i = 0; i < a.Assignments.Count; i++)
@@ -147,6 +147,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " depot=" + depot + " recover=" + recover + " recon=" + recon + " busy=" + busy
                 + " player=" + player
                 + " reliability=" + reliability01.ToString("0.00", CultureInfo.InvariantCulture)
+                + " unreliableDays=" + unreliableDays
                 + " mass=" + (plan != null ? plan.MassStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
                 + " short=" + a.Shortfalls.Count + " surplus=" + a.Surpluses.Count;
         }
