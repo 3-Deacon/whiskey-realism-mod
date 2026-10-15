@@ -23,3 +23,39 @@ namespace WhiskeyRealism.Strategic
         }
     }
 }
+
+namespace WhiskeyRealism.Strategic
+{
+    /// <summary>
+    /// Cadence catch-up for the daily review. The review observes the UniStorm calendar
+    /// (dayCounter/monthCounter, rolled over in UniStormSystem.CalculateMonths, decompile
+    /// 157819) once per AICampaign.Update frame (MonthlyTickHookPatch); at high campaign
+    /// speed / long frames the date can advance several days between two observations, so
+    /// the review can jump e.g. day 6 -> 9 and miss the
+    /// day % 7 weekly gates and the day % 2 alliance-alternating gate of
+    /// StrategicCadencePolicy. These pure checks report a gate that fell strictly between two
+    /// reviews so the caller can force the skipped work. Day serial = year*372 + month*31 + day.
+    /// </summary>
+    public static class ReviewCadenceCatchUp
+    {
+        public static int DaySerial(int day, int month, int year) => year * 372 + month * 31 + day;
+
+        public static bool SkippedWeeklyGate(int lastReviewSerial, int currentSerial)
+        {
+            if (lastReviewSerial < 0 || currentSerial - lastReviewSerial < 2) return false;
+            if (currentSerial - lastReviewSerial > 31) return true;
+            for (int serial = lastReviewSerial + 1; serial < currentSerial; serial++)
+            {
+                int dayOfMonth = serial % 31;
+                if (dayOfMonth == 0) dayOfMonth = 31;
+                if (dayOfMonth % 7 == 0) return true;
+            }
+            return false;
+        }
+
+        public static bool SkippedAlternatingGate(int lastReviewSerial, int currentSerial)
+        {
+            return lastReviewSerial >= 0 && currentSerial - lastReviewSerial >= 2;
+        }
+    }
+}

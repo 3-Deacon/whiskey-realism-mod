@@ -76,6 +76,12 @@ internal static class CampaignLifecycleFixTests
         Check("c1 hardwired days since front change", HardWiredDaysSinceFrontChange);
         Check("c1 hardwired context uses live local signals", HardWiredContextUsesLiveLocalSignals);
         Check("c1 hardwired profile near-target radius narrows vanilla radius", HardWiredProfileRadiusNarrowsVanilla);
+
+        // Cadence
+        Check("c1 cadence skipped weekly gate detected across fast-forward", CadenceSkippedWeeklyGateDetected);
+        Check("c1 cadence skipped weekly gate across month rollover", CadenceSkippedWeeklyGateAcrossMonth);
+        Check("c1 cadence consecutive days skip nothing", CadenceConsecutiveDaysSkipNothing);
+        Check("c1 cadence skipped alternating day forces both alliances", CadenceSkippedAlternatingDayForcesBothAlliances);
     }
 
     private static void Check(string name, Action test)
@@ -826,6 +832,35 @@ internal static class CampaignLifecycleFixTests
         float radius = HistoricalOperationContextBuilder.NearTargetRadius(profile);
         TestHarness.AssertTrue(radius > 0f && radius <= profile.NearTargetRadius, "profile radius is used as a cap: " + radius);
         TestHarness.AssertTrue(profile.NearTargetRadius <= 275f, "catalog radius no wider than vanilla relocation radius (275)");
+    }
+
+    // ------------------------------------------------------------------
+    // Cadence
+    // ------------------------------------------------------------------
+
+    private static void CadenceSkippedWeeklyGateDetected()
+    {
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(5, 6, 1862), Serial(9, 6, 1862)), "day 7 skipped by a 4-day jump");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(8, 6, 1862), Serial(13, 6, 1862)), "no multiple of 7 between 8 and 13");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(5, 6, 1862), Serial(7, 6, 1862)), "landing on day 7 is the normal gate");
+    }
+
+    private static void CadenceSkippedWeeklyGateAcrossMonth()
+    {
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(27, 5, 1862), Serial(2, 6, 1862)), "day 28 of May skipped");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(29, 5, 1862), Serial(2, 6, 1862)), "29..1 has no weekly day");
+    }
+
+    private static void CadenceConsecutiveDaysSkipNothing()
+    {
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(6, 6, 1862), Serial(7, 6, 1862)), "consecutive");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedAlternatingGate(Serial(6, 6, 1862), Serial(7, 6, 1862)), "consecutive");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(-1, Serial(9, 6, 1862)), "first review");
+    }
+
+    private static void CadenceSkippedAlternatingDayForcesBothAlliances()
+    {
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedAlternatingGate(Serial(6, 6, 1862), Serial(8, 6, 1862)), "a whole day skipped");
     }
 
     // ------------------------------------------------------------------

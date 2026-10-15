@@ -62,6 +62,7 @@ namespace WhiskeyRealism.Strategic
         private readonly bool[] _capitalThreatened = new bool[2];
         private readonly int[] _capitalStreakDay = { -1, -1 };
         private readonly int[] _frontChangedDay = { -1, -1 };
+        private int _lastReviewSerial = -1;
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
@@ -176,6 +177,7 @@ namespace WhiskeyRealism.Strategic
             _dailyOpsAnnounced = false;
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
+            _lastReviewSerial = -1;
             _lastSnapshot = default(WarStateObserver.Snapshot);
             _lastSnapshotDay = _lastSnapshotMonth = _lastSnapshotYear = -1;
             _loggedVicksburg = _loggedChattanooga = _loggedAtlanta = false;
@@ -232,7 +234,9 @@ namespace WhiskeyRealism.Strategic
             {
                 LastSeenMonth = gameMonth;
                 LastSeenYear  = gameYear;
-                OnMonthlyTick(gameMonth, gameYear);
+                // Run the monthly review on the real day of the rollover (fast-forward can
+                // land past the 1st); hardcoding day=1 broke every day-keyed gate.
+                OnMonthlyTick(gameDay, gameMonth, gameYear);
                 ranMonthly = true;
             }
 
@@ -280,6 +284,11 @@ namespace WhiskeyRealism.Strategic
 
         public void OnMonthlyTick(int month, int year)
         {
+            OnMonthlyTick(1, month, year);
+        }
+
+        public void OnMonthlyTick(int day, int month, int year)
+        {
             try
             {
                 // Vanilla's Policy.CheckForChapterUpdate() runs from a per-day cycle
@@ -300,7 +309,7 @@ namespace WhiskeyRealism.Strategic
                     Plugin.Log.LogWarning("[TestMode] Force All Succession Events is ON — all 12 events marked fired this tick. Disable in BepInEx config before a real playthrough.");
                 }
 
-                RunStrategicReview(1, month, year, logHeartbeat: true);
+                RunStrategicReview(day, month, year, logHeartbeat: true);
             }
             catch (Exception ex)
             {
@@ -338,6 +347,10 @@ namespace WhiskeyRealism.Strategic
             _wlCareerStartDeferredLogged = false;
 
             RefreshStrategicSettings();
+            int reviewSerial = ReviewCadenceCatchUp.DaySerial(day, month, year);
+            bool weeklyCatchUp = ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewSerial, reviewSerial);
+            bool alternatingCatchUp = ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewSerial, reviewSerial);
+            _lastReviewSerial = reviewSerial;
             int playerAlliance = ResolvePlayerAlliance();
             bool operationalRuntimeReady = OperationalRuntimeReady();
             if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
@@ -347,7 +360,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (operationalRuntimeReady)
-                mapMs += Measure(() => UpdateCampaignMapLedger(day, logHeartbeat));
+                mapMs += Measure(() => UpdateCampaignMapLedger(day, logHeartbeat, weeklyCatchUp));
 
             for (int alliance = 0; alliance < 2; alliance++)
             {
@@ -415,7 +428,7 @@ namespace WhiskeyRealism.Strategic
                 if (operationalRuntimeReady)
                 {
                     string formationSource = FormationSourceSignature(alliance, cic);
-                    bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day, alliance) ||
+                    bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day, alliance, alternatingCatchUp) ||
                         StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) ||
                         frontChanged;
                     if (runFormation)
@@ -431,7 +444,7 @@ namespace WhiskeyRealism.Strategic
                     });
 
                     string armyAreaSource = ArmyAreaSourceSignature(alliance, cic);
-                    if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, armyAreaSource, _armyAreaSourceSignatures[alliance], formationChanged))
+                    if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, armyAreaSource, _armyAreaSourceSignatures[alliance], formationChanged || weeklyCatchUp))
                     {
                         armyAreaMs += Measure(() => UpdateArmyAreaLedger(alliance, cic));
                         _armyAreaSourceSignatures[alliance] = armyAreaSource;
@@ -440,7 +453,7 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 string constructionSource = ConstructionSourceSignature(alliance);
-                if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, constructionSource, _constructionSourceSignatures[alliance], false))
+                if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, constructionSource, _constructionSourceSignatures[alliance], weeklyCatchUp))
                 {
                     constructionMs += Measure(() => UpdateConstructionIntent(alliance, era.Stage, logHeartbeat));
                     _constructionSourceSignatures[alliance] = constructionSource;
@@ -757,7 +770,7 @@ namespace WhiskeyRealism.Strategic
             return elapsedMs >= threshold;
         }
 
-        private void UpdateCampaignMapLedger(int day, bool logHeartbeat)
+        private void UpdateCampaignMapLedger(int day, bool logHeartbeat, bool weeklyCatchUp)
         {
             try
             {
@@ -768,7 +781,7 @@ namespace WhiskeyRealism.Strategic
                         day,
                         dynamicSignature,
                         _campaignMapDynamicSignature,
-                        forceRefresh: false);
+                        forceRefresh: weeklyCatchUp);
                 if (!fullRefresh) return;
 
                 var ledger = CampaignMapRuntime.Build();
