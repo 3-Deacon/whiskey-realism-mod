@@ -100,6 +100,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 cadence consecutive days skip nothing", CadenceConsecutiveDaysSkipNothing);
         Check("c1 cadence skipped alternating day forces both alliances", CadenceSkippedAlternatingDayForcesBothAlliances);
         Check("c1 cadence review only runs once vanilla marks the campaign live", CadenceReviewOnlyWhenCampaignLive);
+        Check("c1 cadence day serial counts calendar days", CadenceDaySerialCountsCalendarDays);
         Check("c1 per stale sidecar plan off the current catalog is replanned", PerStaleSidecarPlanIsReplanned);
     }
 
@@ -142,6 +143,8 @@ internal static class CampaignLifecycleFixTests
     }
 
     private static int Serial(int day, int month, int year) => year * 372 + month * 31 + day;
+    // The review clock (ReviewCadenceCatchUp.DaySerial): calendar days, not the 372-day encoding above.
+    private static int Cal(int day, int month, int year) => ReviewCadenceCatchUp.DaySerial(day, month, year);
 
     private static PhaseTruthInput TruthInput(OperationalPlan plan, int month, int year, float own, float enemy)
     {
@@ -1151,27 +1154,51 @@ internal static class CampaignLifecycleFixTests
 
     private static void CadenceSkippedWeeklyGateDetected()
     {
-        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(5, 6, 1862), Serial(9, 6, 1862)), "day 7 skipped by a 4-day jump");
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(8, 6, 1862), Serial(13, 6, 1862)), "no multiple of 7 between 8 and 13");
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(5, 6, 1862), Serial(7, 6, 1862)), "landing on day 7 is the normal gate");
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(5, 6, 1862), Cal(9, 6, 1862)), "day 7 skipped by a 4-day jump");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(8, 6, 1862), Cal(13, 6, 1862)), "no multiple of 7 between 8 and 13");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(5, 6, 1862), Cal(7, 6, 1862)), "landing on day 7 is the normal gate");
     }
 
     private static void CadenceSkippedWeeklyGateAcrossMonth()
     {
-        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(27, 5, 1862), Serial(2, 6, 1862)), "day 28 of May skipped");
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(29, 5, 1862), Serial(2, 6, 1862)), "29..1 has no weekly day");
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(27, 5, 1862), Cal(2, 6, 1862)), "day 28 of May skipped");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(29, 5, 1862), Cal(2, 6, 1862)), "29..1 has no weekly day");
     }
 
     private static void CadenceConsecutiveDaysSkipNothing()
     {
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Serial(6, 6, 1862), Serial(7, 6, 1862)), "consecutive");
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedAlternatingGate(Serial(6, 6, 1862), Serial(7, 6, 1862)), "consecutive");
-        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(-1, Serial(9, 6, 1862)), "first review");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(6, 6, 1862), Cal(7, 6, 1862)), "consecutive");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedAlternatingGate(Cal(6, 6, 1862), Cal(7, 6, 1862)), "consecutive");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(-1, Cal(9, 6, 1862)), "first review");
     }
 
     private static void CadenceSkippedAlternatingDayForcesBothAlliances()
     {
-        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedAlternatingGate(Serial(6, 6, 1862), Serial(8, 6, 1862)), "a whole day skipped");
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedAlternatingGate(Cal(6, 6, 1862), Cal(8, 6, 1862)), "a whole day skipped");
+    }
+
+    // UniStorm's calendar (calendarType 1) rolls months over with Gregorian lengths and leap years
+    // (CalculateMonths 157818-157847) and builds UniStormDate = new DateTime(year, month, day)
+    // (CalculateDays 157882-157885): the serial is that date's day count.
+    private static void CadenceDaySerialCountsCalendarDays()
+    {
+        TestHarness.AssertEqual(2, Cal(1, 3, 1862) - Cal(27, 2, 1862), "27 Feb -> 1 Mar 1862");
+        TestHarness.AssertEqual(3, Cal(1, 3, 1864) - Cal(27, 2, 1864), "1864 is a leap year");
+        TestHarness.AssertEqual(1, Cal(1, 1, 1863) - Cal(31, 12, 1862), "31 Dec -> 1 Jan");
+        TestHarness.AssertEqual(1, Cal(1, 5, 1862) - Cal(30, 4, 1862), "a 30-day month");
+        TestHarness.AssertTrue(Cal(1, 1, 1861) > 0, "positive: -1 stays the 'never' sentinel");
+        var origin = new System.DateTime(1861, 1, 1);
+        for (var d = origin; d.Year < 1867; d = d.AddDays(1))
+            if (Cal(d.Day, d.Month, d.Year) - Cal(1, 1, 1861) != (d - origin).Days)
+            {
+                TestHarness.AssertEqual((d - origin).Days, Cal(d.Day, d.Month, d.Year) - Cal(1, 1, 1861), "day count at " + d.ToString("yyyy-MM-dd"));
+                break;
+            }
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedAlternatingGate(Cal(28, 2, 1862), Cal(1, 3, 1862)), "28 Feb -> 1 Mar is consecutive: no phantom skipped day");
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(27, 2, 1862), Cal(2, 3, 1862)), "28 Feb skipped");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(28, 2, 1862), Cal(3, 3, 1862)), "1-2 Mar has no weekly day");
+        TestHarness.AssertTrue(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(6, 12, 1862), Cal(8, 12, 1862)), "day 7 by the real calendar");
+        TestHarness.AssertFalse(ReviewCadenceCatchUp.SkippedWeeklyGate(Cal(29, 12, 1862), Cal(2, 1, 1863)), "30 Dec .. 1 Jan has no weekly day");
     }
 
     private static void CadenceReviewOnlyWhenCampaignLive()

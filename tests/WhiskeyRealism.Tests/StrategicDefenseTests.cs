@@ -30,8 +30,8 @@ internal static class StrategicDefenseTests
             ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("defense posture defaults to not-evaluated", DefensePostureDefaultsToNotEvaluated),
             ("defense threat carries signature and posture", DefenseThreatCarriesSignatureAndPosture),
-            ("threat signature for sif uses instance and spot", ThreatSignatureForSifUsesInstanceAndSpot),
-            ("threat signature for raid uses instance and asset", ThreatSignatureForRaidUsesInstanceAndAsset),
+            ("threat signature for sif uses the belief key", ThreatSignatureForSifUsesBeliefKey),
+            ("threat signature for raid uses the belief key and asset", ThreatSignatureForRaidUsesBeliefKeyAndAsset),
             ("threat signature for asset uses sorted top-n enemies", ThreatSignatureForAssetUsesSortedTopN),
             ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies),
             ("threat signature for raid handles null asset", ThreatSignatureForRaidHandlesNullAsset),
@@ -139,21 +139,21 @@ internal static class StrategicDefenseTests
         AssertEqual(ThreatScale.Landing, threat.Scale);
     }
 
-    private static void ThreatSignatureForSifUsesInstanceAndSpot()
+    // G1: sea invasions are keyed on the believed enemy group's UnitKey (no landing spot or port:
+    // that is the enemy's plan state).
+    private static void ThreatSignatureForSifUsesBeliefKey()
     {
-        var sig = DefenseThreatSignature.ForSeaInvasion(
-            invasionForceInstanceId: 42, spotName: "Hampton", sourcePortName: "Boston");
-        AssertEqual("sif:42:Hampton:Boston", sig);
+        var sig = DefenseThreatSignature.ForSeaInvasion("Burnside Expedition:42");
+        AssertEqual("sif:Burnside Expedition:42", sig);
 
-        var nullSpot = DefenseThreatSignature.ForSeaInvasion(
-            invasionForceInstanceId: 42, spotName: null, sourcePortName: null);
-        AssertEqual("sif:42:<no-spot>:<no-port>", nullSpot);
+        var nullKey = DefenseThreatSignature.ForSeaInvasion(null);
+        AssertEqual("sif:<no-key>", nullKey);
     }
 
-    private static void ThreatSignatureForRaidUsesInstanceAndAsset()
+    private static void ThreatSignatureForRaidUsesBeliefKeyAndAsset()
     {
-        var sig = DefenseThreatSignature.ForRaid(raidGroupInstanceId: 7, nearestAssetName: "wilmington-harbor");
-        AssertEqual("raid:7:wilmington-harbor", sig);
+        var sig = DefenseThreatSignature.ForRaid(enemyUnitKey: "Stuart:7", nearestAssetName: "wilmington-harbor");
+        AssertEqual("raid:Stuart:7:wilmington-harbor", sig);
     }
 
     private static void ThreatSignatureForAssetUsesSortedTopN()
@@ -177,8 +177,8 @@ internal static class StrategicDefenseTests
 
     private static void ThreatSignatureForRaidHandlesNullAsset()
     {
-        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, null));
-        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, ""));
+        AssertEqual("raid:Stuart:7:<no-asset>", DefenseThreatSignature.ForRaid("Stuart:7", null));
+        AssertEqual("raid:Stuart:7:<no-asset>", DefenseThreatSignature.ForRaid("Stuart:7", ""));
     }
 
     private static void ThreatSignatureForAssetHandlesNullName()
@@ -379,7 +379,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
-            RaidGroupInstanceId = 7,
+            EnemyUnitKey = "Raider:7",
             AssetName = "hampton-harbor",
             EnemyStrength = 1500f
         });
@@ -412,9 +412,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 42,
-            SpotName = "hampton-spot",
-            SourcePortName = "boston",
+            EnemyUnitKey = "hampton-spot:42",
             LandedSignal = true,
             AssetName = "norfolk-harbor",
             AssetRole = AssetStrategicRole.KeyFort,
@@ -467,9 +465,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 5,
-            SpotName = "charleston-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "charleston-spot:5",
             LandedSignal = true,
             AssetName = "wilmington-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -591,9 +587,7 @@ internal static class StrategicDefenseTests
         var src = new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 10,
-            SpotName = "mobile-spot",
-            SourcePortName = "new-orleans",
+            EnemyUnitKey = "mobile-spot:10",
             LandedSignal = true,
             AssetName = "mobile-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -640,11 +634,9 @@ internal static class StrategicDefenseTests
         var src = new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 20,
-            SpotName = "savannah-spot",
-            SourcePortName = "baltimore",
+            EnemyUnitKey = "savannah-spot:20",
             LandedSignal = true,
-            VanillaCollapsed = false,
+            SightingLapsed = false,
             AssetName = "savannah-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
             EnemyStrength = 5000f
@@ -668,8 +660,8 @@ internal static class StrategicDefenseTests
         AssertTrue(input.Cooldown.IsActive(sig), "tick1: should be active after Active build");
         input.Cooldown.Tick();
 
-        // Tick 2: Recovered (VanillaCollapsed=true). Builder emits Recovered + calls MarkRecovered.
-        src.VanillaCollapsed = true;
+        // Tick 2: Recovered (SightingLapsed=true). Builder emits Recovered + calls MarkRecovered.
+        src.SightingLapsed = true;
         src.LandedSignal = false;
         var out2 = DefenseIntentLedger.Build(input);
         AssertTrue(out2.Responses.Count >= 1, "tick2: expected response");
@@ -704,9 +696,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 1,
-            SpotName = "annapolis-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "annapolis-spot:1",
             LandedSignal = true,
             EnemyStrength = 8000f
         });
@@ -733,9 +723,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 30,
-            SpotName = "beaufort-spot",
-            SourcePortName = "savannah",
+            EnemyUnitKey = "beaufort-spot:30",
             LandedSignal = true,
             AssetName = "beaufort-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -789,9 +777,7 @@ internal static class StrategicDefenseTests
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
-                InvasionForceInstanceId = 50,
-                SpotName = "port-royal-spot",
-                SourcePortName = "norfolk",
+                EnemyUnitKey = "port-royal-spot:50",
                 LandedSignal = true,
                 AssetName = "port-royal-harbor",
                 AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -825,9 +811,7 @@ internal static class StrategicDefenseTests
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
-                InvasionForceInstanceId = 51,
-                SpotName = "richmond-spot",
-                SourcePortName = "norfolk",
+                EnemyUnitKey = "richmond-spot:51",
                 LandedSignal = true,
                 AssetName = "richmond-harbor",
                 AssetRole = AssetStrategicRole.CapitalApproach,
@@ -885,7 +869,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
-            RaidGroupInstanceId = 7,
+            EnemyUnitKey = "Raider:7",
             AssetName = "hampton-spot",
             EnemyStrength = 2000f
         });
@@ -895,8 +879,8 @@ internal static class StrategicDefenseTests
         AssertTrue(output.Responses.Count >= 1, "expected at least one response");
         var response = output.Responses[0];
         AssertEqual(ThreatScale.Raid, response.Threat.Scale);
-        AssertTrue(response.Threat.Signature.StartsWith("raid:7:"),
-            $"expected signature to start with 'raid:7:', got '{response.Threat.Signature}'");
+        AssertTrue(response.Threat.Signature.StartsWith("raid:Raider:7:"),
+            $"expected signature to start with 'raid:Raider:7:', got '{response.Threat.Signature}'");
     }
 
     // Test #13: when SeaInvasion gate is off, AssetProximity fallback works without throw.
@@ -941,9 +925,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 99,
-            SpotName = "charlestown-spot",
-            SourcePortName = "hampton-roads",
+            EnemyUnitKey = "charlestown-spot:99",
             LandedSignal = true,
             AssetName = "charlestown-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -1102,9 +1084,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 44,
-            SpotName = "norfolk-spot",
-            SourcePortName = "baltimore",
+            EnemyUnitKey = "norfolk-spot:44",
             LandedSignal = true,
             AssetName = "richmond-approach",
             AssetRole = AssetStrategicRole.CapitalApproach,
@@ -1144,9 +1124,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 55,
-            SpotName = "mobile-spot",
-            SourcePortName = "new-orleans",
+            EnemyUnitKey = "mobile-spot:55",
             LandedSignal = true,
             AssetName = "mobile",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -1183,9 +1161,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 66,
-            SpotName = "richmond-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "richmond-spot:66",
             LandedSignal = true,
             AssetName = "richmond",
             AssetRole = AssetStrategicRole.CapitalApproach,

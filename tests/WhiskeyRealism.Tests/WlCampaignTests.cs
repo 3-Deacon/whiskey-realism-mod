@@ -888,8 +888,8 @@ internal static class WlCampaignTests
         var threat = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
         threat.Threats.Add(new DefenseThreatSource
         {
-            Kind = DefenseThreatSourceKind.SeaInvasion, InvasionForceInstanceId = 30, SpotName = "spot",
-            SourcePortName = "port", LandedSignal = true, AssetName = "harbor",
+            Kind = DefenseThreatSourceKind.SeaInvasion, EnemyUnitKey = "spot:30",
+            LandedSignal = true, AssetName = "harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort, EnemyStrength = 6000f
         });
         threat.Candidates.Add(PlayerMapGroupCandidate());

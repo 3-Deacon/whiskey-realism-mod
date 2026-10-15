@@ -1,25 +1,19 @@
 // DefenseIntentRuntime — reflection-based extractor that snapshots live AICampaign
 // state into a DefenseIntentInput for consumption by DefenseIntentLedger.Build().
 //
+// Enemy inputs are the side's fog-honest beliefs (EnemyDetectionRuntime.BeliefsFor, plan G1,
+// spec C25): sea-invasion and raid threats are inferred from seen forces only (a group seen
+// afloat off our coast or seen landed, a cavalry-majority group seen on our soil); Whiskey never
+// reads the enemy's seainvasionforce / raidforces plan state (landing spot, port, state, path).
+//
 // Vanilla anchors used:
 //   AICampaign.aifaction (private static list of AIFaction inner class)
-//   AICampaign.seainvasionforce (public static List<SeaInvasionForce>)
-//   AICampaign.raidforces (public static List<RaidForce>)
-//   SeaInvasionForce fields: aifactionused, invasionforce, assignedescort,
-//       seainvasionspot, currentstate, sourceport
-//   SeaInvasion.GetUnitStrengthInRange(int allianceid, bool returnbalance, int shipweight)
-//   RaidForce fields: raidgroup, currentstate, aifactionused, closestarea
-//   RaidForce.IsRaidUnit(Regiment) — static helper
-//   SeaInvasionForce.GetSeaInvasionForceReference(Regiment) — static helper
-//   AIFaction fields: ownunits, enemyunits, unitsinoffensiveoperations,
-//       unitsindefensiveoperations, unitsconstructingsupplydepots, allianceid, ownports
-//   Regiment: groupstrengthactive (int), groupmorale (float), regimentpaths (int),
-//       inbattle (bool), onretreat (bool)
+//   RaidForce.IsRaidUnit(Regiment) — static helper (own units)
+//   SeaInvasionForce.GetSeaInvasionForceReference(Regiment) — static helper (own units)
+//   AIFaction fields: ownunits, unitsinoffensiveoperations, unitsconstructingsupplydepots
+//   Regiment: groupstrengthactive (int), groupmorale (float), inbattle (bool), onretreat (bool)
 //   CampaignArmyPanel.GetReadinessStep(Regiment) — static/instance helper
-//   DLC_WL.IsMovedByPlayer(Regiment) — static helper
-//   Tools.GetXZDistance(Vector3, Vector3) — static helper
 //   GamePrefs.maxdistancedefensiveoperations — static float field
-//   GamePrefs.seainvasionspotsunitrange — static float field
 
 using System;
 using System.Collections;
@@ -27,12 +21,26 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
     internal static class DefenseIntentRuntime
     {
+        private static readonly LapsedThreatTracker[] LapseTrackers = { new LapsedThreatTracker(), new LapsedThreatTracker() };
+        private static readonly Func<DefenseThreatSource, string> LapseSignature = DefenseIntentLedger.BuildSignature;
+
+        static DefenseIntentRuntime()
+        {
+            CampaignScope.Register("defense-intent-lapse", ResetLapses);
+        }
+
+        private static void ResetLapses()
+        {
+            for (int a = 0; a < LapseTrackers.Length; a++) LapseTrackers[a].Clear();
+        }
+
         // Theater adjacency used by ExtractCandidateUnits Tier classification.
         private static readonly Dictionary<Theater, HashSet<Theater>> TheaterAdjacency =
             new Dictionary<Theater, HashSet<Theater>>
@@ -55,8 +63,7 @@ namespace WhiskeyRealism.Strategic
             CampaignMapLedger map,
             DefenseCooldownTable cooldown,
             float totalAllianceEffectiveStrength,
-            GrandStrategyProfile profile = null,
-            HashSet<string> previousSifSignatures = null)
+            GrandStrategyProfile profile = null)
         {
             if (cooldown == null)
             {
@@ -110,7 +117,6 @@ namespace WhiskeyRealism.Strategic
             // Cache GamePrefs values once per call to avoid repeated reflection overhead
             // in the per-unit inner loops.
             float defOpsRadius = ReadGamePrefsFloat("maxdistancedefensiveoperations", 250f);
-            float seaSpotRadius = ReadGamePrefsFloat("seainvasionspotsunitrange", 100f);
 
             // Find our capital position once for AssetRoleScorer.capitalDistance computations.
             // Scan owned towns with IsCapital; fall back to 9999f if none found (CapitalApproach
@@ -130,34 +136,26 @@ namespace WhiskeyRealism.Strategic
                 }
             }
 
-            // Build enemy unit position snapshot once, shared across all extractors that
-            // need frontDistance for AssetRoleScorer.  Rebuilding this inside each extractor
-            // independently would give subtly different snapshots; one snapshot per BuildInput
-            // call is the correct semantics.
+            // The side's believed enemy armies (G1), shared by every extractor below: one
+            // picture per BuildInput call; order-raising threats need a recent sighting.
+            var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
+            int today = EnemyDetectionRuntime.ReviewDayFor(allianceId);
             var enemyPositions = new List<Vector3>();
-            try
-            {
-                var enemyUnitsField = AccessTools.Field(faction.GetType(), "enemyunits");
-                var enemyList = enemyUnitsField?.GetValue(faction) as IList;
-                if (enemyList != null)
-                {
-                    for (int j = 0; j < enemyList.Count; j++)
-                    {
-                        var enemy = enemyList[j];
-                        if (enemy != null)
-                            enemyPositions.Add(enemy is Component comp ? comp.transform.position : ObjectPosition(enemy));
-                    }
-                }
-            }
-            catch { }
+            for (int j = 0; j < beliefs.Count; j++)
+                if (beliefs[j].Confidence01 > 0f) enemyPositions.Add(new Vector3(beliefs[j].X, 0f, beliefs[j].Z));
 
-            try { ExtractSeaInvasionThreats(input, allianceId, aifactionIndex, map, seaSpotRadius, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions, previousSifSignatures); }
+            try { ExtractSeaInvasionThreats(input, allianceId, beliefs, today, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:sif", "[DefenseIntent] sif extract failed: " + ex.Message); }
 
-            try { ExtractRaidForceThreats(input, allianceId, aifactionIndex, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
+            try { ExtractRaidForceThreats(input, allianceId, beliefs, today, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:raid", "[DefenseIntent] raid extract failed: " + ex.Message); }
 
-            try { ExtractAssetProximityThreats(input, allianceId, faction, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
+            // A sea-invasion or raid threat raised last review that no longer qualifies is
+            // reported once as Recovered (LapsedThreatTracker; alliances 0 and 1 only).
+            if (allianceId >= 0 && allianceId < LapseTrackers.Length)
+                LapseTrackers[allianceId].Close(input.Threats, LapseSignature);
+
+            try { ExtractAssetProximityThreats(input, allianceId, beliefs, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:proximity", "[DefenseIntent] proximity extract failed: " + ex.Message); }
 
             try { ExtractCandidateUnits(input, allianceId, faction, map, defOpsRadius); }
@@ -167,25 +165,6 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:guard", "[DefenseIntent] guard asset extract failed: " + ex.Message); }
 
             return input;
-        }
-
-        private static bool _seaInvasionStrengthResolved;
-        private static System.Reflection.MethodInfo _seaInvasionStrengthMethod;
-
-        private static System.Reflection.MethodInfo SeaInvasionStrengthMethod()
-        {
-            if (_seaInvasionStrengthResolved) return _seaInvasionStrengthMethod;
-            _seaInvasionStrengthResolved = true;
-            try { _seaInvasionStrengthMethod = CampaignMilitaryGates.ResolveSeaInvasionStrengthMethod(); }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("defense-intent:runtime:sif:strength-method",
-                    "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange(int,bool,int) lookup failed: " + ex.Message);
-            }
-            if (_seaInvasionStrengthMethod == null)
-                OnceLog.Warning("defense-intent:runtime:sif:strength-method",
-                    "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange(int,bool,int) not found; landed condition 3 disabled");
-            return _seaInvasionStrengthMethod;
         }
 
         // ---------------------------------------------------------------------------
@@ -213,143 +192,32 @@ namespace WhiskeyRealism.Strategic
         // ExtractSeaInvasionThreats
         // ---------------------------------------------------------------------------
 
+        // A believed group seen afloat off our coast (InvasionWatch) or seen recently ashore on
+        // our soil within 3 days of being seen afloat (landed, ActiveInvasion); keyed on its UnitKey.
         private static void ExtractSeaInvasionThreats(
-            DefenseIntentInput input, int allianceId, int aifactionIndex,
-            CampaignMapLedger map, float seaSpotRadius, float defOpsRadius,
+            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs, int today,
+            CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
-            List<Vector3> enemyPositions,
-            HashSet<string> previousSifSignatures)
+            List<Vector3> enemyPositions)
         {
-            var aicType = AccessTools.TypeByName("AICampaign");
-            var sifList = AccessTools.Field(aicType, "seainvasionforce")?.GetValue(null) as IList;
-            if (sifList == null) return;
-
-            var sifType = AccessTools.TypeByName("SeaInvasionForce");
-            if (sifType == null)
+            for (int i = 0; i < beliefs.Count; i++)
             {
-                OnceLog.Warning("defense-intent:runtime:sif:no-type", "[DefenseIntent] SeaInvasionForce type not found via reflection");
-                return;
-            }
+                var belief = beliefs[i];
+                if (!EnemyBeliefReadings.IsSeaInvasionThreat(in belief, today, out bool landed)) continue;
 
-            // TODO(Task 14): wire previousSifSignatures into a tombstone pass when
-            // StrategicCoordinator owns the per-alliance seen-set. For now, the
-            // parameter is accepted and threaded in so the Task 14 caller can pass
-            // a real set without any signature change.
-
-            for (int i = 0; i < sifList.Count; i++)
-            {
-                var entry = sifList[i];
-                if (entry == null) continue;
-
-                // Skip own invasion forces — we care about enemy invasions targeting us.
-                int entryFactionIndex = ReadInt(entry, "aifactionused", -1);
-                if (entryFactionIndex == aifactionIndex) continue;
-
-                // Verify the invading faction is hostile (different alliance).
-                int invadingAlliance = AICampaignReflect.GetAllianceId(entryFactionIndex);
-                if (invadingAlliance == allianceId) continue;
-
-                var invasionForce = ReadObject(entry, "invasionforce");
-                if (invasionForce == null) continue;
-
-                var seaSpot = ReadObject(entry, "seainvasionspot");
-                var sourcePort = ReadObject(entry, "sourceport");
-                int currentState = ReadInt(entry, "currentstate", 0);
-
-                // Position of the invasion force.
-                Vector3 forcePos = ObjectPosition(invasionForce);
-
-                // LandedSignal: any of three conditions.
-                bool landedSignal = false;
-
-                // Condition 1: state >= 2 AND close to landing spot.
-                if (!landedSignal && currentState >= 2 && seaSpot != null)
-                {
-                    Vector3 spotPos = ObjectPosition(seaSpot);
-                    float distToSpot = GetXZDistance(forcePos, spotPos);
-                    if (distToSpot < seaSpotRadius)
-                        landedSignal = true;
-                }
-
-                // Condition 2: regimentpaths > 0 AND close to nearest coastal asset.
-                if (!landedSignal)
-                {
-                    int regimentPaths = ReadInt(invasionForce, "regimentpaths", 0);
-                    if (regimentPaths > 0)
-                    {
-                        float nearestAssetDist = NearestAssetDistance(forcePos, allianceId, map);
-                        if (nearestAssetDist < defOpsRadius)
-                            landedSignal = true;
-                    }
-                }
-
-                // Condition 3: enemy land strength outweighs ours at the sea invasion
-                // spot. SeaInvasion.GetUnitStrengthInRange(int,bool,int) (decompile
-                // 141061 → 141066) with returnbalance=true, as vanilla's own callers use.
-                if (!landedSignal && seaSpot != null)
-                {
-                    var getStrength = SeaInvasionStrengthMethod();
-                    if (getStrength != null)
-                    {
-                        try
-                        {
-                            int balance = Convert.ToInt32(
-                                getStrength.Invoke(seaSpot, CampaignMilitaryGates.SeaInvasionBalanceArgs(allianceId)));
-                            if (CampaignMilitaryGates.IsLandedByStrengthBalance(balance))
-                                landedSignal = true;
-                        }
-                        catch (Exception ex)
-                        {
-                            OnceLog.Warning("defense-intent:runtime:sif:strength-invoke",
-                                "[DefenseIntent] SeaInvasion.GetUnitStrengthInRange invoke failed: " + ex.Message);
-                        }
-                    }
-                }
-
-                // Find nearest owned asset to use as asset metadata.
+                var forcePos = new Vector3(belief.X, 0f, belief.Z);
                 CampaignMapAsset nearestAsset = FindNearestAsset(forcePos, allianceId, map, defOpsRadius);
-
-                // Instance ID for invasion force (UnityEngine.Object).
-                int invasionForceInstanceId = 0;
-                try { invasionForceInstanceId = ((UnityEngine.Object)invasionForce).GetInstanceID(); }
-                catch { }
-
-                string spotName = null;
-                try { spotName = ((UnityEngine.Object)seaSpot)?.name; } catch { }
-
-                string portName = null;
-                try { portName = ((UnityEngine.Object)sourcePort)?.name; } catch { }
-
-                int forceStrength = invasionForce is Regiment invasionRegiment
-                    ? invasionRegiment.groupstrengthactive
-                    : ReadInt(invasionForce, "groupstrengthactive", 0);
-
-                // Derive profile-weighted asset role; OR with catalog role so both flow through.
-                AssetStrategicRole catalogRole = nearestAsset?.StrategicRole ?? AssetStrategicRole.None;
-                AssetStrategicRole assetRole = catalogRole;
-                if (profile != null && nearestAsset != null)
-                {
-                    float capitalDist = capitalFound
-                        ? GetXZDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), capitalPos)
-                        : 9999f;
-                    float frontDist = ComputeFrontDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), enemyPositions);
-                    assetRole |= AssetRoleScorer.Score(nearestAsset, profile, capitalDist, frontDist);
-                }
-
                 input.Threats.Add(new DefenseThreatSource
                 {
                     Kind = DefenseThreatSourceKind.SeaInvasion,
-                    InvasionForceInstanceId = invasionForceInstanceId,
-                    SpotName = spotName,
-                    SourcePortName = portName,
-                    X = forcePos.x,
-                    Z = forcePos.z,
-                    EnemyStrength = (float)forceStrength,
-                    LandedSignal = landedSignal,
-                    VanillaCollapsed = false,
+                    EnemyUnitKey = belief.UnitKey,
+                    X = belief.X,
+                    Z = belief.Z,
+                    EnemyStrength = EnemyBeliefReadings.Weighted(in belief),
+                    LandedSignal = landed,
                     AssetName = nearestAsset?.Name,
                     AssetKind = nearestAsset?.Kind ?? CampaignMapAssetKind.Unknown,
-                    AssetRole = assetRole
+                    AssetRole = AssetRoleOf(nearestAsset, profile, capitalPos, capitalFound, enemyPositions)
                 });
             }
         }
@@ -358,69 +226,47 @@ namespace WhiskeyRealism.Strategic
         // ExtractRaidForceThreats
         // ---------------------------------------------------------------------------
 
+        // A cavalry-majority group seen recently on our soil near one of our assets.
         private static void ExtractRaidForceThreats(
-            DefenseIntentInput input, int allianceId, int aifactionIndex,
+            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs, int today,
             CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
             List<Vector3> enemyPositions)
         {
-            var aicType = AccessTools.TypeByName("AICampaign");
-            var raidList = AccessTools.Field(aicType, "raidforces")?.GetValue(null) as IList;
-            if (raidList == null) return;
-
-            for (int i = 0; i < raidList.Count; i++)
+            for (int i = 0; i < beliefs.Count; i++)
             {
-                var entry = raidList[i];
-                if (entry == null) continue;
+                var belief = beliefs[i];
+                if (!EnemyBeliefReadings.IsRaidThreat(in belief, today)) continue;
 
-                // Skip own raid forces.
-                int entryFactionIndex = ReadInt(entry, "aifactionused", -1);
-                if (entryFactionIndex == aifactionIndex) continue;
-
-                var raidGroup = ReadObject(entry, "raidgroup");
-                if (raidGroup == null) continue;
-
-                int currentState = ReadInt(entry, "currentstate", 0);
-                Vector3 raidPos = ObjectPosition(raidGroup);
-
-                // Only include if near one of our assets.
+                var raidPos = new Vector3(belief.X, 0f, belief.Z);
                 CampaignMapAsset nearestAsset = FindNearestAsset(raidPos, allianceId, map, defOpsRadius);
                 if (nearestAsset == null) continue;
-
-                int raidGroupInstanceId = 0;
-                try { raidGroupInstanceId = ((UnityEngine.Object)raidGroup).GetInstanceID(); }
-                catch { }
-
-                int raidStrength = raidGroup is Regiment raidRegiment
-                    ? raidRegiment.groupstrengthactive
-                    : ReadInt(raidGroup, "groupstrengthactive", 0);
-
-                // Derive profile-weighted asset role; OR with catalog role so both flow through.
-                AssetStrategicRole catalogRole = nearestAsset.StrategicRole;
-                AssetStrategicRole assetRole = catalogRole;
-                if (profile != null)
-                {
-                    float capitalDist = capitalFound
-                        ? GetXZDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), capitalPos)
-                        : 9999f;
-                    float frontDist = ComputeFrontDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), enemyPositions);
-                    assetRole |= AssetRoleScorer.Score(nearestAsset, profile, capitalDist, frontDist);
-                }
 
                 input.Threats.Add(new DefenseThreatSource
                 {
                     Kind = DefenseThreatSourceKind.RaidForce,
-                    RaidGroupInstanceId = raidGroupInstanceId,
-                    RaidCurrentState = currentState,
+                    EnemyUnitKey = belief.UnitKey,
                     AssetName = nearestAsset.Name,
                     AssetKind = nearestAsset.Kind,
-                    AssetRole = assetRole,
-                    X = raidPos.x,
-                    Z = raidPos.z,
-                    EnemyStrength = (float)raidStrength,
+                    AssetRole = AssetRoleOf(nearestAsset, profile, capitalPos, capitalFound, enemyPositions),
+                    X = belief.X,
+                    Z = belief.Z,
+                    EnemyStrength = EnemyBeliefReadings.Weighted(in belief),
                     LandedSignal = true
                 });
             }
+        }
+
+        // Profile-weighted asset role OR-ed with the catalog role, so both flow through.
+        private static AssetStrategicRole AssetRoleOf(CampaignMapAsset asset, GrandStrategyProfile profile,
+            Vector3 capitalPos, bool capitalFound, List<Vector3> enemyPositions)
+        {
+            if (asset == null) return AssetStrategicRole.None;
+            AssetStrategicRole role = asset.StrategicRole;
+            if (profile == null) return role;
+            var assetPos = new Vector3(asset.X, 0f, asset.Z);
+            float capitalDist = capitalFound ? GetXZDistance(assetPos, capitalPos) : 9999f;
+            return role | AssetRoleScorer.Score(asset, profile, capitalDist, ComputeFrontDistance(assetPos, enemyPositions));
         }
 
         // ---------------------------------------------------------------------------
@@ -428,7 +274,7 @@ namespace WhiskeyRealism.Strategic
         // ---------------------------------------------------------------------------
 
         private static void ExtractAssetProximityThreats(
-            DefenseIntentInput input, int allianceId, object faction,
+            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs,
             CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
             List<Vector3> enemyPositions)
@@ -440,41 +286,23 @@ namespace WhiskeyRealism.Strategic
             // against Maryland and New York ports during Slice 1 smoke. The frontline-side
             // check rejects enemies who haven't actually crossed into our territory.
 
-            // Build set of asset names already covered by sif/raid threats to avoid duplicates.
+            // Build set of asset names already covered by sif/raid threats to avoid duplicates
+            // (a lapsed copy covers none).
             var coveredAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var threat in input.Threats)
             {
-                if (!string.IsNullOrEmpty(threat.AssetName))
-                    coveredAssets.Add(threat.AssetName);
+                if (LapsedThreatTracker.CoversAsset(threat)) coveredAssets.Add(threat.AssetName);
             }
 
-            // Read enemy units from the faction for per-asset proximity checks.
-            // enemyPositions (shared snapshot from BuildInput) supplies positions for
-            // ComputeFrontDistance; we need instanceId and strength here too, so we
-            // re-read the list.  Two list reads per BuildInput call is acceptable; the
-            // alternative would be a richer shared snapshot type that is harder to read.
-            var enemyUnits = AccessTools.Field(faction.GetType(), "enemyunits")?.GetValue(faction) as IList;
-            if (enemyUnits == null) return;
-
-            // Snapshot enemy positions + instance ids + strengths for the inner loop.
+            // Believed enemy positions + instance ids + confidence-weighted strengths. A sighting
+            // shows no morale: ComputeEffective takes morale 1.
             var enemies = new List<(Vector3 pos, int instanceId, float strength, float morale)>();
-            for (int j = 0; j < enemyUnits.Count; j++)
+            for (int j = 0; j < beliefs.Count; j++)
             {
-                var enemy = enemyUnits[j];
-                if (enemy == null) continue;
-                var regiment = enemy as Regiment;
-                Vector3 ep = regiment != null
-                    ? ((Component)regiment).transform.position
-                    : ObjectPosition(enemy);
-                int eid = 0;
-                try { eid = ((UnityEngine.Object)enemy).GetInstanceID(); } catch { }
-                float estr = regiment != null
-                    ? regiment.groupstrengthactive
-                    : (float)ReadInt(enemy, "groupstrengthactive", 0);
-                float emor = regiment != null
-                    ? regiment.groupmorale
-                    : ReadFloat(enemy, "groupmorale", 1f);
-                enemies.Add((ep, eid, estr, emor));
+                var belief = beliefs[j];
+                float strength = EnemyBeliefReadings.Weighted(in belief);
+                if (strength <= 0f) continue;
+                enemies.Add((new Vector3(belief.X, 0f, belief.Z), belief.InstanceId, strength, 1f));
             }
 
             // "Very close" radius: absolute proximity that bypasses the frontline check.
@@ -859,20 +687,6 @@ namespace WhiskeyRealism.Strategic
             return best;
         }
 
-        // Distance to nearest owned asset (returns float.MaxValue if no assets).
-        private static float NearestAssetDistance(
-            Vector3 pos, int allianceId, CampaignMapLedger map)
-        {
-            float best = float.MaxValue;
-            foreach (var asset in map.Assets)
-            {
-                if (asset == null || asset.Owner != allianceId) continue;
-                float dist = GetXZDistance(pos, new Vector3(asset.X, 0f, asset.Z));
-                if (dist < best) best = dist;
-            }
-            return best;
-        }
-
         // Extract position from a game object: Component cast first, then reflection fallback.
         private static Vector3 ObjectPosition(object obj)
         {
@@ -953,18 +767,6 @@ namespace WhiskeyRealism.Strategic
                 return Convert.ToBoolean(field.GetValue(obj));
             }
             catch { return fallback; }
-        }
-
-        // Read any reference field from an object via reflection; returns null on failure.
-        private static object ReadObject(object obj, string fieldName)
-        {
-            if (obj == null) return null;
-            try
-            {
-                var field = AccessTools.Field(obj.GetType(), fieldName);
-                return field?.GetValue(obj);
-            }
-            catch { return null; }
         }
 
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);

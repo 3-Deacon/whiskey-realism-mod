@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -148,7 +149,7 @@ namespace WhiskeyRealism.Strategic.Construction
             float telegraphRange = TelegraphRange();
             if (telegraphRange <= 0f) return false;
 
-            var units = BattleUnits.campaignunitlist ?? BattleUnits.completeunitlist;
+            var units = BattleUnits.campaignunitlist ?? BattleUnits.completeunitlist; // own side: UnitEligible keeps alliance == own only
             if (units == null)
             {
                 LogNoStart(alliance, "unit-list-null", null);
@@ -387,12 +388,15 @@ namespace WhiskeyRealism.Strategic.Construction
             return false;
         }
 
+        // A believed enemy within the unit's bugle range (G1: fog-honest; never vanilla's
+        // omniscient GetClosestEnemyUnitReg).
         private static bool EnemyNearby(Regiment unit)
         {
             try
             {
                 if (unit == null || unit.buglerange <= 0f) return true;
-                return unit.GetClosestEnemyUnitReg(unit.buglerange) != null;
+                Vector3 position = ((Component)unit).transform.position;
+                return EnemyBeliefReadings.AnyWithin(EnemyDetectionRuntime.BeliefsFor(unit.alliance), position.x, position.z, unit.buglerange);
             }
             catch
             {
@@ -492,30 +496,18 @@ namespace WhiskeyRealism.Strategic.Construction
             }
         }
 
+        // A believed enemy within range of the site (G1: fog-honest beliefs of this alliance).
         private static bool EnemyNearPosition(Vector3 position, int alliance, float range)
         {
             try
             {
                 if (range <= 0f) return true;
-                var units = BattleUnits.campaignunitlist ?? BattleUnits.completeunitlist;
-                if (units == null) return true;
-
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var unit = units[i];
-                    if (unit == null || unit.alliance == alliance) continue;
-                    if (!((Component)unit).gameObject.activeInHierarchy) continue;
-                    if (unit.isrouted) continue;
-                    if (XzDistance(((Component)unit).transform.position, position) <= range)
-                        return true;
-                }
+                return EnemyBeliefReadings.AnyWithin(EnemyDetectionRuntime.BeliefsFor(alliance), position.x, position.z, range);
             }
             catch
             {
                 return true;
             }
-
-            return false;
         }
 
         private static int CountActiveTelegraphs(int alliance)

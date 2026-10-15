@@ -8,16 +8,18 @@ namespace WhiskeyRealism.Strategic.Planner
     // The planner's two calls per AI alliance in the daily strategic review (plan P1), from
     // StrategicCoordinator.RunStrategicReviewCore inside `if (operationalRuntimeReady)`:
     //   ReviewPlan    after the fiscal and policy steps, before the front ledger: snapshot ->
-    //                 (G1 beliefs, G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
+    //                 G1 detection and beliefs -> (G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
     //                 recon mission sync) -> CampaignPlanStore.Publish.
     //   ReviewExecute after the defense intent: (G2 appointments, then the G5b, G5a, G5c, G5d
     //                 executors). Executors write vanilla state only from here.
-    // Both return for alliances other than 0 and 1, before AICampaign.aifaction holds the
-    // alliance's faction, and for the W&L CIC player's own alliance (vanilla job 36 skips it,
-    // 11620-11628). While vanilla's job machine is paused (UpdateUnitAI 11368: a W&L player with
-    // no command) every faction's jobs are frozen, so ReviewExecute returns for every alliance and
-    // ReviewPlan keeps only its bookkeeping (snapshot; G1 detection/beliefs and ledger aging insert
-    // before that return): no replan, no publish, and the last published plan ages out (spec C5).
+    // Both return for alliances other than 0 and 1 and before AICampaign.aifaction holds the
+    // alliance's faction. For the W&L CIC player's own alliance (vanilla job 36 skips it,
+    // 11620-11628) ReviewPlan keeps only the snapshot and the G1 detection/beliefs (bookkeeping,
+    // integrator decision 2026-10-15) and ReviewExecute returns. While vanilla's job machine is
+    // paused (UpdateUnitAI 11368: a W&L player with no command) every faction's jobs are frozen,
+    // so ReviewExecute returns for every alliance and ReviewPlan keeps only its bookkeeping
+    // (snapshot, G1 detection and beliefs; ledger aging inserts before that return): no replan,
+    // no publish, and the last published plan ages out (spec C5).
     internal static class CampaignPlannerRuntime
     {
         private static readonly CampaignSnapshot[] Snapshots = { new CampaignSnapshot(), new CampaignSnapshot() };
@@ -32,12 +34,20 @@ namespace WhiskeyRealism.Strategic.Planner
                     var chain = WlChainContext.Capture();
                     PlayerCommandClass player = ReadPlayerClass(in chain);
                     var mode = PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance);
-                    if (mode == PlannerReviewMode.StandDown) return;
                     int faction = FactionIndexOf(alliance);
                     if (faction < 0) return;
 
                     var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),
                         player, in chain, tempo, Snapshots[alliance]);
+
+                    // G1: fog-honest detection and the belief update. Bookkeeping: it runs in every
+                    // mode, for a W&L CIC player's stand-down alliance and during the pause (no writes).
+                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());
+                    var beliefs = EnemyDetectionRuntime.ModelFor(alliance);
+                    beliefs.Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance), EnemyDetectionRuntime.MarchFor());
+                    snapshot.Beliefs.AddRange(beliefs.Beliefs);
+                    EnemyDetectionRuntime.Report(snapshot, beliefs);
+                    if (mode == PlannerReviewMode.StandDown) return;
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);
