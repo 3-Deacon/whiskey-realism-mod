@@ -354,6 +354,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         return;
                     }
                     if (dayPhase == EndOfDayPhase.Resumed) PrepareForNewBattleDay();
+                    // W&L order compliance on the doctrine clock (chain-of-command spec §E).
+                    PlayerComplianceRuntime.ObserveBattle(TacticalDoctrineTime.NowBattleHours);
                     unchecked { _tickSerial++; }
                     bool aiVsAi = SafeAiVsAi();
 

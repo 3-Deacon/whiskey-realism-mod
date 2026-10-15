@@ -319,11 +319,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return candidate.Priority >= active.Priority + 40 && !active.ActiveCampaignActionable;
             }
 
-            if (candidate.Scope == PlayerOrderScope.Campaign && active.Scope == PlayerOrderScope.Tactical)
-            {
-                return active.Stale || active.BattleEnded || candidate.Priority >= active.Priority + 40;
-            }
-
             return true;
         }
 

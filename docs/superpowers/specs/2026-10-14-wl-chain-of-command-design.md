@@ -1,6 +1,6 @@
 # W&L Chain of Command — Design
 
-**Status:** §A-§C (battle ownership, chain target resolution, battle dispatches) are implemented by the battle core (`2026-10-15-battle-core-design.md`, OrderArbiter); this spec's own slice covers §D-§F. Approved direction (user, 2026-10-14: "implement your improvements"; disobedience → AI adapts, no penalty). Vanilla reference: `docs/wl-player-model.md`.
+**Status:** §A-§C (battle ownership, chain target resolution, battle dispatches) are implemented by the battle core (`2026-10-15-battle-core-design.md`, OrderArbiter); this spec's own slice covers §D-§F (stage F, implemented on `feat/wl-chain-campaign`; plan `docs/superpowers/plans/2026-10-15-wl-chain-campaign.md`). Approved direction (user, 2026-10-14: "implement your improvements"; disobedience → AI adapts, no penalty). Vanilla reference: `docs/wl-player-model.md`.
 
 ## Problem
 
@@ -100,7 +100,7 @@ Decompile `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, build 14703111. Data:
 
 ## Testing
 
-Pure units fully harness-tested: chain target resolution (detached / not detached / player at root / player two levels down), dispatch type mapping, campaign dispatch policy (top-level vs subordinate, CIC, dedupe window, context → type), compliance ledger (grace window, decay). Runtime pieces verified by build + smoke (dispatch panel shows superior's name; brigade player receives "corps redeploying" dispatch; player units never moved by Whiskey).
+Pure units fully harness-tested: chain target resolution (detached / not detached / player at root / player two levels down), dispatch type mapping, campaign dispatch policy (`WlCampaignDispatchTests`: trigger preconditions, context → type, dedupe window, queued second call), compliance ledger (`PlayerComplianceTests`: grace windows, neutral outcomes, decay, restore, sidecar round trip), CIC guard (`CicFactionAiGuardTests`). Runtime pieces verified by build + smoke (dispatch panel shows superior's name; brigade player receives "corps redeploying" dispatch; player units never moved by Whiskey).
 
 ## Out of scope
 

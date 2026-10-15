@@ -59,6 +59,7 @@ How the player works in a Whiskey & Lemons career, from the vanilla decompile (`
 | 16 | Offensive | Campaign | `CheckOffensiveMovements`, defended target (14455) |
 
 - **Campaign gate (8366):** returns if the player is CIC or is **not the top-level campaign-map group** (`flag2`). ⇒ Brigade/division/sub-HQ players **never get campaign dispatches**; the AI just moves their parent corps. Campaign orders always overwrite and re-pop the panel (no dedupe); `givenorder.commanderid` is the player's own id on that path.
+- **Campaign map (stage F, 2026-10-15).** Only map-visible groups move on the campaign map (`GetUnitVisibilityStateOnCampaignMap` 82934: corps, top-unit divisions, `overridesymbol` 15, armies with independent sub-units, army groups). `GetCampaignGroup` (82991) is the first such group at or above the player's command. A brigade or non-top division player has no counter: his units ride in the campaign group and are inside any zone it reaches, so he cannot disobey a campaign order (and earns its arrival prestige when the group arrives). Vanilla `MoveUnitTo` (14479) moves that AI group like any other; the offensive (14383) and defensive attack (13771) branches list it in their operation only after the call. **Whiskey (#69)** gives the subordinate the order vanilla would give a top-level player for that move (types 5/6/7/8/16, issuer = the moving formation's commander, one per target per game day) and never moves the player's parent group itself. Campaign order prestige (`dlcwl_config.dat`): 5 → 150, 6 → 100, 7 → 120, 8 → 500 per year, 16 → 0.
 - **Battle path:** returns if the player is the battle's commanding officer (8329); only orders to the player's parent chain (same `groupaiobject`) pass; type-11 relayed via `unitlinkedto`; issuer remapped to the parent's commander. **Dedupe** (8643): same type kept (within 110 m for type 0), 15 (retreat) terminal, 13 sticky, 12 never replaces an attack order.
 - **Compliance is reward-only:** `Regiment.CheckDLCWLTopics` (123468-123537) checks the player's top unit inside the order zone (`InsideCombatZone` 160966): battle orders +prestige on first entry; types 5/6/7/16 pay and clear; type 8 pays continuously; 9/10 pay on building completion. **No penalty for disobeying** (no timeout, relation or prestige loss). Type 16 pays 0 (`EarnPrestige` has no case 16).
 - **Clearing:** non-Reserve orders cleared at battle end-of-day (`CheckClearingBattleOrdersEOD` 47985); scene load clears at frame 2 (23862, 29878). Saved in `DLC_WL.dat` / `DLC_WLb.dat` (45098, 45449).
@@ -86,8 +87,8 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 3. If Whiskey replaces a vanilla movement path that normally emits a dispatch (`UpdateMovingTargets`, `AssaultMove`, `MarchToSoundOfGuns`, `CheckForSeparatedEnemy`, campaign offensives/defensive ops/capital defense), it must emit the same dispatch.
 4. Writing `macroai` on the player-side AIBattle in W&L produces dispatches: 2 → type-12 defend orders; 3 → type-15 retreat and a battle-ending retreat timer.
 5. Filter `dlcw_isundercommander` units out of every enumeration of `allgroupsassigned` / `allattachedunits` used for AI decisions (pool leak). Battle: the snapshot carries `UnitFlags.PlayerOwned`; the posture inputs drop player-owned probes (`PostureProbeFilter`) and every per-regiment walk checks the flag or `TacticalWriteGuard.CanWrite`.
-6. Campaign dispatches have no vanilla dedupe — rate-limit and dedupe any Whiskey-issued campaign orders (type + target + ~110 m).
-7. Treat the player's group as an unreliable executor (disobedience is free); don't put it in must-succeed roles without a fallback.
+6. Campaign dispatches have no vanilla dedupe — rate-limit and dedupe any Whiskey-issued campaign orders (type + target + ~110 m). **Enforced by `WlCampaignDispatchPolicy`** (same type and target as the active order, or any order to the same target within one game day, is skipped).
+7. Treat the player's group as an unreliable executor (disobedience is free); don't put it in must-succeed roles without a fallback. **`PlayerComplianceRuntime.Reliability`** (vanilla `firstunitreached` within 3 game days / 0.5 battle hours) weighs the player's regiments in the battle evidence and is the campaign planner's input.
 8. Gate Whiskey campaign writers on vanilla's hierarchy −1 pause (11368), or accept the asymmetry deliberately.
 9. A CIC player is a different regime: Whiskey's CIC for that side stands down; every unit on the player's side is player-owned.
 10. Respect `DLC_WL.IsMovedByPlayer` (player Operations) everywhere, not just capital defense.
@@ -102,11 +103,12 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 
 ## Candidate vanilla bugs (not yet tracked)
 
-- `CheckShipConstruction` (12012) and `CheckArmyGroupManagement` (17723) skip **every** faction when the W&L player is CIC (no alliance check) → the enemy stops building ships and managing army groups.
+- `CheckShipConstruction` (12012) and `CheckArmyGroupManagement` (17723) skip **every** faction when the W&L player is CIC → tracked as `BUG-WL-001`, guarded by #70 (`docs/bug-fixes/vanilla-wl-career.md`).
 - Possible prestige sign bugs: `EarnPrestige` passes negative gains with `AdjustPrestige` type 2 (subtract) (46733-46738); `IncreaseFiscalBudget` passes `0 − cost` with type 2 (226658). Code-read only, not reproduced.
-- Type-16 "Offensive" orders pay no prestige (`EarnPrestige` 46627 has no case 16).
+- Type-16 "Offensive" orders pay no prestige (`EarnPrestige` 46627 has no case 16) → `BUG-WL-002`.
 - Likely NRE at 96704-96706 (type-9 completion nulls `givenorder` then reads `.type`; only reachable via debug key).
+- Capital defense re-issues its type-8 campaign order to a top-level player every `AssignUnitToDefendCapital` pass while his group stays away from the capital (11829-11864: the waypoint test reads the unmoved group), re-popping the panel.
 
 ## Not verified in-game
 
-Issuer portrait on campaign dispatches; the prestige sign bugs; whether queued (`useorderdelay`) `SetWaypoint` re-checks `permanentlydetached` at execution; unittyp 14-16 ↔ brigade/division/corps mapping in every campaign shift; per-battlefield prefs overriding the global ones.
+Whether the player's units inside a campaign group report the group's position to `CheckDLCWLTopics` (subordinate arrival prestige); issuer portrait on campaign dispatches; the prestige sign bugs; whether queued (`useorderdelay`) `SetWaypoint` re-checks `permanentlydetached` at execution; unittyp 14-16 ↔ brigade/division/corps mapping in every campaign shift; per-battlefield prefs overriding the global ones.

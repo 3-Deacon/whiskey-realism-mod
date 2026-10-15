@@ -121,6 +121,8 @@ Non-patch scopes:
 | `tactical.arbiter.execute` | 2.0 ms | outcomes, retries and winner execution in the arbiter tick |
 | `tactical.producer.<name>` | 2.0 ms | each producer's `Produce` (`withdrawal`, `artillery`, `artillery-point-blank`, `group-stance`, `charge-demotion`, `posture` (+ `.nav-plan`), `facing-pulse`, `fire-control`, `play`, `reserve-release`, `charge`) |
 | `tactical.dispatch.emit` | 2.0 ms | `TacticalPlayerDispatchRuntime.Emit` (W&L dispatch) |
+| `campaign.patch.wl-campaign-dispatch.move`, `.flush` | 2.0 ms | #69: `MoveUnitTo` record, `UpdateUnitAI` classify/emit + compliance observation |
+| `campaign.patch.cic-faction-ai-guard.*` | 2.0 ms | #70: arm/disarm around `CheckShipConstruction` / `CheckArmyGroupManagement`, `IsCommanderInChief` answer |
 | `tactical.scene-cache.populate` | 5.0 ms | `TacticalStableSceneCache.Populate` |
 | `campaign.daily-review`, `campaign.construction`, `campaign.defense-intent`, `campaign.fiscal`, `campaign.coordinated-operations`, `campaign.sidecar-json-serialization`, `campaign.sidecar-file-write` | 4.0 ms | strategic coordinator / coordinated-ops / sidecar save |
 | `telemetry.flush` | 10.0 ms | telemetry writer batch flush |
@@ -152,6 +154,10 @@ Non-patch scopes:
 ## Battle-core rows
 
 `LogOutput.log` (tags outside the tactical routing): `[BattleCore] producers count=11 order=…` and `[OrderArbiter] first vanilla order issued channel=… source=…` once per battle; `[OrderArbiter] alliance=… intents=… winners=… issued=… moved=… failed=… retried=… gaveUp=… skipped=… deduped=… superseded=… topSkip=…` every 30 s real time per AI side while the arbiter runs; `[BattlePerception] alliance=… mode=… reason=… visible=… remembered=…` once per mode per battle; `[ChargeDoctrine] first infantry charge armed: …` and `[ChargeDemotion] first vanilla assault demoted: …` once per battle. Battle-core warnings use `[once:tactical-battle-core:…]` keys. The ordered battle-core smoke checklist is in `docs/superpowers/plans/2026-10-15-battle-core.md` § BC7.
+
+## W&L campaign rows
+
+`LogOutput.log`: `[W&LCampaignDispatch] trigger=vanilla-move|whiskey-order type=… unit=… issuer=… target=x,z dest=… action=issue` for every campaign order Whiskey gives a W&L player (at most one per target per game day); skips (`action=skip reason=no-op-move|active-duplicate|rate-limit|…`) go to the campaign sidecar only, at most 64 distinct signatures before the set resets. `[PlayerCompliance] scope=campaign|battle outcome=complied|missed reliability=… samples=…` per resolved order. `[once:cic-faction-ai-guard:applied]` the first time #70 lets a non-player faction past vanilla's CIC early return. Warnings use `[once:wl-campaign-dispatch:…]`, `[once:player-compliance:…]` and `[once:cic-faction-ai-guard:…]` keys.
 
 ## Smoke checklist
 

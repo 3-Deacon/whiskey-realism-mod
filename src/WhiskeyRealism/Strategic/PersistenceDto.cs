@@ -18,6 +18,15 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("minorOfficerProfiles")] public List<MinorOfficerDto> MinorOfficerProfiles = new List<MinorOfficerDto>();
         [JsonProperty("succession")] public SuccessionDto Succession = new SuccessionDto();
         [JsonProperty("battleHistory")] public List<BattleHistoryDto> BattleHistory = new List<BattleHistoryDto>();
+        // W&L player-compliance estimate (stage F); null when none. Older readers ignore it.
+        [JsonProperty("playerCompliance")] public PlayerComplianceDto PlayerCompliance;
+    }
+
+    internal class PlayerComplianceDto
+    {
+        [JsonProperty("careerKey")] public string CareerKey;
+        [JsonProperty("reliability")] public float Reliability;
+        [JsonProperty("samples")] public int Samples;
     }
 
     internal class FactionDto

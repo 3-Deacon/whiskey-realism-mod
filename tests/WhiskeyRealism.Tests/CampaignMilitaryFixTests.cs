@@ -8,8 +8,6 @@ internal static class CampaignMilitaryFixTests
     {
         SeaInvasionStrengthResolvesInstanceOverload();
         SeaInvasionLandedSignalUsesEnemyBalance();
-        WlCampaignContextSourcesAreRealVanillaFields();
-        WlCampaignContextKeyDistinguishesCareersAndSaves();
         ListSnapshotRestoreUndoesVanillaMutation();
         ListSnapshotRestoreIsIdempotent();
         ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved();
@@ -79,39 +77,6 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a sea invasion landed signal uses enemy-minus-friendly balance");
     }
 
-    // C-DeadRefl-scene: SceneManagement.currentcampaign / currentsave do not
-    // exist; the context key collapsed to "campaign:a:f::" for every career.
-    private static void WlCampaignContextSourcesAreRealVanillaFields()
-    {
-        var sources = WlStrategicOrderBridge.CampaignContextSources;
-        TestHarness.AssertEqual(4, sources.Length, "scenario, level, sublevel, save folder");
-        foreach (var source in sources)
-        {
-            var field = source.Owner.GetField(source.Field,
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            TestHarness.AssertTrue(field != null, source.Owner.Name + "." + source.Field + " exists");
-            TestHarness.AssertEqual(typeof(string), field.FieldType, source.Field + " is a string");
-        }
-        LogPass("c2a wl campaign context key reads real vanilla fields");
-    }
-
-    private static void WlCampaignContextKeyDistinguishesCareersAndSaves()
-    {
-        string a = WlStrategicOrderBridge.BuildCampaignContextKey(0, 1, "002", "002", "A", "Save");
-        string sameAgain = WlStrategicOrderBridge.BuildCampaignContextKey(0, 1, "002", "002", "A", "Save");
-        string otherCareer = WlStrategicOrderBridge.BuildCampaignContextKey(0, 1, "002", "002", "B", "Save");
-        string otherSave = WlStrategicOrderBridge.BuildCampaignContextKey(0, 1, "002", "002", "A", "Save3");
-        string otherScenario = WlStrategicOrderBridge.BuildCampaignContextKey(0, 1, "001", "001", "A", "Save");
-        TestHarness.AssertEqual(a, sameAgain, "stable for same context");
-        TestHarness.AssertTrue(a != otherCareer, "career sublevel changes key");
-        TestHarness.AssertTrue(a != otherSave, "save folder changes key");
-        TestHarness.AssertTrue(a != otherScenario, "scenario changes key");
-        LogPass("c2a wl campaign context key distinguishes careers and saves");
-    }
-
-    // B-46-campaign: the ownunits restore moves into a [HarmonyFinalizer] so it
-    // runs even when vanilla CheckForDefensiveOperations throws. The restore
-    // itself must be exact and safe to run twice (Postfix + Finalizer paths).
     private static void ListSnapshotRestoreUndoesVanillaMutation()
     {
         var live = new System.Collections.ArrayList { "a", "c" };

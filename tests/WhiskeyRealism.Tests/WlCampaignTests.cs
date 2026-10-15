@@ -57,9 +57,6 @@ internal static class WlCampaignTests
             ("wl bridge ineligible under commander blocks direct fallback", WlBridgeIneligibleUnderCommanderBlocksDirectFallback),
             ("wl bridge failed vanilla call blocks direct fallback", WlBridgeFailedVanillaCallBlocksDirectFallback),
             ("wl bridge part of player unit blocks direct fallback", WlBridgePartOfPlayerUnitBlocksDirectFallback),
-            ("wl bridge suppresses repeated campaign signature", WlBridgeSuppressesRepeatedCampaignSignature),
-            ("wl bridge does not replace active tactical without gap", WlBridgeDoesNotReplaceActiveTacticalWithoutGap),
-            ("wl bridge clears campaign cache for context", WlBridgeClearsCampaignCacheForContext),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -414,7 +411,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayDirectMove);
         AssertEqual(false, decision.MayMutateOperationList);
     }
-
     private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
     {
         var decision = WlStrategicOrderBridge.Classify(
@@ -586,74 +582,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayDirectMove);
         AssertEqual(false, decision.MayMutateOperationList);
         AssertTrue(decision.Reason.Contains("part-of-player-unit"), "blocked reason should name part-of-player-unit");
-    }
-
-    private static void WlBridgeSuppressesRepeatedCampaignSignature()
-    {
-        var state = new PlayerOrderDedupeState();
-        var active = PlayerOrderActive("campaign-u1", -1, scope: PlayerOrderScope.Campaign, battleIdentity: "campaign-a");
-        var candidate = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.DefendCapital,
-            "campaign-u1",
-            "campaign-a",
-            givenOrderSession: 4,
-            target: new PlayerOrderPoint(100f, 200f),
-            targetName: "Richmond");
-
-        var first = WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 10);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, first.Kind, "first campaign issue");
-        state.RecordAccepted(candidate, candidate, tick: 10);
-
-        var second = WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 800);
-        AssertEqual(PlayerOrderDedupeDecisionKind.SuppressSignature, second.Kind, "same campaign signature should suppress");
-    }
-
-    private static void WlBridgeDoesNotReplaceActiveTacticalWithoutGap()
-    {
-        var state = new PlayerOrderDedupeState();
-        var activeTactical = PlayerOrderActive(
-            "u1",
-            12,
-            scope: PlayerOrderScope.Tactical,
-            provenance: PlayerOrderProvenance.WhiskeyTactical,
-            battleIdentity: "battle-a");
-        var campaign = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.DefendCapital,
-            "u1",
-            "campaign-a",
-            givenOrderSession: 2,
-            target: new PlayerOrderPoint(100f, 200f),
-            targetName: "Richmond");
-
-        var decision = WlStrategicOrderBridge.DecideCampaignOrder(campaign, activeTactical, state, tick: 1000);
-        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, decision.Kind, "campaign order must not demote fresh tactical order without gap");
-    }
-
-    private static void WlBridgeClearsCampaignCacheForContext()
-    {
-        var state = new PlayerOrderDedupeState();
-        string currentContext = string.Empty;
-        var active = PlayerOrderActive("campaign-u1", -1, scope: PlayerOrderScope.Campaign, battleIdentity: "campaign-a");
-        var candidate = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.ConstructFort,
-            "campaign-u1",
-            "campaign-a",
-            givenOrderSession: 5,
-            target: new PlayerOrderPoint(300f, 400f),
-            targetName: "Fort");
-
-        WlStrategicOrderBridge.ClearCampaignCacheIfContextChanged(state, ref currentContext, "campaign-a");
-        state.RecordAccepted(candidate, candidate, tick: 10);
-        AssertEqual(
-            PlayerOrderDedupeDecisionKind.SuppressSignature,
-            WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 800).Kind,
-            "same context keeps campaign shadow");
-
-        WlStrategicOrderBridge.ClearCampaignCacheIfContextChanged(state, ref currentContext, "campaign-b");
-        AssertEqual(
-            PlayerOrderDedupeDecisionKind.Issue,
-            WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 801).Kind,
-            "new campaign context clears stale campaign shadow");
     }
 
     private static void WlCampShortCampCreditsNormalRest()

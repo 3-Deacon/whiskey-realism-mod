@@ -61,6 +61,12 @@
 
 `docs/patch-catalog.md` (#69, #70; next #71), `docs/wl-player-model.md` (campaign map facts, candidate bug moved to tracked), `docs/wl-dispatch-objective-bridge.md`, `docs/wl-player-order-doctrine.md` (campaign side), `docs/telemetry.md`, `docs/handoff.md`, `docs/bug-fixes/README.md` + `vanilla-wl-career.md`, `tools/smoke-situational.txt`.
 
+## As built (2026-10-15)
+
+- F5 landed first (commit "fix(wl): CIC career …"): `CicFactionAiGuard` + #70; `ArmyGroupDoctrine.ArmyGroupsAllowed(allow, allianceAllows, vanillaCicGuardBlocks)`. Harness 1922.
+- F1-F4 + F6: `WlCampaignDispatchPolicy`/`Runtime`, #69, bridge (gated path, campaign `PlayerOrderDedupe` shadow, campaign context key and their tests deleted; `PlayerOrderIntent.DefendCapital/BuildFort/BuildSupplyDepot` and the campaign-candidate branch of `PlayerOrderDedupe.PassesScopePolicy` deleted with their tests, since only the bridge produced them), `PlayerComplianceLedger`/`Runtime`, sidecar `playerCompliance`, `ArmyEvidenceBuilder` weight, coordinator tick hook. `WlCampaignDispatchRuntime` is compiled into the harness (the bridge and `CoordinatedOperationRuntime` are), so `TestPluginLogStub` gained `Plugin.Instance.Enabled` and `EnableCampaignChainDispatches`. Terrain height is read by reflection (the mod does not reference `UnityEngine.TerrainModule`). Harness 1944 (32 new, 10 deleted with the deleted code).
+- Red first: `WlCampaignDispatchTests` (16, compile-red), `PlayerComplianceTests` (16, compile-red incl. the 2 sidecar tests), `CicFactionAiGuardTests` (5) and the `ArmyGroupsAllowed` contract (compile-red).
+
 ## Gates (before each commit)
 
 `./build.sh` 0 warnings; test build 0 warnings; harness exit 0 + PASS count; `python3 -I tools/config-audit.py .` 0; `python3 -I tools/orphan-sweep.py .` 0 and `--include-test-only` adds nothing; `python3 -I tools/test_smoke_check.py` OK; `git log --oneline -10 && git status`.

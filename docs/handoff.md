@@ -16,6 +16,10 @@
 | **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `fc0b8af` (battle core): `WhiskeyRealism.dll` 1,631,232 bytes, SHA-256 `4f6e01fad62aa689a4f64296033c20196a2766d75d6b51fab4aefb9d2beab9ce` (dist and plugins match); harness 1917 PASS / 0 FAIL. The earlier checkpoint DLL (`0831547f…`) was never smoke-tested and is superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
 
+### Stage F — W&L chain of command, campaign side (branch `feat/wl-chain-campaign`, not merged)
+
+Spec [`superpowers/specs/2026-10-14-wl-chain-of-command-design.md`](superpowers/specs/2026-10-14-wl-chain-of-command-design.md) §D-§F + § "Vanilla and W&L model (campaign side)", plan [`superpowers/plans/2026-10-15-wl-chain-campaign.md`](superpowers/plans/2026-10-15-wl-chain-campaign.md). #69 campaign dispatches for subordinate players (vanilla moves the corps → the brigade/division player gets vanilla's order naming the corps commander) and one campaign dispatcher for Whiskey's own orders (the gated bridge path is deleted); `PlayerComplianceRuntime` (per-career order reliability, sidecar, weighs the player's regiments in the battle evidence, exposed for stage G); #70 `BUG-WL-001` guard (a CIC career no longer stops the enemy's fleets and army groups). Three new `[W&L]` flags, all default on. Build/harness/static gates green on the branch; not deployed; smoke items in the plan.
+
 ### What the battle core adds (stage D, on `main`)
 
 Spec [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/2026-10-15-battle-core-design.md), plan [`superpowers/plans/2026-10-15-battle-core.md`](superpowers/plans/2026-10-15-battle-core.md) (decisions D1-D11, per-slice As built, PROVE-MODE, the BC7 smoke checklist). Architecture: [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core.
