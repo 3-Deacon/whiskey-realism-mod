@@ -661,8 +661,10 @@ internal static class EnemyArmyModelTests
         int detect = review.IndexOf("EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn())", StringComparison.Ordinal);
         int update = review.IndexOf(".Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance))", StringComparison.Ordinal);
         int copy = review.IndexOf("snapshot.Beliefs.AddRange(", StringComparison.Ordinal);
+        int report = review.IndexOf("EnemyDetectionRuntime.Report(snapshot, beliefs);", StringComparison.Ordinal);
         int bookkeeping = review.IndexOf("mode == PlannerReviewMode.Bookkeeping) return;", StringComparison.Ordinal);
-        AssertTrue(detect >= 0 && update > detect && copy > update && bookkeeping > copy, "detect -> update -> copy, before the bookkeeping return (beliefs age during the pause)");
+        AssertTrue(detect >= 0 && update > detect && copy > update && report > copy && bookkeeping > report,
+            "detect -> update -> copy -> [EnemyBeliefs], before the bookkeeping return (beliefs and their rows continue during the pause)");
 
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyDetectionRuntime.cs");
         string probe = MethodBody(runtime, "private static bool GridVisible(");
