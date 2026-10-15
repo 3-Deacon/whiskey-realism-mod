@@ -304,9 +304,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Clears every per-battle cache (front axes, contact ledgers, visible
-        /// entry points). Also runs automatically when the BattleUnits instance
-        /// changes; call from the coordinator's battle teardown so a reload of
-        /// the same scene starts clean.
+        /// entry points, terrain, force-balance start time). Called on battle
+        /// teardown (wired by the coordinator); also runs when the BattleUnits
+        /// instance changes.
         /// </summary>
         internal static void ResetForBattleEnd()
         {
@@ -319,6 +319,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _terrainByAlliance[i] = null;
             }
             _battleOwner = null;
+            _battleStartDoctrineHours = -1f;
+            _battleStartOwner = null;
         }
 
         private static void EnsureBattleOwner(BattleUnits bunits)
