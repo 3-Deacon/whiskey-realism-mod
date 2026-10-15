@@ -67,9 +67,9 @@ namespace WhiskeyRealism.Tactical
             // movement orders, not stance changes; we mirror that by leaving
             // vanilla's stance unchanged here and letting #61 own the waypoint.
             // The decision is Apply (not Skip) so it surfaces in telemetry as
-            // "pre-contact-preserve-vanilla", but BattleGroupStancePatch:109
-            // short-circuits when decision.GroupStance == vanillaOrdered, so no
-            // actual write happens — exactly what we want.
+            // "pre-contact-preserve-vanilla"; with decision.GroupStance ==
+            // vanillaOrdered the executor only refreshes vanilla's hold through
+            // TacticalStanceWriter (a claim, no ChangeStance) — exactly what we want.
             // Strictly below-floor cases still skip as low-confidence.
             if (input.Sector.Confidence < 0.40f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");

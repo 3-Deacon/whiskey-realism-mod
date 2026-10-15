@@ -23,7 +23,8 @@ namespace WhiskeyRealism.Patches
     // observer (its only producer), rebuilt from scratch every AdjustGroupAIStance
     // cycle (5866) and written only while the army orchestrator is off; with the
     // orchestrator on (default) the observer is telemetry-only. Its reader
-    // (BattleGroupStancePatch) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
+    // (TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide, legacy
+    // charge denial) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
