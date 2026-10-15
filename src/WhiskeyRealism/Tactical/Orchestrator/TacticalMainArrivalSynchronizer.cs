@@ -33,7 +33,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     ///     Jackson commit Main regardless of support arrival.
     ///   - No SupportMain siblings exist (single-axis or all-Reserve army)
     ///     — nothing to wait for, release immediately.
-    ///   - Timeout fires (default 30s) — supports may be blocked or routed;
+    ///   - Timeout fires (default 15 battle-minutes) — supports may be blocked or routed;
     ///     do not stall Main indefinitely.
     /// </summary>
     public static class TacticalMainArrivalSynchronizer
@@ -46,11 +46,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const float DefaultSupportProximityThresholdMeters = 500f;
 
         /// <summary>
-        /// Maximum time Main will hold for supports before releasing regardless.
-        /// Prevents indefinite stall when supports are blocked, routed, or
-        /// engaging an unrelated threat.
+        /// Maximum BATTLE time (seconds; 15 battle-minutes) Main will hold for
+        /// supports before releasing regardless. Callers must measure the hold
+        /// on GameVars.currenttimefromstart (hours x 3600), not wall-clock time:
+        /// the old 30 real seconds were 3 battle-minutes at 1x and 25 at 50x.
         /// </summary>
-        public const float DefaultMaxHoldSeconds = 30f;
+        public const float DefaultMaxHoldSeconds = 15f * 60f;
 
         /// <summary>
         /// Aggression threshold above which the sync gate is bypassed.

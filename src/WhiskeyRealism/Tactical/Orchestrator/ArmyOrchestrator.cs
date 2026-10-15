@@ -148,50 +148,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _replanBaseline = ReplanBaseline.Initial;
         }
 
+        /// <summary>
+        /// Advances plan age (time since the last replan) and phase age (time
+        /// since the last phase transition) by the same doctrine-clock delta.
+        /// The tick cycle passes BATTLE seconds (GameVars.currenttimefromstart).
+        /// </summary>
         public void AdvancePlanAge(float deltaSeconds)
         {
             if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return;
             _planAgeSeconds += deltaSeconds;
-            // Legacy compat: callers that don't supply a separate battle-time
-            // delta get phase age advanced at real-time too. The preferred
-            // pattern for compression-aware code is to call AdvancePhaseAge
-            // explicitly with a battle-time delta and AdvancePlanAge with a
-            // real-time delta — see ArmyTickCycle.MaybeReplan.
             _phaseAgeSeconds += deltaSeconds;
-        }
-
-        /// <summary>
-        /// Adds <paramref name="battleDeltaSeconds"/> to phase age in battle-
-        /// time. Use this when the runtime tracks GameVars.currenttimefromstart
-        /// for compression-aware phase budgets (2x/5x/20x time compression
-        /// makes real-time and battle-time diverge — phase budgets should run
-        /// on battle-time, replan rate limits on real-time).
-        ///
-        /// Callers should NOT also pass the same delta to AdvancePlanAge for
-        /// the phase-age component — that would double-count. The new pattern
-        /// is: AdvancePhaseAge(battleDelta) FIRST to set phase age, then a
-        /// real-time-only plan age update (or AdvancePlanAge for legacy).
-        /// </summary>
-        public void AdvancePhaseAge(float battleDeltaSeconds)
-        {
-            if (battleDeltaSeconds <= 0f ||
-                float.IsNaN(battleDeltaSeconds) || float.IsInfinity(battleDeltaSeconds))
-                return;
-            _phaseAgeSeconds += battleDeltaSeconds;
-        }
-
-        /// <summary>
-        /// Real-time-only plan age advance. Use this with AdvancePhaseAge
-        /// to keep the two timers semantically separate: replan rate limits
-        /// run on real-time (wallclock decision cadence), phase budgets run
-        /// on battle-time (commander decision pace).
-        /// </summary>
-        public void AdvancePlanAgeRealtimeOnly(float realDeltaSeconds)
-        {
-            if (realDeltaSeconds <= 0f ||
-                float.IsNaN(realDeltaSeconds) || float.IsInfinity(realDeltaSeconds))
-                return;
-            _planAgeSeconds += realDeltaSeconds;
         }
 
         private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
@@ -1049,28 +1015,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence)
         {
-            UpdateReinforcementOpportunity(evidence, UnityEngine.Time.realtimeSinceStartup);
+            float nowBattleSeconds = 0f;
+            try
+            {
+                float hours = GameVars.currenttimefromstart;
+                if (!float.IsNaN(hours) && !float.IsInfinity(hours) && hours > 0f) nowBattleSeconds = hours * 3600f;
+            }
+            catch { }
+            UpdateReinforcementOpportunity(evidence, nowBattleSeconds);
         }
 
-        // Test-injectable overload for harness use.
-        internal void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence, float nowRealtimeSeconds)
+        /// <summary>
+        /// Clock-injected overload. The hysteresis hold is measured on battle
+        /// time (GameVars.currenttimefromstart), so the same span of battle
+        /// passes at every time compression. The "Opportunity Hysteresis Min
+        /// Hold Seconds" config value is read as battle MINUTES.
+        /// </summary>
+        internal void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence, float nowBattleSeconds)
         {
             var raw = TacticalReinforcementOpportunityDoctrine.Decide(evidence);
-            float secondsSinceLastChange = nowRealtimeSeconds - _opportunityLastChangedRealtimeSeconds;
-            // Negative on first call (uninitialized timestamp = 0; nowRealtimeSeconds
-            // > 0); treat as "very long ago" so first decision is always accepted.
-            if (secondsSinceLastChange < 0f) secondsSinceLastChange = float.MaxValue;
+            float sinceLastChange = _hasOpportunityChange
+                ? nowBattleSeconds - _opportunityLastChangedBattleSeconds
+                : float.MaxValue;
+            // Battle clock ran backwards (reload): treat as long ago.
+            if (sinceLastChange < 0f) sinceLastChange = float.MaxValue;
 
-            float minHoldSeconds = TacticalOpportunityHysteresis.DefaultMinHoldSeconds;
+            float minHold = TacticalOpportunityHysteresis.DefaultMinHoldBattleSeconds;
             if (Plugin.OpportunityHysteresisMinHoldSeconds != null)
             {
-                minHoldSeconds = Plugin.OpportunityHysteresisMinHoldSeconds.Value;
+                minHold = Plugin.OpportunityHysteresisMinHoldSeconds.Value * 60f;
             }
             var smoothed = TacticalOpportunityHysteresis.Smooth(
-                raw, _currentReinforcementOpportunity, secondsSinceLastChange, minHoldSeconds);
-            if (smoothed.Changed)
+                raw, _currentReinforcementOpportunity, sinceLastChange, minHold);
+            if (smoothed.Changed || !_hasOpportunityChange)
             {
-                _opportunityLastChangedRealtimeSeconds = nowRealtimeSeconds;
+                _opportunityLastChangedBattleSeconds = nowBattleSeconds;
+                _hasOpportunityChange = true;
             }
             _currentReinforcementOpportunity = smoothed.Decision;
             _currentForceBalanceStance = evidence.Stance;
@@ -1082,10 +1062,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // GetBattleType signal.
         private BattleStance _currentForceBalanceStance = BattleStance.Meeting;
 
-        // Timestamp (Unity Time.realtimeSinceStartup) of the most recent
-        // accepted opportunity-category change. Read by
-        // TacticalOpportunityHysteresis.Smooth to enforce minimum hold time.
-        private float _opportunityLastChangedRealtimeSeconds = 0f;
+        // Battle time (seconds) of the most recent accepted opportunity-category
+        // change. Read by TacticalOpportunityHysteresis.Smooth to enforce the
+        // minimum hold.
+        private float _opportunityLastChangedBattleSeconds;
+        private bool _hasOpportunityChange;
 
         private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
         {

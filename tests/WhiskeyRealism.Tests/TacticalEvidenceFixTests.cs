@@ -53,6 +53,11 @@ internal static class TacticalEvidenceFixTests
         Run("replans preserve the current phase and stop the withdraw-probe loop", ReplanPreservesPhaseNoThrash);
         Run("main effort sector loss uses the main band's own strength history", MainEffortSectorLossFromBandHistory);
         Run("morale is normalized against battle-start morale", MoraleNormalizedToBattleStart);
+        Run("phase budgets are civil-war battle minutes", PhaseBudgetsAreBattleMinutes);
+        Run("main effort consolidates on stalled progress, not elapsed time", MainEffortConsolidatesOnStallNotClock);
+        Run("plan deadline runs on battle time", PlanDeadlineRunsOnBattleTime);
+        Run("opportunity hysteresis holds on battle time", OpportunityHysteresisOnBattleTime);
+        Run("main arrival hold budget is battle minutes", MainArrivalHoldIsBattleMinutes);
     }
 
     private static void Run(string name, Action test)
@@ -620,5 +625,64 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.NormalizedMorale01(sumMorale: 1.5f, sumBattleStartMorale: 3f, fallback: 1f), 0.5f), "half the starting morale");
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.NormalizedMorale01(3.3f, 3f, 1f), "above start clamps to 1");
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.NormalizedMorale01(0.5f, 0f, 1f), "no start morale yet -> fallback");
+    }
+
+    // ---- T8 clocks ----
+
+    private static void PhaseBudgetsAreBattleMinutes()
+    {
+        TestHarness.AssertEqual(20f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1f), "aggressive probes 20 battle-minutes");
+        TestHarness.AssertEqual(40f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.5f), "mid probes 40 battle-minutes");
+        TestHarness.AssertEqual(60f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0f), "cautious probes an hour");
+        TestHarness.AssertEqual(60f * 60f, TacticalPhaseProgressionDoctrine.MainEffortBudgetForAggression(0f), "cautious main effort 1 h");
+        TestHarness.AssertEqual(180f * 60f, TacticalPhaseProgressionDoctrine.MainEffortBudgetForAggression(1f), "aggressive main effort 3 h");
+    }
+
+    private static TacticalPhaseProgressionDoctrine.Input Phase(BattlePhase phase, float ageSeconds, float meNow, float meHistory, float global = 1.2f, float reserves = 0.3f)
+        => new TacticalPhaseProgressionDoctrine.Input(phase, ageSeconds, global, 1f, meNow, meHistory, 1f, 0.4f, reserves, 0.5f);
+
+    private static void MainEffortConsolidatesOnStallNotClock()
+    {
+        float pastBudget = TacticalPhaseProgressionDoctrine.MainEffortBudgetForAggression(0.5f) + 60f;
+        var gaining = TacticalPhaseProgressionDoctrine.Decide(Phase(BattlePhase.MainEffort, pastBudget, meNow: 1.25f, meHistory: 1.1f));
+        TestHarness.AssertEqual(BattlePhase.MainEffort, gaining.NextPhase, "still gaining past the budget keeps pushing; got " + gaining.Reason);
+        var stalled = TacticalPhaseProgressionDoctrine.Decide(Phase(BattlePhase.MainEffort, pastBudget, meNow: 1.0f, meHistory: 1.1f));
+        TestHarness.AssertEqual(BattlePhase.Consolidate, stalled.NextPhase, "stalled past the budget consolidates; got " + stalled.Reason);
+        var early = TacticalPhaseProgressionDoctrine.Decide(Phase(BattlePhase.MainEffort, 600f, meNow: 1.0f, meHistory: 1.1f));
+        TestHarness.AssertEqual(BattlePhase.MainEffort, early.NextPhase, "a stall inside the budget is not yet a verdict");
+    }
+
+    private static void PlanDeadlineRunsOnBattleTime()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+        var realOnly = ArmyTickCycle.MaybeReplan(orch, 5000f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
+            6000f, 1f, 0.5f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 0f);
+        TestHarness.AssertTrue(realOnly != ReplanTrigger.PhaseDeadline, "wall-clock time alone does not expire the plan");
+        var battle = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), QuietFront,
+            6000f, 1f, 0.5f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: ArmyReplanTriggers.PlanDeadlineBattleSeconds + 1f);
+        TestHarness.AssertEqual(ReplanTrigger.PhaseDeadline, battle, "plan deadline after the battle-time budget");
+    }
+
+    private static TacticalForceBalanceEvidence Balance(float own, float enemy)
+        => new TacticalForceBalanceEvidence(own, enemy, null, null, 0.5f, 0.5f, 1f);
+
+    private static void OpportunityHysteresisOnBattleTime()
+    {
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
+        orch.UpdateReinforcementOpportunity(Balance(8000f, 4000f), nowBattleSeconds: 100f);
+        var first = orch.CurrentReinforcementOpportunity.Opportunity;
+        orch.UpdateReinforcementOpportunity(Balance(5600f, 8000f), nowBattleSeconds: 100f + 300f);
+        TestHarness.AssertEqual(first, orch.CurrentReinforcementOpportunity.Opportunity, "5 battle-minutes later the decision is held");
+        orch.UpdateReinforcementOpportunity(Balance(5600f, 8000f), nowBattleSeconds: 100f + TacticalOpportunityHysteresis.DefaultMinHoldBattleSeconds + 1f);
+        TestHarness.AssertTrue(first != orch.CurrentReinforcementOpportunity.Opportunity, "after the battle-time hold the new category is accepted");
+    }
+
+    private static void MainArrivalHoldIsBattleMinutes()
+    {
+        var far = new[] { new TacticalMainArrivalSynchronizer.SupportMainPosition(2000f) };
+        TestHarness.AssertEqual(15f * 60f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds, "hold budget 15 battle-minutes");
+        TestHarness.AssertTrue(TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(far, 0.5f, 600f, 500f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds), "10 battle-minutes in: still waiting");
+        TestHarness.AssertFalse(TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(far, 0.5f, 1000f, 500f, TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds), "past 15 battle-minutes: release");
     }
 }

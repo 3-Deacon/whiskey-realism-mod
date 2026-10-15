@@ -1284,8 +1284,6 @@ static class Program
             // Time compression handling
             ("consider main effort shift respects hysteresis margin", ConsiderMainEffortShiftRespectsHysteresisMargin),
             ("consider main effort shift legacy overload always shifts", ConsiderMainEffortShiftLegacyOverloadAlwaysShifts),
-            ("advance plan age realtime only does not advance phase age", AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge),
-            ("advance phase age battle time separate from plan age", AdvancePhaseAgeBattleTimeSeparateFromPlanAge),
             ("army tick cycle 20x compression burns probe budget in battle time", ArmyTickCycle20xCompressionBurnsProbeInBattleTime),
             ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
             ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
@@ -23629,13 +23627,13 @@ static class Program
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()
     {
         var input = new ReplanTriggerInput(
-            planAgeSeconds: 200f, currentPhase: BattlePhase.Probe,
+            planAgeSeconds: ArmyReplanTriggers.PlanDeadlineBattleSeconds + 20f, currentPhase: BattlePhase.Probe,
             mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0f);
-        AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age >= 180 fires PhaseDeadline");
+        AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age past the battle-time plan deadline fires PhaseDeadline");
     }
 
     private static void ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold()
@@ -24444,7 +24442,7 @@ static class Program
         // Budget elapsed, global odds below 0.9 → consolidate (don't commit
         // to a bad attack just because the clock ran out)
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 200f,
+            BattlePhase.Probe, planAgeSeconds: TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.5f) + 60f,
             globalOddsCurrent: 0.7f, mainEffortOddsCurrent: 0.7f,
             commanderAggression01: 0.5f));
         AssertEqual(BattlePhase.Consolidate, d.NextPhase,
@@ -24499,30 +24497,30 @@ static class Program
 
     private static void PhaseProgressionAggressiveShortensProbeBudget()
     {
-        // Aggressive commander (aggression01=1.0) -> 30s probe budget.
-        // At 45s (past budget) with neutral odds, commit anyway.
+        // Aggressive commander (aggression01=1.0) -> 20 battle-minute probe
+        // budget. At 30 battle-minutes (past budget) with neutral odds, commit.
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 45f,
+            BattlePhase.Probe, planAgeSeconds: 30f * 60f,
             globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
             commanderAggression01: 1.0f));
         AssertEqual(BattlePhase.MainEffort, d.NextPhase,
-            "aggressive 30s probe budget commits at 45s; got " + d.Reason);
-        AssertNear(30f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1.0f), 0.01f,
-            "aggression=1.0 -> 30s probe budget");
+            "aggressive 20-minute probe budget commits at 30 minutes; got " + d.Reason);
+        AssertNear(20f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1.0f), 0.01f,
+            "aggression=1.0 -> 20 battle-minute probe budget");
     }
 
     private static void PhaseProgressionCautiousLengthensProbeBudget()
     {
-        // Cautious commander (aggression01=0.0) -> 120s budget.
-        // At 60s with neutral odds, still probing.
+        // Cautious commander (aggression01=0.0) -> 60 battle-minute budget.
+        // At 30 battle-minutes with neutral odds, still probing.
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 60f,
+            BattlePhase.Probe, planAgeSeconds: 30f * 60f,
             globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
             commanderAggression01: 0.0f));
         AssertEqual(BattlePhase.Probe, d.NextPhase,
-            "cautious 120s probe budget still probing at 60s; got " + d.Reason);
-        AssertNear(120f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.0f), 0.01f,
-            "aggression=0.0 -> 120s probe budget");
+            "cautious 60-minute probe budget still probing at 30 minutes; got " + d.Reason);
+        AssertNear(60f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.0f), 0.01f,
+            "aggression=0.0 -> 60 battle-minute probe budget");
     }
 
     private static void PhaseProgressionExploitEndsOnReservesExhausted()
@@ -25128,37 +25126,6 @@ static class Program
         AssertEqual(3, orch.CurrentPlan.MainEffortSector, "shifted to sector 3");
     }
 
-    private static void AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge()
-    {
-        // Compression-aware API: AdvancePlanAgeRealtimeOnly bumps plan age
-        // (used for replan rate limit) without touching phase age (used for
-        // commander-pace budgets). Mirrors the split needed under 2x/5x/20x
-        // time compression.
-        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
-        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "starts at 0");
-        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "starts at 0");
-
-        orch.AdvancePlanAgeRealtimeOnly(5f);
-        AssertNear(5f, orch.PlanAgeSeconds, 1e-5f, "plan age advanced");
-        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "phase age NOT advanced");
-    }
-
-    private static void AdvancePhaseAgeBattleTimeSeparateFromPlanAge()
-    {
-        // AdvancePhaseAge bumps phase age only — used with battle-time delta
-        // at high time compression (20x compression makes battle time advance
-        // 20s of phase budget per 1s of wallclock).
-        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
-
-        orch.AdvancePhaseAge(20f);
-        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "plan age NOT advanced by phase-only");
-        AssertNear(20f, orch.PhaseAgeSeconds, 1e-5f, "phase age advanced (battle time)");
-    }
-
     private static void ArmyTickCycle20xCompressionBurnsProbeInBattleTime()
     {
         // 20x compression: 1 wallclock second = 20 battle seconds. With a
@@ -25188,7 +25155,8 @@ static class Program
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f,
             battleDeltaSeconds: 30f);  // 20x compression: 1.5 real = 30 battle
 
-        AssertNear(1.5f, orch.PlanAgeSeconds, 1e-5f, "plan age accrues real-time (1.5s)");
+        // T8 (2026-10-14): plan age (the plan deadline) is battle time too.
+        AssertNear(30f, orch.PlanAgeSeconds, 1e-5f, "plan age accrues battle-time (30s)");
         AssertNear(30f, orch.PhaseAgeSeconds, 1e-5f, "phase age accrues battle-time (30s)");
     }
 
@@ -26277,7 +26245,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
-        orch.AdvancePlanAge(190f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var trigger = ArmyTickCycle.MaybeReplan(
             orch,
@@ -26301,7 +26269,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
-        orch.AdvancePlanAge(200f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var first = ArmyTickCycle.MaybeReplan(
             orch,
@@ -26313,7 +26281,7 @@ static class Program
             ownReservesCommittedFraction: 0.5f,
             reinforcementsArrivingDelta: 0f,
             minReplanSeconds: 60);
-        orch.AdvancePlanAge(200f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var second = ArmyTickCycle.MaybeReplan(
             orch,
             deltaSeconds: 5f,
@@ -26343,12 +26311,12 @@ static class Program
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         union.PickInitialPlan(ownEvidence);
         csa.PickInitialPlan(ownEvidence);
-        union.AdvancePlanAge(200f);
-        csa.AdvancePlanAge(200f);
+        union.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
+        csa.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var unionFirst = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
         var csaFirst = ArmyTickCycle.MaybeReplan(csa, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
-        union.AdvancePlanAge(200f);
+        union.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var unionSecond = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, unionFirst, "union first over-budget tick replans");
@@ -26363,14 +26331,14 @@ static class Program
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var firstBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         firstBattle.PickInitialPlan(ownEvidence);
-        firstBattle.AdvancePlanAge(200f);
+        firstBattle.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var first = ArmyTickCycle.MaybeReplan(firstBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         ArmyTickCycle.Reset();
 
         var secondBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         secondBattle.PickInitialPlan(ownEvidence);
-        secondBattle.AdvancePlanAge(200f);
+        secondBattle.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var second = ArmyTickCycle.MaybeReplan(secondBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, first, "first battle over-budget tick replans");

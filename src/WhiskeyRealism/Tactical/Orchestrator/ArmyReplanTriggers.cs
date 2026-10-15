@@ -133,7 +133,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         // Per umbrella §"Replan triggers". Thresholds are seed values; future
         // tuning may move them into config flags.
-        public const float PhaseBudgetSeconds = 180f;
+        /// <summary>
+        /// Plan reassessment deadline in BATTLE seconds since the last replan
+        /// (3 battle hours). Was 180 real seconds, which reset plans every three
+        /// wall-clock minutes regardless of time compression.
+        /// </summary>
+        public const float PlanDeadlineBattleSeconds = 3f * 3600f;
         public const float MainEffortLossFraction = 0.5f;
         public const float OddsLowHysteresis = 0.7f;
         public const float OddsHighHysteresis = 1.4f;
@@ -180,7 +185,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public static ReplanTrigger Evaluate(ReplanTriggerInput i)
         {
-            if (i.PlanAgeSeconds >= PhaseBudgetSeconds) return ReplanTrigger.PhaseDeadline;
+            if (i.PlanAgeSeconds >= PlanDeadlineBattleSeconds) return ReplanTrigger.PhaseDeadline;
 
             if (i.MainEffortHistoryOwnStrength > 0f &&
                 i.MainEffortOwnStrength / i.MainEffortHistoryOwnStrength <= MainEffortLossFraction)

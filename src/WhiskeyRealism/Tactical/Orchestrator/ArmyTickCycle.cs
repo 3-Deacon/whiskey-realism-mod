@@ -12,6 +12,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
 
+        /// <summary>Minimum battle seconds between replans of one army (10 battle-minutes).</summary>
+        public const float MinReplanBattleSeconds = 600f;
+
         public static void Reset()
         {
             _lastReplanByAlliance.Clear();
@@ -66,27 +69,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (orchestrator == null) return ReplanTrigger.None;
 
             var allianceId = orchestrator.AllianceId;
-            if (deltaSeconds > 0f && !float.IsNaN(deltaSeconds) && !float.IsInfinity(deltaSeconds))
+            // Doctrine clock (T8): plan age, phase age and the replan cooldown
+            // all run on BATTLE time when the caller supplies it (the runtime
+            // passes GameVars.currenttimefromstart deltas). Wall-clock deltas
+            // drove the 180 s plan deadline before, so at 20x compression a
+            // plan "expired" after ~10 battle-minutes and at 1x every 3
+            // wall-clock minutes. Legacy callers without a battle delta keep
+            // the single-clock behaviour.
+            bool battleClock = battleDeltaSeconds >= 0f;
+            float clockDelta = battleClock ? battleDeltaSeconds : deltaSeconds;
+            if (clockDelta > 0f && !float.IsNaN(clockDelta) && !float.IsInfinity(clockDelta))
             {
                 float currentClock;
                 _clockByAlliance.TryGetValue(allianceId, out currentClock);
-                _clockByAlliance[allianceId] = currentClock + deltaSeconds;
+                _clockByAlliance[allianceId] = currentClock + clockDelta;
             }
-            // Time compression: if caller supplied a battle-time delta,
-            // advance plan age on real-time and phase age on battle-time
-            // separately. Phase budgets are commander-pace (battle clock)
-            // decisions; replan rate limits are wallclock (real time).
-            // Legacy callers that don't pass battleDeltaSeconds keep the
-            // single-source behavior via AdvancePlanAge.
-            if (battleDeltaSeconds >= 0f)
-            {
-                orchestrator.AdvancePlanAgeRealtimeOnly(deltaSeconds);
-                orchestrator.AdvancePhaseAge(battleDeltaSeconds);
-            }
-            else
-            {
-                orchestrator.AdvancePlanAge(deltaSeconds);
-            }
+            orchestrator.AdvancePlanAge(clockDelta);
 
             orchestrator.ObserveFrontGeometry(enemyVisible);
             if (!orchestrator.HasPlan) return ReplanTrigger.None;
@@ -237,8 +235,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Drives Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw
             // each tick. AdvancePhase resets phase age (NOT plan age) on
             // actual transitions so each phase has its own budget while the
-            // overarching plan deadline (180s) still backstops via PhaseDeadline
-            // replan trigger.
+            // overarching plan deadline (ArmyReplanTriggers.PlanDeadlineBattleSeconds)
+            // still backstops via the PhaseDeadline replan trigger.
             orchestrator.EvaluateAndAdvancePhase(
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 mainEffortOddsCurrent: currentMainEffortOdds,
@@ -282,8 +280,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             float now;
             _clockByAlliance.TryGetValue(allianceId, out now);
+            // On the battle clock the "Min Replan Seconds" config is battle
+            // seconds with a 10 battle-minute floor (its 60 s default would be
+            // 10 wall-clock seconds at 1x).
+            float cooldown = battleClock ? Math.Max(minReplanSeconds, MinReplanBattleSeconds) : minReplanSeconds;
             if (_lastReplanByAlliance.TryGetValue(allianceId, out var lastReplan) &&
-                now - lastReplan < minReplanSeconds)
+                now - lastReplan < cooldown)
             {
                 return ReplanTrigger.None;
             }
