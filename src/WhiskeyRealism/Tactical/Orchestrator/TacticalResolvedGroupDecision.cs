@@ -18,16 +18,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     ///                       DenyCharge: 3) via <c>DemoteCharge</c>. Applies
     ///                       whenever vanilla is at 4 at apply time, including
     ///                       a doctrine entry vanilla escalated after caching.
-    ///   DenyExplicit     — reserved for future denial reasons that don't
-    ///                       demote; currently treated as PreserveVanilla at
-    ///                       apply time.
     /// </summary>
     internal enum ChargeOverrideAction
     {
         None = 0,
         PreserveVanilla = 1,
-        DemoteToHold = 2,
-        DenyExplicit = 3
+        DemoteToHold = 2
     }
 
     /// <summary>

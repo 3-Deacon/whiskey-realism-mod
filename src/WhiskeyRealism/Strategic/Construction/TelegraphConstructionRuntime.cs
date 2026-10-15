@@ -1012,8 +1012,7 @@ namespace WhiskeyRealism.Strategic.Construction
             RemoveBuilding(placed);
             ClearIipReservation(pending, placed);
             PendingTelegraphs.Remove(placeholder);
-            bool refunded = TelegraphWishCharge.Refunds(TelegraphWishOutcome.RejectedByWhiskey) &&
-                RefundWishCharge(pending);
+            bool refunded = RefundWishCharge(pending);
             OnceLog.Warning(
                 "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reason,
                 "[TelegraphAI] alliance=" + pending.Alliance +

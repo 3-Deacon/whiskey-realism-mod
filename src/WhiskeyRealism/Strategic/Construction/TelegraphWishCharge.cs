@@ -23,19 +23,6 @@ namespace WhiskeyRealism.Strategic.Construction
         public float ConstructionCosts { get; }
     }
 
-    // How a Whiskey-started telegraph construction wish ended.
-    public enum TelegraphWishOutcome
-    {
-        // Vanilla placed it and Whiskey kept it.
-        Placed = 0,
-        // Vanilla placed it and Whiskey removed it (validation failed or the
-        // IIP reservation changed).
-        RejectedByWhiskey = 1,
-        // Vanilla WorkDownConstructionWishes found no site and dropped the wish
-        // (97578-97585) or the placement vanished otherwise.
-        CancelledByVanilla = 2
-    }
-
     // What a telegraph construction wish cost the alliance.
     //
     // CBuilding.AddConstructionWish (97479) charges at wish time: it calls
@@ -95,14 +82,6 @@ namespace WhiskeyRealism.Strategic.Construction
                 subsidy,
                 Finite(after.CumulatedSpendingConstruction - before.CumulatedSpendingConstruction),
                 Finite(after.ConstructionCosts - before.ConstructionCosts));
-        }
-
-        // Only a placement Whiskey destroyed after vanilla accepted it is
-        // refunded. Vanilla's own cancellation refunds nothing (97578-97585),
-        // and neither does Whiskey for it.
-        public static bool Refunds(TelegraphWishOutcome outcome)
-        {
-            return outcome == TelegraphWishOutcome.RejectedByWhiskey;
         }
 
         private static float Finite(float value)

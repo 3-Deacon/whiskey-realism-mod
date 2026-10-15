@@ -15,7 +15,6 @@ internal static class IntegrationFollowupTests
         ArtilleryFaceMirrorsVanillaTurnTrigger();
         TelegraphWishChargeMeasuresWhatPlaceTook();
         TelegraphWishChargeWithoutSpendIsNoCharge();
-        TelegraphRefundsOnlyWhiskeyRejections();
         ChargeDenialDemotesDoctrineDeniedAssaultWithArmyOn();
         ChargeDenialPreservesAssaultDoctrineAgreesWith();
         ChargeDenialLegacyReactionOnlyWithArmyOff();
@@ -146,16 +145,6 @@ internal static class IntegrationFollowupTests
         TestHarness.AssertFalse(TelegraphWishCharge.Measure(nullSubsidy, nan).HasCharge, "non-finite delta ignored");
         TestHarness.AssertFalse(default(TelegraphWishCharge).HasCharge, "default has no charge");
         Pass("telegraph wish charge without spend is no charge");
-    }
-
-    // Vanilla's own no-site cancellation (97578-97585) refunds nothing; only a
-    // placement vanilla accepted and Whiskey removed gets its charge back.
-    private static void TelegraphRefundsOnlyWhiskeyRejections()
-    {
-        TestHarness.AssertTrue(TelegraphWishCharge.Refunds(TelegraphWishOutcome.RejectedByWhiskey), "whiskey rejection");
-        TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.Placed), "kept placement");
-        TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.CancelledByVanilla), "vanilla cancellation");
-        Pass("telegraph refunds only Whiskey rejections");
     }
 
     private static ChargeDenialDecision Deny(
