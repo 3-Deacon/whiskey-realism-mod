@@ -40,7 +40,7 @@ internal static class OrderArbiterTests
             ("battle-core PlayerOwnedNeverExecuted", PlayerOwnedNeverExecuted),
             ("battle-core FeudNeverExecuted", FeudNeverExecuted),
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
-            ("battle-core SelfOnlyChainFailsClosedForPlayerAncestor", SelfOnlyChainFailsClosedForPlayerAncestor),
+            ("battle-core DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly", DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly),
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
             ("battle-core FanOutOutcomeCountsTheOrderedSet", FanOutOutcomeCountsTheOrderedSet),
             ("battle-core GatedOffArbiterPublishesNoClaims", GatedOffArbiterPublishesNoClaims),
@@ -626,7 +626,7 @@ internal static class OrderArbiterTests
         AssertTrue(replay.Execute, "#42 replays vanilla's own feud move (FeudReplay exemption)");
 
         var guarded = new OrderExecutor();
-        guarded.Bind(new FixtureGuard { Refuse = SkipReason.Feud }, new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
+        guarded.Bind(new FixtureGuard { Refuse = SkipReason.Feud }, new FixtureTerrain());
         AssertTrue(guarded.Plan(view, Move(1, 500f, -500f, IntentPriority.Support, IntentSource.FeudReplay), 1.0).Execute,
             "the guard's Feud refusal is exempt for FeudReplay");
     }
@@ -638,26 +638,43 @@ internal static class OrderArbiterTests
         var executor = new OrderExecutor();
         AssertEqual(SkipReason.ModeNotActive, executor.Plan(view, Move(1, 500f, -500f, IntentPriority.Safety, IntentSource.Withdrawal), 1.0).Skip,
             "an unbound executor fails closed");
-        executor.Bind(new FixtureGuard { Refuse = SkipReason.NotAiControlled }, new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
+        executor.Bind(new FixtureGuard { Refuse = SkipReason.NotAiControlled }, new FixtureTerrain());
         AssertEqual(SkipReason.NotAiControlled, executor.Plan(view, Move(1, 500f, -500f, IntentPriority.Safety, IntentSource.Withdrawal), 1.0).Skip,
             "guard reason propagates");
         AssertEqual(SkipReason.Inactive, executor.Plan(view, Move(99, 500f, -500f, IntentPriority.Safety, IntentSource.Withdrawal), 1.0).Skip,
             "unknown group");
     }
 
-    private static void SelfOnlyChainFailsClosedForPlayerAncestor()
+    // BC3 chain rule through the executor: an ancestor of a detached player
+    // command has no exposed player-owned descendant, so it is ordered as a group,
+    // and the player's share of its move goes out as a dispatch. Only a Move
+    // carries one: the dispatch is the move's target.
+    private static void DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly()
     {
         var view = new FixtureBattleView();
-        view.AddGroup(1, 100f, -100f, flags: UnitFlags.AncestorOfPlayerCommand);
-        view.AddGroup(2, 400f, -400f);
+        int division = view.AddGroup(1, 100f, -100f, flags: UnitFlags.AncestorOfPlayerCommand);
+        view.AddGroup(2, 100f, -140f, parentIndex: division,
+            flags: UnitFlags.PlayerCommand | UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached);
+        int other = view.AddGroup(3, 400f, -400f);
         var executor = NewExecutor();
-        AssertEqual(SkipReason.ChainNoTargets, executor.Plan(view, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0).Skip,
-            "without the chain planner an ancestor of the player is not ordered");
-        var plan = executor.Plan(view, Move(2, 700f, -700f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0);
-        AssertTrue(plan.Execute, "an ordinary group");
-        AssertEqual(1, plan.Targets.Count, "orders itself");
-        AssertEqual(1, plan.Targets.TargetIndices[0], "target index is the group");
-        AssertEqual(OrderExecutor.NoDispatch, plan.DispatchType, "no W&L dispatch");
+
+        var plan = executor.Plan(view, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective), 1.0);
+        AssertTrue(plan.Execute, "the ancestor of a detached player command is ordered");
+        AssertEqual(1, plan.Targets.Count, "as a group");
+        AssertEqual(division, plan.Targets.TargetIndices[0], "target index is the group");
+        AssertFalse(plan.Targets.FannedOut, "no fan-out: the player's command is detached");
+        AssertEqual(12, plan.DispatchType, "the player's share: defend (HoldObjective)");
+
+        BattleOrderIntent stanceIntent = Stance(1, 4, IntentPriority.Executor, IntentSource.PostureExecutor);
+        stanceIntent.Task = CommandTaskType.HoldObjective;
+        var stance = executor.Plan(view, stanceIntent, 1.0);
+        AssertTrue(stance.Execute, "a stance on the ancestor executes");
+        AssertEqual(OrderExecutor.NoDispatch, stance.DispatchType, "no dispatch for a stance, even one carrying a task");
+
+        var ordinary = executor.Plan(view, Move(3, 700f, -700f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective), 1.0);
+        AssertTrue(ordinary.Execute, "an ordinary group");
+        AssertEqual(other, ordinary.Targets.TargetIndices[0], "orders itself");
+        AssertEqual(OrderExecutor.NoDispatch, ordinary.DispatchType, "no W&L dispatch outside the player's chain");
     }
 
     private static void AncestorFanOutDispatchesOnce()
@@ -667,17 +684,14 @@ internal static class OrderArbiterTests
         view.AddGroup(11, 80f, -120f, parentIndex: division);
         view.AddGroup(12, 120f, -120f, parentIndex: division);
         view.AddGroup(13, 100f, -140f, parentIndex: division, flags: UnitFlags.PlayerCommand | UnitFlags.PlayerOwned);
-        var mapper = new FixtureDispatchMapper { Type = 0 };
-        var executor = new OrderExecutor();
-        executor.Bind(new FixtureGuard(), new FixtureFanOutChain(), mapper, new FixtureTerrain());
-        executor.SetMapSize(1000f, 1000f);
+        view.AddEnemy(90, 420f, -420f, ObservationState.Visible); // the objective is enemy-held
+        var executor = NewExecutor();
 
         var plan = executor.Plan(view, Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.AttackObjective), 1.0);
         AssertTrue(plan.Execute, "the ancestor's order fans out");
         AssertEqual(2, plan.Targets.Count, "the two AI brigades, not the player's");
         AssertTrue(plan.Targets.FannedOut, "fanned out");
-        AssertEqual(0, plan.DispatchType, "one vanilla order type for the player's dispatch");
-        AssertEqual(1, mapper.Calls, "mapped once per plan, not per target");
+        AssertEqual(0, plan.DispatchType, "one vanilla order type for the player's dispatch: take the enemy-held objective");
         AssertTrue(OrderExecutor.ShouldDispatch(plan, executedTargets: 2), "dispatch when a target executed");
         AssertFalse(OrderExecutor.ShouldDispatch(plan, executedTargets: 0), "no dispatch when nothing moved");
 
@@ -825,7 +839,7 @@ internal static class OrderArbiterTests
     private static OrderExecutor NewExecutor()
     {
         var executor = new OrderExecutor();
-        executor.Bind(new FixtureGuard(), new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
+        executor.Bind(new FixtureGuard(), new FixtureTerrain());
         executor.SetMapSize(1000f, 1000f);
         return executor;
     }
@@ -876,7 +890,7 @@ internal static class OrderArbiterTests
         return new BattleOrderIntent { GroupId = group, Channel = OrderChannel.Facing, Heading = heading, Priority = priority, Source = source, Reason = "test" };
     }
 
-    // Array-backed stand-in for BattleSnapshot (BC1) behind IBattleUnitView.
+    // Array-backed stand-in for BattleSnapshot behind IBattleUnitView.
     private sealed class FixtureBattleView : IBattleUnitView
     {
         private readonly UnitRecord[] _own = new UnitRecord[64];
@@ -933,37 +947,6 @@ internal static class OrderArbiterTests
         {
             reason = Refuse;
             return Refuse == SkipReason.None;
-        }
-    }
-
-    // Ancestor of the player command, not detached: the order goes to the direct
-    // children except the player's (plan BC3 chain rule).
-    private sealed class FixtureFanOutChain : IChainResolver
-    {
-        public void ResolveTargets(IBattleUnitView s, int groupIndex, int[] childBuffer, ref ChainResolution result)
-        {
-            int n = 0;
-            for (int i = 0; i < s.OwnCount; i++)
-            {
-                if (s.Own[i].ParentIndex != groupIndex) continue;
-                if ((s.Own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
-                result.TargetIndices[n++] = i;
-            }
-            result.Count = n;
-            result.FannedOut = true;
-            result.PlayerShareNeedsDispatch = true;
-        }
-    }
-
-    private sealed class FixtureDispatchMapper : IDispatchTypeMapper
-    {
-        public int Type = OrderExecutor.NoDispatch;
-        public int Calls;
-
-        public int Map(CommandTaskType task, bool targetEnemyHeld, bool chargeSupported)
-        {
-            Calls++;
-            return Type;
         }
     }
 

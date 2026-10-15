@@ -2,8 +2,8 @@
 //
 // Pure: no Unity or vanilla types. Every battle-core workstream (snapshot, perception,
 // ownership, arbiter/executor, charge doctrine) is written against these identifiers and
-// enum integer values, so do not renumber them. BattleSnapshot is a stub here; BC1
-// declares its contents in BattleSnapshot.cs.
+// enum integer values, so do not renumber them. BattleSnapshot is declared in
+// BattleSnapshot.cs (BC1).
 
 namespace WhiskeyRealism.Tactical.Battle
 {
@@ -167,18 +167,19 @@ namespace WhiskeyRealism.Tactical.Battle
         void Produce(BattleSnapshot snapshot, IIntentSink sink);
     }
 
+    // Not persisted. 2 was Pending (no courier wait to observe, plan D6); the other
+    // values keep their numbers.
     public enum OrderOutcomeKind
     {
-        None,
-        Issued,
-        Pending,
-        Moved,
-        Failed,
-        Retried,
-        GaveUp,
-        Skipped,
-        Deduped,
-        Superseded,
+        None = 0,
+        Issued = 1,
+        Moved = 3,
+        Failed = 4,
+        Retried = 5,
+        GaveUp = 6,
+        Skipped = 7,
+        Deduped = 8,
+        Superseded = 9,
     }
 
     public enum SkipReason
@@ -212,9 +213,5 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentSource Source;
         public double AtHours;
         public int Retries;
-    }
-
-    public sealed partial class BattleSnapshot
-    {
     }
 }

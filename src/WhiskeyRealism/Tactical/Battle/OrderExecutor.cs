@@ -276,12 +276,9 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
-    // ---------------------------------------------------------------- seams
-    //
-    // BC1 seam: the BattleSnapshot members (plan BC1 interface block) the arbiter
-    // pipeline reads, under the same names. At the BC1 merge BattleSnapshot gets
-    // `public sealed partial class BattleSnapshot : IBattleUnitView { }` and
-    // BattleCoreTick.ViewOf becomes the identity.
+    // The BattleSnapshot members the arbiter pipeline reads. BattleSnapshot
+    // implements it; the harness drives the pure pipeline through an array-backed
+    // fixture.
     public interface IBattleUnitView
     {
         int Alliance { get; }
@@ -293,46 +290,12 @@ namespace WhiskeyRealism.Tactical.Battle
         EnemyObservation[] Observations { get; }
     }
 
-    // BC3 seam: TacticalWriteGuard.CanWrite(in UnitRecord, out SkipReason) (mode,
-    // PlayerOwned, Feud, NotAiControlled). Until BC3 merges the runtime binds
-    // OrderExecutorRuntime.ModeOrderGuard (mode only); the executor itself refuses
-    // PlayerOwned and Feud from the snapshot flags (Plan step 1).
+    // Step 1's write guard. The runtime binds TacticalWriteGuard.CanWrite(in
+    // UnitRecord, out SkipReason) (mode, PlayerOwned, Feud); the guard reads the
+    // Tactical Commander Mode, which the pure pipeline cannot.
     public interface IOrderGuard
     {
         bool CanWrite(in UnitRecord unit, out SkipReason reason);
-    }
-
-    // BC3 seam: TacticalChainOrderPlanner.ResolveTargets. The executor sets
-    // result.TargetIndices to its own buffer (capacity >= OwnCount) before the call.
-    public interface IChainResolver
-    {
-        void ResolveTargets(IBattleUnitView s, int groupIndex, int[] childBuffer, ref ChainResolution result);
-    }
-
-    // BC3 seam: TacticalDispatchTypeMapper.Map (returns -1 = None).
-    public interface IDispatchTypeMapper
-    {
-        int Map(CommandTaskType task, bool targetEnemyHeld, bool chargeSupported);
-    }
-
-    // Production chain rule until the BC3 planner merges: a group orders itself,
-    // except an ancestor of the W&L player's command, which is not ordered at all
-    // (fail closed: ordering it would move the player's units with it through
-    // SetGroupFormation, 92060-92090).
-    public sealed class SelfOnlyChainResolver : IChainResolver
-    {
-        public void ResolveTargets(IBattleUnitView s, int groupIndex, int[] childBuffer, ref ChainResolution result)
-        {
-            result.FannedOut = false;
-            result.PlayerShareNeedsDispatch = false;
-            if ((s.Own[groupIndex].Flags & UnitFlags.AncestorOfPlayerCommand) != 0)
-            {
-                result.Count = 0;
-                return;
-            }
-            result.TargetIndices[0] = groupIndex;
-            result.Count = 1;
-        }
     }
 
     // One unit a Move went to and its target (a fanned-out child keeps its offset).
@@ -401,7 +364,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public const int MaxRetries = 1;
         // = #61 FacingRefreshToleranceDegrees.
         public const float FacingToleranceDegrees = 15f;
-        public const int NoDispatch = -1;
+        public const int NoDispatch = TacticalDispatchTypeMapper.None;
         // groupstancename (65061): 4 = assault.
         private const int AssaultStance = 4;
         private const float RetryTicketMatchMeters = 1f;
@@ -414,8 +377,6 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         private IOrderGuard _guard;
-        private IChainResolver _chain;
-        private IDispatchTypeMapper _dispatch;
         private ITerrainProbe _terrain;
         private float _sizeX;
         private float _sizeZ;
@@ -451,14 +412,11 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// Seams for this executor. A null guard fails closed (every plan is
-        /// ModeNotActive); a null dispatch mapper never dispatches; a null terrain
-        /// probe skips the water checks.
+        /// ModeNotActive); a null terrain probe skips the water checks.
         /// </summary>
-        public void Bind(IOrderGuard guard, IChainResolver chain, IDispatchTypeMapper dispatch, ITerrainProbe terrain)
+        public void Bind(IOrderGuard guard, ITerrainProbe terrain)
         {
             _guard = guard;
-            _chain = chain;
-            _dispatch = dispatch;
             _terrain = terrain;
         }
 
@@ -487,7 +445,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private ExecutionPlan PlanCore(IBattleUnitView s, in BattleOrderIntent w, double nowHours, bool retry)
         {
             var plan = new ExecutionPlan { DispatchType = NoDispatch };
-            if (_guard == null || _chain == null) return Skip(plan, SkipReason.ModeNotActive);
+            if (_guard == null) return Skip(plan, SkipReason.ModeNotActive);
             int idx = s.IndexOfOwn(w.GroupId);
             if (idx < 0) return Skip(plan, SkipReason.Inactive);
             UnitRecord[] own = s.Own;
@@ -504,7 +462,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // 2. Chain.
             EnsureCapacity(s.OwnCount);
             plan.Targets = new ChainResolution { TargetIndices = _targetBuffer };
-            _chain.ResolveTargets(s, idx, _childBuffer, ref plan.Targets);
+            TacticalChainOrderPlanner.ResolveTargets(own, s.OwnCount, idx, _childBuffer, ref plan.Targets);
             if (plan.Targets.Count <= 0) return Skip(plan, SkipReason.ChainNoTargets);
 
             // 3. Waypoint validation (Move, and Facing when it carries a point).
@@ -529,8 +487,14 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.X = x;
             plan.Z = z;
             plan.UseOrderDelay = UsesOrderDelay(w);
-            if (plan.Targets.PlayerShareNeedsDispatch && _dispatch != null)
-                plan.DispatchType = _dispatch.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
+            // 9. The player's share of an ancestor's move goes out as one W&L
+            //    dispatch per executed plan. Move only: the dispatch carries the
+            //    move's target, and the Move cooldowns above (recent order, task
+            //    hold, courier cadence, dedupe; a retry skips the first two once)
+            //    are its throttle; Emit's 110 m record and vanilla's own repeat
+            //    check (8643) sit behind it.
+            if (w.Channel == OrderChannel.Move && plan.Targets.PlayerShareNeedsDispatch)
+                plan.DispatchType = TacticalDispatchTypeMapper.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
             return plan;
         }
 

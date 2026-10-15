@@ -9,12 +9,12 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Tactical.Battle
 {
     // Read-only snapshot access for patches (D1). Patches never build or write it.
+    // The one registry is the builder's latest build per alliance.
     public static class BattleCore
     {
         public static bool TryGetSnapshot(int alliance, out BattleSnapshot snapshot)
         {
-            snapshot = BattleCoreTick.Current(alliance);
-            return snapshot != null;
+            return BattleSnapshotBuilder.TryGetCurrent(alliance, out snapshot);
         }
     }
 
@@ -25,8 +25,8 @@ namespace WhiskeyRealism.Tactical.Battle
     // from the CheckGlobalAIStrategy Postfix (vanilla 5866), and the arbiter patch
     // (Postfix on AdjustGroupFormations, 5870) reuses that object in the same
     // UpdateAITasks call (CalculateSideStatsAndUpdateAITasks runs aibattle[0..2]
-    // in one frame, 84864-84869). Each side keeps two pooled instances (current
-    // and previous).
+    // in one frame, 84864-84869). Each side keeps two pooled instances: the
+    // builder's current one and a spare the next build fills.
     //
     // RunArbiter: producers (fixed order) → OrderArbiter.Resolve → outcomes of
     // the last tick's moves and their retries → OrderExecutor.Plan +
@@ -48,8 +48,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static IBattleIntentProducer[] _producers = new IBattleIntentProducer[16];
         private static int _producerCount;
 
-        private static readonly BattleSnapshot[] _current = new BattleSnapshot[2];
-        private static readonly BattleSnapshot[] _previous = new BattleSnapshot[2];
+        private static readonly BattleSnapshot[] _spare = new BattleSnapshot[2];
         private static readonly int[] _builtFrame = { -1, -1 };
         private static readonly int[] _builtBattleKey = { 0, 0 };
         private static long _tickId;
@@ -99,15 +98,17 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattleUnits bunits = ResolveBattleUnits();
                 int battleKey = (UnityEngine.Object)bunits != null ? bunits.GetInstanceID() : 0;
                 int frame = UnityEngine.Time.frameCount;
-                if (_builtFrame[alliance] == frame && _builtBattleKey[alliance] == battleKey) return _current[alliance];
+                BattleSnapshotBuilder.TryGetCurrent(alliance, out BattleSnapshot current);
+                if (_builtFrame[alliance] == frame && _builtBattleKey[alliance] == battleKey && current != null) return current;
 
-                BattleSnapshot reuse = _previous[alliance];
-                _previous[alliance] = _current[alliance];
+                BattleSnapshot reuse = _spare[alliance];
+                if (ReferenceEquals(reuse, current)) reuse = null;
+                _spare[alliance] = current;
                 unchecked { _tickId++; }
-                _current[alliance] = BuildSnapshot(battle, alliance, reuse, _tickId, TacticalDoctrineTime.NowBattleHours);
+                BattleSnapshot built = BattleSnapshotBuilder.Build(battle, alliance, reuse, _tickId, TacticalDoctrineTime.NowBattleHours);
                 _builtFrame[alliance] = frame;
                 _builtBattleKey[alliance] = battleKey;
-                return _current[alliance];
+                return built;
             }
             catch (Exception ex)
             {
@@ -115,19 +116,6 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[BattleCore] EnsureSnapshot threw: " + ex.GetType().Name + " " + ex.Message);
                 return null;
             }
-        }
-
-        internal static BattleSnapshot Current(int alliance)
-        {
-            return alliance >= 0 && alliance < _current.Length ? _current[alliance] : null;
-        }
-
-        // BC1 seam: BattleSnapshot implements IBattleUnitView once BC1 merges
-        // (`public sealed partial class BattleSnapshot : IBattleUnitView { }`); then
-        // this is the identity. Until then it is null and RunArbiter stands down.
-        internal static IBattleUnitView ViewOf(BattleSnapshot snapshot)
-        {
-            return (object)snapshot as IBattleUnitView;
         }
 
         /// <summary>The side's arbiter is gated off this tick: drop its published claims.</summary>
@@ -145,9 +133,8 @@ namespace WhiskeyRealism.Tactical.Battle
             if (arbiter == null || executor == null) return;
 
             BattleSnapshot snapshot = EnsureSnapshot(battle, alliance);
-            IBattleUnitView view = ViewOf(snapshot);
             BattleUnits bunits = ResolveBattleUnits();
-            if (view == null || (UnityEngine.Object)bunits == null)
+            if (snapshot == null || (UnityEngine.Object)bunits == null)
             {
                 arbiter.ClearClaims();
                 OnceLog.Warning("tactical-battle-core:snapshot-unavailable",
@@ -191,7 +178,7 @@ namespace WhiskeyRealism.Tactical.Battle
             using (TelemetryPerf.Scope("tactical.arbiter.execute", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 OrderExecutorRuntime.BindForTick(executor);
-                executor.ObserveOutcomes(view, now, _outcomes, out int outcomeCount);
+                executor.ObserveOutcomes(snapshot, now, _outcomes, out int outcomeCount);
                 for (int o = 0; o < outcomeCount; o++) stats.Tally(_outcomes[o]);
 
                 int retries = executor.TakeRetries(_retries);
@@ -202,31 +189,24 @@ namespace WhiskeyRealism.Tactical.Battle
                         stats.Superseded++;
                         continue;
                     }
-                    ExecutionPlan retryPlan = executor.PlanRetry(view, _retries[r], now);
-                    if (retryPlan.Execute) stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, view, executor, _retries[r], retryPlan, now));
+                    ExecutionPlan retryPlan = executor.PlanRetry(snapshot, _retries[r], now);
+                    if (retryPlan.Execute) stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _retries[r], retryPlan, now));
                     else stats.Skip(retryPlan.Skip);
                 }
 
                 for (int w = 0; w < winners; w++)
                 {
-                    ExecutionPlan plan = executor.Plan(view, _winners[w], now);
+                    ExecutionPlan plan = executor.Plan(snapshot, _winners[w], now);
                     if (!plan.Execute)
                     {
                         stats.Skip(plan.Skip);
                         continue;
                     }
-                    stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, view, executor, _winners[w], plan, now));
+                    stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _winners[w], plan, now));
                 }
             }
 
             stats.EmitIfDue(alliance);
-        }
-
-        // BC1 seam: `return BattleSnapshotBuilder.Build(battle, alliance, reuse ?? new
-        // BattleSnapshot(), tickId, doctrineHours);` once BC1 merges. Null until then.
-        private static BattleSnapshot BuildSnapshot(AIBattle battle, int alliance, BattleSnapshot reuse, long tickId, double doctrineHours)
-        {
-            return null;
         }
 
         private static int Rank(string name)
@@ -271,10 +251,9 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void Reset()
         {
             _producersLogged = false;
-            for (int a = 0; a < _current.Length; a++)
+            for (int a = 0; a < _spare.Length; a++)
             {
-                _current[a] = null;
-                _previous[a] = null;
+                _spare[a] = null;
                 _builtFrame[a] = -1;
                 _builtBattleKey[a] = 0;
                 _stats[a].Clear();

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -9,7 +8,8 @@ namespace WhiskeyRealism.Tactical.Battle
 {
     // The vanilla calls behind OrderExecutor (plan BC4 step 7, steps 8-9
     // bookkeeping). Runtime only; excluded from the test csproj. Every call
-    // re-checks TacticalWriteGuard.CanWrite(Regiment) on the live unit.
+    // re-checks TacticalWriteGuard.CanWrite(Regiment) on the live unit, which
+    // BattleSnapshotBuilder.UnitAt resolves from the snapshot the plan read.
     //
     // Vanilla anchors (decompile, build 14703111):
     //   Move: BattleUnits.SetWaypoint (91232-91640) with showmovementoptions:false
@@ -38,40 +38,23 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleScope.Register("order-executor-runtime", Reset);
         }
 
-        // BC3 seam (plan step 9): TacticalPlayerDispatchRuntime.Emit. Null until
-        // BC3 merges; with no dispatch mapper bound no plan carries a dispatch type.
-        internal interface IDispatchEmitter
-        {
-            bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName);
-        }
-
-        internal static IDispatchEmitter DispatchEmitter;
-
-        // BC3 seam: the guard until TacticalWriteGuard.CanWrite(in UnitRecord, out
-        // SkipReason) exists — Tactical Commander Mode only; PlayerOwned and Feud come
-        // from the snapshot flags inside OrderExecutor.Plan.
-        private sealed class ModeOrderGuard : IOrderGuard
+        // Step 1 over the snapshot flags: Commander Mode Active, not PlayerOwned,
+        // not feuding (OrderExecutor exempts FeudReplay from the Feud refusal).
+        private sealed class SnapshotOrderGuard : IOrderGuard
         {
             public bool CanWrite(in UnitRecord unit, out SkipReason reason)
             {
-                bool allowed = TacticalWriteGuard.ModeAllowsWrites();
-                reason = allowed ? SkipReason.None : SkipReason.ModeNotActive;
-                return allowed;
+                return TacticalWriteGuard.CanWrite(unit, out reason);
             }
         }
 
         private const float FacingToleranceDegrees = OrderExecutor.FacingToleranceDegrees;
 
-        private static readonly IOrderGuard Guard = new ModeOrderGuard();
-        private static readonly IChainResolver Chain = new SelfOnlyChainResolver();
+        private static readonly IOrderGuard Guard = new SnapshotOrderGuard();
         private static readonly Regiment.StopOrder ManualStop =
             new Regiment.StopOrder(_lastwaypointrotation: true, _manualstop: true, _skipmarchcolumnstop: false,
                 _skipadvancefallbackstops: false, _clearregimentpathsbeforerotation: true);
 
-        // instance id (component or GameObject) → Regiment, rebuilt from
-        // BattleUnits.completeunitlist when the roster grows or a lookup misses
-        // (at most once per tick).
-        private static readonly Dictionary<int, Regiment> _regiments = new Dictionary<int, Regiment>(1024);
         // The units one Move reached (grown to the largest chain seen).
         private static IssuedTarget[] _issued = new IssuedTarget[64];
         // Pre-call waypoints of those units and their descendants (grown as needed).
@@ -79,13 +62,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // Per-battle latch for the first-fire line, so the message string is built
         // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
-        private static int _lookupUnitCount = -1;
-        private static int _lookupFrame = -1;
 
         /// <summary>Per-tick seams and settings for an executor.</summary>
         internal static void BindForTick(OrderExecutor executor)
         {
-            executor.Bind(Guard, Chain, null, WaypointValidatorRuntime.Instance);
+            executor.Bind(Guard, WaypointValidatorRuntime.Instance);
             WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
             executor.SetMapSize(sizeX, sizeZ);
             float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null ? Plugin.BrigadeTaskHoldSeconds.Value : 12f;
@@ -94,21 +75,23 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// Issues a planned winner to every chain target and records it. Returns the
-        /// number of targets the vanilla call reached.
+        /// number of targets the vanilla call reached. The snapshot must be the
+        /// alliance's latest build (BattleSnapshotBuilder.UnitAt).
         /// </summary>
         internal static int Execute(
             BattleUnits bunits,
-            IBattleUnitView view,
+            BattleSnapshot view,
             OrderExecutor executor,
             in BattleOrderIntent winner,
             in ExecutionPlan plan,
             double nowHours)
         {
-            if (bunits == null || !plan.Execute) return 0;
+            if (bunits == null || view == null || !plan.Execute) return 0;
             UnitRecord[] own = view.Own;
             int groupIndex = view.IndexOfOwn(winner.GroupId);
             if (groupIndex < 0) return 0;
 
+            bool feudReplay = winner.Source == IntentSource.FeudReplay;
             int executed = 0;
             int issued = 0;
             int waypoints = 0;
@@ -120,8 +103,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 int targetIndex = plan.Targets.TargetIndices[t];
                 if (targetIndex < 0 || targetIndex >= view.OwnCount) continue;
-                if (!TryGetRegiment(own[targetIndex].InstanceId, out Regiment unit)) continue;
-                if (!TacticalWriteGuard.CanWrite(unit)) continue;
+                Regiment unit = BattleSnapshotBuilder.UnitAt(view, targetIndex, enemy: false);
+                if ((UnityEngine.Object)unit == null || !TacticalWriteGuard.CanWrite(unit, feudReplay)) continue;
 
                 float x = plan.X;
                 float z = plan.Z;
@@ -164,18 +147,12 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
             }
 
-            if (OrderExecutor.ShouldDispatch(plan, executed) && DispatchEmitter != null &&
-                TryGetRegiment(winner.GroupId, out Regiment ancestor))
+            // Emit never throws (it logs its own failure once).
+            if (OrderExecutor.ShouldDispatch(plan, executed))
             {
-                try
-                {
-                    DispatchEmitter.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading, winner.Reason);
-                }
-                catch (Exception ex)
-                {
-                    OnceLog.Warning("tactical-battle-core:dispatch-failed",
-                        "[OrderArbiter] W&L dispatch threw: " + ex.GetType().Name + " " + ex.Message);
-                }
+                Regiment ancestor = BattleSnapshotBuilder.UnitAt(view, groupIndex, enemy: false);
+                if ((UnityEngine.Object)ancestor != null)
+                    TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading, winner.Reason);
             }
 
             return executed;
@@ -203,9 +180,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 SkipReason claim = OrderExecutor.InlineClaimCheck(arbiter, intent);
                 if (claim != SkipReason.None) { outcome.Reason = claim; return false; }
 
-                if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot snapshot)) { outcome.Reason = SkipReason.Inactive; return false; }
-                IBattleUnitView view = BattleCoreTick.ViewOf(snapshot);
-                if (view == null) { outcome.Reason = SkipReason.Inactive; return false; }
+                if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot view)) { outcome.Reason = SkipReason.Inactive; return false; }
 
                 double now = TacticalDoctrineTime.NowBattleHours;
                 outcome.AtHours = now;
@@ -411,37 +386,9 @@ namespace WhiskeyRealism.Tactical.Battle
             return moving;
         }
 
-        internal static bool TryGetRegiment(int instanceId, out Regiment unit)
-        {
-            if (instanceId != 0 && _regiments.TryGetValue(instanceId, out unit) && (UnityEngine.Object)unit != null)
-                return true;
-            unit = null;
-            if (instanceId == 0) return false;
-
-            var list = BattleUnits.completeunitlist;
-            int count = list != null ? list.Count : 0;
-            int frame = UnityEngine.Time.frameCount;
-            if (count == _lookupUnitCount && frame == _lookupFrame) return false;
-            _lookupUnitCount = count;
-            _lookupFrame = frame;
-            _regiments.Clear();
-            for (int i = 0; i < count; i++)
-            {
-                Regiment r = list[i];
-                if ((UnityEngine.Object)r == null) continue;
-                _regiments[r.GetInstanceID()] = r;
-                GameObject go = ((Component)r).gameObject;
-                if (go != null) _regiments[go.GetInstanceID()] = r;
-            }
-            return _regiments.TryGetValue(instanceId, out unit) && (UnityEngine.Object)unit != null;
-        }
-
         private static void Reset()
         {
-            _regiments.Clear();
             _firstFireLogged = false;
-            _lookupUnitCount = -1;
-            _lookupFrame = -1;
         }
     }
 }

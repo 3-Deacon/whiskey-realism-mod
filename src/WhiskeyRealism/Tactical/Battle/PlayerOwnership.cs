@@ -176,11 +176,6 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
-        public static bool NeedsChainFanOut(BattleSnapshot s, int groupIndex)
-        {
-            return s != null && NeedsChainFanOut(s.Own, s.OwnCount, groupIndex);
-        }
-
         public static void ApplyChainFlags(BattleSnapshot s, in PlayerOwnershipInput input)
         {
             if (s == null) return;

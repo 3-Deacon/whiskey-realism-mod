@@ -119,7 +119,7 @@ namespace WhiskeyRealism.Tactical.Battle {
   }
   public interface IIntentSink { void Submit(in BattleOrderIntent intent); }
   public interface IBattleIntentProducer { string Name { get; } void Produce(BattleSnapshot snapshot, IIntentSink sink); }
-  public enum OrderOutcomeKind { None, Issued, Pending, Moved, Failed, Retried, GaveUp, Skipped, Deduped, Superseded }
+  public enum OrderOutcomeKind { None = 0, Issued = 1, Moved = 3, Failed = 4, Retried = 5, GaveUp = 6, Skipped = 7, Deduped = 8, Superseded = 9 } /* 2 was Pending, dropped by BC4 (D6); not persisted */
   public enum SkipReason { None, ModeNotActive, PlayerOwned, Feud, NotAiControlled, Routed, OnRetreat, Garrison,
     Inactive, ChainNoTargets, OffMap, Water, FriendlyFootprint, FriendlyFireLine, PointBlank, Cooldown, Duplicate, LowerPriorityThanClaim }
   public struct OrderOutcome { public int GroupId; public OrderChannel Channel; public OrderOutcomeKind Kind; public SkipReason Reason;
@@ -214,7 +214,7 @@ PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the conso
 
 **Merge items (BC1):**
 - **At the BC3 merge:** `BattleSnapshotBuilder.OwnershipFlags` sets `PlayerOwned` from `dlcw_isundercommander` even outside W&L (verify finding 5). Replace it with BC3's `PlayerOwnership.Compute`, as the seam comment in `OwnershipFlags` says, and add `ApplyChainFlags` after `AssembleCommandTree`. Two consumers read `PlayerOwned` and follow the change without edits: `FitFrontAxis`'s group fallback, which replaces the shipped `dlcw_isundercommander` test, and `ToRegimentProbes(excludePlayerOwned)`.
-- **At the BC4 merge:** `ArmyPostureInputsRuntime.ExtendedProbes` (`ArmyPostureInputsRuntime.cs:103-111`) caches the probe list against its own roster signature. Before the first snapshot build, `DirectChildDiscovery.BuildExtendedProbesForAlliance` returns an empty list, which would then be cached until the roster changes. BC4 must build the snapshot (`EnsureSnapshot`) before any reader runs, or the cache must not store an empty probe list taken before the first build.
+- **At the BC4 merge:** `ArmyPostureInputsRuntime.ExtendedProbes` (`ArmyPostureInputsRuntime.cs:103-111`) caches the probe list against its own roster signature. Before the first snapshot build, `DirectChildDiscovery.BuildExtendedProbesForAlliance` returns an empty list, which would then be cached until the roster changes. BC4 must build the snapshot (`EnsureSnapshot`) before any reader runs, or the cache must not store an empty probe list taken before the first build. **Done at the BC4 merge:** both — the coordinator builds each side's snapshot before `RefreshPostureInputs`, and `ExtendedProbes` no longer caches an empty list.
 
 **Known limitations (BC1):**
 - **Stale `allattachedunits` after `MoveUnit` (93091-93150).** `MoveUnit` refreshes the destination (`UpdateAllAttachedUnits`, 93136) and the new parent chain (`UpdateAllParentUnits` 93141 → 90524-90546). On the source side it refreshes only the highest parent up to unittyp 16 (`GetHighestParentUnit(unittomove, 16)`, read before the move at 93103) and, through `includesubordinategroups`, that parent's direct subordinate groups (93137-93140 → 129619-129627). A source group two or more levels below keeps a stale list that still holds the moved unit.
@@ -334,7 +334,7 @@ public static class PlayerOwnership {
   // Per unit: needs dlcw_isundercommander, takenOver, ai_feudstance, permanentlydetached captured by the builder into raw bits.
   public static UnitFlags Compute(in PlayerOwnershipInput input, int alliance, bool dlcwUnderCommander, bool takenOver, int aiFeudStance);
   public static void ApplyChainFlags(BattleSnapshot s, in PlayerOwnershipInput input); // AncestorOfPlayerCommand, PlayerCommandDetached, PlayerCommand
-  public static bool NeedsChainFanOut(BattleSnapshot s, int groupIndex);  // a group order would reach an exposed PlayerOwned descendant
+  public static bool NeedsChainFanOut(UnitRecord[] own, int count, int groupIndex);  // a group order would reach an exposed PlayerOwned descendant
   public static bool IsExposedOwned(UnitFlags descendant, bool detachedNodeBetween);
   public static bool DirectWriteProtected(UnitFlags flags, bool exposedOwnedDescendant, out SkipReason reason); // Regiment-overload decision
 }
@@ -343,11 +343,12 @@ public static class TacticalWriteGuard { // thin reader; same file path
   public static bool IsFeudInstance(AIBattle battle);
   public static bool CanWrite(in UnitRecord unit, out SkipReason reason);   // mode, PlayerOwned, Feud, NotAiControlled
   public static bool CanWrite(Regiment unit);                               // writers that cannot fan out (#61 until BC5a, deployment #60, inline paths): mode, PlayerOwned, Feud, exposed owned descendant
+  public static bool CanWrite(Regiment unit, bool feudReplay);              // the executor's live per-target re-check; feudReplay (IntentSource.FeudReplay) exempts the Feud refusal, never PlayerOwned
   public static bool IsPlayerProtected(Regiment unit);                      // PlayerOwned, Feud, or a group with an exposed owned descendant; an ancestor of a DETACHED player command is not protected as a group, so any loop writing its descendants must call CanWrite per unit
 }
 public struct ChainResolution { public int Count; public int[] TargetIndices; public bool FannedOut; public bool PlayerShareNeedsDispatch; }
 public static class TacticalChainOrderPlanner {
-  public static void ResolveTargets(BattleSnapshot s, int groupIndex, int[] childBuffer, ref ChainResolution result);
+  public static void ResolveTargets(UnitRecord[] own, int count, int groupIndex, int[] childBuffer, ref ChainResolution result); // the executor passes the snapshot's Own/OwnCount
 }
 public static class TacticalDispatchTypeMapper {
   public const int None = -1;
@@ -479,7 +480,7 @@ internal static class OrderExecutorRuntime {
    - Group `SetWaypoint(showmovementoptions:false, useorderdelay:intent has UseOrderDelay && !InContactWithdrawal)`.
    - `PerRegiment` combat behavior goes through `TacticalCombatBehaviorWriter.EnsureBehavior` per regiment.
 8. Outcome next tick (D6): `Moved` also when vanilla took the target — a target unit's or a descendant's last waypoint moved onto it within `DedupeMeters` (SetGroupFormation stamps it, 92067; RegimentSetPath 131254/131258) — because a redirected moving group keeps its moving-unit count and `AddToOrderQueue` skips a same-type in-flight order (91490/91502). A unit (target or descendant) whose waypoint was already on the target before the call is ignored; every inspected unit's pre-call waypoint is recorded. `Failed` → one retry at ±30° (first +30°, then −30° if the +30° target fails validation) → `GaveUp`, reported to the source through `OrderExecutor.LastOutcome(groupId, channel)`.
-9. W&L dispatch: when `PlayerShareNeedsDispatch`, and the plan executed for an ancestor, and `TacticalDispatchTypeMapper.Map(...) != None`, call `TacticalPlayerDispatchRuntime.Emit(ancestor, type, x, z, heading, name)`.
+9. W&L dispatch: when the winner is a Move, `PlayerShareNeedsDispatch`, the plan executed for an ancestor, and `TacticalDispatchTypeMapper.Map(...) != None`, call `TacticalPlayerDispatchRuntime.Emit(ancestor, type, x, z, heading, name)` once per executed plan. Move only, because the dispatch carries the move's target. Its throttle is the Move pipeline itself — dedupe, the 180 battle-s recent-order cooldown, the task hold and the courier cadence (Safety skips only the recent order and the task hold), one winner per group per arbiter tick plus at most one retry of a failed move (`MaxRetries` 1) — with Emit's 110 m record and vanilla's own repeat check (8643) behind it.
 
 **Steps:**
 - [ ] Tests first:
@@ -515,15 +516,16 @@ internal static class OrderExecutorRuntime {
   - Scope `tactical.patch.battle-core-arbiter` (5.0).
   - Gate per D3 → `BattleCoreTick.RunArbiter`.
   - Inner scopes `tactical.arbiter.resolve` (0.5) and `tactical.arbiter.execute` (2.0).
-- [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> pending=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> topSkip=<reason>`. Use OnceLog `tactical-battle-core:arbiter-first-fire` for the first execution.
+- [ ] Telemetry row per side, every 30 s realtime: `[OrderArbiter] alliance=<a> intents=<n> winners=<n> issued=<n> moved=<n> failed=<n> retried=<n> gaveUp=<n> skipped=<n> deduped=<n> superseded=<n> topSkip=<reason>` (`superseded` counts retries whose source no longer holds the claim). The first execution logs OnceLog `tactical-battle-core:arbiter-first-fire`: `[OrderArbiter] first vanilla order issued channel=<channel> source=<source>`.
 - [ ] **Acceptance:** tests pass; the alloc test is green; the arbiter patch compiles with zero producers registered (an empty run is a no-op).
 
-PROVE-MODE: harness. Per-slice proof is `OrderArbiterTests` — arbiter resolve (priority, channels, tie hysteresis, execution order, zero allocation after warm-up), executor outcomes (Moved/Failed/Retried/GaveUp, redirect of a moving group, fan-out set), dedupe and cooldowns, ownership skips, and the waypoint validator. Runtime proof is the BC7 in-game smoke: until BC1 merges `BuildSnapshot` returns null and `ViewOf` has no view, and no producer registers before BC5, so the arbiter path cannot run in the game from this slice.
+PROVE-MODE: harness. Per-slice proof is `OrderArbiterTests` — arbiter resolve (priority, channels, tie hysteresis, execution order, zero allocation after warm-up), executor outcomes (Moved/Failed/Retried/GaveUp, redirect of a moving group, fan-out set), dedupe and cooldowns, ownership skips, and the waypoint validator. Runtime proof is the BC7 in-game smoke: no producer registers before BC5, so the arbiter path cannot run in the game from this slice.
 
 **BC4 merge items:**
-- BC1 merge: `BattleSnapshot : IBattleUnitView` (identity `ViewOf`), `BuildSnapshot` calls `BattleSnapshotBuilder.Build`.
+All bound at the BC4 merge:
+- BC1 merge: `BattleSnapshot : IBattleUnitView` (`ViewOf` deleted), `EnsureSnapshot` calls `BattleSnapshotBuilder.Build`, `BattleCore.TryGetSnapshot` reads `BattleSnapshotBuilder.TryGetCurrent` (one registry), the executor resolves live units with `BattleSnapshotBuilder.UnitAt`. `UnitRecord.QueuedOrders` = own `orderqueue.Count` + units of {self} ∪ `allattachedunits` with `ordertypeactive[0] || [1]` (the in-flight move signal, 124998/124878); a group's `Formation` is `groupformation`.
 - `ArmyPostureInputsRuntime.cs:103-111` (`ExtendedProbes`) must not cache an empty probe list before the first snapshot build: an empty result cached under an unchanged roster signature stays for the battle (from the BC1 verify).
-- BC3 merge: replace `ModeOrderGuard`, `SelfOnlyChainResolver`, the local `ChainResolution` copy and the null dispatch mapper/emitter with BC3's guard, chain planner, mapper and `TacticalPlayerDispatchRuntime.Emit`.
+- BC3 merge: replace `ModeOrderGuard`, `SelfOnlyChainResolver`, the local `ChainResolution` copy and the null dispatch mapper/emitter with BC3's guard, chain planner, mapper and `TacticalPlayerDispatchRuntime.Emit`. The planner and mapper are called directly (no seam interfaces); the guard stays behind `IOrderGuard` because it reads the Commander Mode.
 
 ---
 

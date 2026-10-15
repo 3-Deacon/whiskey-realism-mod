@@ -12,8 +12,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //
     // Every array is pooled and grow-only, so a rebuild into the same instance allocates
     // nothing once the roster fits. Consumers read [0, Count) and treat the instance as
-    // immutable for the tick.
-    public sealed partial class BattleSnapshot
+    // immutable for the tick. The order executor reads it through IBattleUnitView.
+    public sealed partial class BattleSnapshot : IBattleUnitView
     {
         public const int InitialCapacity = 512;
 

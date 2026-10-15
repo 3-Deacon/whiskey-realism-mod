@@ -238,18 +238,20 @@ namespace WhiskeyRealism.Tactical.Battle
             record.Fatigue = reg.fatigue;
             record.Experience = reg.experience;
             record.RegimentPaths = reg.regimentpaths;
-            record.QueuedOrders = reg.orderqueue != null ? reg.orderqueue.Count : 0;
+            record.QueuedOrders = QueuedOrders(reg);
             record.MovementMode = reg.movementmode;
             record.AiStance = reg.ai_stance;
             record.AiStanceOrdered = reg.ai_stanceordered;
-            record.Formation = reg.formation;
+            bool group = reg.unittyp > TacticalUnitType.MaxCombat;
+            // A group's own formation is groupformation (0-4, the value group
+            // formation intents carry); formation is the regiment's.
+            record.Formation = group ? reg.groupformation : reg.formation;
             record.CombatBehaviorOrdered = reg.combatbehaviorordered;
             record.LastWaypointX = reg.lastsetwaypointposition.x;
             record.LastWaypointZ = reg.lastsetwaypointposition.z;
             record.ParentIndex = -1;
             record.FirstEnemyInRangeId = FirstEnemyInRangeId(reg);
 
-            bool group = reg.unittyp > TacticalUnitType.MaxCombat;
             var flags = UnitFlags.None;
             if (go.activeInHierarchy) flags |= UnitFlags.Active;
             if (group || reg.strength > 0) flags |= UnitFlags.Alive; // a group lives while it exists
@@ -267,6 +269,38 @@ namespace WhiskeyRealism.Tactical.Battle
             flags |= TacticalWriteGuard.OwnershipFlags(reg, in ownership);
             record.Flags = flags;
             return record;
+        }
+
+        // Courier orders in flight: the orders this unit is sending (its own
+        // orderqueue; SetWaypoint queues on the sender, the ordered unit's
+        // transform parent, 91461-91504) plus every unit of {self} ∪ allattachedunits
+        // that a move or path order (ordertypeactive[0] / [1]) is still on its way
+        // to. AddToOrderQueue sets ordertypeactive on the receiving units
+        // (124998); processing the order clears it (124878).
+        private static int QueuedOrders(Regiment reg)
+        {
+            int count = reg.orderqueue != null ? reg.orderqueue.Count : 0;
+            bool selfSeen = false;
+            var attached = reg.allattachedunits; // self included (129574)
+            if (attached != null)
+            {
+                for (int i = 0; i < attached.Length; i++)
+                {
+                    var unit = attached[i];
+                    if (unit == null) continue;
+                    if (ReferenceEquals(unit, reg)) selfSeen = true;
+                    if (MoveOrderInFlight(unit)) count++;
+                }
+            }
+            if (!selfSeen && MoveOrderInFlight(reg)) count++;
+            return count;
+        }
+
+        // ordertypeactive can be null or empty before Regiment init (112798-112809).
+        private static bool MoveOrderInFlight(Regiment reg)
+        {
+            var active = reg.ordertypeactive;
+            return active != null && active.Length > 1 && (active[0] || active[1]);
         }
 
         private static int FirstEnemyInRangeId(Regiment reg)

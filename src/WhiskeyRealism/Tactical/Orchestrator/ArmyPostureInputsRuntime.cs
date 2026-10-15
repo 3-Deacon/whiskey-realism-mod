@@ -105,7 +105,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var probes = PlayerCommandProbeFilter.Without(
                 DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId),
                 playerCommand);
-            _probeCache[allianceId] = new CachedProbes(signature, probes);
+            // An empty list means no snapshot was built for the side yet (or the
+            // build degraded); cached, it would stand until the roster changed.
+            if (probes != null && probes.Count > 0) _probeCache[allianceId] = new CachedProbes(signature, probes);
             return probes;
         }
 

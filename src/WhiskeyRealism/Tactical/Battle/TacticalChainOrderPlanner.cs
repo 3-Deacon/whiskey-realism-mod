@@ -33,16 +33,6 @@ namespace WhiskeyRealism.Tactical.Battle
 
     public static class TacticalChainOrderPlanner
     {
-        public static void ResolveTargets(BattleSnapshot s, int groupIndex, int[] childBuffer, ref ChainResolution result)
-        {
-            if (s == null)
-            {
-                Reset(ref result, null, 0);
-                return;
-            }
-            ResolveTargets(s.Own, s.OwnCount, groupIndex, childBuffer, ref result);
-        }
-
         // childBuffer is the breadth-first queue of groups being fanned out; results
         // go to result.TargetIndices. Both are caller-owned and reused, so this does
         // not allocate once TargetIndices exists. Work beyond either array's

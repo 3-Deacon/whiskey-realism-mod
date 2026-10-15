@@ -71,12 +71,21 @@ namespace WhiskeyRealism.Tactical
         // patch writes).
         public static bool CanWrite(Regiment unit)
         {
+            return CanWrite(unit, feudReplay: false);
+        }
+
+        // feudReplay: the battle-core executor's live re-check for #42's replay of
+        // vanilla's own feud move (IntentSource.FeudReplay). The Feud refusal is
+        // exempt for it; PlayerOwned never is.
+        public static bool CanWrite(Regiment unit, bool feudReplay)
+        {
             if (!ModeAllowsWrites()) return false;
             try
             {
                 if ((Object)unit == null) return false;
                 PlayerOwnershipInput input = ReadOwnershipInput();
                 UnitFlags flags = OwnershipFlags(unit, input);
+                if (feudReplay) flags &= ~UnitFlags.Feud;
                 return PlayerOwnership.CanWrite(flags, modeAllowsWrites: true, out _) &&
                     !PlayerOwnership.DirectWriteProtected(flags, HasExposedOwnedDescendant(unit, input), out _);
             }
