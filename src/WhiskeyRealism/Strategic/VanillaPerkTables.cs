@@ -97,7 +97,9 @@ namespace WhiskeyRealism.Strategic
 
         // BattleUnits.CalculateCommanderFame (83930-83933) boosts a corps/army commander's
         // fame when CheckForGroupPerk(reg, 14) finds Embedded Reporters, but that search starts
-        // at the parent (83866-83884) and the level is read from reg. The tooltip ("allowing
+        // at the parent (83866-83884; the unit itself is checked only at the top of its
+        // hierarchy, where GrabNextParentUnit returns it, 86886-86907) and the level is read
+        // from reg. The tooltip ("allowing
         // newspaper reporters to follow the unit") makes the unit itself the first holder, and
         // the factor is that holder's level. fixScope off = vanilla.
         internal static PerkHolder FameReportersHolder(bool selfHas, bool ancestorHas, bool fixScope)
@@ -133,6 +135,7 @@ namespace WhiskeyRealism.Strategic
         // Corps / Foot Cavalry never apply. The plan replaces those two reads with the group's
         // factors; it rewrites only when there is something to correct.
         internal static CampaignWoundedPerkPlan PlanCampaignWounded(
+            bool fixIds,
             int unitType,
             int groupUnitType,
             bool unitHasIdEight,
@@ -140,13 +143,68 @@ namespace WhiskeyRealism.Strategic
             float ambulanceFactor,
             float footCavalryFactor)
         {
-            if (TableFor(unitType) != PerkTable.Battle) return CampaignWoundedPerkPlan.Vanilla;
+            if (!fixIds || TableFor(unitType) != PerkTable.Battle) return CampaignWoundedPerkPlan.Vanilla;
 
             bool groupApplies = GroupPerksApply(groupUnitType);
             float ambulance = groupApplies ? ambulanceFactor : 1f;
             float footCavalry = groupApplies ? footCavalryFactor : 1f;
             bool rewrite = unitHasIdEight || unitHasIdSix || ambulance != 1f || footCavalry != 1f;
             return rewrite ? new CampaignWoundedPerkPlan(true, ambulance, footCavalry) : CampaignWoundedPerkPlan.Vanilla;
+        }
+
+        // Runtime decisions, one per patch or hook. Each takes its flag, so with the flag off
+        // the answer is vanilla's (keep the id / grant / count / hide nothing).
+
+        // Transpiler remaps (Autocalc 1/2/17, UpdateMorale 9).
+        internal static int RemapId(bool fixIds, int vanillaId, int fixedId)
+        {
+            return fixIds ? fixedId : vanillaId;
+        }
+
+        // FogPerkSightPatch: hide id 8 from a viewer whose 8 is not Expert Scouts.
+        internal static bool HideExpertScoutsSight(bool fixIds, int unitType, bool hasPerkEight)
+        {
+            return fixIds && hasPerkEight && !ExpertScoutsSightApplies(unitType, hasPerkEight);
+        }
+
+        // FogPerkConcealmentPatch: drop regref for a non-battle unit holding 3 or 8.
+        internal static bool DropBattleConcealment(bool fixIds, int unitType, bool holdsThreeOrEight)
+        {
+            return fixIds && holdsThreeOrEight && !UsesBattleTable(unitType);
+        }
+
+        // RegimentMove marching XP hook: grant unless the ids fix is on and the unit is no
+        // campaign group.
+        internal static bool GrantMarchPerkExp(bool fixIds, int unitType)
+        {
+            return !fixIds || MarchPerkExpApplies(unitType);
+        }
+
+        // RegimentMove Zouave running-sound hook.
+        internal static bool BattlePerkCounts(bool fixIds, int unitType)
+        {
+            return !fixIds || UsesBattleTable(unitType);
+        }
+
+        // SeaRaidersBlockadePatch: hide a non-fleet unit's perks when it holds 6.
+        internal static bool HideSeaRaiders(bool fixIds, int unitType, bool holdsSix)
+        {
+            return fixIds && holdsSix && !SeaRaidersApplies(unitType);
+        }
+
+        // BattleHqPerkPatch swaps (UpdateFatigue 2, GetCoverValueFromID 6/13/18): hide a
+        // non-battle unit's perks when it holds one of the battle ids read there.
+        internal static bool HideBattleIdsOnHq(bool fixIds, int unitType, bool holdsReadId)
+        {
+            return fixIds && holdsReadId && !UsesBattleTable(unitType);
+        }
+
+        // BattleHqPerkPatch postfixes (isabletorun 2/11, hasengineers 0): reset a flag that only a
+        // battle id read on a non-battle unit set, in battle (vanilla's reads need
+        // !calledfromcampaign), when vanilla's value without the perk is false.
+        internal static bool ResetHqPerkFlag(bool fixIds, bool calledFromCampaign, int unitType, bool flagSet, bool holdsReadId, bool valueWithoutPerk)
+        {
+            return fixIds && !calledFromCampaign && flagSet && holdsReadId && !valueWithoutPerk && !UsesBattleTable(unitType);
         }
 
         private static float FactorAt(float[] factors, int level)

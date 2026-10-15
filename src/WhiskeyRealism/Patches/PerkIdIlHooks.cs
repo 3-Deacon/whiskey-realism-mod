@@ -29,6 +29,19 @@ namespace WhiskeyRealism.Patches
             });
         }
 
+        // A perks swap over Regiment.perks for the Prefix/Finalizer patches.
+        internal static PerkListSwap<Regiment, Regiment.Perk> NewPerkSwap()
+        {
+            return new PerkListSwap<Regiment, Regiment.Perk>(unit => unit.perks, (unit, perks) => unit.perks = perks);
+        }
+
+        // Logs a swap's restore failure once under the patch's key.
+        internal static void LogRestore(string failure, string key)
+        {
+            if (failure != null)
+                OnceLog.Warning(key, "[Patch:PerkIds] perks restore failed: " + failure);
+        }
+
         internal static bool FixIds()
         {
             try { return Plugin.FixPerkIdMismatches != null && Plugin.FixPerkIdMismatches.Value; }
@@ -44,20 +57,20 @@ namespace WhiskeyRealism.Patches
         // Autocalc.FightUnit 21080-21082: the Sharpshooter bonus belongs to battle id 1.
         public static int AutocalcSharpshooters(int vanillaId)
         {
-            return FixIds() ? VanillaPerkTables.BattleSharpshooters : vanillaId;
+            return VanillaPerkTables.RemapId(FixIds(), vanillaId, VanillaPerkTables.BattleSharpshooters);
         }
 
         // Autocalc.FightUnit 21247 and Autocalc.UpdateFatigue 21368-21370: the Zouave fatigue
         // effects belong to battle id 2 (Regiment.UpdateMorale 128659, UpdateFatigue 132665).
         public static int AutocalcZouave(int vanillaId)
         {
-            return FixIds() ? VanillaPerkTables.BattleZouave : vanillaId;
+            return VanillaPerkTables.RemapId(FixIds(), vanillaId, VanillaPerkTables.BattleZouave);
         }
 
         // Autocalc.FightUnit 21155: fightingstrengthembarkedriverexp is River Expedition's.
         public static int AutocalcRiverExpedition(int vanillaId)
         {
-            return FixIds() ? VanillaPerkTables.CampaignRiverExpedition : vanillaId;
+            return VanillaPerkTables.RemapId(FixIds(), vanillaId, VanillaPerkTables.CampaignRiverExpedition);
         }
 
         // Regiment.UpdateMorale 128617: `HasPerk(8) && GetPerkLevel(9) >= 2` pairs Expert
@@ -65,7 +78,7 @@ namespace WhiskeyRealism.Patches
         // and the melee context name Cold Steel (9).
         public static int MoraleColdSteel(int vanillaId)
         {
-            return FixIds() ? VanillaPerkTables.BattleColdSteel : vanillaId;
+            return VanillaPerkTables.RemapId(FixIds(), vanillaId, VanillaPerkTables.BattleColdSteel);
         }
 
         // RegimentMove 133518: Foot Cavalry forced-march speed.
@@ -95,7 +108,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.perk-ids.regiment-move.march-exp", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 bool skip = false;
-                try { skip = FixIds() && !VanillaPerkTables.MarchPerkExpApplies(unit.unittyp); }
+                try { skip = !VanillaPerkTables.GrantMarchPerkExp(FixIds(), unit.unittyp); }
                 catch { }
                 if (skip)
                 {
@@ -117,7 +130,7 @@ namespace WhiskeyRealism.Patches
             {
                 if (!unit.HasPerk(perk)) return false;
                 bool applies = true;
-                try { applies = !FixIds() || VanillaPerkTables.UsesBattleTable(unit.unittyp); }
+                try { applies = VanillaPerkTables.BattlePerkCounts(FixIds(), unit.unittyp); }
                 catch { }
                 if (!applies && !_zouaveSoundLogged)
                 {
@@ -142,7 +155,7 @@ namespace WhiskeyRealism.Patches
                     case PerkHolder.Self:
                         _fameLevelHolder = unit;
                         if ((UnityEngine.Object)ancestor == null)
-                            OnceLog.Info("perk-ids:fame-self", "[Patch:PerkIds] CalculateCommanderFame: a unit's own Embedded Reporters now count");
+                            OnceLog.Info("perk-ids:fame-self", "[Patch:PerkIds] CalculateCommanderFame: a unit below the top now counts its own Embedded Reporters");
                         return unit;
                     case PerkHolder.Ancestor:
                         _fameLevelHolder = ancestor;

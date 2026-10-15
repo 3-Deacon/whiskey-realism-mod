@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
@@ -25,16 +24,13 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(Regiment), nameof(Regiment.UpdateCampaignUnitStats))]
     internal static class CampaignGroupPerkPatch
     {
-        private static readonly List<Regiment.Perk> _scratchPerks = new List<Regiment.Perk>(2);
-        private static readonly Regiment.Perk _ambulance = new Regiment.Perk { perk = VanillaPerkTables.CampaignAmbulanceCorps, perklevel = 0 };
-        private static readonly Regiment.Perk _footCavalry = new Regiment.Perk { perk = VanillaPerkTables.CampaignFootCavalry, perklevel = 0 };
-        private static readonly float[] _ambulanceFactors = new float[3];
-        private static readonly float[] _footCavalryFactors = new float[3];
-
-        private static Regiment _rewritten;
-        private static List<Regiment.Perk> _savedPerks;
-        private static float[] _savedAmbulance;
-        private static float[] _savedFootCavalry;
+        // Perks list and factor arrays for one call (PerkSwaps.CampaignWoundedSwap).
+        private static readonly CampaignWoundedSwap<Regiment, Regiment.Perk> Swap = new CampaignWoundedSwap<Regiment, Regiment.Perk>(
+            unit => unit.perks, (unit, perks) => unit.perks = perks,
+            () => GamePrefs.woundedtokilledambulancecorps, factors => GamePrefs.woundedtokilledambulancecorps = factors,
+            () => GamePrefs.attritionfootcavalry, factors => GamePrefs.attritionfootcavalry = factors,
+            new Regiment.Perk { perk = VanillaPerkTables.CampaignAmbulanceCorps, perklevel = 0 },
+            new Regiment.Perk { perk = VanillaPerkTables.CampaignFootCavalry, perklevel = 0 });
 
         // One group serves all its regiments in the same frame; its parent lookup walks
         // transform.parent (HasPerkParent 132748), so the factors are computed once per frame.
@@ -60,12 +56,13 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.perk-ids.group-perks.prefix");
                 try
                 {
-                    Restore();
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:group-perks:restore");
                     if ((UnityEngine.Object)__instance == null || (UnityEngine.Object)groupunit == null || !Enabled()) return;
                     if (VanillaPerkTables.TableFor(__instance.unittyp) != PerkTable.Battle || __instance.perks == null) return;
 
                     GroupFactors(groupunit, out float ambulance, out float footCavalry);
                     var plan = VanillaPerkTables.PlanCampaignWounded(
+                        PerkIdIlHooks.FixIds(),
                         __instance.unittyp,
                         groupunit.unittyp,
                         __instance.HasPerk(VanillaPerkTables.BattleExpertScouts),
@@ -74,30 +71,13 @@ namespace WhiskeyRealism.Patches
                         footCavalry);
                     if (!plan.Rewrite) return;
 
-                    _scratchPerks.Clear();
-                    if (plan.AmbulanceFactor != 1f && GamePrefs.woundedtokilledambulancecorps != null)
-                    {
-                        Fill(_ambulanceFactors, plan.AmbulanceFactor);
-                        _savedAmbulance = GamePrefs.woundedtokilledambulancecorps;
-                        GamePrefs.woundedtokilledambulancecorps = _ambulanceFactors;
-                        _scratchPerks.Add(_ambulance);
-                    }
-                    if (plan.FootCavalryFactor != 1f && GamePrefs.attritionfootcavalry != null)
-                    {
-                        Fill(_footCavalryFactors, plan.FootCavalryFactor);
-                        _savedFootCavalry = GamePrefs.attritionfootcavalry;
-                        GamePrefs.attritionfootcavalry = _footCavalryFactors;
-                        _scratchPerks.Add(_footCavalry);
-                    }
-                    _savedPerks = __instance.perks;
-                    _rewritten = __instance;
-                    __instance.perks = _scratchPerks;
+                    Swap.Apply(__instance, plan);
 
                     OnceLog.Info("perk-ids:group-perks", "[Patch:PerkIds] UpdateCampaignUnitStats: regiment wounded mortality / forced-march sickness read from its group's Ambulance Corps / Foot Cavalry");
                 }
                 catch (Exception ex)
                 {
-                    Restore();
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:group-perks:restore");
                     OnceLog.Warning("perk-ids:group-perks:prefix", "[Patch:PerkIds] group perk prefix failed, vanilla left as is: " + ex.Message);
                 }
             }
@@ -109,7 +89,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.perk-ids.group-perks.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.perk-ids.group-perks.finalizer");
-                Restore();
+                if (Swap.Active) PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:group-perks:restore");
             }
         }
 
@@ -138,32 +118,6 @@ namespace WhiskeyRealism.Patches
             _cacheFrame = frame;
             _cacheAmbulance = ambulance;
             _cacheFootCavalry = footCavalry;
-        }
-
-        private static void Fill(float[] factors, float value)
-        {
-            for (int i = 0; i < factors.Length; i++) factors[i] = value;
-        }
-
-        private static void Restore()
-        {
-            try
-            {
-                if ((object)_rewritten != null && ReferenceEquals(_rewritten.perks, _scratchPerks))
-                    _rewritten.perks = _savedPerks;
-                if (_savedAmbulance != null && ReferenceEquals(GamePrefs.woundedtokilledambulancecorps, _ambulanceFactors))
-                    GamePrefs.woundedtokilledambulancecorps = _savedAmbulance;
-                if (_savedFootCavalry != null && ReferenceEquals(GamePrefs.attritionfootcavalry, _footCavalryFactors))
-                    GamePrefs.attritionfootcavalry = _savedFootCavalry;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("perk-ids:group-perks:restore", "[Patch:PerkIds] group perk restore failed: " + ex.Message);
-            }
-            _rewritten = null;
-            _savedPerks = null;
-            _savedAmbulance = null;
-            _savedFootCavalry = null;
         }
 
         private static bool Enabled()

@@ -29,8 +29,8 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if ((UnityEngine.Object)regref == null || !Enabled()) return;
-                    if (VanillaPerkTables.UsesBattleTable(regref.unittyp)) return;
-                    if (!regref.HasPerk(VanillaPerkTables.BattleExpertSkirmishers) && !regref.HasPerk(VanillaPerkTables.BattleExpertScouts)) return;
+                    bool holds = regref.HasPerk(VanillaPerkTables.BattleExpertSkirmishers) || regref.HasPerk(VanillaPerkTables.BattleExpertScouts);
+                    if (!VanillaPerkTables.DropBattleConcealment(PerkIdIlHooks.FixIds(), regref.unittyp, holds)) return;
 
                     regref = null;
                     OnceLog.Info("perk-ids:fog-concealment", "[Patch:PerkIds] UnitIsHidden: battle concealment withheld from a non-battle perk id 3/8 (Bureau of Military Information / Ambulance Corps / Balloon Barge / Blockade Busters)");

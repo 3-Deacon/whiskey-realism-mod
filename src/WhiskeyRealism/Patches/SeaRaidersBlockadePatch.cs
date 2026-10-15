@@ -16,7 +16,7 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(Regiment), "UpdateBlockades")]
     internal static class SeaRaidersBlockadePatch
     {
-        private static readonly PerkListSwap Swap = new PerkListSwap("perk-ids:sea-raiders:restore");
+        private static readonly PerkListSwap<Regiment, Regiment.Perk> Swap = PerkIdIlHooks.NewPerkSwap();
 
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance)
@@ -26,15 +26,15 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.perk-ids.sea-raiders.prefix");
                 try
                 {
-                    Swap.Restore();
-                    if (__instance.perks == null || VanillaPerkTables.SeaRaidersApplies(__instance.unittyp) || !PerkIdIlHooks.FixIds()) return;
-                    if (!__instance.HasPerk(VanillaPerkTables.FleetSeaRaiders)) return;
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:sea-raiders:restore");
+                    if (__instance.perks == null) return;
+                    if (!VanillaPerkTables.HideSeaRaiders(PerkIdIlHooks.FixIds(), __instance.unittyp, __instance.HasPerk(VanillaPerkTables.FleetSeaRaiders))) return;
                     Swap.Hide(__instance);
                     OnceLog.Info("perk-ids:sea-raiders", "[Patch:PerkIds] UpdateBlockades: Sea Raiders trade-node raiding withheld from a land unit's perk 6 (Foot Cavalry / Ace of Spade)");
                 }
                 catch (Exception ex)
                 {
-                    Swap.Restore();
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:sea-raiders:restore");
                     OnceLog.Warning("perk-ids:sea-raiders:prefix", "[Patch:PerkIds] UpdateBlockades prefix failed, vanilla left as is: " + ex.Message);
                 }
             }
@@ -46,7 +46,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.perk-ids.sea-raiders.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.perk-ids.sea-raiders.finalizer");
-                if (Swap.Active) Swap.Restore();
+                if (Swap.Active) PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:sea-raiders:restore");
             }
         }
     }

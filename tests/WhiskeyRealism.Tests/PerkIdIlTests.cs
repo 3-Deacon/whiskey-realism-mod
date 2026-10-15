@@ -27,6 +27,7 @@ internal static class PerkIdIlTests
             ("RegimentMoveIlHooksFootCavalryXpAndZouaveSound", RegimentMoveIlHooksFootCavalryXpAndZouaveSound),
             ("CommanderFameIlHooksReportersHolderAndLevel", CommanderFameIlHooksReportersHolderAndLevel),
             ("IlRewritesLeaveVanillaOnPatternMiss", IlRewritesLeaveVanillaOnPatternMiss),
+            ("IlRewritesRefuseADuplicatedSite", IlRewritesRefuseADuplicatedSite),
         });
     }
 
@@ -179,6 +180,41 @@ internal static class PerkIdIlTests
             c => PerkIdIlRewrites.RewriteRegimentMove(c, M(nameof(HasA)), M(nameof(HasB)), M(nameof(Exp)), M(nameof(HasC))), "RegimentMove");
         AssertMissLeavesVanilla(Il(typeof(BattleUnits), nameof(BattleUnits.CalculateCommanderFame)), PerkIdIlRewrites.GetPerkLevel, 14,
             c => PerkIdIlRewrites.RewriteCommanderFame(c, M(nameof(Find)), M(nameof(Level))), "CalculateCommanderFame");
+    }
+
+    // A game update that adds a second matching site (anchor included) must also leave vanilla:
+    // the rewrite cannot tell which one is meant.
+    private static void IlRewritesRefuseADuplicatedSite()
+    {
+        AssertDuplicateRefused(Il(typeof(Autocalc), "FightUnit"), PerkIdIlRewrites.HasPerk, 2, 0,
+            c => PerkIdIlRewrites.RewriteFightUnit(c, M(nameof(RemapA)), M(nameof(RemapB)), M(nameof(RemapC))), "FightUnit Sharpshooter");
+        AssertDuplicateRefused(Il(typeof(Autocalc), "FightUnit"), PerkIdIlRewrites.HasPerk, 10, 3,
+            c => PerkIdIlRewrites.RewriteFightUnit(c, M(nameof(RemapA)), M(nameof(RemapB)), M(nameof(RemapC))), "FightUnit embarked anchor", last: true);
+        AssertDuplicateRefused(Il(typeof(Autocalc), "UpdateFatigue"), PerkIdIlRewrites.HasPerk, 1, 0,
+            c => PerkIdIlRewrites.RewriteAutocalcFatigue(c, M(nameof(RemapB))), "Autocalc.UpdateFatigue");
+        AssertDuplicateRefused(Il(typeof(Regiment), "UpdateMorale"), PerkIdIlRewrites.HasPerk, 8, 4,
+            c => PerkIdIlRewrites.RewriteUpdateMorale(c, M(nameof(RemapA))), "UpdateMorale Cold Steel anchor");
+        AssertDuplicateRefused(Il(typeof(Regiment), nameof(Regiment.RegimentMove)), PerkIdIlRewrites.HasPerk, 6, 0,
+            c => PerkIdIlRewrites.RewriteRegimentMove(c, M(nameof(HasA)), M(nameof(HasB)), M(nameof(Exp)), M(nameof(HasC))), "RegimentMove Foot Cavalry");
+        AssertDuplicateRefused(Il(typeof(Regiment), nameof(Regiment.RegimentMove)), PerkIdIlRewrites.IncreasePerkExp, 5, 0,
+            c => PerkIdIlRewrites.RewriteRegimentMove(c, M(nameof(HasA)), M(nameof(HasB)), M(nameof(Exp)), M(nameof(HasC))), "RegimentMove march XP");
+        AssertDuplicateRefused(Il(typeof(BattleUnits), nameof(BattleUnits.CalculateCommanderFame)), PerkIdIlRewrites.CheckForGroupPerk, 14, 0,
+            c => PerkIdIlRewrites.RewriteCommanderFame(c, M(nameof(Find)), M(nameof(Level))), "CalculateCommanderFame");
+    }
+
+    // Copies one site's `ldc; call` pair plus `extra` following instructions (its anchor) right
+    // after itself, then checks the rewrite refuses and changes nothing.
+    private static void AssertDuplicateRefused(List<CodeInstruction> code, MethodInfo target, int id, int extra, Func<List<CodeInstruction>, bool> rewrite, string label, bool last = false)
+    {
+        var sites = PerkIdIlRewrites.Sites(code, target, id);
+        AssertTrue(sites.Count > 0, label + ": site exists");
+        int call = last ? sites[sites.Count - 1] : sites[0];
+        int from = call - 1, to = call + extra;
+        var copy = code.GetRange(from, to - from + 1).Select(i => new CodeInstruction(i.opcode, i.operand)).ToList();
+        code.InsertRange(to + 1, copy);
+        var before = code.Select(i => i.ToString()).ToList();
+        AssertFalse(rewrite(code), label + ": rewrite refuses a duplicated site");
+        AssertEqual(string.Join("\n", before), string.Join("\n", code.Select(i => i.ToString())), label + ": IL unchanged");
     }
 
     // Breaks one expected site (its constant becomes 99) and checks nothing else changed.

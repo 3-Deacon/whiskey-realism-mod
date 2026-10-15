@@ -22,11 +22,6 @@ namespace WhiskeyRealism.Patches
     // never touched. Rollback: Campaign / Fix Perk Id Mismatches.
     internal static class BattleHqPerkPatch
     {
-        private static bool NonBattleTable(Regiment unit)
-        {
-            return (UnityEngine.Object)unit != null && !VanillaPerkTables.UsesBattleTable(unit.unittyp) && PerkIdIlHooks.FixIds();
-        }
-
         [HarmonyPatch(typeof(Regiment), "CheckAbilityToRun")]
         internal static class AbilityToRun
         {
@@ -38,12 +33,11 @@ namespace WhiskeyRealism.Patches
                     PatchFirstFire.Mark("tactical.patch.perk-ids.hq.ability-to-run");
                     try
                     {
-                        if (__instance.calledfromcampaign || !__instance.isabletorun || !NonBattleTable(__instance)) return;
-                        if (!__instance.HasPerk(VanillaPerkTables.BattleZouave) && !__instance.HasPerk(VanillaPerkTables.BattleStormers)) return;
                         bool[] ableToRun = GamePrefs.abletorun;
                         int type = __instance.unittyp;
-                        bool vanilla = ableToRun != null && type >= 0 && type < ableToRun.Length && ableToRun[type];
-                        if (vanilla) return;
+                        bool withoutPerk = ableToRun != null && type >= 0 && type < ableToRun.Length && ableToRun[type];
+                        bool holds = __instance.HasPerk(VanillaPerkTables.BattleZouave) || __instance.HasPerk(VanillaPerkTables.BattleStormers);
+                        if (!VanillaPerkTables.ResetHqPerkFlag(PerkIdIlHooks.FixIds(), __instance.calledfromcampaign, type, __instance.isabletorun, holds, withoutPerk)) return;
                         __instance.isabletorun = false;
                         OnceLog.Info("perk-ids:hq-run", "[Patch:PerkIds] CheckAbilityToRun: running withheld from a battle HQ's campaign perk 2/11 (Balloon Corps / Land Torpedoes)");
                     }
@@ -86,7 +80,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(Regiment), "UpdateFatigue")]
         internal static class ZouaveFatigue
         {
-            private static readonly PerkListSwap Swap = new PerkListSwap("perk-ids:hq-fatigue:restore");
+            private static readonly PerkListSwap<Regiment, Regiment.Perk> Swap = PerkIdIlHooks.NewPerkSwap();
 
             [HarmonyPrefix]
             internal static void Prefix(Regiment __instance)
@@ -96,15 +90,15 @@ namespace WhiskeyRealism.Patches
                     PatchFirstFire.Mark("tactical.patch.perk-ids.hq.fatigue.prefix");
                     try
                     {
-                        Swap.Restore();
-                        if (__instance.perks == null || !NonBattleTable(__instance)) return;
-                        if (!__instance.HasPerk(VanillaPerkTables.BattleZouave)) return;
+                        PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-fatigue:restore");
+                        if (__instance.perks == null) return;
+                        if (!VanillaPerkTables.HideBattleIdsOnHq(PerkIdIlHooks.FixIds(), __instance.unittyp, __instance.HasPerk(VanillaPerkTables.BattleZouave))) return;
                         Swap.Hide(__instance);
                         OnceLog.Info("perk-ids:hq-fatigue", "[Patch:PerkIds] UpdateFatigue: Zouave fatigue factor withheld from a campaign perk 2 (Balloon Corps)");
                     }
                     catch (Exception ex)
                     {
-                        Swap.Restore();
+                        PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-fatigue:restore");
                         OnceLog.Warning("perk-ids:hq-fatigue:prefix", "[Patch:PerkIds] UpdateFatigue prefix failed, vanilla left as is: " + ex.Message);
                     }
                 }
@@ -116,7 +110,7 @@ namespace WhiskeyRealism.Patches
                 using (TelemetryPerf.Scope("tactical.patch.perk-ids.hq.fatigue.finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("tactical.patch.perk-ids.hq.fatigue.finalizer");
-                    if (Swap.Active) Swap.Restore();
+                    if (Swap.Active) PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-fatigue:restore");
                 }
             }
         }
@@ -124,7 +118,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(Regiment), "GetCoverValueFromID")]
         internal static class CoverFactors
         {
-            private static readonly PerkListSwap Swap = new PerkListSwap("perk-ids:hq-cover:restore");
+            private static readonly PerkListSwap<Regiment, Regiment.Perk> Swap = PerkIdIlHooks.NewPerkSwap();
 
             [HarmonyPrefix]
             internal static void Prefix(Regiment __instance)
@@ -134,18 +128,18 @@ namespace WhiskeyRealism.Patches
                     PatchFirstFire.Mark("tactical.patch.perk-ids.hq.cover.prefix");
                     try
                     {
-                        Swap.Restore();
-                        if (__instance.perks == null || !NonBattleTable(__instance)) return;
-                        if (!__instance.HasPerk(VanillaPerkTables.BattleLightningBrigade)
-                            && !__instance.HasPerk(VanillaPerkTables.BattleSapperGunners)
-                            && !__instance.HasPerk(VanillaPerkTables.BattleAceOfSpade))
-                            return;
+                        PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-cover:restore");
+                        if (__instance.perks == null) return;
+                        bool holds = __instance.HasPerk(VanillaPerkTables.BattleLightningBrigade)
+                            || __instance.HasPerk(VanillaPerkTables.BattleSapperGunners)
+                            || __instance.HasPerk(VanillaPerkTables.BattleAceOfSpade);
+                        if (!VanillaPerkTables.HideBattleIdsOnHq(PerkIdIlHooks.FixIds(), __instance.unittyp, holds)) return;
                         Swap.Hide(__instance);
                         OnceLog.Info("perk-ids:hq-cover", "[Patch:PerkIds] GetCoverValueFromID: battle cover perks withheld from a campaign perk 6/13 (Foot Cavalry / Bushwhackers)");
                     }
                     catch (Exception ex)
                     {
-                        Swap.Restore();
+                        PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-cover:restore");
                         OnceLog.Warning("perk-ids:hq-cover:prefix", "[Patch:PerkIds] GetCoverValueFromID prefix failed, vanilla left as is: " + ex.Message);
                     }
                 }
@@ -157,7 +151,7 @@ namespace WhiskeyRealism.Patches
                 using (TelemetryPerf.Scope("tactical.patch.perk-ids.hq.cover.finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
                     PatchFirstFire.Mark("tactical.patch.perk-ids.hq.cover.finalizer");
-                    if (Swap.Active) Swap.Restore();
+                    if (Swap.Active) PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:hq-cover:restore");
                 }
             }
         }
@@ -168,8 +162,9 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (unit.calledfromcampaign || !unit.hasengineers || !NonBattleTable(unit)) return;
-                if (!unit.HasPerk(VanillaPerkTables.BattleEngineering)) return;
+                if ((UnityEngine.Object)unit == null) return;
+                bool holds = unit.HasPerk(VanillaPerkTables.BattleEngineering);
+                if (!VanillaPerkTables.ResetHqPerkFlag(PerkIdIlHooks.FixIds(), unit.calledfromcampaign, unit.unittyp, unit.hasengineers, holds, valueWithoutPerk: false)) return;
                 unit.hasengineers = false;
                 OnceLog.Info("perk-ids:hq-engineers", "[Patch:PerkIds] hasengineers withheld from a battle HQ's campaign perk 0 (Siege Train)");
             }

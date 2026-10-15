@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
@@ -22,11 +21,12 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(FogOfWar), "UpdateViewRange")]
     internal static class FogPerkSightPatch
     {
-        private static readonly PerkListSwap Swap = new PerkListSwap("perk-ids:fog-sight:restore");
+        private static readonly PerkListSwap<Regiment, Regiment.Perk> Swap = PerkIdIlHooks.NewPerkSwap();
 
+        // Compiled once (CompiledFieldGetter): no FieldInfo.GetValue per call.
         private static bool _resolved;
-        private static FieldInfo _unitsField;
-        private static AccessTools.FieldRef<object, Regiment> _unitReg;
+        private static Func<object, IList> _units;
+        private static Func<object, Regiment> _unitReg;
 
         [HarmonyPrefix]
         internal static void Prefix(FogOfWar __instance)
@@ -36,9 +36,10 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.perk-ids.fog-sight.prefix");
                 try
                 {
-                    Swap.Restore();
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:fog-sight:restore");
                     if (!Enabled() || !GameVars.usefow || !Resolve()) return;
-                    if (!(_unitsField.GetValue(__instance) is IList units)) return;
+                    IList units = _units(__instance);
+                    if (units == null) return;
 
                     for (int i = 0; i < units.Count; i++)
                     {
@@ -48,9 +49,8 @@ namespace WhiskeyRealism.Patches
                         if ((UnityEngine.Object)reg == null || reg.perks == null) continue;
 
                         bool hasEight = reg.HasPerk(VanillaPerkTables.BattleExpertScouts);
-                        if (!hasEight || VanillaPerkTables.ExpertScoutsSightApplies(reg.unittyp, hasEight)) continue;
-
-                        Swap.Hide(reg);
+                        if (VanillaPerkTables.HideExpertScoutsSight(PerkIdIlHooks.FixIds(), reg.unittyp, hasEight))
+                            Swap.Hide(reg);
                     }
 
                     if (Swap.Active)
@@ -58,7 +58,7 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    Swap.Restore();
+                    PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:fog-sight:restore");
                     OnceLog.Warning("perk-ids:fog-sight:prefix", "[Patch:PerkIds] fog sight prefix failed, vanilla left as is: " + ex.Message);
                 }
             }
@@ -70,7 +70,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.perk-ids.fog-sight.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.perk-ids.fog-sight.finalizer");
-                Swap.Restore();
+                if (Swap.Active) PerkIdIlHooks.LogRestore(Swap.Restore(), "perk-ids:fog-sight:restore");
             }
         }
 
@@ -78,22 +78,21 @@ namespace WhiskeyRealism.Patches
         // with a public Regiment reg. A rename leaves vanilla running unpatched.
         private static bool Resolve()
         {
-            if (_resolved) return _unitsField != null && _unitReg != null;
+            if (_resolved) return _units != null && _unitReg != null;
             _resolved = true;
             try
             {
-                _unitsField = AccessTools.Field(typeof(FogOfWar), "units");
                 Type fowUnit = AccessTools.Inner(typeof(FogOfWar), "FOWUnit");
-                if (_unitsField != null && fowUnit != null && AccessTools.Field(fowUnit, "reg") != null)
-                    _unitReg = AccessTools.FieldRefAccess<Regiment>(fowUnit, "reg");
+                _units = CompiledFieldGetter.Build<IList>(AccessTools.Field(typeof(FogOfWar), "units"));
+                _unitReg = fowUnit == null ? null : CompiledFieldGetter.Build<Regiment>(AccessTools.Field(fowUnit, "reg"));
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("perk-ids:fog-sight:reflect", "[Patch:PerkIds] FogOfWar.units / FOWUnit.reg lookup failed: " + ex.Message);
-                _unitsField = null;
+                _units = null;
                 _unitReg = null;
             }
-            if (_unitsField == null || _unitReg == null)
+            if (_units == null || _unitReg == null)
             {
                 OnceLog.Warning("perk-ids:fog-sight:missing", "[Patch:PerkIds] FogOfWar.units / FOWUnit.reg not found; Expert Scouts sight left as vanilla");
                 return false;

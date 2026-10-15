@@ -733,7 +733,7 @@ namespace WhiskeyRealism
                 "Campaign", "Fix Perk Effect Scope", true,
                 "Default ON. Applies two perks only where their tooltips say: Foot Cavalry's forced-march speed only while the unit is on a " +
                 "forced march (vanilla applies it to every campaign move), and Embedded Reporters' fame bonus for the unit that has the perk at " +
-                "that unit's level (vanilla skips the unit itself and reads the level from the wrong unit). Set false for rollback to vanilla.");
+                "that unit's level (vanilla ignores a corps' own perk when the corps sits under an army, and reads the level from the corps even when its army holds the perk). Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");

@@ -82,7 +82,7 @@ internal static class PerkIdFixTests
     {
         float factor = VanillaPerkTables.GroupPerkFactor(AmbulanceMortality, ownHas: true, ownLevel: 2, parentHas: false, parentLevel: 0);
         AssertEqual(0.5f, factor, "Ambulance Corps III: mortality of wounded -50%");
-        var plan = VanillaPerkTables.PlanCampaignWounded(0, 15, false, false, factor, 1f);
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 0, 15, false, false, factor, 1f);
         AssertTrue(plan.Rewrite, "regiment of an Ambulance Corps corps is rewritten");
         AssertEqual(0.5f, plan.AmbulanceFactor, "ambulance factor");
         AssertEqual(1f, plan.FootCavalryFactor, "foot cavalry factor");
@@ -97,7 +97,7 @@ internal static class PerkIdFixTests
 
     private static void RegimentExpertScoutsNoLongerCutsWoundedMortality()
     {
-        var plan = VanillaPerkTables.PlanCampaignWounded(1, 15, unitHasIdEight: true, unitHasIdSix: false,
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 1, 15, unitHasIdEight: true, unitHasIdSix: false,
             ambulanceFactor: 1f, footCavalryFactor: 1f);
         AssertTrue(plan.Rewrite, "battle Expert Scouts id 8 must be hidden");
         AssertEqual(1f, plan.AmbulanceFactor, "no Ambulance Corps on the group");
@@ -107,14 +107,14 @@ internal static class PerkIdFixTests
     {
         float factor = VanillaPerkTables.GroupPerkFactor(FootCavalryAttrition, true, 1, false, 0);
         AssertEqual(0.8f, factor, "Foot Cavalry II: attrition during forced marches -20%");
-        var plan = VanillaPerkTables.PlanCampaignWounded(0, 16, false, false, 1f, factor);
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 0, 16, false, false, 1f, factor);
         AssertTrue(plan.Rewrite, "rewritten");
         AssertEqual(0.8f, plan.FootCavalryFactor, "foot cavalry factor");
     }
 
     private static void RegimentAceOfSpadeNoLongerCutsForcedMarchSickness()
     {
-        var plan = VanillaPerkTables.PlanCampaignWounded(0, 14, unitHasIdEight: false, unitHasIdSix: true,
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 0, 14, unitHasIdEight: false, unitHasIdSix: true,
             ambulanceFactor: 1f, footCavalryFactor: 1f);
         AssertTrue(plan.Rewrite, "battle Ace of Spade id 6 must be hidden");
         AssertEqual(1f, plan.FootCavalryFactor, "no Foot Cavalry on the group");
@@ -122,7 +122,7 @@ internal static class PerkIdFixTests
 
     private static void CampaignWoundedPlanLeavesUnperkedRegimentAlone()
     {
-        var plan = VanillaPerkTables.PlanCampaignWounded(0, 15, false, false, 1f, 1f);
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 0, 15, false, false, 1f, 1f);
         AssertFalse(plan.Rewrite, "nothing to correct: vanilla runs untouched");
     }
 
@@ -130,8 +130,8 @@ internal static class PerkIdFixTests
     // reads (115068-115071); only battle-table units reach them.
     private static void CampaignWoundedPlanIgnoresNonBattleTableUnits()
     {
-        AssertFalse(VanillaPerkTables.PlanCampaignWounded(17, 17, true, true, 0.5f, 0.7f).Rewrite, "fleet");
-        AssertFalse(VanillaPerkTables.PlanCampaignWounded(15, 15, true, true, 0.5f, 0.7f).Rewrite, "corps");
+        AssertFalse(VanillaPerkTables.PlanCampaignWounded(true, 17, 17, true, true, 0.5f, 0.7f).Rewrite, "fleet");
+        AssertFalse(VanillaPerkTables.PlanCampaignWounded(true, 15, 15, true, true, 0.5f, 0.7f).Rewrite, "corps");
     }
 
     // A group that is not on the campaign table has no Ambulance Corps / Foot Cavalry:
@@ -141,7 +141,7 @@ internal static class PerkIdFixTests
         AssertFalse(VanillaPerkTables.GroupPerksApply(17), "fleet group");
         AssertFalse(VanillaPerkTables.GroupPerksApply(13), "brigade group");
         AssertTrue(VanillaPerkTables.GroupPerksApply(15), "corps group");
-        var plan = VanillaPerkTables.PlanCampaignWounded(0, 13, true, false, 0.5f, 1f);
+        var plan = VanillaPerkTables.PlanCampaignWounded(true, 0, 13, true, false, 0.5f, 1f);
         AssertTrue(plan.Rewrite, "regiment id 8 still hidden");
         AssertEqual(1f, plan.AmbulanceFactor, "non-campaign group contributes nothing");
     }
