@@ -261,25 +261,33 @@ namespace WhiskeyRealism.Patches
             Observe(__instance, TacticalObservedEvent.Macro, null, null);
             Observe(__instance, TacticalObservedEvent.Odds, null, null);
 
-            // Orchestrator lifecycle: count units in battle, detect start/end transitions,
-            // then drive TacticalBattleCoordinator. Anchored here because
-            // CheckGlobalAIStrategy is the macro-strategy entry — fires once per AI side
-            // per tick, giving us a consistent per-tick observation cadence.
+            // Orchestrator lifecycle: observe the battle identity, detect start/restart
+            // transitions, then drive TacticalBattleCoordinator. Anchored here because
+            // CheckGlobalAIStrategy runs once per AIBattle per vanilla side-stat cycle
+            // (UpdateAITasks 5857 from CalculateSideStatsAndUpdateAITasks 84864). The end
+            // of a battle is observed by BattleUnitsOnDestroyPostfix below; the identity /
+            // clock checks here catch a new battle or reload when that end was missed.
             try
             {
                 if (Plugin.EnableTacticalBattleOrchestrator.Value)
                 {
-                    int unitsInBattle = CountUnitsInBattleAcrossSides();
-                    var ev = _lifecycleDetector.Observe(unitsInBattle);
-                    switch (ev)
+                    var decision = _lifecycleDetector.Observe(BuildLifecycleObservation(__instance));
+                    switch (decision.Transition)
                     {
-                        case BattleLifecycleEvent.BattleStart:
+                        case BattleLifecycleTransition.Start:
                             ResetOperationsTelemetry();
                             TacticalBattleCoordinator.OnBattleStart(__instance);
                             break;
-                        case BattleLifecycleEvent.BattleEnd:
+                        case BattleLifecycleTransition.End:
                             TacticalBattleCoordinator.OnBattleEnd();
                             ResetOperationsTelemetry();
+                            break;
+                        case BattleLifecycleTransition.Restart:
+                            OnceLog.Info("orch-lifecycle-restart",
+                                "[TacticalOrchestrator] battle restart detected reason=" + decision.Reason);
+                            TacticalBattleCoordinator.OnBattleEnd();
+                            ResetOperationsTelemetry();
+                            TacticalBattleCoordinator.OnBattleStart(__instance);
                             break;
                     }
                     // First Tick is intentionally colocated with OnBattleStart to give the coordinator
@@ -305,31 +313,71 @@ namespace WhiskeyRealism.Patches
             _operationsSummaryEmittedAt.Clear();
         }
 
+        // Battle scene teardown. Vanilla quits a battle by rebuilding the scene
+        // (BattleController quit flow 24095-24113: bo_rebuildscene /
+        // ExitCampaignBattleAndRebuildCampaign), which destroys BattleUnits; its
+        // OnDestroy (79207; nulls completeunitlist at 79219) and AI ticks stop for good. The
+        // detector ignores the campaign-map BattleUnits instance (InitCampaignBattleUnits
+        // 79044), which is destroyed when a campaign battle loads.
+        [HarmonyPatch(typeof(BattleUnits), "OnDestroy")]
+        [HarmonyPostfix]
+        internal static void BattleUnitsOnDestroyPostfix(BattleUnits __instance)
+        {
+            using (TelemetryPerf.Scope("tactical.patch.observer.battle-units-destroy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    int id = __instance != null ? __instance.GetInstanceID() : 0;
+                    var decision = _lifecycleDetector.NotifyBattleUnitsDestroyed(id);
+                    if (decision.Transition != BattleLifecycleTransition.End) return;
+                    TacticalBattleCoordinator.OnBattleEnd();
+                    ResetOperationsTelemetry();
+                }
+                catch (Exception e)
+                {
+                    OnceLog.Warning("orch-lifecycle:destroy", "[TacticalOrchestrator] battle teardown on BattleUnits.OnDestroy failed: "
+                        + e.GetType().Name + " " + e.Message);
+                }
+            }
+        }
+
         /// <summary>
-        /// Returns a positive value when a battle scene is loaded, 0 otherwise. Used by
-        /// the lifecycle detector as the "battle is running" signal.
-        ///
-        /// Vanilla nullifies `BattleUnits.completeunitlist` on battle end (decompile line
-        /// 79219) and treats `completeunitlist == null` as "no battle" in many call sites
-        /// (lines 11306, 36228, 36316, 65947, 105437, 210259, 210294). The presence of a
-        /// non-empty list is therefore the canonical signal that a tactical battle scene
-        /// is currently loaded — irrespective of `Regiment.inbattle` (which tracks
-        /// campaign-side engagement state and does not necessarily flip true on
-        /// battle-instance Regiments). Returns 0 on any exception so a vanilla rename
-        /// fails gracefully.
+        /// Reads the battle identity for the lifecycle detector. completeunitlist is null
+        /// once BattleUnits.OnDestroy (79207-79219) ran; GameVars.currenttimefromstart is the
+        /// battle clock (SetTimeVariables 93545); battlepasseddays (78860) advances at the
+        /// night rollover (86384). Degrades to an empty observation on any exception.
         /// </summary>
-        private static int CountUnitsInBattleAcrossSides()
+        private static BattleLifecycleObservation BuildLifecycleObservation(AIBattle battle)
         {
             try
             {
                 var all = BattleUnits.completeunitlist;
-                if (all == null || all.Count == 0) return 0;
-                return all.Count;
+                int units = all != null ? all.Count : 0;
+                var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
+                int bunitsId = bunits != null ? bunits.GetInstanceID() : 0;
+                int days = bunits != null ? bunits.battlepasseddays : 0;
+                int sceneHash = SceneIdentityHash();
+                return new BattleLifecycleObservation(bunitsId, days, sceneHash, GameVars.currenttimefromstart, units);
             }
             catch (Exception e)
             {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] CountUnitsInBattle: " + e.GetType().Name + " " + e.Message);
-                return 0;
+                OnceLog.Warning("orch-lifecycle:observe", "[TacticalOrchestrator] lifecycle observation failed: "
+                    + e.GetType().Name + " " + e.Message);
+                return new BattleLifecycleObservation(0, 0, 0, 0f, 0);
+            }
+        }
+
+        // SceneManagement.currentoperation is deliberately excluded: vanilla flips 8 -> 3
+        // during battle init (BattleController frame loop ~24000).
+        private static int SceneIdentityHash()
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + (GamePrefs.leveltoload?.GetHashCode() ?? 0);
+                hash = hash * 31 + (GamePrefs.subleveltoload?.GetHashCode() ?? 0);
+                hash = hash * 31 + (SceneManagement.currentcampaignscenario?.GetHashCode() ?? 0);
+                return hash;
             }
         }
 

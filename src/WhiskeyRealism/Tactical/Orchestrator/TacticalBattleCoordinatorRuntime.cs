@@ -60,6 +60,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static float _lastTickTimeSeconds;
         private static int _battleSequence;
         private static int _playerAllianceId = -1;
+        private static int _activeBattleUnitsId;
         private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
         private static readonly HashSet<int> _directChildDeferLogged = new HashSet<int>();
         private static readonly Dictionary<string, string> _commandTreeTelemetrySignatures = new Dictionary<string, string>();
@@ -178,8 +179,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static void OnBattleStart(AIBattle battle)
         {
-            if (active) return;
+            // A start for a different BattleUnits instance while still active means the
+            // previous battle's teardown was missed (scene rebuilt without an observed
+            // BattleUnits.OnDestroy 79207): tear it down first so no orchestrator, cache
+            // or clock state leaks into the new battle.
+            int battleUnitsId = GetBattleKeyFromBunits(battle);
+            if (active)
+            {
+                if (battleUnitsId == _activeBattleUnitsId) return;
+                OnBattleEnd();
+            }
             if (!Plugin.EnableTacticalBattleOrchestrator.Value) return;
+            _activeBattleUnitsId = battleUnitsId;
 
             try
             {
@@ -360,6 +371,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 side0 = null;
                 side1 = null;
                 _playerAllianceId = -1;
+                _activeBattleUnitsId = 0;
                 active = false;
                 OnceLog.Info("orch-teardown", "[TacticalOrchestrator] teardown");
             }
@@ -2289,6 +2301,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             side0 = null;
             side1 = null;
             _playerAllianceId = -1;
+            _activeBattleUnitsId = 0;
             active = false;
         }
 
