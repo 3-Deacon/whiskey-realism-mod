@@ -28,6 +28,11 @@ internal static class TelemetryInfraFixTests
         RouterSeriousLineMatchesWholeTokens();
         RouterBlankDecisionSignatureIsFlaggedNotDropped();
         RouterEmitsDecisionWithBlankSignature();
+        PerfSubThresholdScopesDoNotAllocate();
+        PerfSubThresholdScopesAggregateIntoOneRowPerScope();
+        PerfSlowRowsAreBoundedPerWindow();
+        PerfWarningsOffFoldsSlowCallsIntoAggregate();
+        PerfAggregateWindowFlushesAutomatically();
     }
 
     private static void LogPass(string message)
@@ -358,5 +363,185 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("router emits decision with blank signature");
+    }
+
+    // ---------------------------------------------------------------- P-telemetry-rows
+
+    private static string[] PerformanceLines(string dir)
+    {
+        string text = ReadIfExists(Path.Combine(dir, "performance.jsonl"));
+        return text.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static List<Newtonsoft.Json.Linq.JObject> RowsForScope(string dir, string scope, string eventName)
+    {
+        var rows = new List<Newtonsoft.Json.Linq.JObject>();
+        foreach (string line in PerformanceLines(dir))
+        {
+            var row = Newtonsoft.Json.Linq.JObject.Parse(line);
+            if ((string)row["event"] == eventName && (string)row["fields"]["scope"] == scope)
+                rows.Add(row);
+        }
+        return rows;
+    }
+
+    private static void PerfSubThresholdScopesDoNotAllocate()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            StartRuntime(gameRoot);
+            for (int i = 0; i < 4; i++)
+            {
+                using (TelemetryPerf.Scope("p-test.alloc.outer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                using (TelemetryPerf.Scope("p-test.alloc.inner", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 10000; i++)
+            {
+                using (TelemetryPerf.Scope("p-test.alloc.outer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                using (TelemetryPerf.Scope("p-test.alloc.inner", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            TestHarness.AssertTrue(allocated < 1024, "20k sub-threshold scopes allocated " + allocated.ToString(CultureInfo.InvariantCulture) + " bytes");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf sub-threshold scopes do not allocate");
+    }
+
+    private static void PerfSubThresholdScopesAggregateIntoOneRowPerScope()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            for (int i = 0; i < 500; i++)
+            {
+                using (TelemetryPerf.Scope("p-test.agg", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            }
+            TelemetryRouter.Shutdown("p-test");
+
+            TestHarness.AssertEqual(0, RowsForScope(dir, "p-test.agg", "Performance").Count, "no per-call rows for sub-threshold scopes");
+            var aggregates = RowsForScope(dir, "p-test.agg", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, aggregates.Count, "one aggregate row per scope per window");
+            TestHarness.AssertEqual(500L, (long)aggregates[0]["fields"]["count"], "aggregate count");
+            TestHarness.AssertEqual(0L, (long)aggregates[0]["fields"]["slowCount"], "aggregate slow count");
+            TestHarness.AssertTrue(aggregates[0]["fields"]["totalMs"] != null && aggregates[0]["fields"]["maxMs"] != null, "aggregate timing fields");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf sub-threshold scopes aggregate into one row per scope");
+    }
+
+    private static void PerfSlowRowsAreBoundedPerWindow()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            for (int i = 0; i < 100; i++)
+            {
+                using (TelemetryPerf.Scope("p-test.slow", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.0))
+                {
+                }
+            }
+            TelemetryRouter.Shutdown("p-test");
+
+            int slowRows = RowsForScope(dir, "p-test.slow", "Performance").Count;
+            TestHarness.AssertTrue(slowRows >= 1 && slowRows <= TelemetryPerf.MaxSlowRowsPerScopeWindow, "slow rows bounded: " + slowRows.ToString(CultureInfo.InvariantCulture));
+            var aggregates = RowsForScope(dir, "p-test.slow", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, aggregates.Count, "aggregate row");
+            TestHarness.AssertEqual(100L, (long)aggregates[0]["fields"]["slowCount"], "aggregate counts every slow call");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf slow rows are bounded per window");
+    }
+
+    private static void PerfWarningsOffFoldsSlowCallsIntoAggregate()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot, performanceWarnings: false);
+            string dir = SessionDir(gameRoot, runtime);
+            for (int i = 0; i < 5; i++)
+            {
+                using (TelemetryPerf.Scope("p-test.nowarn", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.0))
+                {
+                }
+            }
+            TelemetryRouter.Shutdown("p-test");
+
+            TestHarness.AssertEqual(0, RowsForScope(dir, "p-test.nowarn", "Performance").Count, "no individual slow rows when warnings off");
+            var aggregates = RowsForScope(dir, "p-test.nowarn", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, aggregates.Count, "aggregate row");
+            TestHarness.AssertEqual(5L, (long)aggregates[0]["fields"]["slowCount"], "slow calls counted in aggregate");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf warnings off folds slow calls into aggregate");
+    }
+
+    private static void PerfAggregateWindowFlushesAutomatically()
+    {
+        string gameRoot = TempDir();
+        long savedWindow = TelemetryPerf.AggregateWindowMs;
+        try
+        {
+            TelemetryPerf.AggregateWindowMs = 20;
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            for (int round = 0; round < 3; round++)
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    using (TelemetryPerf.Scope("p-test.window", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                    {
+                    }
+                }
+                System.Threading.Thread.Sleep(30);
+            }
+            using (TelemetryPerf.Scope("p-test.window", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+            {
+            }
+            TelemetryRouter.Shutdown("p-test");
+
+            var aggregates = RowsForScope(dir, "p-test.window", "PerformanceAggregate");
+            TestHarness.AssertTrue(aggregates.Count >= 3, "window elapsed flushes aggregates without explicit flush: " + aggregates.Count.ToString(CultureInfo.InvariantCulture));
+            long total = 0;
+            foreach (var row in aggregates)
+                total += (long)row["fields"]["count"];
+            TestHarness.AssertEqual(31L, total, "every call accounted across windows");
+        }
+        finally
+        {
+            TelemetryPerf.AggregateWindowMs = savedWindow;
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf aggregate window flushes automatically");
     }
 }

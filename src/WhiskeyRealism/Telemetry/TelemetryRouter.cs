@@ -203,6 +203,9 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
+                // Write the calling thread's final partial aggregate window before stopping.
+                TelemetryPerf.FlushAggregates();
+
                 TelemetryRuntime runtime;
                 lock (Gate)
                 {
