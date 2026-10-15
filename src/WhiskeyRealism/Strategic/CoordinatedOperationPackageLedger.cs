@@ -34,6 +34,26 @@ namespace WhiskeyRealism.Strategic
             };
         }
 
+        /// <summary>
+        /// Vanilla's commander-initiative factor on offensive gathering (BC8;
+        /// AICampaign.CheckOffensiveMovements 14250 / 14281, applied to the dominance test
+        /// 14256 / 14298): the required attack and reinforce ratios × (1 + (1 − initiative) ×
+        /// commanderinfluenceinitiativeforoperations), campaignprefs 0.25 ("additional factor
+        /// needed for offensive operations if commander initiative is 0"). An unreadable
+        /// initiative reads as 0 (most cautious); influence 0 leaves the options unchanged.
+        /// Returns this instance.
+        /// </summary>
+        public CoordinatedOperationOptions ScaledByCommanderInitiative(float initiative01, float influence)
+        {
+            float initiative = float.IsNaN(initiative01) || float.IsInfinity(initiative01) ? 0f
+                : initiative01 < 0f ? 0f : initiative01 > 1f ? 1f : initiative01;
+            float weight = float.IsNaN(influence) || float.IsInfinity(influence) || influence < 0f ? 0f : influence;
+            float factor = 1f + (1f - initiative) * weight;
+            RequiredAttackRatio *= factor;
+            RequiredReinforceRatio *= factor;
+            return this;
+        }
+
         public static CoordinatedOperationOptions FromDirector(float desiredStrength, DirectorPosture posture)
         {
             var options = StableDefaults(desiredStrength);

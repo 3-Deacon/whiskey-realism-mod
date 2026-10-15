@@ -620,7 +620,9 @@ namespace WhiskeyRealism
                 "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
                 "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
                 "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
-                "Off: headcount ratios and sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter.");
+                "Campaign: a coordinated offensive package (#38, which replaces vanilla's offensive gathering) needs its attack and reinforce " +
+                "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
+                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
