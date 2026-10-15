@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Operations;
 
@@ -1240,13 +1241,28 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds");
     }
 
-    // The group threat ArmyEvidenceBuilder.MeanFlankThreatByGroup computes for these states.
-    private static float MeanOutflankedWeight(int[] states, int count)
+    // ArmyEvidenceBuilder.MeanFlankThreatByGroup over one group (own index 0) whose
+    // regiments carry the given vanilla outflanked states as perceived flank pressure
+    // (bit 1 left, 2 right, 4 rear: ArmyEvidenceBuilder.OutflankedState).
+    private static float GroupFlankThreat(int[] states)
     {
-        if (count <= 0) return 0f;
-        float sum = 0f;
-        for (int i = 0; i < count; i++) sum += ArmyEvidenceBuilder.VanillaOutflankedWeight(states[i]);
-        return sum / count;
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 10.0);
+        s.AddOwn(new UnitRecord { InstanceId = 100, UnitTyp = 16, Flags = UnitFlags.Active | UnitFlags.IsGroup });
+        for (int i = 0; i < states.Length; i++)
+            s.AddOwn(new UnitRecord { InstanceId = 1 + i, UnitTyp = 0, Strength = 500, Flags = UnitFlags.Active | UnitFlags.Alive });
+        for (int i = 1; i < s.OwnCount; i++) s.Own[i].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        for (int i = 0; i < states.Length; i++)
+        {
+            if ((states[i] & 1) != 0) s.SetFlankPressure(i + 1, 0, 1f);
+            if ((states[i] & 2) != 0) s.SetFlankPressure(i + 1, 1, 1f);
+            if ((states[i] & 4) != 0) s.SetFlankPressure(i + 1, 2, 1f);
+        }
+        var mean = new float[s.OwnCount];
+        var count = new int[s.OwnCount];
+        ArmyEvidenceBuilder.MeanFlankThreatByGroup(s, mean, count);
+        return mean[0];
     }
 
     private static void FlankThreatIsMeanOverSubordinates()
@@ -1260,21 +1276,21 @@ internal static class TacticalEvidenceFixTests
 
         var wingCorps = new int[12];
         wingCorps[0] = 1; wingCorps[7] = 2;
-        float twoOutflanked = MeanOutflankedWeight(wingCorps, wingCorps.Length);
+        float twoOutflanked = GroupFlankThreat(wingCorps);
         TestHarness.AssertTrue(Near(twoOutflanked, 2f / 12f), "two of twelve regiments: " + twoOutflanked);
         TestHarness.AssertEqual(2, TacticalFrontAxis.FlankExposureBucket(true, true, twoOutflanked),
             "two outflanked regiments in an overlapped wing corps do not trigger refuse");
 
         var turned = new int[12];
         for (int i = 0; i < turned.Length; i++) turned[i] = 1;
-        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, MeanOutflankedWeight(turned, turned.Length)),
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, GroupFlankThreat(turned)),
             "a whole wing outflanked refuses");
 
         var rear = new int[12];
         for (int i = 0; i < 6; i++) rear[i] = 4;
-        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, MeanOutflankedWeight(rear, rear.Length)),
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, GroupFlankThreat(rear)),
             "half the wing taken in the rear refuses");
-        TestHarness.AssertEqual(0f, MeanOutflankedWeight(new int[0], 0), "no regiments, no threat");
+        TestHarness.AssertEqual(0f, GroupFlankThreat(new int[0]), "no regiments, no threat");
     }
 
     private static void RecordedReplanRateLimits()

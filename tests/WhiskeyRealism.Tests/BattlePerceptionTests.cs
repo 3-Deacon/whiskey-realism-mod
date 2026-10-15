@@ -895,12 +895,16 @@ internal static class BattlePerceptionTests
         {
             OwnUnit(1, 0f, -500f), OwnUnit(2, 0f, -500f), OwnUnit(3, 0f, -500f),
             OwnUnit(4, 0f, -500f, flags: UnitFlags.Active | UnitFlags.InMelee),
+            OwnUnit(5, 0f, -500f), OwnUnit(6, 0f, -500f),
         };
         own[0].FirstEnemyInRangeId = 21; // visible
         own[1].FirstEnemyInRangeId = 22; // remembered: not contact
         own[2].FirstEnemyInRangeId = 0;
+        own[4].FirstEnemyInRangeId = 21; // visible
+        own[5].FirstEnemyInRangeId = 23; // in the range list but hidden and never seen: not contact
         var s = ConsumerSnapshot(10.0, own, Seen(21, 0f, -300f, 500f), Seen(22, 0f, -320f, 400f, confidence: 0.5f, remembered: true));
-        AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(s), "two contacts (visible range-list enemy, melee) -> bucket 1");
+        AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(s),
+            "three contacts (two visible range-list enemies, melee) -> bucket 1; counting unseen range-list enemies would make five (bucket 2)");
         AssertEqual(0, ArmyEvidenceBuilder.ContactBucket(ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) })), "no contact");
     }
 

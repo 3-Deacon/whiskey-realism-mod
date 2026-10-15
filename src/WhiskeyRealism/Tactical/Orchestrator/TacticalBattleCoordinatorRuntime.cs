@@ -420,12 +420,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Commander Mode, because fog-honest readers (evidence, TacticalFogOfWarContact,
         /// observer telemetry) run in every mode and the snapshot is a per-frame cache with no
         /// writes. Called from the CheckGlobalAIStrategy postfix (vanilla 5866) and again
-        /// first in Tick; the per-frame cache makes the second call free. Never throws.
+        /// first in Tick; the per-frame cache makes the second call free. The plugin's master
+        /// "Enabled" switch still stops it, as it stops Plugin.Update's per-frame work (a
+        /// switch off at load applies no patch at all). Never throws.
         /// </summary>
         public static void EnsureBattleCoreSnapshots(AIBattle battle)
         {
             try
             {
+                var plugin = Plugin.Instance;
+                if (plugin == null || plugin.Enabled == null || !plugin.Enabled.Value) return;
                 if ((UnityEngine.Object)battle == null) return;
                 bool aiVsAi = SafeAiVsAi();
                 int playerAllianceId = aiVsAi ? -1 : SafePlayerAllianceId();
@@ -443,7 +447,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // The side's battle snapshot built at the top of this Tick (EnsureBattleCoreSnapshot);
+        // The side's battle snapshot built at the top of this Tick (EnsureBattleCoreSnapshots);
         // null only when the build failed, which every reader degrades on.
         private static Battle.BattleSnapshot SideSnapshot(TacticalBattleOrchestrator side)
         {
