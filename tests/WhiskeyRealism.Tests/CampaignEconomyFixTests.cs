@@ -47,6 +47,10 @@ internal static class CampaignEconomyFixTests
         FortSiteCacheReusesDecisionsWithinJobCycle();
         FortSiteCacheInvalidatesOnNewCycleOrWorldChange();
         FortGovernorLetsHighThreatExceedSoftCap();
+
+        PerkCandidateWindowMatchesVanillaRandomRange();
+        PerkNearTieIsWeightedRandom();
+        PerkClearWinnerIgnoresRoll();
     }
 
     private static void LogPass(string message)
@@ -584,5 +588,39 @@ internal static class CampaignEconomyFixTests
         });
         TestHarness.AssertTrue(d.Allow, "threatened local area above soft cap 2, below hard cap 4");
         LogPass("c2b fort governor lets high threat exceed soft cap");
+    }
+
+    // ---------------------------------------------------------------- C-Perk
+    // Vanilla AICampaign.CheckPerkSelection (decompile 11871-11891) calls
+    // ChoosePerk(Random.Range(0, Length/3 - 1)); the int overload's upper bound is
+    // exclusive, so the AI never picks the last perk (LevelsPerPerk = 3, 208648).
+
+    private static void PerkCandidateWindowMatchesVanillaRandomRange()
+    {
+        TestHarness.AssertEqual(17, PerkSelectionScorer.VanillaCandidateLimit(18), "18 army perks => ids 0..16");
+        TestHarness.AssertEqual(10, PerkSelectionScorer.VanillaCandidateLimit(11), "11 fleet perks => ids 0..9");
+        TestHarness.AssertEqual(1, PerkSelectionScorer.VanillaCandidateLimit(1), "Random.Range(0,0) returns 0");
+        TestHarness.AssertEqual(0, PerkSelectionScorer.VanillaCandidateLimit(0), "no perks");
+        LogPass("c2b perk candidate window matches vanilla random range");
+    }
+
+    private static void PerkNearTieIsWeightedRandom()
+    {
+        // General role: Siege Train 2.2 vs Sappers and Miners 2.1 => near tie.
+        var perks = new[] { 0, 10 };
+        int low = PerkSelectionScorer.SelectArmyPerk(0, Theater.West, ArmyPerkRole.General, default(PersonalityVector), perks, roll: 0.05f);
+        int high = PerkSelectionScorer.SelectArmyPerk(0, Theater.West, ArmyPerkRole.General, default(PersonalityVector), perks, roll: 0.95f);
+        TestHarness.AssertEqual(0, low, "low roll => best");
+        TestHarness.AssertEqual(10, high, "high roll => near-equal runner-up");
+        LogPass("c2b perk near tie is weighted random");
+    }
+
+    private static void PerkClearWinnerIgnoresRoll()
+    {
+        int selected = PerkSelectionScorer.SelectArmyPerk(0, Theater.East, ArmyPerkRole.Siege, default(PersonalityVector), new[] { 1, 5, 10, 12 }, roll: 0.99f);
+        TestHarness.AssertEqual(10, selected, "siege role still takes sappers");
+        int fleet = PerkSelectionScorer.SelectFleetPerk(1, FleetPerkRole.Raid, new[] { 1, 5, 6, 8, 10 }, roll: 0.99f);
+        TestHarness.AssertEqual(6, fleet, "raid fleet still takes sea raiders");
+        LogPass("c2b perk clear winner ignores roll");
     }
 }
