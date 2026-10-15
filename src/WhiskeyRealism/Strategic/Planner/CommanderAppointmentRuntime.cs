@@ -73,41 +73,49 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             using (TelemetryPerf.Scope("campaign.planner.appoint", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return;
-                if (alliance < 0 || alliance >= Protections.Length || s == null || s.Alliance != alliance) return;
-                if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetSectors(alliance, out var sectors)) return;
-                if (plan.DaySerial != s.DaySerial || LastReviewDay[alliance] != s.DaySerial) return;
-
-                var succession = StrategicCoordinator.Instance != null ? StrategicCoordinator.Instance.Succession : null;
-                SuccessionPrior prior = (int id, string role, out int eventId) =>
+                try
                 {
-                    eventId = -1;
-                    return succession != null ? succession.PriorFor(alliance, NameOf(s, id), role, out eventId) : 0f;
-                };
-                var protection = Protections[alliance];
-                if (!CommanderAppointmentPlanner.TryPlan(plan, s, sectors, prior, protection, i => VanillaAllows(alliance, i), out var intent))
-                    return;
+                    if (!Enabled()) return;
+                    if (alliance < 0 || alliance >= Protections.Length || s == null || s.Alliance != alliance) return;
+                    if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetSectors(alliance, out var sectors)) return;
+                    if (plan.DaySerial != s.DaySerial || LastReviewDay[alliance] != s.DaySerial) return;
 
-                string unitName;
-                bool done = intent.TargetIsArmyGroup
-                    ? AppointToArmyGroup(intent, out unitName)
-                    : AppointToUnit(intent, out unitName);
-                if (!done)
-                {
-                    OnceLog.Warning("campaign-planner:appointment-failed",
-                        "[CampaignPlanner] an appointment vanilla allowed did not take effect; nothing recorded");
-                    return;
+                    var succession = StrategicCoordinator.Instance != null ? StrategicCoordinator.Instance.Succession : null;
+                    SuccessionPrior prior = (int id, string role, out int eventId) =>
+                    {
+                        eventId = -1;
+                        return succession != null ? succession.PriorFor(alliance, NameOf(s, id), role, out eventId) : 0f;
+                    };
+                    var protection = Protections[alliance];
+                    if (!CommanderAppointmentPlanner.TryPlan(plan, s, sectors, prior, protection, i => VanillaAllows(alliance, i), out var intent))
+                        return;
+
+                    string unitName;
+                    bool done = intent.TargetIsArmyGroup
+                        ? AppointToArmyGroup(intent, out unitName)
+                        : AppointToUnit(intent, out unitName);
+                    if (!done)
+                    {
+                        OnceLog.Warning("campaign-planner:appointment-failed",
+                            "[CampaignPlanner] an appointment vanilla allowed did not take effect; nothing recorded");
+                        return;
+                    }
+
+                    protection.Protect(intent.CommanderId, s.DaySerial);
+                    if (intent.SuccessionEventId >= 0 && succession != null) succession.MarkApplied(intent.SuccessionEventId);
+                    TelemetryRouter.LegacyInfo(
+                        "[Appointment] alliance=" + alliance +
+                        " commander=" + NameOf(s, intent.CommanderId) +
+                        " unit=" + unitName +
+                        " reason=" + intent.Reason +
+                        " displaced=" + NameOf(s, intent.DisplacedId),
+                        TelemetryLayer.Campaign);
                 }
-
-                protection.Protect(intent.CommanderId, s.DaySerial);
-                if (intent.SuccessionEventId >= 0 && succession != null) succession.MarkApplied(intent.SuccessionEventId);
-                TelemetryRouter.LegacyInfo(
-                    "[Appointment] alliance=" + alliance +
-                    " commander=" + NameOf(s, intent.CommanderId) +
-                    " unit=" + unitName +
-                    " reason=" + intent.Reason +
-                    " displaced=" + NameOf(s, intent.DisplacedId),
-                    TelemetryLayer.Campaign);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("campaign-planner:appointment-step-failed",
+                        "[CampaignPlanner] appointment step failed, no appointment today: " + ex.Message);
+                }
             }
         }
 
