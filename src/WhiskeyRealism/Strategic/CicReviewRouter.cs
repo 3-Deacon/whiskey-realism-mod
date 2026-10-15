@@ -21,6 +21,31 @@ namespace WhiskeyRealism.Strategic
         public float Radius;
     }
 
+    internal struct CampaignObjectiveSteer
+    {
+        public bool RunVanilla;
+        public int WriteFollowed;
+    }
+
+    // R5(d): what PickCampaignObjectivePatch does with AIFaction.followedcampaignobjective.
+    // With a plan target the mod writes it and skips vanilla's random pick. Without one,
+    // vanilla AICampaign.PickCampaignObjective (decompile 17769) runs; it only re-picks when
+    // followedcampaignobjective < 0 (17780), so a stale id the MOD wrote is cleared first.
+    // An id vanilla picked itself is left alone.
+    internal static class CampaignObjectiveSteering
+    {
+        internal const int NoWrite = int.MinValue;
+
+        internal static CampaignObjectiveSteer Decide(bool hasPlanTarget, int planTargetObjectiveId, int currentFollowed, int lastWrittenByMod)
+        {
+            if (hasPlanTarget && planTargetObjectiveId >= 0)
+                return new CampaignObjectiveSteer { RunVanilla = false, WriteFollowed = planTargetObjectiveId };
+
+            bool modOwned = lastWrittenByMod >= 0 && currentFollowed == lastWrittenByMod;
+            return new CampaignObjectiveSteer { RunVanilla = true, WriteFollowed = modOwned ? -1 : NoWrite };
+        }
+    }
+
     // Single implementation of "what does a PhaseTruthOutput do to the active plan".
     // CIC.ReviewPlanWithTruth delegates here (it only adds the abandon → null and the
     // phase-advanced log line), so the console harness exercises the exact runtime path.

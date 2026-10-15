@@ -17,7 +17,8 @@ namespace WhiskeyRealism.Strategic
             GrandStrategyProfile strategy,
             PersonalityVector cicPersonality,
             DirectorPosture posture,
-            HistoricalOperationContext context)
+            HistoricalOperationContext context,
+            ICollection<int> availableObjectiveIds = null)
         {
             if (candidate == null)
                 return NoProfile("missing-candidate");
@@ -32,6 +33,8 @@ namespace WhiskeyRealism.Strategic
                 string reason;
                 if (!Matches(profile, allianceId, era, vanillaChapter, month, year, candidate, out reason))
                     continue;
+                if (availableObjectiveIds != null && !PhaseTargetsAvailable(profile, availableObjectiveIds))
+                    continue;
 
                 matches.Add(Matched(
                     profile,
@@ -42,8 +45,29 @@ namespace WhiskeyRealism.Strategic
             if (matches.Count == 0)
                 return NoProfile("no-explicit-profile");
 
+
             matches.Sort(CompareMatches);
             return matches[0];
+        }
+
+        // R5(c): a profile whose phase targets are not in vanilla's available set would be
+        // selected, abort on ObjectiveUnavailable the next review, and be reselected daily.
+        public static bool PhaseTargetsAvailable(HistoricalOperationProfile profile, ICollection<int> availableObjectiveIds)
+        {
+            if (profile?.Phases == null || availableObjectiveIds == null) return false;
+            for (int i = 0; i < profile.Phases.Length; i++)
+            {
+                var phase = profile.Phases[i];
+                if (phase == null || !availableObjectiveIds.Contains(phase.TargetObjectiveId))
+                    return false;
+            }
+            return true;
+        }
+
+        public static IEnumerable<string> ProfileIds()
+        {
+            for (int i = 0; i < Profiles.Length; i++)
+                yield return Profiles[i].OperationId;
         }
 
         public static bool TryGetById(string operationId, out HistoricalOperationProfile profile)
@@ -376,11 +400,28 @@ namespace WhiskeyRealism.Strategic
             return (float)Math.Round(score, 3, MidpointRounding.AwayFromZero);
         }
 
+        // R5: every target below is validated against Config/campaignobjectives.dat by the
+        // harness (CampaignLifecycleFixTests). Rules that come from vanilla:
+        //  - CampaignObjective.GetAvailableObjectives (decompile 178827) only returns
+        //    objectives whose ObjectiveAlliance == the asking alliance, so a CIC can only
+        //    ever pursue its own alliance's objectives (31/35/36/37/29 are Union, 30/32/33/34
+        //    CSA; 29-37 exist only in scenario 002).
+        //  - IsDeactivated (178909-179010) gates chapter, scenario, validfrom/validto and
+        //    precampaign prerequisites (36 needs 29).
+        //  - followedcampaignobjective only adds importance to towns/IIPs that are part of the
+        //    objective (UpdateImportanceValues 14922/14961), so it must point at ground the
+        //    alliance should fight for. Objectives 0-28 have no towns (no vanilla effect).
+        // The allow list equals the phase targets so a match on X always pursues X.
+        // CSA "defense" ops no longer target objective 4 (Capture Washington, which pulled
+        // them north); they hold the CSA's own Potomac/B&O line objective 32 (Martinsburg,
+        // Harpers Ferry, Berkeley Springs, Cumberland, Hagerstown). In scenario 001 there is
+        // no CSA objective with ground, so they do not match there and the CIC falls back
+        // to the generic plan / vanilla.
         private static HistoricalOperationProfile[] BuildProfiles()
         {
             return new[]
             {
-                Profile("union-east-pressure", "Union Eastern Pressure", 0, EraStage.Amateur1861, Theater.East, 3, new[] { 3, 37 },
+                Profile("union-east-pressure", "Union Eastern Pressure", 0, EraStage.Amateur1861, Theater.East, 3, new[] { 3 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.CapitalThreat, StrategyTag.Logistics },
                     OperationTempoPreset.Standard, OperationPosture.ProbeAndDevelop, 1, 1, 4, 1861, 12, 1861,
                     new[]
@@ -390,56 +431,59 @@ namespace WhiskeyRealism.Strategic
                         Phase("attack-objective", "Attack Objective", 3, PhaseTransition.TargetTaken, 0.65f, OperationPosture.ConcentratedAttack, true, true, false, 90)
                     }),
 
-                Profile("csa-capital-defense", "CSA Capital Defense", 1, EraStage.Amateur1861, Theater.East, 4, new[] { 4, 31, 32 },
+                Profile("csa-capital-defense", "CSA Potomac Line Defense", 1, EraStage.Amateur1861, Theater.East, 32, new[] { 32 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.CapitalDefense, StrategyTag.DefensiveDepth },
                     OperationTempoPreset.Deliberate, OperationPosture.ReinforceAndHold, 1, 1, 4, 1861, 12, 1861,
                     new[]
                     {
-                        Phase("screen-and-delay", "Screen And Delay", 4, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 30),
-                        Phase("reinforce-and-hold", "Reinforce And Hold", 4, PhaseTransition.ForceBelowThreshold, 0.65f, OperationPosture.ReinforceAndHold, false, true, false, 75),
-                        Phase("counterstroke", "Counterstroke", 4, PhaseTransition.TargetTaken, 0.60f, OperationPosture.Counterstroke, true, true, false, 105)
+                        Phase("screen-and-delay", "Screen And Delay", 32, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 30),
+                        Phase("reinforce-and-hold", "Reinforce And Hold", 32, PhaseTransition.ForceBelowThreshold, 0.65f, OperationPosture.ReinforceAndHold, false, true, false, 75),
+                        Phase("counterstroke", "Counterstroke", 32, PhaseTransition.TargetTaken, 0.60f, OperationPosture.Counterstroke, true, true, false, 105)
                     }),
 
-                Profile("csa-valley-disruption", "CSA Valley Disruption", 1, EraStage.Amateur1861, Theater.East, 31, new[] { 31, 32, 33 },
+                Profile("csa-valley-disruption", "CSA Valley Disruption", 1, EraStage.Amateur1861, Theater.East, 32, new[] { 32 },
                     OperationChapterPolicy.AllowDateDrift, 15, new[] { StrategyTag.RailHub, StrategyTag.ForeignRecognition },
                     OperationTempoPreset.Press, OperationPosture.Counterstroke, 1, 1, 4, 1861, 12, 1861,
                     new[]
                     {
-                        Phase("develop-contact", "Develop Contact", 31, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ProbeAndDevelop, true, false, true, 30),
-                        Phase("attack-objective", "Attack Objective", 31, PhaseTransition.TargetTaken, 0.55f, OperationPosture.Counterstroke, true, false, false, 75),
-                        Phase("screen-and-delay", "Screen And Delay", 31, PhaseTransition.DeadlineExpired, 0.40f, OperationPosture.ScreenAndDelay, false, true, true, 90)
+                        Phase("develop-contact", "Develop Contact", 32, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ProbeAndDevelop, true, false, true, 30),
+                        Phase("attack-objective", "Attack Objective", 32, PhaseTransition.TargetTaken, 0.55f, OperationPosture.Counterstroke, true, false, false, 75),
+                        Phase("screen-and-delay", "Screen And Delay", 32, PhaseTransition.DeadlineExpired, 0.40f, OperationPosture.ScreenAndDelay, false, true, true, 90)
                     }),
 
-                Profile("union-coastal-pressure", "Union Coastal Pressure", 0, EraStage.Amateur1861, Theater.Coast, 37, new[] { 35, 37 },
+                // Objectives 35/37 are valid from 01.01.1862 (IsDeactivated), so this is an 1862 op.
+                Profile("union-coastal-pressure", "Union Coastal Pressure", 0, EraStage.Operational1862, Theater.Coast, 37, new[] { 37 },
                     OperationChapterPolicy.AllowDateDrift, 20, new[] { StrategyTag.Blockade, StrategyTag.PortAccess, StrategyTag.Logistics },
-                    OperationTempoPreset.Standard, OperationPosture.ProbeAndDevelop, 1, 1, 4, 1861, 12, 1861,
+                    OperationTempoPreset.Standard, OperationPosture.ProbeAndDevelop, 1, 2, 1, 1862, 12, 1862,
                     new[]
                     {
                         Phase("develop-contact", "Develop Contact", 37, PhaseTransition.TargetEngaged, 0.30f, OperationPosture.ProbeAndDevelop, true, false, true, 30),
                         Phase("attack-objective", "Attack Objective", 37, PhaseTransition.TargetTaken, 0.55f, OperationPosture.ConcentratedAttack, true, true, false, 90)
                     }),
 
-                Profile("union-western-pressure", "Union Western Pressure", 0, EraStage.Operational1862, Theater.West, 36, new[] { 29, 36 },
+                // 36 (Saltville) is deactivated until 29 is accomplished (precampaign 029), so the
+                // operation pursues 29 (West Virginia) itself.
+                Profile("union-western-pressure", "Union Western Pressure", 0, EraStage.Operational1862, Theater.East, 29, new[] { 29 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.RiverControl, StrategyTag.RailHub, StrategyTag.Logistics },
                     OperationTempoPreset.Press, OperationPosture.ConcentratedAttack, 2, 2, 1, 1862, 12, 1862,
                     new[]
                     {
-                        Phase("develop-contact", "Develop Contact", 36, PhaseTransition.TargetEngaged, 0.40f, OperationPosture.ProbeAndDevelop, true, false, true, 30),
-                        Phase("concentrate-for-attack", "Concentrate For Attack", 36, PhaseTransition.TargetEngaged, 0.60f, OperationPosture.ConcentratedAttack, true, true, false, 60),
-                        Phase("attack-objective", "Attack Objective", 36, PhaseTransition.TargetTaken, 0.70f, OperationPosture.ConcentratedAttack, true, true, false, 105)
+                        Phase("develop-contact", "Develop Contact", 29, PhaseTransition.TargetEngaged, 0.40f, OperationPosture.ProbeAndDevelop, true, false, true, 30),
+                        Phase("concentrate-for-attack", "Concentrate For Attack", 29, PhaseTransition.TargetEngaged, 0.60f, OperationPosture.ConcentratedAttack, true, true, false, 60),
+                        Phase("attack-objective", "Attack Objective", 29, PhaseTransition.TargetTaken, 0.70f, OperationPosture.ConcentratedAttack, true, true, false, 105)
                     }),
 
-                Profile("csa-western-depth", "CSA Western Depth", 1, EraStage.Operational1862, Theater.West, 36, new[] { 30, 36 },
+                Profile("csa-western-depth", "CSA Western Depth", 1, EraStage.Operational1862, Theater.East, 30, new[] { 30 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.DefensiveDepth, StrategyTag.Logistics },
                     OperationTempoPreset.Recover, OperationPosture.ReinforceAndHold, 2, 2, 1, 1862, 12, 1862,
                     new[]
                     {
-                        Phase("screen-and-delay", "Screen And Delay", 36, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 30),
-                        Phase("reinforce-and-hold", "Reinforce And Hold", 36, PhaseTransition.ForceBelowThreshold, 0.60f, OperationPosture.ReinforceAndHold, false, true, false, 75),
-                        Phase("recover-combat-power", "Recover Combat Power", 36, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 105)
+                        Phase("screen-and-delay", "Screen And Delay", 30, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 30),
+                        Phase("reinforce-and-hold", "Reinforce And Hold", 30, PhaseTransition.ForceBelowThreshold, 0.60f, OperationPosture.ReinforceAndHold, false, true, false, 75),
+                        Phase("recover-combat-power", "Recover Combat Power", 30, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 105)
                     }),
 
-                Profile("union-late-pressure", "Union Late Pressure", 0, EraStage.TotalWar1864, Theater.East, 3, new[] { 3, 31, 32, 37 },
+                Profile("union-late-pressure", "Union Late Pressure", 0, EraStage.TotalWar1864, Theater.East, 3, new[] { 3 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.ArmyDestruction, StrategyTag.RailHub, StrategyTag.Logistics },
                     OperationTempoPreset.Exploit, OperationPosture.ExploitBreakthrough, 3, 4, 1, 1864, 12, 1865,
                     new[]
@@ -449,15 +493,15 @@ namespace WhiskeyRealism.Strategic
                         Phase("attack-objective", "Attack Objective", 3, PhaseTransition.TargetTaken, 0.80f, OperationPosture.ExploitBreakthrough, true, true, false, 75)
                     }),
 
-                Profile("csa-protraction-defense", "CSA Protraction Defense", 1, EraStage.TotalWar1864, Theater.East, 4, new[] { 4, 30, 31, 32, 36 },
+                Profile("csa-protraction-defense", "CSA Protraction Defense", 1, EraStage.TotalWar1864, Theater.East, 32, new[] { 32 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.CapitalDefense, StrategyTag.DefensiveDepth, StrategyTag.Manpower },
                     OperationTempoPreset.Recover, OperationPosture.ReinforceAndHold, 3, 4, 1, 1864, 12, 1865,
                     new[]
                     {
-                        Phase("screen-and-delay", "Screen And Delay", 4, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 21),
-                        Phase("reinforce-and-hold", "Reinforce And Hold", 4, PhaseTransition.ForceBelowThreshold, 0.70f, OperationPosture.ReinforceAndHold, false, true, false, 60),
-                        Phase("counterstroke", "Counterstroke", 4, PhaseTransition.TargetTaken, 0.65f, OperationPosture.Counterstroke, true, true, false, 90),
-                        Phase("recover-combat-power", "Recover Combat Power", 4, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 120)
+                        Phase("screen-and-delay", "Screen And Delay", 32, PhaseTransition.TargetEngaged, 0.35f, OperationPosture.ScreenAndDelay, false, true, true, 21),
+                        Phase("reinforce-and-hold", "Reinforce And Hold", 32, PhaseTransition.ForceBelowThreshold, 0.70f, OperationPosture.ReinforceAndHold, false, true, false, 60),
+                        Phase("counterstroke", "Counterstroke", 32, PhaseTransition.TargetTaken, 0.65f, OperationPosture.Counterstroke, true, true, false, 90),
+                        Phase("recover-combat-power", "Recover Combat Power", 32, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 120)
                     })
             };
         }

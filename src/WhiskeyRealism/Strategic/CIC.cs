@@ -54,6 +54,7 @@ namespace WhiskeyRealism.Strategic
         internal static Func<int, IList> AvailableObjectivesProvider = GetAvailableObjectivesViaReflection;
         internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
         internal static Func<int> CurrentChapterProvider = ResolveCurrentChapter;
+        internal static Func<int, bool> TargetPositionResolves = id => ObjectiveAdapter.ResolveObjectivePosition(id).HasValue;
 
         public PersonalityVector Effective(EraStageManager era)
         {
@@ -134,9 +135,11 @@ namespace WhiskeyRealism.Strategic
             }
 
             scored.Sort((a, b) => b.score.CompareTo(a.score));
-            bool doctrineEnabled = CicSettings.HistoricalOperationDoctrine;
+            var availableIds = new HashSet<int>();
+            for (int i = 0; i < scored.Count; i++)
+                availableIds.Add(GetObjectiveId(scored[i].obj));
 
-            if (doctrineEnabled)
+            if (CicSettings.HistoricalOperationDoctrine)
             {
                 string requestedOperationId = ActivePlan?.PendingRetarget == true
                     ? ActivePlan.PendingRetargetReason
@@ -146,6 +149,7 @@ namespace WhiskeyRealism.Strategic
                     var requested = SelectRequestedHistoricalPlan(
                         requestedOperationId,
                         scored,
+                        availableIds,
                         p,
                         strategy,
                         currentMonth,
@@ -158,8 +162,9 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
-                ActivePlan = SelectHistoricalPlan(
+                var historical = SelectHistoricalPlan(
                     scored,
+                    availableIds,
                     p,
                     strategy,
                     era.Stage,
@@ -169,10 +174,30 @@ namespace WhiskeyRealism.Strategic
                     vanillaChapter,
                     posture,
                     context);
+                if (historical != null)
+                {
+                    ActivePlan = historical;
+                    return;
+                }
+                // R5(d): no historical profile fits — fall back to the generic plan below
+                // instead of leaving the faction with no plan (which used to block vanilla's
+                // PickCampaignObjective and freeze followedcampaignobjective).
+            }
+
+            // Only objectives with a resolvable position can drive a plan: objectives 0-28 have
+            // no towns in campaignobjectives.dat, and a plan on one would hit
+            // MissingTargetPosition -> Replan every day.
+            var reachable = new List<(object obj, float score, ObjectiveMetadata meta)>();
+            for (int i = 0; i < scored.Count; i++)
+                if (TargetPositionResolves(GetObjectiveId(scored[i].obj))) reachable.Add(scored[i]);
+            if (reachable.Count == 0)
+            {
+                EmitPlanDecision("clear", "no-resolvable-objective", "alliance=" + AllianceId + "|decision=clear|objectiveCount=" + scored.Count, ev => ev.WithField("objectiveCount", scored.Count));
+                ActivePlan = null;
                 return;
             }
 
-            var top3 = scored.GetRange(0, Math.Min(3, scored.Count));
+            var top3 = reachable.GetRange(0, Math.Min(3, reachable.Count));
             var picked = WeightedPick(top3);
 
             ActivePlan = BuildLegacyGenericPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
@@ -191,6 +216,7 @@ namespace WhiskeyRealism.Strategic
         private OperationalPlan SelectRequestedHistoricalPlan(
             string operationId,
             List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            HashSet<int> availableIds,
             PersonalityVector p,
             GrandStrategyProfile strategy,
             int currentMonth,
@@ -200,6 +226,11 @@ namespace WhiskeyRealism.Strategic
             if (!HistoricalOperationCatalog.TryGetById(operationId, out var profile))
             {
                 EmitHistoricalOperation("no-profile", operationId, -1, null, "alternate-not-found", null);
+                return null;
+            }
+            if (!HistoricalOperationCatalog.PhaseTargetsAvailable(profile, availableIds))
+            {
+                EmitHistoricalOperation("no-profile", operationId, profile.PrimaryObjectiveId, null, "alternate-phase-target-unavailable", null);
                 return null;
             }
 
@@ -265,6 +296,7 @@ namespace WhiskeyRealism.Strategic
 
         private OperationalPlan SelectHistoricalPlan(
             List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            HashSet<int> availableIds,
             PersonalityVector p,
             GrandStrategyProfile strategy,
             EraStage era,
@@ -298,7 +330,8 @@ namespace WhiskeyRealism.Strategic
                     strategy,
                     p,
                     posture,
-                    context);
+                    context,
+                    availableIds);
                 if (match.Kind != HistoricalOperationMatchKind.Matched)
                 {
                     EmitHistoricalOperation("no-profile-candidate", null, objId, null, match.Reason, null);
@@ -363,6 +396,15 @@ namespace WhiskeyRealism.Strategic
                     "historical-operation:no-profile:" + AllianceId + ":" + (profile?.OperationId ?? "<null>"),
                     $"CIC historical operation profile invalid alliance={AllianceId} operation={profile?.OperationId ?? "<null>"} reason={reason}");
                 return null;
+            }
+
+            for (int i = 0; i < profile.Phases.Length; i++)
+            {
+                if (!TargetPositionResolves(profile.Phases[i].TargetObjectiveId))
+                {
+                    EmitHistoricalOperation("no-profile", profile.OperationId, GetObjectiveId(pickedObjective), profile.Phases[i].PhaseId, "phase-target-position-unresolved", null);
+                    return null;
+                }
             }
 
             int monthsAhead = 6;
