@@ -100,6 +100,69 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return battleHours * 3600f;
         }
 
+        /// <summary>Upper bound between operations-ledger ticks when the published
+        /// snapshot has not changed, so time-based director transitions (commit-window
+        /// expiry) still happen. Battle seconds.</summary>
+        internal const float OperationsLedgerMaxIntervalBattleSeconds = 60f;
+
+        /// <summary>
+        /// The ledger (director + doctrine assignment + command-node build) only needs
+        /// to run when its inputs changed: a new heavy snapshot, a Commander Mode change,
+        /// or OperationsLedgerMaxIntervalBattleSeconds of battle time elapsed (or the
+        /// battle clock went backwards).
+        /// </summary>
+        internal static bool ShouldTickOperationsLedger(
+            bool snapshotChanged,
+            bool modeChanged,
+            float nowBattleSeconds,
+            float lastTickBattleSeconds)
+        {
+            if (snapshotChanged || modeChanged) return true;
+            float elapsed = nowBattleSeconds - lastTickBattleSeconds;
+            return elapsed < 0f || elapsed >= OperationsLedgerMaxIntervalBattleSeconds;
+        }
+
+        /// <summary>
+        /// Allocation-free structural hash of a command tree (root, counts, depth, and per
+        /// node id / parent / raw unittyp / depth / active), replacing the per-tick
+        /// StringBuilder signature used for "unchanged" checks. Active is included so a
+        /// tree whose live active flags changed is re-registered (BR-H5).
+        /// </summary>
+        internal static int CommandTreeHash(CommandTreeSnapshot tree)
+        {
+            if (tree == null || !tree.HasNodes) return 0;
+            unchecked
+            {
+                int h = 17;
+                h = h * 31 + StableHash(tree.RootNodeId);
+                h = h * 31 + tree.Nodes.Count;
+                h = h * 31 + tree.MaxDepth;
+                h = h * 31 + StableHash(tree.RawUnitTypDistribution);
+                h = h * 31 + tree.MissingParentCount;
+                for (int i = 0; i < tree.Nodes.Count; i++)
+                {
+                    var node = tree.Nodes[i];
+                    h = h * 31 + StableHash(node.NodeId);
+                    h = h * 31 + StableHash(node.ParentNodeId);
+                    h = h * 31 + node.RawUnitTyp;
+                    h = h * 31 + node.Depth;
+                    h = h * 31 + (node.Active ? 1 : 0);
+                }
+                return h;
+            }
+        }
+
+        private static int StableHash(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return 0;
+            unchecked
+            {
+                int h = 5381;
+                for (int i = 0; i < value.Length; i++) h = (h * 33) ^ value[i];
+                return h;
+            }
+        }
+
         // ---- Pure helpers used by the runtime partial for telemetry ----
 
         internal static int MatchedCount(TacticalCommanderRoster roster, int alliance)

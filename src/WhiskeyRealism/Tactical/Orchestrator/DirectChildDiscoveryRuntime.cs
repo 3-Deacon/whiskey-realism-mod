@@ -21,24 +21,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private static FieldInfo _commandHierarchyShiftField;
 
-        public static IReadOnlyList<DirectChildSnapshot> Snapshot(AIBattle battle)
-        {
-            // Backwards-compatible overload — when caller doesn't supply an alliance,
-            // fall back to the AIBattle's own sideofai mapping.
-            if (battle == null) return Array.Empty<DirectChildSnapshot>();
-            try
-            {
-                int allianceId = ResolveAllianceFromBattle(battle);
-                return Snapshot(allianceId);
-            }
-            catch (Exception e)
-            {
-                OnceLog.Warning("o3-direct-child-discovery:exception",
-                    "DirectChildDiscovery.Snapshot(battle) failed: " + e.GetType().Name + " " + e.Message);
-                return Array.Empty<DirectChildSnapshot>();
-            }
-        }
-
         public static IReadOnlyList<DirectChildSnapshot> Snapshot(int allianceId)
         {
             try
@@ -330,6 +312,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         private static readonly Dictionary<string, float> _lastProbeHealthTelemetryAt = new Dictionary<string, float>();
+
+        // Keys embed per-battle distributions; cleared at battle end so the dedupe
+        // dictionary does not grow across battles.
+        internal static void ResetForBattleEnd()
+        {
+            _lastProbeHealthTelemetryAt.Clear();
+        }
         private const float ProbeHealthTelemetrySeconds = 30f;
 
         private static int SafeStrengthBucket(Regiment reg)
@@ -368,28 +357,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             return true;
-        }
-
-        private static FieldInfo _sideOfAiField;
-        private static FieldInfo _bunitsField;
-
-        private static int ResolveAllianceFromBattle(AIBattle battle)
-        {
-            try
-            {
-                if (_sideOfAiField == null) _sideOfAiField = AccessTools.Field(typeof(AIBattle), "sideofai");
-                if (_bunitsField == null) _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
-                if (_sideOfAiField == null || _bunitsField == null) return -1;
-                int side = (_sideOfAiField.GetValue(battle) is int s) ? s : -1;
-                if (side != 0 && side != 1) return -1;
-                var bunits = _bunitsField.GetValue(battle) as BattleUnits;
-                if (bunits == null || bunits.alliance == null || side >= bunits.alliance.Length) return -1;
-                return bunits.alliance[side];
-            }
-            catch
-            {
-                return -1;
-            }
         }
 
         private static int ReadCommandHierarchyShift()

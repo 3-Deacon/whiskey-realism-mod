@@ -144,8 +144,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 var commandTree = CommandTreeRuntime.Snapshot(allianceId);
 
-                // Direct children discovery (uses completeunitlist + GetAttachedUnitsReg)
-                IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(battle);
+                // Direct children discovery for THIS side (completeunitlist filtered by
+                // alliance + GetAttachedUnitsReg). Snapshot(battle) resolved the alliance
+                // from the AIBattle that fired the Tick, which drives both sides, so the
+                // other side's snapshot carried the wrong army's children.
+                IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(allianceId);
 
                 // The snapshot performs its own defensive copies. Readiness
                 // fields (fatigue/ammo/reinforcement timing) flow from bundle

@@ -36,6 +36,13 @@ internal static class TacticalLifecycleFixTests
         Pass("t15 released reserve lets vanilla commit", T15ReleasedReserveAllowsVanillaCommit);
         Pass("t15 unreleased reserve still held", T15UnreleasedReserveStillHeld);
         Pass("t15 released reserve permits reserve list bias", T15ReleasedReservePermitsListBias);
+
+        Pass("perf ledger ticks on new snapshot", PerfLedgerTicksOnNewSnapshot);
+        Pass("perf ledger skips unchanged snapshot within interval", PerfLedgerSkipsUnchangedSnapshot);
+        Pass("perf ledger ticks on mode change or max interval", PerfLedgerTicksOnModeChangeOrMaxInterval);
+        Pass("perf ledger ticks after clock rewind", PerfLedgerTicksAfterClockRewind);
+        Pass("perf command tree hash sees parent change", PerfCommandTreeHashSeesParentChange);
+        Pass("perf frame cache hits within one frame only", PerfFrameCacheHitsWithinOneFrame);
     }
 
     private static void Pass(string name, Action test)
@@ -313,5 +320,62 @@ internal static class TacticalLifecycleFixTests
     {
         TestHarness.AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution()), "held");
         TestHarness.AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution(), reserveReleased: true), "released");
+    }
+
+    // ---- Coordinator perf ----
+
+    private static void PerfLedgerTicksOnNewSnapshot()
+    {
+        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldTickOperationsLedger(
+            snapshotChanged: true, modeChanged: false, nowBattleSeconds: 100f, lastTickBattleSeconds: 99f), "new snapshot");
+    }
+
+    private static void PerfLedgerSkipsUnchangedSnapshot()
+    {
+        TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldTickOperationsLedger(
+            snapshotChanged: false, modeChanged: false, nowBattleSeconds: 100f, lastTickBattleSeconds: 90f), "unchanged");
+    }
+
+    private static void PerfLedgerTicksOnModeChangeOrMaxInterval()
+    {
+        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldTickOperationsLedger(false, true, 100f, 99f), "mode");
+        float max = TacticalBattleCoordinator.OperationsLedgerMaxIntervalBattleSeconds;
+        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldTickOperationsLedger(false, false, 100f + max, 100f), "max interval");
+    }
+
+    private static void PerfLedgerTicksAfterClockRewind()
+    {
+        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldTickOperationsLedger(false, false, 50f, 100f), "rewind");
+    }
+
+    private static void PerfCommandTreeHashSeesParentChange()
+    {
+        var a = TreeOf(parentOfChild: "node-1");
+        var b = TreeOf(parentOfChild: "node-1");
+        var c = TreeOf(parentOfChild: "node-3");
+        TestHarness.AssertEqual(TacticalBattleCoordinator.CommandTreeHash(a), TacticalBattleCoordinator.CommandTreeHash(b), "stable");
+        TestHarness.AssertTrue(TacticalBattleCoordinator.CommandTreeHash(a) != TacticalBattleCoordinator.CommandTreeHash(c), "parent");
+    }
+
+    private static CommandTreeSnapshot TreeOf(string parentOfChild)
+    {
+        var probes = new[]
+        {
+            new CommandTreeBuilder.CommandProbe(1, 0, 0, 17, "army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(3, 1, 0, 16, "corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(2, parentOfChild == "node-1" ? 1 : 3, 0, 15, "div", true, false, false),
+        };
+        return CommandTreeBuilder.Build(probes, 0, 0);
+    }
+
+    private static void PerfFrameCacheHitsWithinOneFrame()
+    {
+        var cache = new TacticalFrameCache<string>();
+        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "empty");
+        cache.Set(10, 7, "enemy");
+        TestHarness.AssertTrue(cache.TryGet(10, 7, out string hit) && hit == "enemy", "same frame");
+        TestHarness.AssertFalse(cache.TryGet(10, 8, out _), "other unit");
+        TestHarness.AssertFalse(cache.TryGet(11, 7, out _), "next frame");
+        TestHarness.AssertFalse(cache.TryGet(10, 7, out _), "previous frame entries dropped");
     }
 }
