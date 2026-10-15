@@ -291,7 +291,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
-            bool hasSlot = LeafSlotTarget.TryResolve(s, i, out int parent, out float x, out float z, out float slotHeading);
+            bool hasSlot = LeafSlotTarget.TryResolve(s, i, GamePrefs.refuseflankdepth, GamePrefs.refuseflankskew,
+                out int parent, out float x, out float z, out float slotHeading);
             bool parentActive = false;
             if (parent >= 0)
             {

@@ -1279,23 +1279,26 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
-    // B-leaf target (plan BC5a). Shipped #61 placed a nested leaf brigade at
-    // its slot in the parent's formation: groupposition.unitoffsetposition laid
-    // out in the parent's frame at parent.lastsetwaypointrotation
-    // (LeafFormationSlot.OffsetXZ over GetAngleTerrainPosXYStatic 26937-26949,
-    // SetGroupFormation 92060-92075), and moved it facing that rotation. The
-    // snapshot carries neither the layout nor lastsetwaypointrotation, so the
-    // slot is the leaf's current offset from its command parent (the snapshot
-    // parent map, plan D5) turned by the parent's heading change and re-applied
-    // at the parent's last waypoint. The frame the offset was laid in is the
-    // leaf's own facing (SetGroupFormation paths every child at the group's
-    // rotation, 92063/92096); the parent's facing is its completed heading
-    // (LeafBrigadeMovePolicy moves a leaf only while the parent has no order
-    // in flight). A slot within 60 m of the leaf is no move; the executor's
-    // validator clamps it to the map (131057-131068).
+    // B-leaf target (plan BC5a): shipped #61 TryFormationSlot over the snapshot.
+    // SetGroupFormation stores the group's waypoint and rotation (92067-92068), stands
+    // its commander groupdepth + groupunitdistancetoback behind that waypoint (92050),
+    // and paths each child group k to
+    // GetAngleTerrainPosXY(waypoint, rotation, -offset[k].x, offset[k].z + child
+    // groupdepth) (92094: num + groupdepth2 / 2 = the full groupdepth2), facing the
+    // rotation. Shipped read those live (LeafFormationSlot.OffsetXZ = the formula of
+    // GetAngleTerrainPosXYStatic 26937-26949, without its terrain clamp; the executor's
+    // validator clamps to the map, 131057-131068); the snapshot now carries them
+    // (UnitRecord.LastWaypointRotation, GroupDepth, SlotOffsetX/Z with
+    // UnitFlags.HasLayoutSlot). The parent's commander position never enters it.
+    // A leaf within 60 m of its slot has no move. A refused flank
+    // (refuseflank, 92095-92101) moves a child straight back by SkewedPosition's
+    // depth (78109-78130) and turns it to the skewed line; vanilla keeps no refuse
+    // state, so a leaf within 60 m of any refused slot holds too (and keeps its
+    // facing). Terrain-shape interpolation (92093-92096) is not applied, as shipped.
     public static class LeafSlotTarget
     {
-        public static bool TryResolve(IBattleUnitView s, int leafIndex, out int parentIndex, out float x, out float z, out float heading)
+        public static bool TryResolve(IBattleUnitView s, int leafIndex, float refuseFlankDepth, float refuseFlankSkew,
+            out int parentIndex, out float x, out float z, out float heading)
         {
             parentIndex = -1;
             x = 0f;
@@ -1303,23 +1306,63 @@ namespace WhiskeyRealism.Tactical.Operations
             heading = -1f;
             if (s == null || leafIndex < 0 || leafIndex >= s.OwnCount) return false;
             UnitRecord[] own = s.Own;
-            int parent = own[leafIndex].ParentIndex;
+            ref UnitRecord leaf = ref own[leafIndex];
+            int parent = leaf.ParentIndex;
             if (parent < 0 || parent >= s.OwnCount || parent == leafIndex) return false;
             parentIndex = parent;
-            if (!PostureSense.HasPoint(own[parent].LastWaypointX, own[parent].LastWaypointZ)) return false;
-            heading = PostureSense.NormalizeHeading(own[parent].RotationY);
+            if ((leaf.Flags & UnitFlags.HasLayoutSlot) == 0) return false;
+            ref UnitRecord p = ref own[parent];
+            // No waypoint yet also covers the -999 rotation sentinel (112527): the
+            // rotation is stored together with the waypoint.
+            if (!PostureSense.HasPoint(p.LastWaypointX, p.LastWaypointZ)) return false;
+            float rotation = p.LastWaypointRotation;
+            if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
 
-            // Vanilla headings turn clockwise from +z toward +x.
-            double turn = (own[parent].RotationY - own[leafIndex].RotationY) * Math.PI / 180.0;
-            if (double.IsNaN(turn) || double.IsInfinity(turn)) turn = 0.0;
-            float dx = own[leafIndex].X - own[parent].X;
-            float dz = own[leafIndex].Z - own[parent].Z;
-            float cos = (float)Math.Cos(turn);
-            float sin = (float)Math.Sin(turn);
-            x = own[parent].LastWaypointX + dx * cos + dz * sin;
-            z = own[parent].LastWaypointZ - dx * sin + dz * cos;
+            OffsetXZ(p.LastWaypointX, p.LastWaypointZ, rotation, -leaf.SlotOffsetX, leaf.SlotOffsetZ + leaf.GroupDepth, out x, out z);
+            heading = PostureSense.NormalizeHeading(rotation);
             // A leaf already at its slot has no move to make.
-            return PostureSense.IsMoveAway(own[leafIndex], x, z);
+            if (!PostureSense.IsMoveAway(leaf, x, z)) return false;
+            for (int direction = 0; direction <= 2; direction++)
+            {
+                float back = RefusedSetback(leaf.SlotOffsetX, p.GroupWidth, refuseFlankDepth, refuseFlankSkew, direction);
+                if (!(back > 0f)) continue;
+                OffsetXZ(x, z, rotation, 0f, back, out float rx, out float rz);
+                if (!PostureSense.IsMoveAway(leaf, rx, rz)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// SkewedPosition's setback of a refused child (78109-78130): with
+        /// t = clamp01((offsetX + width / 2) / width), pow(t, skew) for the right
+        /// flank (1), pow(1 - t, skew) for the left (0), pow(|t - 0.5| * 2, skew) for
+        /// both (2), times width * depthFactor (GamePrefs.refuseflankdepth).
+        /// </summary>
+        public static float RefusedSetback(float offsetX, float groupWidth, float depthFactor, float skew, int direction)
+        {
+            if (!(groupWidth > 0f) || !(depthFactor > 0f) || float.IsInfinity(groupWidth)) return 0f;
+            float t = (offsetX + groupWidth / 2f) / groupWidth;
+            if (t < 0f) t = 0f;
+            if (t > 1f) t = 1f;
+            float u;
+            switch (direction)
+            {
+                case 0: u = 1f - t; break;
+                case 1: u = t; break;
+                case 2: u = Math.Abs(t - 0.5f) * 2f; break;
+                default: return 0f;
+            }
+            return (float)Math.Pow(u, skew) * groupWidth * depthFactor;
+        }
+
+        // GetAngleTerrainPosXYStatic (26937-26949) without the terrain clamp: distZ is
+        // rearward, distX to the left of a unit facing angle (0 = +z, 90 = +x).
+        private static void OffsetXZ(float anchorX, float anchorZ, float angle, float distX, float distZ, out float x, out float z)
+        {
+            double a = (angle - 90.0) * Math.PI / 180.0;
+            double b = angle * Math.PI / 180.0;
+            x = (float)(anchorX - Math.Cos(a) * distZ - Math.Cos(b) * distX);
+            z = (float)(anchorZ + Math.Sin(a) * distZ + Math.Sin(b) * distX);
         }
     }
 

@@ -59,6 +59,23 @@ namespace WhiskeyRealism.Tactical.Battle
             scratch.TreeGeneration++;
         }
 
+        // One entry of a group's formation layout (vanilla GroupPosition.attachedunitid[k]
+        // / unitoffsetposition[k], 78374-78378; SetGroupFormation places child k from it,
+        // 92094). Kept only for the child whose command parent (plan D5) is that group:
+        // shipped #61 TryFormationSlot looked a brigade up in its transform parent's
+        // layout. Call after the command tree is assembled. No allocation.
+        internal static bool ApplyLayoutSlot(BattleSnapshot s, int groupIndex, int childInstanceId, float offsetX, float offsetZ)
+        {
+            if (s == null || groupIndex < 0 || groupIndex >= s.OwnCount) return false;
+            int child = s.IndexOfOwn(childInstanceId);
+            if (child < 0 || child == groupIndex || s.Own[child].ParentIndex != groupIndex) return false;
+            ref UnitRecord unit = ref s.Own[child];
+            unit.SlotOffsetX = offsetX;
+            unit.SlotOffsetZ = offsetZ;
+            unit.Flags |= UnitFlags.HasLayoutSlot;
+            return true;
+        }
+
         // True when the roster differs from the one the cached parent map was built for,
         // i.e. the runtime must re-read allattachedunits (and names) this tick.
         internal static bool RosterChanged(UnitRecord[] own, int count, BattleSnapshotScratch scratch)
