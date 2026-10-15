@@ -30,6 +30,10 @@ internal static class BattleWriterFixTests
         ArtilleryMicroMirrorsVanillaUnlimberRule();
         ArtilleryMicroMapsActionsToVanillaWrites();
         CounterBatteryReleasedWhenTargetGone();
+        ChargeGateUsesVanillaPerformAiActionRule();
+        ChargeGateAllowsCounterChargeAgainstChargingEnemy();
+        FeudGateRestoresVanillaDistanceCap();
+        GatesFailOpenOutsideActiveMode();
     }
 
     private static void Pass(string name)
@@ -366,5 +370,48 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(8, true), "enemy artillery still in range");
         TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(7, false), "not counter-battery");
         Pass("battle writers: counter-battery released when the target is gone");
+    }
+
+    // AIBattle.PerformAIActionDLCWL 5101: outside W&L always; a unit of a group
+    // whose ai_stance >= 1 (player delegated to the AI) is allowed even when
+    // under the player's command; otherwise dlcw_isundercommander blocks.
+    private static void ChargeGateUsesVanillaPerformAiActionRule()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.WlAllowsUnitAction(false, 0, false, true), "W&L inactive");
+        TestHarness.AssertTrue(BattleWriterPolicy.WlAllowsUnitAction(true, 4, true, true), "delegated assault stance");
+        TestHarness.AssertFalse(BattleWriterPolicy.WlAllowsUnitAction(true, 0, true, true), "player-held stance");
+        TestHarness.AssertFalse(BattleWriterPolicy.WlAllowsUnitAction(true, 4, false, true), "other group");
+        TestHarness.AssertTrue(BattleWriterPolicy.WlAllowsUnitAction(true, 0, false, false), "AI unit");
+        Pass("battle writers: #41 W&L rule mirrors vanilla PerformAIActionDLCWL");
+    }
+
+    private static void ChargeGateAllowsCounterChargeAgainstChargingEnemy()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.IsCounterCharge(true, 3, false, 0f), "enemy charging (3)");
+        TestHarness.AssertTrue(BattleWriterPolicy.IsCounterCharge(true, 6, false, 0f), "enemy bayonet charge (6)");
+        TestHarness.AssertTrue(BattleWriterPolicy.IsCounterCharge(false, 0, false, 0.4f), "already in melee");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsCounterCharge(true, 3, true, 0f), "routed enemy is a pursuit, not a counter");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsCounterCharge(true, 1, false, 0f), "enemy advancing");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsCounterCharge(false, 3, false, 0f), "no visible enemy");
+        Pass("battle writers: #41 allows counter-charges against a charging enemy");
+    }
+
+    // CheckForFeudGroupActions 4952: GetClosestEnemyUnit(neededdistancefeudgroupmovement).
+    private static void FeudGateRestoresVanillaDistanceCap()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.FeudMoveTargetAllowed(true, 300f, 400f), "inside cap");
+        TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(true, 900f, 400f), "beyond cap");
+        TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(false, 0f, 400f), "no enemy");
+        Pass("battle writers: #42 restores vanilla feud distance cap");
+    }
+
+    // R14: Commander Mode Off/MonitorOnly means no Whiskey writes and no
+    // Whiskey denials - gates hand the call back to vanilla.
+    private static void GatesFailOpenOutsideActiveMode()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.GateMayIntervene(true, true), "active + enabled");
+        TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(false, true), "monitor/off");
+        TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(true, false), "flag off");
+        Pass("battle writers: gates fail open to vanilla outside Active mode");
     }
 }

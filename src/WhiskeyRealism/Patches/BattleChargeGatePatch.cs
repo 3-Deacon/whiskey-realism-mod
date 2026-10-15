@@ -11,15 +11,29 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B1 W&L guard and Slice 3 orchestrator charge gate for
-    // AIBattle.MicroAICheckForCharges. Vanilla owns charge initiation and
-    // cancellation in one small method; this Prefix mirrors that body so charge
-    // initiation can be blocked without skipping the cancellation branch.
+    // #41 — B1 W&L guard and Slice 3 orchestrator charge gate for
+    // AIBattle.MicroAICheckForCharges (decompile 4905, micro-AI slot 4).
+    // Vanilla owns charge initiation and cancellation in one small method; this
+    // Prefix mirrors that body so charge initiation can be blocked without
+    // skipping the cancellation branch.
+    //
+    // Vanilla rules mirrored (WS T3):
+    //   - lastfeudactiontime is stamped only together with the actual
+    //     SetMovementMode(3) / SetMovementMode() (4919, 4924), never on a deny;
+    //   - W&L: vanilla's own PerformAIActionDLCWL rule (5101) - a unit of a
+    //     group in ai_stance >= 1 (delegated to the AI) may act;
+    //   - a counter-charge against a charging enemy (or from melee) is never
+    //     denied by role/doctrine;
+    //   - Tactical Commander Mode != Active: the Prefix returns true and vanilla
+    //     runs untouched (no Whiskey denials).
+    // Note: vanilla compares unit.groupaiobject (GameObject) with aigroup
+    // (Regiment) at 4910, which never matches, so vanilla initiates no charge
+    // here; the mirror keeps that comparison verbatim.
     [HarmonyPatch(typeof(AIBattle), "MicroAICheckForCharges")]
     internal static class BattleChargeGatePatch
     {
         private static readonly object TelemetryGate = new object();
-        private static readonly HashSet<string> _typedDenyTelemetryKeys = new HashSet<string>();
+        private static readonly Dictionary<string, float> _lastDenyTelemetryAt = new Dictionary<string, float>();
         private static FieldInfo _bunitsField;
         private static FieldInfo _isPlayerAiOrFeudField;
         private static bool _missingRequiredAnchorLogged;
@@ -30,7 +44,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-charge-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return true;
+                if (!BattleWriterPolicy.GateMayIntervene(TacticalWriteGuard.ModeAllowsWrites(), Enabled())) return true;
 
                 bool tookOwnership = false;
                 try
@@ -54,7 +68,8 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < allattachedunits.Length; i++)
                 {
                     Regiment unit = allattachedunits[i];
-                    if (unit == null || unit.groupaiobject != aigroup) continue;
+                    // Verbatim vanilla 4910 (GameObject vs Regiment: never equal).
+                    if (unit == null || (UnityEngine.Object)unit.groupaiobject != (UnityEngine.Object)aigroup) continue;
 
                     bool chargeStance = aigroup.ai_stance == 4;
                     bool typeAllowed = ((unit.unittyp <= 13 && restrictunittypes == 13) | (unit.unittyp == restrictunittypes));
@@ -75,70 +90,30 @@ namespace WhiskeyRealism.Patches
                         feudAllowed &&
                         unit.lastaichargetime < GameVars.currenttimefromstart + GamePrefs.timetorenewaichargecheck)
                     {
-                        TacticalWlGuardDecision decision = TacticalWlActionGuard.Decide(
-                            configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
-                            dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                            action: TacticalWlGuardAction.ChargeInitiation,
-                            unitUnderCommander: unit.dlcw_isundercommander,
-                            groupUnderCommander: aigroup.dlcw_isundercommander,
-                            attachedUnitUnderCommander: false);
+                        bool wlAllows = !Plugin.Instance.EnableWlTacticalChargeGuard.Value ||
+                            BattleWriterPolicy.WlAllowsUnitAction(
+                                DLC_WL.dlc_scenarioactive,
+                                aigroup.ai_stance,
+                                (UnityEngine.Object)unit.groupaiobject == (UnityEngine.Object)aigroup.groupaiobject,
+                                unit.dlcw_isundercommander);
 
-                        if (decision.Allow)
+                        tookOwnership = true;
+                        if (!wlAllows)
                         {
-                            tookOwnership = true;
-                            aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
-
-                            if (!doctrineContextInitialized)
-                            {
-                                hasDoctrineOrder = TryResolveDoctrineOrder(aigroup, out doctrineOrder, out doctrinePicture);
-                                doctrineContextInitialized = true;
-                            }
-
-                            bool screenRoutedTargetVisible = ScreenRoutedChargeTargetVisible(unit);
-                            DoctrineChargeDecision doctrineDecision = new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "no-doctrine-order");
-                            if (hasDoctrineOrder)
-                            {
-                                float localOdds = LocalOdds(aigroup);
-                                doctrineDecision = DoctrineConsumerDecisions.DecideCharge(
-                                    doctrineOrder,
-                                    DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, doctrinePicture),
-                                    localOdds,
-                                    screenRoutedTargetVisible,
-                                    BuildEnduranceDecision(aigroup),
-                                    BuildMeleeFearDecision(aigroup, unit, doctrineOrder),
-                                    BuildInfantryFireDecision(aigroup, unit, doctrineOrder));
-                                if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
-                                {
-                                    LogDeniedDoctrine(unit, aigroup, doctrineOrder, doctrineDecision, localOdds, screenRoutedTargetVisible);
-                                    continue;
-                                }
-                            }
-
-                            if (!orchestratorContextInitialized)
-                            {
-                                orchestratorContext = BuildOrchestratorChargeContext(aigroup);
-                                orchestratorContextInitialized = true;
-                            }
-
-                            TacticalOrchestratorChargeGate.Decision orchestratorDecision =
-                                DecideOrchestratorCharge(orchestratorContext, screenRoutedTargetVisible);
-                            bool orchestratorDenied = orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny;
-                            if (!DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, orchestratorDenied))
-                            {
-                                LogDeniedOrchestrator(unit, aigroup, orchestratorDecision, orchestratorContext, screenRoutedTargetVisible);
-                                continue;
-                            }
-
-                            bool b6cDenied = TryB6cDeny(unit, aigroup);
-                            if (!DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, b6cDenied)) continue;
-
-                            unit.SetMovementMode(3);
+                            LogDenied(unit, aigroup, "player-subordinate");
                         }
-                        else
+                        else if (MayInitiateCharge(
+                            unit,
+                            aigroup,
+                            ref doctrineContextInitialized,
+                            ref hasDoctrineOrder,
+                            ref doctrineOrder,
+                            ref doctrinePicture,
+                            ref orchestratorContextInitialized,
+                            ref orchestratorContext))
                         {
-                            tookOwnership = true;
+                            unit.SetMovementMode(3);
                             aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
-                            LogDenied(unit, aigroup, decision.Reason);
                         }
                     }
 
@@ -171,6 +146,71 @@ namespace WhiskeyRealism.Patches
 
             return false;
             } // end using TelemetryPerf.Scope
+        }
+
+        // Whiskey denials (doctrine, orchestrator role, B6c local reaction).
+        // A counter-charge against a charging enemy is never denied.
+        private static bool MayInitiateCharge(
+            Regiment unit,
+            Regiment aigroup,
+            ref bool doctrineContextInitialized,
+            ref bool hasDoctrineOrder,
+            ref CommandDoctrineOrder doctrineOrder,
+            ref BattlefieldPictureSnapshot doctrinePicture,
+            ref bool orchestratorContextInitialized,
+            ref OrchestratorChargeContext orchestratorContext)
+        {
+            Regiment visibleEnemy = TacticalFogOfWarContact.ClosestVisibleEnemy(unit);
+            if (BattleWriterPolicy.IsCounterCharge(
+                    (UnityEngine.Object)visibleEnemy != null,
+                    visibleEnemy != null ? visibleEnemy.movementmode : 0,
+                    visibleEnemy != null && (visibleEnemy.isrouted || visibleEnemy.markedforrout),
+                    unit.inmelee))
+                return true;
+
+            if (!doctrineContextInitialized)
+            {
+                hasDoctrineOrder = TryResolveDoctrineOrder(aigroup, out doctrineOrder, out doctrinePicture);
+                doctrineContextInitialized = true;
+            }
+
+            bool screenRoutedTargetVisible = ScreenRoutedChargeTargetVisible(unit);
+            DoctrineChargeDecision doctrineDecision = new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "no-doctrine-order");
+            if (hasDoctrineOrder)
+            {
+                float localOdds = LocalOdds(aigroup);
+                doctrineDecision = DoctrineConsumerDecisions.DecideCharge(
+                    doctrineOrder,
+                    DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, doctrinePicture),
+                    localOdds,
+                    screenRoutedTargetVisible,
+                    BuildEnduranceDecision(aigroup),
+                    BuildMeleeFearDecision(aigroup, unit, doctrineOrder),
+                    BuildInfantryFireDecision(aigroup, unit, doctrineOrder));
+                if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
+                {
+                    LogDeniedDoctrine(unit, aigroup, doctrineOrder, doctrineDecision, localOdds, screenRoutedTargetVisible);
+                    return false;
+                }
+            }
+
+            if (!orchestratorContextInitialized)
+            {
+                orchestratorContext = BuildOrchestratorChargeContext(aigroup);
+                orchestratorContextInitialized = true;
+            }
+
+            TacticalOrchestratorChargeGate.Decision orchestratorDecision =
+                DecideOrchestratorCharge(orchestratorContext, screenRoutedTargetVisible);
+            bool orchestratorDenied = orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny;
+            if (!DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, orchestratorDenied))
+            {
+                LogDeniedOrchestrator(unit, aigroup, orchestratorDecision, orchestratorContext, screenRoutedTargetVisible);
+                return false;
+            }
+
+            bool b6cDenied = TryB6cDeny(unit, aigroup);
+            return DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, b6cDenied);
         }
 
         private static bool Enabled()
@@ -211,7 +251,7 @@ namespace WhiskeyRealism.Patches
             }
 
             CommandIntentResolution resolution = ResolveIntent(group);
-            bool playerControlled = HasPlayerOwnership(group);
+            bool playerControlled = TacticalWriteGuard.IsPlayerProtected(group);
             float localOdds = LocalOdds(group);
             bool mainEffortSupportAvailable = MainEffortSupportAvailable(group, resolution);
 
@@ -264,29 +304,6 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 return new CommandIntentResolution(false, default, "resolve-error:" + ex.GetType().Name);
-            }
-        }
-
-        private static bool HasPlayerOwnership(Regiment group)
-        {
-            try
-            {
-                if (group == null) return true;
-                if (!SafeAiVsAi() && group.alliance == SafePlayerAlliance()) return true;
-                if (group.dlcw_isundercommander) return true;
-                if (group.allattachedunits == null) return false;
-
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment attached = group.allattachedunits[i];
-                    if (attached != null && attached.dlcw_isundercommander) return true;
-                }
-
-                return false;
-            }
-            catch
-            {
-                return true;
             }
         }
 
@@ -757,18 +774,6 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static int SafePlayerAlliance()
-        {
-            try { return GameVars.playeralliance; }
-            catch { return -99; }
-        }
-
-        private static bool SafeAiVsAi()
-        {
-            try { return GameVars.ai_vs_ai; }
-            catch { return false; }
-        }
-
         private static float Sanitize(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
@@ -827,14 +832,14 @@ namespace WhiskeyRealism.Patches
         private static void LogDenied(Regiment unit, Regiment group, string reason)
         {
             OnceLog.Info("tactical-charge-guard", "BattleChargeGatePatch wired");
-            OnceLog.Info("tactical-charge-guard:deny:" + SafeName(unit), "[TacticalChargeGuard] action=deny reason=" + reason +
+            OnceLog.Info("tactical-charge-guard:deny", "[TacticalChargeGuard] action=deny reason=" + reason +
                 " unit=" + SafeName(unit) +
                 " group=" + SafeName(group));
         }
 
         private static void LogDeniedB6c(Regiment unit, Regiment group, TacticalLocalReactionDecision reaction)
         {
-            OnceLog.Info("tactical-charge-deny:movement:" + SafeName(unit), "[TacticalChargeDeny] surface=movement action=deny" +
+            OnceLog.Info("tactical-charge-deny:movement", "[TacticalChargeDeny] surface=movement action=deny" +
                 " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " reaction=" + reaction.Reaction +
@@ -850,7 +855,7 @@ namespace WhiskeyRealism.Patches
             bool targetRouted)
         {
             OnceLog.Info(
-                "tactical-doctrine-charge:deny:" + SafeName(unit),
+                "tactical-doctrine-charge:deny",
                 "[TacticalDoctrineCharge] action=deny" +
                 " task=" + order.Task +
                 " reason=" + decision.Reason +
@@ -878,7 +883,7 @@ namespace WhiskeyRealism.Patches
                 context.LocalOdds,
                 context.MainEffortSupportAvailable,
                 screenRoutedTargetVisible);
-            if (!MarkTypedDenyTelemetryOnce("orchestrator:" + SafeInstanceId(unit)))
+            if (!ShouldEmitDenyTelemetry("orchestrator|" + decision.Role + "|" + decision.Reason))
                 return;
 
             TelemetryRouter.Emit(
@@ -906,22 +911,20 @@ namespace WhiskeyRealism.Patches
                     .WithField("group", SafeName(group) + "#" + SafeInstanceId(group)));
         }
 
-        private static bool MarkTypedDenyTelemetryOnce(string key)
+        // Bounded: one row per role/reason signature per 30 s real time.
+        private static bool ShouldEmitDenyTelemetry(string signature)
         {
             try
             {
                 lock (TelemetryGate)
                 {
-                    if (_typedDenyTelemetryKeys.Contains(key))
-                        return false;
-
-                    _typedDenyTelemetryKeys.Add(key);
-                    return true;
+                    return TacticalTelemetry.ShouldEmit(
+                        _lastDenyTelemetryAt, "charge-gate-deny", signature, Time.realtimeSinceStartup, 30f, false);
                 }
             }
             catch
             {
-                return true;
+                return false;
             }
         }
 
