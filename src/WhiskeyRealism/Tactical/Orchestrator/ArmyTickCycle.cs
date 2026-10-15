@@ -285,7 +285,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 armyMoraleCurrent: ownArmyMorale,
                 armyMoraleFloor: 0.4f,
                 reservesCommittedFraction: ownReservesCommittedFraction,
-                mainEffortReadiness: readiness.Result);
+                mainEffortReadiness: readiness.Result,
+                intelConfidence01: enemyVisible.IntelConfidence01);
 
             var input = new ReplanTriggerInput(
                 planAgeSeconds: orchestrator.PlanAgeSeconds,

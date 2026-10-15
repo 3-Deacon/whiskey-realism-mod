@@ -84,6 +84,9 @@ internal static class TacticalEvidenceFixTests
         Run("an externally recorded replan counts against the replan cooldown", RecordedReplanRateLimits);
         Run("a backward doctrine clock does not lock out replans", BackwardClockDoesNotLockReplan);
         Run("recorded replans and summed-delta ticks share one cooldown clock", RecordReplanWithSummedDeltas);
+        Run("early battle with unwatched entry points still acts at half confidence", EarlyBattleUnwatchedEntriesActs);
+        Run("coverage bands span own and known enemy ground", CoverageBandsSpanKnownEnemy);
+        Run("probe commits only on enough intel", ProbeCommitNeedsIntel);
     }
 
     private static void Run(string name, Action test)
@@ -547,10 +550,13 @@ internal static class TacticalEvidenceFixTests
         // Same small enemy every time; only the observation changes.
         var full = Seen(1f, 500f, 500f);
         TestHarness.AssertTrue(Near(full.Confidence(1f), 1f), "a small enemy fully observed -> full confidence");
+        TestHarness.AssertEqual(0.5f, TacticalEnemyContactLedger.UnwatchedEntryPointWeight, "unwatched entry points weigh half");
         var unwatched = Seen(1f, 500f, 500f, bands: 5, watchedEntries: 0, totalEntries: 2);
-        TestHarness.AssertEqual(0f, unwatched.Confidence(1f), "enemy arrivals pending at unwatched entry points -> no confidence");
+        TestHarness.AssertEqual(0.5f, unwatched.Confidence(1f), "no enemy-side entry point watched -> half confidence, not none");
         var halfEntries = Seen(1f, 500f, 500f, bands: 5, watchedEntries: 1, totalEntries: 2);
-        TestHarness.AssertTrue(Near(halfEntries.Confidence(1f), 0.5f), "half the entry points watched");
+        TestHarness.AssertTrue(Near(halfEntries.Confidence(1f), 0.75f), "half the entry points watched");
+        var allEntries = Seen(1f, 500f, 500f, bands: 5, watchedEntries: 2, totalEntries: 2);
+        TestHarness.AssertTrue(Near(allEntries.Confidence(1f), 1f), "every entry point watched -> full");
         var threeBands = Seen(1f, 500f, 500f, bands: 3);
         TestHarness.AssertTrue(Near(threeBands.Confidence(1f), 0.6f), "three of five bands observed");
         // A band not re-observed fades over the contact memory.
@@ -999,8 +1005,8 @@ internal static class TacticalEvidenceFixTests
     private static void ArmyOddsBlendWithConfidence()
     {
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, new TacticalEnemyContactLedger(), 1f), "no contact: unknown");
-        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f, watchedEntries: 0, totalEntries: 1), 1f),
-            "picket while enemy arrivals are unwatched: unknown");
+        float picket = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f, bands: 1, watchedEntries: 0, totalEntries: 1), 1f);
+        TestHarness.AssertTrue(picket > 1f && picket < 2f, "picket under low coverage (conf 0.1) stays near unknown, got " + picket);
         TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 4000f, 1000f), 1f), 1.5f), "full coverage: own/seen");
         TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1200f, 1200f), 1f), 5f),
             "a small enemy fully observed reads its real odds (no size floor)");
@@ -1032,15 +1038,17 @@ internal static class TacticalEvidenceFixTests
     {
         ArmyTickCycle.ResetForTest();
         var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
-        // Low coverage: enemy reinforcements are due at an entry point no own unit watches.
-        var ledger = Seen(1f, 40f, 40f, watchedEntries: 0, totalEntries: 1);
+        // Low coverage: one of five coverage bands observed, the enemy-side
+        // entry point unwatched -> confidence 0.1.
+        var ledger = Seen(1f, 40f, 40f, bands: 1, watchedEntries: 0, totalEntries: 1);
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
+        TestHarness.AssertTrue(odds < 2f, "blended odds stay low, got " + odds);
         var picketFront = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 40f, true) },
             ledger.ReserveCommitFraction(40f), true, false, 0f, intelConfidence01: ledger.Confidence(1f));
-        var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), picketFront,
+        ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), picketFront,
             6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
-        TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "a picket under low coverage is not a reason to commit");
-        TestHarness.AssertTrue(trigger != ReplanTrigger.ForceImbalanceShift, "no force-imbalance replan on a picket");
+        TestHarness.AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase,
+            "a picket under low coverage is not enough intel to commit the main effort");
     }
 
     private static void MorningOddsNotInflated()
@@ -1259,5 +1267,66 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.RecordReplan(orch2.AllianceId, 108000.0);
         TestHarness.AssertEqual(ReplanTrigger.None, CasualtyTick(orch2, 20f), "live trigger 20 s after the recorded replan: rate-limited");
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, CasualtyTick(orch2, 50f), "70 s after: the same trigger replans");
+    }
+
+    private static void EarlyBattleUnwatchedEntriesActs()
+    {
+        // Front fully observed, none of three enemy-side entry points watched.
+        var ledger = Seen(1f, 2000f, 0f, bands: 5, watchedEntries: 0, totalEntries: 3);
+        TestHarness.AssertEqual(0.5f, ledger.Confidence(1f), "half confidence");
+        float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, 1f);
+        TestHarness.AssertTrue(Near(odds, 2f), "3:1 blended halfway -> 2, got " + odds);
+        ArmyEvidenceBuilder.ForceBalanceIntel(ledger, 1f, out float enemy, out float conf);
+        var ev = new TacticalForceBalanceEvidence(6000f, enemy, Array.Empty<ReinforcementArrival>(), Array.Empty<ReinforcementArrival>(),
+            0.5f, 0.5f, conf, stance: BattleStance.Meeting);
+        TestHarness.AssertTrue(TacticalReinforcementOpportunityDoctrine.Decide(ev).Reason != "intel-confidence-too-low",
+            "the opportunity doctrine acts at 0.5");
+
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2, aggression: 0.5f);
+        var front = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 2000f, false) },
+            0.35f, true, false, 0f, intelConfidence01: conf);
+        ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(odds, TerrainKind.Open, 2), front,
+            6000f, 1f, 0.35f, 0f, 600, 0f, 1f, 0f, 0f, battleDeltaSeconds: 60f);
+        TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase, "the probe commits at half confidence");
+    }
+
+    private static void CoverageBandsSpanKnownEnemy()
+    {
+        // Facing east; own line spans 800 m north-south, remembered enemy
+        // positions extend 800-1200 m beyond one end with no own observer.
+        var bare = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f);
+        var own = new List<FrontUnitSample>();
+        for (int i = 0; i < 5; i++) own.Add(new FrontUnitSample(100 + i, 500f, -400f + 200f * i, 1000f, false));
+        var known = new List<FrontUnitSample> { new FrontUnitSample(900, 1500f, -800f, 500f, false), new FrontUnitSample(901, 1500f, -1200f, 500f, false) };
+        var observed = new bool[5];
+        int bands = EnemyVisibleSectorBuilder.CoverageBands(bare, own, known, observed);
+        int count = 0;
+        for (int i = 0; i < bands; i++) if (observed[i]) count++;
+        TestHarness.AssertEqual(5, bands, "five coverage bands");
+        TestHarness.AssertEqual(3, count, "bands over enemy-held ground with no own observer stay unobserved");
+
+        var ledger = new TacticalEnemyContactLedger();
+        ledger.Observe(1f, 1000f, 0f);
+        ledger.ObserveCoverage(1f, observed, bands, 1, 1);
+        TestHarness.AssertTrue(Near(ledger.Confidence(1f), 0.6f), "confidence drops to 3/5");
+
+        var ownOnly = new bool[5];
+        EnemyVisibleSectorBuilder.CoverageBands(bare, own, new List<FrontUnitSample>(), ownOnly);
+        int ownCount = 0;
+        foreach (var b in ownOnly) if (b) ownCount++;
+        TestHarness.AssertEqual(5, ownCount, "with no known enemy beyond the line every band is observed");
+    }
+
+    private static void ProbeCommitNeedsIntel()
+    {
+        TacticalPhaseProgressionDoctrine.Input In(float conf) => new TacticalPhaseProgressionDoctrine.Input(
+            BattlePhase.Probe, 60f, 1.9f, 1f, 1.9f, 1f, 1f, 0.4f, 0.35f, 0.5f,
+            intelConfidence01: conf);
+        TestHarness.AssertEqual(BattlePhase.Probe, TacticalPhaseProgressionDoctrine.Decide(In(0.1f)).NextPhase, "0.1 confidence keeps probing");
+        TestHarness.AssertEqual(BattlePhase.MainEffort, TacticalPhaseProgressionDoctrine.Decide(In(0.5f)).NextPhase,
+            "the opportunity doctrine's gate (0.5) is enough to commit");
+        TestHarness.AssertEqual(TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction,
+            TacticalPhaseProgressionDoctrine.ProbeCommitMinIntelConfidence, "one intel gate for both doctrines");
     }
 }

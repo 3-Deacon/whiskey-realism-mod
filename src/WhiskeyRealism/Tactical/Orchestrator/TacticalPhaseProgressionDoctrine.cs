@@ -42,6 +42,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // force should pause and consolidate.
         public const float ProbeCommitOddsFloor = 1.05f;
 
+        /// <summary>
+        /// Intel confidence the probe needs before odds alone commit the main
+        /// effort: the same gate the reinforcement-opportunity doctrine acts on
+        /// (<see cref="TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction"/>),
+        /// so both doctrines agree on "enough intel to act". Blended odds clear
+        /// 1.05 at almost any confidence against a small force; this keeps a
+        /// picket seen under low coverage from committing the army. The probe
+        /// budget still commits on time.
+        /// </summary>
+        public const float ProbeCommitMinIntelConfidence = TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction;
+
         // Consolidate exit threshold for "odds recovered, resume attack."
         // Matches the legacy 1.4 hysteresis used elsewhere.
         public const float ResumeFromConsolidateOddsFloor = 1.4f;
@@ -74,9 +85,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float armyMoraleFloor,
                 float reservesCommittedFraction,
                 float commanderAggression01,
-                TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady)
+                TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady,
+                float intelConfidence01 = 1f)
             {
                 CurrentPhase = currentPhase;
+                IntelConfidence01 = float.IsNaN(intelConfidence01) ? 0f : Clamp01(intelConfidence01);
                 PlanAgeSeconds = planAgeSeconds < 0f ? 0f : planAgeSeconds;
                 GlobalOddsCurrent = SanitizePositive(globalOddsCurrent, 1f);
                 GlobalOddsHistory = SanitizePositive(globalOddsHistory, 1f);
@@ -107,6 +120,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             /// transition is blocked even with favorable odds.
             /// </summary>
             public TacticalSectorReadinessDoctrine.Result MainEffortReadiness { get; }
+
+            /// <summary>Contact-ledger confidence behind the odds (1 for callers without a ledger).</summary>
+            public float IntelConfidence01 { get; }
 
             public bool IsReservesCommitKnown
             {
@@ -186,6 +202,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (input.GlobalOddsCurrent >= ProbeCommitOddsFloor &&
                 input.MainEffortOddsCurrent >= ProbeCommitOddsFloor &&
+                input.IntelConfidence01 >= ProbeCommitMinIntelConfidence &&
                 readinessAllowsPush)
                 return new Decision(BattlePhase.MainEffort, "probe-found-purchase");
 

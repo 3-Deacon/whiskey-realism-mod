@@ -384,7 +384,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float armyMoraleCurrent,
             float armyMoraleFloor,
             float reservesCommittedFraction,
-            TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady)
+            TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady,
+            float intelConfidence01 = 1f)
         {
             if (!HasPlan)
                 return new TacticalPhaseProgressionDoctrine.Decision(BattlePhase.Probe, "no-plan");
@@ -404,7 +405,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 armyMoraleFloor: armyMoraleFloor,
                 reservesCommittedFraction: reservesCommittedFraction,
                 commanderAggression01: aggression01,
-                mainEffortReadiness: mainEffortReadiness);
+                mainEffortReadiness: mainEffortReadiness,
+                intelConfidence01: intelConfidence01);
 
             var decision = TacticalPhaseProgressionDoctrine.Decide(input);
             if (decision.NextPhase != _plan.Phase)

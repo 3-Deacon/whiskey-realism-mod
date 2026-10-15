@@ -30,6 +30,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>Contact older than this is no longer evidence of anything.</summary>
         public const float ContactMemoryHours = 2f;
 
+        /// <summary>
+        /// Weight of the unwatched share of the enemy-side map entry points:
+        /// entry factor = this + (1 − this) × watched share. Not watching an
+        /// entry point leaves room for unseen arrivals, but entry points are
+        /// map knowledge and do not tell whether anything is coming, so they
+        /// can halve the confidence, never zero it.
+        /// </summary>
+        public const float UnwatchedEntryPointWeight = 0.5f;
+
         private float _largestSeen;
         private float _lastObserveHours = -1f;
         private float _lastContactHours = -1f;
@@ -51,11 +60,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Records what the side observed this tick: the front bands
-        /// (<see cref="TacticalFrontAxis"/>) holding live own combat units whose
-        /// sight lists were sampled, and how many of the enemy's pending
-        /// reinforcement entry points an own unit watches. Size of the enemy
-        /// plays no part.
+        /// Records what the side observed this tick: which coverage bands (fitted
+        /// over own units and known enemy positions,
+        /// EnemyVisibleSectorBuilder.CoverageBands) hold live own combat units
+        /// whose sight lists were sampled, and how many of the enemy-side map
+        /// entry points an own unit watches. Size of the enemy plays no part.
         /// </summary>
         public void ObserveCoverage(float nowHours, bool[] observedBands, int bandCount, int watchedEntryPoints, int totalEntryPoints)
         {
@@ -124,12 +133,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Intel confidence on [0, 1] in the current estimate:
         /// coverage × contact recency, independent of how large the enemy is.
         /// Coverage = mean per-band observation recency (a band not observed
-        /// for <see cref="ContactMemoryHours"/> counts 0) × the share of
-        /// pending enemy entry points watched (1 when none are pending).
-        /// Contact recency fades the estimate itself: an old sighting carries
-        /// no confidence however fully the front is watched now. Multiplicative
-        /// by design: while enemy reinforcements are due at an unwatched entry
-        /// point the confidence is 0 and the doctrine falls back to vanilla.
+        /// for <see cref="ContactMemoryHours"/> counts 0) × the entry factor
+        /// (<see cref="UnwatchedEntryPointWeight"/> + the rest × the watched
+        /// share of enemy-side entry points; 1 when there are none). Contact
+        /// recency fades the estimate itself: an old sighting carries no
+        /// confidence however fully the front is watched now.
         /// </summary>
         public float Confidence(float nowHours)
         {
@@ -138,7 +146,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < _bandObservedHours.Length; i++)
                 bands += _bandObservedHours[i] < 0f ? 0f : Recency(nowHours - _bandObservedHours[i]);
             float bandTerm = _bandObservedHours.Length == 0 ? 0f : bands / _bandObservedHours.Length;
-            return bandTerm * _entryShare * Recency(nowHours - _lastContactHours);
+            float entryFactor = UnwatchedEntryPointWeight + (1f - UnwatchedEntryPointWeight) * _entryShare;
+            return bandTerm * entryFactor * Recency(nowHours - _lastContactHours);
         }
 
         private static float Recency(float sinceHours)

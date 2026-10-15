@@ -148,6 +148,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return result.ToArray();
         }
 
+        /// <summary>
+        /// Coverage bands for intel confidence: <paramref name="bandCount"/>
+        /// bands across the combined lateral extent of own units and known
+        /// (visible or remembered) enemy positions, marked observed where an
+        /// own combat unit stands. Bands over enemy-held ground with no own
+        /// observer stay unobserved. Separate from the sector bands, which stay
+        /// fitted over the own extent for role allocation. Returns the number
+        /// of bands written (0 when there is nothing to fit).
+        /// </summary>
+        public static int CoverageBands(
+            TacticalFrontAxis bare,
+            IReadOnlyList<FrontUnitSample> ownUnits,
+            IReadOnlyList<FrontUnitSample> knownEnemyUnits,
+            bool[] observed,
+            int bandCount = TacticalFrontAxis.DefaultBandCount)
+        {
+            if (observed == null || bandCount <= 0 || observed.Length < bandCount) return 0;
+            Array.Clear(observed, 0, bandCount);
+            if (!bare.IsValid || ownUnits == null || ownUnits.Count == 0) return 0;
+            float min = 0f, max = 0f;
+            if (!Extent(bare, ownUnits, ref min, ref max)) return 0;
+            float emin = 0f, emax = 0f;
+            if (Extent(bare, knownEnemyUnits, ref emin, ref emax))
+            {
+                if (emin < min) min = emin;
+                if (emax > max) max = emax;
+            }
+            var axis = bare.WithOwnExtent(min, max, bandCount);
+            for (int i = 0; i < ownUnits.Count; i++)
+            {
+                int b = axis.SectorOf(ownUnits[i].X, ownUnits[i].Z);
+                if (b >= 0 && b < bandCount) observed[b] = true;
+            }
+            return bandCount;
+        }
+
         /// <summary>Instance id → band for own command groups.</summary>
         public static Dictionary<int, int> MapInstances(TacticalFrontAxis axis, IReadOnlyList<FrontUnitSample> groups)
         {

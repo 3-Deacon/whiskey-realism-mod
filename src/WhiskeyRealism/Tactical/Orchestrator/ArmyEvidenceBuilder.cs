@@ -375,6 +375,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _lastFittedAxis[i] = TacticalFrontAxis.None;
                 _contactLedgers[i].Reset();
                 _visibleEnemyEntryPoints[i] = new HashSet<int>();
+                _rememberedEnemy[i].Clear();
                 _terrainByAlliance[i] = null;
             }
             _battleOwner = null;
@@ -478,30 +479,73 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Entry points of the enemy's still-scheduled arrivals
-        /// (BattleUnits.scheduledarrival 78960, ScheduledArrival.entrypoint 78616).
+        /// The enemy side's map entry points: <c>BattleUnits.entrypoints</c>
+        /// (78974) whose <c>EntryPoint.owner</c> is the enemy alliance. Owner is
+        /// map knowledge — set from deployment proximity (87691), the
+        /// frontline zones (87891-87895) and capture (98919). Unowned points
+        /// (owner -1) are not counted. Whether anything is scheduled to arrive
+        /// is not read here.
         /// </summary>
-        private static List<EntrySample> EnemyEntryPoints(BattleUnits bunits, int ownAllianceId)
+        private static List<EntrySample> EnemyEntryPoints(BattleUnits bunits, int enemyAllianceId)
         {
             var list = new List<EntrySample>();
             try
             {
-                var arrivals = bunits.scheduledarrival;
-                if (arrivals == null) return list;
-                var seen = new HashSet<int>();
-                for (int i = 0; i < arrivals.Count; i++)
+                var points = bunits.entrypoints;
+                if (points == null || enemyAllianceId < 0) return list;
+                for (int i = 0; i < points.Length; i++)
                 {
-                    var a = arrivals[i];
-                    if (a?.regimentrefreg == null || a.entrypoint == null) continue;
-                    if (a.regimentrefreg.alliance == ownAllianceId) continue;
-                    int id = a.entrypoint.GetInstanceID();
-                    if (!seen.Add(id)) continue;
-                    var p = a.entrypoint.transform.position;
-                    list.Add(new EntrySample(id, p.x, p.z));
+                    var e = points[i];
+                    if ((object)e == null || e.owner != enemyAllianceId) continue;
+                    var p = e.transform.position;
+                    list.Add(new EntrySample(e.GetInstanceID(), p.x, p.z));
                 }
             }
             catch { }
             return list;
+        }
+
+        private readonly struct RememberedEnemy
+        {
+            public RememberedEnemy(float x, float z, float hours) { X = x; Z = z; Hours = hours; }
+            public float X { get; }
+            public float Z { get; }
+            public float Hours { get; }
+        }
+
+        // Last-known enemy positions per alliance (instance id -> where and
+        // when last in range), kept for the contact memory so coverage bands
+        // can span enemy-held ground that is out of range right now.
+        private static readonly Dictionary<int, RememberedEnemy>[] _rememberedEnemy =
+            { new Dictionary<int, RememberedEnemy>(), new Dictionary<int, RememberedEnemy>() };
+        private static readonly List<FrontUnitSample> _knownEnemyBuffer = new List<FrontUnitSample>();
+        private static readonly List<int> _expiredBuffer = new List<int>();
+
+        /// <summary>
+        /// Refreshes the remembered positions with this build's visible
+        /// enemies, drops entries older than the contact memory (or from a
+        /// later clock — reload), and fills <see cref="_knownEnemyBuffer"/>.
+        /// </summary>
+        private static List<FrontUnitSample> KnownEnemyPositions(int allianceId, List<FrontUnitSample> visible, float nowHours)
+        {
+            _knownEnemyBuffer.Clear();
+            if (allianceId < 0 || allianceId > 1)
+            {
+                _knownEnemyBuffer.AddRange(visible);
+                return _knownEnemyBuffer;
+            }
+            var memory = _rememberedEnemy[allianceId];
+            for (int i = 0; i < visible.Count; i++)
+                memory[visible[i].InstanceId] = new RememberedEnemy(visible[i].X, visible[i].Z, nowHours);
+            _expiredBuffer.Clear();
+            foreach (var kv in memory)
+            {
+                float age = nowHours - kv.Value.Hours;
+                if (age < 0f || age > TacticalEnemyContactLedger.ContactMemoryHours) _expiredBuffer.Add(kv.Key);
+                else _knownEnemyBuffer.Add(new FrontUnitSample(kv.Key, kv.Value.X, kv.Value.Z, 0f, false));
+            }
+            for (int i = 0; i < _expiredBuffer.Count; i++) memory.Remove(_expiredBuffer[i]);
+            return _knownEnemyBuffer;
         }
 
         /// <summary>
@@ -604,7 +648,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 Dictionary<int, float> flankThreat = null;
                 bool anyRecentFire = false;
                 EnsureBattleOwner(bunits);
-                var enemyEntries = EnemyEntryPoints(bunits, ownAllianceId);
+                var enemyEntries = EnemyEntryPoints(bunits, SafeAlliance(bunits, enemySide));
                 // The watched-entry set is kept per alliance for BuildForceBalance;
                 // refill it in place.
                 var visibleEntries = ownAllianceId >= 0 && ownAllianceId <= 1
@@ -676,16 +720,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (ledger != null)
                 {
                     ledger.Observe(nowHours, visibleStrength, engagedStrength);
-                    // Coverage: bands holding own combat units (each sampled
-                    // above) and the enemy entry points an own unit watches.
-                    int bandCount = axis.IsValid && axis.BandCount > 0 ? axis.BandCount : 1;
-                    if (_ownBandBuffer.Length < bandCount) _ownBandBuffer = new bool[bandCount];
-                    Array.Clear(_ownBandBuffer, 0, _ownBandBuffer.Length);
-                    for (int i = 0; i < ownCombat.Count; i++)
-                    {
-                        int band = axis.SectorOf(ownCombat[i].X, ownCombat[i].Z);
-                        if (band >= 0 && band < bandCount) _ownBandBuffer[band] = true;
-                    }
+                    // Coverage: bands across own units and known (visible +
+                    // remembered) enemy positions, observed where an own combat
+                    // unit (each sampled above) stands; and the enemy-side
+                    // entry points an own unit watches.
+                    var knownEnemy = KnownEnemyPositions(ownAllianceId, enemyVisible, nowHours);
+                    int bandCount = EnemyVisibleSectorBuilder.CoverageBands(bare, ownCombat, knownEnemy, _ownBandBuffer);
                     ledger.ObserveCoverage(nowHours, _ownBandBuffer, bandCount, visibleEntries.Count, enemyEntries.Count);
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
