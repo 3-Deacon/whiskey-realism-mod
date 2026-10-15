@@ -22,6 +22,9 @@ internal static class ChapterFixTests
             ("chapter era stale calendar late war is pulled back when the chapter is known", StaleCalendarLateWarPulledBack),
             ("chapter era stale late war keeps chapter 3 and unknown chapter", StaleLateWarKeepsChapterThreeAndUnknown),
             ("chapter era stale late war leaves other stages alone", StaleLateWarLeavesOtherStagesAlone),
+            ("chapter project window uses the calendar year for a project dated 1864", ProjectDatedYearWindowUsesTheCalendar),
+            ("chapter project window flags a project dated 1864 before 1864", ProjectDatedBeforeItsYearIsOutOfWindow),
+            ("chapter project selection patch reads the campaign year once and hands it to the facts", ProjectPatchPassesTheCampaignYear),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -133,5 +136,54 @@ internal static class ChapterFixTests
         AssertContains(src, "era.CheckTransition(month, year, ws.VicksburgFallen, SafePolicyChapter());", "AI alliance");
         AssertContains(src, "else if (firstCall) { // Sidecar migration", "a seeded era is migrated on the first call only");
         AssertContains(src, "_work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());", "stale calendar late war pulled back");
+    }
+
+    // The stage is vanilla's chapter now; a project's date from is a calendar date (datefrom[alliance]).
+    private static WhiskeyRealism.Strategic.Projects.ProjectDoctrineDecision SelectWithVanilla1864Project(int campaignYear)
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Decisive1863,
+            FiscalPosture = WhiskeyRealism.Strategic.Fiscal.FiscalPosture.BalancedWar,
+            NavalDeficit = 1f
+        };
+        var candidates = new[] { new ProjectCandidateInput { ProjectId = 31, SubsidyType = 4, VanillaWeight = 0.2f } };
+        return WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Decisive1863),
+            signals, subsidyType: 4, vanillaProjectId: 35, vanillaWeight: 1f, candidates: candidates, fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts
+            {
+                ProjectId = id,
+                SubsidyLane = 4,
+                Cost = 1000f,
+                DateFromKnown = id == 35,
+                DateFromYear = id == 35 ? 1864 : 0,
+                DateFromMonth = 1,
+                DateFromDay = 1,
+                CampaignYear = campaignYear
+            },
+            fundingAvailable: 0f, netFundingPerDay: 0f, constructionCurrentlyWins: false);
+    }
+
+    private static void ProjectDatedYearWindowUsesTheCalendar()
+    {
+        // June 1864, chapter 2 (era Decisive1863): vanilla's own 1864 pick is available, not out of window.
+        var decision = SelectWithVanilla1864Project(1864);
+        AssertTrue(decision.Reason != "out-of-window-vanilla", "a project dated 1864 is in window in 1864 whatever the era");
+    }
+
+    private static void ProjectDatedBeforeItsYearIsOutOfWindow()
+    {
+        var decision = SelectWithVanilla1864Project(1863);
+        AssertEqual("out-of-window-vanilla", decision.Reason, "a project dated 1864 is out of window in 1863");
+    }
+
+    private static void ProjectPatchPassesTheCampaignYear()
+    {
+        string src = Flat("src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs");
+        AssertContains(src, "int campaignYear = ReadCampaignYear();", "read once per selection");
+        AssertContains(src, "projectId => BuildRuntimeFacts(projectId, subsidyType, alliance, campaignYear),", "handed to every facts read");
+        AssertContains(src, "CampaignYear = campaignYear", "stored on the facts");
     }
 }

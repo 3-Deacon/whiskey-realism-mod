@@ -1629,7 +1629,7 @@ namespace WhiskeyRealism.Strategic
         // so that a reflection gap silently degrades rather than crashing.
         private CampaignPaceInput BuildCampaignPaceInput(int alliance, int day, int month, int year)
         {
-            float ownMorale = 50f, enemyMorale = 50f;
+            float ownMorale = 50f;
             float breakTrigger = 30f, minSurrender = 18f;
             try
             {
@@ -1638,19 +1638,13 @@ namespace WhiskeyRealism.Strategic
                 var allianceArray = _allianceArrayField?.GetValue(null) as System.Array;
                 if (allianceArray != null)
                 {
-                    int enemyAlliance = 1 - alliance;
-                    var ownEntry   = allianceArray.GetValue(alliance);
-                    var enemyEntry = enemyAlliance < allianceArray.Length ? allianceArray.GetValue(enemyAlliance) : null;
+                    var ownEntry = allianceArray.GetValue(alliance);
                     if (ownEntry != null)
                     {
                         if (_nationalMoraleField == null)
                             _nationalMoraleField = AccessTools.Field(ownEntry.GetType(), "nationalmorale");
                         if (_nationalMoraleField != null)
-                        {
                             ownMorale = (float)_nationalMoraleField.GetValue(ownEntry);
-                            if (enemyEntry != null)
-                                enemyMorale = (float)_nationalMoraleField.GetValue(enemyEntry);
-                        }
                     }
                 }
                 if (_gamePrefsType == null) _gamePrefsType = AccessTools.TypeByName("GamePrefs");
@@ -1686,7 +1680,6 @@ namespace WhiskeyRealism.Strategic
                 Month                        = month,
                 PolicyChapter                = SafePolicyChapter(),
                 OwnNationalMorale            = ownMorale,
-                EnemyNationalMorale          = enemyMorale,
                 BreakMoraleTrigger           = breakTrigger,
                 MinNationalMoraleSurrender   = minSurrender,
                 BattlesIn14Days              = battles,

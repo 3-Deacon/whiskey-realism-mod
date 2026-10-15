@@ -202,7 +202,11 @@ namespace WhiskeyRealism.Strategic.Projects
             if (facts == null || !facts.DateFromKnown)
                 return false;
 
-            if (facts.DateFromYear >= 1864 && era != EraStage.TotalWar1864)
+            // A project dated 1864 or later is not yet available before that calendar year. This is
+            // the project's own date (datefrom), not the era: the late-war era is vanilla's chapter 3
+            // (the November 1864 election), well after vanilla makes the 1864 projects available.
+            // An unread year (0) flags nothing.
+            if (facts.DateFromYear >= 1864 && facts.CampaignYear > 0 && facts.CampaignYear < 1864)
                 return true;
 
             if (facts.DateFromYear >= 1863 && era == EraStage.Amateur1861)
