@@ -39,10 +39,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //   own flank  battleprefs "No micro ai charge if unit is outflanked or receiving
     //              flanking fire" (GamePrefs.nomicroaichargeifunitisoutflanked, 54784;
     //              shipped true, never read by vanilla): when set, a regiment whose own
-    //              outflanked is non-zero is not armed.
+    //              outflanked (111488) or firefromflank (111492, fire it received from a
+    //              flank sector, 123208-123264) is non-zero is not armed.
     //   filter     MicroAICheckForCharges' unit filter (4917 arm, 4922 cancel):
-    //              permanentlydetached, routed, markedforrout, or a feuding group (the W&L
-    //              feud instance owns those, and the write guard refuses them).
+    //              permanentlydetached, routed, markedforrout, or Feud, which the snapshot
+    //              propagates from the AI group / command ancestors
+    //              (PlayerOwnership.ApplyFeudGroups); the feud instance owns those units and
+    //              the write guard refuses them.
     //   lane       an own standing regiment (not a group, not this one) whose projection
     //              falls strictly between the regiment and the target and lies within
     //              WaypointValidator.FriendlyFireClearanceMeters (40 m) of that segment.
@@ -258,7 +261,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 WhiskeyArmedPendingDisarm = m.PendingDisarm,
                 RefusalBackoffSeconds = ChargeDoctrine.RefusalBackoffSeconds(settings.VanillaRenewHours),
                 ExcludedByVanillaFilter = (r.Flags & (UnitFlags.PermanentlyDetached | UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.Feud)) != 0,
-                OutflankedBarsCharge = settings.NoChargeIfOutflanked && r.Outflanked != 0,
+                OutflankedBarsCharge = settings.NoChargeIfOutflanked && (r.Outflanked != 0 || r.FireFromFlank != 0),
                 SecondsSinceLastAiChargeRefusal = m.HasRefusal
                     ? (now - m.RefusalAtHours) * TacticalBattleClock.BattleSecondsPerHour
                     : double.PositiveInfinity,

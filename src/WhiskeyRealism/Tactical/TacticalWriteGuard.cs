@@ -28,7 +28,9 @@ namespace WhiskeyRealism.Tactical
     //   - Tactical Commander Mode must be Active (MonitorOnly/Off write nothing).
     //   - PlayerOwned units (W&L player's command + descendants, take-overs, CIC;
     //     outside W&L the player alliance unless ai_vs_ai/debug_allarmiesai) and
-    //     feuding units (ai_feudstance >= 0) are never written.
+    //     feuding units are never written. Feud is the vanilla AI group's state
+    //     (ActivateFeud 116613 + AddUnitToPool 7637-7648; aigroup.ai_feudstance at
+    //     4917/4922): the unit, its AI group (groupaiobject) or a command ancestor.
     //   - Ancestors of the player's command are AI and are not PlayerOwned. The
     //     battle-core executor resolves orders on them through
     //     TacticalChainOrderPlanner. The Regiment overloads serve writers that
@@ -84,7 +86,7 @@ namespace WhiskeyRealism.Tactical
             {
                 if ((Object)unit == null) return false;
                 PlayerOwnershipInput input = ReadOwnershipInput();
-                UnitFlags flags = OwnershipFlags(unit, input);
+                UnitFlags flags = OwnershipFlags(unit, input) | GroupFeudFlags(unit);
                 if (feudReplay) flags &= ~UnitFlags.Feud;
                 return PlayerOwnership.CanWrite(flags, modeAllowsWrites: true, out _) &&
                     !PlayerOwnership.DirectWriteProtected(flags, HasExposedOwnedDescendant(unit, input), out _);
@@ -110,7 +112,7 @@ namespace WhiskeyRealism.Tactical
             {
                 if ((Object)unit == null) { reason = "null"; return true; }
                 PlayerOwnershipInput input = ReadOwnershipInput();
-                UnitFlags flags = OwnershipFlags(unit, input);
+                UnitFlags flags = OwnershipFlags(unit, input) | GroupFeudFlags(unit);
                 bool exposed = (flags & UnitFlags.PlayerOwned) == 0 && HasExposedOwnedDescendant(unit, input);
                 if (!PlayerOwnership.DirectWriteProtected(flags, exposed, out SkipReason skip)) return false;
                 if (skip == SkipReason.Feud) reason = "feud";
@@ -151,6 +153,24 @@ namespace WhiskeyRealism.Tactical
         {
             bool takenOver = input.WlActive && DLC_WL.IsUnitTakenOver(unit);
             return PlayerOwnership.Compute(input, unit.alliance, unit.dlcw_isundercommander, takenOver, unit.ai_feudstance);
+        }
+
+        // Feud is the AI group's state (PlayerOwnership.ApplyFeudGroups): the unit's AI
+        // group (groupaiobject, 110820) feuding, or the side's latest snapshot marking
+        // the unit (a command ancestor feuds). Read live for writers without a snapshot
+        // record; a missing snapshot falls back to the live AI-group read.
+        private static UnitFlags GroupFeudFlags(Regiment unit)
+        {
+            GameObject groupObject = unit.groupaiobject;
+            Regiment group = (Object)groupObject != null ? groupObject.GetComponent<Regiment>() : null;
+            int groupStance = (Object)group != null ? group.ai_feudstance : -1;
+            bool snapshotFeud = false;
+            if (BattleCore.TryGetSnapshot(unit.alliance, out BattleSnapshot snapshot))
+            {
+                int index = snapshot.IndexOfOwn(unit.gameObject.GetInstanceID());
+                snapshotFeud = index >= 0 && (snapshot.Own[index].Flags & UnitFlags.Feud) != 0;
+            }
+            return PlayerOwnership.DirectFeudFlags(unit.ai_feudstance, groupStance, snapshotFeud);
         }
 
         // Whether a group order on `group` would reach a player-owned descendant

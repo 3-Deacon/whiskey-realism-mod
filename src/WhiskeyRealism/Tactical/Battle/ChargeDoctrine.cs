@@ -75,8 +75,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // permanentlydetached, isrouted, markedforrout or a feuding group: MicroAICheckForCharges'
         // own unit filter (4917, 4922) bars arming and the stance-drop cancel.
         public bool ExcludedByVanillaFilter;
-        // GamePrefs.nomicroaichargeifunitisoutflanked (54784) is set and the regiment's own
-        // outflanked is non-zero: no new charge.
+        // GamePrefs.nomicroaichargeifunitisoutflanked (54784, "outflanked or receiving
+        // flanking fire") is set and the regiment's own outflanked or firefromflank is
+        // non-zero: no new charge.
         public bool OutflankedBarsCharge;
     }
 

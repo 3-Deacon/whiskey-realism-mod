@@ -46,6 +46,7 @@ internal static class PlayerOwnershipTests
             ("battle-core ownership detached node shields its owned subtree", DetachedNodeShieldsOwnedSubtree),
             ("battle-core ownership direct-write decision for regiment overloads", DirectWriteDecisionForRegimentOverloads),
             ("battle-core ownership feuding unit protected from direct writers", FeudUnitProtectedFromDirectWriters),
+            ("battle-core ownership feud is the AI group's state for direct writers", DirectWriterFeudFollowsAiGroup),
             ("battle-core ownership per-unit guard refuses owned regiments under a writable group", PerUnitGuardRefusesOwnedRegimentsUnderWritableGroup),
             ("battle-core ownership group's own detach never shields its descendants", GroupOwnDetachNeverShieldsDescendants),
             ("battle-core chain detached orders group", ChainDetachedOrdersGroup),
@@ -302,6 +303,20 @@ internal static class PlayerOwnershipTests
         AssertEqual(SkipReason.Feud, reason, "feud reason");
         AssertTrue(PlayerOwnership.DirectWriteProtected(UnitFlags.Feud | PO, false, out SkipReason both), "owned feud");
         AssertEqual(SkipReason.PlayerOwned, both, "player ownership reported first");
+    }
+
+    // ActivateFeud (116613) sets ai_feudstance on the group and AddUnitToPool(overwriteaigroups)
+    // points every descendant's groupaiobject at it (7637-7648); MicroAICheckForCharges and the
+    // artillery micro test aigroup.ai_feudstance (4917/4922, 3789/3834). TacticalWriteGuard's
+    // Regiment overloads apply the same group rule.
+    private static void DirectWriterFeudFollowsAiGroup()
+    {
+        AssertEqual(UnitFlags.None, PlayerOwnership.DirectFeudFlags(-1, -1, snapshotFeud: false), "no feud anywhere");
+        AssertEqual(UnitFlags.Feud, PlayerOwnership.DirectFeudFlags(-1, 2, snapshotFeud: false), "regiment of a feuding AI group");
+        AssertEqual(UnitFlags.Feud, PlayerOwnership.DirectFeudFlags(1, -1, snapshotFeud: false), "the feuding group itself");
+        AssertEqual(UnitFlags.Feud, PlayerOwnership.DirectFeudFlags(-1, -1, snapshotFeud: true), "snapshot propagation (ancestor feud)");
+        AssertTrue(PlayerOwnership.DirectWriteProtected(PlayerOwnership.DirectFeudFlags(-1, 0, false), false, out SkipReason reason), "refused");
+        AssertEqual(SkipReason.Feud, reason, "feud reason");
     }
 
     private static void PerUnitGuardRefusesOwnedRegimentsUnderWritableGroup()

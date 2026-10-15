@@ -57,6 +57,12 @@ namespace WhiskeyRealism.Tactical.Battle
         // own enemyinrangereg and facing (122959-123175; 0 = not outflanked).
         public float LastAiChargeTime;
         public int Outflanked;
+        // firefromflank (111492): flank code of fire this unit received recently
+        // (receivedfire within timetolastfireforflank, UpdateFlanking 123208-123264).
+        public int FireFromFlank;
+        // groupaiobject (110820) instance id, 0 = none: the unit's vanilla AI group, the
+        // group AddUnitToPool(overwriteaigroups) assigns to every descendant (7637-7648).
+        public int AiGroupId;
         public int ParentIndex;         // -1 = root
         public int FirstEnemyInRangeId; // enemyinrangereg[0], or 0
         public UnitFlags Flags;

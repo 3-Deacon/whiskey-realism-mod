@@ -456,6 +456,8 @@ namespace WhiskeyRealism.Tactical.Battle
         internal int TreeGeneration;
         internal int AncestryMismatchCount;
         internal int[] GroupOrder = new int[BattleSnapshot.InitialCapacity];
+        // PlayerOwnership.ApplyFeudGroups' per-unit "feuds itself" marks (grow-only).
+        internal bool[] FeudSource = new bool[BattleSnapshot.InitialCapacity];
         internal readonly Dictionary<int, int> IndexById = new Dictionary<int, int>(BattleSnapshot.InitialCapacity);
         internal readonly Dictionary<int, int> ParentIdById = new Dictionary<int, int>(BattleSnapshot.InitialCapacity);
         internal readonly Dictionary<int, string> NameById = new Dictionary<int, string>(BattleSnapshot.InitialCapacity);

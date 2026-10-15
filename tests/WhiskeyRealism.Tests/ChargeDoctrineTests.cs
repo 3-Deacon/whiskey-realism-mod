@@ -62,6 +62,7 @@ internal static class ChargeDoctrineTests
             ("charge producer lane ignores routed and inactive friendlies", ProducerLaneIgnoresRoutedAndInactive),
             ("charge producer applies vanilla's unit filter (detached, routed, marked for rout, feud)", ProducerVanillaUnitFilter),
             ("charge producer honours vanilla's no-charge-if-outflanked pref", ProducerHonoursNoChargeIfOutflanked),
+            ("charge producer excludes regiments of a feuding brigade", ProducerExcludesFeudingBrigadeRegiments),
             ("charge producer reads target state only from a visible target's record", ProducerTargetStateFromVisibleRecord),
             ("charge producer never touches player-owned regiments", ProducerNeverTouchesPlayerOwned),
             ("charge producer disarms after a denied assault once vanilla returns to mode 3", ProducerDeferredDisarmAfterAssault),
@@ -1014,6 +1015,38 @@ internal static class ChargeDoctrineTests
         h = new Harness();
         h.Plan(s, new ChargeIntentProducer.Settings(true, Radius, 0f, noChargeIfOutflanked: false));
         AssertTrue(h.Sink.TryFind(RegB, out _), "pref clear: outflanked does not matter");
+
+        // "... or receiving flanking fire": own firefromflank (111492, 123208-123264).
+        BattleSnapshot fire = Line(1.0);
+        Own(fire, RegB).FireFromFlank = 1;
+        h = new Harness();
+        h.Plan(fire, new ChargeIntentProducer.Settings(true, Radius, 0f, noChargeIfOutflanked: true));
+        AssertFalse(h.Sink.TryFind(RegB, out _), "pref set: flanking fire bars the charge");
+        h = new Harness();
+        h.Plan(fire, new ChargeIntentProducer.Settings(true, Radius, 0f, noChargeIfOutflanked: false));
+        AssertTrue(h.Sink.TryFind(RegB, out _), "pref clear: flanking fire does not matter");
+    }
+
+    // Feud on the brigade only (ActivateFeud sets the group, 116613): its regiments are
+    // excluded once the builder's propagation ran (PlayerOwnership.ApplyFeudGroups).
+    private static void ProducerExcludesFeudingBrigadeRegiments()
+    {
+        BattleSnapshot s = Line(1.0);
+        Own(s, BrigadeId).Flags |= UnitFlags.Feud;
+        bool[] scratch = null;
+        PlayerOwnership.ApplyFeudGroups(s, ref scratch);
+        var h = new Harness();
+        h.Plan(s, On());
+        AssertEqual(0, h.Sink.Count, "no regiment of a feuding brigade is armed");
+
+        BattleSnapshot cancel = Line(1.0);
+        Own(cancel, BrigadeId).Flags |= UnitFlags.Feud;
+        Own(cancel, BrigadeId).AiStanceOrdered = 2;
+        Own(cancel, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        PlayerOwnership.ApplyFeudGroups(cancel, ref scratch);
+        h = new Harness();
+        h.Plan(cancel, On());
+        AssertEqual(0, h.Sink.Count, "nor cancelled: the feud instance owns them");
     }
 
     private static BattleSnapshot LineWith(int id, float x, float z)

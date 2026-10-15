@@ -32,7 +32,61 @@ internal static class BattleSnapshotTests
             ("battle snapshot front axis group fallback weights by ai-group strength", FrontAxisGroupFallbackWeightsByAiGroupStrength),
             ("battle snapshot front axis group fallback filter matches the shipped sample", FrontAxisGroupFallbackFilterMatchesShippedSample),
             ("battle snapshot front axis leaf sample excludes units marked for rout", FrontAxisLeafSampleExcludesMarkedForRout),
+            ("battle snapshot feud propagates from the AI group and command ancestors", FeudPropagatesFromAiGroupAndAncestors),
         });
+    }
+
+    // Feud is the vanilla AI group's state (ActivateFeud 116613 on the group; AddUnitToPool
+    // overwriteaigroups 7637-7648 points every descendant's groupaiobject at it; the micro AI
+    // tests aigroup.ai_feudstance, 4917/4922). Compute marks the feuding unit itself;
+    // ApplyFeudGroups marks every unit whose AI group or command ancestor feuds, never an
+    // ancestor of the feuding group, and is order-independent and allocation-free.
+    private static void FeudPropagatesFromAiGroupAndAncestors()
+    {
+        // 0 division -> 1 brigade -> 2,3 regiments; 4 loose regiment whose AI group is the brigade;
+        // 5 second brigade -> 6 regiment.
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        int[] parents = { -1, 0, 1, 1, -1, 0, 5 };
+        for (int i = 0; i < parents.Length; i++)
+        {
+            bool group = i == 0 || i == 1 || i == 5;
+            s.AddOwn(new UnitRecord
+            {
+                InstanceId = 500 + i, UnitTyp = group ? TacticalUnitType.BattleGroupBrigade : TacticalUnitType.Infantry,
+                Flags = UnitFlags.Alive | UnitFlags.Active | (group ? UnitFlags.IsGroup : UnitFlags.IsInfantry),
+                AiGroupId = i == 4 ? 501 : 0,
+            });
+        }
+        for (int i = 0; i < parents.Length; i++) s.Own[i].ParentIndex = parents[i];
+        s.IndexCommandTree(null);
+        s.Own[1].Flags |= UnitFlags.Feud; // the brigade feuds (Compute, own ai_feudstance)
+        bool[] scratch = null;
+        PlayerOwnership.ApplyFeudGroups(s, ref scratch);
+        AssertTrue((s.Own[2].Flags & UnitFlags.Feud) != 0, "regiment of the feuding brigade");
+        AssertTrue((s.Own[3].Flags & UnitFlags.Feud) != 0, "second regiment");
+        AssertTrue((s.Own[4].Flags & UnitFlags.Feud) != 0, "AI group member outside the command subtree");
+        AssertFalse((s.Own[0].Flags & UnitFlags.Feud) != 0, "the division above the feud is not feuding");
+        AssertFalse((s.Own[5].Flags & UnitFlags.Feud) != 0, "sibling brigade");
+        AssertFalse((s.Own[6].Flags & UnitFlags.Feud) != 0, "sibling brigade's regiment");
+
+        // Two levels up: only the division feuds.
+        for (int i = 0; i < parents.Length; i++) s.Own[i].Flags &= ~UnitFlags.Feud;
+        s.Own[0].Flags |= UnitFlags.Feud;
+        PlayerOwnership.ApplyFeudGroups(s, ref scratch);
+        for (int i = 1; i <= 6; i++)
+            AssertTrue((s.Own[i].Flags & UnitFlags.Feud) != 0, "division feud reaches unit " + i);
+
+        // Order independence: a propagated flag is never a source.
+        for (int i = 0; i < parents.Length; i++) s.Own[i].Flags &= ~UnitFlags.Feud;
+        s.Own[2].Flags |= UnitFlags.Feud;
+        PlayerOwnership.ApplyFeudGroups(s, ref scratch);
+        AssertFalse((s.Own[1].Flags & UnitFlags.Feud) != 0, "a feuding regiment does not mark its brigade");
+        AssertFalse((s.Own[3].Flags & UnitFlags.Feud) != 0, "nor its sibling");
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int k = 0; k < 100; k++) PlayerOwnership.ApplyFeudGroups(s, ref scratch);
+        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up");
     }
 
     // Ids of the small fixture army.
