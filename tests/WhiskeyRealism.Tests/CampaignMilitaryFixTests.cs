@@ -189,15 +189,16 @@ internal static class CampaignMilitaryFixTests
     }
 
     // C-ArmyGroup: vanilla CheckArmyGroupManagement (decompile 17705) returns
-    // when army groups are disabled, the reform is not researched, or the W&L
-    // player is commander-in-chief. The Postfix created groups regardless.
+    // when army groups are disabled, the reform is not researched, or its CIC
+    // early return applies (17723; with the stage F guard #70 only for the W&L
+    // CIC player's own alliance, CicFactionAiGuard.VanillaGuardBlocks). The
+    // Postfix created groups regardless.
     private static void ArmyGroupManagementRepeatsVanillaGuard()
     {
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, false, false), "allowed");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(false, true, false, false), "game option off");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, false, false, false), "reform (project 88/89) not researched");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, true, true), "W&L player is CIC");
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, true, false), "W&L player not CIC");
+        TestHarness.AssertTrue(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, false), "allowed");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(false, true, false), "game option off");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, false, false), "reform (project 88/89) not researched");
+        TestHarness.AssertFalse(ArmyGroupDoctrine.ArmyGroupsAllowed(true, true, true), "vanilla CIC guard blocks this faction");
         LogPass("c2a army group management repeats vanilla guard");
     }
 

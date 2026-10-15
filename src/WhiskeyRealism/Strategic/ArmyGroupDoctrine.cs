@@ -76,15 +76,15 @@ namespace WhiskeyRealism.Strategic
             return preference;
         }
 
-        // Verbatim repeat of vanilla CheckArmyGroupManagement's early return
-        // (decompile 17705): !GameVars.allowarmygroups ||
-        // !alliance.AllowsArmyGroups() (projects 88/89, 62545) ||
-        // (DLC_WL.dlc_scenarioactive && DLC_WL.IsCommanderInChief()).
-        public static bool ArmyGroupsAllowed(bool allowArmyGroups, bool allianceAllowsArmyGroups, bool wlScenarioActive, bool playerIsCommanderInChief)
+        // Repeat of vanilla CheckArmyGroupManagement's early return (decompile
+        // 17705-17723): !GameVars.allowarmygroups || !alliance.AllowsArmyGroups()
+        // (projects 88/89, 62545) || the CIC test. vanillaCicGuardBlocks is that CIC
+        // test as vanilla applies it this pass: with #70 (BUG-WL-001) only for the
+        // W&L CIC player's own alliance (CicFactionAiGuard.VanillaGuardBlocks).
+        public static bool ArmyGroupsAllowed(bool allowArmyGroups, bool allianceAllowsArmyGroups, bool vanillaCicGuardBlocks)
         {
             if (!allowArmyGroups || !allianceAllowsArmyGroups) return false;
-            if (wlScenarioActive && playerIsCommanderInChief) return false;
-            return true;
+            return !vanillaCicGuardBlocks;
         }
 
         // Full combinedname (Config/commanders.txt) for historical surnames that
