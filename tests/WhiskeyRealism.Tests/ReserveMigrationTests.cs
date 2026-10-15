@@ -26,7 +26,6 @@ internal static class ReserveMigrationTests
             ("release reserve producer support priority", ReleaseReserveProducerSupportPriority),
             ("stalled fallback reissue from producer", StalledFallbackReissueFromProducer),
             ("vanilla may commit reserve mirrors early exits", VanillaMayCommitReserveMirrorsEarlyExits),
-            ("reserve odds read snapshot slice pressure", ReserveOddsReadSnapshotSlicePressure),
             ("withdrawal reads own-side cover and friendly routs", WithdrawalReadsOwnSideCoverAndRouts),
             ("withdrawal retreat bearing matches vanilla retreatangle", WithdrawalRetreatBearingMatchesVanillaRetreatAngle),
             ("snapshot carries own-side fallback fields through assembly", SnapshotCarriesFallbackFieldsThroughAssembly),
@@ -39,21 +38,15 @@ internal static class ReserveMigrationTests
 
     private static void ReserveDenyRollsBackForRoleReserve()
     {
-        // A Reserve role holds (the deleted B8 doctrine deny implied the same role:
-        // DecideReserve denies only order.Role == Reserve, and order.Role is the ledger
-        // node's role, which HeldResolution reads first).
-        AssertEqual(TacticalReserveCommitGate.Action.Deny, Gate(Resolved(DirectChildRole.Reserve)).Action, "role reserve holds");
-        AssertEqual("role-reserve-hold", Gate(Resolved(DirectChildRole.Reserve)).Reason, "reason");
-        AssertEqual(TacticalReserveCommitGate.Action.Allow,
-            Gate(Resolved(DirectChildRole.Reserve), released: true).Action, "released by the allocator");
-        AssertEqual(TacticalReserveCommitGate.Action.Allow,
-            Gate(Resolved(DirectChildRole.Reserve), engaged: true).Action, "already engaged");
-        AssertEqual(TacticalReserveCommitGate.Action.Observe,
-            Gate(Resolved(DirectChildRole.Reserve), playerControlled: true).Action, "player-owned unit or group");
-        AssertEqual(TacticalReserveCommitGate.Action.Observe,
-            Gate(Resolved(DirectChildRole.Reserve), vanillaCommitted: false).Action, "no vanilla commit");
-        AssertEqual(TacticalReserveCommitGate.Action.Allow, Gate(Resolved(DirectChildRole.Main)).Action, "main role");
-        AssertEqual(TacticalReserveCommitGate.Action.Observe, Gate(NotFound()).Action, "nothing resolved");
+        // #59 acts only for a Reserve-role group (ledger first). The deleted B8
+        // doctrine deny was the same rule: it needed order.Role == Reserve, and the
+        // doctrine order carries the ledger node's role (CommandDoctrineAssignment.Build).
+        AssertEqual(TacticalReserveCommitGate.Action.Deny, Gate().Action, "role reserve holds");
+        AssertEqual("role-reserve-hold", Gate().Reason, "reason");
+        AssertEqual(TacticalReserveCommitGate.Action.Allow, Gate(released: true).Action, "released by the allocator");
+        AssertEqual("reserve-released", Gate(released: true).Reason, "release reason");
+        AssertEqual(TacticalReserveCommitGate.Action.Observe, Gate(playerControlled: true).Action, "player-owned unit or group");
+        AssertEqual(TacticalReserveCommitGate.Action.Observe, Gate(released: true, playerControlled: true).Action, "player first");
 
         // The rollback set: units vanilla gave a direct path (paths rose, no courier queued).
         AssertTrue(TacticalReserveCommitGate.VanillaCommittedUnit(0, 1, 0, 0, useOrderDelays: true), "direct path");
@@ -73,6 +66,14 @@ internal static class ReserveMigrationTests
         AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "allocator released it");
         CommandIntentResolution noLedger = TacticalReserveCommitGate.HeldResolution(ops, LeftLine, 0, Resolved(DirectChildRole.Fix));
         AssertEqual(DirectChildRole.Fix, noLedger.Intent.Role, "no ledger state: the allocator's view");
+        var mainOps = new[]
+        {
+            new CommandNodeOperationalState("node-" + LeftLine, CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort,
+                CommandTaskType.AttackObjective, CommandTaskState.Committed),
+        };
+        AssertEqual(DirectChildRole.Unknown,
+            TacticalReserveCommitGate.HeldResolution(mainOps, LeftLine, 0, Resolved(DirectChildRole.Reserve)).Intent.Role,
+            "a ledger state that does not hold the node: not Reserve, whatever the allocator says");
     }
 
     // ---------------------------------------------------------------- #56
@@ -382,23 +383,6 @@ internal static class ReserveMigrationTests
         AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(2, 0, false, 0, false), "artillery never");
     }
 
-    private static void ReserveOddsReadSnapshotSlicePressure()
-    {
-        BattleSnapshot s = LeafSnapshot(morale: 1f);
-        int leaf = s.IndexOfOwn(Leaf);
-        s.SetSlicePressure(leaf, 0, 300f);
-        s.SetSlicePressure(leaf, 9, 200f);
-        AssertNear(500f, TacticalReserveCommitGate.VisibleAngleStrength(s, leaf), 0.01f, "sum of the fog-honest slices");
-        AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(s, -1), "unknown unit");
-        AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(null, leaf), "no snapshot: nothing seen");
-
-        // #59's odds: own strength bucket over that visible pressure, nothing else.
-        s.Own[leaf].GroupOwnInRange = 1000;
-        s.Own[leaf].GroupStrengthAiGroup = 800;
-        AssertNear(2f, TacticalReserveCommitGate.LocalOdds(s, leaf), 0.001f, "1000 / 500");
-        AssertEqual(1f, TacticalReserveCommitGate.LocalOdds(LeafSnapshot(morale: 1f), leaf), "nothing visible: even");
-    }
-
     private static void WithdrawalReadsOwnSideCoverAndRouts()
     {
         // CheckLineFallbacks 5167 / TacticalMoralePressure: outflanked + under fire +
@@ -492,16 +476,9 @@ internal static class ReserveMigrationTests
 
     // ---------------------------------------------------------------- helpers
 
-    private static TacticalReserveCommitGate.Decision Gate(
-        CommandIntentResolution resolution,
-        bool released = false,
-        bool playerControlled = false,
-        bool vanillaCommitted = true,
-        bool engaged = false)
+    private static TacticalReserveCommitGate.Decision Gate(bool released = false, bool playerControlled = false)
     {
-        return TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(
-            vanillaCommitted, resolution, playerControlled, committedUnitAlreadyEngaged: engaged,
-            ownStrengthRatio: 1f, localOdds: 1f, reserveReleased: released));
+        return TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(playerControlled, released));
     }
 
     private static TacticalReserveCommitGate.CourierParityAction Parity(
@@ -524,8 +501,6 @@ internal static class ReserveMigrationTests
         return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f, 0.5f,
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
     }
-
-    private static CommandIntentResolution NotFound() => new CommandIntentResolution(false, default, "no-side-orchestrator");
 
     private static CommandDoctrineOrder FallbackOrder(float x, float z)
     {

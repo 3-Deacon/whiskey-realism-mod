@@ -11,14 +11,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // #59 deny (BattleReserveCommitGatePatch on vanilla AIBattle.CheckUseOfReserves
     // 6062-6170): vanilla commits one idle reserve regiment toward an outflanked
     // sibling with a direct RegimentSetPath (6170), so only a rollback can deny it.
-    // The rule: the group's resolved role is Reserve (ledger state first, then the
-    // command-node intent) denies, unless the direct-child allocator released it
-    // (T15: crisis Fix, Exploit or trigger odds) before the ledger caught up, or the
-    // committed unit is already engaged. The deleted B8 patch's doctrine deny
-    // (DoctrineConsumerDecisions.DecideReserve == Deny) is covered by it: Deny needs
-    // order.Role == Reserve, and the order's role is the ledger node's role
-    // (CommandDoctrineAssignment.Build; ArmyOrchestrator 1072-1084), which the
-    // ledger-first resolution already reads as Reserve.
+    // The patch acts only for a group whose resolved role is Reserve (ledger state
+    // first, then the command-node intent). For it the rule is: deny, unless the
+    // direct-child allocator released it (T15: crisis Fix, Exploit or trigger odds)
+    // before the ledger caught up; observe when a committed unit or the group is
+    // player-owned. The deleted B8 doctrine deny needed order.Role == Reserve, and
+    // the order's role is the ledger node's role (CommandDoctrineAssignment.Build;
+    // ArmyOrchestrator 1072-1084), so it was this same rule. There is no
+    // already-engaged exemption: vanilla only commits a unit that is not engaged
+    // (6129), and inengagement is set only when a unit fires (FireBullet 119050),
+    // which nothing in CheckUseOfReserves does.
     //
     // #56 courier parity: vanilla's reserve path ignores the order delay (6170);
     // with GameVars.useorderdelays the path is removed and the same target is
@@ -53,84 +55,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public readonly struct Input
         {
-            public Input(
-                bool vanillaCommitted,
-                CommandIntentResolution resolution,
-                bool playerControlled,
-                bool committedUnitAlreadyEngaged,
-                float ownStrengthRatio,
-                float localOdds,
-                bool reserveReleased = false)
+            public Input(bool playerControlled, bool reserveReleased)
             {
-                VanillaCommitted = vanillaCommitted;
-                Resolution = resolution;
                 PlayerControlled = playerControlled;
-                CommittedUnitAlreadyEngaged = committedUnitAlreadyEngaged;
-                OwnStrengthRatio = SanitizeRatio(ownStrengthRatio, 1f);
-                LocalOdds = SanitizeRatio(localOdds, 1f);
                 ReserveReleased = reserveReleased;
             }
 
-            public bool VanillaCommitted { get; }
-            public CommandIntentResolution Resolution { get; }
             public bool PlayerControlled { get; }
-            public bool CommittedUnitAlreadyEngaged { get; }
-            public float OwnStrengthRatio { get; }
-            public float LocalOdds { get; }
             public bool ReserveReleased { get; }
         }
 
         public readonly struct Decision
         {
-            public Decision(Action action, string reason, DirectChildRole role)
+            public Decision(Action action, string reason)
             {
                 Action = action;
                 Reason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
-                Role = role;
             }
 
             public Action Action { get; }
             public string Reason { get; }
-            public DirectChildRole Role { get; }
         }
 
+        /// <summary>The rule for a Reserve-role group whose units vanilla just committed.</summary>
         public static Decision Decide(Input input)
         {
-            if (!input.VanillaCommitted)
-                return Observe("no-vanilla-commit", DirectChildRole.Unknown);
             if (input.PlayerControlled)
-                return Observe("player-controlled", DirectChildRole.Unknown);
-            if (!input.Resolution.Found)
-                return Observe(input.Resolution.Reason, DirectChildRole.Unknown);
-
-            DirectChildRole role = input.Resolution.Intent.Role;
-            if (input.CommittedUnitAlreadyEngaged)
-                return Allow("already-committed-contact", role);
-
-            switch (role)
-            {
-                case DirectChildRole.Reserve:
-                    return input.ReserveReleased
-                        ? Allow("reserve-released", role)
-                        : new Decision(Action.Deny, "role-reserve-hold", role);
-                case DirectChildRole.Main:
-                    return input.OwnStrengthRatio < 0.75f
-                        ? Allow("main-understrength-release", role)
-                        : Allow("main-vanilla-release", role);
-                case DirectChildRole.Fallback:
-                    return input.LocalOdds < 0.85f
-                        ? Allow("fallback-screen-retreat", role)
-                        : Allow("fallback-vanilla-release", role);
-                case DirectChildRole.SupportMain:
-                case DirectChildRole.Fix:
-                case DirectChildRole.Screen:
-                case DirectChildRole.RefuseLeft:
-                case DirectChildRole.RefuseRight:
-                    return Allow("role-vanilla-release", role);
-                case DirectChildRole.Unknown:
-                default:
-                    return Observe("unknown-role", role);
-            }
+                return new Decision(Action.Observe, "player-controlled");
+            return input.ReserveReleased
+                ? new Decision(Action.Allow, "reserve-released")
+                : new Decision(Action.Deny, "role-reserve-hold");
         }
 
         /// <summary>
@@ -183,34 +137,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             return allocator;
-        }
-
-        /// <summary>
-        /// Visible enemy strength around a unit: the sum of its fog-honest slice
-        /// pressure (BC2a SlicePressureBuilder), replacing the unfiltered vanilla
-        /// unitrange.enemystrengthwithinangle. No snapshot or unknown unit: 0.
-        /// </summary>
-        public static float VisibleAngleStrength(BattleSnapshot s, int ownIndex)
-        {
-            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 0f;
-            float total = 0f;
-            for (int k = 0; k < s.SliceCount; k++) total += Math.Max(0f, s.SlicePressure(ownIndex, k));
-            return total;
-        }
-
-        /// <summary>
-        /// Own over visible enemy strength for a group, from the snapshot only: own =
-        /// the command-tree strength bucket (groupowninrange / groupstrengthaigroup,
-        /// own-side), enemy = <see cref="VisibleAngleStrength"/>. Nothing seen (or no
-        /// snapshot record): 1.
-        /// </summary>
-        public static float LocalOdds(BattleSnapshot s, int ownIndex)
-        {
-            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 1f;
-            float enemy = VisibleAngleStrength(s, ownIndex);
-            if (enemy <= 0f) return 1f;
-            float own = Math.Max(0f, Math.Max(s.Own[ownIndex].GroupOwnInRange, s.Own[ownIndex].GroupStrengthAiGroup));
-            return own / Math.Max(1f, enemy);
         }
 
         /// <summary>#56's re-issue of vanilla's reserve move (6170: target, facing, doublequick 6171).</summary>
@@ -358,66 +284,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return true;
         }
 
-        private static CommandIntentResolution LedgerResolution(CommandNodeOperationalState state)
-        {
-            DirectChildRole role = RoleFromLedger(state);
-            DirectChildAxis axis = state.Task == CommandTaskType.FallBackToLine ? DirectChildAxis.Withdraw : DirectChildAxis.Hold;
-            return new CommandIntentResolution(
-                true,
-                new CommandNodeIntent(
-                    state.NodeId,
-                    state.NodeId,
-                    role,
-                    axis,
-                    primarySector: 0,
-                    supportPriority: 0,
-                    aggressionBias01: 0f,
-                    depth: 0),
-                "operations-ledger-command-state:" + state.Role + ":" + state.Task);
-        }
-
         /// <summary>The ledger holds the node in Reserve (Reserve role or ReserveWait task).</summary>
         public static bool HeldInReserve(in CommandNodeOperationalState state)
         {
             return state.Role == CommandNodeRole.Reserve || state.Task == CommandTaskType.ReserveWait;
         }
 
-        private static DirectChildRole RoleFromLedger(CommandNodeOperationalState state)
+        // Only "held in Reserve or not" matters to the gate and the release producer;
+        // a ledger state that does not hold the node resolves to Unknown.
+        private static CommandIntentResolution LedgerResolution(CommandNodeOperationalState state)
         {
-            if (HeldInReserve(state))
-                return DirectChildRole.Reserve;
-            if (state.Role == CommandNodeRole.FallbackGuard || state.Task == CommandTaskType.FallBackToLine)
-                return DirectChildRole.Fallback;
-
-            switch (state.Role)
-            {
-                case CommandNodeRole.MainEffort:
-                    return DirectChildRole.Main;
-                case CommandNodeRole.SupportingAttack:
-                    return DirectChildRole.SupportMain;
-                case CommandNodeRole.FixingForce:
-                    return DirectChildRole.Fix;
-                case CommandNodeRole.ScreeningForce:
-                    return DirectChildRole.Screen;
-                case CommandNodeRole.Defender:
-                    return DirectChildRole.RefuseLeft;
-                default:
-                    return DirectChildRole.Unknown;
-            }
-        }
-
-        private static Decision Observe(string reason, DirectChildRole role) =>
-            new Decision(Action.Observe, reason, role);
-
-        private static Decision Allow(string reason, DirectChildRole role) =>
-            new Decision(Action.Allow, reason, role);
-
-        private static float SanitizeRatio(float value, float fallback)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value)) return fallback;
-            if (value < 0f) return 0f;
-            if (value > 10f) return 10f;
-            return value;
+            return new CommandIntentResolution(
+                true,
+                new CommandNodeIntent(
+                    state.NodeId,
+                    state.NodeId,
+                    HeldInReserve(state) ? DirectChildRole.Reserve : DirectChildRole.Unknown,
+                    DirectChildAxis.Hold,
+                    primarySector: 0,
+                    supportPriority: 0,
+                    aggressionBias01: 0f,
+                    depth: 0),
+                "operations-ledger-command-state:" + state.Role + ":" + state.Task);
         }
     }
 }

@@ -139,10 +139,12 @@ namespace WhiskeyRealism.Tactical.Battle
                 Reason = fallback ? "withdrawal-fallback" : "withdrawal-retreat",
             };
             // Vanilla sets combat behavior 2 right after its fallback path (CheckLineFallbacks
-            // 5176-5180) because RegimentSetPath never refuses. The executor's Move can:
-            // a move WaypointValidator or the silent-exit pre-check would refuse is not
-            // produced, and neither is its behavior, so a unit never switches to
-            // fallback fire while standing.
+            // 5176-5180) because RegimentSetPath never refuses. The executor's Move can, so
+            // the Move is pre-checked here for the silent exits and WaypointValidator; a
+            // move either would refuse is not produced, and neither is its behavior. A
+            // Move the executor skips later (dedupe, failed-write backoff) can still let
+            // behavior 2 through; 2 is vanilla's default infantry combat behavior (112945-112947), so
+            // such a unit is left firing as vanilla sets it by default.
             if (SilentExitPrecheck.Check(rec, OrderChannel.Move) != SkipReason.None ||
                 WaypointValidator.Validate(s, index, move, settings.MapSizeX, settings.MapSizeZ, settings.Terrain, out _, out _) != SkipReason.None)
             {

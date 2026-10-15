@@ -5,7 +5,6 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
-using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -35,10 +34,9 @@ namespace WhiskeyRealism.Patches
     // (RegimentSetPath newpath, 130836) cannot be undone: pontoon/obstacle
     // construction and pending re-forming.
     //
-    // Local odds come from the side's battle snapshot only
-    // (TacticalReserveCommitGate.LocalOdds: own strength bucket over fog-honest
-    // slice pressure), never vanilla's groupenemiesinrange (122650) or
-    // enemystrengthwithinangle, which count enemies the AI cannot see.
+    // The gate reads no enemy state: the old odds inputs (vanilla's unfiltered
+    // groupenemiesinrange 122650 / enemystrengthwithinangle) only chose between
+    // Allow reasons for roles the Prefix never admits, and are gone.
     //
     // Ordering: this Postfix runs at Priority.High, before #56
     // (TacticalReserveOrderDelayGuardPatch). A rollback leaves the unit's paths at
@@ -71,7 +69,6 @@ namespace WhiskeyRealism.Patches
                 bool doubleQuick,
                 bool running,
                 bool lieDown,
-                bool inEngagement,
                 int pathsBeforeRotation,
                 Regiment unitWhoGaveLastMovingOrder,
                 float coverValue,
@@ -125,7 +122,6 @@ namespace WhiskeyRealism.Patches
                 DoubleQuick = doubleQuick;
                 Running = running;
                 LieDown = lieDown;
-                InEngagement = inEngagement;
                 PathsBeforeRotation = Math.Max(0, pathsBeforeRotation);
                 UnitWhoGaveLastMovingOrder = unitWhoGaveLastMovingOrder;
                 CoverValue = coverValue;
@@ -179,7 +175,6 @@ namespace WhiskeyRealism.Patches
             public bool DoubleQuick { get; }
             public bool Running { get; }
             public bool LieDown { get; }
-            public bool InEngagement { get; }
             public int PathsBeforeRotation { get; }
             public Regiment UnitWhoGaveLastMovingOrder { get; }
             public float CoverValue { get; }
@@ -367,12 +362,7 @@ namespace WhiskeyRealism.Patches
                     if (changed.Length == 0) return;
 
                     var input = new TacticalReserveCommitGate.Input(
-                        vanillaCommitted: true,
-                        resolution: __state.Resolution,
                         playerControlled: TacticalWriteGuard.IsPlayerProtected(aigroup) || AnyNotWritable(changed),
-                        committedUnitAlreadyEngaged: AnyAlreadyEngaged(changed),
-                        ownStrengthRatio: OwnStrengthRatio(aigroup),
-                        localOdds: LocalOdds(aigroup),
                         reserveReleased: __state.ReserveReleased);
 
                     TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
@@ -380,7 +370,7 @@ namespace WhiskeyRealism.Patches
                     {
                         if (!AllRollbackSafe(changed))
                         {
-                            Log(aigroup, TacticalReserveCommitGate.Action.Observe, decision.Role, "rollback-unsafe-stopregiment", changed.Length);
+                            Log(aigroup, TacticalReserveCommitGate.Action.Observe, "rollback-unsafe-stopregiment", changed.Length);
                             return;
                         }
 
@@ -388,7 +378,7 @@ namespace WhiskeyRealism.Patches
                         LogProtectedReserveDrift(aigroup, __state, decision, changed.Length);
                     }
 
-                    Log(aigroup, decision.Action, decision.Role, decision.Reason, changed.Length);
+                    Log(aigroup, decision.Action, decision.Reason, changed.Length);
                 }
                 catch (Exception ex)
                 {
@@ -496,7 +486,6 @@ namespace WhiskeyRealism.Patches
                 unit.doublequick,
                 unit.running,
                 unit.liedown,
-                unit.inengagement,
                 unit.regimentpathsbeforerotation,
                 unit.unitwhogavelastmovingorder,
                 unit.covervalue,
@@ -864,47 +853,6 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool AnyAlreadyEngaged(UnitState[] changed)
-        {
-            for (int i = 0; i < changed.Length; i++)
-            {
-                Regiment unit = changed[i].Unit;
-                if (unit != null && (changed[i].InEngagement || SafeInEngagement(unit)))
-                    return true;
-            }
-
-            return false;
-        }
-
-        private static float OwnStrengthRatio(Regiment group)
-        {
-            try
-            {
-                if (group == null) return 1f;
-                float active = Sanitize(group.groupstrengthactive);
-                float total = Math.Max(1f, Sanitize(group.groupstrength));
-                return active / total;
-            }
-            catch
-            {
-                return 1f;
-            }
-        }
-
-        // Snapshot-only odds (fog-honest); no snapshot or the group not in it: 1.
-        private static float LocalOdds(Regiment group)
-        {
-            try
-            {
-                if (group == null || !BattleCore.TryGetSnapshot(group.alliance, out BattleSnapshot snapshot)) return 1f;
-                return TacticalReserveCommitGate.LocalOdds(snapshot, snapshot.IndexOfOwn(TacticalPatchIds.GameObjectInstanceId(group)));
-            }
-            catch
-            {
-                return 1f;
-            }
-        }
-
         internal static void RemoveAddedPaths(Regiment unit, int before, int after)
         {
             int safeBefore = Math.Max(0, before);
@@ -942,18 +890,6 @@ namespace WhiskeyRealism.Patches
         {
             try { return GameVars.useorderdelays; }
             catch { return false; }
-        }
-
-        private static bool SafeInEngagement(Regiment unit)
-        {
-            try { return unit != null && unit.inengagement; }
-            catch { return false; }
-        }
-
-        private static float Sanitize(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
-            return Math.Max(0f, value);
         }
 
         private static TransformState SnapshotTransform(Regiment unit)
@@ -1158,7 +1094,6 @@ namespace WhiskeyRealism.Patches
         private static void Log(
             Regiment group,
             TacticalReserveCommitGate.Action action,
-            DirectChildRole role,
             string reason,
             int changedUnits)
         {
@@ -1166,7 +1101,7 @@ namespace WhiskeyRealism.Patches
             {
                 string groupName = SafeGroupName(group);
                 string safeReason = TacticalCurrentOrderSignature.Safe(reason);
-                string key = action + ":" + role + ":" + safeReason;
+                string key = action + ":" + safeReason;
                 if (!ShouldEmitGateTelemetry(key))
                     return;
 
@@ -1186,13 +1121,13 @@ namespace WhiskeyRealism.Patches
                         .WithField("writeAction", "CheckUseOfReserves")
                         .WithField("writeResult", action == TacticalReserveCommitGate.Action.Deny ? "restored" : "observed")
                         .WithField("group", groupName)
-                        .WithField("role", role.ToString())
+                        .WithField("role", "Reserve") // the gate acts only for Reserve-role groups
                         .WithField("changedUnits", Math.Max(0, changedUnits)));
             }
             catch { }
         }
 
-        // Bounded: one row per action/role/reason signature per 30 s real time
+        // Bounded: one row per action/reason signature per 30 s real time
         // (telemetry throttle only; no doctrine timing).
         private static bool ShouldEmitGateTelemetry(string signature)
         {
@@ -1222,7 +1157,7 @@ namespace WhiskeyRealism.Patches
                     "tactical-reserve-drift:commit-gate",
                     "[TacticalReserveDrift] surface=CheckUseOfReserves group=" + SafeGroupName(group)
                     + " action=" + decision.Action
-                    + " role=" + decision.Role
+                    + " role=Reserve"
                     + " reason=" + TacticalCurrentOrderSignature.Safe(decision.Reason)
                     + " assignment=" + TacticalCurrentOrderSignature.Safe(state.Resolution.Reason)
                     + " changedUnits=" + Math.Max(0, changedUnits));

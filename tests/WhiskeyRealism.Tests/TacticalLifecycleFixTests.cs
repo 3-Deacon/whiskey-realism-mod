@@ -357,17 +357,9 @@ internal static class TacticalLifecycleFixTests
 
     // ---- T15 reserve gate ----
 
-    private static CommandIntentResolution ReserveResolution()
-    {
-        return new CommandIntentResolution(true,
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Reserve, DirectChildAxis.Hold,
-                primarySector: 2, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
-            "exact-command-node");
-    }
-
     private static void T15ReleasedReserveAllowsVanillaCommit()
     {
-        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f, reserveReleased: true);
+        var input = new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: true);
         var d = TacticalReserveCommitGate.Decide(input);
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
         TestHarness.AssertEqual("reserve-released", d.Reason, "reason");
@@ -375,7 +367,7 @@ internal static class TacticalLifecycleFixTests
 
     private static void T15UnreleasedReserveStillHeld()
     {
-        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f);
+        var input = new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: false);
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Deny, TacticalReserveCommitGate.Decide(input).Action, "deny");
     }
 

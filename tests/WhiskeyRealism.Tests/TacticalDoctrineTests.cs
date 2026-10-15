@@ -81,11 +81,6 @@ internal static class TacticalDoctrineTests
             ("doctrine assignment fallback target remains finite for large coordinates", DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates),
             ("doctrine consumer attack order permits assault stance", DoctrineConsumerAttackOrderPermitsAssaultStance),
             ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
-            ("doctrine reserve releases to support endangered main effort", DoctrineReserveReleasesToSupportEndangeredMainEffort),
-            ("doctrine reserve seals threatened flank from operational mission", DoctrineReserveSealsThreatenedFlankFromOperationalMission),
-            ("doctrine reserve conserves exhausted reserve", DoctrineReserveConservesExhaustedReserve),
-            ("doctrine fallback relief beats stale held order", DoctrineFallbackReliefBeatsStaleHeldOrder),
-            ("doctrine reserve nonfinite reserve fraction fails closed", DoctrineReserveNonfiniteReserveFractionFailsClosed),
             ("doctrine artillery supports committed main effort", DoctrineArtillerySupportsCommittedMainEffort),
             ("doctrine artillery no exposed main line does not allow support", DoctrineArtilleryNoExposedMainLineDoesNotAllowSupport),
             ("doctrine artillery mission conserves low ammo", DoctrineArtilleryMissionConservesLowAmmo),
@@ -1148,102 +1143,6 @@ internal static class TacticalDoctrineTests
         bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
 
         AssertFalse(exposed, "known objective id miss should not fall back to coordinates");
-    }
-
-    private static void DoctrineReserveReleasesToSupportEndangeredMainEffort()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.ReserveWait,
-            role: CommandNodeRole.Reserve,
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
-            order,
-            mainEffortOdds: 0.85f,
-            reserveFraction: 0.20f);
-
-        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
-        AssertEqual(CommandTaskType.ReleaseReserve, decision.Task, "task");
-        AssertEqual("main-effort-under-pressure", decision.Reason, "reason");
-    }
-
-    private static void DoctrineReserveSealsThreatenedFlankFromOperationalMission()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.ReserveWait,
-            role: CommandNodeRole.Reserve,
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
-            order,
-            new OperationalReserveInput(
-                reserveFraction: 0.28f,
-                mainEffortOdds: 1.75f,
-                flankThreat01: 0.85f,
-                reserveEndurance01: 0.80f,
-                assaultAuthorized: true,
-                fallbackPressure: false));
-
-        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
-        AssertEqual(CommandTaskType.GuardFlank, decision.Task, "task");
-        AssertEqual("flank-threat", decision.Reason, "reason");
-    }
-
-    private static void DoctrineReserveConservesExhaustedReserve()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.ReserveWait,
-            role: CommandNodeRole.Reserve,
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
-            order,
-            new OperationalReserveInput(
-                reserveFraction: 0.20f,
-                mainEffortOdds: 1.65f,
-                flankThreat01: 0.10f,
-                reserveEndurance01: 0.15f,
-                assaultAuthorized: true,
-                fallbackPressure: false));
-
-        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
-        AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
-        AssertEqual("reserve-spent", decision.Reason, "reason");
-    }
-
-    private static void DoctrineFallbackReliefBeatsStaleHeldOrder()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.FallBackToLine,
-            role: CommandNodeRole.Reserve,
-            fallback: DoctrineTargetPoint.From(90f, 120f),
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
-            order,
-            mainEffortOdds: 0.5f,
-            reserveFraction: 0f);
-
-        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
-        AssertEqual(CommandTaskType.FallBackToLine, decision.Task, "task");
-        AssertEqual("fallback-relief", decision.Reason, "reason");
-    }
-
-    private static void DoctrineReserveNonfiniteReserveFractionFailsClosed()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.ReserveWait,
-            role: CommandNodeRole.Reserve,
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
-            order,
-            mainEffortOdds: 0.80f,
-            reserveFraction: float.PositiveInfinity);
-
-        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
-        AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
-        AssertEqual("reserve-held", decision.Reason, "reason");
     }
 
     private static void DoctrineArtillerySupportsCommittedMainEffort()

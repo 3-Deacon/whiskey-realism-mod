@@ -126,12 +126,8 @@ internal static class TacticalLedgerTests
             ("tactical intent model records all fields", TacticalIntentModelRecordsAllFields),
             ("tactical intent model clamps confidence and age", TacticalIntentModelClampsConfidenceAndAge),
             ("tactical intent model unknown primary intent sentinel", TacticalIntentModelUnknownPrimaryIntentSentinel),
-            ("tactical reserve commit gate observes when vanilla did not move", TacticalReserveCommitGateObservesWhenNoVanillaMove),
             ("tactical reserve commit gate denies reserve role movement", TacticalReserveCommitGateDeniesReserveRoleMovement),
-            ("tactical reserve commit gate allows main understrength movement", TacticalReserveCommitGateAllowsMainUnderstrengthMovement),
-            ("tactical reserve commit gate allows fallback screen movement", TacticalReserveCommitGateAllowsFallbackScreenMovement),
             ("tactical reserve commit gate observes player controlled group", TacticalReserveCommitGateObservesPlayerControlledGroup),
-            ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
         });
     }
 
@@ -2032,61 +2028,16 @@ internal static class TacticalLedgerTests
         AssertNear(0f, unknown.Confidence01, 1e-5f, "unknown confidence");
     }
 
-    private static TacticalReserveCommitGate.Input ReserveGateInput(
-        bool vanillaCommitted = true,
-        bool resolved = true,
-        DirectChildRole role = DirectChildRole.Reserve,
-        bool playerControlled = false,
-        bool committedUnitAlreadyEngaged = false,
-        float ownStrengthRatio = 1.0f,
-        float localOdds = 1.0f)
+    private static TacticalReserveCommitGate.Input ReserveGateInput(bool playerControlled = false)
     {
-        return new TacticalReserveCommitGate.Input(
-            vanillaCommitted,
-            new CommandIntentResolution(
-                resolved,
-                new CommandNodeIntent(
-                    "node-200",
-                    "node-200",
-                    role,
-                    DirectChildAxis.Hold,
-                    primarySector: 2,
-                    supportPriority: 50,
-                    aggressionBias01: 0.5f,
-                    depth: 1),
-                resolved ? "exact-command-node" : "command-node-not-found"),
-            playerControlled,
-            committedUnitAlreadyEngaged,
-            ownStrengthRatio,
-            localOdds);
-    }
-
-    private static void TacticalReserveCommitGateObservesWhenNoVanillaMove()
-    {
-        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(vanillaCommitted: false));
-        AssertEqual(TacticalReserveCommitGate.Action.Observe, d.Action, "action");
-        AssertEqual("no-vanilla-commit", d.Reason, "reason");
+        return new TacticalReserveCommitGate.Input(playerControlled, reserveReleased: false);
     }
 
     private static void TacticalReserveCommitGateDeniesReserveRoleMovement()
     {
-        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Reserve));
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput());
         AssertEqual(TacticalReserveCommitGate.Action.Deny, d.Action, "action");
         AssertEqual("role-reserve-hold", d.Reason, "reason");
-    }
-
-    private static void TacticalReserveCommitGateAllowsMainUnderstrengthMovement()
-    {
-        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Main, ownStrengthRatio: 0.60f));
-        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
-        AssertEqual("main-understrength-release", d.Reason, "reason");
-    }
-
-    private static void TacticalReserveCommitGateAllowsFallbackScreenMovement()
-    {
-        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Fallback, localOdds: 0.70f));
-        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
-        AssertEqual("fallback-screen-retreat", d.Reason, "reason");
     }
 
     private static void TacticalReserveCommitGateObservesPlayerControlledGroup()
@@ -2096,10 +2047,4 @@ internal static class TacticalLedgerTests
         AssertEqual("player-controlled", d.Reason, "reason");
     }
 
-    private static void TacticalReserveCommitGateAllowsAlreadyEngagedReserve()
-    {
-        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Reserve, committedUnitAlreadyEngaged: true));
-        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
-        AssertEqual("already-committed-contact", d.Reason, "reason");
-    }
 }
