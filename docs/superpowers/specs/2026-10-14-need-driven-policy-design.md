@@ -117,7 +117,7 @@ The daily strategic review builds the need vector and ranks every eligible polic
 | `Strategic/Policies/PolicyEligibility.cs` | pure |
 | `Strategic/Policies/PolicyNeedScorer.cs` | pure |
 | `Strategic/Policies/PolicyPlanLedger.cs` | pure |
-| `Strategic/Policies/PolicyListOverride.cs` | pure (emergency protected-id set, held-act fallback filter, snapshot restore) |
+| `Strategic/Policies/PolicyListOverride.cs` | pure (call decision `Decide`, emergency protected-id set, held-act fallback filter, snapshot edits and restore) |
 | `Strategic/Policies/PolicyRuntime.cs` | runtime |
 | `Strategic/CampaignNeedBuilder.cs` | pure |
 | `Strategic/CampaignNeedRuntime.cs` | runtime |

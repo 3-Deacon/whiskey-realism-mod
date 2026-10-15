@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Policies;
@@ -31,22 +30,18 @@ namespace WhiskeyRealism.Patches
     //    (PolicyNeedScorer.IsHeld under the review's need vector) taken out of the personality
     //    list, so neither Whiskey nor vanilla starts one. No need vector yet: vanilla.
     //
-    // Both list edits snapshot vanilla's personality list first and publish the handle
-    // through __state before touching it; the Finalizer puts the exact snapshot back (contents
-    // and order), even when vanilla throws. GetAIPersonality (62716) returns the stored
-    // personality (GetPersonalityByID), the same object vanilla re-reads at 211025.
+    // The Prefix reads the call's facts and follows PolicyListOverride.Decide (pure,
+    // harness-tested: emergency first, then research in progress, then the flag, then the
+    // pick, then the need vector). Both list edits go through PolicyListOverride.Append /
+    // Remove, which take the snapshot and publish it through __state before touching the
+    // list; the Finalizer puts the exact snapshot back (contents and order), even when
+    // vanilla throws, and logs the restored length once. GetAIPersonality (62716) returns the
+    // stored personality (GetPersonalityByID), the same object vanilla re-reads at 211025.
     [HarmonyPatch(typeof(Policies), "CheckAIPolicyChange")]
     internal static class PolicySelectionPatch
     {
-        // Vanilla's personality list and its contents before this call's edit.
-        internal sealed class ListSnapshot
-        {
-            internal List<int> List;
-            internal int[] Original;
-        }
-
         [HarmonyPrefix]
-        internal static bool Prefix(int alliance, out ListSnapshot __state)
+        internal static bool Prefix(int alliance, out PolicyListOverride.Snapshot __state)
         {
             __state = null;
             using (TelemetryPerf.Scope("campaign.patch.policy-selection.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
@@ -65,18 +60,31 @@ namespace WhiskeyRealism.Patches
                     var personality = state.GetAIPersonality(alliance);
                     if (personality == null || personality.policies == null) return true;
 
-                    if (personality.id == GamePrefs.emergencyaipolicycredit || personality.id == GamePrefs.emergencyaipolicyrecruiting)
+                    var coordinator = StrategicCoordinator.Instance;
+                    NeedVector need = coordinator != null && coordinator.Needs != null && alliance < coordinator.Needs.Length ? coordinator.Needs[alliance] : null;
+                    var facts = new PolicyCallFacts
                     {
-                        if (alliance == playerAlliance)
-                            ProtectPlayerResearch(alliance, state, personality, out __state);
-                        return true;
-                    }
+                        Emergency = personality.id == GamePrefs.emergencyaipolicycredit || personality.id == GamePrefs.emergencyaipolicyrecruiting,
+                        PlayerAlliance = alliance == playerAlliance,
+                        ResearchInProgress = PolicyRuntime.HasResearchInProgress(alliance),
+                        SelectionEnabled = Plugin.Instance.EnableNeedDrivenPolicySelection.Value,
+                        HasNeed = need != null
+                    };
 
-                    // Vanilla returns at 211061 without walking the list while anything is in research.
-                    if (PolicyRuntime.HasResearchInProgress(alliance)) return true;
-                    if (TrySelectNeedDriven(alliance)) return false;
-                    HoldIrreversibleActs(alliance, personality, out __state);
-                    return true;
+                    PolicyPlanLedger plan = coordinator != null && coordinator.PolicyPlans != null && alliance < coordinator.PolicyPlans.Length ? coordinator.PolicyPlans[alliance] : null;
+                    switch (PolicyListOverride.Decide(facts, () => FindPick(alliance, plan), pick => StartPick(alliance, pick, plan)))
+                    {
+                        case PolicyCallAction.Pick:
+                            return false;
+                        case PolicyCallAction.ProtectPlayerResearch:
+                            ProtectPlayerResearch(alliance, state, personality, out __state);
+                            return true;
+                        case PolicyCallAction.HoldFallback:
+                            HoldIrreversibleActs(alliance, need, personality, out __state);
+                            return true;
+                        default:
+                            return true;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -87,27 +95,30 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyFinalizer]
-        internal static Exception Finalizer(Exception __exception, ListSnapshot __state)
+        internal static Exception Finalizer(Exception __exception, PolicyListOverride.Snapshot __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.policy-selection.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.policy-selection.finalizer");
                 try
                 {
-                    if (__state != null) PolicyListOverride.Restore(__state.List, __state.Original);
+                    int restored = PolicyListOverride.Restore(__state);
+                    if (restored >= 0)
+                        OnceLog.Info("policy-selection:restore",
+                            "PolicySelectionPatch restored vanilla's personality list after the call restored=" + restored);
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("policy-selection:restore", "[Patch:PolicySelection] personality list restore failed: " + ex.Message);
+                    OnceLog.Warning("policy-selection:restore-failed", "[Patch:PolicySelection] personality list restore failed: " + ex.Message);
                 }
                 return __exception;
             }
         }
 
-        // The restore handle is published through the out parameter (Harmony's __state)
-        // before the vanilla list is touched, so the Finalizer restores it even when anything
-        // after the edit throws.
-        private static void ProtectPlayerResearch(int alliance, GameVars.Alliance state, GameVars.Alliance.AIPersonality personality, out ListSnapshot snapshot)
+        // Emergency, player's alliance: append the in-progress ids so vanilla's cancel
+        // spares them. Append publishes the snapshot through the out parameter (Harmony's
+        // __state) before touching the list.
+        private static void ProtectPlayerResearch(int alliance, GameVars.Alliance state, GameVars.Alliance.AIPersonality personality, out PolicyListOverride.Snapshot snapshot)
         {
             snapshot = null;
             var research = state.activatedpolicies;
@@ -120,10 +131,8 @@ namespace WhiskeyRealism.Patches
                 progress[i] = research[i] != null ? research[i].researchprogress : 1f;
             }
             var protectedIds = PolicyListOverride.ProtectedIds(ids, progress, personality.policies);
-            if (protectedIds.Count == 0) return;
-
-            snapshot = new ListSnapshot { List = personality.policies, Original = personality.policies.ToArray() };
-            personality.policies.AddRange(protectedIds);
+            PolicyListOverride.Append(personality.policies, protectedIds, out snapshot);
+            if (snapshot == null) return;
 
             try
             {
@@ -145,19 +154,13 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Non-emergency fallback, nothing in research and no Whiskey pick: takes the held
-        // irreversible acts out of the list vanilla is about to walk. Same publish-first
-        // handle as ProtectPlayerResearch.
-        private static void HoldIrreversibleActs(int alliance, GameVars.Alliance.AIPersonality personality, out ListSnapshot snapshot)
+        // Fallback with no started pick: take the held irreversible acts out of the list
+        // vanilla is about to walk. Remove publishes the snapshot first.
+        private static void HoldIrreversibleActs(int alliance, NeedVector need, GameVars.Alliance.AIPersonality personality, out PolicyListOverride.Snapshot snapshot)
         {
-            snapshot = null;
-            var coordinator = StrategicCoordinator.Instance;
-            NeedVector need = coordinator != null && coordinator.Needs != null && alliance < coordinator.Needs.Length ? coordinator.Needs[alliance] : null;
-            var held = PolicyListOverride.HeldIdsToRemove(Plugin.Instance.EnableNeedDrivenPolicySelection.Value, emergency: false, need, personality.policies);
-            if (held.Count == 0) return;
-
-            snapshot = new ListSnapshot { List = personality.policies, Original = personality.policies.ToArray() };
-            PolicyListOverride.Remove(personality.policies, held);
+            var held = PolicyListOverride.HeldIdsToRemove(need, personality.policies);
+            PolicyListOverride.Remove(personality.policies, held, out snapshot);
+            if (snapshot == null) return;
 
             try
             {
@@ -179,24 +182,21 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // True when Whiskey started research (vanilla is skipped). The caller checked that
-        // nothing is in research.
-        private static bool TrySelectNeedDriven(int alliance)
+        // The first ranked policy that passes the live filters, or -1.
+        private static int FindPick(int alliance, PolicyPlanLedger plan)
         {
-            if (!Plugin.Instance.EnableNeedDrivenPolicySelection.Value) return false;
-            var coordinator = StrategicCoordinator.Instance;
-            if (coordinator == null || coordinator.PolicyPlans == null || alliance >= coordinator.PolicyPlans.Length) return false;
+            if (plan == null || plan.Ranked.Count == 0) return -1;
+            return plan.NextEligible(id => PolicyRuntime.IsEligibleNow(alliance, id));
+        }
 
-            var plan = coordinator.PolicyPlans[alliance];
-            if (plan == null || plan.Ranked.Count == 0) return false;
-            int pick = plan.NextEligible(id => PolicyRuntime.IsEligibleNow(alliance, id));
-            if (pick < 0) return false;
+        // True when vanilla's AddResearch took the pick (vanilla is then skipped).
+        private static bool StartPick(int alliance, int pick, PolicyPlanLedger plan)
+        {
             if (!PolicyRuntime.TryStartResearch(alliance, pick))
             {
                 OnceLog.Warning("policy-selection:start-failed", "[Patch:PolicySelection] AddResearch did not start policy " + pick + "; vanilla picks");
                 return false;
             }
-
             OnceLog.Info("policy-selection:wired", "PolicySelectionPatch need-driven pick alliance=" + alliance + " policy=" + pick);
             EmitSelection(alliance, pick, plan);
             return true;

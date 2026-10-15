@@ -98,8 +98,13 @@ internal static class NeedDrivenPolicyTests
             ("need-policy emergency restore gives back vanilla's list", EmergencyRestoreGivesBackList),
             ("need-policy fallback hold removes held acts and keeps vanilla's order", FallbackHoldRemovesHeldActs),
             ("need-policy fallback hold restore gives back vanilla's exact list", FallbackHoldRestoreIsExact),
-            ("need-policy fallback hold leaves vanilla untouched without a plan or with selection off", FallbackHoldNeedsPlanAndFlag),
-            ("need-policy fallback hold never filters the emergency list", FallbackHoldSkipsEmergency),
+            ("need-policy fallback hold leaves vanilla untouched without a plan", FallbackHoldNeedsPlan),
+            ("need-policy call decision: an emergency never holds and protects only the player's alliance", DecideEmergencyNeverHolds),
+            ("need-policy call decision: selection off leaves vanilla untouched", DecideFlagOffIsVanilla),
+            ("need-policy call decision: research in progress leaves vanilla untouched", DecideResearchInProgressIsVanilla),
+            ("need-policy call decision: a started Whiskey pick skips vanilla with no list edit", DecidePickSkipsHold),
+            ("need-policy call decision: no started pick holds the fallback only with a need vector", DecideFallbackNeedsNeed),
+            ("need-policy list edits publish a snapshot only when they change the list", ListEditsSnapshotOnlyOnChange),
         });
     }
 
@@ -839,16 +844,14 @@ internal static class NeedDrivenPolicyTests
     private static void EmergencyRestoreGivesBackList()
     {
         var list = new List<int> { 20, 21, 22 };
-        var snapshot = list.ToArray();
-        list.AddRange(PolicyListOverride.ProtectedIds(new[] { 12, 40 }, new[] { 0.3f, 0.5f }, list));
+        PolicyListOverride.Append(list, PolicyListOverride.ProtectedIds(new[] { 12, 40 }, new[] { 0.3f, 0.5f }, list), out var snapshot);
         AssertEqual(5, list.Count, "appended");
-        PolicyListOverride.Restore(list, snapshot);
+        AssertEqual(3, PolicyListOverride.Restore(snapshot), "restored length");
         AssertSequence(new[] { 20, 21, 22 }, list, "vanilla list and order back");
-        PolicyListOverride.Restore(list, snapshot);
+        PolicyListOverride.Restore(snapshot);
         AssertSequence(new[] { 20, 21, 22 }, list, "second restore is a no-op");
-        PolicyListOverride.Restore(list, null);
-        AssertSequence(new[] { 20, 21, 22 }, list, "no snapshot never clears the list");
-        PolicyListOverride.Restore(null, snapshot);
+        AssertEqual(-1, PolicyListOverride.Restore(null), "no snapshot: nothing restored, list never cleared");
+        AssertSequence(new[] { 20, 21, 22 }, list, "list kept without a snapshot");
     }
 
     // Verifier probe (stage E verify round 2): with a plan and no eligible Whiskey pick,
@@ -859,51 +862,126 @@ internal static class NeedDrivenPolicyTests
     {
         var calm = Needs((NeedKind.Manpower, 0.2f), (NeedKind.Treasury, 0.5f));
         var list = new List<int>(UnionHistorical);
-        var held = PolicyListOverride.HeldIdsToRemove(true, false, calm, list);
+        var held = PolicyListOverride.HeldIdsToRemove(calm, list);
         AssertSequence(new[] { 33, 39, 40 }, held, "held acts in list order, each once");
-        PolicyListOverride.Remove(list, held);
+        PolicyListOverride.Remove(list, held, out _);
         var expected = new List<int>();
         foreach (int id in UnionHistorical)
             if (id != 33 && id != 39 && id != 40) expected.Add(id);
         AssertSequence(expected, list, "every occurrence removed, vanilla order kept");
 
-        var csa = PolicyListOverride.HeldIdsToRemove(true, false, calm, CsaHistorical);
-        AssertSequence(new[] { 139, 140 }, csa, "CSA conscription acts held");
+        AssertSequence(new[] { 139, 140 }, PolicyListOverride.HeldIdsToRemove(calm, CsaHistorical), "CSA conscription acts held");
 
         var crisis = Needs((NeedKind.Manpower, 0.9f));
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, crisis, UnionHistorical).Count, "a manpower crisis opens the gate: vanilla walks its own list");
-        var recognitionOnly = new List<int> { 144, 143, 130 };
-        AssertSequence(new[] { 144, 130 }, PolicyListOverride.HeldIdsToRemove(true, false, crisis, recognitionOnly), "recognition acts stay held in a manpower crisis");
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, calm, new List<int> { 22, 35, 41 }).Count, "nothing irreversible listed: untouched");
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, calm, null).Count, "null list");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(crisis, UnionHistorical).Count, "a manpower crisis opens the gate: vanilla walks its own list");
+        AssertSequence(new[] { 144, 130 }, PolicyListOverride.HeldIdsToRemove(crisis, new List<int> { 144, 143, 130 }), "recognition acts stay held in a manpower crisis");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, new List<int> { 22, 35, 41 }).Count, "nothing irreversible listed: untouched");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(calm, null).Count, "null list");
     }
 
     private static void FallbackHoldRestoreIsExact()
     {
         var calm = Needs((NeedKind.Manpower, 0.2f));
         var list = new List<int>(UnionHistorical);
-        var snapshot = list.ToArray();
-        PolicyListOverride.Remove(list, PolicyListOverride.HeldIdsToRemove(true, false, calm, list));
+        PolicyListOverride.Remove(list, PolicyListOverride.HeldIdsToRemove(calm, list), out var snapshot);
         AssertTrue(list.Count < UnionHistorical.Length, "filtered for the call");
-        PolicyListOverride.Restore(list, snapshot);
+        AssertSequence(UnionHistorical, snapshot.Original, "snapshot taken before the edit");
+        AssertEqual(UnionHistorical.Length, PolicyListOverride.Restore(snapshot), "restored length");
         AssertSequence(UnionHistorical, list, "identical list, duplicates and order included");
     }
 
-    private static void FallbackHoldNeedsPlanAndFlag()
+    private static void FallbackHoldNeedsPlan()
     {
-        var calm = Needs((NeedKind.Manpower, 0.2f));
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, null, UnionHistorical).Count, "no plan (no need vector yet): vanilla untouched");
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(false, false, calm, UnionHistorical).Count, "selection off: vanilla untouched");
-        var list = new List<int>(UnionHistorical);
-        PolicyListOverride.Remove(list, new List<int>());
-        AssertSequence(UnionHistorical, list, "removing nothing leaves the list");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(null, UnionHistorical).Count, "no plan (no need vector yet): nothing held");
     }
 
-    private static void FallbackHoldSkipsEmergency()
+    // ---------------------------------------------------------------- call decision
+
+    private static PolicyCallFacts CallFacts(bool emergency = false, bool player = false, bool research = false, bool selection = true, bool need = true)
     {
-        var calm = Needs((NeedKind.Manpower, 0.2f));
-        var emergencyList = new List<int> { 39, 40, 33, 22 };
-        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, true, calm, emergencyList).Count, "emergency list walked as vanilla wrote it");
+        return new PolicyCallFacts { Emergency = emergency, PlayerAlliance = player, ResearchInProgress = research, SelectionEnabled = selection, HasNeed = need };
+    }
+
+    // Counts how often the decision asked for and started a pick.
+    private sealed class PickProbe
+    {
+        public int Finds;
+        public int Starts;
+        public int Candidate = 22;
+        public bool StartWorks = true;
+        public int Find() { Finds++; return Candidate; }
+        public bool Start(int id) { Starts++; return StartWorks; }
+    }
+
+    private static PolicyCallAction Decide(PolicyCallFacts facts, PickProbe probe) => PolicyListOverride.Decide(facts, probe.Find, probe.Start);
+
+    private static void DecideEmergencyNeverHolds()
+    {
+        var probe = new PickProbe();
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(emergency: true), probe), "AI emergency: vanilla's own call, list unfiltered");
+        AssertEqual(PolicyCallAction.ProtectPlayerResearch, Decide(CallFacts(emergency: true, player: true), probe), "player emergency: protect research, no hold");
+        AssertEqual(PolicyCallAction.ProtectPlayerResearch, Decide(CallFacts(emergency: true, player: true, selection: false), probe), "protection under the master switch only");
+        probe.Candidate = -1;
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(emergency: true, research: false), probe), "emergency with no pick still never holds");
+        AssertEqual(0, probe.Finds + probe.Starts, "an emergency never asks for a pick");
+    }
+
+    private static void DecideFlagOffIsVanilla()
+    {
+        var probe = new PickProbe();
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(selection: false), probe), "selection off: vanilla");
+        probe.Candidate = -1;
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(selection: false), probe), "selection off, no pick: no hold");
+        AssertEqual(0, probe.Finds + probe.Starts, "selection off never asks for a pick");
+    }
+
+    private static void DecideResearchInProgressIsVanilla()
+    {
+        var probe = new PickProbe();
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(research: true), probe), "research in progress: vanilla returns at 211061");
+        probe.Candidate = -1;
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(research: true), probe), "research in progress, no pick: no hold");
+        AssertEqual(0, probe.Finds + probe.Starts, "research in progress never asks for a pick");
+    }
+
+    private static void DecidePickSkipsHold()
+    {
+        var probe = new PickProbe();
+        AssertEqual(PolicyCallAction.Pick, Decide(CallFacts(), probe), "started pick: vanilla skipped, no list edit");
+        AssertEqual(1, probe.Finds, "asked once");
+        AssertEqual(1, probe.Starts, "started once");
+        probe = new PickProbe();
+        AssertEqual(PolicyCallAction.Pick, Decide(CallFacts(need: false), probe), "a restored ranking picks without a need vector");
+    }
+
+    private static void DecideFallbackNeedsNeed()
+    {
+        var none = new PickProbe { Candidate = -1 };
+        AssertEqual(PolicyCallAction.HoldFallback, Decide(CallFacts(), none), "no eligible pick: vanilla walks without held acts");
+        AssertEqual(0, none.Starts, "nothing to start");
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(need: false), none), "no need vector: vanilla's own list");
+        var failed = new PickProbe { StartWorks = false };
+        AssertEqual(PolicyCallAction.HoldFallback, Decide(CallFacts(), failed), "AddResearch refused the pick: held fallback");
+        AssertEqual(PolicyCallAction.Vanilla, Decide(CallFacts(need: false), failed), "refused pick, no need vector: vanilla");
+        AssertEqual(PolicyCallAction.Vanilla, PolicyListOverride.Decide(CallFacts(), null, null), "no pick source: vanilla stays safe");
+    }
+
+    private static void ListEditsSnapshotOnlyOnChange()
+    {
+        var list = new List<int> { 20, 21, 22 };
+        PolicyListOverride.Remove(list, new List<int>(), out var removeNothing);
+        AssertTrue(removeNothing == null, "removing nothing: no snapshot");
+        PolicyListOverride.Append(list, new List<int>(), out var appendNothing);
+        AssertTrue(appendNothing == null, "appending nothing: no snapshot");
+        AssertSequence(new[] { 20, 21, 22 }, list, "list untouched");
+        PolicyListOverride.Remove(list, new List<int> { 21 }, out var removed);
+        AssertSequence(new[] { 20, 21, 22 }, removed.Original, "remove snapshots before the edit");
+        AssertTrue(ReferenceEquals(list, removed.List), "snapshot holds vanilla's own list");
+        PolicyListOverride.Restore(removed);
+        PolicyListOverride.Append(list, new List<int> { 9 }, out var appended);
+        AssertSequence(new[] { 20, 21, 22 }, appended.Original, "append snapshots before the edit");
+        PolicyListOverride.Restore(appended);
+        AssertSequence(new[] { 20, 21, 22 }, list, "restored");
     }
 
     private static void AssertSequence(IList<int> expected, IList<int> actual, string label)

@@ -3,10 +3,30 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic.Policies
 {
-    // Temporary edits PolicySelectionPatch makes to the personality list vanilla
-    // Policies.CheckAIPolicyChange walks (decompile 211017-211098), for the duration of one
-    // call. The patch snapshots the list before the edit and the Finalizer puts the exact
-    // snapshot back (Restore), whichever edit was made.
+    // What PolicySelectionPatch does in one vanilla Policies.CheckAIPolicyChange call
+    // (decompile 211017-211098), decided here so the order is covered by the harness.
+    public enum PolicyCallAction
+    {
+        Vanilla,                // leave vanilla's call and list untouched
+        ProtectPlayerResearch,  // emergency, player's alliance: append in-progress ids (BUG-WL-003)
+        Pick,                   // Whiskey started a research; vanilla is skipped
+        HoldFallback,           // vanilla's fallback walk runs without the held irreversible acts
+    }
+
+    // The facts the decision reads, named so a call site cannot swap them.
+    public struct PolicyCallFacts
+    {
+        public bool Emergency;          // GetAIPersonality returned an emergency personality
+        public bool PlayerAlliance;     // the call is for GameVars.playeralliance
+        public bool ResearchInProgress; // anything below progress 1 (211061)
+        public bool SelectionEnabled;   // Enable Need-Driven Policy Selection
+        public bool HasNeed;            // the daily review has a need vector for the alliance
+    }
+
+    // Temporary edits PolicySelectionPatch makes to the personality list vanilla walks, for
+    // the duration of one call. Each edit takes its snapshot and publishes it through the out
+    // parameter (the patch passes Harmony's __state) before touching the list; the Finalizer
+    // puts the exact snapshot back (Restore).
     //
     //  - Emergency, player's alliance: vanilla removes every in-progress policy whose id is
     //    not on the emergency list (211065-211074). For the player's alliance that cancels
@@ -19,6 +39,36 @@ namespace WhiskeyRealism.Strategic.Policies
     //    139/140). HeldIdsToRemove takes the ones held below their need gate out of the walk.
     public static class PolicyListOverride
     {
+        // Vanilla's personality list and its contents before this call's edit.
+        public sealed class Snapshot
+        {
+            public readonly List<int> List;
+            public readonly int[] Original;
+
+            internal Snapshot(List<int> list)
+            {
+                List = list;
+                Original = list.ToArray();
+            }
+        }
+
+        // The call's action, in vanilla's own order: the emergency branch first (vanilla never
+        // filtered there, and for an AI alliance it stays vanilla's), then the one-at-a-time
+        // return while anything is in research (211061), then the flag. findPick is asked only
+        // past those gates; startPick reports whether vanilla's AddResearch took the pick. With
+        // no started pick, the fallback walk is held only once the review has a need vector.
+        // Missing delegates: vanilla.
+        public static PolicyCallAction Decide(PolicyCallFacts facts, Func<int> findPick, Func<int, bool> startPick)
+        {
+            if (facts.Emergency)
+                return facts.PlayerAlliance ? PolicyCallAction.ProtectPlayerResearch : PolicyCallAction.Vanilla;
+            if (facts.ResearchInProgress || !facts.SelectionEnabled) return PolicyCallAction.Vanilla;
+            if (findPick == null || startPick == null) return PolicyCallAction.Vanilla;
+            int pick = findPick();
+            if (pick >= 0 && startPick(pick)) return PolicyCallAction.Pick;
+            return facts.HasNeed ? PolicyCallAction.HoldFallback : PolicyCallAction.Vanilla;
+        }
+
         // Ids still in research (progress < 1), not already on the list, each once.
         public static List<int> ProtectedIds(IList<int> researchIds, IList<float> progress, IList<int> personalityPolicies)
         {
@@ -36,14 +86,13 @@ namespace WhiskeyRealism.Strategic.Policies
             return result;
         }
 
-        // Held irreversible acts on the list vanilla's fallback would walk, in list order, each
-        // once. need is the alliance's need vector from the daily review (the plan's input; null
-        // before the first review, when vanilla stays untouched). Empty when selection is off
-        // or on an emergency personality (vanilla's emergency list is never filtered).
-        public static List<int> HeldIdsToRemove(bool selectionEnabled, bool emergency, NeedVector need, IList<int> personalityPolicies)
+        // Held irreversible acts (PolicyNeedScorer.IsHeld under the review's need vector) on
+        // the list vanilla's fallback would walk, in list order, each once. Decide gates the
+        // call (never on an emergency, never with selection off or no need vector).
+        public static List<int> HeldIdsToRemove(NeedVector need, IList<int> personalityPolicies)
         {
             var result = new List<int>();
-            if (!selectionEnabled || emergency || need == null || personalityPolicies == null) return result;
+            if (need == null || personalityPolicies == null) return result;
             for (int i = 0; i < personalityPolicies.Count; i++)
             {
                 int id = personalityPolicies[i];
@@ -52,20 +101,34 @@ namespace WhiskeyRealism.Strategic.Policies
             return result;
         }
 
-        // Removes every occurrence of ids, keeping the order of the rest.
-        public static void Remove(List<int> list, IList<int> ids)
+        // Appends ids; snapshot published first. Nothing to append: no snapshot, list untouched.
+        public static void Append(List<int> list, IList<int> ids, out Snapshot snapshot)
         {
+            snapshot = null;
             if (list == null || ids == null || ids.Count == 0) return;
+            snapshot = new Snapshot(list);
+            list.AddRange(ids);
+        }
+
+        // Removes every occurrence of ids, keeping the order of the rest; snapshot published
+        // first. Nothing to remove: no snapshot, list untouched.
+        public static void Remove(List<int> list, IList<int> ids, out Snapshot snapshot)
+        {
+            snapshot = null;
+            if (list == null || ids == null || ids.Count == 0) return;
+            snapshot = new Snapshot(list);
             list.RemoveAll(ids.Contains);
         }
 
-        // Finalizer side: puts back exactly the snapshot taken before the edit. No-op without
-        // a snapshot (never clears vanilla's list blind); idempotent.
-        public static void Restore(List<int> list, IList<int> snapshot)
+        // Finalizer side: puts back exactly the snapshot (Clear + AddRange, contents and
+        // order). Returns the restored length, or -1 without a snapshot (vanilla's list is
+        // never cleared blind). Idempotent.
+        public static int Restore(Snapshot snapshot)
         {
-            if (list == null || snapshot == null) return;
-            list.Clear();
-            for (int i = 0; i < snapshot.Count; i++) list.Add(snapshot[i]);
+            if (snapshot == null || snapshot.List == null) return -1;
+            snapshot.List.Clear();
+            snapshot.List.AddRange(snapshot.Original);
+            return snapshot.Original.Length;
         }
     }
 }
