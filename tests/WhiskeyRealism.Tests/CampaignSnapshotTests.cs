@@ -938,8 +938,9 @@ internal static class CampaignSnapshotTests
         AssertEqual(1, rails.LinesNearTown(7, 0f, 0f, 12f), "inside the radius");
         AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 8f), "a new radius is not served from the memo");
         AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 0f), "no radius, no line");
+        AssertEqual(1, rails.LinesNearTown(7, 0f, 0f, 12f), "back to the first radius: memo holds town 7 at 12");
 
-        // A reload: the same town id must not keep the old map's count.
+        // A reload at the same radius: the same town id must not keep the old map's count.
         rails.Clear();
         AssertEqual(0, rails.LinesNearTown(7, 0f, 0f, 12f), "no lines after clear");
         var gone = new RailLineRecord { AIipId = -1, BIipId = -1 };
@@ -974,9 +975,27 @@ internal static class CampaignSnapshotTests
                                          "CrossingCache.Clear()", "CrossingSource.Clear()", "PositionCache.Clear()" })
             AssertContains(reset, clear, "campaign reset clears " + clear);
 
+        string build = MethodBody(src, "internal static CampaignSnapshot Build(");
+        AssertContains(build, "TelemetryPerf.Scope(\"campaign.planner.snapshot\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "snapshot timed in its own scope");
+        AssertContains(build, "return BuildCore(", "the scope wraps the whole build");
+
         string areas = MethodBody(src, "private static void ReadAreas(");
         AssertContains(areas, "AreaSource.Matches(", "areas rebuild their shapes only on a new area list");
         AssertFalse(areas.Contains("zoneedges"), "edges are not read daily");
+        string shapes = MethodBody(src, "private static void ReadAreaShapes(");
+        foreach (string daily in new[] { "importancevalues", "ownpoints", "supplycapacity" })
+        {
+            AssertContains(areas, "area." + daily, "area " + daily + " read every review");
+            AssertFalse(shapes.Contains(daily), "area " + daily + " is not frozen in the shape cache");
+        }
+
+        // Supply: ownership, condition and construction are read live for every source, with no
+        // cache in front of the record (only the static position goes through PositionOf).
+        string supply = MethodBody(src, "private static void ReadSupply(");
+        foreach (string live in new[] { "Owner = iip.allianceowner", "Condition = iip.condition", "Owner = depot.Owner",
+                                        "Condition = depot.Condition", "Built = depot.constructiontimer <= 0f" })
+            AssertContains(supply, live, "supply reads live: " + live);
+        AssertFalse(supply.Contains("TryGetValue") || supply.Contains("Cache") || supply.Contains("Source."), "no cached supply record");
 
         string objectives = MethodBody(src, "private static void ReadObjectives(");
         AssertContains(objectives, "Rails.LinesNearTown(", "town rail lines come from the cached geometry");
@@ -985,18 +1004,28 @@ internal static class CampaignSnapshotTests
 
         string rails = MethodBody(src, "private static void ReadRails(");
         AssertContains(rails, "EnsureRailGeometry()", "rails rebuild their geometry only on a new railroad list");
+        AssertContains(rails, "line.StartConstruction(alliance, checkonly: true)", "startable read every review");
+        AssertContains(rails, "UnderConstruction = line.constructionprogress > 0f && line.constructionprogress < 1f", "under construction read every review");
+        AssertContains(rails, "Progress = line.constructionprogress", "construction progress read every review");
         AssertContains(rails, "Rails.CopyEndpoints(", "endpoints come from the cache");
         AssertFalse(rails.Contains("IIPsForTransportCapacityUpdate"), "no per-review endpoint search");
 
         string ensure = MethodBody(src, "private static void EnsureRailGeometry(");
         AssertContains(ensure, "RailSource.Matches(", "rail geometry keyed on the railroad list");
+        int cleared = ensure.IndexOf("Rails.Clear()", StringComparison.Ordinal);
+        AssertTrue(cleared >= 0 && cleared < ensure.IndexOf("Rails.BeginLine()", StringComparison.Ordinal), "the old geometry is cleared before a rebuild");
 
         string crossings = MethodBody(src, "private static void ReadCrossings(");
         AssertContains(crossings, "CrossingSource.Matches(", "crossings copied once per crossing list");
 
         // Every transform read is the position cache's miss path or a moving unit's climate cell.
-        string position = MethodBody(src, "private static Vector3 PositionOf(");
+        // The cache is reachable only through the Town, IIP and CBuilding overloads.
+        string position = MethodBody(src, "private static Vector3 CachedStaticPosition(");
         AssertEqual(1, Count(position, "transform.position"), "one read on a cache miss");
+        foreach (string typed in new[] { "PositionOf(Town town) => CachedStaticPosition(town);", "PositionOf(IIP iip) => CachedStaticPosition(iip);",
+                                         "PositionOf(CBuilding building) => CachedStaticPosition(building);" })
+            AssertContains(src, typed, "typed position overload");
+        AssertEqual(4, Count(src, "CachedStaticPosition("), "only the three overloads reach the cache");
         int climate = 0;
         foreach (string line in src.Split('\n'))
             if (line.Contains("transform.position") && line.Contains("GetClimateData(")) climate++;

@@ -539,8 +539,18 @@ namespace WhiskeyRealism.Strategic.Planner
             RailSource.Set(lines, count);
         }
 
-        // Towns, IIPs, depots and capitals never move: one transform read per object per campaign.
-        private static Vector3 PositionOf(Component c)
+        // Towns (capitals included), IIPs and buildings never move once placed (CBuilding.Place
+        // 96188 runs before the building joins cbuildings): one transform read per object per
+        // campaign. Typed so a moving unit cannot be cached. A destroyed depot's entry stays until
+        // the campaign reset: bounded by the depots built in one campaign, and Unity's hash is the
+        // instance id, so a stale entry never matches a live object.
+        private static Vector3 PositionOf(Town town) => CachedStaticPosition(town);
+
+        private static Vector3 PositionOf(IIP iip) => CachedStaticPosition(iip);
+
+        private static Vector3 PositionOf(CBuilding building) => CachedStaticPosition(building);
+
+        private static Vector3 CachedStaticPosition(Component c)
         {
             if (PositionCache.TryGetValue(c, out Vector3 p)) return p;
             p = c.transform.position;
