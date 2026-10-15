@@ -88,7 +88,7 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 5. Filter `dlcw_isundercommander` units out of every enumeration of `allgroupsassigned` / `allattachedunits` used for AI decisions (pool leak). Battle: the snapshot carries `UnitFlags.PlayerOwned`; the posture inputs drop player-owned probes (`PostureProbeFilter`) and every per-regiment walk checks the flag or `TacticalWriteGuard.CanWrite`.
 6. Campaign dispatches have no vanilla dedupe — rate-limit and dedupe any Whiskey-issued campaign orders (type + target + ~110 m).
 7. Treat the player's group as an unreliable executor (disobedience is free); don't put it in must-succeed roles without a fallback.
-8. Gate Whiskey campaign writers on vanilla's hierarchy −1 pause (11368), or accept the asymmetry deliberately.
+8. Gate Whiskey campaign writers on vanilla's hierarchy −1 pause (11368), or accept the asymmetry deliberately. Stage G (spec C5): the planner pauses only the player's alliance on that predicate; the enemy alliance's planner keeps running (integrator decision 2026-10-15, a deliberate divergence from vanilla, which pauses every faction).
 9. A CIC player is a different regime: Whiskey's CIC for that side stands down; every unit on the player's side is player-owned.
 10. Respect `DLC_WL.IsMovedByPlayer` (player Operations) everywhere, not just capital defense.
 
