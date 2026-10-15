@@ -133,8 +133,7 @@ namespace WhiskeyRealism.Strategic
                     BugleRange = unit.buglerange,
                     InBattle = unit.inbattle,
                     OnRetreat = unit.onretreat,
-                    HasActivePath = unit.regimentpaths > 0,
-                    IsCavalryCapable = HasCavalryStrength(unit)
+                    HasActivePath = unit.regimentpaths > 0
                 };
 
                 snapshot.AreaKey = ArmyAreaRuntime.AreaKey(unit.transform.position);
@@ -373,17 +372,6 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return 1f;
-        }
-
-        private static bool HasCavalryStrength(Regiment unit)
-        {
-            var values = unit.groupstrengthperunittyp;
-            if (values == null) values = unit.groupstrengthperunittypcampaigndirect;
-            if (values == null) return false;
-
-            int cavalry = values.Length > 1 ? Math.Max(0, values[1]) : 0;
-            int mountedArtillery = values.Length > 4 ? Math.Max(0, values[4]) : 0;
-            return cavalry + mountedArtillery > 0;
         }
 
         private static float EstimateWeaponFirepower(Regiment unit)

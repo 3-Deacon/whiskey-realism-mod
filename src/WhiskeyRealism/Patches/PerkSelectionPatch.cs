@@ -131,8 +131,9 @@ namespace WhiskeyRealism.Patches
             {
                 switch (directive.Directive)
                 {
-                    case FormationDirective.RaidSupport:
-                        return ArmyPerkRole.Raid;
+                    // Screen = on a campaign-planner recon mission (G1b): scouting perks.
+                    case FormationDirective.Screen:
+                        return ArmyPerkRole.Scouting;
                     case FormationDirective.Recover:
                         return ArmyPerkRole.Recovery;
                     case FormationDirective.Guard:

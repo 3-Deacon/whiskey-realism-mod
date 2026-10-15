@@ -73,6 +73,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.cs" Link="Planner\LogisticsGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlayerCommandClassifier.cs" Link="Planner\PlayerCommandClassifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconPlanner.cs" Link="Planner\ReconPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconMissionLedger.cs" Link="Planner\ReconMissionLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconOrders.cs" Link="Planner\ReconOrders.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

@@ -38,7 +38,6 @@ internal static class StrategicOperationsTests
             ("historical operation dynamic victory exploits", HistoricalOperationDynamicVictoryExploits),
             ("historical operation unavailable objective aborts", HistoricalOperationUnavailableObjectiveAborts),
             ("historical operation dynamic action mutates phase posture", HistoricalOperationDynamicActionMutatesPhasePosture),
-            ("raid support maps only to cavalry capable formations", RaidSupportMapsOnlyToCavalryCapableFormations),
             ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges),
             ("formation directive carries stable id and position", FormationDirectiveCarriesStableIdAndPosition),
             ("formation directive summary changes on stable position", FormationDirectiveSummaryChangesOnStablePosition),
@@ -326,23 +325,6 @@ internal static class StrategicOperationsTests
         AssertEqual(true, plan.CurrentPhase.AllowCoordinatedAttack);
         AssertEqual(true, plan.CurrentPhase.AllowReinforcementPackage);
         AssertEqual(false, plan.CurrentPhase.AllowProbeOnly);
-    }
-
-    private static void RaidSupportMapsOnlyToCavalryCapableFormations()
-    {
-        var cavalry = Snapshot("cav", 1, 14, 2500f, 1000f, FormationLevel.Division, FrontPosture.EconomyOfForce);
-        cavalry.IsCavalryCapable = true;
-        cavalry.Supply = 0.9f;
-        cavalry.Readiness = 0.9f;
-
-        var infantry = Snapshot("inf", 1, 14, 2500f, 1000f, FormationLevel.Division, FrontPosture.EconomyOfForce);
-        infantry.IsCavalryCapable = false;
-
-        var ledger = FormationDirectiveLedger.Build(new[] { cavalry, infantry }, EraStage.Operational1862, null);
-
-        AssertEqual(true, ledger.GetAssignment("cav").RaidAllowed);
-        AssertEqual(FormationDirective.RaidSupport, ledger.GetAssignment("cav").Directive);
-        AssertEqual(false, ledger.GetAssignment("inf").RaidAllowed);
     }
 
     private static void FormationDirectiveSummaryChangesWhenAssignmentChanges()
