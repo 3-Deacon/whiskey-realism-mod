@@ -23,9 +23,10 @@ namespace WhiskeyRealism.Patches
     // run when vanilla throws and the filtered list would then leak into every
     // later AI job. The Postfix only does the defense-in-depth revert, which
     // needs vanilla to have completed. Vanilla's first branch queues the move as
-    // a DefensiveMovingOrder (decompile 13716) executed later by UpdateOrders
-    // (79295), so the revert cancels that queued order instead of issuing a
-    // MoveUnitTo toward a possibly-unset theaterposition.
+    // a DefensiveMovingOrder (decompile 13713) executed later by UpdateOrders
+    // (79295): the revert cancels that queued order (the unit has not moved);
+    // only a direct MoveUnitTo commit (attack branch, 13771) is moved back, and
+    // never toward an unset theaterposition.
     //
     // Vanilla field names confirmed from Assembly-CSharp.decompiled.cs:
     //   AIFaction.ownunits               — List<Regiment> (line 10324)
@@ -225,10 +226,16 @@ namespace WhiskeyRealism.Patches
 
                                         defOps.RemoveAt(i);
                                         RemoveFromStaticDefensiveOperation(unit);
-                                        CancelQueuedDefensiveMove(unit);
 
-                                        if (priorPositions != null && priorPositions.TryGetValue(id, out var priorPos) &&
-                                            priorPos != default(Vector3))
+                                        Vector3 priorPos = default(Vector3);
+                                        bool hasPrior = priorPositions != null && priorPositions.TryGetValue(id, out priorPos) &&
+                                            priorPos != default(Vector3);
+                                        var revert = CampaignMilitaryGates.ResolveForbiddenCommitRevert(QueuedDefensiveMove(unit), hasPrior);
+                                        if (revert == ForbiddenCommitRevert.CancelQueuedOrder)
+                                        {
+                                            CancelQueuedDefensiveMove(unit);
+                                        }
+                                        else if (revert == ForbiddenCommitRevert.MoveBack)
                                         {
                                             if (ShouldAvoidDirectWlRevert(unit, allianceId))
                                             {
@@ -297,6 +304,13 @@ namespace WhiskeyRealism.Patches
             if (!_ownUnitsSnapshot.TryGetValue(aifactionIndex, out var snapshot)) return;
             var ownUnits = GetOwnUnitsField(faction.GetType())?.GetValue(faction) as IList;
             CampaignMilitaryGates.RestoreListSnapshot(ownUnits, snapshot);
+        }
+
+        private static bool QueuedDefensiveMove(Regiment unit)
+        {
+            if (unit == null) return false;
+            try { return AICampaign.DefensiveMovingOrder.OrderRunning(unit); }
+            catch { return false; }
         }
 
         private static void CancelQueuedDefensiveMove(Regiment unit)

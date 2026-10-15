@@ -20,7 +20,7 @@ namespace WhiskeyRealism.Strategic
     // builder transitions to Recovered + cooldown expires.
     //
     // 2026-10-14 (C-Coastal): commits now mirror vanilla's defensive-operation
-    // commit (decompile 13716-13724): queue an AICampaign.DefensiveMovingOrder
+    // commit (decompile 13713-13719): queue an AICampaign.DefensiveMovingOrder
     // (executed by UpdateOrders, 79295), AIBattle.CheckCurrentOrderUpdate type 7,
     // remove from unitsinoffensiveoperations, add to unitsindefensiveoperations.
     // The destination keeps the nearest enemy inside 0.8 x buglerange, because
@@ -275,7 +275,7 @@ namespace WhiskeyRealism.Strategic
             tickSet.Add(unitInstanceId);
         }
 
-        // Vanilla defensive-operation commit (decompile 13716-13724).
+        // Vanilla defensive-operation commit (decompile 13713-13719).
         private static bool QueueVanillaDefensiveMove(Regiment unit, Vector3 destination, string orderName)
         {
             if (unit == null) return false;

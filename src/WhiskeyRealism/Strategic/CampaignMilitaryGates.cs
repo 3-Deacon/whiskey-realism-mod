@@ -41,6 +41,8 @@ namespace WhiskeyRealism.Strategic
         public bool TakingTown;            // AICampaign.IsUnitTakingTown
     }
 
+    internal enum ForbiddenCommitRevert { None, CancelQueuedOrder, MoveBack }
+
     internal static class CampaignMilitaryGates
     {
         // ---- C-DefIntent: sea-invasion landed signal -------------------------
@@ -79,6 +81,18 @@ namespace WhiskeyRealism.Strategic
             for (int i = 0; i < snapshot.Count; i++)
                 live.Add(snapshot[i]);
             return true;
+        }
+
+        // Revert of a ledger-forbidden unit vanilla CheckForDefensiveOperations
+        // committed anyway. The defensive branch only queues a
+        // DefensiveMovingOrder (13713; UpdateOrders runs it later, 79295), so the
+        // unit has not moved and cancelling the order is the whole revert. The
+        // attack branch moves directly (MoveUnitTo, 13771), so the unit is sent
+        // back to its prior theater position when one exists.
+        internal static ForbiddenCommitRevert ResolveForbiddenCommitRevert(bool queuedOrderRunning, bool hasPriorTheaterPosition)
+        {
+            if (queuedOrderRunning) return ForbiddenCommitRevert.CancelQueuedOrder;
+            return hasPriorTheaterPosition ? ForbiddenCommitRevert.MoveBack : ForbiddenCommitRevert.None;
         }
 
         // ---- C-Transfer ------------------------------------------------------

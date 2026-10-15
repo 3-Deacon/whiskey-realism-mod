@@ -12,6 +12,7 @@ internal static class CampaignMilitaryFixTests
         WlCampaignContextKeyDistinguishesCareersAndSaves();
         ListSnapshotRestoreUndoesVanillaMutation();
         ListSnapshotRestoreIsIdempotent();
+        ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved();
         TransferRequirementIsLocalNotTheaterWide();
         TransferSteersOnlyWhenPlanShortfallIsWorse();
         ImportanceRedirectHonoursVanillaCandidateGates();
@@ -576,5 +577,20 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertFalse(thisTick["sig-a"].Contains(2), "unit no longer held (vanilla dropped it) is not carried");
         TestHarness.AssertFalse(thisTick.ContainsKey("sig-gone"), "vanished signature is not resurrected (release path handles it)");
         LogPass("c2a coastal assignments carry forward while held");
+    }
+
+    // L3: vanilla's first branch only QUEUES a DefensiveMovingOrder (13713); the
+    // unit has not moved yet, so cancelling the order is the whole revert. The
+    // attack branch (13771) calls MoveUnitTo directly, so that needs a move back.
+    private static void ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved()
+    {
+        TestHarness.AssertEqual(ForbiddenCommitRevert.CancelQueuedOrder,
+            CampaignMilitaryGates.ResolveForbiddenCommitRevert(queuedOrderRunning: true, hasPriorTheaterPosition: true),
+            "queued order -> cancel only, no move");
+        TestHarness.AssertEqual(ForbiddenCommitRevert.MoveBack,
+            CampaignMilitaryGates.ResolveForbiddenCommitRevert(false, true), "already moving -> move back");
+        TestHarness.AssertEqual(ForbiddenCommitRevert.None,
+            CampaignMilitaryGates.ResolveForbiddenCommitRevert(false, false), "no prior position -> leave the path alone");
+        LogPass("c2a forbidden defensive commit revert matches how vanilla moved");
     }
 }
