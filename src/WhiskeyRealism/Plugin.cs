@@ -613,8 +613,10 @@ namespace WhiskeyRealism
                 "Default ON. Whiskey's battle decisions weigh troop quality the way vanilla's own do. Army attack/hold (reinforcement " +
                 "opportunity doctrine, #44's macro opinion): vanilla's force balance, the strength ratio x (1 + own - enemy mean morale) x " +
                 "(1 + own - enemy mean experience), with the attack threshold divided by 1 + commander initiative x vanilla's initiative " +
-                "influence (0.7 shipped). Enemy experience is what the player sees: the experience stars of enemy regiments while they are " +
-                "visible, remembered after they drop out of sight. Reads only. Off: headcount ratios and undivided thresholds.");
+                "influence (0.7 shipped). Group stance sectors and #44's odds: own and enemy strength x vanilla's experience blend " +
+                "1 - ei + experience x ei (ei = expinfluenceonaidecisions, 0.25 shipped), a group's own experience against the closest visible " +
+                "enemy's. Enemy experience is what the player sees: the experience stars of enemy regiments while they are visible, " +
+                "remembered after they drop out of sight. Reads only. Off: headcount ratios and sectors, undivided thresholds.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",

@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
@@ -27,6 +28,11 @@ internal static class TroopQualityTests
             ("troop-quality AttackThresholdDividedByInitiative", AttackThresholdDividedByInitiative),
             ("troop-quality DefenderStillNeverAttacks", DefenderStillNeverAttacks),
             ("troop-quality FlagOffIsHeadcountOnly", FlagOffIsHeadcountOnly),
+            ("troop-quality AiDecisionBlendMatchesVanilla", AiDecisionBlendMatchesVanilla),
+            ("troop-quality SectorScalesOwnAndEnemyByBlend", SectorScalesOwnAndEnemyByBlend),
+            ("troop-quality SectorBlendsUseClosestVisibleEnemy", SectorBlendsUseClosestVisibleEnemy),
+            ("troop-quality SideBlendsNeutralWhenUnknown", SideBlendsNeutralWhenUnknown),
+            ("troop-quality OddsUseExperienceBlends", OddsUseExperienceBlends),
         });
     }
 
@@ -350,5 +356,96 @@ internal static class TroopQualityTests
         AssertNear(0f, off.InitiativeInfluence, 1e-6f, "off: no initiative influence");
         AssertFalse(off.Quality(new SideQuality(0.8f, 0.8f)).Known, "off: side quality unknown (factor 1)");
         AssertTrue(vanilla.Quality(new SideQuality(0.8f, 0.8f)).Known, "on: side quality passes");
+    }
+
+    // ---------------------------------------------------------------- D: group stance / odds / sector
+
+    // GetGroupStrength 6057: 1 - ei + groupexperience × ei, ei = expinfluenceonaidecisions (0.25).
+    private static void AiDecisionBlendMatchesVanilla()
+    {
+        AssertNear(0.75f, TroopQuality.AiDecisionBlend(0f, 0.25f), 1e-6f, "green");
+        AssertNear(0.9f, TroopQuality.AiDecisionBlend(0.6f, 0.25f), 1e-6f, "seasoned");
+        AssertNear(1f, TroopQuality.AiDecisionBlend(1f, 0.25f), 1e-6f, "veteran");
+        AssertNear(1f, TroopQuality.AiDecisionBlend(1.5f, 0.25f), 1e-6f, "experience clamps at 1");
+        AssertNear(0.75f, TroopQuality.AiDecisionBlend(float.NaN, 0.25f), 1e-6f, "NaN reads as 0");
+        AssertNear(1f, TroopQuality.AiDecisionBlend(0f, 0f), 1e-6f, "no influence is neutral");
+    }
+
+    private static void SectorScalesOwnAndEnemyByBlend()
+    {
+        TacticalGroupContactInput Input(float own, float enemy) => new TacticalGroupContactInput(1, 4000f, 0f, 3000f,
+            0f, -1, string.Empty, false, false, false, false, ownExperienceBlend: own, enemyExperienceBlend: enemy);
+        var plain = TacticalGroupSectorEstimator.BuildSector(Input(1f, 1f));
+        var weighted = TacticalGroupSectorEstimator.BuildSector(Input(0.9f, 0.75f));
+        AssertNear(4000f, plain.OwnStrength, 1e-3f, "neutral blends keep own strength");
+        AssertNear(3000f, plain.EnemyStrength, 1e-3f, "neutral blends keep enemy strength");
+        AssertNear(3600f, weighted.OwnStrength, 1e-3f, "own x own blend");
+        AssertNear(2250f, weighted.EnemyStrength, 1e-3f, "enemy x enemy blend");
+        var bad = TacticalGroupSectorEstimator.BuildSector(Input(float.NaN, -1f));
+        AssertNear(4000f, bad.OwnStrength, 1e-3f, "a non-finite blend is neutral");
+        AssertNear(3000f, bad.EnemyStrength, 1e-3f, "a non-positive blend is neutral");
+    }
+
+    private static void SectorBlendsUseClosestVisibleEnemy()
+    {
+        var s = Begin();
+        var group = Regiment(1, 16, 0.7f, 0.8f, extra: UnitFlags.IsGroup);
+        s.AddOwn(in group);
+        s.IndexCommandTree(null);
+        var near = Obs(10, 0.1f, 0.5f);
+        near.Z = -200f;
+        var far = Obs(11, 0.9f, 0.5f);
+        far.Z = -900f;
+        var closerRemembered = Obs(12, 0.9f, 0.5f, remembered: true, confidence: 0.9f);
+        closerRemembered.Z = -50f;
+        s.AddObservation(in near);
+        s.AddObservation(in far);
+        s.AddObservation(in closerRemembered);
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 1000f, FlankShiftMeters = 150f });
+        TroopQuality.SectorBlends(s, 0, 0.25f, out float own, out float enemy);
+        AssertNear(0.95f, own, 1e-5f, "own: the group's groupexperience 0.8");
+        AssertNear(0.775f, enemy, 1e-5f, "enemy: the closest VISIBLE observation (0.1), not the closer remembered one");
+
+        var hidden = Begin();
+        hidden.AddOwn(in group);
+        hidden.IndexCommandTree(null);
+        var onlyRemembered = Obs(12, 0.5f, 0.5f, remembered: true, confidence: 0.5f);
+        hidden.AddObservation(in onlyRemembered);
+        BattlePerception.Publish(hidden, PerceptionMode.FogGrid, PerceptionFallbackReason.None,
+            new[] { onlyRemembered }, 1, PerceptionProbeResult.Create(1));
+        TroopQuality.SectorBlends(hidden, 0, 0.25f, out _, out float fallback);
+        AssertNear(0.875f, fallback, 1e-5f, "no visible enemy: the side's perceived mean (0.5)");
+
+        var empty = Begin();
+        empty.AddOwn(in group);
+        empty.IndexCommandTree(null);
+        TroopQuality.SectorBlends(empty, 0, 0.25f, out float ownAlone, out float none);
+        AssertNear(1f, none, 1e-6f, "nothing perceived: neutral enemy blend");
+        AssertNear(1f, ownAlone, 1e-6f, "nothing perceived: neutral own blend too (no comparison)");
+        TroopQuality.SectorBlends(s, 0, 0f, out float offOwn, out float offEnemy);
+        AssertNear(1f, offOwn, 1e-6f, "weighting off: own neutral");
+        AssertNear(1f, offEnemy, 1e-6f, "weighting off: enemy neutral");
+    }
+
+    private static void SideBlendsNeutralWhenUnknown()
+    {
+        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), new SideQuality(0.7f, 0.6f), 0.25f, out float own, out float enemy);
+        AssertNear(0.8f, own, 1e-6f, "own side mean experience 0.2");
+        AssertNear(0.9f, enemy, 1e-6f, "perceived mean experience 0.6");
+        TroopQuality.SideBlends(new SideQuality(0.7f, 0.2f), SideQuality.Unknown, 0.25f, out own, out enemy);
+        AssertNear(1f, own, 1e-6f, "unknown enemy: own neutral");
+        AssertNear(1f, enemy, 1e-6f, "unknown enemy: enemy neutral");
+    }
+
+    private static void OddsUseExperienceBlends()
+    {
+        var contact = TacticalContactLedger.Classify(new TacticalContactInput(5000f, 5000f, 0f, 0f, true, false));
+        TacticalOddsAssessment Odds(float ownBlend, float enemyBlend) => TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+            6000f, 5000f, 5000f, 0f, 1000f, 0f, contact, null, ownBlend, enemyBlend));
+        var plain = Odds(1f, 1f);
+        var weighted = Odds(0.8f, 0.9f);
+        AssertNear(6000f / 5000f, plain.CurrentGlobalOdds, 1e-4f, "neutral blends keep the headcount odds");
+        AssertNear(6000f * 0.8f / (5000f * 0.9f), weighted.CurrentGlobalOdds, 1e-4f, "current odds weighted");
+        AssertNear(7000f * 0.8f / (5000f * 0.9f), weighted.ProjectedGlobalOdds, 1e-4f, "projected odds weighted");
     }
 }
