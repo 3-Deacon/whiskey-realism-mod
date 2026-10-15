@@ -57,11 +57,6 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        internal bool TryReserve(TelemetryCategory category, long estimatedBytes)
-        {
-            return TryReserve(category, estimatedBytes, lowPriority: true, protectedSummary: false);
-        }
-
         internal bool TryReserve(TelemetryCategory category, long estimatedBytes, bool lowPriority)
         {
             return TryReserve(category, estimatedBytes, lowPriority, protectedSummary: false);
@@ -93,15 +88,6 @@ namespace WhiskeyRealism.Telemetry
                 long safeBytes = Math.Max(0L, bytes);
                 _emittedBytes += safeBytes;
                 _currentFileBytes += safeBytes;
-            }
-        }
-
-        internal bool ShouldRotateBefore(long estimatedBytes)
-        {
-            lock (_gate)
-            {
-                long safeBytes = Math.Max(0L, estimatedBytes);
-                return _currentFileBytes > 0L && _currentFileBytes + safeBytes > _rotateBytes;
             }
         }
 

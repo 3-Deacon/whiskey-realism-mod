@@ -49,7 +49,6 @@ namespace WhiskeyRealism.Patches
             public float posZ;
             public string parentName;
             public float lastLogSeconds;
-            public bool initialized;
         }
 
         private struct WatchedUnit
@@ -209,7 +208,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var snap = new Snapshot { lastLogSeconds = now, initialized = true };
+                var snap = new Snapshot { lastLogSeconds = now };
                 try { snap.aiStance = r.ai_stance; } catch { }
                 try { snap.aiStanceOrdered = r.ai_stanceordered; } catch { }
                 try { snap.inBattle = r.inbattle; } catch { }

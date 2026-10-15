@@ -104,11 +104,6 @@ namespace WhiskeyRealism.Telemetry
             return Legacy(line, TelemetrySeverity.Warning);
         }
 
-        internal static bool LegacyWarning(string line, TelemetryLayer fallbackLayer)
-        {
-            return Legacy(line, TelemetrySeverity.Warning);
-        }
-
         internal static void LegacyInfoToMainLogIfAllowed(string line, TelemetryLayer fallbackLayer)
         {
             try

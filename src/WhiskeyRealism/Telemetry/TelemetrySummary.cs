@@ -100,7 +100,6 @@ namespace WhiskeyRealism.Telemetry
         internal List<TelemetrySummaryItem> CountByEvent { get { return ItemsFrom(_countByEvent, int.MaxValue); } }
         internal List<TelemetrySummaryItem> TopDecisions { get { return ItemsFrom(_decisionCounts, 8); } }
         internal List<TelemetrySummaryItem> TopReasons { get { return ItemsFrom(_reasonCounts, 8); } }
-        internal List<string> DeniedGates { get { return new List<string>(_deniedGates); } }
         internal List<TelemetrySummaryItem> WriteResults { get { return ItemsFrom(_writeResults, int.MaxValue); } }
         internal List<TelemetrySlowScope> SlowestScopes
         {
