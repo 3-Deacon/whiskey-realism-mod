@@ -237,8 +237,13 @@ internal static class OrderArbiterTests
         var safetySame = Move(1, 505f, -505f, IntentPriority.Safety, IntentSource.Withdrawal);
         AssertEqual(SkipReason.Duplicate, executor.Plan(view, safetySame, soon).Skip, "Safety is still deduped");
 
+        // #61 RecentOrderHours was 0.05 h = 180 battle-s; the macro cycle is
+        // 0.015 h (54 battle-s), so the cooldown must span several cycles.
+        double nextCycles = t + 3 * 0.015;
+        AssertEqual(SkipReason.Cooldown, executor.Plan(view, redirect, nextCycles).Skip, "three macro cycles later: still cooling down");
+
         double later = t + (OrderExecutor.RecentOrderBattleSeconds + 1f) / 3600.0;
-        AssertTrue(executor.Plan(view, redirect, later).Execute, "cooldown expires after 30 battle-s");
+        AssertTrue(executor.Plan(view, redirect, later).Execute, "cooldown expires after 180 battle-s");
     }
 
     private static void TaskHoldBlocksSameTaskOnly()
@@ -246,7 +251,7 @@ internal static class OrderArbiterTests
         var view = new FixtureBattleView();
         int g = view.AddGroup(1, 100f, -100f);
         var executor = NewExecutor();
-        executor.TaskHoldHours = 0.02f;
+        executor.TaskHoldHours = 0.1f; // longer than the 180 battle-s recent-order cooldown
         double t = 3.0;
 
         var attack = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.AttackObjective);
@@ -262,7 +267,7 @@ internal static class OrderArbiterTests
         var fallBack = Move(1, 50f, -50f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.FallBackToLine);
         AssertTrue(executor.Plan(view, fallBack, afterRecent).Execute, "a task change bypasses the hold");
 
-        AssertTrue(executor.Plan(view, attackElsewhere, t + 0.021).Execute, "the hold lapses");
+        AssertTrue(executor.Plan(view, attackElsewhere, t + 0.101).Execute, "the hold lapses");
     }
 
     // ---------------------------------------------------------------- validator

@@ -373,7 +373,10 @@ namespace WhiskeyRealism.Tactical.Battle
     // gives up; the source reads TryGetLastOutcome.
     public sealed class OrderExecutor
     {
-        public const float RecentOrderBattleSeconds = 30f;          // was #61 RecentOrderHours
+        // = #61 RecentOrderHours, RealSecondsAtOneXToHours(30) = 0.05 h
+        // (BattleCommandPostureExecutorPatch.cs:30). Spans ~3 macro cycles
+        // (sidestatupdatecycle 0.015 h); 30 battle-s would expire inside one.
+        public const float RecentOrderBattleSeconds = 180f;
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
         public const float PendingCourierTimeoutHours = 0.25f;

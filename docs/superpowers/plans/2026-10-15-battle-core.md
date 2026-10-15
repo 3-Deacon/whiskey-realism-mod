@@ -401,7 +401,7 @@ public sealed class OrderArbiter : IIntentSink {
   public static OrderArbiter ForAlliance(int alliance);            // 0/1 bound-checked; Europe (2) → null
 }
 public sealed class OrderExecutor {
-  public const float RecentOrderBattleSeconds = 30f;                   // was #61 RecentOrderHours
+  public const float RecentOrderBattleSeconds = 180f;                  // = #61 RecentOrderHours 0.05 h (patch :30); 30 s expired inside one 0.015 h macro cycle
   public const float CourierIntervalBattleHours = 0.25f;               // was #61 OutboundCourierIntervalSeconds 900
   public const float FailedWriteBackoffHours = 0.05f;
   public const float PendingCourierTimeoutHours = 0.25f;
@@ -442,7 +442,7 @@ internal static class OrderExecutorRuntime {
    - For `ArtilleryFirePosition`, reject when the segment from the target to `FireTargetId` passes within 40 m of a friendly group, and reject when a visible enemy is within 60 m.
 4. Silent-exit pre-check.
 5. Dedupe: same target within 15 m while the group's last waypoint matches, or there is an active or pending move; or the same stance, formation or behavior already ordered.
-6. Cooldown: recent-order 30 s, task hold, courier 0.25 h, failed backoff. `Safety` bypasses recent-order and task-hold only.
+6. Cooldown: recent-order 180 battle-s (#61's 0.05 h), task hold, courier 0.25 h, failed backoff. `Safety` bypasses recent-order and task-hold only.
 7. Vanilla call:
    - Stance runs before Move, and Move before Formation (#61 L768-774, L976-988).
    - Group `SetWaypoint(showmovementoptions:false, useorderdelay:intent has UseOrderDelay && !InContactWithdrawal)`.
