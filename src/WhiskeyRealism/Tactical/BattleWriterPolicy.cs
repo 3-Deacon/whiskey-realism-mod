@@ -22,8 +22,14 @@ namespace WhiskeyRealism.Tactical
             bool endBattleActive,
             int currentMacro,
             int ledgerOpinion,
-            int doctrineOpinion)
+            int doctrineOpinion,
+            bool wlPlayerSide,
+            bool wlPlayerIsCic,
+            int vanillaPendingMacro)
         {
+            WlPlayerSide = wlPlayerSide;
+            WlPlayerIsCic = wlPlayerIsCic;
+            VanillaPendingMacro = vanillaPendingMacro;
             ModeAllowsWrites = modeAllowsWrites;
             IsFeudInstance = isFeudInstance;
             ScriptedAiStrategy = scriptedAiStrategy;
@@ -42,6 +48,11 @@ namespace WhiskeyRealism.Tactical
         public int CurrentMacro { get; }
         public int LedgerOpinion { get; }
         public int DoctrineOpinion { get; }
+        // W&L player-side AIBattle (aibattle[1], isplayeraiorfeud == 1).
+        public bool WlPlayerSide { get; }
+        public bool WlPlayerIsCic { get; }
+        // AIBattle.newmacroaitoset: where vanilla's own pipeline is heading.
+        public int VanillaPendingMacro { get; }
     }
 
     internal readonly struct AddPathDecision
@@ -142,6 +153,20 @@ namespace WhiskeyRealism.Tactical
                     input.EndBattleActive,
                     input.CurrentMacro))
                 return NoMacroWrite;
+
+            if (input.WlPlayerSide)
+            {
+                // W&L player side: its macroai drives dispatches to the player
+                // (2 -> type-12 defend orders, CheckGlobalAIStrategy 6447-6466;
+                // 3 -> type-15 retreat, CheckRemovalOfOrders 6790-6799). Only a
+                // planned-operation opinion that genuinely differs from vanilla
+                // is written; a CIC player owns every unit on the side.
+                if (input.WlPlayerIsCic) return NoMacroWrite;
+                if (!IsWritableMacro(input.LedgerOpinion)) return NoMacroWrite;
+                if (input.LedgerOpinion == input.CurrentMacro || input.LedgerOpinion == input.VanillaPendingMacro)
+                    return NoMacroWrite;
+                return input.LedgerOpinion;
+            }
 
             int opinion = IsWritableMacro(input.LedgerOpinion)
                 ? input.LedgerOpinion

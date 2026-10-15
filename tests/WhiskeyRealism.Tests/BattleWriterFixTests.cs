@@ -15,6 +15,7 @@ internal static class BattleWriterFixTests
         MacroAiPrefersLedgerOverDoctrineOpinion();
         MacroAiSkipsWhenAlreadyAligned();
         MacroAiEarlyGateMatchesResolver();
+        MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange();
         VanillaAnglePointMatchesGetAngleTerrainPos();
         VanillaAnglePointXYMatchesGetAngleTerrainPosXY();
         B8MapsWithdrawalDecisionsToVanillaFallbackShapes();
@@ -51,7 +52,10 @@ internal static class BattleWriterFixTests
         bool feud = false,
         bool aiStrategy = false,
         bool scriptedSide = false,
-        bool endBattle = false)
+        bool endBattle = false,
+        bool wlPlayerSide = false,
+        bool wlPlayerIsCic = false,
+        int pending = -1)
     {
         return BattleWriterPolicy.ResolveMacroAiWrite(new MacroAiWriteInput(
             modeAllowsWrites,
@@ -61,7 +65,25 @@ internal static class BattleWriterFixTests
             endBattle,
             current,
             ledger,
-            doctrine));
+            doctrine,
+            wlPlayerSide,
+            wlPlayerIsCic,
+            pending));
+    }
+
+    // W&L: aibattle[1] (player side) runs the macro AI; its macroai drives
+    // dispatches to the player (2 -> type-12 defend orders, CheckGlobalAIStrategy
+    // 6447-6466). Only a planned-operation opinion that differs from both the
+    // current and vanilla's pending newmacroaitoset is written there, and
+    // nothing when the player is CIC (every unit on the side is player-owned).
+    private static void MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(doctrine: 2, current: 1, wlPlayerSide: true), "doctrine fallback ignored");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 2, current: 1, pending: 2, wlPlayerSide: true), "vanilla already heading there");
+        TestHarness.AssertEqual(1, Macro(ledger: 1, current: 2, pending: 2, wlPlayerSide: true), "genuine ledger change");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, current: 2, wlPlayerSide: true, wlPlayerIsCic: true), "player CIC");
+        TestHarness.AssertEqual(2, Macro(doctrine: 2, current: 1, pending: 2), "AI side keeps the doctrine fallback");
+        Pass("battle writers: macroai on the W&L player side only writes a genuine ledger change");
     }
 
     // CheckGlobalAIStrategy 6355/6362: startoffallback is stamped only on

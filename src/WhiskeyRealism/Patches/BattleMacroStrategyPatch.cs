@@ -32,6 +32,10 @@ namespace WhiskeyRealism.Patches
     // in saves. The former BattleMacroAIOverridePatch wrote the persisted
     // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
     // is consumed here as the fallback when the operations ledger has none.
+    // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
+    // dispatches to the player, so only a planned-operation opinion that
+    // differs from vanilla's current and pending (newmacroaitoset) value is
+    // written there, never the doctrine fallback, and nothing for a CIC player.
     [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
     internal static class BattleMacroStrategyPatch
     {
@@ -107,11 +111,28 @@ namespace WhiskeyRealism.Patches
                 endBattle,
                 vanillaMacro,
                 ledgerOpinion,
-                doctrineOpinion));
+                doctrineOpinion,
+                IsWlPlayerSide(battle, allianceId),
+                WlPlayerIsCic(),
+                battle.newmacroaitoset));
             if (write == BattleWriterPolicy.NoMacroWrite) return;
 
             battle.macroai = write;
             LogWrite(allianceId, vanillaMacro, write, ledgerOpinion, doctrineOpinion, source);
+        }
+
+        // W&L forces ai_vs_ai (29789), so aibattle[1] (isplayeraiorfeud == 1,
+        // SetSide 3408) runs the player side's macro AI.
+        private static bool IsWlPlayerSide(AIBattle battle, int allianceId)
+        {
+            return DLC_WL.dlc_scenarioactive &&
+                (battle.isplayeraiorfeud == 1 || allianceId == GameVars.playeralliance);
+        }
+
+        private static bool WlPlayerIsCic()
+        {
+            try { return DLC_WL.dlc_scenarioactive && DLC_WL.IsCommanderInChief(); }
+            catch { return true; }
         }
 
         private static int OrchestratorMacroOpinion(ArmyOrchestrator army)
