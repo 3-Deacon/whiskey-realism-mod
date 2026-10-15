@@ -10,10 +10,19 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B1 W&L guard for AIBattle.CheckForFeudGroupActions. Vanilla can move a
-    // feuding formation toward the closest enemy through delayed SetWaypoint
-    // without PerformAIActionDLCWL; this Prefix mirrors the vanilla method and
-    // blocks only protected player-subordinate group movement.
+    // #42 — B1 W&L guard for AIBattle.CheckForFeudGroupActions (decompile 4931).
+    // Vanilla can move a feuding formation toward the closest enemy through a
+    // delayed SetWaypoint without PerformAIActionDLCWL; this Prefix mirrors the
+    // vanilla method and blocks only protected player-subordinate group
+    // movement and orchestrator direct-child denials.
+    //
+    // Vanilla rules mirrored (WS T3):
+    //   - target = closest enemy within GamePrefs.neededdistancefeudgroupmovement
+    //     (4952 GetClosestEnemyUnit(cap)); Whiskey keeps the FOW-visible lookup
+    //     but restores the cap;
+    //   - lastfeudactiontime is stamped only with the actual SetWaypoint (4955-4957);
+    //   - no ChangeStance: vanilla's feud move never sets a stance (BR-L1);
+    //   - Tactical Commander Mode != Active: return true, vanilla runs.
     [HarmonyPatch(typeof(AIBattle), "CheckForFeudGroupActions")]
     internal static class BattleFeudActionGatePatch
     {
@@ -29,7 +38,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.feud-action-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return true;
+                if (!TacticalWriteGuard.ModeAllowsWrites() || !Enabled()) return true;
 
                 bool tookOwnership = false;
                 try
@@ -66,8 +75,12 @@ namespace WhiskeyRealism.Patches
                             probability *= GamePrefs.chanceoffeudsvolunteercommanders;
                         }
 
-                        Regiment visibleEnemyRegiment = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
-                        GameObject closestEnemy = visibleEnemyRegiment != null ? visibleEnemyRegiment.gameObject : null;
+                        TacticalFogOfWarContact.TryClosestVisibleEnemy(group, out Regiment visibleEnemyRegiment, out float enemyDistance);
+                        bool targetAllowed = BattleWriterPolicy.FeudMoveTargetAllowed(
+                            visibleEnemyRegiment != null,
+                            enemyDistance,
+                            GamePrefs.neededdistancefeudgroupmovement);
+                        GameObject closestEnemy = targetAllowed ? visibleEnemyRegiment.gameObject : null;
                         if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
 
                         bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
@@ -80,7 +93,6 @@ namespace WhiskeyRealism.Patches
                             attachedUnitUnderCommander: attachedUnderCommander);
 
                         tookOwnership = true;
-                        group.lastfeudactiontime = CurrentBattleHour(bunits);
 
                         if (!wlDecision.Allow)
                         {
@@ -102,10 +114,7 @@ namespace WhiskeyRealism.Patches
                             " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
                             " prob:" + probability +
                             " init:" + commanderInitiative);
-                        // Scope B alignment (2026-05-22): W&L feud-driven move
-                        // toward enemy = attack intent. Stance 3 (attack).
-                        WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
-                            bunits, group, 3, contextTag: "feud-action-attack");
+                        group.lastfeudactiontime = CurrentBattleHour(bunits);
                         bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                     }
                 }
@@ -214,7 +223,7 @@ namespace WhiskeyRealism.Patches
         private static void LogDenied(Regiment group, string reason)
         {
             OnceLog.Info("tactical-feud-guard", "BattleFeudActionGatePatch wired");
-            OnceLog.Info("tactical-feud-guard:deny:" + SafeName(group), "[TacticalFeudGuard] action=deny reason=" + reason +
+            OnceLog.Info("tactical-feud-guard:deny", "[TacticalFeudGuard] action=deny reason=" + reason +
                 " group=" + SafeName(group));
         }
 
@@ -222,7 +231,7 @@ namespace WhiskeyRealism.Patches
         {
             if (_missingRequiredAnchorLogged) return;
             _missingRequiredAnchorLogged = true;
-            OnceLog.Warning("tactical-feud-guard:missing-anchor:" + anchor, "BattleFeudActionGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla before movement ownership when possible.");
+            OnceLog.Warning("tactical-feud-guard:missing-anchor", "BattleFeudActionGatePatch missing required vanilla anchor " + anchor + "; falling back to vanilla before movement ownership when possible.");
         }
 
         private static string SafeName(Regiment unit)
@@ -357,7 +366,7 @@ namespace WhiskeyRealism.Patches
 
         private static void LogDeniedOrch(Regiment group, DirectChildGateDecision decision)
         {
-            OnceLog.Info("tactical-direct-child-gate:deny:" + SafeName(group) + ":" + decision.Reason,
+            OnceLog.Info("tactical-direct-child-gate:deny",
                 "[TacticalDirectChildGate] action=deny role=" + decision.Role
                 + " reason=" + decision.Reason
                 + " group=" + SafeName(group)

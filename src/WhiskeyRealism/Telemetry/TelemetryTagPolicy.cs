@@ -85,7 +85,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalChargePreserved", TelemetryCategory.Gate);
             AddTactical("TacticalChargeGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDoctrineCharge", TelemetryCategory.Gate);
-            AddTactical("TacticalOrchestratorChargeGate", TelemetryCategory.Gate);
             AddTactical("TacticalFeud", TelemetryCategory.Gate);
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
@@ -116,7 +115,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
             AddTactical("TacticalPlaybookFactionBias", TelemetryCategory.Decision);
             AddTactical("TacticalPlayerProtected", TelemetryCategory.Gate);
-            AddTactical("TacticalObjectiveGuard", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveRecordsParityMismatch", TelemetryCategory.Gate);

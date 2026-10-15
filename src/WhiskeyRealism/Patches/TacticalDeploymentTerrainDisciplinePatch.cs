@@ -11,11 +11,23 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew places AI groups
-    // immediately, then clamps deployment-zone and terrain state. This default-off
-    // Postfix samples bounded terrain-safe candidates and corrects clear AI
-    // terrain/deployment failures through vanilla SetGroupFormation when a safe candidate exists.
-    // Visible enemy bearing may shape final facing only after that terrain/deployment gate trips.
+    // #60 — Vanilla BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew
+    // (decompile 85524) places AI groups immediately, then clamps deployment-zone
+    // and terrain state (MoveAllUnitsIntoDeploymentZone 85862). This Postfix
+    // (default ON) samples bounded terrain-safe candidates and corrects clear AI
+    // terrain/deployment failures through vanilla SetGroupFormation when a safe
+    // candidate exists. Visible enemy bearing may shape final facing only after
+    // that terrain/deployment gate trips.
+    //
+    // Vanilla rules (WS T3):
+    //   - SetGroupFormation's targetpos is the LINE FRONT; vanilla puts the HQ at
+    //     targetpos + (groupdepth + groupunitdistancetoback) (92044-92058). The
+    //     corrected HQ point is converted to the front the same way, and the
+    //     front is re-checked for water / deployment zone;
+    //   - groups vanilla placed on fortification lines (num3 == 1, 85684-85751,
+    //     ignoredeplyomentzone: true) are left alone;
+    //   - fleets and zones with fewer than 2 frontline vectors are skipped;
+    //   - writes go through TacticalWriteGuard.CanWrite.
     [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
     internal static class TacticalDeploymentTerrainDisciplinePatch
     {
@@ -123,8 +135,16 @@ namespace WhiskeyRealism.Patches
                     return false;
                 if (!TryIsWlCurrentCommandExcluded(regiment, out bool excluded) || excluded)
                     return false;
+                if (group.IsApplicableForDeployment(battleUnits, initialDeployment))
+                    return false;
 
-                return !group.IsApplicableForDeployment(battleUnits, initialDeployment);
+                if (!BattleWriterPolicy.DeploymentCorrectionAllowed(
+                        regiment.unittyp,
+                        FrontlineVectorCount(battleUnits),
+                        WouldTakeFortifiedPath(battleUnits, regiment, alliance)))
+                    return false;
+
+                return TacticalWriteGuard.CanWrite(regiment);
             }
             catch (Exception ex)
             {
@@ -133,6 +153,43 @@ namespace WhiskeyRealism.Patches
                     "TacticalDeploymentTerrainDisciplinePatch eligibility failed: " + ex.GetType().Name);
                 return false;
             }
+        }
+
+        private static int FrontlineVectorCount(BattleUnits battleUnits)
+        {
+            Frontline2 zone = battleUnits.frontline2;
+            return (object)zone != null && zone.frontlinevector != null ? zone.frontlinevector.Count : 0;
+        }
+
+        // Mirrors vanilla's num3 == 1 selection (85684-85715).
+        private static bool WouldTakeFortifiedPath(BattleUnits battleUnits, Regiment regiment, int alliance)
+        {
+            float minimumMorale = GamePrefs.minimummoraleforaistances != null && GamePrefs.minimummoraleforaistances.Length > 1
+                ? GamePrefs.minimummoraleforaistances[1]
+                : 0f;
+            return BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(
+                battleUnits.GetBattleType(alliance, usereadinesswhendraw: true),
+                regiment.groupmorale,
+                minimumMorale,
+                EligibleDeploymentSubUnits(regiment));
+        }
+
+        // Vanilla list10 (85704-85712): non-group, active, attached, same AI group.
+        private static int EligibleDeploymentSubUnits(Regiment regiment)
+        {
+            Regiment[] attached = regiment.allattachedunits;
+            if (attached == null) return 0;
+            int count = 0;
+            for (int i = 0; i < attached.Length; i++)
+            {
+                Regiment unit = attached[i];
+                if ((UnityEngine.Object)unit == null) continue;
+                if (unit.unittyp > 13 || !unit.gameObject.activeInHierarchy || unit.permanentlydetached) continue;
+                if ((UnityEngine.Object)unit.groupaiobject != (UnityEngine.Object)regiment.groupaiobject) continue;
+                count++;
+            }
+
+            return count;
         }
 
         private static bool TryReadInitialDeployment(BattleUnits battleUnits, out bool initialDeployment)
@@ -272,17 +329,28 @@ namespace WhiskeyRealism.Patches
                 if ((object)battleUnits == null || group == null || (object)group.go == null || regiment == null)
                     return;
 
-                Vector3 corrected = new Vector3(
+                float facing = decision.Candidate.FacingDegrees;
+                float depth = regiment.groupposition != null ? regiment.groupposition.groupdepth : regiment.depth;
+                BattleWriterPolicy.DeploymentLineFrontFromHq(
                     decision.Candidate.Point.X,
-                    original.y,
-                    decision.Candidate.Point.Z);
-                corrected = TacticalTerrainProbe.WithTerrainHeight(corrected);
+                    decision.Candidate.Point.Z,
+                    facing,
+                    depth,
+                    GamePrefs.groupunitdistancetoback,
+                    out float frontX,
+                    out float frontZ);
+                Vector3 front = TacticalTerrainProbe.WithTerrainHeight(new Vector3(frontX, original.y, frontZ));
+
+                TacticalTerrainRuntimeSample frontSample =
+                    TacticalTerrainProbe.SampleCenter(regiment, battleUnits.frontline2, front);
+                if (frontSample.Water || !frontSample.InDeploymentZone)
+                    return;
 
                 battleUnits.SetGroupFormation(
                     group.go,
                     regiment.groupformation,
-                    decision.Candidate.FacingDegrees,
-                    corrected,
+                    facing,
+                    front,
                     immediateplacement: true,
                     newpath: true,
                     modifylastwaypoint: false,
@@ -446,7 +514,7 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-deployment-terrain:" + fieldName,
+                    "tactical-deployment-terrain:read-field",
                     "Failed reading BattleUnits." + fieldName + ": " + ex.GetType().Name);
                 return 0;
             }

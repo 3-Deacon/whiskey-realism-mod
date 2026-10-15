@@ -7,9 +7,14 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla Regiment.MoveNonAIUnits auto-links idle group/HQ units to the
-    // closest own unit without checking command hierarchy. Cross-command links
-    // can make HQs follow unrelated troops.
+    // #55 — Vanilla Regiment.MoveNonAIUnits (decompile 129026, AI alliance
+    // only) auto-links an idle, unlinked group/HQ unit to unitrange.
+    // closestownunit[0] (129046-129051) without checking command hierarchy.
+    // Cross-command links can make HQs follow unrelated troops; this Postfix
+    // restores the previous (empty) link when the new link crosses commands.
+    // "Same command" uses vanilla's hierarchy: allattachedunits membership
+    // (GetComponentsInChildren, 129574) or a shared real parent
+    // (BattleUnits.GetParentUnit 93883). Commander Mode != Active: no change.
     [HarmonyPatch(typeof(Regiment), "MoveNonAIUnits")]
     internal static class TacticalHqAutoLinkGuardPatch
     {
@@ -30,12 +35,6 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.hq-link-guard-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled())
-                {
-                    __state = default;
-                    return;
-                }
-
                 __state = new LinkState(
                     __instance != null ? __instance.unitlinkedto : null,
                     __instance != null ? __instance.linkedposition : 0);
@@ -47,34 +46,32 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.hq-link-guard", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return;
-
                 try
                 {
-                    if (__instance == null) return;
+                    if ((UnityEngine.Object)__instance == null || __instance.unittyp <= 13) return;
                     GameObject newLink = __instance.unitlinkedto;
-                    bool newlyLinked = __state.PreviousLink == null && newLink != null;
-                    Regiment target = newLink != null ? newLink.GetComponent<Regiment>() : null;
+                    bool newlyLinked = (UnityEngine.Object)__state.PreviousLink == null && (UnityEngine.Object)newLink != null;
+                    if (!newlyLinked) return;
+                    if (!TacticalWriteGuard.ModeAllowsWrites() || !Enabled()) return;
 
+                    Regiment target = newLink.GetComponent<Regiment>();
                     bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
                         modEnabled: true,
-                        newlyLinked: newlyLinked,
-                        sourceIsGroupUnit: __instance.unittyp > 13,
-                        targetExists: target != null,
-                        sameHierarchy: SameHierarchy(__instance, target),
-                        sameNonRootParent: SameNonRootParent(__instance, target),
+                        newlyLinked: true,
+                        sourceIsGroupUnit: true,
+                        targetExists: (UnityEngine.Object)target != null,
+                        sameHierarchy: SameCommand(__instance, target),
+                        sameNonRootParent: false,
                         sameAiGroup: SameAiGroup(__instance, target));
                     if (!clear) return;
 
-                    string sourceName = SafeUnitName(__instance);
-                    string targetName = SafeUnitName(target);
                     __instance.unitlinkedto = __state.PreviousLink;
                     __instance.linkedposition = __state.PreviousPosition;
 
                     OnceLog.Info(
-                        "tactical-hq-link-guard:" + sourceName + ":" + targetName,
+                        "tactical-hq-link-guard:cleared",
                         "[TacticalHqLinkGuard] cleared cross-command auto group link unit=" +
-                        sourceName + " target=" + targetName);
+                        SafeUnitName(__instance) + " target=" + SafeUnitName(target));
                 }
                 catch (Exception ex)
                 {
@@ -94,22 +91,26 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalHqLinkGuard.Value;
         }
 
-        private static bool SameHierarchy(Regiment source, Regiment target)
+        private static bool SameCommand(Regiment source, Regiment target)
         {
-            if (source == null || target == null) return false;
-            Transform sourceTransform = ((Component)source).transform;
-            Transform targetTransform = ((Component)target).transform;
-            return sourceTransform.IsChildOf(targetTransform) || targetTransform.IsChildOf(sourceTransform);
+            if ((UnityEngine.Object)source == null || (UnityEngine.Object)target == null) return false;
+            Regiment sourceParent = BattleUnits.GetParentUnit(source);
+            Regiment targetParent = BattleUnits.GetParentUnit(target);
+            return BattleWriterPolicy.HqLinkSameCommand(
+                Contains(source.allattachedunits, target),
+                Contains(target.allattachedunits, source),
+                source.GetInstanceID(),
+                target.GetInstanceID(),
+                (UnityEngine.Object)sourceParent != null ? sourceParent.GetInstanceID() : source.GetInstanceID(),
+                (UnityEngine.Object)targetParent != null ? targetParent.GetInstanceID() : target.GetInstanceID());
         }
 
-        private static bool SameNonRootParent(Regiment source, Regiment target)
+        private static bool Contains(Regiment[] units, Regiment unit)
         {
-            if (source == null || target == null) return false;
-            Transform sourceParent = ((Component)source).transform.parent;
-            Transform targetParent = ((Component)target).transform.parent;
-            if (sourceParent == null || targetParent == null) return false;
-            if (sourceParent != targetParent) return false;
-            return sourceParent.name != "Units";
+            if (units == null) return false;
+            for (int i = 0; i < units.Length; i++)
+                if ((UnityEngine.Object)units[i] == (UnityEngine.Object)unit) return true;
+            return false;
         }
 
         private static bool SameAiGroup(Regiment source, Regiment target)

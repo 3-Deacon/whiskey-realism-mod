@@ -1,0 +1,552 @@
+using System;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
+
+// WS T3 — battle writer & gate patch fixes. Every test pins a pure decision
+// extracted from a Harmony patch to the vanilla behavior it must respect.
+internal static class BattleWriterFixTests
+{
+    public static void Run()
+    {
+        MacroAiNeverWritesRetreat();
+        MacroAiDefersToScriptedOverrides();
+        MacroAiSkipsFeudInstanceAndMonitorModes();
+        MacroAiSkipsVanillaRetreatAndEndOfBattle();
+        MacroAiPrefersLedgerOverDoctrineOpinion();
+        MacroAiSkipsWhenAlreadyAligned();
+        MacroAiEarlyGateMatchesResolver();
+        MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange();
+        MacroAiLegacyScorerNeverWritesWlPlayerSide();
+        MacroAiShadowHandsBackVanillaValueOnce();
+        MacroAiShadowKeepsVanillaOffWhiskeyValue();
+        VanillaAnglePointMatchesGetAngleTerrainPos();
+        VanillaAnglePointClampsToTerrainBounds();
+        VanillaAnglePointXYMatchesGetAngleTerrainPosXY();
+        B8MapsWithdrawalDecisionsToVanillaFallbackShapes();
+        B8SkipsUnitsVanillaWouldNotFallBack();
+        ReserveGateMirrorsVanillaEndangeredFilter();
+        ReserveGateSnapshotsOnlyPossibleSupportUnits();
+        ReserveGateRollbackOnlyWhenStopRegimentIsReversible();
+        ReserveDelayConversionOnlyWhereSetWaypointQueues();
+        PathfinderNeverRemovesAddedPaths();
+        PathfinderEndsRetryLoopOnlyWithinTolerance();
+        VetoSkipsPlayerUiOrdersAndNonAiUnits();
+        VetoMeasuresEnemyDistanceToTarget();
+        ArtilleryMicroNeverInterruptsMovement();
+        ArtilleryMicroMirrorsVanillaUnlimberRule();
+        ArtilleryMicroMapsActionsToVanillaWrites();
+        CounterBatteryReleasedWhenTargetGone();
+        FeudGateRestoresVanillaDistanceCap();
+        DeploymentSkipsVanillaFortifiedPlacement();
+        DeploymentSkipsFleetsAndMissingZones();
+        HqLinkSameCommandUsesVanillaHierarchy();
+        CombinedArtilleryGunsFollowVanillaInitializeRule();
+    }
+
+    private static void Pass(string name)
+    {
+        Console.WriteLine("PASS " + name);
+    }
+
+    private static int Macro(
+        int ledger = -1,
+        int fallback = -1,
+        int current = -1,
+        bool modeAllowsWrites = true,
+        bool feud = false,
+        bool aiStrategy = false,
+        bool scriptedSide = false,
+        bool endBattle = false,
+        bool wlPlayerSide = false,
+        bool wlPlayerIsCic = false,
+        int pending = -1)
+    {
+        return BattleWriterPolicy.ResolveMacroAiWrite(new MacroAiWriteInput(
+            modeAllowsWrites,
+            feud,
+            aiStrategy,
+            scriptedSide,
+            endBattle,
+            current,
+            ledger,
+            fallback,
+            wlPlayerSide,
+            wlPlayerIsCic,
+            pending));
+    }
+
+    // W&L: aibattle[1] (player side) runs the macro AI; its macroai drives
+    // dispatches to the player (2 -> type-12 defend orders, CheckGlobalAIStrategy
+    // 6447-6466). Only a planned-operation opinion that differs from both the
+    // current and vanilla's pending newmacroaitoset is written there, and
+    // nothing when the player is CIC (every unit on the side is player-owned).
+    private static void MacroAiOnWlPlayerSideOnlyWritesGenuineLedgerChange()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 2, current: 1, wlPlayerSide: true), "doctrine fallback ignored");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 2, current: 1, pending: 2, wlPlayerSide: true), "vanilla already heading there");
+        TestHarness.AssertEqual(1, Macro(ledger: 1, current: 2, pending: 2, wlPlayerSide: true), "genuine ledger change");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, current: 2, wlPlayerSide: true, wlPlayerIsCic: true), "player CIC");
+        TestHarness.AssertEqual(2, Macro(fallback: 2, current: 1, pending: 2), "AI side keeps the doctrine fallback");
+        Pass("battle writers: macroai on the W&L player side only writes a genuine ledger change");
+    }
+
+    // With the army orchestrator off, #44's legacy scorer supplies the
+    // opinion. It is not a planned operation, so it travels in the fallback
+    // slot: written on an AI side, never on the W&L player side (rule 4).
+    private static void MacroAiLegacyScorerNeverWritesWlPlayerSide()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 0, current: 1, pending: 1, wlPlayerSide: true), "scorer on player side");
+        TestHarness.AssertEqual(0, Macro(fallback: 0, current: 1, pending: 1), "scorer on AI side");
+        Pass("battle writers: #44 legacy scorer never writes the W&L player side");
+    }
+
+    // One #44 cycle against the shadow: the Prefix restore (the value vanilla
+    // starts from is checked against seenByVanilla), vanilla moving to
+    // vanillaOwn, then the Postfix write. Returns the macroai left.
+    private static int MacroCycle(ref bool shadow, ref int written, ref int shadowVanilla, int current, int seenByVanilla, int vanillaOwn, int ledger)
+    {
+        int restore = BattleWriterPolicy.MacroAiRestoreBeforeVanilla(shadow, written, shadowVanilla, current);
+        shadow = false;
+        int beforeVanilla = restore != BattleWriterPolicy.NoMacroWrite ? restore : current;
+        TestHarness.AssertEqual(seenByVanilla, beforeVanilla, "vanilla starts from its own value");
+        int write = Macro(ledger: ledger, current: vanillaOwn);
+        if (write == BattleWriterPolicy.NoMacroWrite) return vanillaOwn;
+        shadow = true;
+        written = write;
+        shadowVanilla = vanillaOwn;
+        return write;
+    }
+
+    // 6438 re-stamps timertosetnewmacroai while newmacroaitoset >= 0 &&
+    // macroai <= 0, so a Whiskey 0 seen by vanilla never reverts at 6388. The
+    // shadow hands vanilla's own value back the first cycle Whiskey has no
+    // opinion, and only once.
+    private static void MacroAiShadowHandsBackVanillaValueOnce()
+    {
+        bool shadow = false;
+        int written = 0, shadowVanilla = 0;
+        TestHarness.AssertEqual(0, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 1, seenByVanilla: 1, vanillaOwn: 1, ledger: 0), "whiskey writes assault");
+        TestHarness.AssertEqual(1, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 0, seenByVanilla: 1, vanillaOwn: 1, ledger: -1), "no opinion hands back vanilla's 1");
+        TestHarness.AssertFalse(shadow, "shadow consumed");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(false, 0, 1, 1), "never wrote: nothing restored");
+        TestHarness.AssertEqual(-1,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(true, 2, -1, 2), "vanilla's unset -1 comes back as vanilla had it");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite,
+            BattleWriterPolicy.MacroAiRestoreBeforeVanilla(true, 0, 1, 3), "foreign write (debug 189257) left alone");
+        Pass("battle writers: #44 shadow hands vanilla's own macroai back once");
+    }
+
+    // 6388 reverts macroai to newmacroaitoset once the timer expires; with the
+    // shadow vanilla only ever sees its own value, so Whiskey's 2 is not
+    // reverted (and re-logged) every cycle while vanilla's own state advances.
+    private static void MacroAiShadowKeepsVanillaOffWhiskeyValue()
+    {
+        bool shadow = false;
+        int written = 0, shadowVanilla = 0;
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 1, seenByVanilla: 1, vanillaOwn: 1, ledger: 2), "cycle 1");
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 1, vanillaOwn: 1, ledger: 2), "cycle 2: vanilla sees 1, whiskey keeps 2");
+        TestHarness.AssertEqual(2, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 1, vanillaOwn: 0, ledger: 2), "vanilla's own transition is tracked");
+        TestHarness.AssertEqual(0, shadowVanilla, "shadow follows vanilla's own value");
+        TestHarness.AssertEqual(0, MacroCycle(ref shadow, ref written, ref shadowVanilla, current: 2, seenByVanilla: 0, vanillaOwn: 0, ledger: -1), "hand back the value vanilla reached");
+        Pass("battle writers: #44 shadow keeps vanilla's pipeline off Whiskey's value");
+    }
+
+    // CheckGlobalAIStrategy 6355/6362: startoffallback is stamped only on
+    // vanilla's own transition to 3; a foreign 3 ends the battle next cycle.
+    private static void MacroAiNeverWritesRetreat()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 3), "ledger 3 is no opinion");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(fallback: 3), "doctrine 3 is no opinion");
+        TestHarness.AssertEqual(2, Macro(ledger: 3, fallback: 2), "ledger 3 falls through to doctrine 2");
+        Pass("battle writers: macroai never writes retreat 3");
+    }
+
+    // 6378 aistrategy >= 0 and 6383 sideinformation.macroai >= 0 are scripted overrides.
+    private static void MacroAiDefersToScriptedOverrides()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, aiStrategy: true), "aistrategy override");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, scriptedSide: true), "scripted side macro");
+        Pass("battle writers: macroai defers to scripted aistrategy and side macro");
+    }
+
+    private static void MacroAiSkipsFeudInstanceAndMonitorModes()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, feud: true), "feud instance");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, modeAllowsWrites: false), "mode monitor/off");
+        Pass("battle writers: macroai skips feud instance and non-Active mode");
+    }
+
+    // 6362/6374: once vanilla is at 3 (or the battle is ending) nothing else may run.
+    private static void MacroAiSkipsVanillaRetreatAndEndOfBattle()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, current: 3), "vanilla retreat");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 1, endBattle: true), "end of battle");
+        Pass("battle writers: macroai skips vanilla retreat and end of battle");
+    }
+
+    private static void MacroAiPrefersLedgerOverDoctrineOpinion()
+    {
+        TestHarness.AssertEqual(1, Macro(ledger: 1, fallback: 2), "ledger wins");
+        TestHarness.AssertEqual(2, Macro(ledger: -1, fallback: 2), "doctrine fallback");
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(), "no opinion leaves vanilla");
+        Pass("battle writers: macroai prefers ledger then doctrine opinion");
+    }
+
+    private static void MacroAiSkipsWhenAlreadyAligned()
+    {
+        TestHarness.AssertEqual(BattleWriterPolicy.NoMacroWrite, Macro(ledger: 2, current: 2), "aligned");
+        TestHarness.AssertEqual(0, Macro(ledger: 0, current: 2), "changed");
+        Pass("battle writers: macroai skips writes when vanilla already aligned");
+    }
+
+    private static void MacroAiEarlyGateMatchesResolver()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.MacroAiMayHaveOpinion(true, false, false, false, false, 1), "open gate");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(false, false, false, false, false, 1), "mode");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(true, true, false, false, false, 1), "feud");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(true, false, true, false, false, 1), "aistrategy");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(true, false, false, true, false, 1), "scripted side");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(true, false, false, false, true, 1), "end battle");
+        TestHarness.AssertFalse(BattleWriterPolicy.MacroAiMayHaveOpinion(true, false, false, false, false, 3), "vanilla retreat");
+        Pass("battle writers: macroai early gate matches resolver gates");
+    }
+
+    private static TacticalWithdrawalDoctrine.FallbackUnitState FallbackUnit(
+        int unitTyp = 0,
+        bool routed = false,
+        bool markedForRout = false,
+        bool detached = false,
+        bool onRetreat = false,
+        int paths = 0,
+        int movementMode = 0,
+        bool chargeTarget = false,
+        float inMelee = 0f)
+    {
+        return new TacticalWithdrawalDoctrine.FallbackUnitState(
+            unitTyp, routed, markedForRout, detached, onRetreat, paths, movementMode, chargeTarget, inMelee);
+    }
+
+    // R1: never SetWithdrawal in battle (116116 sets onretreat; SetWaypoint
+    // returns early on onretreat at 91361). Use vanilla's own tactical
+    // fallbacks: CheckLineFallbacks 5118 (mode 2) and MicroAICheckForRetreats
+    // 4825 (retreat distance).
+    private static void B8MapsWithdrawalDecisionsToVanillaFallbackShapes()
+    {
+        var unit = FallbackUnit();
+        TestHarness.AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Fallback,
+            TacticalWithdrawalDoctrine.PlanTacticalFallback(TacticalWithdrawalDoctrine.Decision.RearGuard, unit), "rear guard -> fallback");
+        TestHarness.AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Retreat,
+            TacticalWithdrawalDoctrine.PlanTacticalFallback(TacticalWithdrawalDoctrine.Decision.FullRetreat, unit), "full retreat -> retreat");
+        TestHarness.AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            TacticalWithdrawalDoctrine.PlanTacticalFallback(TacticalWithdrawalDoctrine.Decision.Screen, unit), "screen -> none");
+        TestHarness.AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            TacticalWithdrawalDoctrine.PlanTacticalFallback(TacticalWithdrawalDoctrine.Decision.HoldLine, unit), "hold -> none");
+        Pass("battle writers: B8 maps withdrawal decisions to vanilla fallback shapes");
+    }
+
+    // CheckLineFallbacks 5132: infantry/cavalry, movementmode 0, not routed,
+    // no charge target, no paths, not in melee.
+    private static void B8SkipsUnitsVanillaWouldNotFallBack()
+    {
+        var d = TacticalWithdrawalDoctrine.Decision.FullRetreat;
+        var none = TacticalWithdrawalDoctrine.FallbackKind.None;
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(unitTyp: 2)), "artillery");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(routed: true)), "routed");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(markedForRout: true)), "marked for rout");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(detached: true)), "detached");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(onRetreat: true)), "on retreat");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(paths: 1)), "has paths");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(movementMode: 4)), "retreating");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(movementMode: 2)), "falling back");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(chargeTarget: true)), "charging");
+        TestHarness.AssertEqual(none, TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(inMelee: 0.5f)), "in melee");
+        TestHarness.AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Retreat,
+            TacticalWithdrawalDoctrine.PlanTacticalFallback(d, FallbackUnit(unitTyp: 1)), "cavalry eligible");
+        Pass("battle writers: B8 skips units vanilla would not fall back");
+    }
+
+    // CheckUseOfReserves 6093-6113: vanilla commits only when an attached
+    // unit (unittyp <= 2, no paths, not routed) is outflanked on a side its
+    // own flank unit doesn't cover; otherwise it returns before any write.
+    private static void ReserveGateMirrorsVanillaEndangeredFilter()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, false, 1, 0), "left outflank");
+        TestHarness.AssertTrue(BattleWriterPolicy.IsEndangeredForReserveSupport(2, 0, false, 6, 1), "right outflank (6)");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, false, 1, 1), "left covered by own flank");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, false, 2, 2), "right covered by own flank");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, false, 3, 0), "outflanked code 3 not handled by vanilla");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(14, 0, false, 1, 0), "group unit");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 1, false, 1, 0), "moving");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, true, 1, 0), "routed");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsEndangeredForReserveSupport(0, 0, false, 0, 0), "not outflanked");
+        Pass("battle writers: #59 mirrors vanilla endangered-unit filter");
+    }
+
+    // CheckUseOfReserves 6121: only unittyp <= 1, idle, not routed, not
+    // outflanked, not engaged units can be sent as support.
+    private static void ReserveGateSnapshotsOnlyPossibleSupportUnits()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.IsReserveSupportCandidate(0, 0, false, 0, false), "idle infantry");
+        TestHarness.AssertTrue(BattleWriterPolicy.IsReserveSupportCandidate(1, 0, false, -1, false), "idle cavalry");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(2, 0, false, 0, false), "artillery");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(0, 2, false, 0, false), "moving");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(0, 0, true, 0, false), "routed");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(0, 0, false, 1, false), "outflanked");
+        TestHarness.AssertFalse(BattleWriterPolicy.IsReserveSupportCandidate(0, 0, false, 0, true), "engaged");
+        Pass("battle writers: #59 snapshots only possible support units");
+    }
+
+    // RegimentSetPath(newpath) calls StopRegiment(manualstop) (130836), which
+    // drops pontoon/obstacle construction and re-forms out of march column via
+    // ChangeRegimentFormation; a field snapshot cannot undo those.
+    private static void ReserveGateRollbackOnlyWhenStopRegimentIsReversible()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ReserveRollbackIsSafe(false, false, 0, 0), "plain unit");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(true, false, 0, 0), "pontoon builder");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, true, 0, 0), "obstacle builder");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, false, 2, 0), "formation change pending");
+        Pass("battle writers: #59 rolls back only when StopRegiment side effects are reversible");
+    }
+
+    // SetWaypoint 91449/91463: no groupposition, unittyp 5 or a
+    // parentregiment force useorderdelay = false, so #56's conversion would
+    // only replace vanilla's path with another immediate one.
+    private static void ReserveDelayConversionOnlyWhereSetWaypointQueues()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ReserveDelayConversionApplies(true, 0, false), "regiment of a formed group");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(false, 0, false), "no groupposition");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(true, 5, false), "unittyp 5");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(true, 0, true), "has parentregiment");
+        Pass("battle writers: #56 converts only where SetWaypoint queues a courier order");
+    }
+
+    // #34: Regiment.Initialize sets guns = GetSollGuns(forinitialization: true)
+    // (112681); on the campaign map GetSollGuns derives from
+    // GetSpriteAmounts(-1, calculateonly: true), i.e. from strength (135231,
+    // 127049). In battle it reads the live sprite count, which CombineUnits
+    // does not update, so nothing durable can be computed there.
+    private static void CombinedArtilleryGunsFollowVanillaInitializeRule()
+    {
+        TestHarness.AssertEqual(7, BattleWriterPolicy.GunsAfterCombine(true, true, 7, 4), "campaign artillery takes the initialize value");
+        TestHarness.AssertEqual(2, BattleWriterPolicy.GunsAfterCombine(true, true, 2, 4), "smaller source keeps the initialize value too");
+        TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(true, false, 7, 4), "battle: unchanged");
+        TestHarness.AssertEqual(4, BattleWriterPolicy.GunsAfterCombine(false, true, 7, 4), "not artillery");
+        Pass("battle writers: #34 combined artillery guns follow vanilla initialize rule");
+    }
+
+    private static void AssertNear(float expected, float actual, string label)
+    {
+        TestHarness.AssertTrue(Math.Abs(expected - actual) < 0.001f, label + ": expected " + expected + " got " + actual);
+    }
+
+    // BattlefieldSetup.GetAngleTerrainPosStatic 26891: angle -= 90;
+    // x += cos(a) * d; z -= sin(a) * d.
+    private static void VanillaAnglePointMatchesGetAngleTerrainPos()
+    {
+        BattleWriterPolicy.AnglePointXZ(100f, -200f, 90f, 50f, 4000f, 4000f, out float x, out float z);
+        AssertNear(150f, x, "angle 90 x");
+        AssertNear(-200f, z, "angle 90 z");
+        BattleWriterPolicy.AnglePointXZ(100f, -200f, 0f, 50f, 4000f, 4000f, out x, out z);
+        AssertNear(100f, x, "angle 0 x");
+        AssertNear(-150f, z, "angle 0 z");
+        Pass("battle writers: angle point matches vanilla GetAngleTerrainPos");
+    }
+
+    // GetAngleTerrainPosStatic 26908-26923 clamps to the terrain: x in
+    // [0, size.x - 1], z in [-(size.z - 1), 0]. A retreat point from a unit
+    // near the map edge must stay on the map.
+    private static void VanillaAnglePointClampsToTerrainBounds()
+    {
+        BattleWriterPolicy.AnglePointXZ(30f, -200f, 270f, 180f, 2000f, 1500f, out float x, out float z);
+        AssertNear(0f, x, "west edge");
+        BattleWriterPolicy.AnglePointXZ(1950f, -200f, 90f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(1999f, x, "east edge = size.x - 1");
+        BattleWriterPolicy.AnglePointXZ(500f, -40f, 0f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(0f, z, "north edge z = 0");
+        BattleWriterPolicy.AnglePointXZ(500f, -1450f, 180f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(-1499f, z, "south edge = -(size.z - 1)");
+        Pass("battle writers: angle point clamps to the terrain like vanilla");
+    }
+
+    // BattlefieldSetup.GetAngleTerrainPosXYStatic 26937: the distancez term
+    // points opposite to GetAngleTerrainPos, so SetGroupFormation's HQ
+    // (targetpos + (0, depth + back), 92044) sits behind the line front.
+    private static void VanillaAnglePointXYMatchesGetAngleTerrainPosXY()
+    {
+        BattleWriterPolicy.AnglePointXYXZ(100f, -200f, 0f, 0f, 30f, out float x, out float z);
+        AssertNear(100f, x, "xy angle 0 x");
+        AssertNear(-230f, z, "xy angle 0 z (behind)");
+        BattleWriterPolicy.AnglePointXYXZ(100f, -200f, 0f, 10f, 0f, out x, out z);
+        AssertNear(90f, x, "xy lateral x (positive distancex is to the left)");
+        AssertNear(-200f, z, "xy lateral z");
+        BattleWriterPolicy.DeploymentLineFrontFromHq(100f, -230f, 0f, 20f, 10f, out x, out z);
+        AssertNear(100f, x, "front x");
+        AssertNear(-200f, z, "front z = hq moved forward by depth + back");
+        Pass("battle writers: angle XY point matches vanilla GetAngleTerrainPosXY");
+    }
+
+    // Regiment.AddPath 130511: partial/invalid paths are accepted only once
+    // iterations >= 15 (deliberate); on endpoint mismatch the segment is kept
+    // and RegimentSetPath (131167-131178) chains from its last corner.
+    private static void PathfinderNeverRemovesAddedPaths()
+    {
+        var partial = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 0, finalDistance: 80f, tolerance: 5f);
+        TestHarness.AssertFalse(partial.OverrideResult, "far endpoint keeps vanilla result");
+        TestHarness.AssertEqual("vanilla-chain", partial.Reason, "far endpoint reason");
+        var none = BattleWriterPolicy.DecideAddPath(pathAdded: false, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(none.OverrideResult, "no added path");
+        var accepted = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 1, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(accepted.OverrideResult, "vanilla accepted");
+        Pass("battle writers: #53 never removes added path segments");
+    }
+
+    // Exact float endpoint equality (130517) never matches a navmesh-snapped
+    // target, so vanilla burns all 20 RegimentSetPath iterations; a close
+    // endpoint ends the loop.
+    private static void PathfinderEndsRetryLoopOnlyWithinTolerance()
+    {
+        var near = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 0, finalDistance: 1.25f, tolerance: 5f);
+        TestHarness.AssertTrue(near.OverrideResult, "near endpoint overrides");
+        TestHarness.AssertEqual(1, near.Result, "near endpoint result");
+        var noCorners = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(noCorners.OverrideResult, "no corners never overrides");
+        Pass("battle writers: #53 ends the retry loop only within endpoint tolerance");
+    }
+
+    private static bool Veto(
+        int unitTyp = 2,
+        int guns = 4,
+        bool routed = false,
+        bool detached = false,
+        bool showMovementOptions = false,
+        bool canWrite = true,
+        float nearestEnemyToTargetSq = 30f * 30f)
+    {
+        return BattleWriterPolicy.ShouldVetoArtilleryWaypoint(
+            unitTyp, guns, routed, detached, showMovementOptions, canWrite, nearestEnemyToTargetSq, 60f);
+    }
+
+    // BR-C2: SetWaypoint's showmovementoptions defaults true for UI orders;
+    // every vanilla AI call site passes false (e.g. 3139, 4146, 6235, 6959).
+    private static void VetoSkipsPlayerUiOrdersAndNonAiUnits()
+    {
+        TestHarness.AssertTrue(Veto(), "AI battery ordered to point blank");
+        TestHarness.AssertFalse(Veto(showMovementOptions: true), "player UI order");
+        TestHarness.AssertFalse(Veto(canWrite: false), "guard denies (player/W&L/mode)");
+        TestHarness.AssertFalse(Veto(unitTyp: 0), "infantry");
+        TestHarness.AssertFalse(Veto(guns: 0), "no guns");
+        TestHarness.AssertFalse(Veto(routed: true), "routed");
+        TestHarness.AssertFalse(Veto(detached: true), "detached");
+        Pass("battle writers: veto skips player UI orders and non-AI units");
+    }
+
+    private static void VetoMeasuresEnemyDistanceToTarget()
+    {
+        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: 61f * 61f), "target beyond point blank");
+        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: float.MaxValue), "no visible enemy");
+        TestHarness.AssertTrue(Veto(nearestEnemyToTargetSq: 59f * 59f), "target inside point blank");
+        Pass("battle writers: veto measures nearest visible enemy to the target");
+    }
+
+    private static ArtilleryMicroWrite Micro(
+        TacticalArtilleryMicroAction action,
+        int mounted = 0,
+        int paths = 0,
+        int movementMode = 0,
+        int combatBehaviorOrdered = 7,
+        bool enemyInFireRange = true)
+    {
+        return BattleWriterPolicy.PlanArtilleryMicroWrite(action, mounted, paths, movementMode, combatBehaviorOrdered, enemyInFireRange);
+    }
+
+    // BR-H3/B7 thrash: RotateRegiment and RegimentSetPath(newpath) both run
+    // StopRegiment (130165, 130836); vanilla's artillery micro (3482, 3513)
+    // only acts on idle batteries.
+    private static void ArtilleryMicroNeverInterruptsMovement()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1, paths: 2), "unlimber while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1, paths: 1), "retreat while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1, movementMode: 4), "retreat while retreating");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.WheelToBestThreat, paths: 1), "wheel while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Limber, paths: 1), "limber while moving");
+        Pass("battle writers: artillery micro never interrupts battery movement");
+    }
+
+    // UnlimberArtilleryAIMicro 3482: mounted == 1, no paths, enemy within fire range.
+    private static void ArtilleryMicroMirrorsVanillaUnlimberRule()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.UnlimberAndFace, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1), "unlimber in range");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1, enemyInFireRange: false), "no enemy in fire range");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 0), "already unlimbered");
+        Pass("battle writers: artillery unlimber mirrors vanilla rule");
+    }
+
+    private static void ArtilleryMicroMapsActionsToVanillaWrites()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Limber, Micro(TacticalArtilleryMicroAction.Limber, mounted: 0), "limber");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Limber, mounted: 1), "already limbered");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Retreat, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1), "retreat");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Face, Micro(TacticalArtilleryMicroAction.WheelToBestThreat), "wheel");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.CeaseBombard, Micro(TacticalArtilleryMicroAction.ConserveAmmo, combatBehaviorOrdered: 9), "conserve cancels bombard");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.ConserveAmmo, combatBehaviorOrdered: 7), "conserve no bombard");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Fire), "fire is vanilla");
+        Pass("battle writers: artillery micro maps actions to vanilla writes");
+    }
+
+    // CheckCounterBatteryFire 3834 skips combatbehaviorordered == 8, so its own
+    // 8 -> 7 release branch is unreachable; CheckAIBombardment 3890 skips 8 too.
+    private static void CounterBatteryReleasedWhenTargetGone()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ShouldReleaseCounterBattery(8, false), "no enemy artillery in fire range");
+        TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(8, true), "enemy artillery still in range");
+        TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(7, false), "not counter-battery");
+        Pass("battle writers: counter-battery released when the target is gone");
+    }
+
+    // CheckForFeudGroupActions 4952: GetClosestEnemyUnit(neededdistancefeudgroupmovement).
+    private static void FeudGateRestoresVanillaDistanceCap()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.FeudMoveTargetAllowed(true, 300f, 400f), "inside cap");
+        TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(true, 900f, 400f), "beyond cap");
+        TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(false, 0f, 400f), "no enemy");
+        Pass("battle writers: #42 restores vanilla feud distance cap");
+    }
+
+    // DoPlacementAIUnitsWithinDeploymentzoneNew 85684-85751: num3 == 1
+    // (defender battle type 2, or attacker type 1 with groupmorale <=
+    // minimummoraleforaistances[1]) with >= 3 eligible sub-units places the
+    // group on fortification lines with ignoredeplyomentzone: true.
+    private static void DeploymentSkipsVanillaFortifiedPlacement()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(2, 0.9f, 0.4f, 3), "defender");
+        TestHarness.AssertTrue(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(1, 0.3f, 0.4f, 5), "shaken attacker");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(1, 0.9f, 0.4f, 5), "attacker");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(2, 0.9f, 0.4f, 2), "too few units -> num3 = 2");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(0, 0.9f, 0.4f, 5), "meeting");
+        Pass("battle writers: #60 leaves vanilla fortified-line placement alone");
+    }
+
+    private static void DeploymentSkipsFleetsAndMissingZones()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 4, false), "brigade with zone");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(17, 4, false), "fleet");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 1, false), "frontlinevector.Count < 2");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 4, true), "fortified path");
+        Pass("battle writers: #60 skips fleets, missing zones and fortified groups");
+    }
+
+    // #55: Regiment.allattachedunits is GetComponentsInChildren<Regiment>
+    // (UpdateAllAttachedUnits 129574) and BattleUnits.GetParentUnit (93883)
+    // returns the unit itself when it hangs off the units root - same command
+    // is membership either way or a shared real parent, not a name check.
+    private static void HqLinkSameCommandUsesVanillaHierarchy()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(true, false, 1, 2, 10, 20), "target subordinate");
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(false, true, 1, 2, 10, 20), "source subordinate");
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 7, 7), "same parent");
+        TestHarness.AssertFalse(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 1, 2), "both root-level (parent = self)");
+        TestHarness.AssertFalse(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 7, 8), "different parents");
+        Pass("battle writers: #55 same command uses vanilla hierarchy");
+    }
+}

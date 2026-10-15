@@ -54,6 +54,73 @@ namespace WhiskeyRealism.Tactical
             return baseDecision;
         }
 
+        public enum FallbackKind { None, Fallback, Retreat }
+
+        public readonly struct FallbackUnitState
+        {
+            public FallbackUnitState(
+                int unitTyp,
+                bool routed,
+                bool markedForRout,
+                bool permanentlyDetached,
+                bool onRetreat,
+                int regimentPaths,
+                int movementMode,
+                bool hasChargeTarget,
+                float inMelee)
+            {
+                UnitTyp = unitTyp;
+                Routed = routed;
+                MarkedForRout = markedForRout;
+                PermanentlyDetached = permanentlyDetached;
+                OnRetreat = onRetreat;
+                RegimentPaths = regimentPaths;
+                MovementMode = movementMode;
+                HasChargeTarget = hasChargeTarget;
+                InMelee = inMelee;
+            }
+
+            public int UnitTyp { get; }
+            public bool Routed { get; }
+            public bool MarkedForRout { get; }
+            public bool PermanentlyDetached { get; }
+            public bool OnRetreat { get; }
+            public int RegimentPaths { get; }
+            public int MovementMode { get; }
+            public bool HasChargeTarget { get; }
+            public float InMelee { get; }
+        }
+
+        // B8 write shape. Never the campaign Regiment.SetWithdrawal (116116):
+        // it leaves onretreat = true, and BattleUnits.SetWaypoint returns early
+        // for onretreat units (91361), so the unit could never be ordered again.
+        // Instead mirror vanilla's own tactical fallbacks:
+        //   RearGuard   -> AIBattle.CheckLineFallbacks 5118 (fallback, mode 2,
+        //                  GamePrefs.standardfallbackdistance);
+        //   FullRetreat -> AIBattle.MicroAICheckForRetreats 4825-4898 (path at
+        //                  GamePrefs.standardretreatdistance keeping the current
+        //                  facing, roads off, then mode 2; SetMovementMode maps 2
+        //                  to 4 for mounted units).
+        // Eligibility is CheckLineFallbacks' unit filter (5132): infantry or
+        // cavalry, movementmode 0, not routed/marked, no charge target, no
+        // paths, not in melee; plus not detached and not already onretreat.
+        public static FallbackKind PlanTacticalFallback(Decision decision, in FallbackUnitState unit)
+        {
+            FallbackKind kind;
+            switch (decision)
+            {
+                case Decision.RearGuard: kind = FallbackKind.Fallback; break;
+                case Decision.FullRetreat: kind = FallbackKind.Retreat; break;
+                default: return FallbackKind.None;
+            }
+
+            if (unit.UnitTyp != 0 && unit.UnitTyp != 1) return FallbackKind.None;
+            if (unit.Routed || unit.MarkedForRout || unit.PermanentlyDetached || unit.OnRetreat) return FallbackKind.None;
+            if (unit.RegimentPaths > 0 || unit.MovementMode != 0) return FallbackKind.None;
+            if (unit.HasChargeTarget || unit.InMelee > 0f) return FallbackKind.None;
+            return kind;
+        }
+
         private static Decision BumpUpOne(Decision d)
         {
             switch (d)

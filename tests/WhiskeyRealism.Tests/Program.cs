@@ -246,7 +246,6 @@ static class Program
             ("grand tactician recon doctrine prevents no contact blind assault", GrandTacticianReconDoctrinePreventsNoContactBlindAssault),
             ("scourge artillery micro doctrine limbers retreats and wheels", ScourgeArtilleryMicroDoctrineLimbersRetreatsAndWheels),
             ("scourge melee fear doctrine gates charge by pressure not just headcount", ScourgeMeleeFearDoctrineGatesChargeByPressure),
-            ("doctrine charge gate consumes melee fear and fire discipline", DoctrineChargeGateConsumesMeleeFearAndFireDiscipline),
             ("scourge skirmisher doctrine recalls tired distant screens", ScourgeSkirmisherDoctrineRecallsTiredDistantScreens),
             ("scourge infantry fire discipline holds bad shots and blocks premature charge", ScourgeInfantryFireDisciplineHoldsBadShots),
             ("infantry fire control prefers historical close medium bands", InfantryFireControlPrefersHistoricalCloseMediumBands),
@@ -394,11 +393,8 @@ static class Program
             ("doctrine assignment unknown role has no legal idle", DoctrineAssignmentUnknownRoleHasNoLegalIdle),
             ("doctrine assignment fallback target remains finite for large coordinates", DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates),
             ("doctrine consumer attack order permits assault stance", DoctrineConsumerAttackOrderPermitsAssaultStance),
-            ("doctrine consumer reserve order denies charge", DoctrineConsumerReserveOrderDeniesCharge),
-            ("doctrine consumer skirmisher-only contact holds formed regiments", DoctrineConsumerSkirmisherOnlyContactHoldsFormedRegiments),
             ("doctrine consumer battlefield picture screen does not expose line", DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine),
             ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
-            ("doctrine consumer allow cannot override charge denial", DoctrineConsumerAllowCannotOverrideChargeDenial),
             ("doctrine reserve releases to support endangered main effort", DoctrineReserveReleasesToSupportEndangeredMainEffort),
             ("doctrine reserve seals threatened flank from operational mission", DoctrineReserveSealsThreatenedFlankFromOperationalMission),
             ("doctrine reserve conserves exhausted reserve", DoctrineReserveConservesExhaustedReserve),
@@ -408,7 +404,6 @@ static class Program
             ("doctrine artillery no exposed main line does not allow support", DoctrineArtilleryNoExposedMainLineDoesNotAllowSupport),
             ("doctrine artillery mission conserves low ammo", DoctrineArtilleryMissionConservesLowAmmo),
             ("doctrine artillery mission counterbattery outranks support", DoctrineArtilleryMissionCounterbatteryOutranksSupport),
-            ("doctrine charge endurance gate blocks assault", DoctrineChargeEnduranceGateBlocksAssault),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -610,8 +605,6 @@ static class Program
             ("tactical wl guard allows charge cancellation", TacticalWlGuardAllowsChargeCancellation),
             ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
             ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
-            ("tactical wl guard denies objective advance with attached subordinate", TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate),
-            ("tactical wl guard allows ai chain objective advance", TacticalWlGuardAllowsAiChainObjectiveAdvance),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
@@ -1122,17 +1115,6 @@ static class Program
             ("tactical reserve commit gate observes player controlled group", TacticalReserveCommitGateObservesPlayerControlledGroup),
             ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
             ("tactical reserve list bias rejects reserve role candidate", TacticalReserveListBiasRejectsReserveRoleCandidate),
-            ("tactical orchestrator charge gate observes when vanilla would not charge", TacticalOrchestratorChargeGateObservesWhenNoVanillaCharge),
-            ("tactical orchestrator charge gate preserves vanilla cancellation", TacticalOrchestratorChargeGatePreservesCancellation),
-            ("tactical orchestrator charge gate fails open without command intent", TacticalOrchestratorChargeGateFailsOpenWithoutIntent),
-            ("tactical orchestrator charge gate observes player controlled group", TacticalOrchestratorChargeGateObservesPlayerControlled),
-            ("tactical orchestrator charge gate allows main with favorable odds", TacticalOrchestratorChargeGateAllowsMainFavorableOdds),
-            ("tactical orchestrator charge gate denies main with poor odds", TacticalOrchestratorChargeGateDeniesMainPoorOdds),
-            ("tactical orchestrator charge gate allows support main with support evidence", TacticalOrchestratorChargeGateAllowsSupportMainWithEvidence),
-            ("tactical orchestrator charge gate denies support main without support evidence", TacticalOrchestratorChargeGateDeniesSupportMainWithoutEvidence),
-            ("tactical orchestrator charge gate denies fix reserve fallback refuse and screen", TacticalOrchestratorChargeGateDeniesHoldRoles),
-            ("tactical orchestrator charge gate reason strings are stable", TacticalOrchestratorChargeGateReasonStringsStable),
-            ("tactical orchestrator charge gate unknown role fails open", TacticalOrchestratorChargeGateUnknownRoleFailsOpen),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -1376,6 +1358,7 @@ static class Program
         ObjectiveRecordsFromAggregateTests.Run();
         TacticalLifecycleFixTests.Run();
         PostureStanceFixTests.Run();
+        BattleWriterFixTests.Run();
         CommanderModeParseTests.Run();
         CampaignEconomyFixTests.Run();
         CampaignLifecycleFixTests.Run();
@@ -5030,16 +5013,9 @@ static class Program
             CommandTaskType.AttackObjective,
             primary: DoctrineTargetPoint.From(300f, 450f)).WithSop(sop);
 
-        DoctrineChargeDecision charge = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: true,
-            localOdds: 1.55f,
-            targetRouted: false);
-
         AssertEqual(TacticalSopAuthority.Attack, sop.Authority, "authority");
         AssertTrue(sop.RequiresSupportBeforeMajorAttack, "thin attack should require support");
-        AssertEqual(DoctrineConsumerAction.Deny, charge.Action, "charge action");
-        AssertEqual("support-required", charge.Reason, "charge reason");
+        AssertTrue(order.Sop.RequiresSupportBeforeMajorAttack, "order carries the support requirement");
     }
 
     private static void DoctrineAssignmentStampsSopAuthority()
@@ -8035,38 +8011,6 @@ static class Program
         AssertEqual("doctrine-attack", decision.Reason, "reason");
     }
 
-    private static void DoctrineConsumerReserveOrderDeniesCharge()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.ReserveWait,
-            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
-
-        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: true,
-            localOdds: 2.0f,
-            targetRouted: true);
-
-        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
-        AssertEqual("reserve-held", decision.Reason, "reason");
-    }
-
-    private static void DoctrineConsumerSkirmisherOnlyContactHoldsFormedRegiments()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.AttackObjective,
-            primary: DoctrineTargetPoint.From(100f, 200f));
-
-        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: false,
-            localOdds: 2.0f,
-            targetRouted: false);
-
-        AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
-        AssertEqual("main-line-not-exposed", decision.Reason, "reason");
-    }
-
     private static void DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine()
     {
         CommandDoctrineOrder order = DoctrineOrder(
@@ -8084,15 +8028,8 @@ static class Program
             nowSeconds: 20f);
 
         bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
-        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            exposed,
-            localOdds: 2.0f,
-            targetRouted: false);
 
         AssertFalse(exposed, "screen contact should not expose formed line");
-        AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
-        AssertEqual("main-line-not-exposed", decision.Reason, "reason");
     }
 
     private static void DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch()
@@ -8109,17 +8046,6 @@ static class Program
         bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
 
         AssertFalse(exposed, "known objective id miss should not fall back to coordinates");
-    }
-
-    private static void DoctrineConsumerAllowCannotOverrideChargeDenial()
-    {
-        DoctrineChargeDecision doctrineAllow = new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge");
-
-        bool allowed = DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(
-            doctrineAllow,
-            authoritativeDenied: true);
-
-        AssertFalse(allowed, "doctrine allow should not supersede an authoritative denial");
     }
 
     private static void DoctrineReserveReleasesToSupportEndangeredMainEffort()
@@ -8297,28 +8223,6 @@ static class Program
 
         AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
         AssertEqual("counterbattery", decision.Reason, "reason");
-    }
-
-    private static void DoctrineChargeEnduranceGateBlocksAssault()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.AttackObjective,
-            primary: DoctrineTargetPoint.From(100f, 200f));
-
-        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: true,
-            localOdds: 2.0f,
-            targetRouted: false,
-            endurance: TacticalEnduranceGate.Evaluate(new TacticalEnduranceInput(
-                infantryAmmo01: 0.10f,
-                artilleryAmmo01: 0.60f,
-                fatigue01: 0.86f,
-                morale01: 0.42f,
-                casualtyPressure01: 0.64f)));
-
-        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
-        AssertEqual("endurance-relief-needed", decision.Reason, "reason");
     }
 
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
@@ -10369,34 +10273,6 @@ static class Program
         AssertEqual("ai-chain", decision.Reason, "reason");
     }
 
-    private static void TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ObjectiveChainAdvance,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: true);
-
-        AssertTrue(!decision.Allow, "objective-chain advance should be denied when the center group contains a player-subordinate unit");
-        AssertEqual("player-subordinate-attached", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardAllowsAiChainObjectiveAdvance()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ObjectiveChainAdvance,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: false);
-
-        AssertTrue(decision.Allow, "AI-chain objective movement should remain vanilla");
-        AssertEqual("ai-chain", decision.Reason, "reason");
-    }
-
     private static void TacticalB6aProbePostureMapsToProbeIntent()
     {
         var input = new TacticalIntentInput(
@@ -11692,47 +11568,6 @@ static class Program
         AssertFalse(badAttack.AllowsCharge, "defensive terrain and fire should block charge");
         AssertTrue(badAttack.RequiresFallbackPressure, "bad fear ratio should request fallback pressure");
         AssertEqual(TacticalMeleeFearPosture.FallbackPressure, badAttack.Posture, "bad posture");
-    }
-
-    private static void DoctrineChargeGateConsumesMeleeFearAndFireDiscipline()
-    {
-        CommandDoctrineOrder order = DoctrineOrder(
-            CommandTaskType.AttackObjective,
-            role: CommandNodeRole.MainEffort,
-            primary: DoctrineTargetPoint.From(100f, 200f));
-
-        var badFear = new TacticalMeleeFearDecision(
-            TacticalMeleeFearPosture.FallbackPressure,
-            advantageRatio: 0.62f,
-            allowsCharge: false,
-            encouragesCharge: false,
-            requiresFallbackPressure: true,
-            reason: "fear-disadvantage");
-        var readyFire = new TacticalInfantryFireDecision(
-            TacticalInfantryFireAction.FireVolley,
-            blocksCharge: true,
-            reason: "volley-ready");
-        DoctrineChargeDecision fearDenied = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: true,
-            localOdds: 2.0f,
-            targetRouted: false,
-            new TacticalEnduranceDecision(true, true, true, false, "endurance-ready"),
-            badFear,
-            TacticalInfantryFireDecision.NoOpinion);
-        DoctrineChargeDecision volleyDenied = DoctrineConsumerDecisions.DecideCharge(
-            order,
-            enemyMainLineExposed: true,
-            localOdds: 2.0f,
-            targetRouted: false,
-            new TacticalEnduranceDecision(true, true, true, false, "endurance-ready"),
-            TacticalMeleeFearDecision.NoOpinion,
-            readyFire);
-
-        AssertEqual(DoctrineConsumerAction.Deny, fearDenied.Action, "fear gate denies");
-        AssertContains(fearDenied.Reason, "melee-fear", "fear reason");
-        AssertEqual(DoctrineConsumerAction.Deny, volleyDenied.Action, "fire gate denies");
-        AssertContains(volleyDenied.Reason, "fire-discipline", "fire reason");
     }
 
     private static void ScourgeSkirmisherDoctrineRecallsTiredDistantScreens()
@@ -23362,161 +23197,6 @@ static class Program
 
         AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(reserve), "reserve role is not list-bias eligible");
         AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(main), "main role can be list-bias eligible");
-    }
-
-    private static TacticalOrchestratorChargeGate.Input ChargeGateInput(
-        bool vanillaWouldCharge = true,
-        bool chargeCancellation = false,
-        bool resolved = true,
-        DirectChildRole role = DirectChildRole.Main,
-        bool playerControlled = false,
-        float localOdds = 1.10f,
-        bool mainEffortSupportAvailable = false,
-        bool screenRoutedTargetVisible = false)
-    {
-        return new TacticalOrchestratorChargeGate.Input(
-            vanillaWouldCharge,
-            chargeCancellation,
-            new CommandIntentResolution(
-                resolved,
-                new CommandNodeIntent(
-                    "node-200",
-                    "node-200",
-                    role,
-                    DirectChildAxis.SectorAxis,
-                    primarySector: 2,
-                    supportPriority: 50,
-                    aggressionBias01: 0.5f,
-                    depth: 1),
-                resolved ? "exact-command-node" : "command-node-not-found"),
-            playerControlled,
-            localOdds,
-            mainEffortSupportAvailable,
-            screenRoutedTargetVisible);
-    }
-
-    private static void AssertChargeGate(
-        TacticalOrchestratorChargeGate.Decision decision,
-        TacticalOrchestratorChargeGate.Action action,
-        DirectChildRole role,
-        string reason)
-    {
-        AssertEqual(action, decision.Action, "action");
-        AssertEqual(role, decision.Role, "role");
-        AssertEqual(reason, decision.Reason, "reason");
-        AssertEqual(action != TacticalOrchestratorChargeGate.Action.Deny, decision.AllowsCharge, "allows charge");
-    }
-
-    private static void TacticalOrchestratorChargeGateObservesWhenNoVanillaCharge()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(vanillaWouldCharge: false));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Observe, DirectChildRole.Unknown, "no-vanilla-charge");
-    }
-
-    private static void TacticalOrchestratorChargeGatePreservesCancellation()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(chargeCancellation: true, role: DirectChildRole.Reserve));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "charge-cancellation");
-    }
-
-    private static void TacticalOrchestratorChargeGateFailsOpenWithoutIntent()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(resolved: false, role: DirectChildRole.Reserve));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "no-command-intent");
-    }
-
-    private static void TacticalOrchestratorChargeGateObservesPlayerControlled()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(playerControlled: true));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Observe, DirectChildRole.Unknown, "player-controlled");
-    }
-
-    private static void TacticalOrchestratorChargeGateAllowsMainFavorableOdds()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Main, localOdds: 1.10f));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Main, "main-favorable-odds");
-
-        AssertNear(1f, ChargeGateInput(localOdds: float.NaN).LocalOdds, 1e-5f, "NaN odds fallback");
-        AssertNear(1f, ChargeGateInput(localOdds: float.PositiveInfinity).LocalOdds, 1e-5f, "Infinity odds fallback");
-    }
-
-    private static void TacticalOrchestratorChargeGateDeniesMainPoorOdds()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Main, localOdds: 1.09f));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Main, "main-unfavorable-odds");
-
-        AssertNear(0f, ChargeGateInput(localOdds: -0.25f).LocalOdds, 1e-5f, "negative odds clamp");
-    }
-
-    private static void TacticalOrchestratorChargeGateAllowsSupportMainWithEvidence()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(
-            role: DirectChildRole.SupportMain,
-            mainEffortSupportAvailable: true));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.SupportMain, "support-main-charge-support");
-    }
-
-    private static void TacticalOrchestratorChargeGateDeniesSupportMainWithoutEvidence()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.SupportMain));
-        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.SupportMain, "support-main-no-main-charge");
-    }
-
-    private static void TacticalOrchestratorChargeGateDeniesHoldRoles()
-    {
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fix)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Fix, "role-fix-hold");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Reserve)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Reserve, "role-reserve-hold");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fallback)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Fallback, "role-fallback-no-charge");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseLeft)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.RefuseLeft, "role-refuse-left-no-charge");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseRight)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.RefuseRight, "role-refuse-right-no-charge");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Screen)),
-            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Screen, "screen-no-routed-target");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(
-                role: DirectChildRole.Screen,
-                screenRoutedTargetVisible: true)),
-            TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Screen, "screen-chase-routed-target");
-        AssertChargeGate(
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Unknown)),
-            TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "unknown-role");
-    }
-
-    private static void TacticalOrchestratorChargeGateReasonStringsStable()
-    {
-        var cases = new[]
-        {
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fix)).Reason,
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Reserve)).Reason,
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fallback)).Reason,
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseLeft)).Reason,
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseRight)).Reason,
-            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Screen)).Reason,
-        };
-
-        AssertEqual("role-fix-hold", cases[0], "fix reason");
-        AssertEqual("role-reserve-hold", cases[1], "reserve reason");
-        AssertEqual("role-fallback-no-charge", cases[2], "fallback reason");
-        AssertEqual("role-refuse-left-no-charge", cases[3], "refuse-left reason");
-        AssertEqual("role-refuse-right-no-charge", cases[4], "refuse-right reason");
-        AssertEqual("screen-no-routed-target", cases[5], "screen reason");
-    }
-
-    private static void TacticalOrchestratorChargeGateUnknownRoleFailsOpen()
-    {
-        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Unknown));
-        AssertEqual(TacticalOrchestratorChargeGate.Action.Allow, d.Action, "action");
-        AssertEqual("unknown-role", d.Reason, "reason");
     }
 
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()

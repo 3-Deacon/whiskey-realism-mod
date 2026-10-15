@@ -17,6 +17,13 @@ namespace WhiskeyRealism.Patches
     // TacticalCommanderIntentResolver and TacticalPlaybookLedger, and emits
     // bounded [TacticalIntent], [TacticalPlaybook], [TacticalLocalReaction],
     // and [TacticalReserveIntent] log lines. Never writes vanilla battle state.
+    //
+    // State contract (#57): TacticalReactionContext.Shared is NOT orchestrator
+    // or strategic state. It is the per-macro-cycle cache of this legacy B6c
+    // observer (its only producer), rebuilt from scratch every AdjustGroupAIStance
+    // cycle (5866) and written only while the army orchestrator is off; with the
+    // orchestrator on (default) the observer is telemetry-only. Its reader
+    // (BattleGroupStancePatch) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
@@ -37,29 +44,23 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-commander-intent", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                RefreshRuntimeState(__instance, emitTelemetry: true);
+                if (!Enabled() || __instance == null) return;
+                try
+                {
+                    Apply(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-b6a-observer:failed", "BattleCommanderIntentObserverPatch failed: " + ex.Message);
+                }
             }
         }
 
-        internal static bool RefreshRuntimeState(AIBattle battle, bool emitTelemetry)
-        {
-            if (!Enabled() || battle == null) return false;
-            try
-            {
-                return Apply(battle, emitTelemetry);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-b6a-observer:failed", "BattleCommanderIntentObserverPatch failed: " + ex.Message);
-                return false;
-            }
-        }
-
-        private static bool Apply(AIBattle battle, bool emitTelemetry)
+        private static void Apply(AIBattle battle)
         {
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
-            if (side < 0) return false;
+            if (side < 0) return;
 
             var intentInput = BuildIntentInput(macro, side, battle);
             var intent = TacticalCommanderIntentResolver.Resolve(intentInput);
@@ -75,11 +76,8 @@ namespace WhiskeyRealism.Patches
                 stalenessPressure: 0f);
             var playbook = TacticalPlaybookLedger.Decide(playbookInput);
 
-            if (emitTelemetry)
-            {
-                EmitIntent(side, macro, intentInput, intent);
-                EmitPlaybook(side, playbook);
-            }
+            EmitIntent(side, macro, intentInput, intent);
+            EmitPlaybook(side, playbook);
 
             // O1.13: when the army orchestrator is on (default), it owns reactions.
             // The legacy scorer still computes and emits telemetry for comparison,
@@ -91,7 +89,7 @@ namespace WhiskeyRealism.Patches
                 TacticalReactionContext.Shared.Clear();
 
             if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
-                return true;
+                return;
 
             IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
             var reactions = new List<TacticalLocalReactionDecision>();
@@ -107,27 +105,20 @@ namespace WhiskeyRealism.Patches
                     if (legacyWritesAllowed)
                         TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
                     reactions.Add(reaction);
-                    if (emitTelemetry)
-                        EmitReaction(side, group, reaction);
+                    EmitReaction(side, group, reaction);
                 }
             }
 
-            bool reserveTelemetryEnabled = Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value;
-            if (reserveTelemetryEnabled || Plugin.Instance.EnableTacticalReserveListMutation.Value)
+            // Reserve intent is telemetry only: nothing consumes it at runtime.
+            if (Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value)
             {
                 var availability = BuildReserveAvailability(battle);
                 var reserveInput = new TacticalReserveIntentInput(
                     playbook.ReservePolicy,
                     reactions.ToArray(),
                     availability);
-                TacticalReserveIntentDecision reserveIntent = TacticalReservePolicyLedger.Decide(reserveInput);
-                if (legacyWritesAllowed)
-                    TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
-                if (emitTelemetry && reserveTelemetryEnabled)
-                    EmitReserveIntent(side, reserveIntent);
+                EmitReserveIntent(side, TacticalReservePolicyLedger.Decide(reserveInput));
             }
-
-            return true;
         }
 
         private static TacticalIntentInput BuildIntentInput(int macro, int side, AIBattle battle)
@@ -324,7 +315,7 @@ namespace WhiskeyRealism.Patches
                         return false;
                     }
 
-                    if (!ReserveWlOwnershipSafe(reserve))
+                    if (!WlOwnershipSafe(reserve))
                         return false;
 
                     hasValidReserve = true;
@@ -406,38 +397,7 @@ namespace WhiskeyRealism.Patches
 
         private static bool WlOwnershipSafe(Regiment group)
         {
-            return WlOwnershipSafe(group, failClosed: false);
-        }
-
-        private static bool ReserveWlOwnershipSafe(Regiment group)
-        {
-            return WlOwnershipSafe(group, failClosed: true);
-        }
-
-        private static bool WlOwnershipSafe(Regiment group, bool failClosed)
-        {
-            try
-            {
-                if (!DLC_WL.dlc_scenarioactive) return true;
-                if (group == null) return true;
-                if (group.dlcw_isundercommander) return false;
-                if (group.allattachedunits == null) return true;
-
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if (unit != null && unit.dlcw_isundercommander)
-                        return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                if (failClosed)
-                    OnceLog.Warning("tactical-b6c-reserve-wl-ownership:failed", "Reserve W&L ownership inspection failed; blocking reserve mutation: " + ex.Message);
-                return !failClosed;
-            }
+            return !TacticalWriteGuard.IsPlayerProtected(group);
         }
 
         private static TacticalReserveAvailability BuildReserveAvailability(AIBattle battle)
@@ -465,7 +425,7 @@ namespace WhiskeyRealism.Patches
                             }
 
                             reserveCount++;
-                            if (!ReserveWlOwnershipSafe(reserve))
+                            if (!WlOwnershipSafe(reserve))
                                 wlOwnershipSafe = false;
                         }
                     }
