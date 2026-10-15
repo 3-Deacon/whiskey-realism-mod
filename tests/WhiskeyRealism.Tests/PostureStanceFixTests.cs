@@ -53,6 +53,13 @@ internal static class PostureStanceFixTests
         Pass("regiment facing pulse requires a threat inside fire range", RegimentFacingPulseRequiresFireRange);
         Pass("regiment facing pulse never stops a moving or withdrawing unit", RegimentFacingPulseNeverStopsMovingUnit);
         Pass("regiment facing pulse with current formation only rotates", RegimentFacingPulseOnlyRotates);
+
+        // B-61clock / M3 retry
+        Pass("executor movement uses courier order delay like vanilla AI group moves", ExecutorMovementUsesCourierDelay);
+        Pass("in-contact withdrawal skips order delay like CheckIfOutflanked", InContactWithdrawalSkipsOrderDelay);
+        Pass("queued courier order counts as an issued move", QueuedCourierOrderCountsAsIssuedMove);
+        Pass("failed write backs off on battle time", FailedWriteBacksOffOnBattleTime);
+        Pass("real seconds at 1x convert to battle hours", RealSecondsAtOneXConvertToBattleHours);
     }
 
     private static void Pass(string name, Action test)
@@ -437,5 +444,43 @@ internal static class PostureStanceFixTests
         var d = Pulse(current: 3, target: 3);
         AssertEqual(TacticalFacingPulseAction.CorrectFacing, d.Action, "rotate only");
         AssertEqual(3, d.TargetFormation, "formation untouched");
+    }
+
+    private static void ExecutorMovementUsesCourierDelay()
+    {
+        foreach (var task in new[] { CommandTaskType.AttackObjective, CommandTaskType.Probe, CommandTaskType.Scout, CommandTaskType.FallBackToLine, CommandTaskType.AdvanceToAssembly })
+            AssertTrue(CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: false),
+                task + " goes through the courier queue (UpdateMovingTargets 6959, RepositionAIGroupMicroTowardsEnemy 4146)");
+    }
+
+    private static void InContactWithdrawalSkipsOrderDelay()
+    {
+        AssertFalse(CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.FallBackToLine, battleActive: true, inContactWithdrawal: true),
+            "in-contact fallback is immediate like CheckIfOutflanked 6235");
+        AssertTrue(CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.AttackObjective, battleActive: true, inContactWithdrawal: true),
+            "only withdrawals skip the courier");
+    }
+
+    private static void QueuedCourierOrderCountsAsIssuedMove()
+    {
+        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 2, 0, 0), "paths appeared");
+        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 0, 0, 1), "courier queued");
+        AssertFalse(CommandWaypointWritePolicy.MovementIssued(1, 1, 2, 2), "nothing changed");
+    }
+
+    private static void FailedWriteBacksOffOnBattleTime()
+    {
+        float until = CommandWaypointWritePolicy.FailedWriteBackoffUntil(2f);
+        AssertTrue(until > 2f, "backoff in the future");
+        AssertTrue(CommandWaypointWritePolicy.IsBackedOff(2.01f, until), "inside backoff");
+        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(until + 0.001f, until), "after backoff");
+        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(0.5f, until), "clock reset clears backoff");
+    }
+
+    private static void RealSecondsAtOneXConvertToBattleHours()
+    {
+        // Macro cycle 0.015 game-hours ≈ 9 s real at 1x ⇒ 1 game-hour ≈ 600 s real.
+        AssertEqual(0.015f, TacticalBattleClock.RealSecondsAtOneXToHours(9f), "macro cycle");
+        AssertEqual(0f, TacticalBattleClock.RealSecondsAtOneXToHours(-3f), "negative clamps");
     }
 }

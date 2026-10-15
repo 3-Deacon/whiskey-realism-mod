@@ -7107,12 +7107,14 @@ static class Program
 
     private static void PostureExecutorBattleWaypointsBypassDelayedOrderQueue()
     {
-        AssertFalse(
+        // T4 B-61clock: AI group moves use the courier queue like vanilla
+        // (UpdateMovingTargets 6959); only an in-contact withdrawal skips it.
+        AssertTrue(
             CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.AttackObjective, battleActive: true),
-            "battle attack movement needs an immediate path, not a delayed order queue");
+            "battle attack movement goes through the courier queue");
         AssertFalse(
-            CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.FallBackToLine, battleActive: true),
-            "battle fallback movement needs an immediate recovery path");
+            CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.FallBackToLine, battleActive: true, inContactWithdrawal: true),
+            "in-contact fallback is immediate like CheckIfOutflanked");
         AssertTrue(
             CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.AttackObjective, battleActive: false),
             "non-battle callers should keep vanilla order-delay semantics");
@@ -7120,12 +7122,12 @@ static class Program
 
     private static void PostureExecutorScoutAndProbeAreObjectiveMovementTasks()
     {
-        AssertFalse(
+        AssertTrue(
             CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.Scout, battleActive: true),
-            "scout toward objective needs immediate battle movement");
-        AssertFalse(
+            "scout toward objective goes through the courier queue");
+        AssertTrue(
             CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.Probe, battleActive: true),
-            "probe toward objective needs immediate battle movement");
+            "probe toward objective goes through the courier queue");
         AssertTrue(
             CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Scout),
             "scout movement must stamp active progress");

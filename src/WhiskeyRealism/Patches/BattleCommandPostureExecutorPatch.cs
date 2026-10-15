@@ -19,7 +19,9 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCommandPostureExecutorPatch
     {
-        private const float RecentOrderSeconds = 30f;
+        // Doctrine timers run on battle time (game hours, GameVars.currenttimefromstart).
+        // Former wall-clock values were tuned at 1x and convert 1:1 at 1x.
+        private static readonly float RecentOrderHours = TacticalBattleClock.RealSecondsAtOneXToHours(30f);
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
@@ -35,16 +37,18 @@ namespace WhiskeyRealism.Patches
         private const float MinWaypointDistance = 60f;
         private const float VanillaBlockedMoveDistance = 150f;
         private const float FacingRefreshToleranceDegrees = 15f;
+        // CommandDoctrineOrder.CourierIntervalSeconds is battle seconds: 900 = 0.25 game-hours.
         private const float OutboundCourierIntervalSeconds = 900f;
-        private const float FireControlOrderCooldownSeconds = 45f;
-        private const float BrigadeFacingPulseCooldownSeconds = 12f;
-        private const float RegimentFacingPulseCooldownSeconds = 5f;
+        private static readonly float FireControlOrderCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(45f);
+        private static readonly float BrigadeFacingPulseCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(12f);
+        private static readonly float RegimentFacingPulseCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(5f);
         private const int MaxRegimentFacingPulseWritesPerGroup = 4;
 
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFacingPulseAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFormationWriteAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _writeBackoffUntil = new Dictionary<int, float>();
         private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
@@ -260,11 +264,11 @@ namespace WhiskeyRealism.Patches
             // R8: no pending-order bypass and no shortened cooldown in contact —
             // the old 5 s "urgent" retry re-laid engaged brigades repeatedly.
             bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass);
-            float recentOrderSeconds = RecentOrderSeconds;
+            float recentOrderHours = RecentOrderHours;
             bool recentOrder = CommandPostureExecutor.ShouldBlockForRecentOrder(
                 state.Task,
                 physical,
-                HasRecentExecutorOrder(instanceId, recentOrderSeconds));
+                HasRecentExecutorOrder(instanceId, recentOrderHours));
             bool alreadyCorrect = IsAlreadyDoingCorrectTask(group, state, physical, targetFormation, idle);
             bool pendingOrderOnChild = HasPendingOrder(group);
 
@@ -294,26 +298,36 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
+            // M3: a write that failed to materialize backs off on battle time.
+            if (_writeBackoffUntil.TryGetValue(instanceId, out float backoffUntil) &&
+                CommandWaypointWritePolicy.IsBackedOff(BattleHours(), backoffUntil))
+            {
+                EmitPostureTelemetry(side, group, state,
+                    new PostureExecutionDecision(PostureExecutionAction.NoWrite, "write-backoff"),
+                    idle, applied: false, extraReason: "write-backoff");
+                return;
+            }
+
             PostureExecutionDecision decision;
-            using (TelemetryPerf.Scope("tactical.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor.decide", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 decision = hasDoctrineOrder
-                    ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
+                    ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, BattleHours())
                     : CommandPostureExecutor.Decide(state, physical, eligibility);
             }
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
                 if (TryApplyContactFacingPulse(bunits, side, group, state, closeEngaged, flankRisk))
                 {
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    _lastExecutorOrderAt[instanceId] = BattleHours();
                     EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "contact-facing-pulse");
                     return;
                 }
 
-                if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowStaleQueuedBypass) &&
+                if (CanWrite(group, state.Task, eligibility, physical, recentOrderHours, allowStaleQueuedBypass) &&
                     TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
                 {
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    _lastExecutorOrderAt[instanceId] = BattleHours();
                     EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "fire-control-" + fireDecision.Reason);
                     return;
                 }
@@ -322,7 +336,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowStaleQueuedBypass))
+            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderHours, allowStaleQueuedBypass))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
@@ -364,14 +378,16 @@ namespace WhiskeyRealism.Patches
 
             if (wrote)
             {
-                _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                _lastExecutorOrderAt[instanceId] = BattleHours();
                 RecordOutboundOrder(group, state, outboundSignature);
                 if (hasDoctrineOrder && doctrineOrder.Delivery == TacticalOrderDelivery.Courier)
-                    _lastCourierAt[CourierParentKey(side, doctrineOrder)] = Time.realtimeSinceStartup;
+                    _lastCourierAt[CourierChildKey(side, doctrineOrder)] = BattleHours();
+                _writeBackoffUntil.Remove(instanceId);
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: decision.Reason);
             }
             else
             {
+                _writeBackoffUntil[instanceId] = CommandWaypointWritePolicy.FailedWriteBackoffUntil(BattleHours());
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: hasTarget ? "movement-unmaterialized" : "target-unresolved");
             }
         }
@@ -589,19 +605,21 @@ namespace WhiskeyRealism.Patches
             bool childActiveMove,
             out TacticalOutboundCourierDecision decision)
         {
-            string parentKey = CourierParentKey(side, order);
-            _lastCourierAt.TryGetValue(parentKey, out float lastCourierAt);
+            // Courier cadence per child on battle time (B-61clock): a parent
+            // sends to each subordinate on its own interval instead of one
+            // courier per parent starving the siblings.
+            _lastCourierAt.TryGetValue(CourierChildKey(side, order), out float lastCourierAt);
             decision = TacticalOutboundCourierCadence.Decide(
                 new TacticalOutboundCourierInput(
-                    parentKey,
+                    CourierParentKey(side, order),
                     order.NodeId,
-                    Time.realtimeSinceStartup,
+                    BattleHours(),
                     lastCourierAt,
                     pendingOrderOnChild,
                     commanderHasOrder: order.HasPurpose,
                     commanderHasPlay: order.Task != CommandTaskType.None,
                     childIsPlayerControlled: playerProtected,
-                    courierIntervalSeconds: order.CourierIntervalSeconds,
+                    courierIntervalSeconds: order.CourierIntervalSeconds / 3600f,
                     allowObjectiveMovementContinuation: IsCourierObjectiveContinuationTask(order.Task) && order.HasConcreteMovementTarget,
                     childActiveMove: childActiveMove));
             return decision.AllowIssue;
@@ -688,6 +706,11 @@ namespace WhiskeyRealism.Patches
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0;
             return (int)Math.Round(value / 10f, MidpointRounding.AwayFromZero);
+        }
+
+        private static string CourierChildKey(int side, CommandDoctrineOrder order)
+        {
+            return "side-" + side + ":child:" + (string.IsNullOrWhiteSpace(order.NodeId) ? "unknown" : order.NodeId);
         }
 
         private static string CourierParentKey(int side, CommandDoctrineOrder order)
@@ -948,7 +971,11 @@ namespace WhiskeyRealism.Patches
             EnsureStanceMatchesTask(bunits, group, task);
 
             int beforeMovingPaths = CountMovingPaths(group);
-            bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true);
+            int beforeQueued = QueuedOrderCount(group);
+            bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(
+                task,
+                battleActive: true,
+                inContactWithdrawal: HasCloseEngagement(group) || HasLocalFlankRisk(group));
 
             bunits.SetWaypoint(
                 group,
@@ -967,7 +994,7 @@ namespace WhiskeyRealism.Patches
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
 
-            if (!MovementMaterialized(group, beforeMovingPaths))
+            if (!CommandWaypointWritePolicy.MovementIssued(beforeMovingPaths, CountMovingPaths(group), beforeQueued, QueuedOrderCount(group)))
                 return false;
 
             MarkGroupMovementStarted(group, task);
@@ -1132,16 +1159,17 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                float hold = Plugin.BrigadeTaskHoldSeconds != null
+                float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null
                     ? Plugin.BrigadeTaskHoldSeconds.Value
                     : 12.0f;
-                if (hold <= 0f) return false;
+                if (holdSeconds <= 0f) return false;
+                float hold = TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
                 int id = SafeInstanceId(group);
                 if (id == 0) return false;
                 if (!_brigadeTaskHoldState.TryGetValue(id, out var prior)) return false;
                 if (prior.task != task) return false;  // legitimate task change — bypass
-                float now = Time.realtimeSinceStartup;
-                return (now - prior.ts) < hold;
+                float age = BattleHours() - prior.ts;
+                return age >= 0f && age < hold;
             }
             catch { return false; }
         }
@@ -1155,7 +1183,7 @@ namespace WhiskeyRealism.Patches
             {
                 int id = SafeInstanceId(group);
                 if (id == 0) return;
-                _brigadeTaskHoldState[id] = (task, Time.realtimeSinceStartup);
+                _brigadeTaskHoldState[id] = (task, BattleHours());
             }
             catch { }
         }
@@ -1365,17 +1393,26 @@ namespace WhiskeyRealism.Patches
             catch { }
         }
 
-        private static bool MovementMaterialized(Regiment group, int beforeMovingPaths)
+        // SetWaypoint with order delay queues the move on the command parent
+        // (or the unit itself at the Units root) via AddToOrderQueue (91470-91500).
+        private static int QueuedOrderCount(Regiment group)
         {
             try
             {
-                if (group == null) return false;
-                if (group.regimentpaths > 0) return true;
-                return CountMovingPaths(group) > beforeMovingPaths;
+                if (group == null) return 0;
+                int count = group.orderqueue != null ? group.orderqueue.Count : 0;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parentObject = BattleUnits.GrabNextParentUnit(self);
+                if (parentObject != null && parentObject != self)
+                {
+                    Regiment parent = parentObject.GetComponent<Regiment>();
+                    if (parent != null && parent.orderqueue != null) count += parent.orderqueue.Count;
+                }
+                return count;
             }
             catch
             {
-                return false;
+                return 0;
             }
         }
 
@@ -1553,8 +1590,8 @@ namespace WhiskeyRealism.Patches
             source = hasThreatFacing ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
             int instanceId = SafeInstanceId(unit);
             float cooldown = scope == TacticalFacingPulseScope.Regiment
-                ? RegimentFacingPulseCooldownSeconds
-                : BrigadeFacingPulseCooldownSeconds;
+                ? RegimentFacingPulseCooldownHours
+                : BrigadeFacingPulseCooldownHours;
 
             decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
                 scope,
@@ -1685,7 +1722,7 @@ namespace WhiskeyRealism.Patches
                 if (decision.RecommendedCombatBehavior == unit.combatbehaviorordered) return false;
 
                 bunits.ChangeCombatBehavior(gameObject, decision.RecommendedCombatBehavior);
-                _lastFireControlAt[instanceId] = Time.realtimeSinceStartup;
+                _lastFireControlAt[instanceId] = BattleHours();
                 return true;
             }
             catch
@@ -2254,7 +2291,7 @@ namespace WhiskeyRealism.Patches
             CommandTaskType task,
             WriteEligibilitySnapshot eligibility,
             CommandPhysicalState physical,
-            float recentOrderSeconds,
+            float recentOrderHours,
             bool allowStaleQueuedBypass)
         {
             if (!eligibility.ModeAllowsWrites) return false;
@@ -2267,7 +2304,7 @@ namespace WhiskeyRealism.Patches
             if (CommandPostureExecutor.ShouldBlockForRecentOrder(
                     task,
                     physical,
-                    HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)))
+                    HasRecentExecutorOrder(SafeInstanceId(group), recentOrderHours)))
                 return false;
             return true;
         }
@@ -2836,7 +2873,7 @@ namespace WhiskeyRealism.Patches
                         ignoredisabledships: false,
                         checkforreadiness: true,
                         clearinterruptionpaths: true);
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    _lastExecutorOrderAt[instanceId] = BattleHours();
                     EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask.ToString(), true);
                 }
                 else
@@ -3196,36 +3233,44 @@ namespace WhiskeyRealism.Patches
 
         private static bool HasRecentExecutorOrder(int instanceId)
         {
-            return HasRecentExecutorOrder(instanceId, RecentOrderSeconds);
+            return HasRecentExecutorOrder(instanceId, RecentOrderHours);
         }
 
-        private static bool HasRecentExecutorOrder(int instanceId, float cooldownSeconds)
+        private static bool HasRecentExecutorOrder(int instanceId, float cooldownHours)
         {
             if (instanceId == 0) return true;
             if (!_lastExecutorOrderAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
+            return WithinBattleWindow(last, cooldownHours);
         }
 
-        private static bool HasRecentFacingPulse(int instanceId, float cooldownSeconds)
+        private static bool HasRecentFacingPulse(int instanceId, float cooldownHours)
         {
             if (instanceId == 0) return true;
             if (!_lastFacingPulseAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
+            return WithinBattleWindow(last, cooldownHours);
+        }
+
+        // True while stampHours + windowHours is ahead of the battle clock. A
+        // clock that went backwards (reload, new battle) expires the window.
+        private static bool WithinBattleWindow(float stampHours, float windowHours)
+        {
+            float age = BattleHours() - stampHours;
+            return age >= 0f && age < Math.Max(0f, windowHours);
         }
 
         private static void MarkFacingPulse(Regiment unit)
         {
             int instanceId = SafeInstanceId(unit);
             if (instanceId == 0) return;
-            _lastFacingPulseAt[instanceId] = Time.realtimeSinceStartup;
-            _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+            _lastFacingPulseAt[instanceId] = BattleHours();
+            _lastExecutorOrderAt[instanceId] = BattleHours();
         }
 
         private static bool HasRecentFireControlOrder(int instanceId)
         {
             if (instanceId == 0) return true;
             if (!_lastFireControlAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < FireControlOrderCooldownSeconds;
+            return WithinBattleWindow(last, FireControlOrderCooldownHours);
         }
 
         private static bool HasActiveMoveMakingProgress(Regiment group)
@@ -4013,6 +4058,8 @@ namespace WhiskeyRealism.Patches
             _lastFacingPulseAt.Clear();
             _lastFireControlAt.Clear();
             _lastFormationWriteAt.Clear();
+            _writeBackoffUntil.Clear();
+            _brigadeTaskHoldState.Clear();
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();
             _lastTelemetryAt.Clear();

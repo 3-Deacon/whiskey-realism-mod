@@ -233,15 +233,64 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // Battle clock helpers. Doctrine timers run on GameVars.currenttimefromstart
+    // (game hours). The macro AI cycle is sidestatupdatecycle = 0.015 game-hours
+    // ≈ 9 s real at 1x, so 1 game-hour ≈ 600 s real at 1x; old wall-clock
+    // constants tuned at 1x convert with RealSecondsAtOneXToHours.
+    public static class TacticalBattleClock
+    {
+        public const float RealSecondsPerBattleHourAtOneX = 600f;
+
+        public static float RealSecondsAtOneXToHours(float seconds)
+        {
+            if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds <= 0f) return 0f;
+            return seconds / RealSecondsPerBattleHourAtOneX;
+        }
+    }
+
     public static class CommandWaypointWritePolicy
     {
         private const float MovementFlagThreshold = 0.05f;
 
-        public static bool ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType task, bool battleActive)
+        // B-61clock (2026-10-14): vanilla AI group moves go through the courier
+        // queue — UpdateMovingTargets (6959), RepositionAIGroupMicroTowardsEnemy
+        // (4146), CheckDefensiveFacing (4768) and feud attacks (4957) all pass
+        // useorderdelay: true. Vanilla skips the delay only for in-contact
+        // reactions: AssaultMove (3643), MarchToSoundOfGuns (3763), the
+        // CheckIfOutflanked retreat (6235) and CheckForSeparatedEnemy (8188).
+        // The executor's only in-contact reaction is a withdrawal under contact
+        // or flank risk; everything else is a planned group move.
+        public static bool ShouldUseOrderDelayForExecutorWaypoint(
+            CommandTaskType task,
+            bool battleActive,
+            bool inContactWithdrawal = false)
         {
             if (!battleActive) return true;
-            if (IsExecutorMovementTask(task)) return false;
+            if (task == CommandTaskType.FallBackToLine && inContactWithdrawal) return false;
             return true;
+        }
+
+        // A move was issued when the group (or a subordinate) gained paths or a
+        // courier order was queued (SetWaypoint → AddToOrderQueue, 91470-91500).
+        public static bool MovementIssued(int movingPathsBefore, int movingPathsAfter, int queuedBefore, int queuedAfter)
+        {
+            return movingPathsAfter > movingPathsBefore || queuedAfter > queuedBefore;
+        }
+
+        // M3: a write that did not materialize backs off on battle time instead
+        // of retrying every macro cycle.
+        public const float FailedWriteBackoffHours = 0.05f;
+
+        public static float FailedWriteBackoffUntil(float nowHours)
+        {
+            return nowHours + FailedWriteBackoffHours;
+        }
+
+        public static bool IsBackedOff(float nowHours, float backoffUntilHours)
+        {
+            if (backoffUntilHours <= 0f) return false;
+            if (nowHours < backoffUntilHours - FailedWriteBackoffHours) return false;
+            return nowHours < backoffUntilHours;
         }
 
         public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(
