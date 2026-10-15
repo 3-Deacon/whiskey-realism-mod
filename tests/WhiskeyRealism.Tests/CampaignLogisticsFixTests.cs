@@ -456,12 +456,14 @@ internal static class CampaignLogisticsFixTests
             AssertTrue(AccessTools.Field(typeof(AICampaign), field) != null, "AICampaign." + field);
         AssertHasParameters(AccessTools.Method(typeof(AICampaign), "CheckOffensiveMovements"), "_aifaction", "unit", "timediff");
         AssertHasParameters(AccessTools.Method(typeof(AICampaign), "CheckSupplyDepotConstruction"), "_aifaction");
-        AssertHasParameters(AccessTools.Method(typeof(CBuilding), "EnemyUnitsInRange"), "alliancecalling", "usecombatrange", "rangefactor");
         AssertHasParameters(AccessTools.Method(typeof(BattleUnits), "GrabSubordinateByStrength"), "groupunit", "strengthtosearchfor", "minimumamount", "leaveminimumbrigades", "overridetype");
         AssertHasParameters(AccessTools.Method(typeof(Policies), "UpdatePolicyEffects"), "alliance", "timediff", "startsetup");
         AssertTrue(AccessTools.Field(typeof(Regiment), "sound_objectref") != null, "Regiment.sound_objectref");
         AssertHasParameters(AccessTools.Method(typeof(Regiment), "CheckModelReplacement"));
         AssertHasParameters(AccessTools.Method(typeof(Regiment), "OnDestroy"));
+        AssertHasParameters(AccessTools.Method(typeof(SoundEngine), "AddPurposeArray"), "go_to_attach_to", "soundpurposeid", "clips", "activate", "nation");
+        AssertTrue(AccessTools.Method(typeof(SoundEngine), "AddPurposeArray").ReturnType == typeof(int), "AddPurposeArray returns the array index");
+        AssertTrue(AccessTools.Field(typeof(Regiment), "csound_shipfiring") != null, "Regiment.csound_shipfiring");
         foreach (var field in new[] { "shownmodel", "currentmodeltype", "campbuilding", "entrenchment", "iswithinfog" })
             AssertTrue(AccessTools.Field(typeof(Regiment), field) != null, "Regiment." + field);
     }

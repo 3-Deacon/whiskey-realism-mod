@@ -345,7 +345,14 @@ internal static class CampaignLogisticsGlueTests
         AssertTrue(embark.Contains("!FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog));"), "model visibility from the restored fog flag");
         AssertTrue(embark.Contains("if (isPlayerAlliance || __instance.unittyp == 17) return;"), "player units and fleets never touched");
         AssertTrue(embark.Contains("__state = (UnityEngine.Object)__instance.shownmodel != null;"), "model presence captured before vanilla runs");
-        AssertTrue(embark.Contains("FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring)"), "sound sharing only inside the fix");
+        string sounds = embark.Substring(embark.IndexOf("class SharedFiringSounds", StringComparison.Ordinal));
+        string share = "if (!FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring)) return true;";
+        string soundPrefix = MethodBody(sounds, "Prefix");
+        AssertTrue(soundPrefix.Contains(share), "the sound Prefix skips vanilla only inside the fix and for ship-firing arrays");
+        AssertTrue(soundPrefix.IndexOf(share, StringComparison.Ordinal) < soundPrefix.IndexOf("return false;", StringComparison.Ordinal), "the sound Prefix decides before it skips vanilla");
+        AssertTrue(soundPrefix.Contains("if (!FiringSounds.TryGet(__instance, out int index)) return true;"), "the sound Prefix skips only with an array of this engine");
+        string soundPostfix = MethodBody(sounds, "Postfix");
+        AssertTrue(soundPostfix.Contains("if (FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring))") && soundPostfix.Contains("FiringSounds.Remember(__instance, __result);"), "the sound Postfix remembers only inside the fix");
         string raid = PatchSource("RaidSupplyThresholdPatch.cs");
         AssertTrue(raid.Contains("RaidSupplyThreshold.ShouldRescale(Enabled(), hasGroup, DLC_WL.dlc_scenarioactive, hasGroup && __instance.raidgroup.dlcw_isundercommander)"), "W&L raid guard wired");
         AssertTrue(raid.Contains("Threshold.Apply(RaidSupplyThreshold.ThresholdOnGroupSupplyScale(GamePrefs.minimumsupplyoffensivetargets))"), "raid threshold rescaled");
