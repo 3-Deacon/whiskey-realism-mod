@@ -78,6 +78,7 @@ internal static class TacticalEvidenceFixTests
         Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
         Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
         Run("the orchestrator's one observe path releases reserves and holds Main", OrchestratorObservePathAppliesReleaseAndHysteresis);
+        Run("evidence is built once per side per frame and shared", EvidenceMemoSharesWithinFrame);
     }
 
     private static void Run(string name, Action test)
@@ -1082,5 +1083,24 @@ internal static class TacticalEvidenceFixTests
         orch.ObserveGlobalOdds(1.5f);
         orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
         TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds");
+    }
+
+    private static void EvidenceMemoSharesWithinFrame()
+    {
+        var memo = new ArmyEvidenceBuilder.PerSideFrameMemo<string>();
+        var battleA = new object();
+        var battleB = new object();
+        TestHarness.AssertFalse(memo.TryGet(battleA, 0, 10, out _), "empty memo misses");
+        memo.Store(battleA, 0, 10, "a0@10");
+        memo.Store(battleA, 1, 10, "a1@10");
+        TestHarness.AssertTrue(memo.TryGet(battleA, 0, 10, out var hit) && hit == "a0@10", "same side, same frame: shared");
+        TestHarness.AssertTrue(memo.TryGet(battleA, 1, 10, out var hit1) && hit1 == "a1@10", "sides are separate");
+        TestHarness.AssertFalse(memo.TryGet(battleA, 0, 11, out _), "next frame rebuilds");
+        TestHarness.AssertFalse(memo.TryGet(battleB, 1, 10, out _), "another battle never reuses");
+        memo.Store(battleA, 2, 10, "europe");
+        TestHarness.AssertFalse(memo.TryGet(battleA, 2, 10, out _), "only alliances 0/1 are cached");
+        TestHarness.AssertFalse(memo.TryGet(battleA, 0, -1, out _), "unknown frame never hits");
+        memo.Reset();
+        TestHarness.AssertFalse(memo.TryGet(battleA, 1, 10, out _), "reset clears");
     }
 }

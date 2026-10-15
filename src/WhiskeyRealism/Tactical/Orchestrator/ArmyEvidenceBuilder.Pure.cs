@@ -186,5 +186,46 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (ledger.Confidence(nowDoctrineHours, ownStrength) < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction) return 1f;
             return ownStrength / enemyKnown;
         }
+    
+        /// <summary>
+        /// One value per side per frame for one battle. Build runs from up to
+        /// four call sites per side per coordinator tick (replan, heavy path,
+        /// snapshot, parity cycle); the memo lets every site after the first
+        /// share the result instead of re-walking completeunitlist.
+        /// </summary>
+        internal sealed class PerSideFrameMemo<T>
+        {
+            private readonly T[] _values = new T[2];
+            private readonly int[] _frames = { -1, -1 };
+            private readonly WeakReference<object>[] _owners = new WeakReference<object>[2];
+
+            internal bool TryGet(object owner, int side, int frame, out T value)
+            {
+                value = default(T);
+                if (owner == null || side < 0 || side > 1 || frame < 0) return false;
+                if (_frames[side] != frame || _owners[side] == null) return false;
+                if (!_owners[side].TryGetTarget(out var cached) || !ReferenceEquals(cached, owner)) return false;
+                value = _values[side];
+                return true;
+            }
+
+            internal void Store(object owner, int side, int frame, T value)
+            {
+                if (owner == null || side < 0 || side > 1 || frame < 0) return;
+                _values[side] = value;
+                _frames[side] = frame;
+                _owners[side] = new WeakReference<object>(owner);
+            }
+
+            internal void Reset()
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    _values[i] = default(T);
+                    _frames[i] = -1;
+                    _owners[i] = null;
+                }
+            }
+        }
     }
 }

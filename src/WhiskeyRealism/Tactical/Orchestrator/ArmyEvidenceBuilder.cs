@@ -113,6 +113,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownActive = SafeSideInfoFloat(bunits, side, "totalactiveforce");
                 if (ownActive <= 0f) return fallback;
 
+                int frame = SafeFrameCount();
+                if (_bundleMemo.TryGet(bunits, allianceId, frame, out var shared)) return shared;
+
                 var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
                 EstimateOwnAverages(bunits, side, out float ownAvgFatigue, out float ownAvgAmmo, out float ownMoraleRatio);
 
@@ -146,7 +149,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // arrival for this side from the scheduledarrival queue.
                 FindNearestReinforcement(bunits, side, out float nearestHours, out float nearestStrength);
 
-                return new Bundle(
+                var bundle = new Bundle(
                     ownEvidence,
                     enemyVisible,
                     Math.Max(1f, ownActive),
@@ -157,6 +160,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownAvgAmmo01: ownAvgAmmo,
                     nearestReinforcementHours: nearestHours,
                     nearestReinforcementStrength: nearestStrength);
+                _bundleMemo.Store(bunits, allianceId, frame, bundle);
+                return bundle;
             }
             catch (Exception e)
             {
@@ -302,6 +307,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly HashSet<int>[] _visibleEnemyEntryPoints = { new HashSet<int>(), new HashSet<int>() };
         private static System.WeakReference<BattleUnits> _battleOwner;
 
+        // Build result per side for the current frame (shared by every call
+        // site in the same coordinator tick).
+        private static readonly PerSideFrameMemo<Bundle> _bundleMemo = new PerSideFrameMemo<Bundle>();
+
+        // Scratch buffers for BuildEnemyVisibleState. Main-thread only and not
+        // re-entrant; nothing returned to callers aliases them.
+        private static readonly List<FrontUnitSample> _ownCombatBuffer = new List<FrontUnitSample>();
+        private static readonly List<FrontUnitSample> _ownGroupsBuffer = new List<FrontUnitSample>();
+        private static readonly List<FrontUnitSample> _enemyBuffer = new List<FrontUnitSample>();
+        private static readonly HashSet<Regiment> _seenEnemyBuffer = new HashSet<Regiment>(ReferenceComparer.Instance);
+
+        private sealed class ReferenceComparer : IEqualityComparer<Regiment>
+        {
+            internal static readonly ReferenceComparer Instance = new ReferenceComparer();
+            public bool Equals(Regiment a, Regiment b) => ReferenceEquals(a, b);
+            public int GetHashCode(Regiment r) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(r);
+        }
+
+        private static int SafeFrameCount()
+        {
+            try { return UnityEngine.Time.frameCount; }
+            catch { return -1; }
+        }
+
         /// <summary>
         /// Clears every per-battle cache (front axes, contact ledgers, visible
         /// entry points, terrain, force-balance start time). Called on battle
@@ -319,6 +348,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _terrainByAlliance[i] = null;
             }
             _battleOwner = null;
+            _bundleMemo.Reset();
             _battleStartDoctrineHours = -1f;
             _battleStartOwner = null;
         }
@@ -533,24 +563,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int enemySide = OppositeSide(ownSide);
                 int effectiveCommandMin = ClampShiftedMin(ReadCommandHierarchyShift());
-                var ownCombat = new List<FrontUnitSample>();
-                var ownGroups = new List<FrontUnitSample>();
-                var enemyVisible = new List<FrontUnitSample>();
-                var seenEnemy = new HashSet<int>();
-                var flankThreat = new Dictionary<int, float>();
+                var ownCombat = _ownCombatBuffer;
+                var ownGroups = _ownGroupsBuffer;
+                var enemyVisible = _enemyBuffer;
+                var seenEnemy = _seenEnemyBuffer;
+                ownCombat.Clear();
+                ownGroups.Clear();
+                enemyVisible.Clear();
+                seenEnemy.Clear();
+                Dictionary<int, float> flankThreat = null;
                 bool anyRecentFire = false;
                 EnsureBattleOwner(bunits);
                 var enemyEntries = EnemyEntryPoints(bunits, ownAllianceId);
-                var visibleEntries = new HashSet<int>();
+                // The watched-entry set is kept per alliance for BuildForceBalance;
+                // refill it in place.
+                var visibleEntries = ownAllianceId >= 0 && ownAllianceId <= 1
+                    ? _visibleEnemyEntryPoints[ownAllianceId]
+                    : new HashSet<int>();
+                visibleEntries.Clear();
                 bool entryPointsChecked = enemyEntries.Count == 0;
 
                 for (int i = 0; i < units.Count; i++)
                 {
                     var reg = units[i] as Regiment;
                     if (reg == null || reg.alliance != ownAllianceId) continue;
-                    if (!TryPosition(reg, out int id, out float x, out float z)) continue;
                     bool routed = reg.isrouted || reg.markedforrout;
 
+                    // Managed-field filters first; position and activeInHierarchy
+                    // are native calls, made only for units that qualify.
                     if (reg.unittyp >= effectiveCommandMin)
                     {
                         // W&L: the player's sub-groups leak into aibattle[1]'s
@@ -558,14 +598,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         // RemoveUnitFromPool removes only the root). They are
                         // never AI command groups, so they get no sector/role.
                         if (routed || IsPlayerCommanded(reg)) continue;
-                        ownGroups.Add(new FrontUnitSample(id, x, z, Math.Max(0, reg.groupstrengthaigroup), false));
+                        if (!TryPosition(reg, out int gid, out float gx, out float gz)) continue;
+                        ownGroups.Add(new FrontUnitSample(gid, gx, gz, Math.Max(0, reg.groupstrengthaigroup), false));
                         float threat = reg.flanksthreated;
-                        if (threat > 0f && !float.IsNaN(threat)) flankThreat[id] = threat;
+                        if (threat > 0f && !float.IsNaN(threat))
+                        {
+                            if (flankThreat == null) flankThreat = new Dictionary<int, float>();
+                            flankThreat[gid] = threat;
+                        }
                         continue;
                     }
 
                     if (reg.unittyp > TacticalUnitType.MaxCombat || reg.unittyp == TacticalUnitType.Excluded) continue;
+                    if (reg.strength <= 0 || routed) continue;
                     if (!IsAliveCombatUnit(reg.strength, SafeActive(reg), routed)) continue;
+                    if (!TryPosition(reg, out int id, out float x, out float z)) continue;
 
                     bool fire = HasReceivedFire(reg);
                     if (fire) anyRecentFire = true;
@@ -601,7 +648,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
                 }
-                if (ownAllianceId >= 0 && ownAllianceId <= 1) _visibleEnemyEntryPoints[ownAllianceId] = visibleEntries;
                 float enemyReinforcements = SumVisibleEnemyArrivals(bunits, enemySide, visibleEntries, withinHours: 24f);
 
                 return new EnemyVisibleState(
@@ -728,7 +774,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static void CollectVisibleEnemies(Regiment own, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output)
+        private static void CollectVisibleEnemies(Regiment own, int ownAllianceId, HashSet<Regiment> seen, List<FrontUnitSample> output)
         {
             try
             {
@@ -742,18 +788,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch { }
         }
 
-        private static void AddVisible(List<Regiment> list, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output, bool engaged)
+        private static void AddVisible(List<Regiment> list, int ownAllianceId, HashSet<Regiment> seen, List<FrontUnitSample> output, bool engaged)
         {
             if (list == null) return;
             for (int i = 0; i < list.Count; i++)
             {
                 var enemy = list[i];
-                if (enemy == null || enemy.alliance == ownAllianceId) continue;
+                if ((object)enemy == null || enemy.alliance == ownAllianceId) continue;
                 // Same eligibility vanilla applies when filling the lists (122644).
                 if (enemy.unittyp == TacticalUnitType.Excluded || enemy.unittyp > TacticalUnitType.MaxCombat) continue;
-                if (enemy.isrouted || !SafeActive(enemy)) continue;
+                if (enemy.isrouted) continue;
+                // Dedupe by reference before the native reads: every regiment
+                // in a brigade lists the same enemies, so most entries are
+                // repeats. An enemy rejected below is rejected for every list.
+                if (!seen.Add(enemy)) continue;
+                if (!SafeActive(enemy)) continue;
                 if (!TryPosition(enemy, out int id, out float x, out float z)) continue;
-                if (!seen.Add(id)) continue;
                 output.Add(new FrontUnitSample(id, x, z, enemy.strength, engaged));
             }
         }
