@@ -204,6 +204,19 @@ internal static class StanceArtilleryMigrationTests
         AssertEqual(OrderChannel.Formation, buffer[0].Channel, "formation");
         AssertEqual(3, buffer[0].Value, "limbered artillery formation");
         AssertTrue((buffer[0].Flags & IntentFlags.Limber) != 0, "Limber flag");
+        AssertEqual(IntentPriority.Safety, buffer[0].Priority, "limbering is the first half of the escape: Safety, past the recent-order cooldown");
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleOrderIntent earlier = buffer[0];
+        earlier.Value = 0;
+        earlier.Priority = IntentPriority.Executor;
+        executor.RecordIssued(earlier, 1.0, null, 0, null, 0, 0, 0);
+        AssertTrue(executor.Plan(s, buffer[0], 1.01).Execute, "a battery unlimbered a moment ago can still limber");
+
+        // Counter-battery release, unlimber and face in one tick: all three fit.
+        s = ArtillerySnapshot(cbo: 8, mounted: true, enemyDistance: 600f);
+        var three = new BattleOrderIntent[3];
+        AssertEqual(3, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(mounted: true), Rules(), three), "release + unlimber + face");
 
         // Unlimbered, enemy only behind (out of the front quadrant, in range): wheel.
         s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, facing: 0f);

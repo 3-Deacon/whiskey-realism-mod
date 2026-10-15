@@ -459,10 +459,12 @@ namespace WhiskeyRealism.Tactical
 
         // Doctrine + micro intents for battery `index` (ArtilleryBatteryEligible
         // checked by the caller). Returns how many were written to buffer (at most
-        // one per channel; up to 2).
+        // one per channel; up to 3: behavior, formation, facing). Limber is Safety:
+        // the micro doctrine limbers only to escape (point-blank or unsupported
+        // close), so it must pass the executor's recent-order cooldown.
         public static int ArtilleryDoctrineIntents(BattleSnapshot s, int index, in BattleArtilleryState b, in BattleArtilleryRules r, BattleOrderIntent[] buffer)
         {
-            if (s == null || buffer == null || buffer.Length < 2 || b.InHold || b.Guns <= 0) return 0;
+            if (s == null || buffer == null || buffer.Length < 3 || b.InHold || b.Guns <= 0) return 0;
             ref UnitRecord battery = ref s.Own[index];
             int n = 0;
 
@@ -552,7 +554,7 @@ namespace WhiskeyRealism.Tactical
                     break;
                 case ArtilleryMicroWrite.Limber:
                 {
-                    BattleOrderIntent limber = BatteryIntent(battery, OrderChannel.Formation, ArtilleryLimberedFormation, IntentPriority.Executor, "artillery-limber");
+                    BattleOrderIntent limber = BatteryIntent(battery, OrderChannel.Formation, ArtilleryLimberedFormation, IntentPriority.Safety, "artillery-limber");
                     limber.Flags = IntentFlags.Limber;
                     buffer[n++] = limber;
                     break;
@@ -562,7 +564,7 @@ namespace WhiskeyRealism.Tactical
                     BattleOrderIntent unlimber = BatteryIntent(battery, OrderChannel.Formation, ArtilleryUnlimberedFormation, IntentPriority.Executor, "artillery-unlimber");
                     unlimber.Flags = IntentFlags.Unlimber;
                     buffer[n++] = unlimber;
-                    if (towardEnemy >= 0f && n < buffer.Length)
+                    if (towardEnemy >= 0f)
                     {
                         BattleOrderIntent face = BatteryIntent(battery, OrderChannel.Facing, 0, IntentPriority.Executor, "artillery-unlimber-face");
                         face.Heading = towardEnemy;

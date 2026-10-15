@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         };
 
         private readonly bool _pointBlank;
-        private readonly BattleOrderIntent[] _buffer = new BattleOrderIntent[2];
+        private readonly BattleOrderIntent[] _buffer = new BattleOrderIntent[3];
 
         private ArtilleryIntentProducer(string name, bool pointBlank)
         {
