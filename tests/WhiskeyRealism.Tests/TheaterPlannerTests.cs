@@ -74,6 +74,10 @@ internal static class TheaterPlannerTests
             ("DrainCompletesThenReviewAppliesRiverTerms", DrainCompletesThenReviewAppliesRiverTerms),
             ("DrainAppendsNewCommandRangesOnly", DrainAppendsNewCommandRangesOnly),
             ("TerrainDrainWiringPinned", TerrainDrainWiringPinned),
+            ("DrainMemoBelongsToTheMap", DrainMemoBelongsToTheMap),
+            ("SegmentsStayWithinTheFrameBudget", SegmentsStayWithinTheFrameBudget),
+            ("SegmentStartIsVanillasWalk", SegmentStartIsVanillasWalk),
+            ("MassExcludesTheCapitalReserve", MassExcludesTheCapitalReserve),
             ("BusyFormationNeverTheCandidateForce", BusyFormationNeverTheCandidateForce),
             ("CandidateForceIsTheMainBody", CandidateForceIsTheMainBody),
             ("SeedFoldsDecisionSerialAndAlliance", SeedFoldsDecisionSerialAndAlliance),
@@ -149,7 +153,8 @@ internal static class TheaterPlannerTests
         foreach (var e in HistoricalPriorTable.Entries)
             if (e.Id == "union-east-pressure") east = e;
         double month = HistoricalPriorTable.MeanMonthDays;
-        AssertTrue(month >= 30.4 && month <= 31.0, "a month of the serial (30.44 calendar, 31 legacy): " + month);
+        bool calendar = ReviewCadenceCatchUp.DaySerial(1, 1, 1862) - ReviewCadenceCatchUp.DaySerial(1, 1, 1861) == 365;
+        AssertEqual(calendar ? 30.4375 : 31.0, month, "the serial's mean month: 1461 / 48 calendar days, or the legacy 31");
         AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.EndSerial + (int)Math.Round(3 * month)), 0.005f, "three months after the window");
         AssertNear(0.25f, HistoricalPriorTable.Weight(east, east.EndSerial + (int)Math.Round(6 * month)), 0.005f, "six months after");
         AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.StartSerial - (int)Math.Round(3 * month)), 0.005f, "three months before");
@@ -753,15 +758,19 @@ internal static class TheaterPlannerTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TerrainLineRuntime.cs");
         string probe = MethodBody(src, "public bool ProbeLine(");
         AssertContains(probe, "Tools.GetAngle(start, end) + 180f", "vanilla's angle convention");
-        AssertContains(probe, ".CountTerrainLine(start, angle, distance, GameVars.terrainrestrictions_combat) < distance", "vanilla's < distance test");
-        AssertContains(probe, "Remember(LineMemo,", "memoized for the campaign (static terrain grid)");
+        AssertContains(probe, ".CountTerrainLine(from, angle, steps, GameVars.terrainrestrictions_combat) < steps", "vanilla's < distance test, per segment");
+        AssertContains(probe, "LineSegments.AlongLine(start.x, start.z, angle, walked, out float px, out float pz);", "a segment starts where vanilla's walk is after the steps walked");
+        AssertContains(probe, "Remember(LineMemo, key, blocked);", "memoized for the map (static terrain grid)");
         // P01: over budget the question stays unknown (no probe, no memo write, return false).
-        AssertContains(probe, "if (_lineSteps + distance > MaxLineStepsPerReview || OverTime()) return Refused();", "line budget refusal");
-        AssertContains(probe, "if (ProbedThisReview() && _probeMillis + distance * _millisPerStep > MaxProbeMillisPerReview) return Refused();", "the estimated cost never refuses a review's first probe");
-        AssertContains(MethodBody(src, "private static bool ProbedThisReview("), "return _lineSteps > 0f || _riverProbes > 0;", "first probe of the review");
-        AssertContains(src, "internal const float MaxLineStepsPerReview = 1500f;", "step budget");
-        AssertTrue(ReviewTerrain.MaxProbedLine <= 1500f, "every probed line fits the step budget");
+        AssertContains(probe, "if (OverTime()) return Refused();", "CPU budget refusal");
+        AssertContains(probe, "if (steps <= 0f) return Refused();", "step budget refusal");
+        AssertContains(probe, "_millisPerStep, !ProbedThisReview(), MinSegmentSteps);", "the budget's first probe walks at least a minimum segment");
+        AssertContains(MethodBody(src, "private static bool ProbedThisReview("), "return _lineSteps > 0f || _riverProbes > 0;", "first probe of the budget");
+        // A line walked only partly keeps its offset and stays unknown.
+        AssertContains(probe, "if (!blocked && walked + steps < distance)", "unfinished line");
+        AssertContains(probe, "Partials[key] = walked + steps;\n                return false;", "offset kept, answer unknown");
         AssertTrue(probe.IndexOf("return Refused();", StringComparison.Ordinal) < probe.IndexOf("Remember(LineMemo,", StringComparison.Ordinal), "refused before anything is remembered");
+        AssertTrue(probe.IndexOf("return false;", StringComparison.Ordinal) < probe.IndexOf("Remember(LineMemo,", StringComparison.Ordinal), "an unfinished line is not remembered");
         string refused = MethodBody(src, "private static bool Refused(");
         AssertContains(refused, "\"campaign-planner:terrain-probe-cap\"", "cap logged once with a static key");
         AssertContains(refused, "return false;", "a refused probe answers unknown");
@@ -771,13 +780,26 @@ internal static class TheaterPlannerTests
         AssertContains(river, "BattlefieldSetup.GetCurrentTerrainOnPos(", "terrain lookup 26727");
         AssertContains(river, "Remember(RiverMemo,", "memoized");
         // P17: every review starts with a fresh budget.
-        AssertContains(MethodBody(src, "internal static TerrainLineRuntime ForReview("), "NewBudget();", "each review starts a budget");
+        AssertContains(MethodBody(src, "internal static TerrainLineRuntime ForReview("), "NewBudget(MaxProbeMillisPerReview);", "each review starts a 1 ms budget");
         string review = MethodBody(src, "private static void NewBudget(");
+        AssertContains(review, "_budgetMillis = millis;", "the budget's CPU time");
         AssertContains(review, "_lineSteps = 0f;", "line budget reset per review");
         AssertContains(review, "_riverProbes = 0;", "river budget reset per review");
         AssertContains(review, "_probeMillis = 0.0;", "CPU budget reset per review");
-        AssertContains(MethodBody(src, "private static bool OverTime("), "_probeMillis > MaxProbeMillisPerReview", "only probing time is charged");
+        AssertContains(MethodBody(src, "private static bool OverTime("), "_probeMillis > _budgetMillis", "only probing time is charged");
+        AssertContains(probe, "_lineSteps, MaxLineStepsPerReview, _probeMillis, _budgetMillis,", "segments sized to the current budget");
+        AssertContains(src, "internal const double MaxDrainMillisPerFrame = 0.9;", "drain frames keep a margin under 1 ms");
         AssertContains(src, "CampaignScope.Register(\"campaign-planner-terrain-probe\"", "per-campaign reset");
+        // M2b: a CampaignScope reset keeps the map's memo; only a new map identity clears it.
+        string reset = MethodBody(src, "private static void Reset(");
+        AssertFalse(reset.Contains("LineMemo") || reset.Contains("RiverMemo") || reset.Contains("Partials") || reset.Contains("Drain.") || reset.Contains("ClearMap"), "the reset keeps the memo, partial lines and drain");
+        string prepare = MethodBody(src, "internal static void PrepareDrain(");
+        AssertContains(prepare, "TerrainMemoDrain.MapIdentity(SceneManagement.currentcampaignscenario, snapshot.Areas)", "map identity: scenario and area geometry");
+        AssertContains(prepare, "if (mapChanged) ClearMap();", "cleared on a new map only");
+        string clear = MethodBody(src, "private static void ClearMap(");
+        AssertContains(clear, "LineMemo.Clear();", "line memo");
+        AssertContains(clear, "RiverMemo.Clear();", "river memo");
+        AssertContains(clear, "Partials.Clear();", "partial lines");
     }
 
     // The plan step: snapshot -> (bookkeeping return) -> plan -> publish; one G2 seam line.
@@ -892,6 +914,13 @@ internal static class TheaterPlannerTests
         AssertEqual("capital-threat", Plan(threatened, state).SwitchReason, "onset");
         state.Restore(0, 99, -1, 0, state.DecisionSerial, state.CampaignSeed, 0, state.CapitalThreatLatched);
         AssertEqual("hold", Plan(threatened, state).SwitchReason, "standing threat: no trigger");
+        float floor = 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f; // vanilla weighting (11735): 1256
+        var easing = TwoTargets(0.5f, 0.6f);
+        easing.Own.Add(Corps(2, 200f, 20000f));
+        easing.Own.Add(Corps(3, 0f, floor / 0.5f)); // threat 0.5: below the trigger, above the release
+        easing.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+        Plan(easing, state);
+        AssertTrue(state.CapitalThreatLatched, "0.5 keeps the latch: released only below 0.4");
 
         var calm = TwoTargets(0.5f, 0.6f);
         calm.Own.Add(Corps(2, 0f, 20000f)); // capital held: threat 0.06 < CapitalThreatRelease
@@ -926,6 +955,9 @@ internal static class TheaterPlannerTests
         s.Objectives.Add(Target(99, 400f, 1f));
         s.Own.Add(Corps(1, 200f, 25000f));
         s.Own.Add(Corps(2, 100f, 25000f));
+        var hungry = Corps(3, 300f, 25000f);
+        hungry.Supply01 = 0.35f; // raw Supply01 below RecoverSupplyBelow: Recover, never massed
+        s.Own.Add(hungry);
         s.Beliefs.Add(Belief(400f, 0f, 40000f, 1f));
         var plan = PlanOnce(s);
         AssertEqual(99, plan.MainObjectiveId, "massed odds 1.25 >= 1.10");
@@ -1071,7 +1103,7 @@ internal static class TheaterPlannerTests
         foreach (int range in new[] { 40, 60 })
             for (int a = 0; a < 9; a++) expected.Add("R" + a * 100f + "," + range);
         var drain = new TerrainMemoDrain();
-        AssertTrue(drain.Prepare(s.Areas, s.Own, 1000), "queued");
+        AssertTrue(drain.Prepare(MapA, s.Areas, s.Own, 1000, out _), "queued");
         AssertEqual(33, drain.Lines, "33 of the 36 pairs are within 600");
         AssertEqual(18, drain.Rivers, "9 areas x 2 command ranges");
         var source = new RecordingSource(int.MaxValue);
@@ -1079,9 +1111,9 @@ internal static class TheaterPlannerTests
         AssertEqual(expected.Count, drain.Drain(source), "every question probed once");
         AssertEqual(string.Join(";", expected), string.Join(";", source.Probed), "exactly the set, in the fixed order");
         AssertEqual(0, drain.Remaining, "complete");
-        AssertTrue(!drain.Prepare(s.Areas, s.Own, 1000), "the same map and ranges queue nothing more");
+        AssertTrue(!drain.Prepare(MapA, s.Areas, s.Own, 1000, out _), "the same map and ranges queue nothing more");
         var tooMany = new TerrainMemoDrain();
-        AssertTrue(!tooMany.Prepare(s.Areas, s.Own, 50) && tooMany.Oversize && tooMany.Remaining == 0, "a set larger than the memo is not drained");
+        AssertTrue(!tooMany.Prepare(MapA, s.Areas, s.Own, 50, out _) && tooMany.Oversize && tooMany.Remaining == 0, "a set larger than the memo is not drained");
     }
 
     private static void DrainRespectsTheFrameBudget()
@@ -1089,7 +1121,7 @@ internal static class TheaterPlannerTests
         var s = Line(0, 9);
         s.Own.Add(Corps(1, 100f, 1000f));
         var drain = new TerrainMemoDrain();
-        drain.Prepare(s.Areas, s.Own, 1000);
+        drain.Prepare(MapA, s.Areas, s.Own, 1000, out _);
         int total = drain.Remaining; // 33 lines + 9 river points
         var source = new RecordingSource(5);
         source.NewFrame();
@@ -1114,7 +1146,7 @@ internal static class TheaterPlannerTests
         var source = new MemoRiverAtZ(60f, 0);
         var drain = new TerrainMemoDrain();
         var s = Mirror(false);
-        drain.Prepare(s.Areas, s.Own, 1000);
+        drain.Prepare(MapA, s.Areas, s.Own, 1000, out _);
         source.NewReview();
         var before = TheaterPlanner.Plan(s, Sectors(s), null, new PlannerState { CampaignSeed = 1L }, null, source, Speed(), out string traceBefore);
         AssertTrue(traceBefore.Contains("terrain=filling"), "no budget: filling");
@@ -1146,16 +1178,99 @@ internal static class TheaterPlannerTests
         var s = Line(0, 4);
         s.Own.Add(Corps(1, 100f, 1000f));
         var drain = new TerrainMemoDrain();
-        drain.Prepare(s.Areas, s.Own, 1000);
+        drain.Prepare(MapA, s.Areas, s.Own, 1000, out _);
         var source = new RecordingSource(int.MaxValue);
         source.NewFrame();
         drain.Drain(source);
         var wide = Corps(2, 200f, 1000f);
         wide.CommandRange = 80f;
         s.Own.Add(wide);
-        AssertTrue(drain.Prepare(s.Areas, s.Own, 1000), "a new command range is queued");
+        AssertTrue(drain.Prepare(MapA, s.Areas, s.Own, 1000, out _), "a new command range is queued");
         AssertEqual(4, drain.Remaining, "only its four river points");
         AssertEqual(8, drain.Rivers, "two ranges x four areas");
+    }
+
+    private const long MapA = 1L;
+
+    // M2b: the set and the memo belong to the campaign map: preparing the same map again (after a
+    // sidecar load or a battle) re-queues nothing; another scenario or area geometry starts over.
+    private static void DrainMemoBelongsToTheMap()
+    {
+        var s = Line(0, 4);
+        s.Own.Add(Corps(1, 100f, 1000f));
+        long map = TerrainMemoDrain.MapIdentity("1861", s.Areas);
+        AssertEqual(map, TerrainMemoDrain.MapIdentity("1861", Line(0, 4).Areas), "same scenario and areas: same map");
+        AssertTrue(map != TerrainMemoDrain.MapIdentity("1862", s.Areas), "another scenario");
+        var moved = Line(0, 4);
+        var area = moved.Areas[2];
+        area.X += 50f;
+        moved.Areas[2] = area;
+        AssertTrue(map != TerrainMemoDrain.MapIdentity("1861", moved.Areas), "another area geometry");
+        AssertTrue(map != TerrainMemoDrain.MapIdentity("1861", Line(0, 5).Areas), "another area count");
+        var drain = new TerrainMemoDrain();
+        drain.Prepare(map, s.Areas, s.Own, 1000, out bool first);
+        AssertTrue(first, "the first map is a change");
+        var source = new RecordingSource(int.MaxValue);
+        source.NewFrame();
+        drain.Drain(source);
+        AssertTrue(!drain.Prepare(map, s.Areas, s.Own, 1000, out bool again) && !again && drain.Remaining == 0, "same map after a reset: kept, nothing re-queued");
+        AssertTrue(drain.Prepare(TerrainMemoDrain.MapIdentity("1862", s.Areas), s.Areas, s.Own, 1000, out bool other) && other, "another map starts over");
+        AssertEqual(drain.Lines + drain.Rivers, drain.Remaining, "the whole set re-queued");
+    }
+
+    // M2a: a long line is walked in segments that keep each frame within its budget; the budget's
+    // first segment is at least MinSegmentSteps however slow a step is measured.
+    private static void SegmentsStayWithinTheFrameBudget()
+    {
+        const double millisPerStep = 0.003, frameMillis = 1.0;
+        float distance = 600f, walked = 0f;
+        int frames = 0;
+        while (walked < distance && frames < 10)
+        {
+            float steps = LineSegments.Steps(distance - walked, 0f, 1500f, 0.0, frameMillis, millisPerStep, true, 32f);
+            AssertTrue(steps * millisPerStep <= frameMillis + 1e-9, "frame " + frames + " within 1 ms: " + steps + " steps");
+            walked += steps;
+            frames++;
+        }
+        AssertEqual(600f, walked, "the whole line walked");
+        AssertEqual(2, frames, "333 + 267 steps");
+        AssertEqual(32f, LineSegments.Steps(600f, 0f, 1500f, 0.0, 1.0, 0.1, true, 32f), "first segment never below the minimum");
+        AssertEqual(0f, LineSegments.Steps(600f, 0f, 1500f, 0.9, 1.0, 0.1, false, 32f), "after the first, nothing past the budget");
+        AssertEqual(100f, LineSegments.Steps(600f, 1400f, 1500f, 0.0, 1.0, 0.001, false, 32f), "the step budget");
+        AssertEqual(5.5f, LineSegments.Steps(5.5f, 0f, 1500f, 0.0, 1.0, 0.003, true, 32f), "the line's remainder");
+    }
+
+    // A segment starts where vanilla's one-step walk (GetAngleTerrainPosStatic, 26909-26912) is
+    // after the steps walked, in the same cell.
+    private static void SegmentStartIsVanillasWalk()
+    {
+        float sx = 1234.4f, sz = -567.8f, ex = 1500.2f, ez = -790.6f;
+        float angle = (float)(Math.Atan2(ex - sx, ez - sz) / Math.PI * 180.0 - 180.0) + 180f; // Tools.GetAngle + 180
+        float x = sx, z = sz;
+        for (int k = 1; k <= 300; k++)
+        {
+            float r = (angle - 90f) * (float)Math.PI / 180f;
+            x += (float)Math.Cos(r);
+            z -= (float)Math.Sin(r);
+            if (k % 50 != 0) continue;
+            LineSegments.AlongLine(sx, sz, angle, k, out float px, out float pz);
+            AssertTrue(Math.Abs(px - x) < 0.01f && Math.Abs(pz - z) < 0.01f, "step " + k + " same point");
+        }
+        LineSegments.AlongLine(sx, sz, angle, RiverLines.Distance(sx, sz, ex, ez), out float fx, out float fz);
+        AssertTrue(Math.Abs(fx - ex) < 0.05f && Math.Abs(fz - ez) < 0.05f, "the walk heads to the end point");
+    }
+
+    // M1 / N08: the capital reserve never masses. Capital at x 0 facing a believed 10000 at x -100
+    // (floor 1256); the 2000 guard at the capital is the reserve, so target 99 masses corps 1 only.
+    private static void MassExcludesTheCapitalReserve()
+    {
+        var s = Line();
+        s.Objectives.Add(Target(99, 300f, 1f));
+        s.Own.Add(Corps(1, 250f, 20000f));
+        s.Own.Add(Corps(3, 0f, 2000f));
+        s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
+        var c = Candidate(s, null, 99);
+        AssertNear(20000f, c.Mass, 0.01f, "the capital guard is not massable");
     }
 
     // The drain runs from Plugin.Update on the campaign map, is prepared by each review and reset
@@ -1173,12 +1288,11 @@ internal static class TheaterPlannerTests
         AssertContains(tick, "if (Drain.Remaining == 0) return;", "nothing to do costs nothing");
         AssertContains(tick, "TelemetryPerf.Scope(\"campaign.planner.terrain-drain\"", "perf scope");
         AssertContains(tick, "if ((UnityEngine.Object)ResolveBattlefieldSetup() == null) return;", "campaign map only");
-        AssertContains(tick, "NewBudget();", "a fresh budget each frame");
+        AssertContains(tick, "NewBudget(MaxDrainMillisPerFrame);", "a fresh 0.9 ms budget each frame");
         AssertContains(tick, "Drain.Drain(Instance);", "drains through the budgeted source");
         AssertContains(tick, "catch (Exception ex)", "never throws");
         AssertContains(MethodBody(src, "private static BattlefieldSetup ResolveBattlefieldSetup("), "!_bunits.IsCampaign", "a battle map's terrain is never probed");
-        AssertContains(MethodBody(src, "private static void Reset("), "Drain.Clear();", "per-campaign reset");
-        AssertContains(MethodBody(src, "internal static void PrepareDrain("), "Drain.Prepare(snapshot.Areas, snapshot.Own, MaxMemoEntries)", "bounded by the memo");
+        AssertContains(MethodBody(src, "internal static void PrepareDrain("), "Drain.Prepare(map, snapshot.Areas, snapshot.Own, MaxMemoEntries, out bool mapChanged)", "per map, bounded by the memo");
     }
 
     private static CampaignSnapshot Mirror(bool reversed)

@@ -19,19 +19,28 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Rivers  BattlefieldSetup.GetCurrentTerrainOnPos at the point and 8 points on each of two
     //           rings (half and full range) for terrain 3/4/5 (small river, river, river crossing:
     //           the cells River Expedition speeds, 133482-133491).
-    // The terrain-spec grid does not change during a campaign, so answers are memoized for the
-    // campaign (CampaignScope) on endpoints snapped to a 16-unit grid (the probe runs between the
-    // snapped points; the coarse grid keeps a slowly moving army's lines on the same keys), bounded
-    // to MaxMemoEntries. Per review: at most MaxLineStepsPerReview map units of lines,
-    // MaxRiverProbesPerReview river points, and MaxProbeMillisPerReview of wall clock spent probing (a
-    // CPU budget, AGENTS.md § Clocks; after the review's first probe a line is not started when its
-    // length times the measured cost per step would overrun it; the first probe always runs, so
-    // a review's probing costs at most the budget or one line of ReviewTerrain.MaxProbedLine steps). A refused probe changes no answer the planner uses: ReviewTerrain scores
-    // a review with no river term until every question is known (G3 verify F3).
+    // The terrain-spec grid of a campaign map is static, so answers are memoized for the map, on
+    // endpoints snapped to a 16-unit grid (the probe runs between the snapped points), bounded to
+    // MaxMemoEntries. The memo, the drain and the partial lines survive CampaignScope resets (a
+    // sidecar load, a return from a battle) and are cleared only when the map's identity changes
+    // (TerrainMemoDrain.MapIdentity: scenario and area geometry; PrepareDrain).
+    // Per review or frame: at most MaxLineStepsPerReview map units of lines, MaxRiverProbesPerReview
+    // river points, and MaxProbeMillisPerReview (a drain frame: MaxDrainMillisPerFrame) of wall clock
+    // spent probing (a CPU budget, AGENTS.md
+    // § Clocks). A long line is walked in segments: each call walks what the budgets leave (the
+    // measured cost per step times the steps stays within the CPU budget; at least MinSegmentSteps
+    // on the first probe of a budget so the memo always progresses) and keeps its offset in
+    // Partials; the line is answered (memoized) when a segment meets a blocking cell or the last
+    // segment ends. A segment starts at the point vanilla's own walk reaches after the steps
+    // already walked (AlongLine), so the union of the segments samples the
+    // cells the single CountTerrainLine call would. A refused or unfinished probe changes no answer
+    // the planner uses: ReviewTerrain scores a review with no river term until every question is
+    // known (G3 verify F3).
     //   Drain   the whole static question set (TerrainMemoDrain: every area-centre pair within
     //           ReviewTerrain.MaxProbedLine, every area centre at every own command range) is
     //           prepared from each review's snapshot and drained by Plugin.Update a frame at a
-    //           time within the same budgets (DrainTick), only while GameController's BattleUnits
+    //           time within the same budgets (DrainTick, segmenting long lines so no frame passes
+    //           the CPU budget), only while GameController's BattleUnits
     //           is the campaign map's (IsCampaign, 78782); a battle map's terrain is never probed.
     //           The review keeps its own budget as a fallback. When fix/perf-hot-paths' frame-budget
     //           daily-review scheduler merges, the drain becomes a job of that scheduler.
@@ -41,17 +50,24 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const float MaxLineStepsPerReview = 1500f; // map units of CountTerrainLine per review
         internal const int MaxRiverProbesPerReview = 128;
         internal const double MaxProbeMillisPerReview = 1.0;
+        // A drain frame probes for at most 0.9 ms, so the frame stays under the 1 ms target with the
+        // drain's own bookkeeping and the error of the measured cost per step.
+        internal const double MaxDrainMillisPerFrame = 0.9;
         internal const int MaxMemoEntries = 200000; // also the most questions the drain takes
+        internal const float MinSegmentSteps = 32f;
+        private const int MaxPartials = 256;
         private const float Snap = 16f;
         private const int RingPoints = 8;
 
         private static readonly TerrainLineRuntime Instance = new TerrainLineRuntime();
         private static readonly Dictionary<long, bool> LineMemo = new Dictionary<long, bool>();
         private static readonly Dictionary<long, bool> RiverMemo = new Dictionary<long, bool>();
+        private static readonly Dictionary<long, float> Partials = new Dictionary<long, float>(); // line key -> steps walked
         private static readonly System.Diagnostics.Stopwatch Clock = new System.Diagnostics.Stopwatch();
         private static float _lineSteps;
         private static double _millisPerStep = 0.003; // learned from the probes this session (starts at 3 us)
-        private static double _probeMillis;            // time spent probing this review
+        private static double _probeMillis;            // time spent probing this review or frame
+        private static double _budgetMillis = MaxProbeMillisPerReview;
         private static int _riverProbes;
         private static BattlefieldSetup _bfs;
         private static BattleUnits _bunits;
@@ -65,29 +81,34 @@ namespace WhiskeyRealism.Strategic.Planner
             CampaignScope.Register("campaign-planner-terrain-probe", Reset);
         }
 
+        // A CampaignScope reset drops the scene references and the budgets only; the memo belongs to
+        // the map (ClearMap).
         private static void Reset()
         {
-            LineMemo.Clear();
-            RiverMemo.Clear();
-            _lineSteps = 0f;
-            _riverProbes = 0;
-            _millisPerStep = 0.003;
+            NewBudget(MaxProbeMillisPerReview);
             _bfs = null;
             _bunits = null;
             _findAfterFrame = 0;
-            Drain.Clear();
+        }
+
+        private static void ClearMap()
+        {
+            LineMemo.Clear();
+            RiverMemo.Clear();
+            Partials.Clear();
             _drainFrames = 0;
         }
 
         // The source for one review: the memo lives for the campaign, the budgets for this review.
         internal static TerrainLineRuntime ForReview()
         {
-            NewBudget();
+            NewBudget(MaxProbeMillisPerReview);
             return Instance;
         }
 
-        private static void NewBudget()
+        private static void NewBudget(double millis)
         {
+            _budgetMillis = millis;
             _lineSteps = 0f;
             _riverProbes = 0;
             _probeMillis = 0.0;
@@ -100,7 +121,10 @@ namespace WhiskeyRealism.Strategic.Planner
             try
             {
                 if (snapshot == null) return;
-                if (Drain.Prepare(snapshot.Areas, snapshot.Own, MaxMemoEntries))
+                long map = TerrainMemoDrain.MapIdentity(SceneManagement.currentcampaignscenario, snapshot.Areas);
+                bool grew = Drain.Prepare(map, snapshot.Areas, snapshot.Own, MaxMemoEntries, out bool mapChanged);
+                if (mapChanged) ClearMap();
+                if (grew)
                     OnceLog.Info("campaign-planner:terrain-drain-start", "[CampaignPlanner] terrain drain started: lines=" + Drain.Lines
                         + " rivers=" + Drain.Rivers + " remaining=" + Drain.Remaining);
                 if (Drain.Oversize)
@@ -124,7 +148,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     var flag = Plugin.EnableCampaignPlanner;
                     if (flag == null || !flag.Value) return;
                     if ((UnityEngine.Object)ResolveBattlefieldSetup() == null) return;
-                    NewBudget();
+                    NewBudget(MaxDrainMillisPerFrame);
                     _drainFrames++;
                     Drain.Drain(Instance);
                     if (Drain.Remaining == 0)
@@ -150,22 +174,41 @@ namespace WhiskeyRealism.Strategic.Planner
             return RiverMemo.TryGetValue(RiverKey(x, z, range), out river);
         }
 
+        // True when the line is answered (memoized); false when refused or walked only partly (the
+        // next call continues from its offset).
         public bool ProbeLine(float ax, float az, float bx, float bz)
         {
             float distance = LineDistance(ax, az, bx, bz, out Vector3 start, out Vector3 end);
             if (distance < 1f) return true;
-            if (_lineSteps + distance > MaxLineStepsPerReview || OverTime()) return Refused();
-            if (ProbedThisReview() && _probeMillis + distance * _millisPerStep > MaxProbeMillisPerReview) return Refused();
+            if (OverTime()) return Refused();
+            long key = LineKey(ax, az, bx, bz);
+            Partials.TryGetValue(key, out float walked);
+            float steps = LineSegments.Steps(distance - walked, _lineSteps, MaxLineStepsPerReview, _probeMillis, _budgetMillis,
+                _millisPerStep, !ProbedThisReview(), MinSegmentSteps);
+            if (steps <= 0f) return Refused();
             var bfs = ResolveBattlefieldSetup();
             if ((UnityEngine.Object)bfs == null) return false;
-            _lineSteps += distance;
+            _lineSteps += steps;
             Clock.Restart();
             float angle = Tools.GetAngle(start, end) + 180f;
-            bool blocked = bfs.CountTerrainLine(start, angle, distance, GameVars.terrainrestrictions_combat) < distance;
+            Vector3 from = start;
+            if (walked > 0f)
+            {
+                LineSegments.AlongLine(start.x, start.z, angle, walked, out float px, out float pz);
+                from = new Vector3(px, 0f, pz);
+            }
+            bool blocked = bfs.CountTerrainLine(from, angle, steps, GameVars.terrainrestrictions_combat) < steps;
             double spent = Clock.Elapsed.TotalMilliseconds;
             _probeMillis += spent;
-            _millisPerStep = 0.8 * _millisPerStep + 0.2 * (spent / distance);
-            Remember(LineMemo, LineKey(ax, az, bx, bz), blocked);
+            _millisPerStep = 0.8 * _millisPerStep + 0.2 * (spent / steps);
+            if (!blocked && walked + steps < distance)
+            {
+                if (Partials.Count >= MaxPartials) Partials.Clear();
+                Partials[key] = walked + steps;
+                return false;
+            }
+            Partials.Remove(key);
+            Remember(LineMemo, key, blocked);
             return true;
         }
 
@@ -190,9 +233,8 @@ namespace WhiskeyRealism.Strategic.Planner
             return true;
         }
 
-        // The first probe of a review always runs (a line within MaxProbedLine fits the step budget),
-        // so the memo makes progress every review whatever a step costs: refusing a line on its
-        // estimated cost alone would refuse the head of the fixed order every review, forever.
+        // The first probe of a budget always walks at least MinSegmentSteps, so the memo makes
+        // progress every review and frame whatever a step costs.
         private static bool ProbedThisReview()
         {
             return _lineSteps > 0f || _riverProbes > 0;
@@ -200,7 +242,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static bool OverTime()
         {
-            return _probeMillis > MaxProbeMillisPerReview;
+            return _probeMillis > _budgetMillis;
         }
 
         // Over budget: nothing is probed or remembered; the question stays unknown.

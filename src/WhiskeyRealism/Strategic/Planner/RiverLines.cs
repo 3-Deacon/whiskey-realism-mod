@@ -161,7 +161,10 @@ namespace WhiskeyRealism.Strategic.Planner
     // ask) and every area centre at every own command range seen (the only river points it can ask),
     // in a fixed order (lines by ascending area list position, then river points by range as first
     // seen and area position). TerrainLineRuntime drains it a frame at a time within the per-frame
-    // budget; questions already memoised by a review are skipped without a probe.
+    // budget; questions already memoised by a review are skipped without a probe. The terrain of a
+    // campaign map is static, so the set and the memo belong to the map (MapIdentity: the campaign
+    // scenario and the area geometry), not to the CampaignScope: a sidecar load or a return from a
+    // battle on the same map keeps them; another map starts over.
     internal sealed class TerrainMemoDrain
     {
         private struct Question
@@ -173,7 +176,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private readonly List<Question> _queue = new List<Question>();
         private readonly HashSet<int> _ranges = new HashSet<int>();
-        private int _areaCount = -1;
+        private long _map;
+        private bool _hasMap;
         private int _next;
 
         internal int Lines { get; private set; }
@@ -185,22 +189,25 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             _queue.Clear();
             _ranges.Clear();
-            _areaCount = -1;
+            _hasMap = false;
             _next = 0;
             Lines = 0;
             Oversize = false;
         }
 
-        // Enumerates the area pairs on the first call for a map (a different area count is a different
-        // map) and appends the river points of any command range not seen yet. Returns true when the
+        // Enumerates the area pairs on the first call for a map (mapChanged: the caller clears its memo
+        // too) and appends the river points of any command range not seen yet. Returns true when the
         // queue grew.
-        internal bool Prepare(IReadOnlyList<AreaRecord> areas, IReadOnlyList<FormationRecord> own, int maxQuestions)
+        internal bool Prepare(long map, IReadOnlyList<AreaRecord> areas, IReadOnlyList<FormationRecord> own, int maxQuestions, out bool mapChanged)
         {
+            mapChanged = false;
             if (areas == null || areas.Count == 0) return false;
-            if (_areaCount != areas.Count)
+            if (!_hasMap || _map != map)
             {
                 Clear();
-                _areaCount = areas.Count;
+                _hasMap = true;
+                _map = map;
+                mapChanged = true;
                 for (int a = 0; a < areas.Count; a++)
                     for (int b = a + 1; b < areas.Count; b++)
                     {
@@ -231,6 +238,37 @@ namespace WhiskeyRealism.Strategic.Planner
             return _queue.Count != before;
         }
 
+        // The campaign map's identity: FNV-1a 64 over the scenario name and every area's index and
+        // centre (rounded to a map unit).
+        internal static long MapIdentity(string scenario, IReadOnlyList<AreaRecord> areas)
+        {
+            ulong hash = 14695981039346656037UL;
+            string text = scenario ?? "";
+            for (int i = 0; i < text.Length; i++) hash = Mix(hash, text[i]);
+            int count = areas != null ? areas.Count : 0;
+            hash = Mix(hash, count);
+            for (int i = 0; i < count; i++)
+            {
+                hash = Mix(hash, areas[i].Index);
+                hash = Mix(hash, (int)Math.Round(areas[i].X));
+                hash = Mix(hash, (int)Math.Round(areas[i].Z));
+            }
+            return unchecked((long)hash);
+        }
+
+        private static ulong Mix(ulong hash, int value)
+        {
+            unchecked
+            {
+                for (int b = 0; b < 4; b++)
+                {
+                    hash ^= (byte)(value >> (8 * b));
+                    hash *= 1099511628211UL;
+                }
+                return hash;
+            }
+        }
+
         // Probes the queue in order until the source's budget refuses one; returns how many were
         // probed (memoised questions are passed over without a probe).
         internal int Drain(ITerrainLineSource source)
@@ -250,6 +288,33 @@ namespace WhiskeyRealism.Strategic.Planner
                 _next++;
             }
             return probed;
+        }
+    }
+
+    // The arithmetic of a line probe walked in segments (TerrainLineRuntime.ProbeLine): how far one
+    // call may walk within the budgets, and where a segment starts.
+    internal static class LineSegments
+    {
+        // Whole map units: what the step budget and the CPU budget (at the measured cost per step)
+        // leave, at least minSegment on the budget's first probe so the memo always progresses.
+        internal static float Steps(float remaining, float stepsUsed, float maxSteps, double millisUsed, double maxMillis,
+                                    double millisPerStep, bool firstOfBudget, float minSegment)
+        {
+            double allowed = Math.Min(maxSteps - stepsUsed, millisPerStep > 0.0 ? (maxMillis - millisUsed) / millisPerStep : maxSteps);
+            allowed = Math.Floor(allowed);
+            if (firstOfBudget) allowed = Math.Max(allowed, minSegment);
+            return (float)Math.Max(0.0, Math.Min(remaining, allowed));
+        }
+
+        // The point vanilla's walk reaches after `distance` steps along `angle`:
+        // GetAngleTerrainPosStatic's x/z (26909-26912; the cell lookup reads only x and z,
+        // 26743-26744). Both endpoints of a probed line are on the map, so no point between them
+        // needs vanilla's edge clamp.
+        internal static void AlongLine(float x, float z, float angle, float distance, out float px, out float pz)
+        {
+            float radians = (angle - 90f) * (float)Math.PI / 180f;
+            px = x + (float)Math.Cos(radians) * distance;
+            pz = z - (float)Math.Sin(radians) * distance;
         }
     }
 
