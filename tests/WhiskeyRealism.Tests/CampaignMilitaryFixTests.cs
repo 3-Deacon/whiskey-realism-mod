@@ -29,6 +29,8 @@ internal static class CampaignMilitaryFixTests
         CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
         CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
         AreaOrderSkipsEveryVanillaBusyAssignment();
+        CoastalInterceptKeepsEnemyInsideBugleRange();
+        CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose();
     }
 
     private static void LogPass(string message)
@@ -374,5 +376,28 @@ internal static class CampaignMilitaryFixTests
             TestHarness.AssertFalse(CampaignMilitaryGates.IsIdleForAreaOrder((AreaOrderBusyFlags)flags), name + " blocks area orders");
         }
         LogPass("c2a area order skips every vanilla busy assignment");
+    }
+
+    // C-Coastal: vanilla CheckForEndOfDefensiveOperations (decompile 13836) stops
+    // and drops a defensive-op unit once no enemy is within its buglerange of its
+    // last path position. Ordering coastal guards onto the asset itself meant a
+    // daily stop/go; the destination must keep the threat within bugle range.
+    private static void CoastalInterceptKeepsEnemyInsideBugleRange()
+    {
+        CampaignMilitaryGates.CoastalInterceptPoint(0f, 0f, 100f, 0f, 20f, out float x, out float z);
+        float toEnemy = (float)Math.Sqrt((x - 100f) * (x - 100f) + z * z);
+        TestHarness.AssertTrue(toEnemy < 20f, "destination within bugle range of the enemy, got " + toEnemy);
+        TestHarness.AssertTrue(x > 0f && x < 100f && Math.Abs(z) < 0.001f, "destination between asset and enemy");
+        LogPass("c2a coastal intercept keeps enemy inside bugle range");
+    }
+
+    private static void CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose()
+    {
+        CampaignMilitaryGates.CoastalInterceptPoint(10f, 5f, 15f, 5f, 20f, out float x, out float z);
+        TestHarness.AssertEqual(10f, x, "anchor x kept");
+        TestHarness.AssertEqual(5f, z, "anchor z kept");
+        CampaignMilitaryGates.CoastalInterceptPoint(10f, 5f, 10f, 5f, 0f, out x, out z);
+        TestHarness.AssertEqual(10f, x, "degenerate bugle range keeps anchor");
+        LogPass("c2a coastal intercept holds the anchor when enemy already close");
     }
 }

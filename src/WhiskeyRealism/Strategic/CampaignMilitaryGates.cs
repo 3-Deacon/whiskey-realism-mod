@@ -217,6 +217,28 @@ namespace WhiskeyRealism.Strategic
                 !busy.TakingTown;
         }
 
+        // ---- C-Coastal ------------------------------------------------------
+        // Vanilla CheckForEndOfDefensiveOperations (decompile 13836) keeps a
+        // defensive-operation unit only while some enemy (or enemy depot) is
+        // within the unit's buglerange of its last transmitted path position;
+        // otherwise it StopRegiment()s and drops it. The guard therefore stands on
+        // the anchor (asset) only if the enemy is already within reach of it;
+        // otherwise between anchor and enemy, inside 0.8 x buglerange of the enemy.
+        internal const float CoastalInterceptBugleFraction = 0.8f;
+
+        internal static void CoastalInterceptPoint(float anchorX, float anchorZ, float enemyX, float enemyZ, float bugleRange, out float x, out float z)
+        {
+            x = anchorX;
+            z = anchorZ;
+            float reach = Math.Max(0f, bugleRange) * CoastalInterceptBugleFraction;
+            float dx = anchorX - enemyX;
+            float dz = anchorZ - enemyZ;
+            float d = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (reach <= 0f || d <= reach) return;
+            x = enemyX + dx / d * reach;
+            z = enemyZ + dz / d * reach;
+        }
+
         internal static float Clamp(float value, float min, float max)
         {
             if (value < min) return min;

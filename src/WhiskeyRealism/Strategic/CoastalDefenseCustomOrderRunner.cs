@@ -12,13 +12,22 @@ namespace WhiskeyRealism.Strategic
     // Coordinator-driven custom defensive movement order runner.
     //
     // Runs after DefenseIntentLedger.Build emits its responses for an
-    // alliance. Issues MoveUnitTo + unitsindefensiveoperations.Add for
-    // selected packages where vanilla CheckForDefensiveOperations would
-    // not (rate-limited landings, relaxed-filter CoastalGuard candidates
+    // alliance. Commits selected packages where vanilla CheckForDefensiveOperations
+    // would not (rate-limited landings, relaxed-filter CoastalGuard candidates
     // vanilla's downstream gates would reject). Does NOT touch the static
     // AICampaign.defensiveoperations list — that surface is owned by
     // vanilla's commit path. Release happens on a future tick when the
     // builder transitions to Recovered + cooldown expires.
+    //
+    // 2026-10-14 (C-Coastal): commits now mirror vanilla's defensive-operation
+    // commit (decompile 13716-13724): queue an AICampaign.DefensiveMovingOrder
+    // (executed by UpdateOrders, 79295), AIBattle.CheckCurrentOrderUpdate type 7,
+    // remove from unitsinoffensiveoperations, add to unitsindefensiveoperations.
+    // The destination keeps the nearest enemy inside 0.8 x buglerange, because
+    // vanilla CheckForEndOfDefensiveOperations (13836) stops and drops any
+    // defensive-op unit with no enemy within buglerange of its destination - the
+    // old asset-anchored MoveUnitTo produced a daily stop/go. Release mirrors
+    // vanilla's end of operation (RemoveOrder, StopRegiment, remove).
     internal static class CoastalDefenseCustomOrderRunner
     {
         // Per-alliance dedup of "first assignment per (threat, unit) tuple"
@@ -67,6 +76,8 @@ namespace WhiskeyRealism.Strategic
                 var defOps = defOpsField?.GetValue(faction) as IList;
                 var ownUnits = ownUnitsField?.GetValue(faction) as IList;
                 if (defOps == null || ownUnits == null) return;
+                var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
+                var enemyUnits = AccessTools.Field(faction.GetType(), "enemyunits")?.GetValue(faction) as IList;
 
                 bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
@@ -119,14 +130,17 @@ namespace WhiskeyRealism.Strategic
                         }
                         else if (bridgeDecision.MayDirectMove)
                         {
-                            if (!SafeMoveUnitTo(unit, anchor))
+                            var destination = InterceptDestination(enemyUnits, anchor, unit);
+                            string orderName = string.IsNullOrEmpty(response.Threat.AssetName) ? "Coastal defense" : response.Threat.AssetName;
+                            if (!QueueVanillaDefensiveMove(unit, destination, orderName))
                             {
                                 EmitCampaignInfoOnce(
                                     $"defense-intent:custom-order:move-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}",
-                                    $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=moveunitto-failed");
+                                    $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=defensive-order-failed");
                                 continue;
                             }
 
+                            offensive?.Remove(unit);
                             if (!defOps.Contains(unit)) defOps.Add(unit);
                         }
                         else
@@ -178,7 +192,7 @@ namespace WhiskeyRealism.Strategic
                             _wlCurrentOrderAttempts.Remove($"{allianceId}|{kv.Key}|{unitId}");
                             if (unit == null) continue;
                             if (!defOps.Contains(unit)) continue;
-                            defOps.Remove(unit);
+                            EndDefensiveOperation(unit, defOps);
                             TelemetryRouter.LegacyInfo(
                                 $"[DefenseIntent] released alliance={allianceId} " +
                                 $"threat={kv.Key} " +
@@ -243,16 +257,76 @@ namespace WhiskeyRealism.Strategic
             tickSet.Add(unitInstanceId);
         }
 
-        private static bool SafeMoveUnitTo(Regiment unit, Vector3 position)
+        // Vanilla defensive-operation commit (decompile 13716-13724).
+        private static bool QueueVanillaDefensiveMove(Regiment unit, Vector3 destination, string orderName)
         {
             if (unit == null) return false;
-            try { return AICampaign.MoveUnitTo(unit, position, true); }
+            try
+            {
+                if (!unit.dlcw_isundercommander || !DLC_WL.dlc_scenarioactive)
+                {
+                    AICampaign.DefensiveMovingOrder.RemoveOrder(unit);
+                    // The ctor creates AICampaign.orders when null (9911) but does not enqueue itself.
+                    var order = new AICampaign.DefensiveMovingOrder(
+                        unit, destination, 30f, (float)unit.groupstrengthactive * unit.groupmorale, _alwaysblockforts: false);
+                    AICampaign.orders.Add(order);
+                }
+                AIBattle.CheckCurrentOrderUpdate(unit, 7, destination, orderName, -1f, 20f, 20f, calledfromcampaign: true);
+                return true;
+            }
             catch (Exception ex)
             {
-                OnceLog.Warning("defense-intent:custom-order:moveunitto",
-                    "CoastalDefenseCustomOrderRunner MoveUnitTo failed: " + ex.Message);
+                OnceLog.Warning("defense-intent:custom-order:queue",
+                    "CoastalDefenseCustomOrderRunner defensive order failed: " + ex.Message);
                 return false;
             }
+        }
+
+        // Vanilla CheckForEndOfDefensiveOperations (13836): units already stopped,
+        // retreating or in battle are just dropped; moving ones are stopped first.
+        private static void EndDefensiveOperation(Regiment unit, IList defOps)
+        {
+            try
+            {
+                AICampaign.DefensiveMovingOrder.RemoveOrder(unit);
+                bool moving = unit.regimentpaths > 0 && !unit.onretreat && !unit.inbattle;
+                if (moving && (!unit.dlcw_isundercommander || !DLC_WL.dlc_scenarioactive))
+                    unit.StopRegiment(skipfinalrotation: true, manualstop: true);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("defense-intent:custom-order:release",
+                    "CoastalDefenseCustomOrderRunner release stop failed: " + ex.Message);
+            }
+            defOps.Remove(unit);
+        }
+
+        private static Vector3 InterceptDestination(IList enemyUnits, Vector3 anchor, Regiment unit)
+        {
+            Vector3 enemy = anchor;
+            float best = float.MaxValue;
+            if (enemyUnits != null)
+            {
+                for (int i = 0; i < enemyUnits.Count; i++)
+                {
+                    var e = enemyUnits[i] as Regiment;
+                    if ((UnityEngine.Object)(object)e == (UnityEngine.Object)null) continue;
+                    var p = ((Component)e).transform.position;
+                    float dx = p.x - anchor.x;
+                    float dz = p.z - anchor.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < best)
+                    {
+                        best = d;
+                        enemy = p;
+                    }
+                }
+            }
+            float searchRadius = GamePrefs.maxdistancedefensiveoperations;
+            if (best > searchRadius * searchRadius) enemy = anchor;
+
+            CampaignMilitaryGates.CoastalInterceptPoint(anchor.x, anchor.z, enemy.x, enemy.z, unit.buglerange, out float x, out float z);
+            return new Vector3(x, anchor.y, z);
         }
 
         private static int ResolveAifactionIndex(int allianceId)
