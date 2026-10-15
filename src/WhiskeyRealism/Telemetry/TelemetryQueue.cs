@@ -11,8 +11,8 @@ namespace WhiskeyRealism.Telemetry
         Dropped
     }
 
-    // Bounded telemetry queue shared by every emitting thread (main, orchestrator worker,
-    // writer) and drained by the writer thread.
+    // Bounded telemetry queue: rows are enqueued on the Unity main thread and drained by
+    // the telemetry writer thread, the mod's only background thread. Both sides lock.
     //
     // Rows live in one FIFO ring per eviction rank; a global sequence number lets Drain
     // merge the rings back into enqueue order. Detail and protected (Health/Failure) rows

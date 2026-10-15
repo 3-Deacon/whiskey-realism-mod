@@ -795,7 +795,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Own command group (GameObject instance id) → lateral band, using the
         /// last front axis fitted for this alliance by <see cref="Build"/>.
         /// Empty until a Build has run. Lets callers that only have the battle
-        /// (the worker capture path) band groups the same way the evidence did.
+        /// (the direct-child allocator's fallback when the evidence carries no
+        /// instance-sector map) band groups the same way the evidence did.
         /// </summary>
         internal static Dictionary<int, int> MapOwnGroupsToSectors(int allianceId)
         {

@@ -144,10 +144,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int EffectiveCommandLevel { get; }
 
         // ---- Gap-fill Chunk 1: per-group sector fields (own-side only) ----
-        // Captured so the worker thread's PopulateGroupDecisions can rebuild
-        // TacticalGroupContactInput without touching live vanilla Regiment state.
-        // All default to neutral values (0 / false / -1 / string.Empty) for
-        // enemy observations and for own-side units where the source read failed.
+        // Read from the live Regiment on the main thread when the observation is
+        // captured, so the observation carries the same signals
+        // BattleGroupStancePatch.BuildGroupSector reads. All default to neutral
+        // values (0 / false / -1 / string.Empty) for enemy observations and for
+        // own-side units where the source read failed.
 
         /// <summary>
         /// Closest-visible-enemy <c>Regiment.unittyp</c> (own-side only).
@@ -174,8 +175,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float GroupEnemiesInRange { get; }
         /// <summary>
         /// Sum of <c>Regiment.unitrange.enemystrengthwithinangle[]</c>
-        /// (own-side only). Precomputed at capture time so the worker doesn't
-        /// have to touch the array. Defaults to 0f for enemy observations.
+        /// (own-side only). Summed at capture time so readers do not need the
+        /// live array. Defaults to 0f for enemy observations.
         /// </summary>
         public float GroupAngleEnemyStrength { get; }
         /// <summary>
@@ -192,8 +193,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public bool GroupStrongPoint { get; }
         /// <summary>
         /// <c>Regiment.ai_stanceordered</c> at capture time (own-side only).
-        /// Defaults to -1 for enemy observations or read failure. Consumed by
-        /// the worker as <c>vanillaStance</c> input to
+        /// Defaults to -1 for enemy observations or read failure. The
+        /// <c>vanillaStance</c> input shape of
         /// <see cref="TacticalDoctrineScorer.DecideGroupStance"/>.
         /// </summary>
         public int GroupVanillaStanceOrdered { get; }

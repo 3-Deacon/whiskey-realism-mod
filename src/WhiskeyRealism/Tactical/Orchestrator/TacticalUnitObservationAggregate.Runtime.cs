@@ -238,8 +238,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Gap-fill chunk 1: per-group sector fields (own-side only).
                 // BuildGroupSector reads: groupenemiesinrange, unitrange.enemystrengthwithinangle[],
                 // flanksthreated, outflanked, covervalue, fortinrange, ai_stanceordered.
-                // FlankRisk / StrongPoint are precomputed here to keep the worker
-                // pure (avoid passing raw float/int signals it would have to re-threshold).
+                // FlankRisk / StrongPoint are thresholded here, once, so readers get
+                // the same booleans BuildGroupSector derives from the raw signals.
                 groupEnemiesInRange = SafeFloat(reg, ref _groupEnemiesInRangeField, "groupenemiesinrange");
                 if (float.IsNaN(groupEnemiesInRange) || float.IsInfinity(groupEnemiesInRange) || groupEnemiesInRange < 0f)
                     groupEnemiesInRange = 0f;
