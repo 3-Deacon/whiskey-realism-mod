@@ -36,6 +36,10 @@ internal static class PostureStanceFixTests
         // BR-H1
         Pass("defensive hold is no opinion for leaf and brigade tasks", DefensiveHoldIsNoOpinionForTasks);
         Pass("opportunity overrides keep withdrawal consolidate and attack-now rules", OpportunityOverridesKeepOtherRules);
+
+        // B-divplay
+        Pass("division play keeps ledger hold tasks", DivisionPlayKeepsLedgerHoldTasks);
+        Pass("division play stands down for a defending side", DivisionPlayStandsDownForDefender);
     }
 
     private static void Pass(string name, Action test)
@@ -279,5 +283,36 @@ internal static class PostureStanceFixTests
         AssertEqual(CommandTaskType.Probe,
             TacticalOpportunityTaskOverride.Override(CommandTaskType.Probe, DirectChildRole.Main, ReinforcementOpportunity.NoOpportunity, out _),
             "no opportunity no change");
+    }
+
+    private static TacticalDivisionPlaySubordinate Sub(string id, CommandNodeRole role, bool engaged, float distance, CommandTaskType task)
+    {
+        return new TacticalDivisionPlaySubordinate(id, role, engaged, engaged, false, false, false, distance, false, task);
+    }
+
+    private static void DivisionPlayKeepsLedgerHoldTasks()
+    {
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        {
+            Sub("holder", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.HoldObjective),
+            Sub("attacker", CommandNodeRole.SupportingAttack, true, 300f, CommandTaskType.AttackObjective),
+            Sub("guard", CommandNodeRole.FlankMarch, false, 0f, CommandTaskType.GuardFlank),
+            Sub("idle", CommandNodeRole.SupportingAttack, false, 0f, CommandTaskType.SupportAttack),
+        }));
+        AssertEqual("attacker", decision.AnchorNodeId, "a holding child cannot anchor an attack play");
+        AssertFalse(decision.OrderFor("holder").HasOrder, "hold task kept");
+        AssertFalse(decision.OrderFor("guard").HasOrder, "guard flank kept");
+        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("idle").Task, "idle sibling supports");
+    }
+
+    private static void DivisionPlayStandsDownForDefender()
+    {
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput("div", 1f, new[]
+        {
+            Sub("a", CommandNodeRole.MainEffort, true, 120f, CommandTaskType.AttackObjective),
+            Sub("b", CommandNodeRole.SupportingAttack, false, 0f, CommandTaskType.SupportAttack),
+        }, sideDefending: true));
+        AssertFalse(decision.HasAnchor, "defending side keeps its ledger tasks");
+        AssertEqual(0, decision.Orders.Count, "no play orders");
     }
 }

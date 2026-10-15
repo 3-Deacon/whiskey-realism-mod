@@ -96,7 +96,7 @@ namespace WhiskeyRealism.Patches
             // end-of-day phase, and the W&L feud instance.
             if (!PostureExecutorBattleGate.Allows(state, macro, SafeEodCycle(bunits), isPlayerAiOrFeud, GameVars.ai_vs_ai, out _)) return;
 
-            Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(units);
+            Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(bunits, units);
             var iteratedInstanceIds = new HashSet<int>();
             for (int i = 0; i < units.Count; i++)
             {
@@ -401,24 +401,29 @@ namespace WhiskeyRealism.Patches
             public TacticalDivisionPlaySubordinate Subordinate { get; }
         }
 
-        private static Dictionary<string, TacticalDivisionPlayOrder> BuildRuntimeDivisionPlayOrders(IList units)
+        private static Dictionary<string, TacticalDivisionPlayOrder> BuildRuntimeDivisionPlayOrders(BattleUnits bunits, IList units)
         {
             var result = new Dictionary<string, TacticalDivisionPlayOrder>();
             if (units == null) return result;
 
             var byParent = new Dictionary<string, List<RuntimePlayChild>>();
+            var defendingByAlliance = new Dictionary<int, bool>();
+            var allianceByParent = new Dictionary<string, int>();
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
                 if (!TryResolveLedgerState(group, out CommandNodeOperationalState state, out _)) continue;
 
-                string parentKey = ParentNodeKey(group, state);
+                // Vanilla command parent; groups directly under the units root
+                // have no division to play with (B-divplay).
+                string parentKey = ParentNodeKey(group);
                 if (string.IsNullOrWhiteSpace(parentKey)) continue;
                 if (!byParent.TryGetValue(parentKey, out List<RuntimePlayChild> children))
                 {
                     children = new List<RuntimePlayChild>();
                     byParent[parentKey] = children;
+                    allianceByParent[parentKey] = group.alliance;
                 }
 
                 children.Add(new RuntimePlayChild(
@@ -432,7 +437,10 @@ namespace WhiskeyRealism.Patches
                         inTrouble: HasLocalFlankRisk(group) || SafeMorale(group) < 0.35f,
                         isArtillery: HasArtilleryCapability(group),
                         enemyDistance: SafeEnemyDistance(group),
-                        hasOrders: HasPendingOrder(group) || HasActiveMoveMakingProgress(group))));
+                        hasOrders: HasPendingOrder(group) || HasActiveMoveMakingProgress(group),
+                        currentTask: state.Task)));
+                if (!defendingByAlliance.ContainsKey(group.alliance))
+                    defendingByAlliance[group.alliance] = SideDefending(bunits, group.alliance);
             }
 
             foreach (var pair in byParent)
@@ -441,8 +449,10 @@ namespace WhiskeyRealism.Patches
                 var subordinates = new TacticalDivisionPlaySubordinate[pair.Value.Count];
                 for (int i = 0; i < pair.Value.Count; i++) subordinates[i] = pair.Value[i].Subordinate;
 
+                bool defending = allianceByParent.TryGetValue(pair.Key, out int parentAlliance) &&
+                    defendingByAlliance.TryGetValue(parentAlliance, out bool d) && d;
                 TacticalDivisionPlayDecision decision = TacticalDivisionPlayExecutor.Decide(
-                    new TacticalDivisionPlayInput(pair.Key, Time.realtimeSinceStartup, subordinates));
+                    new TacticalDivisionPlayInput(pair.Key, GameVars.currenttimefromstart, subordinates, defending));
                 if (!decision.HasAnchor) continue;
 
                 for (int i = 0; i < decision.Orders.Count; i++)
@@ -528,7 +538,7 @@ namespace WhiskeyRealism.Patches
             {
                 updatedOrder = doctrineOrder
                     .WithTask(task, follow.Reason)
-                    .WithDelivery(TacticalOrderDelivery.Courier, ParentNodeKey(group, state), OutboundCourierIntervalSeconds, follow.Reason);
+                    .WithDelivery(TacticalOrderDelivery.Courier, ParentNodeKey(group), OutboundCourierIntervalSeconds, follow.Reason);
             }
 
             return true;
@@ -3584,26 +3594,34 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static string ParentNodeKey(Regiment group, CommandNodeOperationalState state)
+        // Vanilla command parent: BattleUnits.GrabNextParentUnit (86886) walks
+        // transform.parent and returns the unit itself at the "Units" root;
+        // GetAttachedUnitsReg(directonly) (119854) defines direct subordinates
+        // the same way. Groups under the root have no parent node (null) —
+        // the old "role-parent" fallback lumped every such group of an echelon
+        // into one play.
+        private static string ParentNodeKey(Regiment group)
         {
             try
             {
-                if (group != null)
-                {
-                    FieldInfo parentField = AccessTools.Field(typeof(Regiment), "parentregiment");
-                    object parent = parentField != null ? parentField.GetValue(group) : null;
-                    var parentGameObject = parent as GameObject;
-                    if (parentGameObject != null) return "parent-go:" + parentGameObject.GetInstanceID();
-                    var parentComponent = parent as Component;
-                    if (parentComponent != null) return "parent-co:" + parentComponent.GetInstanceID();
-
-                    Transform parentTransform = group.transform != null ? group.transform.parent : null;
-                    if (parentTransform != null) return "parent-tr:" + parentTransform.GetInstanceID();
-                }
+                if (group == null) return null;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parent = BattleUnits.GrabNextParentUnit(self);
+                if (parent == null || parent == self) return null;
+                return "parent-go:" + parent.GetInstanceID();
             }
-            catch { }
+            catch
+            {
+                return null;
+            }
+        }
 
-            return "role-parent:" + state.Echelon + ":" + state.Role;
+        // Vanilla GetBattleType (86095) with readiness, as AdjustGroupAIStance
+        // uses it (4252): 2 = this alliance holds the objectives (defending).
+        private static bool SideDefending(BattleUnits bunits, int alliance)
+        {
+            try { return bunits != null && bunits.GetBattleType(alliance, usereadinesswhendraw: true) == 2; }
+            catch { return false; }
         }
 
         private static TacticalRefuseFlankIntent.Decision ResolveRefusedFlank(
