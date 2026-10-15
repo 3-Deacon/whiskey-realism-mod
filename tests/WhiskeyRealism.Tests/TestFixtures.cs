@@ -342,4 +342,25 @@ internal static class TestFixtures
             battleHoursElapsed: battleHoursElapsed,
             stance: stance);
     }
+
+    // Walks up from the working directory to the first ancestor holding relativePath.
+    internal static string FindRepoPath(string relativePath)
+    {
+        string current = Directory.GetCurrentDirectory();
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            string candidate = Path.Combine(current, relativePath);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+                return candidate;
+
+            var parent = Directory.GetParent(current);
+            if (parent == null) break;
+            current = parent.FullName;
+        }
+
+        throw new FileNotFoundException("repo path not found", relativePath);
+    }
+
+    internal static string ReadRepoFile(string relativePath)
+        => File.ReadAllText(FindRepoPath(relativePath));
 }

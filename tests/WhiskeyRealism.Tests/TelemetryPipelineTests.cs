@@ -1012,21 +1012,4 @@ internal static class TelemetryPipelineTests
             AssertEqual(expected[i].value, actualValue, enumType.Name + "." + expected[i].name + " value");
         }
     }
-
-    private static string ReadRepoFile(string relativePath)
-    {
-        string current = Directory.GetCurrentDirectory();
-        while (!string.IsNullOrWhiteSpace(current))
-        {
-            string candidate = Path.Combine(current, relativePath);
-            if (File.Exists(candidate))
-                return File.ReadAllText(candidate);
-
-            var parent = Directory.GetParent(current);
-            if (parent == null) break;
-            current = parent.FullName;
-        }
-
-        throw new FileNotFoundException("repo file not found", relativePath);
-    }
 }

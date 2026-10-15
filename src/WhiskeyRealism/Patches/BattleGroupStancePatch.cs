@@ -25,8 +25,12 @@ namespace WhiskeyRealism.Patches
     //     unless Commander Mode allows writes).
     //   - artillery all-stance audit: combat behavior / limber / retreat writes for
     //     the side's batteries ("Enable Artillery All-Stance Audit").
-    // No movement, reserve or fallback orders. The patch runs when the sector
-    // flag is on or Commander Mode allows writes; turning both off stops it.
+    // No movement, reserve or fallback orders. Every vanilla write goes through
+    // TacticalStanceWriter / TacticalArtilleryApplier, which require
+    // TacticalWriteGuard.CanWrite (Commander Mode Active + W&L/player
+    // protection), so MonitorOnly and Off write nothing; the artillery audit
+    // still evaluates and logs its decisions there. The patch runs when the
+    // sector flag is on or Commander Mode allows writes.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleGroupStancePatch
     {
