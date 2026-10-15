@@ -54,6 +54,12 @@ internal static class CampaignSnapshotTests
             ("ObjectiveRolesFromVanillaFacts", ObjectiveRolesFromVanillaFacts),
             ("ContractEnumValuesPinned", ContractEnumValuesPinned),
             ("ContractRecordsCarryCensusFields", ContractRecordsCarryCensusFields),
+            ("ImportanceMirrorsVanillaTerms", ImportanceMirrorsVanillaTerms),
+            ("FortGarrisonReadOnlyForOwnOrAlliedForts", FortGarrisonReadOnlyForOwnOrAlliedForts),
+            ("SectorAdjacencyCacheFollowsGeometry", SectorAdjacencyCacheFollowsGeometry),
+            ("CoordinatorPauseGuardsOrderIssuingSteps", CoordinatorPauseGuardsOrderIssuingSteps),
+            ("CoordinatorPauseGatesAreTheVanillaPredicates", CoordinatorPauseGatesAreTheVanillaPredicates),
+            ("PlannerReviewGatesPinned", PlannerReviewGatesPinned),
         });
     }
 
@@ -224,6 +230,7 @@ internal static class CampaignSnapshotTests
         s.Rails.Add(new RailLineRecord { Index = 5 });
         s.Commanders.Add(new CommanderRecord { Id = 6 });
         s.RankBands.Add(new RankBand { UnitTyp = 15 });
+        s.Crossings.Add(new CrossingRecord { X = 1f, Z = 2f });
         s.Detections.Add(new EnemyDetection { InstanceId = 7 });
         s.Beliefs.Add(new EnemyBelief { InstanceId = 8 });
         s.CapitalX = 5f;
@@ -242,7 +249,7 @@ internal static class CampaignSnapshotTests
         AssertTrue(ReferenceEquals(tempo, s.Tempo), "tempo");
         AssertTrue(ReferenceEquals(own, s.Own), "lists are pooled");
         AssertEqual(0, s.Own.Count + s.Areas.Count + s.Objectives.Count + s.Supply.Count + s.Rails.Count
-            + s.Commanders.Count + s.RankBands.Count + s.Detections.Count + s.Beliefs.Count, "every list cleared");
+            + s.Commanders.Count + s.RankBands.Count + s.Crossings.Count + s.Detections.Count + s.Beliefs.Count, "every list cleared");
         AssertEqual(0f, s.CapitalX, "capital x cleared");
         AssertFalse(s.HasCapital, "capital flag cleared");
         AssertEqual(0f, s.RelocationRange, "scalars cleared");
@@ -641,8 +648,11 @@ internal static class CampaignSnapshotTests
         AssertEqual(6, allocation.Shortfalls[0], "shortfall");
         AssertEqual(7, allocation.Surpluses[0], "surplus");
 
-        var rail = new RailLineRecord { Index = 2, Startable = true, UnderConstruction = false, Progress = 0f, AX = 1f, AZ = 2f, BX = 3f, BZ = 4f };
+        var rail = new RailLineRecord { Index = 2, Startable = true, UnderConstruction = false, Progress = 0f, AX = 1f, AZ = 2f, BX = 3f, BZ = 4f, AIipId = 11, BIipId = 12 };
         AssertTrue(rail.Startable, "rail startable");
+        AssertEqual(12, rail.BIipId, "rail endpoint iip");
+        var crossing = new CrossingRecord { X = 5f, Z = 6f };
+        AssertEqual(6f, crossing.Z, "crossing");
         var objective = new ObjectiveRecord { ObjectiveId = 4, HolderAlliance = 1, Available = true, Accomplished = false, Roles = ObjectiveRole.Port, Importance01 = 0.4f, GarrisonStrength = 800f };
         AssertEqual(800f, objective.GarrisonStrength, "objective garrison");
         var band = new RankBand { UnitTyp = 15, MinRank = 7, MaxRank = 8 };
@@ -652,8 +662,172 @@ internal static class CampaignSnapshotTests
         formation.Flags = FormationFlags.Embarked | FormationFlags.MoveQueued;
         formation.Chain = WlChainClass.CarryingGroup;
         formation.ParentInstanceId = -1;
+        formation.UseRails = true;
+        formation.UseRivers = false;
+        AssertTrue(formation.UseRails && !formation.UseRivers, "transport modes");
         AssertTrue((formation.Flags & FormationFlags.MoveQueued) != 0, "formation flags");
         AssertEqual(WlChainClass.CarryingGroup, formation.Chain, "formation chain class");
+    }
+
+    // ---- G0 landing (verify-g0 F1-F4) ----
+
+    // UpdateImportanceValues 14905-14995 for one faction, on fixture prefs.
+    private static void ImportanceMirrorsVanillaTerms()
+    {
+        const float pop = 0.01f, transport = 0.2f, nonWar = 0.35f, objective = 5f, capital = 20f;
+        AssertNear(10f, SnapshotRules.TargetImportance(true, 1000f, 0f, true, false, false, pop, transport, nonWar, objective, capital), 0.001f, "enemy town: population term x 1");
+        AssertNear(3.5f, SnapshotRules.TargetImportance(true, 1000f, 0f, false, false, false, pop, transport, nonWar, objective, capital), 0.001f, "own or non-war town: x 0.35");
+        AssertNear(8.5f, SnapshotRules.TargetImportance(true, 1000f, 0f, false, true, false, pop, transport, nonWar, objective, capital), 0.001f, "followed objective adds its bonus unscaled");
+        AssertNear(23.5f, SnapshotRules.TargetImportance(true, 1000f, 0f, false, false, true, pop, transport, nonWar, objective, capital), 0.001f, "capital bonus only at its own index, unscaled");
+        AssertNear(10f, SnapshotRules.TargetImportance(false, 1000f, 50f, true, false, true, pop, transport, nonWar, objective, capital), 0.001f, "IIP: transport term, never the capital bonus");
+        AssertNear(3.5f, SnapshotRules.TargetImportance(false, 0f, 50f, false, false, false, pop, transport, nonWar, objective, capital), 0.001f, "own IIP x 0.35");
+    }
+
+    private static void FortGarrisonReadOnlyForOwnOrAlliedForts()
+    {
+        AssertTrue(SnapshotRules.SideKnowsGarrison(1, 1, false), "own fort");
+        AssertTrue(SnapshotRules.SideKnowsGarrison(0, 3, true), "allied fort");
+        AssertFalse(SnapshotRules.SideKnowsGarrison(1, 0, false), "enemy fort: a G1 belief, not a snapshot read");
+
+        // Every garrisonunit read in the snapshot runtime sits after the side check.
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
+        int check = src.IndexOf("SnapshotRules.SideKnowsGarrison(", StringComparison.Ordinal);
+        AssertTrue(check >= 0, "side check present");
+        foreach (Match m in Regex.Matches(src, @"\bgarrisonunit\b"))
+            AssertTrue(m.Index > check, "garrisonunit read after the side check at " + m.Index);
+    }
+
+    private static void SectorAdjacencyCacheFollowsGeometry()
+    {
+        // Same area count, different geometry: the cached matrix must not leak across.
+        var near = NewSnapshot(0);
+        near.RelocationRange = 15f;
+        near.Areas.Add(Area(0, 0f, 0f, 1f));
+        near.Areas.Add(Area(1, 10f, 0f, 1f));
+        near.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 0f, Z = 0f });
+        var far = NewSnapshot(0);
+        far.RelocationRange = 15f;
+        far.Areas.Add(Area(0, 0f, 0f, 1f));
+        far.Areas.Add(Area(1, 100f, 0f, 1f));
+        far.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 0f, Z = 0f });
+
+        AssertEqual(1, SectorModel.Build(near).Count, "adjacent pair is one sector");
+        AssertEqual(2, SectorModel.Build(far).Count, "moved area is its own sector");
+        AssertEqual(1, SectorModel.Build(near).Count, "back to the first geometry");
+
+        var a = near.Areas.ToArray();
+        AssertEqual(SectorModel.AdjacencyKey(a, 15f), SectorModel.AdjacencyKey(near.Areas.ToArray(), 15f), "same geometry, same key");
+        AssertTrue(SectorModel.AdjacencyKey(a, 15f) != SectorModel.AdjacencyKey(a, 16f), "range changes the key");
+        a[1].EdgeX = new[] { 10f, 11f, 10f, 10f };
+        AssertTrue(SectorModel.AdjacencyKey(a, 15f) != SectorModel.AdjacencyKey(near.Areas.ToArray(), 15f), "an edge changes the key");
+    }
+
+    // Spec C5 / plan P1: while vanilla's job machine is paused (11368), every order-issuing step of
+    // the coordinator's review is unreachable (BattleWriteGateTests style source pin).
+    private static void CoordinatorPauseGuardsOrderIssuingSteps()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string review = MethodBody(src, "private void RunStrategicReviewCore(");
+        foreach (string call in new[]
+        {
+            "Succession.CheckEvents(", "SwapOfficer(", "ReviewPlanWithTruth(", "cic.Replan(", "UpdateFrontLedger(",
+            "UpdateDefenseIntent(", "CampaignPlannerRuntime.ReviewExecute(", "UpdateFormationDirectiveLedger(",
+            "UpdateOperationalProbe(", "UpdateArmyAreaLedger(",
+        })
+            AssertGuardedByPause(review, call);
+
+        // Bookkeeping that must keep running is not behind the pause.
+        foreach (string call in new[] { "CampaignPlannerRuntime.ReviewPlan(", "UpdateFiscalIntent(", "UpdateConstructionIntent(" })
+            AssertFalse(IsGuardedByPause(review, review.IndexOf(call, StringComparison.Ordinal)), call + " keeps running during the pause");
+        AssertContains(review, "UpdateConstructionIntent(alliance, era.Stage, logHeartbeat, jobMachinePaused)", "construction receives the pause");
+
+        // The telegraph start is an executor write (AddConstructionWish): guarded inside construction.
+        string construction = MethodBody(src, "private void UpdateConstructionIntentCore(");
+        AssertGuardedByPause(construction, "TelegraphConstructionRuntime.TryStartTelegraph(");
+    }
+
+    private static void CoordinatorPauseGatesAreTheVanillaPredicates()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string review = MethodBody(src, "private void RunStrategicReviewCore(");
+        AssertContains(review, "if (WlCareerNotStarted())", "the whole review defers only before a commander is chosen");
+        AssertFalse(review.Contains("WlCareerStartPending()"), "the review no longer defers between commands");
+        AssertContains(review, "bool jobMachinePaused = WlVanillaJobMachinePaused();", "pause read once per review");
+        AssertTrue(review.IndexOf("if (WlCareerNotStarted())", StringComparison.Ordinal) < review.IndexOf("for (int alliance = 0;", StringComparison.Ordinal), "early return before the alliance loop");
+
+        string paused = MethodBody(src, "public static bool WlVanillaJobMachinePaused(");
+        AssertContains(paused, "WlCareerStartGate.VanillaJobMachinePaused(active, DLC_WL.GetPlayerCommandHierarchy(), DLC_WL.IsCommanderInChief())", "11368 predicate with its CIC term");
+        string notStarted = MethodBody(src, "public static bool WlCareerNotStarted(");
+        AssertContains(notStarted, "WlCareerStartGate.CareerNotStarted(DLC_WL.dlc_scenarioactive, DLC_WL.dlc_chosencommander)", "career start predicate");
+
+        string hook = ReadRepoFile("src/WhiskeyRealism/Patches/MonthlyTickHookPatch.cs");
+        AssertContains(hook, "!StrategicCoordinator.WlCareerNotStarted()", "the cadence notifies between commands");
+        AssertFalse(hook.Contains("WlCareerStartPending"), "the cadence no longer waits for a command");
+    }
+
+    private static void PlannerReviewGatesPinned()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        string plan = MethodBody(src, "internal static void ReviewPlan(");
+        AssertContains(plan, "!FlagOn(Plugin.EnableCampaignPlanner)", "review gated on its flag");
+        AssertContains(plan, "mode == PlannerReviewMode.StandDown) return;", "CIC stand-down");
+        int bookkeeping = plan.IndexOf("mode == PlannerReviewMode.Bookkeeping) return;", StringComparison.Ordinal);
+        int publish = plan.IndexOf("CampaignPlanStore.Publish(", StringComparison.Ordinal);
+        AssertTrue(bookkeeping >= 0 && publish > bookkeeping, "bookkeeping returns before anything is published");
+
+        string execute = MethodBody(src, "internal static void ReviewExecute(");
+        AssertContains(execute, "!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)", "executors gated on both flags");
+        AssertContains(execute, "!= PlannerReviewMode.Full) return;", "executors run only in a full review");
+    }
+
+    private static void AssertGuardedByPause(string body, string call)
+    {
+        int at = body.IndexOf(call, StringComparison.Ordinal);
+        AssertTrue(at >= 0, "call present: " + call);
+        for (; at >= 0; at = body.IndexOf(call, at + call.Length, StringComparison.Ordinal))
+            AssertTrue(IsGuardedByPause(body, at), call + " is reachable while vanilla's job machine is paused");
+    }
+
+    // True when an enclosing block, or a brace-less if directly above, tests !jobMachinePaused.
+    private static bool IsGuardedByPause(string body, int at)
+    {
+        int lineStart = body.LastIndexOf('\n', Math.Max(0, at - 1)) + 1;
+        string before = body.Substring(0, lineStart).TrimEnd();
+        int prevLineStart = before.LastIndexOf('\n') + 1;
+        string previous = before.Substring(prevLineStart).Trim();
+        if (previous.StartsWith("if (") && !previous.EndsWith(";") && !previous.EndsWith("{") && previous.Contains("!jobMachinePaused"))
+            return true;
+
+        int depth = 0;
+        for (int i = at - 1; i >= 0; i--)
+        {
+            char c = body[i];
+            if (c == '}') depth++;
+            else if (c == '{')
+            {
+                if (depth > 0) { depth--; continue; }
+                int headerEnd = body.LastIndexOf('\n', Math.Max(0, i - 1));
+                int headerStart = headerEnd > 0 ? body.LastIndexOf('\n', headerEnd - 1) + 1 : 0;
+                string header = body.Substring(headerStart, Math.Max(0, headerEnd - headerStart)).Trim();
+                if (header.StartsWith("if (") && header.Contains("!jobMachinePaused")) return true;
+            }
+        }
+        return false;
+    }
+
+    // From the signature to its matching closing brace.
+    private static string MethodBody(string src, string signature)
+    {
+        int start = src.IndexOf(signature, StringComparison.Ordinal);
+        AssertTrue(start >= 0, "method present: " + signature);
+        int open = src.IndexOf('{', start);
+        int depth = 0;
+        for (int i = open; i < src.Length; i++)
+        {
+            if (src[i] == '{') depth++;
+            else if (src[i] == '}' && --depth == 0) return src.Substring(start, i - start + 1);
+        }
+        throw new Exception("unbalanced body: " + signature);
     }
 
     // ---- fixtures ----

@@ -75,6 +75,11 @@ namespace WhiskeyRealism.Strategic.Planner
         public float SightRadius;   // SightRadiusFormula.Campaign, the radius that paints the fog grid
         // Smallest containing own top group by allattachedunits (the battle core's D5 rule), -1 root.
         public int ParentInstanceId;
+        // The unit's rail and river pathing modes (Regiment.userails/userivers, 111466-111470; AddPath
+        // 130435-130454). Non-player alliances get rails and rivers at init (112862-112867); the
+        // player's alliance, including its AI-owned groups under ai_vs_ai, keeps its stored values
+        // (field default false). G5a raises them to vanilla's AI default before a planner move.
+        public bool UseRails, UseRivers;
     }
 
     // No enemy aggregate (spec C25): points, distancepoints, enemycampaignunitsstrength* and
@@ -134,7 +139,19 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Startable;          // StartConstruction(alliance, checkonly: true)
         public bool UnderConstruction;
         public float Progress;
+        // The line's two farthest-apart IIPs (ConstructionSymbol.IIPsForTransportCapacityUpdate,
+        // 188134): their positions and instance ids (= SupplySourceRecord.Id of the same IIP),
+        // so G5c can score a line by what it connects.
         public float AX, AZ, BX, BZ;
+        public int AIipId, BIipId; // -1 none
+    }
+
+    // A ford (terrain 5) or bridge (6) cell of the campaign terrain grid
+    // (BattlefieldSetup.rivercrossingpositions, built by ReadInTerrainSpecs 26628-26638, cells
+    // merged within 20). G3's river-line term routes a threat or an advance through the nearest one.
+    public struct CrossingRecord
+    {
+        public float X, Z;
     }
 
     public enum DetectionSource

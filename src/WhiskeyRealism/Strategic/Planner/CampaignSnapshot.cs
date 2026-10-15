@@ -17,6 +17,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public int PlayerCommandInstanceId { get; private set; } // -1 none; G2's no-vertical-swap check
         public bool UseFog { get; private set; }
         // MassRatioModifier -> G3 required ratio, MinimumHoldRatioModifier -> G4 hold ratio.
+        // Nullable: DirectorMemories[alliance].LastPosture is null until PublishDirectorPosture has
+        // run once (the first review after a reset, or a CIC player's alliance); G3/G4 treat null as
+        // neutral (both modifiers 0).
         public DirectorPosture Tempo { get; private set; }
 
         public float CapitalX, CapitalZ;
@@ -37,6 +40,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<RailLineRecord> Rails { get; } = new List<RailLineRecord>();
         public List<CommanderRecord> Commanders { get; } = new List<CommanderRecord>();
         public List<RankBand> RankBands { get; } = new List<RankBand>();             // 10..18
+        public List<CrossingRecord> Crossings { get; } = new List<CrossingRecord>(); // fords and bridges (G3)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
 
@@ -67,6 +71,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Rails.Clear();
             Commanders.Clear();
             RankBands.Clear();
+            Crossings.Clear();
             Detections.Clear();
             Beliefs.Clear();
         }
@@ -148,6 +153,35 @@ namespace WhiskeyRealism.Strategic.Planner
             if (railLines >= 2) roles |= ObjectiveRole.RailHub;
             if (hasIndustry) roles |= ObjectiveRole.Industry;
             return roles;
+        }
+
+        // One target's term of vanilla UpdateImportanceValues (14905-14995) for one faction:
+        //   IIP:  transport capacity x aiimportancetransportcapacityweight x num   (14918)
+        //   town: representingpopulation x aiimportancepopulation x num           (14959)
+        //   num = 1 when the holder is at war with the faction, else
+        //         nonwarparticipantsobjectimportanceweighting (0.35, campaignprefs 1400-1401), so own
+        //         and allied targets count 0.35 (14917, 14958)
+        //   + aitownweightfactorobjective when the target is part of the faction's
+        //     followedcampaignobjective (IsPartOfObjective, 14919-14922, 14960-14962), not x num
+        //   + aiimportancevaluescapital for a town that is alliance l's capital, added at array index
+        //     l for l = 0, 1 (14970-14976): vanilla indexes the faction-indexed array by alliance
+        //     id there, so the bonus goes to the faction whose index equals the capital's alliance.
+        internal static float TargetImportance(bool isTown, float population, float transportCapacity, bool holderAtWar,
+                                               bool partOfFollowedObjective, bool capitalOfFactionIndex, float populationWeight,
+                                               float transportWeight, float nonWarWeight, float objectiveBonus, float capitalBonus)
+        {
+            float num = holderAtWar ? 1f : nonWarWeight;
+            float value = isTown ? population * populationWeight * num : transportCapacity * transportWeight * num;
+            if (partOfFollowedObjective) value += objectiveBonus;
+            if (isTown && capitalOfFactionIndex) value += capitalBonus;
+            return value;
+        }
+
+        // Fog (spec C14/C25): the side knows the garrison strength of its own and allied forts only;
+        // an enemy fort's garrison is known only as G1 believes it (seen or contacted).
+        internal static bool SideKnowsGarrison(int alliance, int fortOwner, bool fortOwnerAllied)
+        {
+            return fortOwner == alliance || fortOwnerAllied;
         }
 
         internal static float Clamp01(float value)

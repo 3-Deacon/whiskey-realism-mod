@@ -509,7 +509,7 @@ namespace WhiskeyRealism.Strategic
                 string constructionSource = ConstructionSourceSignature(alliance);
                 if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, constructionSource, _constructionSourceSignatures[alliance], weeklyCatchUp))
                 {
-                    constructionMs += Measure(() => UpdateConstructionIntent(alliance, era.Stage, logHeartbeat));
+                    constructionMs += Measure(() => UpdateConstructionIntent(alliance, era.Stage, logHeartbeat, jobMachinePaused));
                     _constructionSourceSignatures[alliance] = constructionSource;
                 }
 
@@ -853,13 +853,13 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat)
+        private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat, bool jobMachinePaused)
         {
             using (TelemetryPerf.Scope("campaign.construction", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdateConstructionIntentCore(alliance, era, logHeartbeat);
+                UpdateConstructionIntentCore(alliance, era, logHeartbeat, jobMachinePaused);
         }
 
-        private void UpdateConstructionIntentCore(int alliance, EraStage era, bool logHeartbeat)
+        private void UpdateConstructionIntentCore(int alliance, EraStage era, bool logHeartbeat, bool jobMachinePaused)
         {
             try
             {
@@ -890,7 +890,10 @@ namespace WhiskeyRealism.Strategic
                     EmitConstructionTelemetry(alliance, output, telemetry.Summary(alliance));
                 }
 
-                if (ConfigValue(plugin.EnableTelegraphAI))
+                // A telegraph start places a vanilla construction wish (TelegraphConstructionRuntime,
+                // CBuilding.AddConstructionWish 97479): an executor write, so it waits while vanilla's
+                // job machine is paused (11368, spec C5). The ledger above keeps its bookkeeping.
+                if (!jobMachinePaused && ConfigValue(plugin.EnableTelegraphAI))
                     TelegraphConstructionRuntime.TryStartTelegraph(alliance, output);
             }
             catch (Exception ex)

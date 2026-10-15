@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
@@ -18,6 +19,9 @@ namespace WhiskeyRealism.Strategic.Planner
     // Each sector's theater is TheaterClassifier.FromPosition of its centroid (the mean of its
     // areas' averageposition). The model copies what it needs: the snapshot it was built from is
     // pooled and rebuilt in place, while the store keeps the model until the next publish.
+    // The adjacency matrix (n^2 / 2 area pairs x 16 edge pairs) is cached per campaign: AI areas are
+    // authored colour regions (11259-11286) whose zoneedges do not move after the map scan, so the
+    // cache is rebuilt only when the area set, its geometry or the relocation range changes.
     public sealed class SectorModel
     {
         private int[] _sectorOfPosition = new int[0];       // per area list position
@@ -45,15 +49,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 model._positionOfIndex[a.Index] = i;
             }
 
-            bool[,] adjacent = new bool[n, n];
-            float range = s.RelocationRange;
-            for (int i = 0; i < n; i++)
-                for (int j = i + 1; j < n; j++)
-                {
-                    bool near = range > 0f && AreaGeometry.AreaDistance(model._areas[i], model._areas[j]) <= range;
-                    adjacent[i, j] = near;
-                    adjacent[j, i] = near;
-                }
+            bool[,] adjacent = Adjacency(model._areas, s.RelocationRange);
 
             var seedArea = new bool[n];
             for (int k = 0; k < s.Objectives.Count; k++)
@@ -107,6 +103,73 @@ namespace WhiskeyRealism.Strategic.Planner
                 model._theater[sector] = TheaterClassifier.FromPosition(model._centroidX[sector], model._centroidZ[sector]);
             }
             return model;
+        }
+
+        private static bool[,] _adjacency;
+        private static ulong _adjacencyKey;
+
+        static SectorModel()
+        {
+            CampaignScope.Register("campaign-planner-sector-adjacency", ResetAdjacency);
+        }
+
+        private static void ResetAdjacency()
+        {
+            _adjacency = null;
+            _adjacencyKey = 0UL;
+        }
+
+        private static bool[,] Adjacency(AreaRecord[] areas, float range)
+        {
+            ulong key = AdjacencyKey(areas, range);
+            if (_adjacency != null && _adjacencyKey == key && _adjacency.GetLength(0) == areas.Length)
+                return _adjacency;
+
+            int n = areas.Length;
+            var adjacent = new bool[n, n];
+            for (int i = 0; i < n; i++)
+                for (int j = i + 1; j < n; j++)
+                {
+                    bool near = range > 0f && AreaGeometry.AreaDistance(areas[i], areas[j]) <= range;
+                    adjacent[i, j] = near;
+                    adjacent[j, i] = near;
+                }
+            _adjacency = adjacent;
+            _adjacencyKey = key;
+            return adjacent;
+        }
+
+        // 64-bit FNV-1a over the count, the range and every area's index, centre and edges.
+        internal static ulong AdjacencyKey(AreaRecord[] areas, float range)
+        {
+            ulong hash = 14695981039346656037UL;
+            hash = Mix(hash, areas.Length);
+            hash = Mix(hash, BitConverter.SingleToInt32Bits(range));
+            for (int i = 0; i < areas.Length; i++)
+            {
+                var a = areas[i];
+                hash = Mix(hash, a.Index);
+                hash = Mix(hash, BitConverter.SingleToInt32Bits(a.X));
+                hash = Mix(hash, BitConverter.SingleToInt32Bits(a.Z));
+                int edges = a.EdgeX == null || a.EdgeZ == null ? 0 : Math.Min(a.EdgeX.Length, a.EdgeZ.Length);
+                hash = Mix(hash, edges);
+                for (int e = 0; e < edges; e++)
+                {
+                    hash = Mix(hash, BitConverter.SingleToInt32Bits(a.EdgeX[e]));
+                    hash = Mix(hash, BitConverter.SingleToInt32Bits(a.EdgeZ[e]));
+                }
+            }
+            return hash;
+        }
+
+        private static ulong Mix(ulong hash, int value)
+        {
+            for (int b = 0; b < 4; b++)
+            {
+                hash ^= (byte)(value >> (8 * b));
+                hash *= 1099511628211UL;
+            }
+            return hash;
         }
 
         // Dijkstra over the areas not yet finalized: repeatedly finalize the unfinished area with

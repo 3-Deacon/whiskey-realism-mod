@@ -94,8 +94,16 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
+        // The transport-mode counts are the smoke proof of G0's W&L-side finding: vanilla gives
+        // rails and rivers to non-player alliances only (112862-112867).
         private static void LogFirstReview(CampaignSnapshot s, SectorModel sectors)
         {
+            int rails = 0, rivers = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                if (s.Own[i].UseRails) rails++;
+                if (s.Own[i].UseRivers) rivers++;
+            }
             OnceLog.Info(s.Alliance == 0 ? "campaign-planner:first-review:0" : "campaign-planner:first-review:1",
                 "[CampaignPlanner] first review alliance=" + s.Alliance +
                 " formations=" + s.Own.Count +
@@ -105,6 +113,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 " supply=" + s.Supply.Count +
                 " rails=" + s.Rails.Count +
                 " commanders=" + s.Commanders.Count +
+                " crossings=" + s.Crossings.Count +
+                " useRails=" + rails + " useRivers=" + rivers +
                 " player=" + s.Player);
         }
 

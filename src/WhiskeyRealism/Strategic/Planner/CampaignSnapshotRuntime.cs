@@ -28,12 +28,14 @@ namespace WhiskeyRealism.Strategic.Planner
     //
     // Objectives: one record per Town / IIP target of every active objective of either alliance
     // (CampaignObjective.allcampaignobjectives 178548; scenario match and IsDeactivated as
-    // GetAvailableObjectives 178827-178866 filters; IDAccomplished 178805). Importance mirrors the
-    // per-target terms of UpdateImportanceValues (14905-14995: population x aiimportancepopulation,
-    // + aiimportancevaluescapital for a capital, transport capacity x
-    // aiimportancetransportcapacityweight for an IIP), normalized to the snapshot's largest.
+    // GetAvailableObjectives 178827-178866 filters; IDAccomplished 178805). Importance is vanilla's
+    // own per-target term for this faction (SnapshotRules.TargetImportance, UpdateImportanceValues
+    // 14905-14995), normalized to the snapshot's largest. Garrison strength only for own and allied
+    // forts: an enemy fort's garrison reaches the side only as a G1 belief (spec C14/C25).
     // Supply sources: every IIP (owner kept; LogisticsGate accepts own, non-invisible ones) and the
-    // supply depots of this alliance or an ally (UpdateIIPSupplyLink 114272-114306).
+    // supply depots of this alliance or an ally (UpdateIIPSupplyLink 114272-114306). Crossings: the
+    // ford and bridge cells of the campaign terrain grid (BattlefieldSetup.rivercrossingpositions,
+    // 26628-26638). Commander records are read once per alliance and review day.
     // Rails: BattleUnits.railroad with StartConstruction(alliance, checkonly: true) (77818-77845).
     // Commanders: this alliance's GameVars.commander records with the live getters at their default
     // arguments (as vanilla 14250 calls them) and GetAverageAttributeValue (59175). Rank bands:
@@ -42,9 +44,28 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         private const int FactoryId = 5, FoundryId = 8, IronworksId = 10, ManufactoryId = 12; // CBuilding ids 95107-95113
 
-        private static FieldInfo _offensiveField, _defensiveField, _depotBuildersField, _capitalField;
+        private static FieldInfo _offensiveField, _defensiveField, _depotBuildersField, _capitalField, _followedField;
         private static Type _factionType;
         private static Weather _weather;
+        private static BattlefieldSetup _bfs;
+        private static readonly List<CommanderRecord>[] CommanderCache = { new List<CommanderRecord>(), new List<CommanderRecord>() };
+        private static readonly int[] CommanderCacheDay = { -1, -1 };
+
+        static CampaignSnapshotRuntime()
+        {
+            CampaignScope.Register("campaign-planner-snapshot-cache", ResetCaches);
+        }
+
+        private static void ResetCaches()
+        {
+            for (int a = 0; a < CommanderCache.Length; a++)
+            {
+                CommanderCache[a].Clear();
+                CommanderCacheDay[a] = -1;
+            }
+            _weather = null;
+            _bfs = null;
+        }
 
         private static readonly HashSet<Regiment> OffensiveSet = new HashSet<Regiment>();
         private static readonly HashSet<Regiment> DefensiveSet = new HashSet<Regiment>();
@@ -76,9 +97,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadScalars(s, alliance);
                 ReadAreas(s, factionIndex);
                 ReadFormations(s, alliance, faction, in chain);
-                ReadObjectives(s, alliance);
+                ReadObjectives(s, alliance, faction);
                 ReadSupply(s, alliance);
                 ReadRails(s, alliance);
+                ReadCrossings(s);
                 ReadCommanders(s, alliance);
                 ReadRankBands(s, alliance);
             }
@@ -231,7 +253,9 @@ namespace WhiskeyRealism.Strategic.Planner
                         CavalryShare = SnapshotRules.CavalryShare(reg.groupstrengthperunittypcampaigndirect),
                         SightRadius = SightRadiusFormula.Campaign(unitTyp, los, hasEight, eightFactor, climate, rainSnow,
                             reg.liedown, layDown, incident63, fixPerkIds),
-                        ParentInstanceId = -1
+                        ParentInstanceId = -1,
+                        UseRails = reg.userails,
+                        UseRivers = reg.userivers
                     });
                 }
                 catch (Exception ex)
@@ -295,7 +319,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return position >= 0 ? s.Areas[position].Index : -1;
         }
 
-        private static void ReadObjectives(CampaignSnapshot s, int alliance)
+        private static void ReadObjectives(CampaignSnapshot s, int alliance, object faction)
         {
             var objectives = CampaignObjective.allcampaignobjectives;
             if (objectives == null) return;
@@ -326,7 +350,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < forts.Count; i++)
                 {
                     var fort = forts[i];
-                    if ((UnityEngine.Object)fort == null || (UnityEngine.Object)fort.garrisonunit == null) continue;
+                    if ((UnityEngine.Object)fort == null) continue;
+                    if (!SnapshotRules.SideKnowsGarrison(alliance, fort.Owner, AlliedWith(alliance, fort.Owner))) continue;
+                    if ((UnityEngine.Object)fort.garrisonunit == null) continue;
                     float strength = fort.garrisonunit.groupstrengthdirect;
                     AddGarrison(fort.closesttown, strength);
                     AddGarrison((UnityEngine.Object)fort.parentiip != null ? fort.parentiip : fort.closestiip, strength);
@@ -334,6 +360,8 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             CountRailLines();
 
+            int followed = FollowedObjective(faction);
+            int f = s.FactionIndex;
             string scenario = GamePrefs.leveltoload;
             float townRadius = GamePrefs.radiustowncentertocapture;
             RawImportance.Clear();
@@ -357,8 +385,10 @@ namespace WhiskeyRealism.Strategic.Planner
                         record.HolderAlliance = town.Owner;
                         record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, RailLinesNear(p, townRadius), IndustryTowns.Contains(town));
                         record.GarrisonStrength = GarrisonOf(town);
-                        importance = town.representingpopulation * GamePrefs.aiimportancepopulation
-                            + (town.IsCapital ? GamePrefs.aiimportancevaluescapital : 0f);
+                        importance = SnapshotRules.TargetImportance(true, town.representingpopulation, 0f, AtWar(town.Owner, alliance),
+                            CampaignObjective.IsPartOfObjective(followed, town), IsCapitalOfIndex(town, f),
+                            GamePrefs.aiimportancepopulation, GamePrefs.aiimportancetransportcapacityweight,
+                            GamePrefs.nonwarparticipantsobjectimportanceweighting, GamePrefs.aitownweightfactorobjective, GamePrefs.aiimportancevaluescapital);
                     }
                     else if (o.objectives[t] is IIP iip && (UnityEngine.Object)iip != null)
                     {
@@ -369,7 +399,10 @@ namespace WhiskeyRealism.Strategic.Planner
                         record.Roles = SnapshotRules.ObjectiveRoles(false, iip.IIPType == IIP.id_harbor,
                             RailLinesOfIip.TryGetValue(iip, out int lines) ? lines : 0, false);
                         record.GarrisonStrength = GarrisonOf(iip);
-                        importance = iip.GetTransportCapacity() * GamePrefs.aiimportancetransportcapacityweight;
+                        importance = SnapshotRules.TargetImportance(false, 0f, iip.GetTransportCapacity(), AtWar(iip.allianceowner, alliance),
+                            CampaignObjective.IsPartOfObjective(followed, null, iip), false,
+                            GamePrefs.aiimportancepopulation, GamePrefs.aiimportancetransportcapacityweight,
+                            GamePrefs.nonwarparticipantsobjectimportanceweighting, GamePrefs.aitownweightfactorobjective, GamePrefs.aiimportancevaluescapital);
                     }
                     else continue;
                     importance = Math.Max(0f, importance);
@@ -384,6 +417,35 @@ namespace WhiskeyRealism.Strategic.Planner
                 record.Importance01 = maxImportance > 0f ? RawImportance[i] / maxImportance : 0f;
                 s.Objectives[i] = record;
             }
+        }
+
+        // GameVars.alliance[holder].IsAtWarWith(faction alliance), the order vanilla tests (14917, 14958).
+        private static bool AtWar(int holder, int alliance)
+        {
+            var alliances = GameVars.alliance;
+            return alliances != null && holder >= 0 && holder < alliances.Length && alliances[holder].IsAtWarWith(alliance);
+        }
+
+        private static bool AlliedWith(int alliance, int other)
+        {
+            var alliances = GameVars.alliance;
+            return alliances != null && alliance >= 0 && alliance < alliances.Length && alliances[alliance].IsInAllianceWith(other);
+        }
+
+        // Vanilla adds the capital bonus at array index l for the capital of alliance l (14970-14976);
+        // the array is faction-indexed, so faction index f gets alliance f's capital (f = 0, 1).
+        private static bool IsCapitalOfIndex(Town town, int factionIndex)
+        {
+            var alliances = GameVars.alliance;
+            return factionIndex >= 0 && factionIndex < 2 && alliances != null && factionIndex < alliances.Length
+                && (UnityEngine.Object)alliances[factionIndex].capital == (UnityEngine.Object)town;
+        }
+
+        private static int FollowedObjective(object faction)
+        {
+            if (_followedField == null || _followedField.DeclaringType != faction.GetType())
+                _followedField = AccessTools.Field(faction.GetType(), "followedcampaignobjective");
+            return _followedField != null ? (int)_followedField.GetValue(faction) : -1;
         }
 
         private static void AddGarrison(UnityEngine.Object at, float strength)
@@ -501,6 +563,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 var record = new RailLineRecord
                 {
                     Index = i,
+                    AIipId = -1,
+                    BIipId = -1,
                     Startable = line.StartConstruction(alliance, checkonly: true),
                     UnderConstruction = line.constructionprogress > 0f && line.constructionprogress < 1f,
                     Progress = line.constructionprogress
@@ -532,11 +596,53 @@ namespace WhiskeyRealism.Strategic.Planner
                     record.AZ = pa.z;
                     record.BX = pb.x;
                     record.BZ = pb.z;
+                    record.AIipId = iips[a].GetInstanceID();
+                    record.BIipId = iips[b].GetInstanceID();
                 }
             }
         }
 
+        private static void ReadCrossings(CampaignSnapshot s)
+        {
+            var bfs = ResolveBattlefieldSetup();
+            var cells = (UnityEngine.Object)bfs != null ? bfs.rivercrossingpositions : null;
+            if (cells == null) return;
+            for (int i = 0; i < cells.Count; i++)
+                s.Crossings.Add(new CrossingRecord { X = cells[i].x, Z = cells[i].z });
+        }
+
+        // AICampaign's own lookup (11143).
+        private static BattlefieldSetup ResolveBattlefieldSetup()
+        {
+            if ((UnityEngine.Object)_bfs != null) return _bfs;
+            var go = GameObject.Find("GameController");
+            _bfs = (UnityEngine.Object)go != null ? go.GetComponent<BattlefieldSetup>() : null;
+            return _bfs;
+        }
+
+        // The four live attribute getters cost a parent-radius test each (61043-61101); one read per
+        // alliance per review day is enough (appointments execute after the snapshot).
         private static void ReadCommanders(CampaignSnapshot s, int alliance)
+        {
+            if (alliance < 0 || alliance >= CommanderCache.Length)
+            {
+                ReadCommandersLive(s, alliance);
+                return;
+            }
+            var cache = CommanderCache[alliance];
+            if (CommanderCacheDay[alliance] == s.DaySerial)
+            {
+                s.Commanders.AddRange(cache);
+                return;
+            }
+            cache.Clear();
+            CommanderCacheDay[alliance] = -1;
+            ReadCommandersLive(s, alliance);
+            cache.AddRange(s.Commanders);
+            CommanderCacheDay[alliance] = s.DaySerial;
+        }
+
+        private static void ReadCommandersLive(CampaignSnapshot s, int alliance)
         {
             var commanders = GameVars.commander;
             if (commanders == null) return;
