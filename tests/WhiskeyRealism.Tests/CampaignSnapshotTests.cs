@@ -728,36 +728,66 @@ internal static class CampaignSnapshotTests
 
     // Spec C5 / plan P1: while vanilla's job machine is paused (11368), every order-issuing step of
     // the coordinator's review is unreachable (BattleWriteGateTests style source pin).
+    // Sliced review (perf merge): the pause is captured with the day's inputs (ReviewDay
+    // .JobMachinePaused) and each order-issuing job tests it.
     private static void CoordinatorPauseGuardsOrderIssuingSteps()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string review = MethodBody(src, "private void RunStrategicReviewCore(");
-        foreach (string call in new[]
-        {
-            "Succession.CheckEvents(", "SwapOfficer(", "ReviewPlanWithTruth(", "cic.Replan(", "UpdateFrontLedger(",
-            "UpdateDefenseIntent(", "CampaignPlannerRuntime.ReviewExecute(", "UpdateFormationDirectiveLedger(",
-            "UpdateOperationalProbe(", "UpdateArmyAreaLedger(",
-        })
-            AssertGuardedByPause(review, call);
+        string cic = MethodBody(src, "private void RunCicReviewJob(");
+        foreach (string call in new[] { "Succession.CheckEvents(", "SwapOfficer(", "ReviewPlanWithTruth(", "cic.Replan(" })
+            AssertGuardedByPause(cic, call, "!d.JobMachinePaused");
+        foreach (string call in new[] { "UpdateCapitalThreat(", "PublishDirectorPosture(" })
+            AssertFalse(IsGuardedByPause(cic, cic.IndexOf(call, StringComparison.Ordinal), "!d.JobMachinePaused"), call + " keeps running during the pause");
 
+        string job = MethodBody(src, "private void RunReviewJob(");
+        AssertContains(job, "bool paused = d.JobMachinePaused;", "the day's pause");
+        // Each order-issuing case returns or skips while paused before its call.
+        foreach (var (kind, guard, call) in new[]
+        {
+            ("Front", "if (paused) break;", "UpdateFrontLedger("),
+            ("Defense", "if (!paused)", "UpdateDefenseIntent("),
+            ("Execute", "if (ready && !paused)", "CampaignPlannerRuntime.ReviewExecute("),
+            ("Formation", "if (!ready || paused) break;", "UpdateFormationDirectiveLedger("),
+            ("Probe", "if (ready && !paused)", "UpdateOperationalProbe("),
+            ("ArmyArea", "if (ready && !paused)", "UpdateArmyAreaLedger("),
+        })
+        {
+            string body = CaseBody(job, kind);
+            int g = body.IndexOf(guard, StringComparison.Ordinal);
+            int c = body.IndexOf(call, StringComparison.Ordinal);
+            AssertTrue(g >= 0 && c > g, kind + " job: " + call + " behind " + guard);
+        }
         // Bookkeeping that must keep running is not behind the pause.
-        foreach (string call in new[] { "CampaignPlannerRuntime.ReviewPlan(", "UpdateFiscalIntent(", "UpdateConstructionIntent(" })
-            AssertFalse(IsGuardedByPause(review, review.IndexOf(call, StringComparison.Ordinal)), call + " keeps running during the pause");
-        AssertContains(review, "UpdateConstructionIntent(alliance, era.Stage, logHeartbeat, jobMachinePaused)", "construction receives the pause");
+        foreach (var (kind, call) in new[] { ("Plan", "CampaignPlannerRuntime.ReviewPlan("), ("Fiscal", "UpdateFiscalIntent("), ("Construction", "UpdateConstructionIntent(") })
+        {
+            string body = CaseBody(job, kind);
+            AssertTrue(body.Contains(call) && !body.Contains("paused) break;") && !body.Contains("!paused"), call + " keeps running during the pause");
+        }
+        AssertContains(job, "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat, paused)", "construction receives the pause");
 
         // The telegraph start is an executor write (AddConstructionWish): guarded inside construction.
         string construction = MethodBody(src, "private void UpdateConstructionIntentCore(");
-        AssertGuardedByPause(construction, "TelegraphConstructionRuntime.TryStartTelegraph(");
+        AssertGuardedByPause(construction, "TelegraphConstructionRuntime.TryStartTelegraph(", "!jobMachinePaused");
+    }
+
+    private static string CaseBody(string job, string kind)
+    {
+        string label = "case DailyReviewJobKind." + kind + ":";
+        int start = job.IndexOf(label, StringComparison.Ordinal);
+        AssertTrue(start >= 0, "case present: " + kind);
+        int end = job.IndexOf("case DailyReviewJobKind.", start + label.Length, StringComparison.Ordinal);
+        return job.Substring(start, (end < 0 ? job.Length : end) - start);
     }
 
     private static void CoordinatorPauseGatesAreTheVanillaPredicates()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string review = MethodBody(src, "private void RunStrategicReviewCore(");
+        string review = MethodBody(src, "private bool BeginReviewDay(");
         AssertContains(review, "if (WlCareerNotStarted())", "the whole review defers only before a commander is chosen");
         AssertFalse(review.Contains("WlCareerStartPending()"), "the review no longer defers between commands");
         AssertContains(review, "bool jobMachinePaused = WlVanillaJobMachinePaused();", "pause read once per review");
-        AssertTrue(review.IndexOf("if (WlCareerNotStarted())", StringComparison.Ordinal) < review.IndexOf("for (int alliance = 0;", StringComparison.Ordinal), "early return before the alliance loop");
+        AssertContains(review, "JobMachinePaused = jobMachinePaused,", "captured with the day's inputs");
+        AssertTrue(review.IndexOf("if (WlCareerNotStarted())", StringComparison.Ordinal) < review.IndexOf("_review.Begin(", StringComparison.Ordinal), "early return before the day begins");
 
         string paused = MethodBody(src, "public static bool WlVanillaJobMachinePaused(");
         AssertContains(paused, "WlCareerStartGate.VanillaJobMachinePaused(active, DLC_WL.GetPlayerCommandHierarchy(), DLC_WL.IsCommanderInChief())", "11368 predicate with its CIC term");
@@ -784,22 +814,22 @@ internal static class CampaignSnapshotTests
         AssertContains(execute, "!= PlannerReviewMode.Full) return;", "executors run only in a full review");
     }
 
-    private static void AssertGuardedByPause(string body, string call)
+    private static void AssertGuardedByPause(string body, string call, string guard)
     {
         int at = body.IndexOf(call, StringComparison.Ordinal);
         AssertTrue(at >= 0, "call present: " + call);
         for (; at >= 0; at = body.IndexOf(call, at + call.Length, StringComparison.Ordinal))
-            AssertTrue(IsGuardedByPause(body, at), call + " is reachable while vanilla's job machine is paused");
+            AssertTrue(IsGuardedByPause(body, at, guard), call + " is reachable while vanilla's job machine is paused");
     }
 
-    // True when an enclosing block, or a brace-less if directly above, tests !jobMachinePaused.
-    private static bool IsGuardedByPause(string body, int at)
+    // True when an enclosing block, or a brace-less if directly above, tests the guard.
+    private static bool IsGuardedByPause(string body, int at, string guard)
     {
         int lineStart = body.LastIndexOf('\n', Math.Max(0, at - 1)) + 1;
         string before = body.Substring(0, lineStart).TrimEnd();
         int prevLineStart = before.LastIndexOf('\n') + 1;
         string previous = before.Substring(prevLineStart).Trim();
-        if (previous.StartsWith("if (") && !previous.EndsWith(";") && !previous.EndsWith("{") && previous.Contains("!jobMachinePaused"))
+        if (previous.StartsWith("if (") && !previous.EndsWith(";") && !previous.EndsWith("{") && previous.Contains(guard))
             return true;
 
         int depth = 0;
@@ -813,7 +843,7 @@ internal static class CampaignSnapshotTests
                 int headerEnd = body.LastIndexOf('\n', Math.Max(0, i - 1));
                 int headerStart = headerEnd > 0 ? body.LastIndexOf('\n', headerEnd - 1) + 1 : 0;
                 string header = body.Substring(headerStart, Math.Max(0, headerEnd - headerStart)).Trim();
-                if (header.StartsWith("if (") && header.Contains("!jobMachinePaused")) return true;
+                if (header.StartsWith("if (") && header.Contains(guard)) return true;
             }
         }
         return false;

@@ -38,12 +38,12 @@ namespace WhiskeyRealism.Strategic.Planner
     // known (G3 verify F3).
     //   Drain   the whole static question set (TerrainMemoDrain: every area-centre pair within
     //           ReviewTerrain.MaxProbedLine, every area centre at every own command range) is
-    //           prepared from each review's snapshot and drained by Plugin.Update a frame at a
-    //           time within the same budgets (DrainTick, segmenting long lines so no frame passes
+    //           prepared from each review's snapshot and drained a frame at a time by the
+    //           daily review's frame pump (StrategicCoordinator.PumpDailyReview, on campaign frames
+    //           with no review day in flight; DrainTick, segmenting long lines so no frame passes
     //           the CPU budget), only while GameController's BattleUnits
     //           is the campaign map's (IsCampaign, 78782); a battle map's terrain is never probed.
-    //           The review keeps its own budget as a fallback. When fix/perf-hot-paths' frame-budget
-    //           daily-review scheduler merges, the drain becomes a job of that scheduler.
+    //           The review keeps its own budget as a fallback.
     //   ReadMarchSpeed  the campaign speed terms of the march-time estimate (MarchSpeedInputs).
     internal sealed class TerrainLineRuntime : ITerrainLineSource
     {
@@ -137,7 +137,8 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // Plugin.Update, once a frame: drains the queue within one frame's budget on the campaign map.
+        // StrategicCoordinator.PumpDailyReview on a campaign frame with no review day in flight:
+        // drains the queue within one frame's budget on the campaign map.
         internal static void DrainTick()
         {
             if (Drain.Remaining == 0) return;

@@ -28,6 +28,13 @@ namespace WhiskeyRealism.Strategic
         public bool   AllowProbeOnly;
         public int    PhaseStartedDaySerial;
         public Phase  Fallback;
+
+        internal Phase Clone()
+        {
+            var copy = (Phase)MemberwiseClone();
+            copy.Fallback = Fallback?.Clone();
+            return copy;
+        }
     }
 
     public class OperationalPlan
@@ -52,5 +59,15 @@ namespace WhiskeyRealism.Strategic
 
         public Phase CurrentPhase
             => (CurrentPhaseIndex >= 0 && CurrentPhaseIndex < Phases.Count) ? Phases[CurrentPhaseIndex] : null;
+
+        internal OperationalPlan Clone()
+        {
+            var copy = (OperationalPlan)MemberwiseClone();
+            copy.Phases = new List<Phase>(Phases != null ? Phases.Count : 0);
+            if (Phases != null)
+                for (int i = 0; i < Phases.Count; i++)
+                    copy.Phases.Add(Phases[i]?.Clone());
+            return copy;
+        }
     }
 }

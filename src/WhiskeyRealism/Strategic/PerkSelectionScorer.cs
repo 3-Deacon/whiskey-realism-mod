@@ -68,13 +68,27 @@ namespace WhiskeyRealism.Strategic
         }
 
         // Vanilla AICampaign.CheckPerkSelection (decompile 11881/11888) draws
-        // Random.Range(0, Length / LevelsPerPerk - 1): int overload, exclusive upper
-        // bound, so the AI never receives the last perk id. Returns that exclusive
-        // upper bound (Random.Range(0, 0) yields 0, hence a single-perk table keeps id 0).
-        internal static int VanillaCandidateLimit(int perkCount)
+        // Random.Range(0, Length / LevelsPerPerk - 1): the int overload excludes its upper
+        // bound, so the AI never receives the last perk id (campaign 17 River Expedition,
+        // fleet 10 Port Defender). The battle pick (AIBattle.CheckPerkSelection 5429) uses
+        // array[Random.Range(0, array.Length)], every id, which is the intent (BUG-AI-011).
+        // Returns the exclusive upper bound of the candidate ids: every id with the fix on,
+        // vanilla's window with it off (Random.Range(0, 0) yields 0, hence a single-perk
+        // table keeps id 0).
+        internal static int CandidateLimit(int perkCount, bool includeLastId)
         {
             if (perkCount <= 0) return 0;
+            if (includeLastId) return perkCount;
             return perkCount == 1 ? 1 : perkCount - 1;
+        }
+
+        // Upper bound passed to Random.Range(0, bound) when Whiskey replays vanilla's random
+        // pick (the units Whiskey does not steer): perkCount with the fix on, vanilla's
+        // perkCount - 1 with it off.
+        internal static int RandomPickUpperBound(int perkCount, bool includeLastId)
+        {
+            if (perkCount <= 0) return 0;
+            return includeLastId ? perkCount : perkCount - 1;
         }
 
         // roll in [0, 1): 0 = always the best-scoring perk.
@@ -149,7 +163,7 @@ namespace WhiskeyRealism.Strategic
                 case 4: score += 0.9f; break;  // Skilled Cartographers
                 case 5: score += 1.0f; break;  // Flying Column
                 case 6: score += 0.9f; break;  // Foot Cavalry
-                case 7: score += 0.9f; break;  // Engineers & Mechanics
+                case 7: break;                 // Engineers & Mechanics: AI construction never reads it (BUG-AI-012)
                 case 8: score += 0.9f; break;  // Ambulance Corps
                 case 9: score += 0.8f; break;  // Pontoon Train
                 case 10: score += 1.1f; break; // Sappers and Miners
@@ -162,13 +176,23 @@ namespace WhiskeyRealism.Strategic
                 case 17: score += 0.7f; break; // River Expedition
             }
 
+            // Role bonuses go only to perks whose code effect serves the role (BUG-AI-012):
+            // Siege: 10 siege assault (Autocalc.FightUnit 21100, assault stance 0 only),
+            //   0 siege firepower (UpdateSiegeStrength 18340), 15 night siege/skirmish (21130,
+            //   either side), 17 siege assault (21108).
+            // River: 17 river speed (RegimentMove 133484), 9 creek crossing and supply speed.
+            // Recovery: 8 wounded speed/mortality, 9 supply speed (UpdateIIPSupplyLink 114146),
+            //   5 supplies carried (114165).
+            // CapitalDefense: a fort holder defends (CalculateStance 22449 -> stance 2), so
+            //   Sappers never fires; 11 defensive skirmish (21119) and enemy slow-down, 15 night
+            //   siege, 8, 1.
             switch (role)
             {
                 case ArmyPerkRole.Siege:
                     if (perk == 10) score += 4.0f;
                     if (perk == 0) score += 3.2f;
-                    if (perk == 9) score += 2.4f;
-                    if (perk == 7) score += 1.5f;
+                    if (perk == 15) score += 2.4f;
+                    if (perk == 17) score += 1.5f;
                     break;
                 case ArmyPerkRole.Raid:
                     if (perk == 12) score += 4.0f;
@@ -184,7 +208,7 @@ namespace WhiskeyRealism.Strategic
                     break;
                 case ArmyPerkRole.Recovery:
                     if (perk == 8) score += 3.0f;
-                    if (perk == 7) score += 2.2f;
+                    if (perk == 9) score += 2.2f;
                     if (perk == 5) score += 1.0f;
                     break;
                 case ArmyPerkRole.Scouting:
@@ -196,12 +220,10 @@ namespace WhiskeyRealism.Strategic
                 case ArmyPerkRole.River:
                     if (perk == 17) score += 3.4f;
                     if (perk == 9) score += 3.0f;
-                    if (perk == 10) score += 1.8f;
-                    if (perk == 3) score += 1.2f;
                     break;
                 case ArmyPerkRole.CapitalDefense:
                     if (perk == 11) score += 3.0f;
-                    if (perk == 10) score += 2.4f;
+                    if (perk == 15) score += 2.4f;
                     if (perk == 8) score += 2.0f;
                     if (perk == 1) score += 1.4f;
                     break;
@@ -210,7 +232,7 @@ namespace WhiskeyRealism.Strategic
             score += Math.Max(0f, personality.Audacity) * ((perk == 5 || perk == 6 || perk == 12 || perk == 13) ? 0.8f : 0f);
             score += Math.Max(0f, personality.Caution) * ((perk == 8 || perk == 11 || perk == 1) ? 0.6f : 0f);
 
-            if (theater == Theater.River && (perk == 17 || perk == 9 || perk == 10)) score += 1.2f;
+            if (theater == Theater.River && (perk == 17 || perk == 9)) score += 1.2f;
             if (theater == Theater.Coast && (perk == 0 || perk == 10 || perk == 15)) score += 0.8f;
             if (theater == Theater.East && (perk == 1 || perk == 3 || perk == 8)) score += 0.5f;
 

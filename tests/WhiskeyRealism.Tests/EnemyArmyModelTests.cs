@@ -849,10 +849,16 @@ internal static class EnemyArmyModelTests
         string beforeDetect = review.Substring(0, detect);
         AssertFalse(beforeDetect.Contains("PlannerReviewMode.StandDown") || beforeDetect.Contains("PlannerReviewMode.Bookkeeping"), "no mode return before detection");
 
+        // Sliced review (perf merge): the CIC job marks the CIC player's alliance PlayerCic, and that
+        // mode's Plan job runs the bookkeeping review.
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        int cicBranch = coordinator.IndexOf("if (operationalRuntimeReady && IsPlayerCICOf(alliance, playerAlliance))", StringComparison.Ordinal);
-        int next = coordinator.IndexOf("continue;", cicBranch, StringComparison.Ordinal);
-        AssertTrue(cicBranch >= 0 && coordinator.IndexOf("CampaignPlannerRuntime.ReviewPlan(", cicBranch, StringComparison.Ordinal) is int call && call > cicBranch && call < next,
+        string cicJob = MethodBody(coordinator, "private void RunCicReviewJob(");
+        int cicBranch = cicJob.IndexOf("if (operationalRuntimeReady && IsPlayerCICOf(alliance, d.PlayerAlliance))", StringComparison.Ordinal);
+        AssertTrue(cicBranch >= 0 && cicJob.IndexOf("a.Mode = AllianceReviewMode.PlayerCic;", cicBranch, StringComparison.Ordinal) > cicBranch, "the CIC player's alliance is reviewed as PlayerCic");
+        string job = MethodBody(coordinator, "private void RunReviewJob(");
+        int playerCic = job.IndexOf("if (a.Mode == AllianceReviewMode.PlayerCic)", StringComparison.Ordinal);
+        int next = job.IndexOf("return;", playerCic, StringComparison.Ordinal);
+        AssertTrue(playerCic >= 0 && job.IndexOf("CampaignPlannerRuntime.ReviewPlan(", playerCic, StringComparison.Ordinal) is int call && call > playerCic && call < next,
             "the CIC player's alliance gets its bookkeeping review");
 
         CampaignScope.ResetAll();
@@ -996,10 +1002,16 @@ internal static class EnemyArmyModelTests
         AssertContains(detectBody, "LastDaySerial[side] = s.DaySerial;", "stamped by each detection");
         AssertContains(planner, "CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),", "the snapshot day is the calendar day serial");
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        int serialAt = coordinator.IndexOf("int calendarDay = ReviewCadenceCatchUp.DaySerial(day, month, year);", StringComparison.Ordinal);
-        int stampAt = coordinator.IndexOf("EnemyDetectionRuntime.StampReviewDay(calendarDay);", StringComparison.Ordinal);
-        int loopAt = coordinator.IndexOf("for (int alliance = 0; alliance < 2; alliance++)", stampAt < 0 ? 0 : stampAt, StringComparison.Ordinal);
-        AssertTrue(serialAt >= 0 && stampAt > serialAt && loopAt > stampAt, "the calendar day is stamped once per review, before any alliance (also with the planner off)");
+        // Sliced review (perf merge): the calendar day is captured on the date-change frame and
+        // stamped by the first job (Map), before any alliance's jobs, whatever the readiness.
+        AssertContains(MethodBody(coordinator, "private bool BeginReviewDay("), "int calendarDay = ReviewCadenceCatchUp.DaySerial(day, month, year);", "calendar day captured with the day's inputs");
+        string reviewJob = MethodBody(coordinator, "private void RunReviewJob(");
+        int mapAt = reviewJob.IndexOf("if (job.Kind == DailyReviewJobKind.Map)", StringComparison.Ordinal);
+        int stampAt = reviewJob.IndexOf("EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);", StringComparison.Ordinal);
+        int readyAt = reviewJob.IndexOf("if (d.OperationalRuntimeReady)", StringComparison.Ordinal);
+        AssertTrue(mapAt >= 0 && stampAt > mapAt && readyAt > stampAt, "the calendar day is stamped once per review by the map job, before any alliance (also with the planner off)");
+        AssertEqual(DailyReviewJobKind.Map, DailyReviewJobList.Ordered[0].Kind, "the map job runs first");
+        AssertEqual(1, coordinator.Split(new[] { "EnemyDetectionRuntime.StampReviewDay(" }, StringSplitOptions.None).Length - 1, "one stamp");
         AssertContains(rollbackBodyOf(runtime), "int campaignDay = _reviewDay;", "the rollback is keyed by the calendar stamp");
         AssertContains(rollbackBodyOf(runtime), "int day = campaignDay;", "and dated by it");
         AssertFalse(CodeOnly(runtime).Contains("currenttimefromstart"), "no day from currenttimefromstart (30171: months are 1/12 year)");
@@ -1023,15 +1035,18 @@ internal static class EnemyArmyModelTests
     private static void ReviewDayScalesNeverMix()
     {
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string core = MethodBody(coordinator, "private void RunStrategicReviewCore(");
+        // Sliced review (perf merge): the day's inputs, the CIC job and the other jobs.
+        string core = MethodBody(coordinator, "private bool BeginReviewDay(") + MethodBody(coordinator, "private void RunCicReviewJob(")
+            + MethodBody(coordinator, "private void RunReviewJob(");
         AssertContains(core, "int calendarDay = ReviewCadenceCatchUp.DaySerial(day, month, year);", "the calendar day");
         AssertContains(core, "int legacySerial = year * 372 + month * 31 + day;", "the legacy serial");
         AssertContains(core, "UpdateCapitalThreat(alliance, legacySerial);", "capital threat streak: legacy (persisted)");
         AssertContains(core, "PublishDirectorPosture(alliance, cic, era, day, month, year, legacySerial);", "director LastFullRefreshDay: legacy (persisted)");
         AssertContains(core, "OperationMemories[alliance].RecordReplan(legacySerial);", "replan memory: legacy (persisted)");
-        AssertContains(core, "_frontChangedDay[alliance] = legacySerial;", "front change day: legacy");
-        AssertContains(core, "UpdatePolicyPlan(alliance, cicEra.Stage, calendarDay)", "CIC policy step: calendar");
-        AssertContains(core, "UpdatePolicyPlan(alliance, era.Stage, calendarDay)", "policy step: calendar");
+        AssertContains(core, "a.LegacySerial = legacySerial;", "the CIC job hands the legacy serial on");
+        AssertContains(core, "_frontChangedDay[alliance] = a.LegacySerial;", "front change day: legacy");
+        AssertContains(core, "CalendarDay = calendarDay,", "the day's calendar day");
+        AssertEqual(2, core.Split(new[] { "UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay)" }, StringSplitOptions.None).Length - 1, "CIC player and AI policy steps: calendar");
         AssertContains(core, "ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewCalendarDay, calendarDay)", "cadence: calendar");
         AssertContains(core, "ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewCalendarDay, calendarDay)", "cadence: calendar");
         AssertContains(MethodBody(coordinator, "private void UpdatePolicyPlanCore("),

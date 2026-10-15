@@ -42,9 +42,70 @@ namespace WhiskeyRealism.Patches
     //     14256 / 14298). The package's required attack and reinforce ratios get the same
     //     factor from the lead's commander (the CIC of the lead's own group, 14250; the
     //     14281 re-read is not reproduced). Rollback: Enable Experience And Drill AI Weighting.
+    //   - perf (F4): vanilla calls this once per UpdateUnitAI pass (11319-11321). The id ->
+    //     unit index over ownunits and the operation-list memberships are built once per
+    //     call (CoordinatedOffensiveScratch), the W&L chain context is captured once per
+    //     call, and the vanilla gate (14080) and GetClosestObjectivePosOfArea (14542) are
+    //     typed delegates bound once. Results are unchanged.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
     internal static class CoordinatedOffensiveOperationsPatch
     {
+        static CoordinatedOffensiveOperationsPatch()
+        {
+            CampaignScope.Register("coord-offensive-scratch", () => { Scratch.Clear(); Gate.End(); });
+        }
+
+        // Feeds CoordinatedOffensiveScratch.AssembleCandidates the per-unit checks of
+        // the old loop: vanilla's offensive-availability gate for the vanilla target,
+        // then the W&L bridge classification, with the chain context captured at the
+        // first classification of the call (where the old loop captured its first).
+        private sealed class CandidateGate : ICoordinatedCandidateGate
+        {
+            private int _allianceId;
+            private int _aifactionIndex;
+            private Vector3 _target;
+            private WlChainContext _chain;
+            private bool _chainCaptured;
+
+            internal void Begin(int allianceId, int aifactionIndex, Vector3 target)
+            {
+                _allianceId = allianceId;
+                _aifactionIndex = aifactionIndex;
+                _target = target;
+                _chain = default;
+                _chainCaptured = false;
+            }
+
+            public bool IsAvailable(Regiment unit)
+            {
+                // Same eligibility vanilla applies to every unit it adds (14246, 14268).
+                return OffensiveAvailabilityWrapper.IsAvailable(_aifactionIndex, unit, _target);
+            }
+
+            public CoordinatedCommitMode CommitMode(Regiment unit)
+            {
+                if (!_chainCaptured)
+                {
+                    _chain = WlChainContext.Capture();
+                    _chainCaptured = true;
+                }
+                return CoordinatedOperationRuntime.CommitModeFromBridge(
+                    WlStrategicOrderBridge.ClassifyOnly(in _chain, _allianceId, unit, WlStrategicIntent.Offensive));
+            }
+
+            // Drops the Regiment references the chain context holds.
+            internal void End()
+            {
+                _chain = default;
+                _chainCaptured = false;
+            }
+        }
+
+        // Main-thread scratch, filled and cleared within one Prefix call.
+        private static readonly CoordinatedOffensiveScratch Scratch = new CoordinatedOffensiveScratch();
+        private static readonly CandidateGate Gate = new CandidateGate();
+        private static readonly PackageFilterDecision NoPackage = new PackageFilterDecision();
+
         private sealed class Snapshot
         {
             internal readonly List<object> OwnUnits = new List<object>();
@@ -117,7 +178,7 @@ namespace WhiskeyRealism.Patches
                 ownUnits = GetOwnUnits(faction);
                 if (!VanillaWouldEvaluate(faction, ownUnits, unit, timediff)) return;
 
-                var decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit, faction);
+                var decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit);
                 if (!decision.PackageSelected) return;
 
                 var snapshot = new Snapshot
@@ -132,7 +193,7 @@ namespace WhiskeyRealism.Patches
                 // empty ownunits so vanilla early-returns (14200) instead of rolling
                 // again for the same target; the Finalizer restores the list. Silent -
                 // this fails most calls by design and runs per unit per job cycle.
-                var tempo = VanillaTempoVerdict(allianceId, decision, ownUnits, timediff);
+                var tempo = VanillaTempoVerdict(allianceId, decision, timediff);
                 if (tempo == TempoVerdict.Error) return; // vanilla runs unchanged
                 if (CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(tempo))
                 {
@@ -218,6 +279,11 @@ namespace WhiskeyRealism.Patches
                         "coord-offensive:no-snapshot",
                         "Patch CoordinatedOps prefix failed before snapshot; vanilla candidate list left unchanged");
                 }
+            }
+            finally
+            {
+                Scratch.Clear();
+                Gate.End();
             }
             } // end using TelemetryPerf.Scope
         }
@@ -331,65 +397,35 @@ namespace WhiskeyRealism.Patches
                     .WithField("support", decision?.Output?.SupportStableUnitIds != null ? decision.Output.SupportStableUnitIds.Count : 0));
         }
 
+        // Scratch.Offensive/Defensive/Depots were filled by VanillaWouldEvaluate on this call.
         private static PackageFilterDecision BuildAllowedSet(
             int allianceId,
             int aifactionIndex,
             IList ownUnits,
-            Regiment lead,
-            object faction)
+            Regiment lead)
         {
-            var decision = new PackageFilterDecision();
             var coordinator = StrategicCoordinator.Instance;
             if (coordinator?.FormationDirectives == null || allianceId >= coordinator.FormationDirectives.Length)
-                return decision;
+                return NoPackage;
 
             var ledger = coordinator.FormationDirectives[allianceId];
             if (ledger == null || ledger.Assignments == null || ledger.Assignments.Count == 0)
-                return decision;
+                return NoPackage;
 
-            var candidates = new List<CoordinatedOperationCandidate>();
-            var offensive = GetList(faction, "unitsinoffensiveoperations", _offensiveFields);
-            var defensive = GetList(faction, "unitsindefensiveoperations", _defensiveFields);
-            var depots = GetList(faction, "unitsconstructingsupplydepots", _depotFields);
             var leadAssignment = ledger.GetAssignment(UnitKey(lead));
             var vanillaTarget = ResolveVanillaOffensiveTarget(aifactionIndex, lead, out float targetEnemyWeight);
             if (!vanillaTarget.HasValue)
-                return decision;
+                return NoPackage;
             string targetName = CoordinatedOperationRuntime.ResolveTargetName(
                 -1,
                 leadAssignment?.AreaKey,
                 coordinator.CampaignMap,
                 vanillaTarget.Value);
 
-            for (int i = 0; i < ledger.Assignments.Count; i++)
-            {
-                var assignment = ledger.Assignments[i];
-                var unit = CoordinatedOperationRuntime.FindUnitById(ownUnits, assignment.StableUnitId);
-                if (unit == null) continue;
-                // Same eligibility vanilla applies to every unit it adds (14246, 14268).
-                if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, vanillaTarget.Value)) continue;
-
-                var bridgeDecision = WlStrategicOrderBridge.ClassifyOnly(new WlStrategicOrderRequest
-                {
-                    AllianceId = allianceId,
-                    AifactionIndex = aifactionIndex,
-                    Unit = unit,
-                    TargetPosition = vanillaTarget.Value,
-                    TargetName = targetName,
-                    ObjectiveId = -1,
-                    Intent = WlStrategicIntent.Offensive,
-                    Width = 20f,
-                    Depth = 20f,
-                    SourceSystem = "CoordinatedOffensive"
-                });
-
-                candidates.Add(CoordinatedOperationRuntime.CandidateFromAssignment(
-                    assignment,
-                    ListContains(offensive, unit),
-                    ListContains(defensive, unit),
-                    ListContains(depots, unit),
-                    CoordinatedOperationRuntime.CommitModeFromBridge(bridgeDecision)));
-            }
+            Scratch.Units.Index(ownUnits);
+            Gate.Begin(allianceId, aifactionIndex, vanillaTarget.Value);
+            Scratch.AssembleCandidates(ledger.Assignments, Gate);
+            var candidates = Scratch.Candidates;
 
             float targetStrength = Math.Max(1f, leadAssignment?.LocalEnemyStrength ?? lead.groupstrengthactive);
             var options = CoordinatedOperationOptions.StableDefaults(targetStrength)
@@ -414,8 +450,9 @@ namespace WhiskeyRealism.Patches
             if (output.Decision == CoordinatedOperationDecision.None ||
                 output.Decision == CoordinatedOperationDecision.Delay ||
                 output.Decision == CoordinatedOperationDecision.Recover)
-                return decision;
+                return NoPackage;
 
+            var decision = new PackageFilterDecision();
             decision.PackageSelected = true;
             decision.TargetEnemyWeight = targetEnemyWeight;
             decision.RequiredAttackRatio = options.RequiredAttackRatio;
@@ -462,11 +499,6 @@ namespace WhiskeyRealism.Patches
             return field?.GetValue(faction) as IList;
         }
 
-        private static bool ListContains(IList list, Regiment unit)
-        {
-            return list != null && unit != null && list.Contains(unit);
-        }
-
         private static string ListSignature(IList list)
         {
             if (list == null || list.Count == 0) return "-";
@@ -508,7 +540,7 @@ namespace WhiskeyRealism.Patches
         }
 
         private static bool _closestObjectivePosResolved;
-        private static MethodInfo _closestObjectivePos;
+        private static Func<Vector3, AICampaign.AIArea, int, bool, Vector3> _closestObjectivePos;
         private static bool _recruitingZonesFieldResolved;
         private static FieldInfo _recruitingZonesField;
         private static bool _bunitsFieldResolved;
@@ -550,19 +582,24 @@ namespace WhiskeyRealism.Patches
 
                 if (!_closestObjectivePosResolved)
                 {
+                    // Vanilla private static GetClosestObjectivePosOfArea (14542), bound once
+                    // to a typed delegate - no object[] or boxing per call.
                     _closestObjectivePosResolved = true;
-                    _closestObjectivePos = AccessTools.Method(
+                    var method = AccessTools.Method(
                         typeof(AICampaign),
                         "GetClosestObjectivePosOfArea",
                         new[] { typeof(Vector3), typeof(AICampaign.AIArea), typeof(int), typeof(bool) });
+                    if (method != null)
+                        _closestObjectivePos = (Func<Vector3, AICampaign.AIArea, int, bool, Vector3>)Delegate.CreateDelegate(
+                            typeof(Func<Vector3, AICampaign.AIArea, int, bool, Vector3>), method, throwOnBindFailure: false);
                     if (_closestObjectivePos == null)
                         OnceLog.Warning("coordinated-ops:offensive:target-method",
-                            "Patch CoordinatedOps: AICampaign.GetClosestObjectivePosOfArea not found");
+                            "Patch CoordinatedOps: AICampaign.GetClosestObjectivePosOfArea not found or not bindable");
                 }
                 if (_closestObjectivePos == null) return null;
 
-                var result = _closestObjectivePos.Invoke(null, new object[] { lead.GetPosition(), targetArea, aifactionIndex, true });
-                if (!(result is Vector3 target) || target == default(Vector3)) return null;
+                var target = _closestObjectivePos(lead.GetPosition(), targetArea, aifactionIndex, true);
+                if (target == default(Vector3)) return null;
                 return target;
             }
             catch (Exception ex)
@@ -585,19 +622,31 @@ namespace WhiskeyRealism.Patches
             return values != null && index >= 0 && index < values.Length;
         }
 
+        // The cheap gates run first (with no lead in any list the pure gate reduces to
+        // them, and it can only get stricter); the three operation lists are indexed only
+        // when those pass, and BuildAllowedSet reuses the index for the candidate loop.
         private static bool VanillaWouldEvaluate(object faction, IList ownUnits, Regiment lead, float timediff)
         {
             bool leadPresent = (UnityEngine.Object)(object)lead != (UnityEngine.Object)null;
             bool leadActive = leadPresent && ((Component)lead).gameObject.activeInHierarchy;
+            int ownUnitCount = ownUnits?.Count ?? 0;
+            bool recruitingZonesUpdated = ReadRecruitingZonesUpdated(faction);
+            if (!CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(
+                    ownUnitCount, timediff, leadPresent, leadActive, recruitingZonesUpdated, false, false, false))
+                return false;
+
+            Scratch.Offensive.Fill(GetList(faction, "unitsinoffensiveoperations", _offensiveFields));
+            Scratch.Defensive.Fill(GetList(faction, "unitsindefensiveoperations", _defensiveFields));
+            Scratch.Depots.Fill(GetList(faction, "unitsconstructingsupplydepots", _depotFields));
             return CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(
-                ownUnits?.Count ?? 0,
+                ownUnitCount,
                 timediff,
                 leadPresent,
                 leadActive,
-                ReadRecruitingZonesUpdated(faction),
-                leadPresent && ListContains(GetList(faction, "unitsinoffensiveoperations", _offensiveFields), lead),
-                leadPresent && ListContains(GetList(faction, "unitsindefensiveoperations", _defensiveFields), lead),
-                leadPresent && ListContains(GetList(faction, "unitsconstructingsupplydepots", _depotFields), lead));
+                recruitingZonesUpdated,
+                Scratch.Offensive.Contains(lead),
+                Scratch.Defensive.Contains(lead),
+                Scratch.Depots.Contains(lead));
         }
 
         private static bool ReadRecruitingZonesUpdated(object faction)
@@ -617,7 +666,7 @@ namespace WhiskeyRealism.Patches
 
         // Vanilla tempo roll (14316-14350): applied when the objective position lies
         // in a state of another alliance and the target area's num2 (14230) > 0.
-        private static TempoVerdict VanillaTempoVerdict(int allianceId, PackageFilterDecision decision, IList ownUnits, float timediff)
+        private static TempoVerdict VanillaTempoVerdict(int allianceId, PackageFilterDecision decision, float timediff)
         {
             try
             {
@@ -644,7 +693,7 @@ namespace WhiskeyRealism.Patches
                     factionAggression,
                     GameVars.usedcampaignagressiveness,
                     WinterModifier(),
-                    date - AverageTimeOfNotMoving(decision.Output, ownUnits),
+                    date - AverageTimeOfNotMoving(decision.Output, Scratch.Units),
                     DLC_WL.dlc_scenarioactive,
                     GamePrefs.dlcwl_careerincreasedaggressiveness,
                     PackageContainsPlayerGroup(decision.Output));
@@ -694,15 +743,17 @@ namespace WhiskeyRealism.Patches
                 GamePrefs.winterdefensiveoperationsmodifier);
         }
 
-        private static float AverageTimeOfNotMoving(CoordinatedOperationOutput output, IList ownUnits)
+        // units: this call's ownunits index (built by BuildAllowedSet; ownunits is unchanged
+        // until the Prefix empties it after the roll).
+        private static float AverageTimeOfNotMoving(CoordinatedOperationOutput output, RegimentIdIndex units)
         {
             float sum = 0f;
             int count = 0;
-            var lead = CoordinatedOperationRuntime.FindUnitById(ownUnits, output.LeadStableUnitId);
+            var lead = units.FindUnitById(output.LeadStableUnitId);
             if (lead != null) { sum += lead.timeofnotmoving; count++; }
             for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
             {
-                var support = CoordinatedOperationRuntime.FindUnitById(ownUnits, output.SupportStableUnitIds[i]);
+                var support = units.FindUnitById(output.SupportStableUnitIds[i]);
                 if (support == null) continue;
                 sum += support.timeofnotmoving;
                 count++;

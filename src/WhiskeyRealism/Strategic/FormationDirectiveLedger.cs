@@ -40,6 +40,8 @@ namespace WhiskeyRealism.Strategic
         public bool DirectMovementAllowed;
         public bool InheritsFromParent;
         public string ParentUnitKey;
+
+        internal FormationDirectiveAssignment Copy() => (FormationDirectiveAssignment)MemberwiseClone();
     }
 
     public sealed class FormationPressureSummary
@@ -50,6 +52,8 @@ namespace WhiskeyRealism.Strategic
         public int GuardCount;
         public int MassCount;
         public string TopSupplyAreaKey;
+
+        internal FormationPressureSummary Copy() => (FormationPressureSummary)MemberwiseClone();
     }
 
     public sealed class FormationDirectiveLedger
@@ -118,6 +122,18 @@ namespace WhiskeyRealism.Strategic
 
             ledger.RecomputePressure();
             return ledger;
+        }
+
+        // Copy for StrategicLedgerSet.PublishFrom: the assignments and the pressure summary are
+        // copied, so the probe overlay (ApplyOperationalProbe) on the working ledger never
+        // reaches the published one.
+        public FormationDirectiveLedger Clone()
+        {
+            var copy = new FormationDirectiveLedger();
+            for (int i = 0; i < _ordered.Count; i++)
+                copy.Add(_ordered[i].Copy());
+            copy.Pressure = Pressure?.Copy();
+            return copy;
         }
 
         public FormationDirectiveAssignment GetAssignment(string unitKey)

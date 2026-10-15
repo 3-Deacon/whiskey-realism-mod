@@ -642,30 +642,34 @@ internal static class TelemetryPipelineTests
         AssertFalse(traceBudget.Allow(TelemetryCategory.Trace, 20), "trace cuts above 90 percent");
         AssertTrue(traceBudget.Allow(TelemetryCategory.State, 20), "state survives trace cutoff");
 
-        // Same order as TelemetryQueue.Rank: Performance rows go after Trace and before
-        // State/Decision, so a full budget keeps doctrine rows over perf samples.
-        var perfBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
-        perfBudget.RecordBytes(TelemetryCategory.Performance, 925);
-        AssertFalse(perfBudget.Allow(TelemetryCategory.Performance, 20), "performance cuts above 93 percent");
-        AssertTrue(perfBudget.Allow(TelemetryCategory.State, 20), "state survives performance cutoff");
-        AssertTrue(perfBudget.Allow(TelemetryCategory.Decision, 20), "decision survives performance cutoff");
-        AssertTrue(perfBudget.Allow(TelemetryCategory.Performance, 20, lowPriority: true, protectedSummary: true), "performance summary stays in the protected reserve");
-
+        // Same order as TelemetryQueue.Rank (B6): Trace first, then Info rows by category
+        // (State 93, Decision 95, Gate/Write 98); Performance and Warning rows only at the
+        // total cap.
         var stateBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
-        stateBudget.RecordBytes(TelemetryCategory.State, 940);
-        AssertFalse(stateBudget.Allow(TelemetryCategory.State, 20), "state cuts above 95 percent");
+        stateBudget.RecordBytes(TelemetryCategory.State, 915);
+        AssertFalse(stateBudget.Allow(TelemetryCategory.State, 20), "state info cuts above 93 percent");
         AssertTrue(stateBudget.Allow(TelemetryCategory.Decision, 20), "decision survives state cutoff");
+        AssertTrue(stateBudget.Allow(TelemetryCategory.Performance, 20), "performance survives state cutoff");
+        AssertTrue(stateBudget.Allow(TelemetryCategory.State, 20, lowPriority: true, protectedSummary: false, severity: TelemetrySeverity.Warning), "state warning survives state cutoff");
 
         var decisionBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
-        decisionBudget.RecordBytes(TelemetryCategory.Decision, 970);
-        AssertFalse(decisionBudget.Allow(TelemetryCategory.Decision, 20), "decision cuts above 98 percent");
+        decisionBudget.RecordBytes(TelemetryCategory.Decision, 935);
+        AssertFalse(decisionBudget.Allow(TelemetryCategory.Decision, 20), "decision info cuts above 95 percent");
         AssertTrue(decisionBudget.Allow(TelemetryCategory.Gate, 20), "gate survives decision cutoff");
         AssertTrue(decisionBudget.Allow(TelemetryCategory.Write, 20), "write survives decision cutoff");
 
+        var writeBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        writeBudget.RecordBytes(TelemetryCategory.Write, 965);
+        AssertFalse(writeBudget.Allow(TelemetryCategory.Gate, 20), "gate info cuts above 98 percent");
+        AssertFalse(writeBudget.Allow(TelemetryCategory.Write, 20), "write info cuts above 98 percent");
+        AssertTrue(writeBudget.Allow(TelemetryCategory.Performance, 20), "performance survives every info cut");
+        AssertTrue(writeBudget.Allow(TelemetryCategory.Trace, 20, lowPriority: true, protectedSummary: false, severity: TelemetrySeverity.Warning), "a warning row survives every info cut");
+        AssertTrue(writeBudget.Allow(TelemetryCategory.Performance, 20, lowPriority: true, protectedSummary: true), "performance summary stays in the protected reserve");
+
         var gateBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
         gateBudget.RecordBytes(TelemetryCategory.Gate, 990);
-        AssertFalse(gateBudget.Allow(TelemetryCategory.Gate, 20), "gate cuts above total cap");
-        AssertFalse(gateBudget.Allow(TelemetryCategory.Write, 20), "write cuts above total cap");
+        AssertFalse(gateBudget.Allow(TelemetryCategory.Gate, 20, lowPriority: true, protectedSummary: false, severity: TelemetrySeverity.Warning), "gate warning cuts above total cap");
+        AssertFalse(gateBudget.Allow(TelemetryCategory.Performance, 20), "performance cuts above total cap");
         AssertTrue(gateBudget.Allow(TelemetryCategory.Failure, 20, lowPriority: true, protectedSummary: true), "failure summary protected above total cap");
         AssertTrue(gateBudget.Allow(TelemetryCategory.Health, 20, lowPriority: true, protectedSummary: true), "health summary protected above total cap");
     }
@@ -815,19 +819,19 @@ internal static class TelemetryPipelineTests
             "Allow",
             BindingFlags.Instance | BindingFlags.NonPublic,
             null,
-            new[] { typeof(TelemetryCategory), typeof(long), typeof(bool), typeof(bool) },
+            new[] { typeof(TelemetryCategory), typeof(long), typeof(bool), typeof(bool), typeof(TelemetrySeverity) },
             null);
         AssertTrue(overload != null, "protected summary overload exists");
 
         var failureBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
         failureBudget.RecordBytes(TelemetryCategory.Write, 1000);
         AssertFalse(failureBudget.Allow(TelemetryCategory.Failure, 1), "raw failure detail capped by total bytes");
-        AssertTrue((bool)overload.Invoke(failureBudget, new object[] { TelemetryCategory.Failure, 1L, true, true }), "failure summary allowed past cap");
+        AssertTrue((bool)overload.Invoke(failureBudget, new object[] { TelemetryCategory.Failure, 1L, true, true, TelemetrySeverity.Info }), "failure summary allowed past cap");
 
         var healthBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
         healthBudget.RecordBytes(TelemetryCategory.Write, 1001);
-        AssertFalse((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, false }), "raw health detail capped past total bytes");
-        AssertTrue((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, true }), "health summary allowed past cap");
+        AssertFalse((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, false, TelemetrySeverity.Info }), "raw health detail capped past total bytes");
+        AssertTrue((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, true, TelemetrySeverity.Info }), "health summary allowed past cap");
     }
 
     private static void TelemetryBudgetBoundsProtectedSummaryReserve()

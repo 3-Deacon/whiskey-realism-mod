@@ -52,7 +52,11 @@ namespace WhiskeyRealism.Patches
                 // (the review narrows itself while vanilla's job machine is paused, 11368).
                 bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerNotStarted();
                 if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
+                {
+                    // Continue a time-sliced daily review started on an earlier frame.
+                    StrategicCoordinator.Instance?.PumpDailyReview();
                     return;
+                }
 
                 _lastNotifiedDay = day;
                 _lastNotifiedMonth = month;

@@ -118,7 +118,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
         public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiCampPlacementBudget;
+        public static ConfigEntry<int> FoggedAiCampPlacementsPerFrame;
         public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableHiddenTransportFlagDeferral;
         public static ConfigEntry<bool> EnableOrphanCampCleanup;
         public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
         public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
@@ -127,18 +130,34 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
+        public static ConfigEntry<bool> ReuseCampaignAiUnitList;
+        public static ConfigEntry<bool> SkipDeadWlUnitNameRead;
+        public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
+        public static ConfigEntry<bool> EnableCombineWeaponStockFix;
+        public static ConfigEntry<bool> EnableAiWeaponPurchaseOrderableFix;
+        public static ConfigEntry<bool> EnableGroupWeaponStrengthGuard;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetScopeFix;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetPrestigeGateFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> EnableCampaignPlanner;
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
+        internal static ConfigEntry<bool> FixAiPerkPickRange;
+        internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
+        internal static ConfigEntry<bool> FixEngineerBranchBonus;
+        internal static ConfigEntry<bool> FixGoodGroundCoverCap;
+        internal static ConfigEntry<bool> FixAutoresolveEntrenchmentSide;
+        internal static ConfigEntry<bool> FixPlayerEntrenchmentPoints;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
         internal ConfigEntry<int> FastForwardAi50xExtraPasses;
         internal ConfigEntry<float> FastForwardAiSlowFrameThresholdMs;
         internal ConfigEntry<int> FastForwardAiSlowFrameCooldownFrames;
+        internal ConfigEntry<bool> TimeSliceDailyReview;
+        internal ConfigEntry<float> DailyReviewFrameBudgetMs;
         internal ConfigEntry<bool> CampaignAiGovernorEnabled;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses20x;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
@@ -370,6 +389,14 @@ namespace WhiskeyRealism
                 "player-owned groups never feud-move. The orchestrator direct-child gate may deny the move. Without a battle snapshot for the " +
                 "side it fails closed: vanilla's move goes out directly only where the write guard allows it. Needs Tactical Commander Mode = " +
                 "Active. Off: vanilla feud movement runs unmodified and the direct-child gate is skipped. (The key name is kept for existing cfg files.)");
+            FixGoodGroundCoverCap = Config.Bind(
+                "W&L",
+                "Fix Good Ground Cover Cap",
+                true,
+                "Default ON. W&L incident 'A Good Ground' doubles the cover of the player's command with no ceiling, so behind " +
+                "parapets cover reaches 1.0 or more and the units take no ranged losses at all. With this on the doubled cover is " +
+                "capped at 0.9 (ranged losses never below 10%); below that the incident keeps its full doubling, and a unit never ends " +
+                "below its cover without the incident. Set false for rollback to vanilla.");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -439,6 +466,13 @@ namespace WhiskeyRealism
                 "resupply). Left vanilla because their texts promise something else: the attrition values of Harsh Punishments, Ample " +
                 "Rewards and Purge, and the prestige values on items, injuries and one career event; three companions' rank values use a " +
                 "quality type vanilla has no meaning for. Off: vanilla.");
+            FixPlayerEntrenchmentPoints = Config.Bind(
+                "Tactical",
+                "Fix Player Entrenchment Points",
+                true,
+                "Default ON. At battle start the player's engineering points get a bonus for the army's campaign entrenchment, " +
+                "but vanilla multiplies it by the entrenchment level twice, so the player gets less than the AI for the same works " +
+                "(the AI's bonus is linear). With this on the player's bonus is linear too. Set false for rollback to vanilla.");
             EnableBattleEntrenchmentAverageFix = Config.Bind(
                 "Tactical",
                 "Enable Battle Entrenchment Average Fix",
@@ -867,9 +901,18 @@ namespace WhiskeyRealism
             EnableFoggedAiCampFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
                 "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiCampPlacementBudget = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Camp Placement Budget", true,
+                "Default ON. With the Fogged AI Camp Fix, hidden AI armies that halted for the night all reach vanilla's camp time in the same few seconds, and each camp placement fits its model to the ground. A hidden AI unit without a camp places one only while this frame's placement budget ('Fogged AI Camp Placements Per Frame') has room; the others place theirs on a later regular cycle (vanilla re-checks each unit every 25 frames). Each unit still gets its camp as in vanilla; only the moment is spread. Units that already have a camp are never deferred. Off: every hidden AI camp is placed on the first cycle it qualifies.");
+            FoggedAiCampPlacementsPerFrame = Config.Bind(
+                "Campaign Bug Fixes", "Fogged AI Camp Placements Per Frame", 2,
+                "Default 2. Most new camps placed per frame for AI units the player cannot see, when 'Enable Fogged AI Camp Placement Budget' is on. A value below 1 counts as 1.");
             EnableFoggedAiEmbarkationFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
                 "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableHiddenTransportFlagDeferral = Config.Bind(
+                "Campaign Bug Fixes", "Enable Hidden Transport Flag Deferral", true,
+                "Default ON. With the Fogged AI Embarkation Fix, a transport model created for an AI unit the player cannot see is hidden at once, yet vanilla still sets up its flag (texture loads and a material copy the model's removal does not free). That setup is skipped for such a model and run when the model is shown, which is when vanilla itself would have created it; a model removed while hidden never sets its flag up. Off: the flag is set up when the model is created (models already deferred still set theirs up when shown).");
             EnableOrphanCampCleanup = Config.Bind(
                 "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
                 "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");
@@ -894,6 +937,25 @@ namespace WhiskeyRealism
             EnableConfiscationSupplyFlowFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
                 "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
+            // Armament vanilla bug fixes (docs/bug-fixes/vanilla-armament.md).
+            EnableAutoresolveStandardGunFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Autoresolve Standard Gun Fix", true,
+                "Default ON. In vanilla autoresolve a battery armed with weapon id 0, the 6-pounder Field Gun that every campaign issues as its standard artillery, inflicts no casualties: Autocalc.FightUnit only counts weapon ids above 0. A narrow IL rewrite (left as vanilla if the code pattern is not found) counts id 0 as armed, for every side including the W&L player; this flag switches it live. Off: vanilla.");
+            EnableCombineWeaponStockFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable Combine Weapon Stock Fix", true,
+                "Default ON. When two units merge, vanilla's weapon-stock bookkeeping counts a battery's men as guns (100-240 phantom guns per merge when the target's model is short), returns a partly merged battery's whole gun count, draws more guns than the target gains (downgrading it to the standard gun when that count is short), and adds a standard-armed target's whole holding to stock before re-arming it with the same model. The stock is set to the correct count (guns for batteries, men otherwise; only what changes hands) and the target keeps its model whenever the stock covers what it gains; a real shortfall still re-arms it with the standard weapon, as vanilla does. Every side, W&L player merges included. Off: vanilla.");
+            EnableAiWeaponPurchaseOrderableFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Weapon Purchase Orderable Fix", true,
+                "Default ON. Vanilla AI weapon purchasing may order models it has researched but does not produce or import (Gatling, Coffee Mill and Williams Gun), which the player's order screen refuses; it pays the whole order up front for a delivery of up to two years. The AI now orders only models the order screen allows for its own alliance (researched and produced, or imported), choosing among them as vanilla does; units still receive the machine guns the projects stock. Every side, including the AI buying for the W&L player's alliance. Off: vanilla.");
+            EnableGroupWeaponStrengthGuard = Config.Bind(
+                "Campaign Bug Fixes", "Enable Group Weapon Strength Guard", true,
+                "Default ON. Vanilla's group weapon factor divides by the group's armed men with no zero check, so a group with no armed men returns NaN, which corrupts the campaign AI's area weapon averages and offensive outgunned tests. Such a group gets weapon factor 0. Off: vanilla.");
+            EnableWlWeaponBudgetScopeFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Scope Fix", true,
+                "Default ON. Vanilla subtracts every alliance's weapon orders, the enemy's included, from the W&L career player's federal weapon budget. Only orders of the player's own alliance (his own, or the AI's for his alliance) spend it now. Off: vanilla.");
+            EnableWlWeaponBudgetPrestigeGateFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Prestige Gate Fix", true,
+                "Default ON. Buying weapon budget as commander-in-chief costs 500 prestige, but vanilla only checks that prestige is at least -500, so it can be bought into negative prestige. The purchase now needs the prestige to pay for it; the charge is vanilla's. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
@@ -928,6 +990,30 @@ namespace WhiskeyRealism
                 "appointment pool and rank rules) on its main-effort commands, at most one appointment a day; the historical succession events add a " +
                 "bonus when their conditions hold; appointees are shielded from vanilla's job-24 swap for 60 days. Never appoints or displaces the W&L " +
                 "player or his officers, and never changes a command that holds the player's. OFF = vanilla job 24 only and no succession swaps.");
+            FixAiPerkPickRange = Config.Bind(
+                "Campaign", "Fix AI Perk Pick Range", true,
+                "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +
+                "and no AI fleet Port Defender. With this on every perk id is a candidate, both for Whiskey's role-aware pick and for the " +
+                "plain random pick vanilla makes where Whiskey does not steer (a W&L commander-in-chief's own alliance, Europe). Set false " +
+                "for rollback to vanilla.");
+            FixPontoonTrainCreekSpeed = Config.Bind(
+                "Campaign", "Fix Pontoon Train Creek Speed", true,
+                "Default ON. Pontoon Train promises +25/50/75% movement speed across small rivers; vanilla only lowers the creek path cost " +
+                "(x0.75/0.5/0.25), so armies route through creeks they still cross at normal creek speed. With this on a division, corps, " +
+                "army or army group with the perk (or under an army that has it) crosses creeks 1.25/1.5/1.75 times as fast, and its creek " +
+                "path cost is 1/1.25, 1/1.5, 1/1.75 so routes are chosen by real travel time. Every side, including the W&L player. Set " +
+                "false for rollback to vanilla.");
+            FixAutoresolveEntrenchmentSide = Config.Bind(
+                "Campaign", "Fix Autoresolve Entrenchment Side", true,
+                "Default ON. In an autoresolved battle a defending side's entrenchments reduce the fire it takes, but vanilla always " +
+                "reads side 1's engineering points, so when side 0 defends it is protected by its attacker's works. With this on each " +
+                "defending side uses its own engineering points. Set false for rollback to vanilla.");
+            FixEngineerBranchBonus = Config.Bind(
+                "Campaign", "Fix Engineer Branch Bonus", true,
+                "Default ON. The engineering-point bonus for an engineer regiment whose commander is an engineer officer (unitprefs " +
+                "'if commander fits to branch of arms (engineers)', x1.5) tests the navy branch in vanilla, so no engineer officer " +
+                "(Lee, McClellan, Meade, a W&L Engineer) ever gets it. With this on the bonus goes to engineer-branch commanders, in " +
+                "battle deployment and in autoresolve. Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
@@ -946,6 +1032,17 @@ namespace WhiskeyRealism
             FastForwardAiSlowFrameCooldownFrames = Config.Bind(
                 "Performance", "Fast Forward AI Slow Frame Cooldown Frames", 180,
                 "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
+            TimeSliceDailyReview = Config.Bind(
+                "Performance", "Time-Slice Daily Review", true,
+                "Default ON. Spreads the daily strategic review (campaign map, then per alliance the CIC review and every ledger) over a few " +
+                "frames as an ordered job list, using at most Daily Review Frame Budget Ms plus one job per frame, instead of running it all " +
+                "on the frame the date changes. Jobs keep their order and inputs; vanilla state they read (unit positions, strengths, " +
+                "treasury) is read when each job runs, a few frames after the date change. Patches keep seeing the previous day's complete " +
+                "results until the whole review finishes, then the new day is published at once. Set false for rollback to the single-frame review.");
+            DailyReviewFrameBudgetMs = Config.Bind(
+                "Performance", "Daily Review Frame Budget Ms", 4f,
+                "Wall-clock milliseconds per frame the time-sliced daily strategic review may use before it continues on the next frame; " +
+                "every frame runs at least one review job. Default 4.");
             CampaignAiGovernorEnabled = Config.Bind(
                 "Performance", "Campaign AI Governor Enabled", true,
                 "Default ON. Replaces vanilla AICampaign.Update high-speed pass scheduling with a bounded wrapper that preserves vanilla side effects.");
@@ -969,6 +1066,14 @@ namespace WhiskeyRealism
                 3f,
                 "Wall-clock milliseconds per AICampaign.Update frame above which the governor stops running passes beyond the guaranteed ones, " +
                 "unless the owed backlog forces catch-up. Default 3.");
+            ReuseCampaignAiUnitList = Config.Bind(
+                "Performance", "Reuse Campaign AI Unit List", true,
+                "Default ON. Every vanilla AICampaign.UpdateUnitAI pass copies the whole campaign unit list into a new list it only reads (8 bytes per unit per pass; the governor and fast-forward catch-up add passes). " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) refills one reused list with the same units in the same order instead; this flag switches it live. Off: vanilla.");
+            SkipDeadWlUnitNameRead = Config.Bind(
+                "Performance", "Skip Dead W&L Unit Name Read", true,
+                "Default ON. In a W&L career vanilla BattleUnits.IsUnitUnderCommander reads the unit's name and discards the comparison on every call (about 90-100 calls per frame), allocating a string each time. " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) skips the read; no result changes. This flag switches it live. Off: vanilla.");
             EnableWlCampAccountingFix = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Accounting Fix", true,
                 "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");
@@ -1060,10 +1165,9 @@ namespace WhiskeyRealism
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
         }
 
-        // Per-frame hitch probe for the telemetry sidecar, one doctrine clock
+        // Per-frame hitch probe for the telemetry sidecar, and one doctrine clock
         // sample per frame so the clock sees every end-of-day frame even when no
-        // doctrine reader runs overnight (a sample is skipped off the battle map),
-        // and the campaign planner's terrain memo drain (campaign map only).
+        // doctrine reader runs overnight (a sample is skipped off the battle map).
         // Neither throws, but a Unity message must not either, so the guard stays.
         private void Update()
         {
@@ -1072,7 +1176,6 @@ namespace WhiskeyRealism
                 if (Enabled == null || !Enabled.Value) return;
                 WhiskeyRealism.Telemetry.TelemetryFrameProbe.Tick(UnityEngine.Time.unscaledDeltaTime);
                 WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.SampleDoctrineClock();
-                WhiskeyRealism.Strategic.Planner.TerrainLineRuntime.DrainTick();
             }
             catch
             {

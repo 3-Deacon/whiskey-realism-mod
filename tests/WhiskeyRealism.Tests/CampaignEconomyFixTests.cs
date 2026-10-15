@@ -788,13 +788,14 @@ internal static class CampaignEconomyFixTests
     // Vanilla AICampaign.CheckPerkSelection (decompile 11871-11891) calls
     // ChoosePerk(Random.Range(0, Length/3 - 1)); the int overload's upper bound is
     // exclusive, so the AI never picks the last perk (LevelsPerPerk = 3, 208648).
+    // With the fix off the candidate window stays vanilla's (BUG-AI-011).
 
     private static void PerkCandidateWindowMatchesVanillaRandomRange()
     {
-        TestHarness.AssertEqual(17, PerkSelectionScorer.VanillaCandidateLimit(18), "18 army perks => ids 0..16");
-        TestHarness.AssertEqual(10, PerkSelectionScorer.VanillaCandidateLimit(11), "11 fleet perks => ids 0..9");
-        TestHarness.AssertEqual(1, PerkSelectionScorer.VanillaCandidateLimit(1), "Random.Range(0,0) returns 0");
-        TestHarness.AssertEqual(0, PerkSelectionScorer.VanillaCandidateLimit(0), "no perks");
+        TestHarness.AssertEqual(17, PerkSelectionScorer.CandidateLimit(18, false), "18 army perks => ids 0..16");
+        TestHarness.AssertEqual(10, PerkSelectionScorer.CandidateLimit(11, false), "11 fleet perks => ids 0..9");
+        TestHarness.AssertEqual(1, PerkSelectionScorer.CandidateLimit(1, false), "Random.Range(0,0) returns 0");
+        TestHarness.AssertEqual(0, PerkSelectionScorer.CandidateLimit(0, false), "no perks");
         LogPass("c2b perk candidate window matches vanilla random range");
     }
 

@@ -1273,12 +1273,18 @@ internal static class TheaterPlannerTests
         AssertNear(20000f, c.Mass, 0.01f, "the capital guard is not massable");
     }
 
-    // The drain runs from Plugin.Update on the campaign map, is prepared by each review and reset
+    // The drain runs from the daily review's frame pump on the campaign map, is prepared by each review and reset
     // per campaign.
     private static void TerrainDrainWiringPinned()
     {
+        // A client of the daily review's frame pump (fix/perf-hot-paths scheduler): it drains on a
+        // campaign frame with no review day in flight, never from Plugin.Update.
         string plugin = ReadRepoFile("src/WhiskeyRealism/Plugin.cs");
-        AssertContains(MethodBody(plugin, "private void Update("), "WhiskeyRealism.Strategic.Planner.TerrainLineRuntime.DrainTick();", "ticked once a frame by the plugin's Update");
+        AssertFalse(MethodBody(plugin, "private void Update(").Contains("DrainTick"), "not a bare Plugin.Update tick");
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string pump = System.Text.RegularExpressions.Regex.Replace(MethodBody(coordinator, "internal void PumpDailyReview("), @"\s+", " ");
+        AssertContains(pump, "if (!_review.InFlight) { TerrainLineRuntime.DrainTick(); return; }", "drained by the review's frame pump between review days");
+        AssertEqual(1, coordinator.Split(new[] { "TerrainLineRuntime.DrainTick();" }, StringSplitOptions.None).Length - 1, "one drain call site");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
         string review = MethodBody(runtime, "internal static void ReviewPlan(");
         int prepare = review.IndexOf("TerrainLineRuntime.PrepareDrain(snapshot);", StringComparison.Ordinal);

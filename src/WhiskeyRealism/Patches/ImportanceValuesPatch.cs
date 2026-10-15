@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -40,18 +41,17 @@ namespace WhiskeyRealism.Patches
 
         private static bool _closestAreaDistanceResolved;
         private static Func<AICampaign.AIArea, AICampaign.AIArea, float> _closestAreaDistance;
-        private static int _cachedObjectiveId = int.MinValue;
-        private static object _cachedAreaList;
-        private static AICampaign.AIArea _cachedTargetArea;
+        // Keyed by (objective id, AICampaign.aiarea identity). A settled miss is cached
+        // too: vanilla calls this Postfix once per AI area per job-4 pass (11408-11414).
+        private static readonly KeyedResolveCache<AICampaign.AIArea> TargetAreaCache =
+            new KeyedResolveCache<AICampaign.AIArea>();
         // Vanilla rewrites the pick on every AI-area pass, so the redirect repeats per
         // area per cycle; the verbose row is emitted only when the alliance's target changes.
         private static readonly Dictionary<int, int> LastLoggedTarget = new Dictionary<int, int>();
 
         internal static void ResetForNewCampaign()
         {
-            _cachedObjectiveId = int.MinValue;
-            _cachedAreaList = null;
-            _cachedTargetArea = null;
+            TargetAreaCache.Reset();
             LastLoggedTarget.Clear();
         }
 
@@ -162,12 +162,40 @@ namespace WhiskeyRealism.Patches
         private static AICampaign.AIArea ResolveTargetAIAreaCached(int objectiveId)
         {
             var areaList = AICampaign.aiarea;
-            if (objectiveId == _cachedObjectiveId && ReferenceEquals(areaList, _cachedAreaList) && _cachedTargetArea != null)
-                return _cachedTargetArea;
-            _cachedObjectiveId = objectiveId;
-            _cachedAreaList = areaList;
-            _cachedTargetArea = ResolveTargetAIArea(objectiveId) as AICampaign.AIArea;
-            return _cachedTargetArea;
+            if (TargetAreaCache.TryGet(objectiveId, areaList, out var cached))
+                return cached;
+            var area = ResolveTargetAIArea(objectiveId, out bool settled) as AICampaign.AIArea;
+            TargetAreaCache.Store(objectiveId, areaList, area, settled);
+            return area;
+        }
+
+        // Name lookups for ResolveTargetAIArea, done once per process (each TypeByName
+        // is an assembly-wide search). GetColorOnPos is looked up on the live FilterMap
+        // type and re-looked up only if that type changes.
+        private static bool _lookupsResolved;
+        private static FieldInfo _allObjectivesField;
+        private static FieldInfo _objectiveIdField;
+        private static FieldInfo _objectiveTargetsField;
+        private static FieldInfo _aiareasField;
+        private static MethodInfo _getAIArea;
+        private static Type _colorOnPosOwner;
+        private static MethodInfo _getColorOnPos;
+
+        private static void ResolveLookups()
+        {
+            if (_lookupsResolved) return;
+            var coType = AccessTools.TypeByName("CampaignObjective");
+            if (coType != null)
+            {
+                _allObjectivesField = AccessTools.Field(coType, "allcampaignobjectives");
+                _objectiveIdField = AccessTools.Field(coType, "UniqueObjectiveID");
+                _objectiveTargetsField = AccessTools.Field(coType, "objectives");
+            }
+            var aicType = AccessTools.TypeByName("AICampaign");
+            _aiareasField = AccessTools.Field(aicType, "aiareas");
+            var aiAreaType = AccessTools.TypeByName("AIArea");
+            _getAIArea = AccessTools.Method(aiAreaType, "GetAIArea", new[] { typeof(Color) });
+            _lookupsResolved = true;
         }
 
         // Resolve a CampaignObjective UniqueObjectiveID → AIArea by:
@@ -175,61 +203,73 @@ namespace WhiskeyRealism.Patches
         //   2. From the objective's `objectives` (List<object> of Town/IIP refs), grab the first.
         //   3. Read its world position (Component.transform.position).
         //   4. Use vanilla's lookup chain: AICampaign.aiareas (FilterMap) → GetColorOnPos → AIArea.GetAIArea.
-        private static object ResolveTargetAIArea(int objectiveId)
+        // settled: the answer is fixed for this (objective, aiarea list). allcampaignobjectives
+        // is built once in InitializeObjectives (178634-178710), an objective's targets and
+        // their positions are fixed there, and aiareas/aiarea are built together (11269-11272)
+        // with a static colour map; a missing name lookup stays missing for the process.
+        // Unbuilt data (no objective list or area map yet) or an exception is not settled,
+        // so that miss is retried on the next call as before.
+        private static object ResolveTargetAIArea(int objectiveId, out bool settled)
         {
+            settled = false;
             try
             {
+                ResolveLookups();
+
                 // Step 1: find the CampaignObjective.
-                var coType = AccessTools.TypeByName("CampaignObjective");
-                if (coType == null) return null;
-                var allObjsField = AccessTools.Field(coType, "allcampaignobjectives");
-                var allObjs = allObjsField?.GetValue(null) as IList;
+                if (_allObjectivesField == null || _objectiveIdField == null) { settled = true; return null; }
+                var allObjs = _allObjectivesField.GetValue(null) as IList;
                 if (allObjs == null) return null;
 
                 object matchingObj = null;
-                var idField = AccessTools.Field(coType, "UniqueObjectiveID");
                 foreach (var obj in allObjs)
                 {
                     if (obj == null) continue;
-                    if (idField != null && (int)idField.GetValue(obj) == objectiveId)
+                    if ((int)_objectiveIdField.GetValue(obj) == objectiveId)
                     {
                         matchingObj = obj;
                         break;
                     }
                 }
-                if (matchingObj == null) return null;
+                if (matchingObj == null) { settled = true; return null; }
 
                 // Step 2-3: get first target's world position.
-                var targetsList = AccessTools.Field(coType, "objectives")?.GetValue(matchingObj) as IList;
-                if (targetsList == null || targetsList.Count == 0) return null;
+                if (_objectiveTargetsField == null) { settled = true; return null; }
+                var targetsList = _objectiveTargetsField.GetValue(matchingObj) as IList;
+                if (targetsList == null || targetsList.Count == 0) { settled = true; return null; }
                 Vector3? pos = null;
                 foreach (var target in targetsList)
                 {
                     if (target == null) continue;
                     if (target is Component c) { pos = c.transform.position; break; }
                 }
-                if (pos == null) return null;
+                if (pos == null) { settled = true; return null; }
 
                 // Step 4: position → color → AIArea via vanilla helpers.
-                var aicType = AccessTools.TypeByName("AICampaign");
-                var aiareasField = AccessTools.Field(aicType, "aiareas");
-                var aiareas = aiareasField?.GetValue(null);
+                if (_aiareasField == null) { settled = true; return null; }
+                var aiareas = _aiareasField.GetValue(null);
                 if (aiareas == null) return null;
 
                 // Vanilla: public Color GetColorOnPos(Vector3 position, float overridealpha = -1f)
                 // (decompile line 33585). Two args; pass -1f to use the default.
-                var getColorOnPos = AccessTools.Method(aiareas.GetType(), "GetColorOnPos", new[] { typeof(Vector3), typeof(float) });
-                if (getColorOnPos == null) return null;
-                var color = getColorOnPos.Invoke(aiareas, new object[] { pos.Value, -1f });
+                var filterMapType = aiareas.GetType();
+                if (filterMapType != _colorOnPosOwner)
+                {
+                    _colorOnPosOwner = filterMapType;
+                    _getColorOnPos = AccessTools.Method(filterMapType, "GetColorOnPos", new[] { typeof(Vector3), typeof(float) });
+                }
+                if (_getColorOnPos == null) { settled = true; return null; }
+                var color = _getColorOnPos.Invoke(aiareas, new object[] { pos.Value, -1f });
                 if (color == null) return null;
 
-                var aiAreaType = AccessTools.TypeByName("AIArea");
-                var getAIArea = AccessTools.Method(aiAreaType, "GetAIArea", new[] { typeof(Color) });
-                if (getAIArea == null) return null;
-                return getAIArea.Invoke(null, new object[] { color });
+                if (_getAIArea == null) { settled = true; return null; }
+                var area = _getAIArea.Invoke(null, new object[] { color });
+                settled = true;
+                return area;
             }
             catch (Exception ex)
             {
+                settled = false;
                 OnceLog.Warning("importance:resolve-target", "[Patch:Importance] ResolveTargetAIArea failed: " + ex.Message);
                 return null;
             }

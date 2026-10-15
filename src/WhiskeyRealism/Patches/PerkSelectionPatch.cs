@@ -10,10 +10,18 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla AICampaign.CheckPerkSelection (decompile 11871-11891, job 14) calls
     // Regiment.ChoosePerk(Random.Range(0, Length/3 - 1)) for every own unit and fleet;
-    // ChoosePerk (123381) fills the first open slot unless the perk is already owned.
-    // This Prefix mirrors vanilla eligibility and candidate window (last perk id never
-    // drawn), chooses a role-aware perk with a weighted-random tiebreak among near-equal
-    // scores, then still delegates assignment to Regiment.ChoosePerk.
+    // ChoosePerk (123381) fills the first open slot unless the perk is already owned. The int
+    // Random.Range excludes its upper bound, so the last id (campaign 17 River Expedition,
+    // fleet 10 Port Defender) is never drawn; the battle pick (AIBattle.CheckPerkSelection
+    // 5429) draws array[Random.Range(0, array.Length)], every id (BUG-AI-011).
+    // This Prefix chooses a role-aware perk with a weighted-random tiebreak among near-equal
+    // scores for alliances 0/1 when Whiskey runs that alliance, then still delegates
+    // assignment to Regiment.ChoosePerk. Where Whiskey does not steer (a W&L
+    // commander-in-chief's own alliance, Europe, no coordinator yet) it replays vanilla's
+    // random pick with vanilla's eligibility and the full id range, and skips vanilla; the
+    // whole method is these two loops, so the replay is the method with the bound fixed.
+    // Candidate window: every id with Campaign / Fix AI Perk Pick Range on, vanilla's
+    // window (last id never drawn) with it off; with it off the unsteered case runs vanilla.
     [HarmonyPatch(typeof(AICampaign), "CheckPerkSelection")]
     internal static class PerkSelectionPatch
     {
@@ -30,14 +38,14 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return true;
-                if (StrategicCoordinator.Instance == null) return true;
 
                 var faction = GetFaction(_aifaction);
                 if (faction == null) return true;
 
                 int alliance = AICampaignReflect.GetAllianceId(_aifaction);
-                if (alliance < 0 || alliance >= 2) return true;
-                if (StrategicCoordinator.IsPlayerCICOf(alliance, GameVars.playeralliance)) return true;
+                if (StrategicCoordinator.Instance == null || alliance < 0 || alliance >= 2
+                    || StrategicCoordinator.IsPlayerCICOf(alliance, GameVars.playeralliance))
+                    return !(FixPickRange() && ReplayVanillaPick(faction));
 
                 bool handled = false;
                 OnceLog.Info("perks", "PerkSelectionPatch wired (campaign army/fleet perk steering)");
@@ -184,12 +192,54 @@ namespace WhiskeyRealism.Patches
 
             if (!hasOpenSlot) return available;
 
-            int limit = PerkSelectionScorer.VanillaCandidateLimit(perkCount);
+            int limit = PerkSelectionScorer.CandidateLimit(perkCount, FixPickRange());
             for (int perkId = 0; perkId < limit; perkId++)
                 if (!existing.Contains(perkId))
                     available.Add(perkId);
 
             return available;
+        }
+
+        internal static bool FixPickRange()
+        {
+            try { return Plugin.FixAiPerkPickRange != null && Plugin.FixAiPerkPickRange.Value; }
+            catch { return false; }
+        }
+
+        // Vanilla's two loops (11877-11890) with the full id range: same units, same W&L
+        // eligibility (a unit under the W&L player's command is skipped), uniform random id,
+        // Regiment.ChoosePerk decides as in vanilla. Returns false (run vanilla) when vanilla
+        // would return early or the faction's lists cannot be read.
+        private static bool ReplayVanillaPick(object faction)
+        {
+            if (AICampaign.aiarea == null) return false; // vanilla returns before picking (11873)
+            var ownUnits = ReadList(faction, "ownunits");
+            var ownFleets = ReadList(faction, "ownfleets");
+            if (ownUnits == null || ownFleets == null) return false;
+
+            if (PerkRow.TooltipsHeadlinesEachLevelGroup != null)
+            {
+                int bound = PerkSelectionScorer.RandomPickUpperBound(PerkRow.TooltipsHeadlinesEachLevelGroup.Length / PerkRow.LevelsPerPerk, true);
+                for (int i = 0; i < ownUnits.Count; i++)
+                {
+                    var unit = ownUnits[i] as Regiment;
+                    if ((UnityEngine.Object)unit == null) continue;
+                    if (unit.dlcw_isundercommander && DLC_WL.dlc_scenarioactive) continue;
+                    unit.ChoosePerk(UnityEngine.Random.Range(0, bound));
+                }
+            }
+            if (PerkRow.TooltipsHeadlinesEachLevelFleets != null)
+            {
+                int bound = PerkSelectionScorer.RandomPickUpperBound(PerkRow.TooltipsHeadlinesEachLevelFleets.Length / PerkRow.LevelsPerPerk, true);
+                for (int j = 0; j < ownFleets.Count; j++)
+                {
+                    var fleet = ownFleets[j] as Regiment;
+                    if ((UnityEngine.Object)fleet == null) continue;
+                    fleet.ChoosePerk(UnityEngine.Random.Range(0, bound));
+                }
+            }
+            OnceLog.Info("perks:replay", "[Patch:Perks] unsteered alliance: vanilla random perk pick replayed over every perk id");
+            return true;
         }
 
         // AIFaction is a single private type; field lookups are cached by name.

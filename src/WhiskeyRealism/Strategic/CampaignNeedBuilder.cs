@@ -16,7 +16,6 @@ namespace WhiskeyRealism.Strategic
         public float AnnualSpending;          // |army| + |navy| + |recruitment| + |interest| + |depots| per year
         public float RecruitsAvailable;       // volunteersavailable + draftsavailable
         public float TroopsFielded;
-        public float TroopsInRecruitment;
         public float ContractExpiries;        // recruitscontractexpiries
         public int RecruitableStates = -1;    // states able to raise a max-size unit (GetAIPersonality 62716); -1 unread
         public float NationalMorale = 1f;
@@ -24,7 +23,10 @@ namespace WhiskeyRealism.Strategic
         public float InterventionProbability; // max(GetInterventionProbability(2), (3)) — public diplomacy
         public float OwnBlockadeRatio;        // own harbors (GetAverageBlockadeRatio 93766)
         public float CsaBlockadeRatio;        // CSA harbors: the blockade the Union is building
-        public float WeaponStock;             // weapons in the alliance's stock
+        public ArmsLane Rifles = new ArmsLane();      // own non-artillery arming (ArmsCoverage)
+        public ArmsLane Guns = new ArmsLane();        // own artillery arming
+        public float MinEquippableShare = 0.15f;      // aiminnumberofequippableunits (campaignprefs.txt 1613)
+        public float ImportCutAtFullBlockade = 0.1f;  // influenceofblockadesonweaponimports (campaignprefs.txt 2067)
         public float PeakTransportUse;        // max transportcapacitypeak over the three transport types
         public float SupplyPressure;          // front supply stress (FiscalRuntime)
         public bool EmergencyCredit;          // vanilla credit-emergency personality active
@@ -101,13 +103,36 @@ namespace WhiskeyRealism.Strategic
             v[NeedKind.Blockade] = s.Alliance == 1
                 ? Clamp01(s.OwnBlockadeRatio)
                 : (IsFinite(s.CsaBlockadeRatio) ? Clamp01(1f - s.CsaBlockadeRatio) : 0f);
-            v[NeedKind.Industry] = s.TroopsInRecruitment > 0f
-                ? Clamp01(1f - s.WeaponStock / s.TroopsInRecruitment)
-                : 0f;
+            v[NeedKind.Industry] = Math.Max(LaneNeed(s.Rifles, s.MinEquippableShare), LaneNeed(s.Guns, s.MinEquippableShare));
             v[NeedKind.Agriculture] = Clamp01(s.SupplyPressure);
             v[NeedKind.Logistics] = Clamp01((s.PeakTransportUse - TransportComfortableUse) / (1f - TransportComfortableUse));
             v[NeedKind.Supply] = Clamp01(s.SupplyPressure);
             return v;
+        }
+
+        // One lane's arming need: the larger of
+        // - the coverage gap: vanilla buys when its equippable units fall below
+        //   aiminnumberofequippableunits x units (CheckPurchaseWeapons 16325, 16335), so the
+        //   need is how far below that line the lane is (1 with nothing better in stock);
+        // - the quality gap: 1 - average WSF / best orderable WSF (vanilla's own measure,
+        //   16214). With nothing orderable the gap is 0 and coverage alone drives the need.
+        public static float LaneNeed(ArmsLane lane, float minEquippableShare)
+        {
+            if (lane == null || lane.Units <= 0) return 0f;
+            float wanted = minEquippableShare * lane.Units;
+            float coverage = wanted > 0f ? Clamp01(1f - lane.EquippableUnits / wanted) : 0f;
+            float quality = lane.BestOrderableStrength > 0f
+                ? Clamp01(1f - lane.AverageStrength / lane.BestOrderableStrength)
+                : 0f;
+            return Math.Max(coverage, quality);
+        }
+
+        // Vanilla's weapon import factor for the alliance's own blockade: 1 at none, the pref
+        // (0.1) at full (GetProductionFigures 64120-64124).
+        public static float ArmsImportViability(NeedSnapshot s)
+        {
+            if (s == null || !IsFinite(s.OwnBlockadeRatio) || !IsFinite(s.ImportCutAtFullBlockade)) return 1f;
+            return Clamp01(1f + (s.ImportCutAtFullBlockade - 1f) * Clamp01(s.OwnBlockadeRatio));
         }
 
         // Daily EMA with alpha = 2 / (EmaDays + 1), applied once per elapsed day in closed form
@@ -139,11 +164,12 @@ namespace WhiskeyRealism.Strategic
         }
 
         // ProjectSelectionPatch's doctrine signals from the shared need vector. Before the
-        // first review (no snapshot) the blockade and port signals stay neutral (0.5).
-        // ArtilleryDeficit, NavalDeficit and OffensiveTempoNeed stay 0 and the late-war collapse
-        // risk has no strength term: their only sources are enemy internals (weapon stats,
-        // tonnage; AICampaign.GetStrengthRatio 12366-12402 counts every enemy unit plus the
-        // enemy's troopsinrecruitment), which are not fog-honest. A fog-honest enemy strength
+        // first review (no snapshot) the blockade and port signals stay neutral (0.5) and
+        // imports are not cut. ArtilleryDeficit is the own gun lane (own averages against the
+        // best orderable gun). NavalDeficit and OffensiveTempoNeed stay 0 and the late-war
+        // collapse risk has no strength term: their only sources are enemy internals (tonnage;
+        // AICampaign.GetStrengthRatio 12366-12402 counts every enemy unit plus the enemy's
+        // troopsinrecruitment), which are not fog-honest. A fog-honest enemy strength
         // estimate is stage G's EnemyArmyModel; wire it here when it exists.
         public static ProjectDoctrineSignals ToProjectSignals(NeedSnapshot s, NeedVector v)
         {
@@ -163,6 +189,8 @@ namespace WhiskeyRealism.Strategic
                 Era = s.Era,
                 FiscalPosture = s.FiscalPosture,
                 WeaponDeficit = v[NeedKind.Industry],
+                ArtilleryDeficit = LaneNeed(s.Guns, s.MinEquippableShare),
+                ArmsImportViability = ArmsImportViability(s),
                 BlockadePressure = v[NeedKind.Blockade],
                 PortViability = IsFinite(s.OwnBlockadeRatio) ? Clamp01(1f - s.OwnBlockadeRatio) : 0.5f,
                 CreditStress = v[NeedKind.Credit],

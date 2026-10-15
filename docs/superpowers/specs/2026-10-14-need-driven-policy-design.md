@@ -80,12 +80,12 @@ Daily per alliance, own-alliance and public data only (fog-honest), each need in
 | Support | 1 − `averagesupport` (32481) |
 | Recognition | max(`GetInterventionProbability(2)`, `(3)`) — opportunity for the CSA, threat for the Union |
 | Blockade | CSA: own `averageblockaderatio`; Union: 1 − CSA ratio |
-| Industry | 1 − weapons in stock / men to arm (`weaponstock`, `troopsinrecruitment`) |
+| Industry | Own arming need, worse of two lanes (guns / other units): max(vanilla purchase-trigger coverage gap, 1 − own average WSF / best orderable WSF). Replaced the original `1 − weaponstock / troopsinrecruitment` on 2026-10-15 (arms follow-up, plan `2026-10-15-arms-bugs.md` item 6). |
 | Agriculture | front supply pressure (`FiscalRuntime` front read) |
 | Logistics | peak transport utilisation above 60 % (`transportcapacitypeak`) |
 | Supply | front supply pressure |
 
-Emergency personalities force Credit or Manpower to 1 (after smoothing). `ToProjectSignals` derives `ProjectDoctrineSignals` from the same vector; WeaponDeficit uses Industry; ArtilleryDeficit and NavalDeficit stay 0 (the only sources are enemy weapon/tonnage internals, which are not fog-honest and were never filled); OffensiveTempo stays 0 and the late-war collapse risk has no strength term: `AICampaign.GetStrengthRatio` (12366-12402) adds the enemy's `troopsinrecruitment` and `AIFaction.SeparateUnits` (10462) does not filter by fog, so it is not fog-honest. A fog-honest enemy strength is stage G's `EnemyArmyModel`; wire it into these signals when it exists. The review builds needs only once `AICampaign.aifaction` exists (vanilla `GetAIPersonality` can reach `GetStrengthRatio`, which indexes it).
+Emergency personalities force Credit or Manpower to 1 (after smoothing). `ToProjectSignals` derives `ProjectDoctrineSignals` from the same vector; WeaponDeficit uses Industry; ArtilleryDeficit is the own gun lane (arms follow-up 2026-10-15) and NavalDeficit stays 0 (its only source is enemy tonnage, not fog-honest); ArmsImport projects scale by the own blockade's import factor; OffensiveTempo stays 0 and the late-war collapse risk has no strength term: `AICampaign.GetStrengthRatio` (12366-12402) adds the enemy's `troopsinrecruitment` and `AIFaction.SeparateUnits` (10462) does not filter by fog, so it is not fog-honest. A fog-honest enemy strength is stage G's `EnemyArmyModel`; wire it into these signals when it exists. The review builds needs only once `AICampaign.aifaction` exists (vanilla `GetAIPersonality` can reach `GetStrengthRatio`, which indexes it).
 
 ### Score
 

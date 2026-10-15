@@ -75,6 +75,18 @@ namespace WhiskeyRealism.Strategic
                     CicSettings.LockedDifficulty));
         }
 
+        // Copy for StrategicLedgerSet.PublishFrom: the review mutates the active plan in place.
+        public CIC CloneForPublish()
+        {
+            return new CIC
+            {
+                AllianceId = AllianceId,
+                OfficerName = OfficerName,
+                OfficerPersonality = OfficerPersonality,
+                ActivePlan = ActivePlan?.Clone()
+            };
+        }
+
         // Applies a PhaseTruthOutput to the active plan. The routing itself lives in
         // CicReviewRouter (single implementation, harness-covered); this wrapper only drops
         // an aborted plan and logs phase advances.

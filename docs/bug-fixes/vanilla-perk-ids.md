@@ -79,7 +79,7 @@ Context: **B** battle regiment (`<= 13`), **G** campaign group (14-16), **HQ** b
 | 142823-142841 | `SpottedEnemy.UpdateMarks` | G (`!= 17`) | 1 Field Telegraph, 3 BMI | information delay | Table OK |
 | 144429, 144984 | `Vessel` | F | 2 Supply Colliers, 9 Battery Runner | consumption, fort fighting | OK |
 
-AI perk choice: battle `AIBattle.CheckPerkSelection` (5408) picks from the right battle list per unit type; campaign `AICampaign.CheckPerkSelection` (11871) draws `Random.Range(0, count - 1)` so the AI never takes campaign 17 (River Expedition) or fleet 10 (Port Defender). Whiskey's #7 `PerkSelectionPatch` mirrors that window and uses campaign/fleet ids correctly (`Strategic/PerkSelectionScorer.cs`).
+AI perk choice: battle `AIBattle.CheckPerkSelection` (5408) picks from the right battle list per unit type; campaign `AICampaign.CheckPerkSelection` (11871) draws `Random.Range(0, count - 1)` so the AI never takes campaign 17 (River Expedition) or fleet 10 (Port Defender). Whiskey's #7 `PerkSelectionPatch` uses campaign/fleet ids correctly (`Strategic/PerkSelectionScorer.cs`); the window is fixed as BUG-AI-011 ([vanilla-campaign-terrain.md](vanilla-campaign-terrain.md)).
 
 ## Ambulance Corps (campaign 8)
 
