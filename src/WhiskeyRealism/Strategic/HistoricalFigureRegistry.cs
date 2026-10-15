@@ -19,8 +19,9 @@ namespace WhiskeyRealism.Strategic
 
         private static readonly List<Entry> _entries = new List<Entry>
         {
-            // CSA leadership (Davis administration + senior generals)
-            new Entry { AllianceTag = "CSA", CanonicalName = "davis", FullNames = new[] { "Jefferson Davis" }, V = new PersonalityVector(-0.1f, +0.3f, -0.3f, -0.3f, +0.5f) },
+            // CSA senior generals. Every name is spelled as Config/commanders.txt
+            // spells it; the registry only resolves battle commanders, so
+            // political leaders absent from that file have no entry.
             new Entry { AllianceTag = "CSA", CanonicalName = "lee", FullNames = new[] { "Robert E. Lee" }, V = new PersonalityVector(+0.7f, -0.5f, +0.6f, +0.4f, -0.2f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "johnston", FullNames = new[] { "Joseph E. Johnston" }, V = new PersonalityVector(-0.2f, +0.5f, -0.2f, -0.6f, +0.1f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "bragg", FullNames = new[] { "Braxton Bragg" }, V = new PersonalityVector(+0.2f, +0.3f, -0.4f, -0.1f, +0.4f) },
@@ -43,7 +44,6 @@ namespace WhiskeyRealism.Strategic
             new Entry { AllianceTag = "CSA", CanonicalName = "hampton", FullNames = new[] { "Wade Hampton" }, V = new PersonalityVector(+0.4f, -0.1f, +0.4f, +0.2f, +0.0f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "anderson", FullNames = new[] { "Richard H. Anderson" }, V = new PersonalityVector(+0.3f, +0.2f, +0.1f, +0.1f, +0.1f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "mahone", FullNames = new[] { "William Mahone" }, V = new PersonalityVector(+0.4f, +0.0f, +0.3f, +0.2f, +0.0f) },
-            new Entry { AllianceTag = "CSA", CanonicalName = "stephens", FullNames = new[] { "Alexander H. Stephens" }, V = new PersonalityVector(+0.0f, +0.4f, -0.2f, -0.2f, +0.6f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "smith", FullNames = new[] { "Edmund Kirby Smith" }, V = new PersonalityVector(+0.1f, +0.4f, -0.1f, -0.3f, +0.4f) },  // Kirby Smith
             new Entry { AllianceTag = "CSA", CanonicalName = "vandorn", FullNames = new[] { "Earl Van Dorn" }, V = new PersonalityVector(+0.5f, -0.4f, +0.5f, +0.4f, +0.2f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "magruder", FullNames = new[] { "John B. Magruder" }, V = new PersonalityVector(+0.2f, +0.4f, +0.0f, +0.1f, +0.5f) },
@@ -53,11 +53,9 @@ namespace WhiskeyRealism.Strategic
             new Entry { AllianceTag = "CSA", CanonicalName = "price", FullNames = new[] { "Sterling Price" }, V = new PersonalityVector(+0.3f, +0.0f, +0.2f, +0.0f, +0.3f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "taylor", FullNames = new[] { "Richard Taylor" }, V = new PersonalityVector(+0.4f, -0.1f, +0.3f, +0.2f, +0.1f) },  // Richard Taylor
             new Entry { AllianceTag = "CSA", CanonicalName = "stewart", FullNames = new[] { "Alexander P. Stewart" }, V = new PersonalityVector(+0.3f, +0.2f, +0.1f, +0.0f, +0.1f) },  // A.P. Stewart
-            new Entry { AllianceTag = "CSA", CanonicalName = "buckner", FullNames = new[] { "Simon B. Buckner" }, V = new PersonalityVector(+0.2f, +0.3f, +0.0f, -0.1f, +0.2f) },
+            new Entry { AllianceTag = "CSA", CanonicalName = "buckner", FullNames = new[] { "Simon B. Buckner Sr." }, V = new PersonalityVector(+0.2f, +0.3f, +0.0f, -0.1f, +0.2f) },
             new Entry { AllianceTag = "CSA", CanonicalName = "wise", FullNames = new[] { "Henry A. Wise" }, V = new PersonalityVector(+0.1f, +0.3f, +0.0f, -0.1f, +0.6f) },
-            new Entry { AllianceTag = "CSA", CanonicalName = "floyd", FullNames = new[] { "John B. Floyd" }, V = new PersonalityVector(-0.1f, +0.4f, -0.2f, -0.4f, +0.7f) },
-            // Union leadership (Lincoln administration + general-in-chief tier)
-            new Entry { AllianceTag = "Union", CanonicalName = "lincoln", FullNames = new[] { "Abraham Lincoln" }, V = new PersonalityVector(+0.3f, +0.1f, +0.1f, +0.4f, +0.7f) },
+            // Union general-in-chief tier and army commanders
             new Entry { AllianceTag = "Union", CanonicalName = "scott", FullNames = new[] { "Winfield Scott" }, V = new PersonalityVector(-0.1f, +0.4f, +0.2f, -0.4f, +0.3f) },
             new Entry { AllianceTag = "Union", CanonicalName = "mcclellan", FullNames = new[] { "George B. McClellan" }, V = new PersonalityVector(-0.3f, +0.9f, -0.6f, -0.7f, +0.6f) },
             new Entry { AllianceTag = "Union", CanonicalName = "halleck", FullNames = new[] { "Henry W. Halleck" }, V = new PersonalityVector( 0f,   +0.6f, -0.3f, -0.2f, +0.5f) },
@@ -94,7 +92,7 @@ namespace WhiskeyRealism.Strategic
             new Entry { AllianceTag = "Union", CanonicalName = "wallace", FullNames = new[] { "Lew Wallace" }, V = new PersonalityVector(+0.3f, +0.1f, +0.3f, +0.2f, +0.2f) },  // Lew Wallace
             new Entry { AllianceTag = "Union", CanonicalName = "fremont", FullNames = new[] { "John C. Fremont" }, V = new PersonalityVector(+0.0f, +0.4f, +0.0f, -0.2f, +0.7f) },
             new Entry { AllianceTag = "Union", CanonicalName = "butler", FullNames = new[] { "Benjamin F. Butler" }, V = new PersonalityVector(-0.1f, +0.4f, -0.1f, -0.3f, +0.8f) },
-            new Entry { AllianceTag = "Union", CanonicalName = "stoneman", FullNames = new[] { "George Stoneman" }, V = new PersonalityVector(+0.2f, +0.2f, +0.3f, +0.1f, +0.1f) },
+            new Entry { AllianceTag = "Union", CanonicalName = "stoneman", FullNames = new[] { "George Stoneman Jr." }, V = new PersonalityVector(+0.2f, +0.2f, +0.3f, +0.1f, +0.1f) },
             new Entry { AllianceTag = "Union", CanonicalName = "wilson", FullNames = new[] { "James H. Wilson" }, V = new PersonalityVector(+0.5f, -0.2f, +0.5f, +0.3f, +0.0f) },  // James H. Wilson
             new Entry { AllianceTag = "Union", CanonicalName = "smith", FullNames = new[] { "Andrew J. Smith", "William F. Smith" }, V = new PersonalityVector(+0.3f, +0.2f, +0.1f, +0.1f, +0.1f) },  // A.J. Smith / W.F. Smith — generic Union "Smith"
             new Entry { AllianceTag = "Union", CanonicalName = "miles", FullNames = new[] { "Nelson A. Miles" }, V = new PersonalityVector(+0.3f, +0.2f, +0.2f, +0.1f, +0.0f) },

@@ -77,6 +77,7 @@ internal static class TacticalEvidenceFixTests
         Run("army odds stay unknown while intel confidence is low", ArmyOddsUnknownUnderLowConfidence);
         Run("picket-only contact keeps the army probing end to end", PicketOnlyContactKeepsProbe);
         Run("morning odds after a paused night are not inflated", MorningOddsNotInflated);
+        Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
     }
 
     private static void Run(string name, Action test)
@@ -992,5 +993,82 @@ internal static class TacticalEvidenceFixTests
         ledger.Observe(morningHours, 0f, 0f);
         float odds = ArmyEvidenceBuilder.KnownEnemyOdds(6000f, ledger, morningHours);
         TestHarness.AssertTrue(odds > 1.45f && odds < 1.55f, "morning odds stay ~1.5, got " + odds);
+    }
+
+    // Copied from GTCW Config/commanders.txt (build 14703111): the combined
+    // name (firstname + " " + name, decompile 59081) of every alliance-0
+    // (Union) and alliance-1 (CSA) commander whose surname the historical
+    // registry uses. A registry entry with a new surname must add that
+    // surname's vanilla names here, spelled exactly as the game spells them.
+    private static readonly string[] VanillaUnionNamesForRegistrySurnames =
+    {
+            "Abner Doubleday", "Albert F. Thomas", "Albert L. Lee", "Alger M. Wheeler", "Ambrose E. Burnside",
+            "Andrew A. Humphreys", "Andrew J. Smith", "Andrew Porter", "Benjamin F. Butler",
+            "Benjamin F. Davis", "Benjamin F. Smith", "Burr Porter", "Charles F. Smith", "Charles H. Davis",
+            "Charles H. Morgan", "Charles H. Smith", "Charles Stewart", "Conrad F. Jackson",
+            "Darius N. Couch", "David B. Birney", "David D. Porter", "David Hunter", "David Miles",
+            "David Stuart", "Dixon S. Miles", "Don Carlos Buell", "Edmund J. Davis", "Edward O.C. Ord",
+            "Edward S. Bragg", "Ezra Taylor", "Fitz J. Porter", "Francis C. Barlow", "Francis T. Sherman",
+            "Franz Sigel", "George A. Custer", "George B. McClellan", "George G. Meade", "George H. Thomas",
+            "George P. Buell", "George Stoneman Jr.", "George Sykes", "George W. Morgan",
+            "George W. Schofield", "George W. Scott", "George W. Taylor", "Gilbert H. Reynolds",
+            "Giles A. Smith", "Gouverneur K. Warren", "Henry G. Thomas", "Henry W. Halleck",
+            "Henry W. Slocum", "James B. McPherson", "James D. Morgan", "James E. Smith", "James H. Wilson",
+            "James S. Jackson", "Jefferson C. Davis", "John A. Logan", "John A. Reynolds", "John Buford",
+            "John C. Fremont", "John E. Smith", "John F. Reynolds", "John G. Reynolds", "John M. Schofield",
+            "John Newton", "John Pope", "John S. Slocum", "John Sedgwick", "Joseph Hooker",
+            "Joseph J. Reynolds", "Joseph L. Kirby Smith", "Joseph Smith", "Judson Kilpatrick", "Lew Wallace",
+            "Lewis A. Grant", "Melancton Smith", "Morgan L. Smith", "Morton C. Hunter", "Napoleon B. Buford",
+            "Nathaniel J. Jackson", "Nathaniel P. Banks", "Nelson A. Miles", "Nelson Taylor",
+            "Oliver O. Howard", "Orland Smith", "Philip H. Sheridan", "Robert Anderson", "Robert B. Hampton",
+            "Robert F. Taylor", "Robert K. Scott", "Samuel M. Logan", "Samuel P. Lee", "Samuel W. Price",
+            "Sylvester G. Hill", "Thomas Kilby Smith", "Thomas W. Sherman", "Ulysses Doubleday",
+            "Ulysses S. Grant", "William A. Jackson", "William Birney", "William D. Porter",
+            "William F. Smith", "William H. Reynolds", "William H.L. Wallace", "William Reynolds",
+            "William Rosecrans", "William S. Smith", "William T. Sherman", "William W.H. Davis",
+            "William Wheeler", "William Wilson", "Winfield S. Hancock", "Winfield Scott",
+    };
+
+    private static readonly string[] VanillaCsaNamesForRegistrySurnames =
+    {
+            "Abraham Buford", "Albert S. Johnston", "Alexander P. Stewart", "Alexander W. Reynolds",
+            "Alfred E. Jackson", "Ambrose P. Hill", "Baxter Smith", "Benjamin G. Humphreys", "Benjamin Huger",
+            "Braxton Bragg", "Caraway Smith", "Charles D. Anderson", "Claudius C. Wilson", "Daniel H. Hill",
+            "Daniel H. Reynolds", "Earl Van Dorn", "Edmund Kirby Smith", "Edward L. Thomas",
+            "Edward T.H. Warren", "Edwin J. Anderson", "Edwin M. Anderson", "Fitzhugh Lee", "Frank Huger",
+            "French Forrest", "G. W. Scott", "George B. Anderson", "George D. Johnston", "George E. Pickett",
+            "George H. Smith", "George T. Anderson", "George W. Anderson Jr.", "Gustavus W. Smith",
+            "Henry A. Wise", "Henry R. Jackson", "J.E.B. Stuart", "James A. Smith", "James Jackson",
+            "James Longstreet", "James T. Wheeler", "James W. Jackson", "Jeffrey E. Forrest", "John B. Hood",
+            "John B. Magruder", "John C. Pemberton", "John D. Taylor", "John F. Smith", "John H. Morgan",
+            "John K. Jackson", "John L. Logan", "John S. Scott", "John T. Morgan", "Joseph E. Johnston",
+            "Joseph R. Anderson", "Joseph R. Davis", "Joseph W. Anderson", "Joseph Wheeler", "Jubal A. Early",
+            "Leon Smith", "Leonidas Polk", "Lucius E. Polk", "Martin L. Smith", "Matthew C. Butler",
+            "Melanchton Smith", "Nathan B. Forrest", "P.G.T. Beauregard", "Patrick R. Cleburne",
+            "Patton Anderson", "Preston Smith", "Richard H. Anderson", "Richard S. Ewell", "Richard Taylor",
+            "Robert D. Johnston", "Robert E. Lee", "Robert H. Anderson", "Samuel R. Anderson",
+            "Simon B. Buckner Sr.", "Stephen D. Lee", "Sterling Price", "Sydney S. Lee", "T. Sturgis Davis",
+            "Thomas B. Huger", "Thomas B. Smith", "Thomas H. Taylor", "Thomas J. Jackson", "Thomas M. Scott",
+            "Thomas Smith", "Wade Hampton", "William A. Morgan", "William B. Butler", "William G.M. Davis",
+            "William H. Jackson", "William H. Stephens", "William H.F. Lee", "William J. Hardee",
+            "William L. Jackson", "William Mahone", "William R. Miles", "William Smith", "William W. Hunter",
+            "William W. Loring",
+    };
+
+    private static void RegistryNamesExistInVanilla()
+    {
+        var union = new System.Collections.Generic.HashSet<string>();
+        var csa = new System.Collections.Generic.HashSet<string>();
+        foreach (var n in VanillaUnionNamesForRegistrySurnames) union.Add(WhiskeyRealism.Strategic.HistoricalFigureRegistry.NormalizeFullNameForTest(n));
+        foreach (var n in VanillaCsaNamesForRegistrySurnames) csa.Add(WhiskeyRealism.Strategic.HistoricalFigureRegistry.NormalizeFullNameForTest(n));
+        var missing = new System.Collections.Generic.List<string>();
+        foreach (var e in WhiskeyRealism.Strategic.HistoricalFigureRegistry.EntriesForTest)
+        {
+            var roster = e.AllianceTag == "CSA" ? csa : union;
+            foreach (var n in e.FullNames)
+                if (!roster.Contains(WhiskeyRealism.Strategic.HistoricalFigureRegistry.NormalizeFullNameForTest(n)))
+                    missing.Add(e.AllianceTag + ":" + n);
+        }
+        TestHarness.AssertTrue(missing.Count == 0, "not in vanilla roster: " + string.Join(", ", missing));
     }
 }
