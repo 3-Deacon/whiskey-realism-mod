@@ -51,6 +51,12 @@ namespace WhiskeyRealism.Tactical.Battle
         public float CoverValue;
         public int CoverObject;
         public float FriendlyRoutedNear;
+        // Charge doctrine inputs (BC6b): lastaichargetime (110798), the battle hour of
+        // vanilla's last odds refusal (UpdateChargeTarget 122290-122292; 0 = never), and
+        // outflanked (111488), the flank-sector code UpdateFlanking sets from the unit's
+        // own enemyinrangereg and facing (122959-123175; 0 = not outflanked).
+        public float LastAiChargeTime;
+        public int Outflanked;
         public int ParentIndex;         // -1 = root
         public int FirstEnemyInRangeId; // enemyinrangereg[0], or 0
         public UnitFlags Flags;
@@ -146,6 +152,10 @@ namespace WhiskeyRealism.Tactical.Battle
         Limber = 32,
         Unlimber = 64,
         PerRegiment = 128,
+        // CombatBehavior, charge doctrine Disarm (BC6b): after the behavior write the
+        // executor also leaves charge movement mode 3 with SetMovementMode(0), as
+        // vanilla's own refusal does (122290); behavior alone never ends mode 3.
+        LeaveChargeMode = 256,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

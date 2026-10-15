@@ -785,22 +785,46 @@ PROVE-MODE: harness. Per-slice proof is `ReserveMigrationTests` (Reserve-role de
 
 ## BC6 — Infantry charge doctrine (spec §4b)
 
-**Owned files:** create `Tactical/Battle/ChargeDoctrine.cs` (pure, BC6a) and `Tactical/Battle/Producers/ChargeIntentProducer.cs` (runtime, BC6b); test file `ChargeDoctrineTests.cs`. File a bug-fix note in `docs/bug-fixes/` for the dead vanilla `MicroAICheckForCharges` 4910 compare (BC7 docs).
+**Owned files:** create `Tactical/Battle/ChargeDoctrine.cs` (pure, BC6a) and `Tactical/Battle/Producers/ChargeIntentProducer.cs` (runtime, BC6b) plus its pure half `ChargeIntentProducer.Plan.cs` (BC6b, in the test csproj); test file `ChargeDoctrineTests.cs`. File a bug-fix note in `docs/bug-fixes/` for the dead vanilla `MicroAICheckForCharges` 4910 compare (BC7 docs). BC6b shared edits (integrator-assigned): `BattleCoreContracts.cs` (two `UnitRecord` fields, one `IntentFlags` value), `BattleSnapshotBuilder.Capture` (two field reads), `OrderExecutor.IsDuplicate` and `OrderExecutorRuntime.IssueOther` (the Disarm path), `PostureProducers.EnsureRegistered` (one registration line).
 
 **Vanilla to read:** `UpdateChargeTarget` 122199-122310; `MicroAICheckForCharges` 4905-4940 (dead compare 4910); micro cycle 6 at 5617-5638; `ChangeCombatBehavior` 90944; `AdjustCavalryBehavior` 5036-5056; GamePrefs `maxchargeradius` 53232, `microaitriggerforcharge` 54776, `weightingfactorsformicroaicharge` 54777-54781.
 
-**Interfaces — Produces:**
+**Interfaces — as built (BC6a + BC6b):**
 ```csharp
-public struct ChargeInput { public bool ConfigOn; public bool PlayerOwned; public bool IsInfantryRegiment; public int GroupAiStance;
-  public bool TargetVisible; public bool TargetIsFirstInRange; public float DistanceToTarget; public float VanillaMaxChargeRadius;
-  public float OwnMorale, TargetMorale, OwnFatigue; public bool TargetDisordered; public bool TargetFlanked; public bool LaneBlockedByFriendly;
-  public bool Moving; public int MovementMode; public bool ChargeResolved; public int CurrentBehaviorOrdered; }
-public enum ChargeAction { None, Charge, Revert }
-public static class ChargeDoctrine {
-  public const int AssaultStance = 4; public const int ChargeBehavior = 3; public const int RevertBehavior = 2; // vanilla cycle-6 value for stance ≥ 1
-  public const float MoraleMargin = 0.15f; public const float OwnMoraleFloor = 0.5f; public const float OwnFatigueCeiling = 0.6f;
-  public const int MaxLeadingRegimentsPerGroup = 2;
-  public static ChargeAction Decide(in ChargeInput input);
+namespace WhiskeyRealism.Tactical.Battle {                       // pure, ChargeDoctrine.cs
+  public struct ChargeInput { public bool ConfigOn; public bool PlayerOwned; public bool IsInfantryRegiment; public int GroupAiStance;
+    public bool TargetVisible; public bool TargetIsFirstInRange; public float DistanceToTarget; public float VanillaMaxChargeRadius;
+    public float OwnMorale, TargetMorale, OwnFatigue; public bool TargetDisordered; public bool TargetFlanked; public bool LaneBlockedByFriendly;
+    public bool Moving; public int MovementMode; public bool ChargeResolved;
+    public bool WhiskeyArmed;               // BC6b: producer memory (replaces BC6a's CurrentBehaviorOrdered == 3, see As built)
+    public bool IsLeading; public bool WhiskeyArmedPendingDisarm; public double SecondsSinceLastAiChargeRefusal;
+    public double RefusalBackoffSeconds; }  // BC6b: RefusalBackoffSeconds(timetorenewaichargecheck); 120 s floor
+  public enum ChargeAction { None, Charge, Revert, Disarm }
+  public static class ChargeDoctrine {
+    public const int AssaultStance = 4; public const int ChargeBehavior = 3; public const int RevertBehavior = 2; // vanilla cycle-6 value for stance ≥ 1
+    public const float MoraleMargin = 0.15f; public const float OwnMoraleFloor = 0.5f; public const float OwnFatigueCeiling = 0.6f;
+    public const int MaxLeadingRegimentsPerGroup = 2; public const double RearmAfterRefusalBattleSeconds = 120.0;
+    public const int NormalMovementMode = 0, ArmedMovementMode = 3, AssaultMovementMode = 6;
+    public static ChargeAction Decide(in ChargeInput input);
+    public static double RefusalBackoffSeconds(float vanillaRenewHours);   // max(120, renew h × 3600)
+    public static bool ChargeCycleEnded(int previousMovementMode, int movementMode);
+    public static bool PendingDisarmAfter(bool pending, ChargeAction action, int movementMode);
+    public static bool IsLeading(ReadOnlySpan<float> distancesToTarget, int index);
+  }
+  // BattleCoreContracts (additive): UnitRecord.LastAiChargeTime (lastaichargetime 110798), UnitRecord.Outflanked (outflanked 111488);
+  //   IntentFlags.LeaveChargeMode = 256 (Disarm: the executor also calls SetMovementMode(0) on a regiment in mode 3).
+}
+namespace WhiskeyRealism.Tactical.Battle.Producers {
+  internal sealed partial class ChargeIntentProducer : IBattleIntentProducer {   // Name "Charge"; runtime half ChargeIntentProducer.cs
+    internal static void Register();                                             // static-ctor touch from PostureProducers.EnsureRegistered
+    // pure half ChargeIntentProducer.Plan.cs (test csproj):
+    internal readonly struct Settings { Settings(bool configOn, float maxChargeRadius, float vanillaRenewHours); }
+    internal struct RegimentMemory { Seen; PreviousMode; Armed; PendingDisarm; LastAiChargeTime; HasRefusal; RefusalAtHours; Submitted; SubmittedAtHours; SubmittedMode; }
+    internal sealed class ChargeMemory { /* per side: ById, pooled scratch */ }
+    internal static int Plan(BattleSnapshot s, in Settings settings, ChargeMemory memory, OrderExecutor executor, IIntentSink sink); // returns confirmed charges
+    internal static BattleOrderIntent Intent(int regimentId, ChargeAction action);  // CombatBehavior, PerRegiment, Executor, ChargeDoctrine
+    internal static int GroupStance(in UnitRecord group);                           // 4 only while ai_stance and ai_stanceordered are 4
+  }
 }
 ```
 **Rule:** Charge when all of the following hold:
@@ -825,7 +849,23 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
   - `DenialPrecedenceOverCharge` (arbiter fixture)
   - `OnlyTwoLeadingRegimentsCharge`
   - `ConfigOffNeverCharges`
-- [ ] BC6b: the producer reads vanilla GamePrefs once per battle into the snapshot scratch, and checks the lane through the snapshot's own positions on the segment (40 m corridor, reusing `WaypointValidator.FriendlyFireClearanceMeters`). Scope `tactical.producer.charge`. OnceLog `tactical-battle-core:charge-first-fire`.
+- [x] BC6b: the producer reads vanilla GamePrefs once per battle into the snapshot scratch, and checks the lane through the snapshot's own positions on the segment (40 m corridor, reusing `WaypointValidator.FriendlyFireClearanceMeters`). Scope `tactical.producer.charge`. OnceLog `tactical-battle-core:charge-first-fire`.
+
+**As built (BC6b):**
+- **Vanilla correction (124770-124774).** `Regiment.SetMovementMode(3)` sets `combatbehavior = 0` and `combatbehaviorordered = 0` for infantry and cavalry. So the 122214 gate fires once per behavior-3 write, and an armed regiment reads behavior 0 in modes 3/6. BC6a's "armed = `combatbehaviorordered == 3`" was therefore false exactly when a revert matters (red-first test: `ProducerArmedFromMemoryNotOrderedBehavior` failed with "armed regiment gets an intent"). `ChargeInput.CurrentBehaviorOrdered` is replaced by `WhiskeyArmed`, the producer's memory. Two BC6a header claims were wrong and are corrected there: a refusal does not re-arm the gate on the next frame (behavior is already 0), and the volley-before-the-charge branch (122267, needs `combatbehavior == 3` in mode 3) is unreachable for a regiment armed through the gate. After a refusal vanilla leaves the regiment at behavior 0 (short range); the doctrine's Revert restores 2.
+- **Armed = executor-confirmed.** A Charge counts as armed only when `OrderExecutor.TryGetLastOutcome(regiment, CombatBehavior)` reports `Issued`, source `ChargeDoctrine`, at or after the submission (read on the next tick, before the executor runs again). With no such outcome (guard, claim, cooldown) nothing is armed (fail closed). A confirmed Revert or Disarm releases the regiment.
+- **Resolved** (Decide reverts) when the regiment leaves the cycle (`ChargeCycleEnded`), when the refusal stamp changed, or when it is back at mode 0 without behavior 3. The last case covers an arm and refusal both inside one tick, and vanilla's cycle-6 cascade: `SetAIStance` writes the group's own behavior (122099-122120), so cycle 6 re-orders the group to 2 and `ChangeCombatBehavior` cascades to every non-detached unit below it (5631-5634, 90944-90968, PerformActionForGroupForAllUnitsOnLevel 92572-92627). A Revert whose behavior 2 is already ordered writes nothing and releases the regiment.
+- **Refusal.** A change of `lastaichargetime` since the last tick is a refusal seen now on the doctrine clock. The first value the producer sees is only the baseline, so a fresh unit's 0 (or a stamp from before the producer saw the unit) is never a refusal. Back-off = `ChargeDoctrine.RefusalBackoffSeconds(GamePrefs.timetorenewaichargecheck)` = max(120 battle-s, renew h × 3600). The shipped renew is 0.5 h (battleprefs: "a renewed charge order is not given if it was broken up before due to bad conditions"), so the effective back-off is 1800 battle-s; vanilla's own use (4917) is dead and compares `lastaichargetime < now + renew` (always true). **Integrator decision point:** the plan named both 120 s and the renew interval; this takes vanilla's intended interval with BC6a's constant as the floor.
+- **Inputs from the snapshot.** The target is the regiment's own `FirstEnemyInRangeId` (`enemyinrangereg[0]`, 122228), only while it is a Visible observation; nothing is substituted. Target morale, `outflanked` (`TargetFlanked`) and disorder are read from that visible target's own `EnemyRecords` row, following BC5a's `TargetGarrisoned`/`EnemyAdvancing` precedent. `outflanked` is fog-honest: UpdateFlanking (122959-123175) computes it from the target's facing and this side's own units in its flank sectors. Disordered = `MarkedForRout`, `OnRetreat` or movement mode 2/4. Distance runs from `Own[ParentIndex]` (the transform parent, D5; vanilla measures from `transform.parent`, 122257), strictly `<`. With no parent there is no charge. Stance = the parent's: 4 only while `ai_stance` and `ai_stanceordered` are both 4. The demotion writes `ai_stanceordered` at once and `ai_stance` after the courier (ChangeStance 90787/90814), so a demotion reverts on the next tick and a pending assault order arms nothing. Lane: an own standing regiment (not a group) whose projection falls strictly between the regiment and the target, within 40 m of the segment. Leading: `IsLeading` over the parent's direct children's distances to their own visible first target.
+- **Radius.** `GamePrefs.maxchargeradius` is 50 m in the shipped unitprefs ("calculated from next group commander"), measured from the brigade HQ, so charges are rare: the HQ must be within 50 m of the target. It is kept as vanilla's.
+- **Disarm through the executor.** `IntentFlags.LeaveChargeMode` (256). `OrderExecutor.IsDuplicate` does not swallow it while the regiment is in mode 3, even with behavior 2 already ordered. `OrderExecutorRuntime.IssueOther` runs `TacticalCombatBehaviorWriter.EnsureBehavior`, then `Regiment.SetMovementMode(0)` on a regiment (unittyp ≤ 13) still in mode 3. That is vanilla's refusal (122290); the 4922-4924 disarm is unreachable. The write is behind the executor's per-target `TacticalWriteGuard.CanWrite(Regiment)`. ChargeDoctrine has no executor recent-order window on CombatBehavior (BC5a, `RecentOrderBattleSecondsFor`).
+- **W&L.** `PlayerOwned` regiments are never charged, reverted or disarmed (Decide), the executor refuses them (`OrderExecutor.Plan` step 1), and the runtime re-checks `TacticalWriteGuard.CanWrite` on the live unit.
+- **Config.** `Plugin.EnableInfantryChargeDoctrine` is read on every tick. Off still runs the plan, so what the doctrine armed is handed back (Revert/Disarm), and nothing new is armed. The master `Enabled` switch idles the producer.
+- **Registration.** `ChargeIntentProducer.Register()` is called from `PostureProducers.EnsureRegistered` (BC5a's temporary touch, run by `ArmyPostureInputsRuntime.Refresh` on the coordinator tick). On this base nothing registers BC5b's `GroupStance`, `ChargeDemotion` and `Artillery*` producers or BC5c's `Withdrawal` and `ReserveRelease`; their static constructors never run. So the charge demotion (and with it `DenialPrecedenceOverCharge`) cannot happen in game until BC7's explicit registry. The doctrine still reverts on any stance change away from 4.
+- First fire: `OnceLog.Info("tactical-battle-core:charge-first-fire", "[ChargeDoctrine] first infantry charge armed: combat behavior 3 issued to a leading regiment of an assault group")`, logged on the tick that confirms the executor issued the first Charge (one arbiter tick after the vanilla write).
+- For BC7: `BattleWriteGateTests`' writer regex does not list `SetMovementMode(`; the executor's two calls are gated (file checks `TacticalWriteGuard.CanWrite`), but the scanner would not see a new ungated one.
+
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is `ChargeDoctrineTests` (BC6a pure block plus the BC6b block, exit 0; a failing assertion throws, exit 134): the producer over a `BattleSnapshot` fixture (two leading regiments, intent shape, armed from memory, executor-confirmed arming, fresh stamp baseline, refusal back-off with and without vanilla's renew interval, parent-group distance strict `<`, stance from ordered and current, lane between only, target state only from a visible record, never PlayerOwned, deferred disarm after a denied assault, release after vanilla's re-order, config off releases, zero allocation after warm-up), the executor's `LeaveChargeMode` dedupe rule, and `DenialPrecedenceOverCharge` through the real `OrderArbiter` (tick 1: Safety demotion wins the Stance channel while the charges keep their CombatBehavior channel; tick 2: Revert for the courier-pending regiment, Disarm for the armed one). Red first: `ProducerArmedFromMemoryNotOrderedBehavior` (against BC6a's `CurrentBehaviorOrdered` contract) and `LeaveChargeModeIsNotADuplicateInChargeMode` (before the executor flag). Mutation evidence (each turned a named test red, exit 134): no renew interval in the back-off; a first-seen non-zero stamp taken as a refusal; group stance read from `ai_stance` alone; lane check without the strictly-between test; a confirmed Revert counted as arming. Runtime proof (the `charge-first-fire` line, `[OrderArbiter]` rows with `ChargeDoctrine` issues, the SetMovementMode(0) disarm, no W&L player regiment touched) is the BC7 in-game smoke.
 
 ---
 
@@ -870,7 +910,7 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
   - `[once:tactical.battle-perception:mode:RangeOnly] [BattlePerception] alliance=<a> mode=RangeOnly reason=GridNotPainted visible=<n> remembered=<n>` at the first perception tick, then `[once:tactical.battle-perception:mode:FogGrid] [BattlePerception] alliance=<a> mode=FogGrid reason=None visible=<n> remembered=<n>` for the enemy AI side within 5 battle-seconds of its first perception tick. With HQ-in-the-saddle, `… mode=RangeOnly reason=HqInTheSaddle …` and no FogGrid line. A W&L / `ai_vs_ai` player-alliance side logs `mode=OwnSideWithinFog reason=None`. Each line fires once per mode per battle; every per-side mode change is the `BattlePerception` Decision event in the tuning sidecar.
   - `[OrderArbiter]` rows with `moved > 0`, `failed/issued < 0.2`, and no `gaveUp` storm (≤ 5 per side per 30 s).
   - Perf: `tactical.snapshot.build` p95 ≤ 1.5 ms per side, `tactical.arbiter.resolve` p95 ≤ 0.5 ms, no `tactical.patch.battle-core-arbiter` row above 5 ms more than 1 % of calls.
-  - A line starting `[once:tactical-battle-core:charge-first-fire]` in an infantry assault (message text set by BC6b).
+  - `[once:tactical-battle-core:charge-first-fire] [ChargeDoctrine] first infantry charge armed: combat behavior 3 issued to a leading regiment of an assault group` in an infantry assault. It is rare by vanilla's design: the brigade HQ must be within `maxchargeradius` (50 m shipped) of the regiment's visible `enemyinrangereg[0]`. Charge demotion only reaches it once BC7 registers the BC5b producers.
   - A W&L brigade career shows: player units never in `[OrderArbiter]` issued counts; a dispatch panel naming the superior when the parent division is moved; `[once:tactical-battle-core:ancestry-mismatch] [BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance=<a> groups=<n>` absent, or explained.
   - BC3 PROVE-MODE check: in a W&L battle with the player's command detached, the AI parent is ordered and rotated (RotateInPlace) and no player-owned regiment receives a Whiskey write (no movement, rotation, stance or formation change on the player's regiments); then, with the AI parent holding a stance (`ai_stanceordered > 0`; `ChangeStance` then sets the parent's own `permanentlydetached`, 90788-90791, which must not shield the re-attached player command below it), press the player's stance-off (re-attach) and confirm the parent is no longer ordered as a group (fan-out, or `TacticalPlayerProtected reason=owned-descendant-attached`).
 - [ ] Docs:

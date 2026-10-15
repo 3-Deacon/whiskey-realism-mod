@@ -1,14 +1,20 @@
 using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.Producers;
+using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
 
 // BC6a: pure infantry charge doctrine. Vanilla anchors (Assembly-CSharp build 14703111):
 // Regiment.UpdateChargeTarget 122199-122345, MicroAICheckForCharges 4905-4930, micro cycle 6
 // 5617-5638, StopRegiment 132316 (regimentpaths = 0 at 132397, movementmode untouched).
 //
-// Owed by BC6b (needs BC4's arbiter): the arbiter-fixture DenialPrecedenceOverCharge, where a
-// ChargeDemotion Safety claim on the Stance channel and this doctrine's Executor intent on the
-// CombatBehavior channel meet in one tick. Here it is the pure decision only.
+// BC6b: ChargeIntentProducer.Plan over a BattleSnapshot fixture, the executor's
+// LeaveChargeMode flag, and the arbiter-fixture DenialPrecedenceOverCharge (ChargeDemotion
+// Safety on the Stance channel, this doctrine's Executor intent on CombatBehavior).
+// SetMovementMode(3) zeroes combatbehavior/combatbehaviorordered of infantry (124770-124774),
+// so an armed regiment in mode 3/6 reads ordered 0.
 internal static class ChargeDoctrineTests
 {
     public static void Run()
@@ -43,6 +49,24 @@ internal static class ChargeDoctrineTests
             ("charge doctrine arms only the two leading regiments", OnlyTwoLeadingRegimentsCharge),
             ("charge doctrine config off never charges and releases its own arming", ConfigOffNeverCharges),
             ("charge doctrine decide and leading selection do not allocate", DecideAndLeadingDoNotAllocate),
+            // BC6b: producer over the snapshot, executor flag, arbiter fixture.
+            ("charge producer arms the two leading regiments on their visible first target", ProducerArmsTwoLeadingRegiments),
+            ("charge producer reads armed from its memory, not the ordered behavior vanilla zeroes", ProducerArmedFromMemoryNotOrderedBehavior),
+            ("charge producer arms only on an executor-confirmed charge", ProducerUnconfirmedChargeIsNotArmed),
+            ("charge producer takes a fresh lastaichargetime as the baseline, not a refusal", ProducerFreshStampIsNotARefusal),
+            ("charge producer backs off a refusal on the doctrine clock with vanilla's renew interval", ProducerRefusalBacksOffWithVanillaRenew),
+            ("charge producer measures from the parent group, strictly inside the radius", ProducerDistanceFromParentGroupStrict),
+            ("charge producer group stance is 4 only while ordered and current are 4", ProducerGroupStanceNeedsOrderedAndCurrent),
+            ("charge producer lane is blocked only by a friendly between regiment and target", ProducerLaneBlockedOnlyBetween),
+            ("charge producer reads target state only from a visible target's record", ProducerTargetStateFromVisibleRecord),
+            ("charge producer never touches player-owned regiments", ProducerNeverTouchesPlayerOwned),
+            ("charge producer disarms after a denied assault once vanilla returns to mode 3", ProducerDeferredDisarmAfterAssault),
+            ("charge producer releases a regiment vanilla re-ordered to behavior 2", ProducerReleasesVanillaReorder),
+            ("charge producer config off releases its own arming", ProducerConfigOffReleases),
+            ("charge producer plan does not allocate after warm-up", ProducerPlanAllocatesNothingAfterWarmup),
+            ("charge executor leave-charge-mode is not a duplicate while in mode 3", LeaveChargeModeIsNotADuplicateInChargeMode),
+            ("charge doctrine has no executor recent-order window on combat behavior", ChargeHasNoExecutorWindow),
+            ("charge DenialPrecedenceOverCharge through the arbiter", DenialPrecedenceOverChargeArbiter),
         });
     }
 
@@ -69,18 +93,18 @@ internal static class ChargeDoctrineTests
             Moving = true,
             MovementMode = ChargeDoctrine.NormalMovementMode,
             ChargeResolved = false,
-            CurrentBehaviorOrdered = ChargeDoctrine.RevertBehavior,
+            WhiskeyArmed = false,
             IsLeading = true,
             WhiskeyArmedPendingDisarm = false,
             SecondsSinceLastAiChargeRefusal = double.PositiveInfinity,
         };
     }
 
-    // The same regiment after the doctrine armed it (combatbehaviorordered = 3).
+    // The same regiment after the executor issued the doctrine's behavior 3 (producer memory).
     private static ChargeInput Armed(int movementMode)
     {
         var input = Ready();
-        input.CurrentBehaviorOrdered = ChargeDoctrine.ChargeBehavior;
+        input.WhiskeyArmed = true;
         input.MovementMode = movementMode;
         return input;
     }
@@ -214,6 +238,17 @@ internal static class ChargeDoctrineTests
         var unknown = Ready();
         unknown.SecondsSinceLastAiChargeRefusal = double.NaN;
         AssertEqual(ChargeAction.None, Decide(unknown), "unknown refusal age fails closed");
+
+        // Vanilla's renew interval (timetorenewaichargecheck) above the floor lengthens it.
+        var renew = Ready();
+        renew.RefusalBackoffSeconds = 1800.0;
+        renew.SecondsSinceLastAiChargeRefusal = 1799.0;
+        AssertEqual(ChargeAction.None, Decide(renew), "inside vanilla's renew interval");
+        renew.SecondsSinceLastAiChargeRefusal = 1800.0;
+        AssertEqual(ChargeAction.Charge, Decide(renew), "renew interval elapsed");
+        renew.RefusalBackoffSeconds = 30.0;
+        renew.SecondsSinceLastAiChargeRefusal = 60.0;
+        AssertEqual(ChargeAction.None, Decide(renew), "a shorter renew keeps the 120 s floor");
     }
 
     private static void NoChargeOnPlayerOwned()
@@ -252,8 +287,9 @@ internal static class ChargeDoctrineTests
 
     private static void NoChargeWhenVanillaChargeModeActive()
     {
-        // Behavior is not ours (2) but the regiment is already in charge mode 3 or assault 6:
-        // vanilla is running its own trigger, so the doctrine adds nothing.
+        // Not armed by the doctrine but already in charge mode 3 or assault 6 (a contact
+        // melee ended 6 -> 3, 122302/122326): vanilla runs its own cycle, the doctrine adds
+        // nothing.
         foreach (int mode in new[] { ChargeDoctrine.ArmedMovementMode, ChargeDoctrine.AssaultMovementMode })
         {
             var input = Ready();
@@ -283,7 +319,7 @@ internal static class ChargeDoctrineTests
             input.TargetVisible = (bits & 4) != 0;
             input.DistanceToTarget = (bits & 8) != 0 ? 80f : 130f;
             input.TargetMorale = (bits & 16) != 0 ? 0.5f : 0.9f;
-            input.CurrentBehaviorOrdered = (bits & 32) != 0 ? ChargeDoctrine.RevertBehavior : 1;
+            input.WhiskeyArmed = (bits & 32) == 0;
             if (Decide(input) != ChargeAction.Charge) continue;
             charges++;
             AssertEqual(ChargeDoctrine.NormalMovementMode, input.MovementMode, "charge only at movementmode 0");
@@ -291,8 +327,9 @@ internal static class ChargeDoctrineTests
             AssertTrue(input.TargetIsFirstInRange && input.TargetVisible, "charge only on the visible enemyinrangereg[0]");
             AssertTrue(input.DistanceToTarget < input.VanillaMaxChargeRadius, "charge only inside the vanilla radius");
             AssertTrue(input.TargetMorale + ChargeDoctrine.MoraleMargin < input.OwnMorale, "Whiskey margin on top");
+            AssertFalse(input.WhiskeyArmed, "an armed regiment is never re-armed");
         }
-        AssertEqual(2, charges, "one charging cell per non-3 prior behavior");
+        AssertEqual(1, charges, "one charging cell, unarmed");
     }
 
     private static void HoldsWhileCourierPending()
@@ -524,5 +561,560 @@ internal static class ChargeDoctrineTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(25000, hits, "hit count");
         AssertEqual(0L, allocated, "allocated bytes");
+    }
+
+    // ------------------------------------------------------------------ BC6b producer
+
+    private const int BrigadeId = 100;
+    private const int RegA = 101, RegB = 102, RegC = 103, RegD = 104;
+    private const int TargetId = 900;
+    private const float Radius = 120f;
+    private static long _tick;
+
+    // Brigade HQ (500, -500) in assault; three moving infantry regiments on z = -520 at
+    // x 420/500/580, ordered behavior 2, all with the visible enemy 900 at (500, -580) as
+    // enemyinrangereg[0]. Parent distance 80 < 120. Regiment distances 100/60/100: B and A
+    // lead (A wins the tie with C on the lower index).
+    private static BattleSnapshot Line(double hours)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, ++_tick, hours);
+        s.SetSliceCount(20);
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = BrigadeId, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 500f, Z = -500f,
+            AiStance = 4, AiStanceOrdered = 4, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup,
+        });
+        AddRegiment(s, RegA, 420f);
+        AddRegiment(s, RegB, 500f);
+        AddRegiment(s, RegC, 580f);
+        for (int i = 1; i < s.OwnCount; i++) s.Own[i].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        s.AddEnemy(new UnitRecord
+        {
+            InstanceId = TargetId, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -580f, Morale = 0.4f,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry,
+        });
+        s.AddObservation(new EnemyObservation
+        {
+            InstanceId = TargetId, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -580f, Strength = 500f,
+            State = ObservationState.Visible, Confidence01 = 1f, LastSeenHours = hours,
+        });
+        return s;
+    }
+
+    private static void AddRegiment(BattleSnapshot s, int id, float x)
+    {
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = id, UnitTyp = TacticalUnitType.Infantry, X = x, Z = -520f, Morale = 0.8f, Fatigue = 0.2f,
+            RegimentPaths = 1, MovementMode = 0, CombatBehaviorOrdered = 2, FirstEnemyInRangeId = TargetId,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry,
+        });
+    }
+
+    private static ref UnitRecord Own(BattleSnapshot s, int id) => ref s.Own[s.IndexOfOwn(id)];
+
+    private static ChargeIntentProducer.Settings On(float renewHours = 0f) => new ChargeIntentProducer.Settings(true, Radius, renewHours);
+
+    private sealed class Sink : IIntentSink
+    {
+        public readonly BattleOrderIntent[] Items = new BattleOrderIntent[16];
+        public int Count;
+        public void Submit(in BattleOrderIntent intent) { if (Count < Items.Length) Items[Count++] = intent; }
+        public void Clear() { Count = 0; }
+
+        public bool TryFind(int id, out BattleOrderIntent intent)
+        {
+            for (int i = 0; i < Count; i++)
+                if (Items[i].GroupId == id) { intent = Items[i]; return true; }
+            intent = default(BattleOrderIntent);
+            return false;
+        }
+    }
+
+    private sealed class Harness
+    {
+        public readonly ChargeIntentProducer.ChargeMemory Memory = new ChargeIntentProducer.ChargeMemory();
+        public readonly OrderExecutor Executor = new OrderExecutor();
+        public readonly Sink Sink = new Sink();
+        public int Confirmed;
+
+        public void Plan(BattleSnapshot s, ChargeIntentProducer.Settings settings)
+        {
+            Sink.Clear();
+            Confirmed = ChargeIntentProducer.Plan(s, settings, Memory, Executor, Sink);
+        }
+
+        // The executor issued every intent of the last Plan at its doctrine time.
+        public void ExecuteAll(double hours)
+        {
+            for (int i = 0; i < Sink.Count; i++)
+                Executor.RecordIssued(Sink.Items[i], hours, null, 0, null, 0, 0, 0);
+        }
+    }
+
+    // Two ticks: the doctrine arms A and B, the executor issues both.
+    private static Harness Armed()
+    {
+        var h = new Harness();
+        h.Plan(Line(1.0), On());
+        h.ExecuteAll(1.0);
+        return h;
+    }
+
+    private static void ProducerArmsTwoLeadingRegiments()
+    {
+        var h = new Harness();
+        h.Plan(Line(1.0), On());
+        AssertEqual(2, h.Sink.Count, "two leading regiments");
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent b), "closest regiment charges");
+        AssertTrue(h.Sink.TryFind(RegA, out _), "tie with C goes to the lower index");
+        AssertFalse(h.Sink.TryFind(RegC, out _), "third regiment does not lead");
+        AssertEqual(OrderChannel.CombatBehavior, b.Channel, "combat behavior channel");
+        AssertEqual(ChargeDoctrine.ChargeBehavior, b.Value, "behavior 3");
+        AssertEqual(IntentPriority.Executor, b.Priority, "executor priority");
+        AssertEqual(IntentSource.ChargeDoctrine, b.Source, "source");
+        AssertEqual(IntentFlags.PerRegiment, b.Flags, "per regiment only");
+        AssertEqual(-1f, b.Heading, "no heading");
+        AssertEqual(ChargeIntentProducer.ChargeReason, b.Reason, "static reason");
+        AssertEqual(0, h.Confirmed, "nothing confirmed before the executor ran");
+
+        // The brigade itself never gets a behavior write (cycle 6 would re-order it, D10).
+        AssertFalse(h.Sink.TryFind(BrigadeId, out _), "never the group");
+    }
+
+    // Vanilla's arming gate zeroes the ordered behavior (124770-124774): the regiment reads
+    // mode 3 / ordered 0 while armed. A stance demotion must still disarm it.
+    private static void ProducerArmedFromMemoryNotOrderedBehavior()
+    {
+        Harness h = Armed();
+        BattleSnapshot s = Line(1.01);
+        foreach (int id in new[] { RegA, RegB })
+        {
+            Own(s, id).MovementMode = ChargeDoctrine.ArmedMovementMode;
+            Own(s, id).CombatBehaviorOrdered = 0;
+        }
+        Own(s, BrigadeId).AiStanceOrdered = 2;
+        h.Plan(s, On());
+        AssertEqual(2, h.Confirmed, "both charges confirmed by the executor");
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent b), "armed regiment gets an intent");
+        AssertEqual(ChargeDoctrine.RevertBehavior, b.Value, "behavior 2");
+        AssertTrue((b.Flags & IntentFlags.LeaveChargeMode) != 0, "disarm leaves charge mode 3");
+        AssertEqual(ChargeIntentProducer.DisarmReason, b.Reason, "disarm reason");
+        AssertTrue(h.Sink.TryFind(RegA, out _), "both armed regiments disarmed");
+        AssertFalse(h.Sink.TryFind(RegC, out _), "never armed, nothing to disarm");
+
+        // Stance kept: an armed regiment in mode 3 holds.
+        Harness hold = Armed();
+        BattleSnapshot s2 = Line(1.01);
+        Own(s2, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(s2, RegB).CombatBehaviorOrdered = 0;
+        hold.Plan(s2, On());
+        AssertFalse(hold.Sink.TryFind(RegB, out _), "armed in mode 3, conditions hold: no write");
+
+        // A confirmed Revert releases the regiment: a later mode 3 of its own (a contact melee
+        // ending 6 -> 3, 122302/122326) is vanilla's, never disarmed by the doctrine.
+        Harness rev = Armed();
+        BattleSnapshot r1 = Line(1.01);
+        Own(r1, BrigadeId).AiStanceOrdered = 2;
+        Own(r1, RegB).CombatBehaviorOrdered = 3; // courier still carrying the charge order
+        rev.Plan(r1, On());
+        AssertTrue(rev.Sink.TryFind(RegB, out BattleOrderIntent pendingRevert) && (pendingRevert.Flags & IntentFlags.LeaveChargeMode) == 0,
+            "courier pending: plain revert");
+        rev.ExecuteAll(1.01);
+        BattleSnapshot r2 = Line(1.02);
+        Own(r2, BrigadeId).AiStanceOrdered = 2;
+        Own(r2, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(r2, RegB).CombatBehaviorOrdered = 0;
+        rev.Plan(r2, On());
+        AssertFalse(rev.Sink.TryFind(RegB, out _), "released: vanilla's own mode 3 is left alone");
+    }
+
+    private static void ProducerUnconfirmedChargeIsNotArmed()
+    {
+        var h = new Harness();
+        h.Plan(Line(1.0), On());
+        // The executor refused (guard, claim, cooldown): no Issued outcome.
+        BattleSnapshot s = Line(1.01);
+        Own(s, BrigadeId).AiStanceOrdered = 2;
+        Own(s, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode; // vanilla's own mode 3
+        h.Plan(s, On());
+        AssertEqual(0, h.Sink.Count, "nothing armed, nothing to revert");
+
+        // An outcome from another source does not arm either.
+        var other = new Harness();
+        other.Plan(Line(1.0), On());
+        other.Executor.RecordIssued(new BattleOrderIntent { GroupId = RegB, Channel = OrderChannel.CombatBehavior, Value = 1, Source = IntentSource.FireControl },
+            1.0, null, 0, null, 0, 0, 0);
+        other.Plan(s, On());
+        AssertFalse(other.Sink.TryFind(RegB, out _), "fire control's write is not the doctrine's arming");
+    }
+
+    private static void ProducerFreshStampIsNotARefusal()
+    {
+        var h = new Harness();
+        BattleSnapshot s = Line(1.0);
+        Own(s, RegB).LastAiChargeTime = 0.75f; // a refusal from before the producer ever saw it
+        h.Plan(s, On());
+        AssertTrue(h.Sink.TryFind(RegB, out _), "first-seen stamp is the baseline");
+        AssertTrue(h.Sink.TryFind(RegA, out _), "fresh unit (0) charges");
+    }
+
+    // Refusal: 122290 SetMovementMode() + 122292 stamp; the gate had already zeroed the
+    // ordered behavior. The doctrine reverts to 2 and waits max(120 s, renew) on its clock.
+    private static void ProducerRefusalBacksOffWithVanillaRenew()
+    {
+        AssertEqual(1800.0, ChargeDoctrine.RefusalBackoffSeconds(0.5f), "shipped renew 0.5 h");
+        AssertEqual(ChargeDoctrine.RearmAfterRefusalBattleSeconds, ChargeDoctrine.RefusalBackoffSeconds(0f), "floor 120 s");
+        AssertEqual(ChargeDoctrine.RearmAfterRefusalBattleSeconds, ChargeDoctrine.RefusalBackoffSeconds(float.NaN), "unknown renew keeps the floor");
+
+        foreach (float renewHours in new[] { 0f, 0.5f })
+        {
+            double backoff = ChargeDoctrine.RefusalBackoffSeconds(renewHours);
+            var h = new Harness();
+            h.Plan(Line(1.0), On(renewHours));
+            h.ExecuteAll(1.0);
+
+            double refusedAt = 1.01;
+            BattleSnapshot s = Line(refusedAt);
+            Own(s, RegB).CombatBehaviorOrdered = 0;
+            Own(s, RegB).LastAiChargeTime = 1.005f;
+            h.Plan(s, On(renewHours));
+            AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent revert), "refusal reverts");
+            AssertEqual(ChargeDoctrine.RevertBehavior, revert.Value, "back to behavior 2 (renew " + renewHours + ")");
+            AssertFalse((revert.Flags & IntentFlags.LeaveChargeMode) != 0, "mode 0: nothing to disarm");
+            h.ExecuteAll(refusedAt);
+
+            double inside = refusedAt + (backoff - 1.0) / 3600.0;
+            BattleSnapshot s2 = Line(inside);
+            Own(s2, RegB).LastAiChargeTime = 1.005f;
+            h.Plan(s2, On(renewHours));
+            AssertFalse(h.Sink.TryFind(RegB, out _), "inside the back-off (renew " + renewHours + ")");
+
+            BattleSnapshot s3 = Line(refusedAt + (backoff + 1.0) / 3600.0);
+            Own(s3, RegB).LastAiChargeTime = 1.005f;
+            h.Plan(s3, On(renewHours));
+            AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent again) && again.Value == ChargeDoctrine.ChargeBehavior,
+                "re-armed after the back-off (renew " + renewHours + ")");
+        }
+    }
+
+    private static void ProducerDistanceFromParentGroupStrict()
+    {
+        var h = new Harness();
+        BattleSnapshot s = Line(1.0);
+        // Regiments stay 60-100 m from the target; the HQ moves to exactly the radius.
+        Own(s, BrigadeId).Z = -580f + Radius;
+        h.Plan(s, On());
+        AssertEqual(0, h.Sink.Count, "parent at the radius: vanilla's < fails (122257)");
+
+        BattleSnapshot inside = Line(1.0);
+        Own(inside, BrigadeId).Z = -580f + Radius - 0.5f;
+        h = new Harness();
+        h.Plan(inside, On());
+        AssertEqual(2, h.Sink.Count, "parent just inside");
+
+        BattleSnapshot orphan = Line(1.0);
+        Own(orphan, RegB).ParentIndex = -1;
+        h = new Harness();
+        h.Plan(orphan, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "no command parent, no charge");
+    }
+
+    private static void ProducerGroupStanceNeedsOrderedAndCurrent()
+    {
+        UnitRecord g = new UnitRecord { AiStance = 4, AiStanceOrdered = 4 };
+        AssertEqual(4, ChargeIntentProducer.GroupStance(g), "both 4");
+        g.AiStance = 3;
+        AssertEqual(3, ChargeIntentProducer.GroupStance(g), "assault ordered, courier not arrived: not yet 4");
+        g.AiStance = 4;
+        g.AiStanceOrdered = 2;
+        AssertEqual(2, ChargeIntentProducer.GroupStance(g), "demotion ordered: reverts at once");
+
+        var h = new Harness();
+        BattleSnapshot s = Line(1.0);
+        Own(s, BrigadeId).AiStance = 3;
+        h.Plan(s, On());
+        AssertEqual(0, h.Sink.Count, "pending assault order arms nothing");
+    }
+
+    private static void ProducerLaneBlockedOnlyBetween()
+    {
+        // A cavalry regiment (no target, never leads) straight between B and the target.
+        BattleSnapshot s = LineWith(RegD, 500f, -550f);
+        var h = new Harness();
+        h.Plan(s, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "friendly in B's lane");
+
+        // Behind B (projection <= 0): not in the lane.
+        BattleSnapshot behind = LineWith(RegD, 500f, -480f);
+        h = new Harness();
+        h.Plan(behind, On());
+        AssertTrue(h.Sink.TryFind(RegB, out _), "friendly behind is not in the lane");
+
+        // Beyond the target (projection >= 1): not in the lane.
+        BattleSnapshot beyond = LineWith(RegD, 500f, -620f);
+        h = new Harness();
+        h.Plan(beyond, On());
+        AssertTrue(h.Sink.TryFind(RegB, out _), "friendly beyond the target is not in the lane");
+    }
+
+    private static BattleSnapshot LineWith(int id, float x, float z)
+    {
+        BattleSnapshot s = Line(1.0);
+        int count = s.OwnCount;
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = id, UnitTyp = TacticalUnitType.Cavalry, X = x, Z = z, Morale = 0.8f,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsCavalry,
+        });
+        for (int i = 1; i <= count; i++) s.Own[i].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private static void ProducerTargetStateFromVisibleRecord()
+    {
+        BattleSnapshot even = Line(1.0);
+        even.EnemyRecords[0].Morale = 0.7f; // 0.7 + 0.15 >= 0.8
+        var h = new Harness();
+        h.Plan(even, On());
+        AssertEqual(0, h.Sink.Count, "no morale margin, ordered target");
+
+        BattleSnapshot flanked = Line(1.0);
+        flanked.EnemyRecords[0].Morale = 0.7f;
+        flanked.EnemyRecords[0].Outflanked = 1;
+        h = new Harness();
+        h.Plan(flanked, On());
+        AssertEqual(2, h.Sink.Count, "visible target outflanked by this side (UpdateFlanking 123149)");
+
+        foreach (int mode in new[] { 2, 4 })
+        {
+            BattleSnapshot falling = Line(1.0);
+            falling.EnemyRecords[0].Morale = 0.7f;
+            falling.EnemyRecords[0].MovementMode = mode;
+            h = new Harness();
+            h.Plan(falling, On());
+            AssertEqual(2, h.Sink.Count, "target disordered, movement mode " + mode);
+        }
+
+        // Remembered, not visible: nothing is read, nothing charges.
+        BattleSnapshot hidden = Line(1.0);
+        hidden.Observations[0].State = ObservationState.Remembered;
+        h = new Harness();
+        h.Plan(hidden, On());
+        AssertEqual(0, h.Sink.Count, "remembered target");
+
+        // First in range is some other unit: the doctrine never substitutes a target.
+        BattleSnapshot other = Line(1.0);
+        Own(other, RegB).FirstEnemyInRangeId = 901;
+        h = new Harness();
+        h.Plan(other, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "first in range unseen");
+    }
+
+    private static void ProducerNeverTouchesPlayerOwned()
+    {
+        BattleSnapshot s = Line(1.0);
+        for (int i = 1; i < s.OwnCount; i++) s.Own[i].Flags |= UnitFlags.PlayerOwned;
+        var h = new Harness();
+        h.Plan(s, On());
+        AssertEqual(0, h.Sink.Count, "player-owned never charged");
+
+        Harness armed = Armed();
+        BattleSnapshot later = Line(1.01);
+        Own(later, RegB).Flags |= UnitFlags.PlayerOwned;
+        Own(later, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(later, BrigadeId).AiStanceOrdered = 2;
+        armed.Plan(later, On());
+        AssertFalse(armed.Sink.TryFind(RegB, out _), "player-owned never reverted or disarmed");
+    }
+
+    private static void ProducerDeferredDisarmAfterAssault()
+    {
+        Harness h = Armed();
+        BattleSnapshot assault = Line(1.01);
+        Own(assault, RegB).MovementMode = ChargeDoctrine.AssaultMovementMode;
+        Own(assault, RegB).CombatBehaviorOrdered = 0;
+        Own(assault, RegB).RegimentPaths = 1;
+        Own(assault, BrigadeId).AiStanceOrdered = 2;
+        h.Plan(assault, On());
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent revert), "denied mid-assault");
+        AssertEqual(ChargeDoctrine.RevertBehavior, revert.Value, "behavior 2");
+        AssertFalse((revert.Flags & IntentFlags.LeaveChargeMode) != 0, "never aborts mode 6");
+        h.ExecuteAll(1.01);
+
+        BattleSnapshot still = Line(1.02);
+        Own(still, RegB).MovementMode = ChargeDoctrine.AssaultMovementMode;
+        Own(still, RegB).CombatBehaviorOrdered = 2;
+        Own(still, BrigadeId).AiStanceOrdered = 2;
+        h.Plan(still, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "assault still running: wait");
+
+        BattleSnapshot back = Line(1.03);
+        Own(back, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode; // 122302 / 122326
+        Own(back, RegB).CombatBehaviorOrdered = 0;
+        Own(back, BrigadeId).AiStanceOrdered = 2;
+        h.Plan(back, On());
+        AssertTrue(h.Sink.TryFind(RegB, out BattleOrderIntent disarm), "6 -> 3: disarm");
+        AssertTrue((disarm.Flags & IntentFlags.LeaveChargeMode) != 0, "leaves mode 3");
+        h.ExecuteAll(1.03);
+
+        BattleSnapshot done = Line(1.04);
+        Own(done, RegB).CombatBehaviorOrdered = 2;
+        Own(done, BrigadeId).AiStanceOrdered = 2;
+        h.Plan(done, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "disarmed: nothing left");
+    }
+
+    // Cycle 6 re-cascades behavior 2 after a stance change (SetAIStance zeroes the group's
+    // ordered behavior, 122099-122120 -> 5631-5634): the regiment is back at mode 0 / 2.
+    private static void ProducerReleasesVanillaReorder()
+    {
+        Harness h = Armed();
+        BattleSnapshot s = Line(1.01);
+        Own(s, RegB).CombatBehaviorOrdered = 2;
+        Own(s, BrigadeId).AiStanceOrdered = 2; // conditions fail: Revert would write 2 again
+        h.Plan(s, On());
+        AssertFalse(h.Sink.TryFind(RegB, out _), "behavior 2 already ordered: no write");
+        AssertTrue(h.Memory.TryGet(RegB, out ChargeIntentProducer.RegimentMemory m) && !m.Armed, "released");
+
+        // Cascade while every condition still holds: released, then armed afresh.
+        Harness again = Armed();
+        BattleSnapshot cascade = Line(1.01);
+        Own(cascade, RegB).CombatBehaviorOrdered = 2;
+        again.Plan(cascade, On());
+        AssertFalse(again.Sink.TryFind(RegB, out _), "no write on the release tick");
+        again.Plan(Line(1.02), On());
+        AssertTrue(again.Sink.TryFind(RegB, out BattleOrderIntent charge) && charge.Value == ChargeDoctrine.ChargeBehavior, "re-armed");
+    }
+
+    private static void ProducerConfigOffReleases()
+    {
+        var off = new ChargeIntentProducer.Settings(false, Radius, 0f);
+        var h = new Harness();
+        h.Plan(Line(1.0), off);
+        AssertEqual(0, h.Sink.Count, "off: nothing armed");
+
+        Harness armed = Armed();
+        BattleSnapshot s = Line(1.01);
+        Own(s, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(s, RegB).CombatBehaviorOrdered = 0;
+        armed.Plan(s, off);
+        AssertTrue(armed.Sink.TryFind(RegB, out BattleOrderIntent disarm) && (disarm.Flags & IntentFlags.LeaveChargeMode) != 0,
+            "off hands an armed regiment back");
+    }
+
+    private static void ProducerPlanAllocatesNothingAfterWarmup()
+    {
+        var h = new Harness();
+        BattleSnapshot a = Line(1.0);
+        BattleSnapshot b = Line(1.01);
+        Own(b, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(b, RegB).CombatBehaviorOrdered = 0;
+        var settings = On(0.5f);
+        h.Plan(a, settings);
+        h.ExecuteAll(1.0);
+        h.Plan(b, settings);
+        h.Plan(a, settings);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 200; i++)
+        {
+            h.Sink.Clear();
+            ChargeIntentProducer.Plan((i & 1) == 0 ? b : a, settings, h.Memory, h.Executor, h.Sink);
+        }
+        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "allocated bytes");
+    }
+
+    private sealed class AllowGuard : IOrderGuard
+    {
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason)
+        {
+            reason = SkipReason.None;
+            return true;
+        }
+    }
+
+    private static void LeaveChargeModeIsNotADuplicateInChargeMode()
+    {
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleSnapshot s = Line(1.0);
+        BattleOrderIntent disarm = ChargeIntentProducer.Intent(RegB, ChargeAction.Disarm);
+        BattleOrderIntent revert = ChargeIntentProducer.Intent(RegB, ChargeAction.Revert);
+
+        // Ordered 2 already (cycle-6 cascade) but still in charge mode 3.
+        Own(s, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        AssertTrue(executor.Plan(s, disarm, 1.0).Execute, "disarm in mode 3 executes");
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, revert, 1.0).Skip, "plain revert with 2 ordered is a duplicate");
+
+        Own(s, RegB).MovementMode = 0;
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, disarm, 1.0).Skip, "mode 0 and 2 ordered: nothing to do");
+    }
+
+    private static void ChargeHasNoExecutorWindow()
+    {
+        AssertEqual(0f, OrderExecutor.RecentOrderBattleSecondsFor(OrderChannel.CombatBehavior, IntentSource.ChargeDoctrine), "stateful charge/revert");
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleSnapshot s = Line(1.0);
+        BattleOrderIntent charge = ChargeIntentProducer.Intent(RegB, ChargeAction.Charge);
+        executor.RecordIssued(charge, 1.0, null, 0, null, 0, 0, 0);
+        Own(s, RegB).CombatBehaviorOrdered = 0;
+        AssertTrue(executor.Plan(s, ChargeIntentProducer.Intent(RegB, ChargeAction.Revert), 1.0001).Execute, "revert right after the charge");
+    }
+
+    // Plan's arbiter fixture: tick 1 the posture executor holds the brigade in assault,
+    // the charge demotion (Safety, Stance) and the charge doctrine (Executor,
+    // CombatBehavior per regiment) meet in one arbiter tick; tick 2 the group is out of
+    // assault and the doctrine reverts what it armed.
+    private static void DenialPrecedenceOverChargeArbiter()
+    {
+        var arbiter = new OrderArbiter();
+        var h = new Harness();
+        BattleSnapshot s = Line(1.0);
+        arbiter.BeginTick();
+        arbiter.Submit(new BattleOrderIntent { GroupId = BrigadeId, Channel = OrderChannel.Stance, Value = 4, Heading = -1f,
+            Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(Own(s, BrigadeId), DemoteTo(2), out BattleOrderIntent demotion), "demotion intent");
+        arbiter.Submit(demotion);
+        ChargeIntentProducer.Plan(s, On(), h.Memory, h.Executor, arbiter);
+
+        var winners = new BattleOrderIntent[8];
+        int count = arbiter.Resolve(winners);
+        AssertEqual(3, count, "one stance winner plus two regiment behaviors");
+        AssertEqual(OrderChannel.Stance, winners[0].Channel, "stance resolves first");
+        AssertEqual(IntentSource.ChargeDemotion, winners[0].Source, "Safety demotion beats the executor's assault");
+        AssertEqual(2, winners[0].Value, "demoted to 2");
+        for (int w = 1; w < count; w++)
+        {
+            AssertEqual(OrderChannel.CombatBehavior, winners[w].Channel, "regiment behavior channel");
+            AssertEqual(IntentSource.ChargeDoctrine, winners[w].Source, "the doctrine's own channel, no conflict");
+            h.Executor.RecordIssued(winners[w], 1.0, null, 0, null, 0, 0, 0);
+        }
+
+        // Tick 2: the demotion landed (ordered 2). One regiment is still waiting for the
+        // courier (mode 0, ordered 3), one had armed (mode 3, ordered 0).
+        BattleSnapshot next = Line(1.01);
+        Own(next, BrigadeId).AiStanceOrdered = 2;
+        Own(next, RegA).CombatBehaviorOrdered = 3;
+        Own(next, RegB).MovementMode = ChargeDoctrine.ArmedMovementMode;
+        Own(next, RegB).CombatBehaviorOrdered = 0;
+        arbiter.BeginTick();
+        ChargeIntentProducer.Plan(next, On(), h.Memory, h.Executor, arbiter);
+        count = arbiter.Resolve(winners);
+        AssertEqual(2, count, "both armed regiments revert");
+        for (int w = 0; w < count; w++)
+        {
+            AssertEqual(ChargeDoctrine.RevertBehavior, winners[w].Value, "behavior 2");
+            bool disarm = (winners[w].Flags & IntentFlags.LeaveChargeMode) != 0;
+            AssertEqual(winners[w].GroupId == RegB, disarm, "mode 3 disarms, mode 0 reverts");
+        }
+    }
+
+    private static TacticalResolvedGroupDecision DemoteTo(int stance)
+    {
+        return new TacticalResolvedGroupDecision(stance, TacticalDoctrineDecisionKind.Skip, "charge-demote-doctrine", false, false, true, ChargeOverrideAction.DemoteToHold);
     }
 }

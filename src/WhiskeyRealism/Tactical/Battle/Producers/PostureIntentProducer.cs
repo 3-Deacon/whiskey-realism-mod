@@ -55,6 +55,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             FacingPulseIntentProducer.Register();
             FireControlIntentProducer.Register();
             DivisionPlayIntentProducer.Register();
+            ChargeIntentProducer.Register(); // BC6b; BC7's explicit registry replaces this touch
         }
     }
 

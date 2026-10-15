@@ -757,6 +757,10 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.Formation:
                     return rec.Formation == w.Value && w.Refuse == RefuseFlank.None;
                 case OrderChannel.CombatBehavior:
+                    // A charge Disarm still has charge mode 3 to leave even when vanilla
+                    // already re-ordered behavior 2 (cycle-6 cascade, 5631-5634).
+                    if ((w.Flags & IntentFlags.LeaveChargeMode) != 0 && rec.MovementMode == ChargeDoctrine.ArmedMovementMode)
+                        return false;
                     return rec.CombatBehaviorOrdered == w.Value;
                 case OrderChannel.Facing:
                     return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees &&
