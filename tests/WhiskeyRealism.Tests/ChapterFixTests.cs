@@ -49,6 +49,7 @@ internal static class ChapterFixTests
             ("chapter late operation is not available before May 1864", LateOperationNotBeforeMay1864),
             ("chapter late operation needs the decisive era or later", LateOperationNeedsDecisiveEraOrLater),
             ("chapter every other operation keeps its single era so its match set is unchanged", OtherOperationsKeepTheirSingleEra),
+            ("chapter early operations still reject every later era in their window", EarlyOperationsRejectLaterErasInTheirWindow),
             ("chapter grand strategy profile is decisive before chapter three", GrandStrategyStaysDecisiveBeforeChapterThree),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
@@ -533,6 +534,14 @@ internal static class ChapterFixTests
             AssertTrue(HistoricalOperationCatalog.TryGetById(id, out var profile), id);
             AssertEqual(profile.Era, profile.MaxEra, id + " single era");
         }
+    }
+
+    private static void EarlyOperationsRejectLaterErasInTheirWindow()
+    {
+        // The behaviour behind the single-era check: a profile with MaxEra == Era matches that era only.
+        AssertEqual("union-east-pressure", ResolveUnionEast(EraStage.Amateur1861, 1, 6, 1861).Profile.OperationId, "its own era");
+        foreach (var later in new[] { EraStage.Operational1862, EraStage.Decisive1863, EraStage.TotalWar1864 })
+            AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(later, 1, 6, 1861).Kind, "1861-06 in " + later);
     }
 
     private static void GrandStrategyStaysDecisiveBeforeChapterThree()
