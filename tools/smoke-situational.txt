@@ -20,6 +20,7 @@ campaign.patch.project-unlock-observer.*           # Projects.CheckProjectUnlock
 # Save / load.
 campaign.patch.save-load.save                      # AICampaign.Save: only when the game saves (manual or autosave)
 campaign.patch.save-load.load                      # AICampaign.Load: only when a save is loaded
+campaign.patch.daily-review-save-drain             # SceneManagement.SaveAll: only when the game saves (manual, autosave or before a battle)
 
 # W&L career (DLC_WL) only.
 campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L career camp and diary only

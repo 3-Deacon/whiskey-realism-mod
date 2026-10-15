@@ -195,11 +195,7 @@ namespace WhiskeyRealism.Strategic
             var coordinator = StrategicCoordinator.Instance;
             if (coordinator == null) return null;
 
-            object ledgers = AccessTools.Field(coordinator.GetType(), "FormationDirectives")?.GetValue(coordinator);
-            if (ledgers == null)
-                ledgers = AccessTools.Property(coordinator.GetType(), "FormationDirectives")?.GetValue(coordinator, null);
-
-            var array = ledgers as FormationDirectiveLedger[];
+            var array = coordinator.FormationDirectives;
             if (array == null || allianceId >= array.Length) return null;
             return array[allianceId]?.GetAssignment(unitKey);
         }
