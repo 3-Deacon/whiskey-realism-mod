@@ -64,6 +64,7 @@ Tags are routed by `TelemetryTagPolicy`; unregistered `Tactical*` tags fall back
 | `ChargeDemotionCount` | Decision | ChargeDemotion producer: per side, at most every 30 s real time and only after a new demotion: `demoted` (window), `battleTotal`, `windowSeconds`. |
 | `BattlePerception` | Decision | `BattlePerceptionProbe`: per-side perception mode change (mode, reason, visible, remembered). The once-per-mode `[BattlePerception]` line also goes to `LogOutput.log`. |
 | `TacticalHeavyGate` | Gate | `TacticalBattleCoordinatorRuntime`: heavy snapshot-build gate decision per side (executed/skipped + reason, battle/real-time clocks, pending flag, unit count, objective hash). |
+| `TacticalDecisionMatrix` | State | `TacticalObserverPatch` (perf slice F1): built only when the profile writes tactical rows. Side-wide: one matrix per AIBattle per frame, written at `AdjustGroupAIStance`; the battle row carries `events` (the frame's observed side-wide events, e.g. `Reserve|Macro|Odds|Group`) and keeps the per-signature throttle (`Tactical Decision Matrix Min Seconds Between Snapshots`); a group row is written only when its decision inputs (the input signature's fields without the event, floats in 0.5 buckets, plus the decision) changed, or every 30 s. Micro-AI calls write the battle row and the focus group's row under the same rules. A Statistics-panel replay in the same frame writes no second matrix. The side-wide odds are evaluated once per AIBattle per frame and shared; counts and the feud `delta=` stay per call. |
 
 `TacticalHeavyGate` also carries GC pressure per side: `gcCountAbs` (absolute `GC.CollectionCount(0)`) and `gcDelta` (collections since the previous gate decision on that side). Mono Boehm is non-generational, so one counter suffices. Reset per battle in `ResetRuntimeTickState`. Correlate `gcDelta` with `tactical.snapshot-build*` timings: high `gcDelta` points to allocation churn, high duration with low `gcDelta` to algorithmic cost.
 
@@ -126,7 +127,8 @@ Non-patch scopes:
 | `campaign.patch.wl-campaign-dispatch.move`, `.flush` | 2.0 ms | #69: `MoveUnitTo` record, `UpdateUnitAI` classify/emit + compliance observation |
 | `campaign.patch.cic-faction-ai-guard.*` | 2.0 ms | #70: arm/disarm around `CheckShipConstruction` / `CheckArmyGroupManagement`, `IsCommanderInChief` answer |
 | `tactical.scene-cache.populate` | 5.0 ms | `TacticalStableSceneCache.Populate` |
-| `campaign.daily-review`, `campaign.construction`, `campaign.defense-intent`, `campaign.fiscal`, `campaign.coordinated-operations`, `campaign.sidecar-json-serialization`, `campaign.sidecar-file-write` | 4.0 ms | strategic coordinator / coordinated-ops / sidecar save |
+| `campaign.daily-review` | 4.0 ms | each slice of the time-sliced daily review (perf slice M2): the first on the date-change frame, each later frame's slice, and any drain before a new day or a campaign save; with `Time-Slice Daily Review` off, the whole review. `[DailyOps:Perf]` adds `slices=<n> maxSliceMs=<ms>`; its `totalMs` is the summed slice time |
+| `campaign.construction`, `campaign.defense-intent`, `campaign.fiscal`, `campaign.coordinated-operations`, `campaign.sidecar-json-serialization`, `campaign.sidecar-file-write` | 4.0 ms | strategic coordinator / coordinated-ops / sidecar save |
 | `telemetry.flush` | 10.0 ms | telemetry writer batch flush |
 
 ## Frame hitch probe
