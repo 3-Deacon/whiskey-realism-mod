@@ -7,7 +7,11 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Vanilla AIBattle fallback/retreat loops dereference allattachedunits slots
-    // without null guards. Suppress only those NullReferenceException cases.
+    // without null guards (MicroAICheckForRetreats decompile 4817, CheckLineFallbacks 5118,
+    // CheckOutOfFireRange 4497). Suppress only those NullReferenceException cases, and only
+    // when no Whiskey Realism frame is on the throwing stack: an NRE from a mod
+    // Prefix/Postfix on these methods (or on RegimentSetPath/SetMovementMode they call)
+    // must surface.
     internal static class TacticalFallbackRetreatNullGuardPatch
     {
         private static bool Enabled()
@@ -22,6 +26,14 @@ namespace WhiskeyRealism.Patches
             if (!Enabled() || exception == null) return exception;
             if (!TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(methodName, exception))
                 return exception;
+            if (VanillaFaultSite.IsModFault(exception))
+            {
+                OnceLog.Warning(
+                    "tactical-fallback-retreat-null:mod-fault",
+                    "[Patch:TacticalFallbackRetreatNullGuard] not suppressing NullReferenceException in " + methodName +
+                    "; the throwing stack includes Whiskey Realism code.");
+                return exception;
+            }
 
             OnceLog.Warning(
                 "tactical-fallback-retreat-null:" + methodName,

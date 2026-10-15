@@ -15,7 +15,10 @@ namespace WhiskeyRealism.Patches
     // no-progress false results or an initialization-only exception. Runtime
     // calls are not looped, but a null inside a single map item can otherwise
     // rethrow every campaign frame, so the finalizer skips that one iterator
-    // slot using vanilla's cursor semantics.
+    // slot using vanilla's cursor semantics (UpdateFilterMaps decompile 31852).
+    // The finalizer only acts on the fault types that body raises (null/missing
+    // reference, cursor index out of range) and never on a fault whose stack includes
+    // Whiskey Realism code.
     [HarmonyPatch(typeof(Economy), "UpdateFilterMaps")]
     internal static class EconomyFilterMapInitializationGuardPatch
     {
@@ -68,6 +71,15 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if (__exception == null || !Enabled()) return __exception;
+                    if (!VanillaFaultSite.IsFilterMapInitializationFault(__exception)) return __exception;
+                    if (VanillaFaultSite.IsModFault(__exception))
+                    {
+                        OnceLog.Warning(
+                            "filter-map-init:mod-fault",
+                            "[Patch:FilterMapInit] not suppressing UpdateFilterMaps " + __exception.GetType().Name
+                                + "; the throwing stack includes Whiskey Realism code.");
+                        return __exception;
+                    }
                     var decision = Guard.ObserveException(initialization, __exception, __state);
                     if (!decision.ForceComplete) return __exception;
 

@@ -51,6 +51,9 @@ internal static class TelemetryInfraFixTests
         SummaryReportsFrameHitches();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
+        FaultSiteDetectsModFramesInStack();
+        FaultSiteAcceptsOnlyListedExceptionTypes();
+        FaultSiteDiarySupplyCycleMatchesVanillaNullHandling();
     }
 
     private static void LogPass(string message)
@@ -1049,5 +1052,56 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 121, "Hampton", "Hampton"), "roster count change rescans");
         TestHarness.AssertTrue(TacticalRegimentDiagnosticsPatch.ShouldRescan(true, 120, 120, "Hampton", "Hampton,Tennessee"), "watch list change rescans");
         LogPass("regiment diagnostics rescan only when roster or watch list changes");
+    }
+
+    // ---------------------------------------------------------------- H-finalizer
+
+    private static Exception Capture(Action action)
+    {
+        try { action(); }
+        catch (Exception ex) { return ex; }
+        return null;
+    }
+
+    private static void FaultSiteDetectsModFramesInStack()
+    {
+        var modAssembly = typeof(TelemetryInfraFixTests).Assembly;
+        var jsonAssembly = typeof(Newtonsoft.Json.JsonConvert).Assembly;
+
+        // Thrown inside Newtonsoft, caught here: the trace holds Newtonsoft frames plus this
+        // test frame (the catch site), mirroring vanilla frames plus the patched DMD frame.
+        Exception jsonFault = Capture(() => Newtonsoft.Json.Linq.JObject.Parse("{"));
+        TestHarness.AssertTrue(jsonFault != null, "fault captured");
+        TestHarness.AssertTrue(VanillaFaultSite.HasFrameFrom(jsonFault, jsonAssembly), "frames from the throwing assembly detected");
+        TestHarness.AssertFalse(VanillaFaultSite.HasFrameFrom(jsonFault, typeof(System.Xml.XmlDocument).Assembly), "unrelated assembly not detected");
+
+        Exception modFault = Capture(() => { string s = null; GC.KeepAlive(s.Length); });
+        TestHarness.AssertTrue(VanillaFaultSite.HasFrameFrom(modFault, modAssembly), "mod-thrown NRE has a mod frame");
+        TestHarness.AssertFalse(VanillaFaultSite.HasFrameFrom(new NullReferenceException("never thrown"), modAssembly), "no trace means no mod frame (keep old suppression)");
+        TestHarness.AssertFalse(VanillaFaultSite.HasFrameFrom(null, modAssembly), "null exception");
+        LogPass("fault site detects mod frames in stack");
+    }
+
+    private static void FaultSiteAcceptsOnlyListedExceptionTypes()
+    {
+        TestHarness.AssertTrue(VanillaFaultSite.IsNullOrMissingReference(new NullReferenceException()), "NRE");
+        TestHarness.AssertTrue(VanillaFaultSite.IsNullOrMissingReference(new UnityEngine.MissingReferenceException()), "Unity missing reference");
+        TestHarness.AssertFalse(VanillaFaultSite.IsNullOrMissingReference(new InvalidOperationException()), "other type");
+        TestHarness.AssertTrue(VanillaFaultSite.IsFilterMapInitializationFault(new IndexOutOfRangeException()), "cursor out of range");
+        TestHarness.AssertTrue(VanillaFaultSite.IsFilterMapInitializationFault(new ArgumentOutOfRangeException()), "list index out of range");
+        TestHarness.AssertTrue(VanillaFaultSite.IsFilterMapInitializationFault(new NullReferenceException()), "null map item");
+        TestHarness.AssertFalse(VanillaFaultSite.IsFilterMapInitializationFault(new InvalidOperationException()), "unrelated failure not forced complete");
+        TestHarness.AssertFalse(VanillaFaultSite.IsFilterMapInitializationFault(new OutOfMemoryException()), "fatal failure not forced complete");
+        TestHarness.AssertFalse(VanillaFaultSite.IsFilterMapInitializationFault(null), "null");
+        LogPass("fault site accepts only listed exception types");
+    }
+
+    private static void FaultSiteDiarySupplyCycleMatchesVanillaNullHandling()
+    {
+        TestHarness.AssertTrue(VanillaFaultSite.DiarySupplyCycleSafe(10, null), "regiment-level group uses supplystate");
+        TestHarness.AssertTrue(VanillaFaultSite.DiarySupplyCycleSafe(14, null), "null groupsupplystate is skipped by vanilla (Diary.UpdateEvents ~183037)");
+        TestHarness.AssertFalse(VanillaFaultSite.DiarySupplyCycleSafe(14, new float[2]), "short array would throw at index 2");
+        TestHarness.AssertTrue(VanillaFaultSite.DiarySupplyCycleSafe(14, new float[4]), "normal array");
+        LogPass("fault site diary supply cycle matches vanilla null handling");
     }
 }
