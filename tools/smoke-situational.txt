@@ -58,6 +58,7 @@ campaign.patch.random-candidate-pick.hook         # AICampaign random picks: onl
 campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
 campaign.patch.pontoon-creek.speed                 # Regiment.GetTerrainSpeedAdjustment: only while a campaign group stands on a creek cell
+campaign.patch.fogged-embarkation.hidden-flag.prefix  # Ship.InitializeFlag: only when a fleet or transport model with a Flag child is created on the campaign map outside the player's fog
 campaign.patch.engineer-branch.autocalc.*          # Autocalc.CalculateEngineeringPoints: only when a battle is autoresolved
 campaign.patch.autocalc-entrenchment-side.*        # Autocalc.FightUnit: only when a battle is autoresolved
 
