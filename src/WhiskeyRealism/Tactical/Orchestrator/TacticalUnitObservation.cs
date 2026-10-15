@@ -7,39 +7,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// call. All fields are immutable after capture. Alliance-aware:
     /// visibility / objective / waypoint fields are populated only when the
     /// captured unit's alliance matches the capture's <c>allianceId</c>;
-    /// enemy units get cheap fields (position, strength, unittyp, routed
-    /// flag, permanently-detached flag) only. This matches the pre-refactor
+    /// enemy units get cheap fields (strength, routed flag,
+    /// permanently-detached flag) only. This matches the pre-refactor
     /// cost profile, which never invoked the visibility walk for enemy units.
     ///
     /// Own-side-only fields: <see cref="HasCurrentSetObjective"/>,
     /// <see cref="HasLastWaypoint"/>, <see cref="HasVisibleEnemy"/>,
     /// <see cref="HasVisibleEnemyPosition"/>, <see cref="VisibleEnemyStrength"/>,
-    /// <see cref="VisibleEnemyX"/>, <see cref="VisibleEnemyZ"/>,
-    /// <see cref="VisibleEnemyUnittyp"/>, <see cref="VisibleEnemyName"/>,
-    /// <see cref="VisibleEnemyRouted"/>, <see cref="VisibleEnemyPermanentlyDetached"/>,
-    /// <see cref="Fatigue01"/>, <see cref="Ammo01"/>,
-    /// <see cref="GroupEnemiesInRange"/>, <see cref="GroupAngleEnemyStrength"/>,
-    /// <see cref="GroupFlankRisk"/>, <see cref="GroupStrongPoint"/>,
-    /// <see cref="GroupVanillaStanceOrdered"/>.
+    /// <see cref="VisibleEnemyX"/>, <see cref="VisibleEnemyZ"/>.
     /// </summary>
     public readonly struct TacticalUnitObservation
     {
         public TacticalUnitObservation(
             int instanceId,
-            int unittyp,
             int alliance,
             bool isRouted,
             bool permanentlyDetached,
-            float worldX,
-            float worldZ,
             float strength,
-            float groupOwnInRange,
-            float groupAiGroup,
             bool hasCurrentSetObjective,
             string objectiveName,
             float objectiveX,
             float objectiveZ,
-            TacticalObjectiveType objectiveType,
             bool hasLastWaypoint,
             float lastWaypointX,
             float lastWaypointZ,
@@ -47,35 +35,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool hasVisibleEnemy,
             bool hasVisibleEnemyPosition,
             float visibleEnemyX,
-            float visibleEnemyZ,
-            float fatigue01,
-            float ammo01,
-            int effectiveCommandLevel,
-            int visibleEnemyUnittyp = -1,
-            string visibleEnemyName = null,
-            bool visibleEnemyRouted = false,
-            bool visibleEnemyPermanentlyDetached = false,
-            float groupEnemiesInRange = 0f,
-            float groupAngleEnemyStrength = 0f,
-            bool groupFlankRisk = false,
-            bool groupStrongPoint = false,
-            int groupVanillaStanceOrdered = -1)
+            float visibleEnemyZ)
         {
             InstanceId = instanceId;
-            Unittyp = unittyp;
             Alliance = alliance;
             IsRouted = isRouted;
             PermanentlyDetached = permanentlyDetached;
-            WorldX = worldX;
-            WorldZ = worldZ;
             Strength = strength;
-            GroupOwnInRange = groupOwnInRange;
-            GroupAiGroup = groupAiGroup;
             HasCurrentSetObjective = hasCurrentSetObjective;
             ObjectiveName = objectiveName ?? string.Empty;
             ObjectiveX = objectiveX;
             ObjectiveZ = objectiveZ;
-            ObjectiveType = objectiveType;
             HasLastWaypoint = hasLastWaypoint;
             LastWaypointX = lastWaypointX;
             LastWaypointZ = lastWaypointZ;
@@ -84,30 +54,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             HasVisibleEnemyPosition = hasVisibleEnemyPosition;
             VisibleEnemyX = visibleEnemyX;
             VisibleEnemyZ = visibleEnemyZ;
-            Fatigue01 = fatigue01;
-            Ammo01 = ammo01;
-            EffectiveCommandLevel = effectiveCommandLevel;
-            VisibleEnemyUnittyp = visibleEnemyUnittyp;
-            VisibleEnemyName = visibleEnemyName ?? string.Empty;
-            VisibleEnemyRouted = visibleEnemyRouted;
-            VisibleEnemyPermanentlyDetached = visibleEnemyPermanentlyDetached;
-            GroupEnemiesInRange = groupEnemiesInRange;
-            GroupAngleEnemyStrength = groupAngleEnemyStrength;
-            GroupFlankRisk = groupFlankRisk;
-            GroupStrongPoint = groupStrongPoint;
-            GroupVanillaStanceOrdered = groupVanillaStanceOrdered;
         }
 
         public int InstanceId { get; }
-        public int Unittyp { get; }
         public int Alliance { get; }
         public bool IsRouted { get; }
         public bool PermanentlyDetached { get; }
-        public float WorldX { get; }
-        public float WorldZ { get; }
         public float Strength { get; }
-        public float GroupOwnInRange { get; }
-        public float GroupAiGroup { get; }
         public bool HasCurrentSetObjective { get; }
         /// <summary>
         /// Raw objective name string captured via reflection on <c>objectivename</c>.
@@ -121,7 +74,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public string ObjectiveName { get; }
         public float ObjectiveX { get; }
         public float ObjectiveZ { get; }
-        public TacticalObjectiveType ObjectiveType { get; }
         public bool HasLastWaypoint { get; }
         public float LastWaypointX { get; }
         public float LastWaypointZ { get; }
@@ -139,64 +91,5 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float VisibleEnemyX { get; }
         /// <summary>World Z position of the closest visible enemy regiment (own-side only).</summary>
         public float VisibleEnemyZ { get; }
-        public float Fatigue01 { get; }
-        public float Ammo01 { get; }
-        public int EffectiveCommandLevel { get; }
-
-        // ---- Gap-fill Chunk 1: per-group sector fields (own-side only) ----
-        // Read from the live Regiment on the main thread when the observation is
-        // captured, so the observation carries the same signals
-        // BattleGroupStancePatch.BuildGroupSector reads. All default to neutral
-        // values (0 / false / -1 / string.Empty) for enemy observations and for
-        // own-side units where the source read failed.
-
-        /// <summary>
-        /// Closest-visible-enemy <c>Regiment.unittyp</c> (own-side only).
-        /// Defaults to -1 when no visible enemy or read failed. Used by
-        /// <see cref="TacticalGroupSectorEstimator.IsVisibleLineContact"/> to
-        /// gate the line-contact confidence bump.
-        /// </summary>
-        public int VisibleEnemyUnittyp { get; }
-        /// <summary>
-        /// Closest-visible-enemy GameObject name (own-side only). Used by
-        /// <see cref="TacticalGroupSectorEstimator.IsVisibleLineContact"/> to
-        /// reject skirmisher contact (name contains "skirm"). Empty when no
-        /// visible enemy or read failed.
-        /// </summary>
-        public string VisibleEnemyName { get; }
-        /// <summary>Closest-visible-enemy routed flag (own-side only).</summary>
-        public bool VisibleEnemyRouted { get; }
-        /// <summary>Closest-visible-enemy permanently-detached flag (own-side only).</summary>
-        public bool VisibleEnemyPermanentlyDetached { get; }
-        /// <summary>
-        /// <c>Regiment.groupenemiesinrange</c> (own-side only). Defaults to 0f
-        /// for enemy observations.
-        /// </summary>
-        public float GroupEnemiesInRange { get; }
-        /// <summary>
-        /// Sum of <c>Regiment.unitrange.enemystrengthwithinangle[]</c>
-        /// (own-side only). Summed at capture time so readers do not need the
-        /// live array. Defaults to 0f for enemy observations.
-        /// </summary>
-        public float GroupAngleEnemyStrength { get; }
-        /// <summary>
-        /// Precomputed flank-risk flag (own-side only). Mirrors
-        /// <c>BattleGroupStancePatch.BuildGroupSector</c>:
-        /// <c>flanksthreated &gt; 0f || outflanked &gt; 0</c>.
-        /// </summary>
-        public bool GroupFlankRisk { get; }
-        /// <summary>
-        /// Precomputed strong-point flag (own-side only). Mirrors
-        /// <c>BattleGroupStancePatch.BuildGroupSector</c>:
-        /// <c>covervalue &gt; 0.5f || fortinrange</c>.
-        /// </summary>
-        public bool GroupStrongPoint { get; }
-        /// <summary>
-        /// <c>Regiment.ai_stanceordered</c> at capture time (own-side only).
-        /// Defaults to -1 for enemy observations or read failure. The
-        /// <c>vanillaStance</c> input shape of
-        /// <see cref="TacticalDoctrineScorer.DecideGroupStance"/>.
-        /// </summary>
-        public int GroupVanillaStanceOrdered { get; }
     }
 }

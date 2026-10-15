@@ -20,8 +20,6 @@ internal static class TacticalUnitObservationAggregateTests
         private static TacticalUnitObservation MakeUnit(
             int instanceId,
             int alliance,
-            float worldX = 0f,
-            float worldZ = 0f,
             bool permanentlyDetached = false,
             bool hasVisibleEnemyPosition = false,
             float visibleEnemyX = 0f,
@@ -29,20 +27,14 @@ internal static class TacticalUnitObservationAggregateTests
         {
             return new TacticalUnitObservation(
                 instanceId: instanceId,
-                unittyp: 0,
                 alliance: alliance,
                 isRouted: false,
                 permanentlyDetached: permanentlyDetached,
-                worldX: worldX,
-                worldZ: worldZ,
                 strength: 100f,
-                groupOwnInRange: 100f,
-                groupAiGroup: 100f,
                 hasCurrentSetObjective: false,
                 objectiveName: "",
                 objectiveX: 0f,
                 objectiveZ: 0f,
-                objectiveType: TacticalObjectiveType.UnknownVanillaObjective,
                 hasLastWaypoint: false,
                 lastWaypointX: 0f,
                 lastWaypointZ: 0f,
@@ -50,10 +42,7 @@ internal static class TacticalUnitObservationAggregateTests
                 hasVisibleEnemy: hasVisibleEnemyPosition,
                 hasVisibleEnemyPosition: hasVisibleEnemyPosition,
                 visibleEnemyX: visibleEnemyX,
-                visibleEnemyZ: visibleEnemyZ,
-                fatigue01: 0.2f,
-                ammo01: 0.9f,
-                effectiveCommandLevel: 0);
+                visibleEnemyZ: visibleEnemyZ);
         }
 
         private static void LoadForTestPartitionsAlliedAndEnemyIndices()

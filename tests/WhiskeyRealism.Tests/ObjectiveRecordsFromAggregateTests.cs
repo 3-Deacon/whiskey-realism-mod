@@ -20,8 +20,6 @@ internal static class ObjectiveRecordsFromAggregateTests
     private static TacticalUnitObservation MakeUnit(
         int instanceId,
         int alliance,
-        float worldX = 0f,
-        float worldZ = 0f,
         float strength = 100f,
         bool hasVisibleEnemy = false,
         float visibleEnemyStrength = 0f,
@@ -36,20 +34,14 @@ internal static class ObjectiveRecordsFromAggregateTests
     {
         return new TacticalUnitObservation(
             instanceId: instanceId,
-            unittyp: 0,
             alliance: alliance,
             isRouted: isRouted,
             permanentlyDetached: permanentlyDetached,
-            worldX: worldX,
-            worldZ: worldZ,
             strength: strength,
-            groupOwnInRange: strength,
-            groupAiGroup: strength,
             hasCurrentSetObjective: false,
             objectiveName: string.Empty,
             objectiveX: 0f,
             objectiveZ: 0f,
-            objectiveType: TacticalObjectiveType.UnknownVanillaObjective,
             hasLastWaypoint: hasLastWaypoint,
             lastWaypointX: lastWaypointX,
             lastWaypointZ: lastWaypointZ,
@@ -57,10 +49,7 @@ internal static class ObjectiveRecordsFromAggregateTests
             hasVisibleEnemy: hasVisibleEnemy,
             hasVisibleEnemyPosition: hasVisibleEnemyPosition,
             visibleEnemyX: visibleEnemyX,
-            visibleEnemyZ: visibleEnemyZ,
-            fatigue01: 0.2f,
-            ammo01: 0.9f,
-            effectiveCommandLevel: 0);
+            visibleEnemyZ: visibleEnemyZ);
     }
 
     private static void VisibleEnemyLineComputesWeightedCentroidOfEnemyPositions()
@@ -98,7 +87,7 @@ internal static class ObjectiveRecordsFromAggregateTests
         {
             MakeUnit(1, 0, hasVisibleEnemy: false),
             MakeUnit(2, 0, hasVisibleEnemy: false),
-            MakeUnit(3, 1, worldX: 50f, worldZ: 50f, strength: 100f),
+            MakeUnit(3, 1, strength: 100f),
         });
         bool ok = TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(
             agg, 0, out _, out _, out _);
@@ -134,7 +123,7 @@ internal static class ObjectiveRecordsFromAggregateTests
         {
             MakeUnit(1, 0),
             MakeUnit(2, 0),
-            MakeUnit(3, 1, worldX: 50f, worldZ: 50f),
+            MakeUnit(3, 1),
         });
         bool ok = TacticalVisionRuntimeAdapter.TryMovementAnchorLineFromAggregate_ForTest(
             agg, 0, out _, out _);
