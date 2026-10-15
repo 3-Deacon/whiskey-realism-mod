@@ -39,6 +39,7 @@ internal static class BattleWriterFixTests
         ObjectiveChainMovementGateMatchesVanilla();
         DeploymentSkipsVanillaFortifiedPlacement();
         DeploymentSkipsFleetsAndMissingZones();
+        HqLinkSameCommandUsesVanillaHierarchy();
     }
 
     private static void Pass(string name)
@@ -516,5 +517,19 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 1, false), "frontlinevector.Count < 2");
         TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 4, true), "fortified path");
         Pass("battle writers: #60 skips fleets, missing zones and fortified groups");
+    }
+
+    // #55: Regiment.allattachedunits is GetComponentsInChildren<Regiment>
+    // (UpdateAllAttachedUnits 129574) and BattleUnits.GetParentUnit (93883)
+    // returns the unit itself when it hangs off the units root - same command
+    // is membership either way or a shared real parent, not a name check.
+    private static void HqLinkSameCommandUsesVanillaHierarchy()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(true, false, 1, 2, 10, 20), "target subordinate");
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(false, true, 1, 2, 10, 20), "source subordinate");
+        TestHarness.AssertTrue(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 7, 7), "same parent");
+        TestHarness.AssertFalse(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 1, 2), "both root-level (parent = self)");
+        TestHarness.AssertFalse(BattleWriterPolicy.HqLinkSameCommand(false, false, 1, 2, 7, 8), "different parents");
+        Pass("battle writers: #55 same command uses vanilla hierarchy");
     }
 }

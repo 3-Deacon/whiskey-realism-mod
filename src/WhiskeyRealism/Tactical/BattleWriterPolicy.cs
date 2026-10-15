@@ -436,6 +436,23 @@ namespace WhiskeyRealism.Tactical
             return unitTyp != 17 && frontlineVectorCount >= 2 && !fortifiedPath;
         }
 
+        // #55: "same command" for Regiment.MoveNonAIUnits' auto-link (129026):
+        // either unit in the other's allattachedunits (GetComponentsInChildren,
+        // 129574), or both under the same real parent per
+        // BattleUnits.GetParentUnit (93883 - a root-level unit is its own parent).
+        public static bool HqLinkSameCommand(
+            bool targetInSourceAttached,
+            bool sourceInTargetAttached,
+            int sourceId,
+            int targetId,
+            int sourceParentId,
+            int targetParentId)
+        {
+            if (targetInSourceAttached || sourceInTargetAttached) return true;
+            if (sourceParentId == sourceId || targetParentId == targetId) return false;
+            return sourceParentId == targetParentId;
+        }
+
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
         // commits a reserve when an attached unit (unittyp <= 2, no paths, not
         // routed) is outflanked (1|5 left, 2|6 right) on a side its own flank
