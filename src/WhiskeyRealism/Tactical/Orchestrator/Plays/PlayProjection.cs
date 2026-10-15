@@ -16,9 +16,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float anchorX, float anchorZ,
             float halfExtentX, float halfExtentZ,
             float startTimeOffsetSeconds,
-            int priority)
+            int priority,
+            bool envelops = false)
         {
             Kind = kind;
+            Envelops = envelops;
             AnchorX = anchorX;
             AnchorZ = anchorZ;
             HalfExtentX = halfExtentX < 0f ? 0f : halfExtentX;
@@ -34,6 +36,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float HalfExtentZ { get; }
         public float StartTimeOffsetSeconds { get; }
         public int Priority { get; }
+        /// <summary>PlayRect.Envelops, carried to the zone assignment.</summary>
+        public bool Envelops { get; }
 
         public bool ContainsPoint(float x, float z)
         {
@@ -138,7 +142,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     anchorWorldX, anchorWorldZ,
                     halfExtentX, halfExtentZ,
                     rect.StartTimeOffsetSeconds,
-                    rect.Priority);
+                    rect.Priority,
+                    rect.Envelops);
             }
             return result;
         }

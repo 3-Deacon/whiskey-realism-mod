@@ -58,9 +58,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float relativeSizeX,
             float relativeSizeY,
             float startTimeOffsetSeconds,
-            int priority)
+            int priority,
+            bool envelops = false)
         {
             Kind = kind;
+            Envelops = envelops;
             RelativeAnchorX = SanitizeRange(relativeAnchorX, -2f, 2f);
             RelativeAnchorY = SanitizeRange(relativeAnchorY, -2f, 2f);
             RelativeSizeX = SanitizeNonNeg(relativeSizeX);
@@ -76,6 +78,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float RelativeSizeY { get; }
         public float StartTimeOffsetSeconds { get; }
         public int Priority { get; }
+
+        /// <summary>
+        /// BC11 decision 4: the child assigned to this rect executes an envelopment (EnvelopmentManeuver: hold, march
+        /// round the enemy line end, face it, attack it). True on exactly six rects of the catalog; every other
+        /// wing rect is a plain role assignment whose StartTimeOffsetSeconds is only a start delay.
+        /// </summary>
+        public bool Envelops { get; }
 
         private static float SanitizeRange(float v, float min, float max)
         {

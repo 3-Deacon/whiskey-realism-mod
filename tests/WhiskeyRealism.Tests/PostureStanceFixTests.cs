@@ -400,7 +400,10 @@ internal static class PostureStanceFixTests
         var facing = CommandFormationWritePolicy.Decide(Fw(needsFacing: true, enemiesInRange: 0.4f));
         AssertEqual(FormationWriteKind.None, facing.Kind, "wheel re-paths every child (SetGroupFormation modifylastwaypoint)");
         AssertEqual("enemies-in-range", facing.Reason, "reason");
-        AssertEqual(FormationWriteKind.None, CommandFormationWritePolicy.Decide(Fw(needsRefuse: true, enemiesInRange: 1f)).Kind, "refuse flank too");
+        // BC11 decision 2: a refused flank is the wheel whatever the enemies in reach (only the facing-only wheel refuses them).
+        var refuse = CommandFormationWritePolicy.Decide(Fw(needsRefuse: true, enemiesInRange: 1f));
+        AssertEqual(FormationWriteKind.WheelGroup, refuse.Kind, "refuse flank wheels with enemies in range (BC11)");
+        AssertEqual("refuse-wheel", refuse.Reason, "refuse reason");
         AssertEqual(FormationWriteKind.VanillaFormation,
             CommandFormationWritePolicy.Decide(Fw(needsFormation: true, enemiesInRange: 1f)).Kind, "courier formation change unaffected");
     }
@@ -412,7 +415,7 @@ internal static class PostureStanceFixTests
         var facing = CommandFormationWritePolicy.Decide(Fw(needsFormation: true, needsFacing: true, combat: 0.5f));
         AssertEqual(FormationWriteKind.RotateInPlace, facing.Kind, "in contact only rotate in place");
         var refuse = CommandFormationWritePolicy.Decide(Fw(needsRefuse: true, combat: 0.5f));
-        AssertEqual(FormationWriteKind.None, refuse.Kind, "no skewed re-lay in contact");
+        AssertEqual(FormationWriteKind.RefuseInPlace, refuse.Kind, "no skewed re-lay in contact: the refuse rotates the wing in place (BC11)");
     }
 
     private static void FormationPolicyUsesVanillaOutOfCombat()

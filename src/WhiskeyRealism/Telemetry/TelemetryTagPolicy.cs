@@ -93,6 +93,11 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalLeafCascade", TelemetryCategory.Decision);
             AddTactical("TacticalArrivalRepath", TelemetryCategory.Decision);
             AddTactical("TacticalDeploymentPlan", TelemetryCategory.Decision);
+            // BC11: the refused flank in combat, the envelopment state machine, the flank reserve release, vanilla's own flank moves.
+            AddTactical("TacticalRefuseInPlace", TelemetryCategory.Write);
+            AddTactical("TacticalEnvelopment", TelemetryCategory.Decision);
+            AddTactical("TacticalReserveRelease", TelemetryCategory.Decision);
+            AddTactical("TacticalVanillaFlankMove", TelemetryCategory.State);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can

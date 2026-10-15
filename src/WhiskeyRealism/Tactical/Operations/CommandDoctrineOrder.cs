@@ -29,8 +29,12 @@ namespace WhiskeyRealism.Tactical.Operations
             TacticalOrderDelivery delivery,
             string parentNodeId,
             float courierIntervalSeconds,
-            string reason)
+            string reason,
+            float maneuverHeading = -1f,
+            bool maneuverHold = false)
         {
+            ManeuverHeading = maneuverHeading >= 0f && IsFinite(maneuverHeading) ? maneuverHeading % 360f : -1f;
+            ManeuverHold = maneuverHold;
             NodeId = SanitizeText(nodeId, "node-unknown");
             Role = role;
             Task = task;
@@ -67,6 +71,15 @@ namespace WhiskeyRealism.Tactical.Operations
         public string ParentNodeId { get; }
         public float CourierIntervalSeconds { get; }
         public string Reason { get; }
+
+        /// <summary>
+        /// BC11 decision 4, additive: the bearing the order's group faces on arrival (EnvelopmentManeuver's Turn phase);
+        /// -1 for no maneuver heading. The posture producer submits a group Facing with it.
+        /// </summary>
+        public float ManeuverHeading { get; }
+
+        /// <summary>BC11: the order is an EnvelopmentManeuver hold (stand where you are, no target to plan a route to).</summary>
+        public bool ManeuverHold { get; }
 
         public bool HasPurpose { get { return Role != CommandNodeRole.Unknown || Task != CommandTaskType.None; } }
         public bool AllowsIdle { get { return AllowedIdle != DoctrineAllowedIdleReason.None; } }
@@ -122,7 +135,9 @@ namespace WhiskeyRealism.Tactical.Operations
                 Delivery,
                 ParentNodeId,
                 CourierIntervalSeconds,
-                Reason);
+                Reason,
+                ManeuverHeading,
+                ManeuverHold);
         }
 
         public CommandDoctrineOrder WithTask(CommandTaskType task, string reason)
@@ -143,7 +158,37 @@ namespace WhiskeyRealism.Tactical.Operations
                 Delivery,
                 ParentNodeId,
                 CourierIntervalSeconds,
-                reason);
+                reason,
+                ManeuverHeading,
+                ManeuverHold);
+        }
+
+        /// <summary>
+        /// BC11 decision 4: the order a maneuvering child's nodes carry. Replaces the primary target, the allowed idle
+        /// (a hold is FormingUp) and the maneuver heading; the SOP is resolved for the task by the caller.
+        /// </summary>
+        public CommandDoctrineOrder WithManeuver(DoctrineTargetPoint primaryTarget, DoctrineAllowedIdleReason allowedIdle,
+            float maneuverHeading, bool maneuverHold, string reason)
+        {
+            return new CommandDoctrineOrder(
+                NodeId,
+                Role,
+                Task,
+                ObjectiveId,
+                primaryTarget,
+                SupportTarget,
+                FallbackTarget,
+                allowedIdle,
+                MinCommitUntilSeconds,
+                IssuedAtSeconds,
+                Confidence01,
+                Sop,
+                Delivery,
+                ParentNodeId,
+                CourierIntervalSeconds,
+                reason,
+                maneuverHeading,
+                maneuverHold);
         }
 
         private static string SanitizeText(string value, string fallback)
@@ -171,6 +216,57 @@ namespace WhiskeyRealism.Tactical.Operations
         private static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+    }
+
+    /// <summary>One node's maneuver override (see <see cref="ManeuverNodeTable"/>).</summary>
+    public readonly struct ManeuverNodeEntry
+    {
+        public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
+            bool hasTarget, float targetX, float targetZ, float heading, string reason)
+        {
+            NodeId = nodeId ?? string.Empty;
+            Phase = phase;
+            Task = task;
+            HasTarget = hasTarget;
+            TargetX = targetX;
+            TargetZ = targetZ;
+            Heading = heading;
+            Reason = reason ?? "maneuver";
+        }
+
+        public string NodeId { get; }
+        public WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase Phase { get; }
+        public CommandTaskType Task { get; }
+        public bool HasTarget { get; }
+        public float TargetX { get; }
+        public float TargetZ { get; }
+        public float Heading { get; }
+        public string Reason { get; }
+        public bool Holds => Phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Hold;
+    }
+
+    /// <summary>
+    /// BC11 decision 4: the side's maneuver table, keyed by command-node id and covering every node of each maneuvering
+    /// child (EnvelopmentManeuver.ExpandToNodes). CommandDoctrineAssignment.Build overrides the task, the primary target
+    /// and the maneuver heading of the nodes it names.
+    /// </summary>
+    public sealed class ManeuverNodeTable
+    {
+        private readonly System.Collections.Generic.Dictionary<string, ManeuverNodeEntry> _byNode =
+            new System.Collections.Generic.Dictionary<string, ManeuverNodeEntry>(System.StringComparer.Ordinal);
+
+        public int Count => _byNode.Count;
+
+        public void Add(in ManeuverNodeEntry entry)
+        {
+            if (!string.IsNullOrEmpty(entry.NodeId)) _byNode[entry.NodeId] = entry;
+        }
+
+        public bool TryGet(string nodeId, out ManeuverNodeEntry entry)
+        {
+            entry = default(ManeuverNodeEntry);
+            return nodeId != null && _byNode.TryGetValue(nodeId, out entry);
         }
     }
 }
