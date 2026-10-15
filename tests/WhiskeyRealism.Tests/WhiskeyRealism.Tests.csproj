@@ -124,6 +124,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlOperationNullGuard.cs" Link="WlOperationNullGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlEconomyFixes.cs" Link="WlEconomyFixes.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\WlEffectSwaps.cs" Link="Patches\WlEffectSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionModels.cs" Link="ConstructionModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
@@ -350,5 +352,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalRegimentDiagnosticsPatch.cs" Link="Patches\TacticalRegimentDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleWriterPolicy.cs" Link="Tactical\BattleWriterPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleStatFixes.cs" Link="Tactical\BattleStatFixes.cs" />
   </ItemGroup>
 </Project>
