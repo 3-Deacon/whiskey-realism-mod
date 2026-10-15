@@ -161,17 +161,19 @@ namespace WhiskeyRealism.Tactical
                 UnitFlags flags = OwnershipFlags(d, input) & UnitFlags.PlayerOwned;
                 if (flags == UnitFlags.None) continue;
                 if (d.permanentlydetached) flags |= UnitFlags.PermanentlyDetached;
-                if (PlayerOwnership.IsExposedOwned(flags, DetachedNodeBetween(attached, d))) return true;
+                if (PlayerOwnership.IsExposedOwned(flags, DetachedNodeBetween(group, attached, d))) return true;
             }
             return false;
         }
 
-        private static bool DetachedNodeBetween(Regiment[] groupDescendants, Regiment descendant)
+        // groupDescendants includes the group itself (GetComponentsInChildren,
+        // 129574); the group's own detach never shields its subtree.
+        private static bool DetachedNodeBetween(Regiment group, Regiment[] groupDescendants, Regiment descendant)
         {
             for (int i = 0; i < groupDescendants.Length; i++)
             {
                 Regiment node = groupDescendants[i];
-                if ((Object)node == null || (Object)node == (Object)descendant || !node.permanentlydetached) continue;
+                if ((Object)node == null || (Object)node == (Object)group || (Object)node == (Object)descendant || !node.permanentlydetached) continue;
                 Regiment[] below = node.allattachedunits;
                 if (below == null) continue;
                 for (int j = 0; j < below.Length; j++)

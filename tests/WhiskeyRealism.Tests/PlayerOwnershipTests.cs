@@ -46,6 +46,8 @@ internal static class PlayerOwnershipTests
             ("battle-core ownership detached node shields its owned subtree", DetachedNodeShieldsOwnedSubtree),
             ("battle-core ownership direct-write decision for regiment overloads", DirectWriteDecisionForRegimentOverloads),
             ("battle-core ownership feuding unit protected from direct writers", FeudUnitProtectedFromDirectWriters),
+            ("battle-core ownership per-unit guard refuses owned regiments under a writable group", PerUnitGuardRefusesOwnedRegimentsUnderWritableGroup),
+            ("battle-core ownership group's own detach never shields its descendants", GroupOwnDetachNeverShieldsDescendants),
             ("battle-core chain detached orders group", ChainDetachedOrdersGroup),
             ("battle-core chain not detached fans out skipping player child", ChainNotDetachedFansOutSkippingPlayerChild),
             ("battle-core chain player at root fans out nothing", ChainPlayerAtRootFansOutNothing),
@@ -300,6 +302,35 @@ internal static class PlayerOwnershipTests
         AssertEqual(SkipReason.Feud, reason, "feud reason");
         AssertTrue(PlayerOwnership.DirectWriteProtected(UnitFlags.Feud | PO, false, out SkipReason both), "owned feud");
         AssertEqual(SkipReason.PlayerOwned, both, "player ownership reported first");
+    }
+
+    private static void PerUnitGuardRefusesOwnedRegimentsUnderWritableGroup()
+    {
+        // Detached player brigade (5): its AI division (3) passes the group guard,
+        // but a Whiskey loop over the division's allattachedunits (every transform
+        // descendant, UpdateAllAttachedUnits 129574) reaches the player's
+        // regiments, which are never detached themselves (85316 needs !ai_vs_ai).
+        // The per-unit decision must refuse them.
+        var t = BrigadePlayerChained(detached: true);
+        AssertFalse(PlayerOwnership.DirectWriteProtected(t[3].Flags, PlayerOwnership.NeedsChainFanOut(t, t.Length, 3), out _),
+            "division writable as a group");
+        foreach (int u in new[] { 7, 8 })
+        {
+            AssertTrue(PlayerOwnership.DirectWriteProtected(t[u].Flags, PlayerOwnership.NeedsChainFanOut(t, t.Length, u), out SkipReason r),
+                "player regiment " + u + " refused per unit");
+            AssertEqual(SkipReason.PlayerOwned, r, "per-unit reason");
+        }
+        AssertFalse(PlayerOwnership.DirectWriteProtected(t[9].Flags, PlayerOwnership.NeedsChainFanOut(t, t.Length, 9), out _),
+            "AI regiment writable");
+    }
+
+    private static void GroupOwnDetachNeverShieldsDescendants()
+    {
+        // allattachedunits includes the group itself (GetComponentsInChildren,
+        // 129574). An AI group with a stance is detached itself (ChangeStance
+        // 90786-90793), but an order given to it still reaches its attached subtree.
+        var t = Records(Anc, Anc, 0, Anc | PD, 0, PO | Cmd, 0, PO, PO, 0);
+        AssertTrue(PlayerOwnership.NeedsChainFanOut(t, t.Length, 3), "detached division with attached player");
     }
 
     // ---- chain resolution (chain-of-command spec §B) ---------------------

@@ -903,6 +903,11 @@ namespace WhiskeyRealism.Patches
                     GameObject gameObject = UnityObject(unit);
                     if (gameObject == null || !gameObject.activeInHierarchy) continue;
                     if (!CommandFormationCorrection.NeedsFacingCorrection(SafeRotationY(unit), rotation, FacingRefreshToleranceDegrees)) continue;
+                    // allattachedunits is every transform descendant (129574), so a
+                    // writable group can still hold player-owned or feuding units
+                    // (e.g. a detached player brigade's regiments, never detached
+                    // themselves): guard each regiment.
+                    if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(unit)) continue;
                     unit.RotateRegiment(rotation);
                     rotated++;
                 }
