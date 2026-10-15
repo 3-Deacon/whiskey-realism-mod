@@ -124,7 +124,9 @@ namespace WhiskeyRealism.Tactical
             bool verbose)
         {
             string fullKey = key + "|" + Safe(signature);
-            if (verbose) return true;
+            // Verbose shortens the repeat window to one second; it never removes it,
+            // or the per-AI-call observer and matrix rows would be unbounded.
+            if (verbose && minSeconds > 1f) minSeconds = 1f;
             if (lastEmittedAt == null) return true;
             if (!lastEmittedAt.TryGetValue(fullKey, out var last))
             {

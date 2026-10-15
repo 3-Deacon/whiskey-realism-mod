@@ -30,6 +30,8 @@ namespace WhiskeyRealism.Patches
     {
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
         private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
+        // Verbose transfer-steer rows are emitted only when the alliance's steer signature changes.
+        private static readonly Dictionary<int, string> LastLoggedSteer = new Dictionary<int, string>();
 
         private sealed class TransferSteerState
         {
@@ -313,6 +315,8 @@ namespace WhiskeyRealism.Patches
                 "|from=" + safeSource +
                 "|to=" + safeDestination +
                 "|budget=" + budgetAction;
+            if (LastLoggedSteer.TryGetValue(allianceId, out string last) && last == signature) return;
+            LastLoggedSteer[allianceId] = signature;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithDecision("transfer-steer", budgetAction.ToString(), signature)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -37,6 +38,9 @@ namespace WhiskeyRealism.Patches
         private static int _cachedObjectiveId = int.MinValue;
         private static object _cachedAreaList;
         private static AICampaign.AIArea _cachedTargetArea;
+        // Vanilla rewrites the pick on every AI-area pass, so the redirect repeats per
+        // area per cycle; the verbose row is emitted only when the alliance's target changes.
+        private static readonly Dictionary<int, int> LastLoggedTarget = new Dictionary<int, int>();
 
         [HarmonyTargetMethod]
         internal static System.Reflection.MethodBase TargetMethod()
@@ -219,6 +223,8 @@ namespace WhiskeyRealism.Patches
 
         private static void EmitPlanImportanceTarget(int allianceId, int objectiveId)
         {
+            if (LastLoggedTarget.TryGetValue(allianceId, out int last) && last == objectiveId) return;
+            LastLoggedTarget[allianceId] = objectiveId;
             string signature = "alliance=" + allianceId +
                 "|action=importance-target" +
                 "|objective=" + objectiveId;

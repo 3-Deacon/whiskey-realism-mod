@@ -226,22 +226,22 @@ namespace WhiskeyRealism
                 "General", "Enabled", true,
                 "Master enable. Disable to short-circuit every patch in this mod.");
             VerboseLogging = Config.Bind(
-                "Diagnostics", "Verbose Logging", false,
-                "Emit per-patch first-fire markers and decision-trace logs to LogOutput.log.");
+                "Diagnostics", "Verbose Logging", true,
+                "Default ON. Emits campaign decision-trace rows: daily ledger summaries (DailyOps, front, army-area, formation-directive, fiscal, defense, construction) every day instead of only on change, plus plan steering rows (importance target, campaign objective, unit transfer — each only when its signature changes) and construction probability-bias rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             PlanTrace = Config.Bind(
-                "Diagnostics", "Plan Trace Logging", false,
-                "On each strategic review tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
+                "Diagnostics", "Plan Trace Logging", true,
+                "Default ON. When the CIC builds a generic (non-historical) plan, emits the pick and the top-5 objective scores (id, score, theater, category). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             SuccessionTrace = Config.Bind(
-                "Diagnostics", "Succession Trace Logging", false,
-                "On each strategic review tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
+                "Diagnostics", "Succession Trace Logging", true,
+                "Default ON. Each day, per alliance, emits one row per not-yet-fired scripted succession event with its date-gate and war-state-gate result (at most 24 rows a day, fewer as events fire). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             FiscalTrace = Config.Bind(
-                "Diagnostics", "Fiscal Trace Logging", false,
-                "Emit fiscal posture, gate, supply, and finance override reasoning.");
+                "Diagnostics", "Fiscal Trace Logging", true,
+                "Default ON. Emits the daily fiscal posture, gate, supply and finance-override row for each alliance every day instead of only when its signature changes. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             DirectorVerboseTrace = Config.Bind(
                 "Telemetry",
                 "Director Verbose Trace",
-                false,
-                "When true, logs detailed Director slice traces every advanced game day. Default off — only [CampaignPace] and [CollapseRisk] level-change lines emit.");
+                true,
+                "Default ON. Emits one detailed Director trace row per alliance per game day, in addition to the [CampaignPace] and [CollapseRisk] level-change rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             TelemetryLoggingProfileRaw = Config.Bind(
                 "Telemetry",
                 "Logging Profile",
@@ -272,7 +272,7 @@ namespace WhiskeyRealism
                 "Telemetry",
                 "Emit Human Summary",
                 true,
-                "Reserved for human-readable summary output at shutdown.");
+                "Default ON. At telemetry shutdown, writes summary.md in the session folder, built from up to 32 MB of that session's telemetry rows.");
             TelemetryPerformanceWarnings = Config.Bind(
                 "Telemetry",
                 "Telemetry Performance Warnings",
@@ -281,8 +281,8 @@ namespace WhiskeyRealism
             TelemetryCreateIssueBundleOnShutdown = Config.Bind(
                 "Telemetry",
                 "Create Issue Bundle On Shutdown",
-                false,
-                "When true, future telemetry closeout may create a redacted issue bundle on shutdown.");
+                true,
+                "Default ON. At telemetry shutdown, writes issue-bundle.json in the session folder: a redacted index of that session's own telemetry files for bug reports (copies nothing). Nothing is written when Logging Profile is Off.");
             TelemetryQueueCapacity = Config.Bind(
                 "Telemetry",
                 "Telemetry Queue Capacity",
@@ -307,13 +307,14 @@ namespace WhiskeyRealism
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
-                false,
-                "Default ON for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
+                true,
+                "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
+                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial; that producer only writes when Enable Tactical Orchestrator Army is off, so with the orchestrator on the observer changes no battle state.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
-                false,
-                "Emit lower-throttle tactical observer detail for focused smoke runs. Default observer mode remains signature-gated.");
+                true,
+                "Default ON. Shortens the tactical observer, bug-telemetry and decision-matrix repeat window to one row per key and signature per second (instead of the configured interval). Rows still go only to the tactical tuning sidecar, capped by Max Tuning Log MB.");
             TacticalObserverMinSecondsBetweenSummaries = Config.Bind(
                 "Tactical",
                 "Tactical Observer Min Seconds Between Summaries",
@@ -341,8 +342,8 @@ namespace WhiskeyRealism
             EnableTacticalBugTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Bug Telemetry",
-                false,
-                "Default ON. Emits focused read-only telemetry for tactical order/current-order bug hunts; does not change battlefield behavior.");
+                true,
+                "Default ON. Emits read-only tactical sidecar rows when vanilla current-order, courier, waypoint, path, formation, reserve or objective-chain handling looks risky; deduped per signature, no behavior change.");
             EnableTacticalFallbackRetreatNullGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Fallback Retreat Null Guard",
@@ -586,19 +587,17 @@ namespace WhiskeyRealism
             TacticalRegimentDiagnosticNames = Config.Bind(
                 "Tactical Diagnostics",
                 "Tactical Regiment Diagnostic Names",
-                "Hampton,Tennessee",
-                "Comma-separated case-insensitive substrings matched against Regiment names. " +
-                "Default seeds Hampton's Legion + any Tennessee-named regiment (the reported " +
-                "stuck-retreat units). Add more as needed: 'Hampton,Tennessee,2nd_South_Carolina'. " +
-                "Empty string disables logging (feature stays enabled but watches nothing).");
+                "",
+                "Comma-separated case-insensitive substrings matched against regiment names, e.g. 'Hampton,Tennessee'. " +
+                "Default empty = nothing watched, nothing scanned: the regiment and map-knowledge diagnostics skip the unit walk entirely. " +
+                "Each name you add makes those diagnostics read every unit's name once per AI cycle to find matches.");
             EnableTacticalMapKnowledgeDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Map Knowledge Diagnostics",
-                false,
-                "Default ON. Read-only tactical scene-object probe for map-knowledge debugging. " +
-                "When enabled, emits bounded [TacticalMapKnowledge] rows for Objectives, EntryPoints, " +
-                "AIFortifications, FortificationGroup, road/railroad anchors, and watched-regiment " +
-                "cover/facing context. Does not change unit orders, facing, formation, or pathing.");
+                true,
+                "Default ON. Read-only. Emits one [TacticalMapKnowledge] scene-anchor inventory row per battle (objectives, entry points, AI fortifications, " +
+                "fortification groups, road/railroad anchors) to the tactical tuning sidecar, plus cover/facing/objective context rows (at most one per unit " +
+                "per 2 s, 1000 per battle) for regiments matched by Tactical Regiment Diagnostic Names. Does not change orders, facing, formation or pathing.");
             EnableTacticalContactFacingPulse = Config.Bind(
                 "Tactical",
                 "Enable Tactical Contact Facing Pulse",
@@ -674,23 +673,24 @@ namespace WhiskeyRealism
             DefenseIntentVerboseLogging = Config.Bind(
                 "Defense Intent Ledger",
                 "Defense Intent Verbose Logging",
-                false,
-                "Log per-tick defense intent telemetry even when the signature has not changed.");
+                true,
+                "Default ON. Emits the daily defense-intent package rows every day instead of only on change, plus defensive-operation candidate filter/revert rows and coastal-defense custom-order rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             EnableConstructionSiteSteering = Config.Bind(
-                "Construction", "Enable Construction Site Steering", false,
-                "Default ON. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
+                "Construction", "Enable Construction Site Steering", true,
+                "Default ON. AI factions only: during vanilla Economy.UpdateCompanyFoundations, multiplies vanilla's private-building construction probabilities (bestiipplacesprob) by the Construction Intent Ledger's steering score (clamped 0.1-3). Keeps vanilla's candidate per building group, its build-rate cap and its subsidy/funding/rating gates, and restores the slots vanilla did not consume.");
             FortConstructionGovernorEnabled = Config.Bind(
                 "Construction", "Fort Construction Governor Enabled", true,
                 "Default ON. Filters saturated vanilla fort construction sites before AICampaign.CheckFortConstruction so either side cannot stack excessive forts in one local area unless threat justifies more.");
             EnableTelegraphAI = Config.Bind(
-                "Construction", "Enable Telegraph AI", false,
-                "Default ON. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
+                "Construction", "Enable Telegraph AI", true,
+                "Default ON. AI factions only: when the construction intent updates (weekly), may start vanilla telegraph-station construction wishes that extend the faction's connected chain toward a large, uncovered, enemy-free field command, paid through vanilla. " +
+                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and an invalid final placement is removed (the paid cost is not refunded).");
             ConstructionTelemetryEnabled = Config.Bind(
                 "Construction", "Construction Telemetry", true,
                 "Emit no-spam construction intent and actual-start heartbeat lines.");
             ConstructionVerboseLogging = Config.Bind(
-                "Construction", "Construction Verbose Logging", false,
-                "Emit verbose construction candidate and actual-start details.");
+                "Construction", "Construction Verbose Logging", true,
+                "Default ON. Emits the daily construction-intent row every day instead of only on change, every actual construction start, and telegraph no-start/reject reasons (once per alliance and reason). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
                 "Construction", "Max Active Telegraph Constructions Per Faction", 1,
                 "Caps simultaneously active Whiskey telegraph constructions per faction when Telegraph AI is enabled.");
@@ -765,8 +765,8 @@ namespace WhiskeyRealism
                     "Power applied to commanded-unit count for unit-facing camp effects. 0.5 uses square-root scaling; 1.0 is vanilla-equivalent.",
                     new AcceptableValueRange<float>(0.5f, 1.0f)));
             EnableWlCampVerboseTrace = Config.Bind(
-                "W&L Camp", "Enable W&L Camp Verbose Trace", false,
-                "Emit bounded W&L camp accounting and modifier trace lines for focused smoke tests.");
+                "W&L Camp", "Enable W&L Camp Verbose Trace", true,
+                "Default ON. Emits W&L camp accounting and modifier trace rows, each kind only when its value signature changes. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
@@ -30,6 +31,9 @@ namespace WhiskeyRealism.Patches
         // writes; the coordinator snapshots/restores it with the sidecar so a stale mod-written
         // objective is still recognized after a reload.
         private static readonly int[] LastWrittenByMod = { -1, -1 };
+        // The verbose plan-objective row repeats every AI cycle while the plan steers;
+        // emit it only when the alliance's objective/operation/phase signature changes.
+        private static readonly Dictionary<int, string> LastLoggedPlanObjective = new Dictionary<int, string>();
 
         internal static void ResetForNewCampaign()
         {
@@ -134,10 +138,13 @@ namespace WhiskeyRealism.Patches
         {
             string safeOperation = string.IsNullOrWhiteSpace(operationId) ? "-" : operationId;
             string safePhase = string.IsNullOrWhiteSpace(phaseId) ? "-" : phaseId;
+            string signature = "alliance=" + allianceId + "|objective=" + objectiveId + "|operation=" + safeOperation + "|phase=" + safePhase;
+            if (LastLoggedPlanObjective.TryGetValue(allianceId, out string last) && last == signature) return;
+            LastLoggedPlanObjective[allianceId] = signature;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithPhase(safePhase)
-                .WithDecision("pick-campaign-objective", "active-plan", "alliance=" + allianceId + "|objective=" + objectiveId + "|operation=" + safeOperation + "|phase=" + safePhase)
+                .WithDecision("pick-campaign-objective", "active-plan", signature)
                 .WithField("objective", objectiveId)
                 .WithField("operation", safeOperation));
         }
