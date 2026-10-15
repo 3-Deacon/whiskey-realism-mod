@@ -12,7 +12,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //     GetComponentsInChildren<Regiment>(true): every descendant, inactive ones
     //     included, AND the group itself. A leaf's list is just [self].
     //   - GetAttachedUnitsReg(directonly) (119840-119880) treats a unit as a direct child
-    //     when its transform.parent is the group's transform, after its filters:
+    //     when its scene-graph parent is the group's transform, after its filters:
     //     permanentlydetached (excludedechainedunits), unittyp 3/4 (excludeskirmishers),
     //     !activeInHierarchy | isrouted (includenonactiveunits:false), isgarrisonbasicunit.
     //   - Groups are unittyp > 13 (vanilla's own cut, 129589).

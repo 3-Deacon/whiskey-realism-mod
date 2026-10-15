@@ -2,20 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// Vanilla-touching wrapper for DirectChildDiscovery. Walks
-    /// BattleUnits.completeunitlist filtered by allianceId so each side discovers
-    /// its own command groups regardless of which AIBattle.OnBattleStart fired
-    /// (vanilla creates one AIBattle per side; the coordinator only bootstraps
-    /// from one of them, so AIBattle.unitsused is the wrong list for the other
-    /// side). Calls Regiment.GetAttachedUnitsReg(directonly: true) to flag
-    /// direct-child relationships, then delegates to the pure DirectChildDiscovery.Probe.
+    /// Runtime wrapper for DirectChildDiscovery. Reads the side's current
+    /// <see cref="BattleSnapshot"/> (one completeunitlist pass per tick, filtered by
+    /// alliance, so each side discovers its own command groups whichever AIBattle fired)
+    /// and its single command-parent map (BattleSnapshotAssembler, plan D5: smallest group
+    /// whose allattachedunits contains the unit). No GetAttachedUnitsReg walk, no
+    /// scene-graph parent read, no roster pass of its own. IsDirectChild reproduces vanilla's
+    /// GetAttachedUnitsReg(directonly, includenonactiveunits:false) filters (119840-119880)
+    /// from the snapshot flags.
     /// </summary>
     public static partial class DirectChildDiscovery
     {
@@ -30,8 +31,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
+                if (!BattleSnapshotBuilder.TryGetCurrentOrWarn(allianceId, out BattleSnapshot battle))
+                    return Array.Empty<DirectChildSnapshot>();
                 int shift = ReadCommandHierarchyShift();
-                var probes = BuildProbesForAlliance(allianceId, shift);
+                var probes = new List<RegimentProbe>(battle.OwnCount);
+                // The W&L player's command subtree is never an AI direct child: no role
+                // is allocated to it (same exclusion as ArmyPostureInputsRuntime's tree).
+                BattleSnapshotAssembler.ToRegimentProbes(battle, BattleSnapshotBuilder.NamesFor(allianceId), shift,
+                    excludePlayerOwned: DLC_WL.dlc_scenarioactive, probes);
                 return Probe(probes, shift);
             }
             catch (Exception e)
@@ -42,233 +49,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static IReadOnlyList<RegimentProbe> BuildProbesForAlliance(int allianceId, int commandHierarchyShift)
-        {
-            var units = BattleUnits.completeunitlist as System.Collections.IList;
-            if (units == null || units.Count == 0) return Array.Empty<RegimentProbe>();
-            int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
-
-            // Walk vanilla command hierarchy via GetAttachedUnitsReg to build
-            // TWO maps in one pass:
-            //   directChildren — set of instance ids that are a direct child of
-            //     some command-level parent.
-            //   directChildToParent — reverse map (child id -> parent id) so
-            //     we can populate parentInstanceId from the vanilla command
-            //     hierarchy. The prior code used go.transform.parent which is
-            //     the Unity scene-graph parent, NOT the command parent. Corps
-            //     / divisions in vanilla GTCW are typically siblings under a
-            //     common units root with the command hierarchy expressed only
-            //     through allattachedunits lists. That made parentInstanceId 0
-            //     for most units, which caused DirectChildDiscovery.Snapshot
-            //     to fall through to synth-army placeholders for any army
-            //     with no transform-parent-matched direct children.
-            //
-            // 2026-05-23 backport: the extended-probes path
-            // (BuildExtendedProbesForAlliance) was fixed in the 2026-05-19
-            // patch but the non-extended path still used transform.parent.
-            // Smoke confirmed synth-army-* IDs reappearing for CSA's corps
-            // root with no matched direct children. This brings both paths
-            // into sync.
-            var directChildren = new HashSet<int>();
-            var directChildToParent = new Dictionary<int, int>();
-            for (int i = 0; i < units.Count; i++)
-            {
-                var reg = units[i] as Regiment;
-                if (reg == null) continue;
-                if (reg.alliance != allianceId) continue;
-                var regGo = ((Component)reg).gameObject;
-                if (regGo == null) continue;
-                if (reg.unittyp < effectiveCommandMin) continue;
-                int regInstanceId = regGo.GetInstanceID();
-                Regiment[] kids;
-                try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
-                catch { kids = null; }
-                if (kids == null) continue;
-                for (int k = 0; k < kids.Length; k++)
-                {
-                    var kid = kids[k];
-                    if (kid == null) continue;
-                    var kidGo = ((Component)kid).gameObject;
-                    if (kidGo == null) continue;
-                    int kidId = kidGo.GetInstanceID();
-                    directChildren.Add(kidId);
-                    // Record FIRST command parent. Walks in unit-list order
-                    // so an Army containing a Corps records Corps→Army before
-                    // nested walks try to claim it.
-                    if (!directChildToParent.ContainsKey(kidId))
-                        directChildToParent[kidId] = regInstanceId;
-                }
-            }
-
-            // The W&L player's command subtree (dlcw_isundercommander) is never an
-            // AI direct child, as in ArmyPostureInputsRuntime's probe tree
-            // (PlayerCommandProbeFilter): no role is allocated to it.
-            bool wl = DLC_WL.dlc_scenarioactive;
-            var result = new List<RegimentProbe>(units.Count);
-            for (int i = 0; i < units.Count; i++)
-            {
-                var reg = units[i] as Regiment;
-                if (reg == null) continue;
-                if (reg.alliance != allianceId) continue;
-                if (wl && reg.dlcw_isundercommander) continue;
-                var go = ((Component)reg).gameObject;
-                if (go == null) continue;
-                int instanceId = go.GetInstanceID();
-                // Vanilla command hierarchy parent FIRST; fall back to Unity
-                // transform parent only when no command parent claimed this
-                // unit (true top-level army node).
-                int parentInstanceId = 0;
-                if (!directChildToParent.TryGetValue(instanceId, out parentInstanceId))
-                {
-                    parentInstanceId = 0;
-                    var parentTransform = go.transform != null ? go.transform.parent : null;
-                    if (parentTransform != null)
-                    {
-                        var parentReg = parentTransform.GetComponent<Regiment>();
-                        if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
-                    }
-                }
-                result.Add(new RegimentProbe(
-                    instanceId: instanceId,
-                    unittyp: reg.unittyp,
-                    name: ((UnityEngine.Object)go).name,
-                    active: IsOperationallyPresent(reg, go, commandHierarchyShift),
-                    parentInstanceId: parentInstanceId,
-                    isDirectChild: directChildren.Contains(instanceId)));
-            }
-            return result;
-        }
-
         /// <summary>
-        /// Same alliance walk as BuildProbesForAlliance, but emits richer probes
-        /// (world X/Z, strength bucket) for TacticalCommandTreeProbe. Used by
-        /// the role-cascade leaf-brigade map.
+        /// Same parent map as <see cref="Snapshot(int)"/>, with world X/Z and a strength
+        /// bucket, for TacticalCommandTreeProbe (role cascade / leaf-brigade map).
         /// </summary>
         public static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> BuildExtendedProbesForAlliance(int allianceId)
         {
             try
             {
-                int shift = ReadCommandHierarchyShift();
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                if (units == null || units.Count == 0)
+                if (!BattleSnapshotBuilder.TryGetCurrentOrWarn(allianceId, out BattleSnapshot battle))
                     return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
-                int effectiveCommandMin = ClampShiftedMin(shift);
-
-                // Walk the vanilla command hierarchy via GetAttachedUnitsReg
-                // to build TWO maps in one pass:
-                //   directChildren — set of GameObject instance ids that
-                //     are a direct child of SOME command parent (used by
-                //     DirectChildDiscovery.Snapshot to identify army-tier
-                //     subordinates).
-                //   directChildToParent — reverse map (child id -> parent
-                //     id) so we can populate parentInstanceId from the
-                //     vanilla command hierarchy. The prior code used
-                //     go.transform.parent which is the Unity scene-graph
-                //     parent, NOT the command parent — corps/divisions in
-                //     vanilla GTCW are typically siblings in the scene
-                //     graph (under a common units root) with the command
-                //     hierarchy expressed only through allattachedunits
-                //     lists. That made parentInstanceId 0 for most units,
-                //     which caused DirectChildDiscovery.Snapshot to fall
-                //     through to synth-army placeholders for armies with
-                //     no transform-parent-matched direct children. The
-                //     symptom was cascade Main role never propagating to
-                //     real combat brigades — no attack-objective writes
-                //     even when AttackNow doctrine fired.
-                var directChildren = new HashSet<int>();
-                var directChildToParent = new Dictionary<int, int>();
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg == null || reg.alliance != allianceId) continue;
-                    var regGo = ((Component)reg).gameObject;
-                    if (regGo == null) continue;
-                    if (reg.unittyp < effectiveCommandMin) continue;
-                    int regInstanceId = regGo.GetInstanceID();
-                    Regiment[] kids;
-                    try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
-                    catch { kids = null; }
-                    if (kids == null) continue;
-                    for (int k = 0; k < kids.Length; k++)
-                    {
-                        var kid = kids[k];
-                        if (kid == null) continue;
-                        var kidGo = ((Component)kid).gameObject;
-                        if (kidGo == null) continue;
-                        int kidId = kidGo.GetInstanceID();
-                        directChildren.Add(kidId);
-                        // Record the FIRST command parent that claims this
-                        // child. If the same unit appears under multiple
-                        // command parents (which shouldn't happen in valid
-                        // vanilla data but we guard anyway), the first one
-                        // wins. Walks in unit-list order so an Army that
-                        // contains a Corps will record Corps→Army before
-                        // any nested walks try to claim it.
-                        if (!directChildToParent.ContainsKey(kidId))
-                            directChildToParent[kidId] = regInstanceId;
-                    }
-                }
-
-                // Verification counters for the BUG-TAC-2026-05-19 synth-army
-                // root cause fix. Tracks how often parentInstanceId resolved
-                // via the vanilla command hierarchy (new path) vs the legacy
-                // transform-parent fallback. After the fix, vanilla resolution
-                // should dominate for any army with corps/division subordinates.
-                int probesVanillaParent = 0;
-                int probesTransformParent = 0;
-                int probesNoParent = 0;
-
-                var result = new List<TacticalCommandTreeProbe.ExtendedProbe>(units.Count);
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg == null || reg.alliance != allianceId) continue;
-                    var go = ((Component)reg).gameObject;
-                    if (go == null) continue;
-                    int instanceId = go.GetInstanceID();
-                    // Use vanilla command hierarchy parent first; fall back
-                    // to transform parent only if no command parent claimed
-                    // this unit (degenerate top-level army case).
-                    int parentInstanceId = 0;
-                    bool resolvedVanilla = directChildToParent.TryGetValue(instanceId, out parentInstanceId);
-                    bool resolvedTransform = false;
-                    if (!resolvedVanilla)
-                    {
-                        parentInstanceId = 0;
-                        var parentTransform = go.transform != null ? go.transform.parent : null;
-                        if (parentTransform != null)
-                        {
-                            var parentReg = parentTransform.GetComponent<Regiment>();
-                            if (parentReg != null)
-                            {
-                                parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
-                                resolvedTransform = true;
-                            }
-                        }
-                    }
-                    if (resolvedVanilla) probesVanillaParent++;
-                    else if (resolvedTransform) probesTransformParent++;
-                    else probesNoParent++;
-                    float worldX = 0f, worldZ = 0f;
-                    try
-                    {
-                        var pos = go.transform != null ? go.transform.position : default(Vector3);
-                        worldX = pos.x; worldZ = pos.z;
-                    }
-                    catch { }
-                    int strengthBucket = SafeStrengthBucket(reg);
-                    result.Add(new TacticalCommandTreeProbe.ExtendedProbe(
-                        instanceId: instanceId,
-                        unittyp: reg.unittyp,
-                        name: ((UnityEngine.Object)go).name,
-                        active: IsOperationallyPresent(reg, go, shift),
-                        parentInstanceId: parentInstanceId,
-                        isDirectChild: directChildren.Contains(instanceId),
-                        worldX: worldX,
-                        worldZ: worldZ,
-                        strengthBucket: strengthBucket));
-                }
-                EmitProbeHealthTelemetry(allianceId, probesVanillaParent, probesTransformParent, probesNoParent);
+                var result = new List<TacticalCommandTreeProbe.ExtendedProbe>(battle.OwnCount);
+                BattleSnapshotAssembler.ToExtendedProbes(battle, BattleSnapshotBuilder.NamesFor(allianceId),
+                    ReadCommandHierarchyShift(), result);
+                int withParent = 0;
+                for (int i = 0; i < result.Count; i++)
+                    if (result[i].ParentInstanceId != 0) withParent++;
+                EmitProbeHealthTelemetry(allianceId, withParent, result.Count - withParent);
                 return result;
             }
             catch (Exception e)
@@ -281,27 +78,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Emits a signature-deduped health event reporting how the parent-id
-        /// resolution distributed across the three paths. After BUG-TAC-2026-05-19
-        /// (synth-army root cause fix), vanilla-parent should dominate any army
-        /// with corps/division subordinates. Transform-fallback should occur
-        /// only for true top-level army nodes that no other unit claims.
-        /// Dedup signature is the integer trio so repeated identical
-        /// distributions emit only once per session.
+        /// Signature-deduped health event: how many probes have a command parent in the
+        /// snapshot's parent map and how many are roots (no containing group).
         /// </summary>
-        private static void EmitProbeHealthTelemetry(int allianceId, int vanillaParent, int transformParent, int noParent)
+        private static void EmitProbeHealthTelemetry(int allianceId, int withParent, int noParent)
         {
             // Environment.TickCount (mscorlib) instead of UnityEngine.Time.realtimeSinceStartup
             // — Unity Time is an ECall whose JIT-time verification throws
-            // SecurityException in pure-.NET test environments. TickCount
-            // works in tests and Unity; wraps every ~25 days which is
-            // irrelevant for a battle session.
+            // SecurityException in pure-.NET test environments. Telemetry throttle only.
             float nowSeconds = System.Environment.TickCount * 0.001f;
             try
             {
                 string sig = "alliance=" + allianceId
-                    + "|vanilla=" + vanillaParent
-                    + "|transform=" + transformParent
+                    + "|parent=" + withParent
                     + "|noParent=" + noParent;
                 string key = "tactical-probe-health:" + allianceId + ":" + sig;
                 if (!TacticalTelemetry.ShouldEmit(_lastProbeHealthTelemetryAt, key, sig, nowSeconds, ProbeHealthTelemetrySeconds, false))
@@ -314,8 +103,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ev => ev
                         .WithDecision("TacticalCommandTreeProbeHealth", "summary", sig)
                         .WithField("alliance", allianceId)
-                        .WithField("vanillaParent", vanillaParent)
-                        .WithField("transformParent", transformParent)
+                        .WithField("parent", withParent)
                         .WithField("noParent", noParent));
             }
             catch { }
@@ -330,44 +118,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _lastProbeHealthTelemetryAt.Clear();
         }
         private const float ProbeHealthTelemetrySeconds = 30f;
-
-        private static int SafeStrengthBucket(Regiment reg)
-        {
-            try
-            {
-                // Approximate strength bucket: 0 (weak), 1 (normal), 2 (strong).
-                // Uses groupstrengthaigroup if available, else groupowninrange.
-                float strength = 0f;
-                try { strength = Math.Max(reg.groupowninrange, reg.groupstrengthaigroup); }
-                catch { }
-                if (strength >= 3000f) return 2;
-                if (strength >= 1000f) return 1;
-                return 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static bool IsOperationallyPresent(Regiment reg, GameObject go, int commandHierarchyShift)
-        {
-            if (reg == null || go == null) return false;
-            if (go.activeInHierarchy) return true;
-
-            int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
-            if (reg.unittyp < effectiveCommandMin) return false;
-            try
-            {
-                if (reg.isrouted || reg.markedforrout) return false;
-            }
-            catch
-            {
-                return false;
-            }
-
-            return true;
-        }
 
         private static int ReadCommandHierarchyShift()
         {
