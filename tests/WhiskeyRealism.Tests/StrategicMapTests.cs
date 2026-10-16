@@ -938,7 +938,8 @@ internal static class StrategicMapTests
     {
         var input = new ContactEvidenceInput
         {
-            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            TargetX = 100f,
+            TargetZ = 100f,
             CurrentEnemyStrength = 0f,
             CurrentFriendlyStrength = 8000f,
             PreviousObservedEnemyStrength = 0f,
@@ -958,7 +959,8 @@ internal static class StrategicMapTests
     {
         var input = new ContactEvidenceInput
         {
-            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            TargetX = 100f,
+            TargetZ = 100f,
             CurrentEnemyStrength = 6000f,
             CurrentFriendlyStrength = 7000f,
             PreviousObservedEnemyStrength = 3000f,
@@ -977,7 +979,8 @@ internal static class StrategicMapTests
     {
         var input = new ContactEvidenceInput
         {
-            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            TargetX = 100f,
+            TargetZ = 100f,
             CurrentEnemyStrength = 1000f,
             CurrentFriendlyStrength = 1500f,
             PreviousObservedEnemyStrength = 1000f,
@@ -1003,7 +1006,8 @@ internal static class StrategicMapTests
         int daySerial = 1862 * 372 + 6 * 31 + 6;
         var input = new ContactEvidenceInput
         {
-            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            TargetX = 100f,
+            TargetZ = 100f,
             ObservingAllianceId = 0,
             CurrentEnemyStrength = 5000f,
             CurrentFriendlyStrength = 6000f,
@@ -1032,7 +1036,8 @@ internal static class StrategicMapTests
         int daySerial = 1862 * 372 + 6 * 31 + 6;
         var input = new ContactEvidenceInput
         {
-            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            TargetX = 100f,
+            TargetZ = 100f,
             ObservingAllianceId = 0,
             CurrentEnemyStrength = 1000f,
             CurrentFriendlyStrength = 2500f,

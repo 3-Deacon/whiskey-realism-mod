@@ -142,6 +142,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> EnableCampaignPlanner;
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
+        internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
@@ -979,6 +980,15 @@ namespace WhiskeyRealism
                 "Campaign Planner", "Enable Campaign Planner Executors", true,
                 "Default ON. Lets the planner steer vanilla: offensive target pointers, campaign objective, theater boxes, availability, capital pledges, " +
                 "transfers, MoveUnitTo, depots, forts, railroads. Never moves or orders the W&L player's own command. OFF = plan and telemetry only.");
+            EnableCampaignReconnaissance = Config.Bind(
+                "Campaign Planner", "Enable Campaign Reconnaissance", true,
+                "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +
+                "screens toward the oldest or most uncertain believed armies and along approaches no viewer covers, pickets on threatened towns, an " +
+                "advance guard ahead of a main effort with strength to spare, and a belief-driven probe short of a main objective whose picture is stale. " +
+                "A formation on a mission gets the Screen formation directive and the Scouting perk role, and the [Recon] row logs the missions. " +
+                "No formation is sent to its post until the reconnaissance executor ships: until then this plans, marks (Screen directive, Scouting " +
+                "perks) and logs, and keeps the marked formations out of the old probe and package layers; the old army-area moves (#15) can still move them. " +
+                "Never uses the W&L player's own command. OFF = no missions (Screen then means nothing); needs Enable Campaign Planner.");
             EnableCampaignFogHonestBeliefs = Config.Bind(
                 "Campaign Planner", "Enable Campaign Fog-Honest Beliefs", true,
                 "Default ON. Enemy armies are known only when vanilla's campaign fog shows them to the side (FogOfWar.UnitIsHidden, 127225 arguments; " +

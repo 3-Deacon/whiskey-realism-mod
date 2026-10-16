@@ -5,9 +5,28 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class BattleHistoryQuery
     {
+        // The battle history's day scale (year x 372 + month x 31 + day), the scale BattleHistoryRecord
+        // dates are compared on; never mix it with ReviewCadenceCatchUp.DaySerial (calendar days).
+        internal static int LegacySerial(int year, int month, int day)
+        {
+            return year * 372 + month * 31 + day;
+        }
+
         public static IEnumerable<BattleHistoryRecord> Near(
             IReadOnlyList<BattleHistoryRecord> history,
             Vector3 position,
+            float maxDistance,
+            int currentDaySerial,
+            int withinDays)
+        {
+            return Near(history, position.x, position.z, maxDistance, currentDaySerial, withinDays);
+        }
+
+        // The pure form (the planner's files hold positions as float X, Z, not Unity vectors).
+        public static IEnumerable<BattleHistoryRecord> Near(
+            IReadOnlyList<BattleHistoryRecord> history,
+            float x,
+            float z,
             float maxDistance,
             int currentDaySerial,
             int withinDays)
@@ -18,10 +37,10 @@ namespace WhiskeyRealism.Strategic
             {
                 var record = history[i];
                 if (record == null) continue;
-                int recordDay = record.Year * 372 + record.Month * 31 + record.Day;
+                int recordDay = LegacySerial(record.Year, record.Month, record.Day);
                 if (currentDaySerial - recordDay > withinDays || recordDay > currentDaySerial) continue;
-                float dx = record.PositionX - position.x;
-                float dz = record.PositionZ - position.z;
+                float dx = record.PositionX - x;
+                float dz = record.PositionZ - z;
                 if (dx * dx + dz * dz > maxDistSq) continue;
                 yield return record;
             }

@@ -238,6 +238,10 @@ internal static class DailyReviewSchedulerTests
         string allocations = string.Join("", unsliced.CommittedPlanner);
         foreach (string role in new[] { "MainEffort", "CapitalGuard", "Hold", "Recover", "Recon", "Reserve" })
             AssertContains(allocations, ":" + role + "@", "the model's allocations exercise " + role + ": the sliced comparison covers the allocator");
+        // G1b runtime step: the model's days carry missions of every kind, a probe's verdicts and a paused day's aging,
+        // so the sliced==unsliced comparison covers the ledger, the verdicts and the row counts.
+        foreach (string token in new[] { ":Probe:", ":Screen:", ":Picket:", ":Recalled:", "probe-withdraw", "[Recon] alliance=" })
+            AssertContains(allocations, token, "the model's days exercise '" + token + "': the sliced comparison covers the recon step");
     }
 
     private static void ReaderBetweenSlicesSeesPreviousDay()
@@ -474,10 +478,11 @@ internal static class DailyReviewSchedulerTests
         }
 
         private readonly ReconMissionLedger[] _recon = { new ReconMissionLedger(), new ReconMissionLedger() };
+        private readonly Allocation[] _previousAllocation = new Allocation[2];
 
-        // The allocation step of CampaignPlannerRuntime.ReviewPlan on a snapshot and plan that are a pure
-        // function of (day, alliance): the real tasks, allocator and mission sync, the ledger carried across days.
-        private string AllocateModelDay(int a, Random rng)
+        // The snapshot of CampaignPlannerRuntime.ReviewPlan: a pure function of (day, alliance), as the job's
+        // vanilla reads are; the recon ledger and the previous allocation are what carries over.
+        private CampaignSnapshot ModelSnapshot(int a, Random rng)
         {
             var s = new CampaignSnapshot();
             s.Reset(a, a, 1000 + _day, PlayerCommandClass.NotCareer, -1, true, null);
@@ -491,6 +496,7 @@ internal static class DailyReviewSchedulerTests
             s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = a, X = 100f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
             foreach (float x in new[] { 100f, 300f, 500f })
                 s.Objectives.Add(new ObjectiveRecord { ObjectiveId = (int)x, X = x, Z = 0f, HolderAlliance = 1 - a, Available = true, Importance01 = 0.5f });
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 550, X = 550f, Z = 0f, HolderAlliance = a, Available = true, Importance01 = 0.8f }); // an own town for a picket
             for (int i = 1; i <= 7; i++)
                 s.Own.Add(new FormationRecord
                 {
@@ -499,19 +505,64 @@ internal static class DailyReviewSchedulerTests
                     AreaIndex = -1, Flags = FormationFlags.FightingForce | (rng.Next(6) == 0 ? FormationFlags.InBattle : FormationFlags.None),
                     CavalryShare = rng.Next(3) == 0 ? 0.9f : 0f, SightRadius = 50f, Name = "m" + i, ParentInstanceId = -1
                 });
+            // A third of the beliefs are decayed, so the probe trigger (no belief of confidence >= 0.5 near the
+            // objective) and the stale-picture gate both come up over the 40 days.
             for (int i = 0; i < 2; i++)
-                s.Beliefs.Add(new EnemyBelief { InstanceId = -1, UnitKey = "e" + i + ":0", UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 4000f + rng.Next(9000), Confidence01 = 1f, LastSeenDay = s.DaySerial });
+            {
+                bool decayed = rng.Next(3) == 0;
+                s.Beliefs.Add(new EnemyBelief
+                {
+                    InstanceId = -1, UnitKey = "e" + i + ":0", UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 4000f + rng.Next(9000),
+                    Confidence01 = decayed ? 0.3f : 1f, LastSeenDay = s.DaySerial - (decayed ? 9 : 0), UncertaintyRadius = decayed ? 60f : 5f
+                });
+            }
+            return s;
+        }
+
+        // The allocation step of CampaignPlannerRuntime.ReviewPlan, in its order: AgeRecon (OnReview), the plan,
+        // PlanRecon (ReconStep.Plan on the battles the review judged), the allocation, SyncRecon. The snapshot
+        // and plan are a pure function of (day, alliance); the ledger and the previous allocation carry over.
+        private string AllocateModelDay(int a, Random rng)
+        {
+            var s = ModelSnapshot(a, rng);
+            _recon[a].OnReview(s, _previousAllocation[a]);
             var sectors = SectorModel.Build(s);
-            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, MainEnemyStrength = 4000f + rng.Next(9000), CapitalFloorStrength = rng.Next(6000) };
+            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, CapitalFloorStrength = rng.Next(6000) };
             plan.Sectors.Add(new SectorPlan { SectorId = plan.MainSectorId, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 100, TargetX = 100f, TargetZ = 0f });
             plan.Sectors.Add(new SectorPlan { SectorId = sectors.SectorAt(550f, 0f), Posture = TheaterPosture.Hold, HoldNeed = rng.Next(9000) });
             for (int i = 1; i <= 7; i++)
                 if (rng.Next(2) == 0) plan.MassInstanceIds.Add(i);
+            plan.MassStrength = rng.Next(3) == 0 ? rng.Next(4000) : rng.Next(30000);
+            var battles = new List<BattleHistoryRecord>();
+            if (rng.Next(4) == 0)
+                battles.Add(new BattleHistoryRecord
+                {
+                    BattleName = "b" + _day, Day = 1 + _day % 28, Month = 1 + _day / 28, Year = 1862, PositionX = 100f, PositionZ = 0f,
+                    BattleResultType = 1, AllianceWon = rng.Next(2), Alliance = new[] { 0, 1 }
+                });
+            plan.MainEnemyStrength = 4000f + rng.Next(9000); // G4: the odds' enemy at the main objective (drawn last, so the earlier draws keep their stream)
             var tasks = new List<ReconTask>();
-            ReconPlanner.PlanTasks(s, sectors, plan, _recon[a], tasks);
+            ReconStep.Plan(s, sectors, plan, battles, BattleHistoryQuery.LegacySerial(1862, 1 + _day / 28, 1 + _day % 28), _recon[a], tasks);
             var allocation = ForceAllocator.Allocate(plan, s, sectors, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
             _recon[a].Sync(s, tasks, allocation);
-            return AllocationSignature(allocation) + "#" + _recon[a].Missions.Count;
+            _previousAllocation[a] = allocation;
+            return AllocationSignature(allocation) + "#" + MissionSignature(_recon[a]) + "#" + ReconStep.CountsOf(s, _recon[a], tasks).Row(a);
+        }
+
+        // A paused day keeps the planner's bookkeeping, which includes the mission ledger's aging.
+        private string AgeModelDay(int a, Random rng)
+        {
+            _recon[a].OnReview(ModelSnapshot(a, rng), _previousAllocation[a]);
+            return MissionSignature(_recon[a]);
+        }
+
+        private static string MissionSignature(ReconMissionLedger ledger)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var m in ledger.Missions)
+                sb.Append(m.MissionId).Append(':').Append(m.Kind).Append(':').Append(m.State).Append(':').Append(m.Reason).Append('@')
+                  .Append(m.InstanceId).Append('/').Append(m.IssuedDay).Append('/').Append(m.LastContactDay).Append('/').Append(m.ObservedEnemyStrength.ToString("0.#")).Append(';');
+            return sb.ToString();
         }
 
         private bool PauseNow => _readPauseLive ? LivePause : _capturedPause;
@@ -630,7 +681,7 @@ internal static class DailyReviewSchedulerTests
                     // While the job machine is paused the planner keeps its bookkeeping only: no replan, no allocation.
                     if (PauseNow)
                     {
-                        _plans[a] = "bookkeeping:" + _day;
+                        _plans[a] = "bookkeeping:" + _day + ":" + AgeModelDay(a, rng);
                         break;
                     }
                     _plans[a] = "p" + _day + ":" + View.DirectorMemories[a].LastPosture.Pace + "/" + View.PolicyPlans[a].CurrentPick

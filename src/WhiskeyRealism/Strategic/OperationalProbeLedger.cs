@@ -47,6 +47,8 @@ namespace WhiskeyRealism.Strategic
         public OperationalProbeOptions Options = new OperationalProbeOptions();
         public CoordinatedOperationOptions PackageOptions;
         public ContactEvidence ContactEvidence = ContactEvidence.EnemyPresent;
+        // How current the beliefs behind CurrentEnemyStrength are (EnemyBeliefQuery.ConfidenceWithin).
+        public float BeliefConfidence01 = 1f;
         public float TargetX;
         public float TargetZ;
         public bool HasTargetCoordinates;
@@ -246,7 +248,10 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            if (age >= options.MinimumProbeDays && ratio >= options.EscalateFriendlyRatio &&
+            // Withdrawing and pausing above are never gated; escalating needs a current picture (the enemy
+            // strength is a confidence-weighted belief, so a decayed army reads small).
+            bool currentPicture = input.BeliefConfidence01 >= ContactEvidenceLedger.MinEscalationConfidence;
+            if (currentPicture && age >= options.MinimumProbeDays && ratio >= options.EscalateFriendlyRatio &&
                 input.ContactEvidence != ContactEvidence.NoContact &&
                 input.ContactEvidence != ContactEvidence.OvermatchedContact)
             {
@@ -256,7 +261,7 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            if (age >= options.MinimumProbeDays && IsFavorablePackageContact(input.ContactEvidence))
+            if (currentPicture && age >= options.MinimumProbeDays && IsFavorablePackageContact(input.ContactEvidence))
             {
                 var package = BuildPackage(input, output, CoordinatedOperationIntent.Attack);
                 if (package.Decision == CoordinatedOperationDecision.CoordinateAttack)
@@ -319,7 +324,8 @@ namespace WhiskeyRealism.Strategic
             if (assignment.Directive == FormationDirective.Guard ||
                 assignment.Directive == FormationDirective.Hold ||
                 assignment.Directive == FormationDirective.Recover ||
-                assignment.Directive == FormationDirective.Concede)
+                assignment.Directive == FormationDirective.Concede ||
+                assignment.Directive == FormationDirective.Screen) // on a planner recon mission: not this layer's to move
                 return false;
             if (assignment.Readiness < options.MinimumProbeReadiness) return false;
             if (assignment.Supply < options.MinimumProbeSupply) return false;

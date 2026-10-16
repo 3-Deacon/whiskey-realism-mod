@@ -36,6 +36,7 @@ internal static class ReconPlannerTests
             ("BelowMovementMinimaNeverChosen", BelowMovementMinimaNeverChosen),
             ("ScreenStaysWithIncumbent", ScreenStaysWithIncumbent),
             ("RecalledFormationNotRepicked", RecalledFormationNotRepicked),
+            ("IncumbentWhoseCommandPassesToThePlayerIsRefused", IncumbentWhoseCommandPassesToThePlayerIsRefused),
             ("PicketHoldsUnwatchedMajorTown", PicketHoldsUnwatchedMajorTown),
             ("PicketNeverTakesFinalReserve", PicketNeverTakesFinalReserve),
             ("AdvanceGuardOnlyWithSpareStrengthAndNoCloseContact", AdvanceGuardOnlyWithSpareStrengthAndNoCloseContact),
@@ -71,6 +72,31 @@ internal static class ReconPlannerTests
             ("RecallPointNeverAPlayerFormation", RecallPointNeverAPlayerFormation),
             ("DivisionVsArmyIsDelayNotScreen", DivisionVsArmyIsDelayNotScreen),
             ("DefaultFallbackIsHold", DefaultFallbackIsHold),
+            ("LocalForceBalanceFromBeliefsExcludesUnseen", LocalForceBalanceFromBeliefsExcludesUnseen),
+            ("BeliefConfidenceIsStrengthWeightedAndIgnoresExpired", BeliefConfidenceIsStrengthWeightedAndIgnoresExpired),
+            ("ContactEvidenceStaleBeliefCannotEscalate", ContactEvidenceStaleBeliefCannotEscalate),
+            ("LegacySerialIsTheBattleHistoryScale", LegacySerialIsTheBattleHistoryScale),
+            ("ProbeVerdictEscalatesOnlyOnFreshBeliefs", ProbeVerdictEscalatesOnlyOnFreshBeliefs),
+            ("ProbeVerdictWithdrawsWhenOvermatched", ProbeVerdictWithdrawsWhenOvermatched),
+            ("ProbeVerdictReadsPendingBattlesNearTheObjective", ProbeVerdictReadsPendingBattlesNearTheObjective),
+            ("ProbeReactionNeedsAPreviousSighting", ProbeReactionNeedsAPreviousSighting),
+            ("ProbeVerdictOnlyForActiveProbes", ProbeVerdictOnlyForActiveProbes),
+            ("ReconRowCountsMissionsAndApproachTasks", ReconRowCountsMissionsAndApproachTasks),
+            ("ReconDirectiveFilterFollowsUnitKeyThroughTheSnapshot", ReconDirectiveFilterFollowsUnitKeyThroughTheSnapshot),
+            ("ReconStepAllocatesNothingOnceWarm", ReconStepAllocatesNothingOnceWarm),
+            ("ReconStepPinned", ReconStepPinned),
+            ("ReconLedgerHasNoReaderOutsideTheReview", ReconLedgerHasNoReaderOutsideTheReview),
+            ("ReconFlagIsBoundAndRead", ReconFlagIsBoundAndRead),
+            ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
+            ("ClearedMissionIsGoneAfterTheNextReview", ClearedMissionIsGoneAfterTheNextReview),
+            ("ProbeVerdictEnemyIsThePlansMainEnemy", ProbeVerdictEnemyIsThePlansMainEnemy),
+            ("ProbeIsReleasedNotRecalledWhenTheMainMoves", ProbeIsReleasedNotRecalledWhenTheMainMoves),
+            ("ProbeOnTheNewMainSectorIsJudgedWithAFreshReference", ProbeOnTheNewMainSectorIsJudgedWithAFreshReference),
+            ("ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector", ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector),
+            ("ProbeVerdictSitsOnTheOddsThresholds", ProbeVerdictSitsOnTheOddsThresholds),
+            ("ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup", ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup),
+            ("ReconRowRoutesToTheRegisteredEvent", ReconRowRoutesToTheRegisteredEvent),
+            ("ReconFilesHoldNoUnityTypes", ReconFilesHoldNoUnityTypes),
         });
     }
 
@@ -342,6 +368,29 @@ internal static class ReconPlannerTests
         var task = ScreenTask(0f, 0f, 265f, 0f, -1);
         AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "the formation already on that post keeps it");
         AssertEqual(1, ReconPlanner.PickFormation(s, null, null, null, task, new List<int>(), true), "without the ledger the nearest to the axis start");
+    }
+
+    // A mission outlives the day it was issued: if the player takes command of the group on it (stage F's chain
+    // class turns PlayerMapGroup or PlayerCommand), the incumbent rule must not keep a recon task on his group.
+    private static void IncumbentWhoseCommandPassesToThePlayerIsRefused()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand })
+        {
+            var s = World();
+            s.Own.Add(Unit(1, 0f, 0f, 3000f, 0.9f, 14));
+            s.Own.Add(Unit(2, 260f, 0f, 3000f, 0.9f, 14));
+            var ledger = new ReconMissionLedger();
+            AddMission(ledger, s, ReconKind.Screen, 2, 260f, 0f, -1);
+            var task = ScreenTask(0f, 0f, 265f, 0f, -1);
+            AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "fixture: while the AI holds it the incumbent keeps the post");
+
+            var taken = s.Own[1];
+            taken.Chain = chain;                                                     // the player takes command of group 2
+            s.Own[1] = taken;
+            AssertEqual(1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": the incumbent is refused and another formation is picked");
+            s.Own.RemoveAt(0);
+            AssertEqual(-1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": with no other formation, none");
+        }
     }
 
     private static void RecalledFormationNotRepicked()
@@ -715,7 +764,7 @@ internal static class ReconPlannerTests
         foreach (var type in new[] { typeof(EnemyDetection), typeof(EnemyBelief) })
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                 AssertFalse(Regex.IsMatch(field.Name, "Waypoint|Destination|Path|Target", RegexOptions.IgnoreCase), type.Name + "." + field.Name + " is no destination");
-        foreach (var file in new[] { "ReconPlanner.cs", "ReconMissionLedger.cs", "ReconOrders.cs" })
+        foreach (var file in new[] { "ReconPlanner.cs", "ReconMissionLedger.cs", "ReconOrders.cs", "ReconStep.cs" })
         {
             string src = Regex.Replace(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/" + file), @"//[^\n]*", ""); // code, not the anchor comments
             AssertFalse(Regex.IsMatch(src, @"GetLastTransmittedPathPos|\bWaypoint[XZ]\b|closestenemyunitfar"), file + " reads no destination");
@@ -1007,6 +1056,590 @@ internal static class ReconPlannerTests
         AssertEqual("default-hold", assignment.Reason, "reason");
     }
 
+    // ---- G1b runtime step (docs/superpowers/plans/2026-10-15-campaign-planner.md § G1b runtime as built) ----
+
+    // The enemy numbers the surviving probe layer and phase truth read are the side's beliefs: an enemy
+    // the side has not seen (no belief), an expired one and one outside the radius add nothing.
+    private static void LocalForceBalanceFromBeliefsExcludesUnseen()
+    {
+        var beliefs = new List<EnemyBelief>
+        {
+            Belief("seen", 100f, 0f, 8000f, Today, 1f, 5f),
+            Belief("decayed", 110f, 0f, 10000f, Today - 7, 0.5f, 40f),
+            Belief("expired", 90f, 0f, 50000f, Today - 40, 0f, 400f),
+            Belief("far", 900f, 0f, 30000f, Today, 1f, 5f)
+        };
+        AssertNear(13000f, EnemyBeliefQuery.StrengthWithin(beliefs, 100f, 0f, 150f), 0.01f, "seen in full, the decayed one at its confidence; expired and far add nothing");
+        AssertNear(0f, EnemyBeliefQuery.StrengthWithin(new List<EnemyBelief>(), 100f, 0f, 150f), 0.01f, "no belief, no enemy: an unseen army is not counted");
+
+        // The runtime read: ReadLocalForceBalance sums beliefs, never vanilla's omniscient enemyunits.
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string read = BodyOf(coordinator, "private static void ReadLocalForceBalance(");
+        AssertContains(read, "EnemyDetectionRuntime.BeliefsFor(alliance)", "the side's beliefs");
+        AssertContains(read, "EnemyBeliefQuery.StrengthWithin(beliefs, center.x, center.z, radius)", "the pure sum");
+        AssertContains(read, "EnemyBeliefQuery.ConfidenceWithin(beliefs, center.x, center.z, radius)", "and how fresh it is");
+        AssertFalse(read.Contains("enemyunits") || read.Contains("_enemyUnitsField"), "no omniscient enemy list");
+        AssertFalse(coordinator.Contains("\"enemyunits\""), "the coordinator no longer reads enemyunits at all");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(coordinator, @"ReadLocalForceBalance\(alliance, ").Count, "the phase-truth and probe call sites");
+        string probeUpdate = BodyOf(coordinator, "private bool UpdateOperationalProbe(");
+        AssertContains(probeUpdate, "out localEnemy, out localEnemyConfidence);", "the probe call site reads the confidence");
+        AssertContains(probeUpdate, "localEnemy,\n                    localEnemyConfidence)", "and hands it to the input builder");
+        string probe = ReadRepoFile("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(probe, @"BeliefConfidence01 = localEnemyConfidence01").Count, "the probe input and its contact-evidence input both carry the confidence");
+        AssertContains(probe, "CurrentEnemyStrength = target.HasValue ? localEnemyStrength : -1f", "the probe's enemy strength is the belief sum the coordinator passes");
+    }
+
+    private static void BeliefConfidenceIsStrengthWeightedAndIgnoresExpired()
+    {
+        AssertNear(1f, EnemyBeliefQuery.ConfidenceWithin(new List<EnemyBelief>(), 0f, 0f, 100f), 0.0001f, "nothing remembered, nothing stale");
+        var beliefs = new List<EnemyBelief>
+        {
+            Belief("old", 10f, 0f, 20000f, Today - 10, 0.3f, 80f),
+            Belief("fresh", 20f, 0f, 2000f, Today, 1f, 5f),
+            Belief("expired", 30f, 0f, 90000f, Today - 40, 0f, 400f),
+            Belief("far", 800f, 0f, 90000f, Today - 10, 0.1f, 400f)
+        };
+        // (20000 x 0.3 + 2000 x 1) / 22000: the share of the believed strength that is current.
+        AssertNear(8000f / 22000f, EnemyBeliefQuery.ConfidenceWithin(beliefs, 0f, 0f, 100f), 0.0001f, "strength-weighted mean over live beliefs in range");
+        AssertNear(0.3f, EnemyBeliefQuery.ConfidenceWithin(beliefs, 10f, 0f, 5f), 0.0001f, "one belief in range");
+        AssertNear(1f, EnemyBeliefQuery.ConfidenceWithin(beliefs, 0f, 300f, 50f), 0.0001f, "none in range");
+        AssertNear(1f, EnemyBeliefQuery.ConfidenceWithin(null, 0f, 0f, 100f), 0.0001f, "null list");
+    }
+
+    private static void ContactEvidenceStaleBeliefCannotEscalate()
+    {
+        // A decayed belief understates the enemy (its strength is confidence-weighted), so an odds
+        // check on it would flatter the probe: no escalation on it, whatever the ratio or the battles.
+        var stale = Evidence(friendly: 9000f, enemy: 3000f);
+        stale.BeliefConfidence01 = 0.3f;
+        var staleOut = ContactEvidenceLedger.Build(stale);
+        AssertEqual(ContactEvidence.FavorableContact, staleOut.Evidence, "the classification is unchanged");
+        AssertFalse(staleOut.AllowsEscalation, "a stale belief cannot escalate");
+        AssertContains(staleOut.Reason, "stale-belief", "and says why");
+
+        var fresh = Evidence(friendly: 9000f, enemy: 3000f);
+        fresh.BeliefConfidence01 = ContactEvidenceLedger.MinEscalationConfidence;
+        AssertTrue(ContactEvidenceLedger.Build(fresh).AllowsEscalation, "a belief at the threshold escalates");
+        AssertTrue(ContactEvidenceLedger.Build(Evidence(friendly: 9000f, enemy: 3000f)).AllowsEscalation, "the default confidence is 1");
+
+        var nan = Evidence(friendly: 9000f, enemy: 3000f);
+        nan.BeliefConfidence01 = float.NaN;
+        AssertFalse(ContactEvidenceLedger.Build(nan).AllowsEscalation, "an unreadable confidence never escalates");
+
+        // Withdrawing is never gated: an overmatched probe still falls back on a stale belief.
+        var overmatched = Evidence(friendly: 1000f, enemy: 9000f);
+        overmatched.BeliefConfidence01 = 0.1f;
+        AssertEqual(ContactEvidence.OvermatchedContact, ContactEvidenceLedger.Build(overmatched).Evidence, "overmatch still reads");
+
+        // A won battle nearby does not escalate on a stale picture either.
+        var battle = Evidence(friendly: 9000f, enemy: 3000f);
+        battle.BattleHistory = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "won", PositionX = 0f, PositionZ = 0f, Day = 5, Month = 6, Year = 1862, BattleResultType = 1, AllianceWon = 0 }
+        };
+        battle.CurrentDaySerial = BattleHistoryQuery.LegacySerial(1862, 6, 6);
+        AssertTrue(ContactEvidenceLedger.Build(battle).AllowsEscalation, "fixture: a won battle and a favorable ratio escalate");
+        battle.BeliefConfidence01 = 0.2f;
+        AssertFalse(ContactEvidenceLedger.Build(battle).AllowsEscalation, "not on a stale belief");
+
+        // One stale threshold for the probe layer: the planner's probe trigger and the verdict agree.
+        AssertEqual(ContactEvidenceLedger.MinEscalationConfidence, ReconPlanner.ProbeStaleConfidence, "one number for 'stale'");
+    }
+
+    private static void LegacySerialIsTheBattleHistoryScale()
+    {
+        AssertEqual(1862 * 372 + 6 * 31 + 6, BattleHistoryQuery.LegacySerial(1862, 6, 6), "the scale BattleHistoryQuery.Near compares on");
+        var history = new List<BattleHistoryRecord> { new BattleHistoryRecord { PositionX = 0f, PositionZ = 0f, Day = 5, Month = 6, Year = 1862 } };
+        int seen = 0;
+        foreach (var unused in BattleHistoryQuery.Near(history, new UnityEngine.Vector3(0f, 0f, 0f), 10f, BattleHistoryQuery.LegacySerial(1862, 6, 6), 7)) seen++;
+        AssertEqual(1, seen, "a battle a day ago is found on the legacy scale");
+        foreach (var unused in BattleHistoryQuery.Near(history, new UnityEngine.Vector3(0f, 0f, 0f), 10f, ReviewCadenceCatchUp.DaySerial(6, 6, 1862), 7)) seen++;
+        AssertEqual(1, seen, "the calendar serial is another scale: nothing is found on it, which is why the step takes the legacy one");
+    }
+
+    // ---- probe verdict ----
+
+    private static ReconMissionLedger ProbeLedger(CampaignSnapshot s, out TheaterPlan plan)
+    {
+        s.Own.Add(Unit(2, 700f, 0f, 3000f, 0.9f, 14));
+        plan = MainPlan(2, 800f);
+        plan.MassStrength = 12000f;
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Probe, 2, 700f, 0f, 2);
+        return ledger;
+    }
+
+    private static void ProbeVerdictEscalatesOnlyOnFreshBeliefs()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);
+        s.Beliefs.Add(Belief("stale", 810f, 0f, 20000f, Today - 12, 0.3f, 90f));   // 6000 weighted: the mass is 2x that
+        plan.MainEnemyStrength = 6000f;                                              // what G3 judged the odds against
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "a stale picture does not clear the probe");
+        AssertFalse(MissionOf(ledger, 2).Reason == "probe-escalate", "nor name it an escalation");
+
+        s.Beliefs.Clear();
+        s.Beliefs.Add(Belief("fresh", 810f, 0f, 5000f, Today, 1f, 5f));              // 12000 / 5000 = 2.4 >= the plan's 1.1
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(ReconState.Cleared, MissionOf(ledger, 2).State, "a fresh sighting the main effort outguns clears the probe");
+        AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "as an escalation");
+        AssertEqual(Today, MissionOf(ledger, 2).LastContactDay, "the contact day is on the calendar scale of the mission ledger");
+    }
+
+    private static void ProbeVerdictWithdrawsWhenOvermatched()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);
+        s.Beliefs.Add(Belief("big", 805f, 0f, 30000f, Today, 1f, 5f));              // 12000 / 30000 = 0.4 <= 0.55
+        plan.MainEnemyStrength = 30000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "overmatched: recalled");
+        AssertEqual("probe-withdraw", MissionOf(ledger, 2).Reason, "as a withdrawal");
+    }
+
+    private static void ProbeVerdictReadsPendingBattlesNearTheObjective()
+    {
+        int legacyToday = BattleHistoryQuery.LegacySerial(1862, 6, 6);
+        BattleHistoryRecord Battle(string name, int winner, float x, int month, int day) => new BattleHistoryRecord
+        {
+            BattleName = name, PositionX = x, PositionZ = 0f, Day = day, Month = month, Year = 1862, BattleResultType = 1, AllianceWon = winner, Alliance = new[] { 0, 1 }
+        };
+
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);
+        ReconStep.ProbeVerdicts(s, plan, new List<BattleHistoryRecord> { Battle("far", 0, 1000f, 6, 5), Battle("old", 0, 800f, 5, 20) }, legacyToday, ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "a battle 200 from the objective (beyond the relocation range of 150) and one more than a week old say nothing");
+        ReconStep.ProbeVerdicts(s, plan, new List<BattleHistoryRecord> { Battle("near", 0, 900f, 6, 5) }, legacyToday, ledger);
+        AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "a battle won 100 from the objective, inside the relocation range, clears the probe");
+        ledger = ProbeLedger(s = World(), out plan);
+
+        ReconStep.ProbeVerdicts(s, plan, new List<BattleHistoryRecord> { Battle("won", 0, 800f, 6, 5) }, legacyToday, ledger);
+        AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "a battle won at the objective clears the probe");
+
+        var s2 = World();
+        var ledger2 = ProbeLedger(s2, out var plan2);
+        ReconStep.ProbeVerdicts(s2, plan2, new List<BattleHistoryRecord> { Battle("lost", 1, 800f, 6, 5) }, legacyToday, ledger2);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger2, 2).State, "a battle lost at the objective recalls it");
+    }
+
+    private static void ProbeReactionNeedsAPreviousSighting()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);
+        plan.MainRequiredRatio = 2f;
+        plan.MassStrength = 7000f;
+        s.Beliefs.Add(Belief("a", 805f, 0f, 5000f, Today, 1f, 5f));                  // 1.4: between withdraw 0.55 and the plan's 2.0
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "a first sighting is no reaction");
+        AssertNear(5000f, MissionOf(ledger, 2).ObservedEnemyStrength, 0.01f, "and is remembered");
+
+        s.Beliefs.Clear();
+        s.Beliefs.Add(Belief("a", 805f, 0f, 7500f, Today, 1f, 5f));                  // 1.5 x the last look, ratio 0.93 < 2.0
+        plan.MainEnemyStrength = 7500f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "an enemy that grew 1.45x since the last look and still outguns the probe: recalled");
+        AssertEqual("probe-withdraw", MissionOf(ledger, 2).Reason, "as a withdrawal");
+    }
+
+    private static void ProbeVerdictOnlyForActiveProbes()
+    {
+        var s = World();
+        s.Own.Add(Unit(2, 700f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(3, 600f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(4, 650f, 0f, 3000f, 0.9f, 14));
+        var plan = MainPlan(2, 800f);
+        plan.MassStrength = 12000f;
+        var ledger = new ReconMissionLedger();
+        AddMissions(ledger, s, (ReconKind.Screen, 2, 700f, 2), (ReconKind.Probe, 3, 600f, 2), (ReconKind.Probe, 4, 650f, 9)); // sector 9: the plan has no target for it
+        s.Beliefs.Add(Belief("fresh", 810f, 0f, 5000f, Today, 1f, 5f));
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "a screen is not a probe");
+        AssertEqual("probe-escalate", MissionOf(ledger, 3).Reason, "the probe on the main sector's objective is judged");
+        AssertEqual("main-moved", MissionOf(ledger, 4).Reason, "a probe on a sector that is not the plan's main sector is released, never judged");
+        ReconStep.ProbeVerdicts(s, null, null, 0, ledger);
+        ReconStep.ProbeVerdicts(null, plan, null, 0, ledger);
+        ReconStep.ProbeVerdicts(s, plan, null, 0, null);
+    }
+
+    // ---- the [Recon] row, the directive filter and the zero-allocation glue ----
+
+    private static void ReconRowCountsMissionsAndApproachTasks()
+    {
+        var s = World();
+        for (int i = 2; i <= 6; i++) s.Own.Add(Unit(i, i * 100f, 0f, 3000f, 0.9f, 14));
+        var ledger = new ReconMissionLedger();
+        AddMissions(ledger, s, (ReconKind.Screen, 2, 200f, -1), (ReconKind.Picket, 3, 300f, -1), (ReconKind.Probe, 4, 400f, -1),
+            (ReconKind.AdvanceGuard, 5, 500f, -1), (ReconKind.Screen, 6, 600f, -1));
+        s.Own.RemoveAt(s.Own.Count - 1);
+        s.Beliefs.Add(Belief("a", 900f, 0f, 3000f, Today - 12, 0.4f, 60f));
+        s.Beliefs.Add(Belief("b", 950f, 0f, 3000f, Today - 3, 0.9f, 10f));
+        s.Beliefs.Add(Belief("gone", 990f, 0f, 3000f, Today - 40, 0f, 400f));
+        ledger.OnReview(s, HoldAlloc());                                              // unit 6 is missing: its mission is cleared
+        var tasks = new List<ReconTask>
+        {
+            new ReconTask { Kind = ReconKind.Screen, Reason = ReconPlanner.ReasonMainAxis },
+            new ReconTask { Kind = ReconKind.Screen, Reason = ReconPlanner.ReasonCapitalApproach },
+            new ReconTask { Kind = ReconKind.Screen, Reason = ReconPlanner.ReasonFrontApproach },
+            new ReconTask { Kind = ReconKind.Screen, Reason = "belief" },
+            new ReconTask { Kind = ReconKind.Probe, Reason = "probe" }
+        };
+        var counts = ReconStep.CountsOf(s, ledger, tasks);
+        AssertEqual(1, counts.Screens, "one active screen (the cleared one does not count)");
+        AssertEqual(1, counts.Pickets, "pickets");
+        AssertEqual(1, counts.AdvanceGuards, "advance guards");
+        AssertEqual(1, counts.Probes, "probes");
+        AssertEqual(0, counts.Recalled, "none recalled");
+        AssertEqual(3, counts.UnwatchedApproaches, "the three approach tasks, not the belief or probe tasks");
+        AssertEqual(12, counts.OldestBeliefDays, "the oldest live belief; the expired one does not count");
+        AssertEqual("[Recon] alliance=0 screens=1 pickets=1 advanceGuards=1 probes=1 recalled=0 unwatchedApproaches=3 oldestBeliefDays=12", counts.Row(0), "the row text");
+        AssertTrue(counts.Equals(ReconStep.CountsOf(s, ledger, tasks)), "the same review twice is the same row (rows on change)");
+
+        ledger.OnProbeContact(4, ContactEvidenceLedger.Build(Evidence(friendly: 1000f, enemy: 9000f)), Today);
+        var recalled = ReconStep.CountsOf(s, ledger, tasks);
+        AssertEqual(1, recalled.Recalled, "a recalled probe counts as recalled");
+        AssertEqual(0, recalled.Probes, "and no longer as an active probe");
+        AssertFalse(counts.Equals(recalled), "so the row changes");
+    }
+
+    private static void ReconDirectiveFilterFollowsUnitKeyThroughTheSnapshot()
+    {
+        var s = World();
+        s.Own.Add(Unit(2, 300f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(3, 400f, 0f, 3000f, 0.9f, 14));
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Screen, 2, 300f, 0f, -1);
+        AssertTrue(ReconStep.IsReconKey(s, ledger, "u2:2"), "the formation on a mission, found by its unit key");
+        AssertFalse(ReconStep.IsReconKey(s, ledger, "u3:3"), "a formation without one");
+        AssertFalse(ReconStep.IsReconKey(s, ledger, "nobody:9"), "a key the snapshot does not hold");
+        AssertFalse(ReconStep.IsReconKey(s, ledger, null), "no key");
+        AssertFalse(ReconStep.IsReconKey(null, ledger, "u2:2"), "no snapshot");
+        AssertFalse(ReconStep.IsReconKey(s, null, "u2:2"), "no ledger");
+        ledger.OnProbeContact(2, ContactEvidenceLedger.Build(Evidence(friendly: 1000f, enemy: 9000f)), Today);
+        AssertTrue(ReconStep.IsReconKey(s, ledger, "u2:2"), "fixture: still active (a screen takes no probe verdict)");
+        var reloaded = new ReconMissionLedger();
+        reloaded.Restore(ledger.Missions);
+        var after = World();
+        var same = Unit(99, 300f, 0f, 3000f, 0.9f, 14);
+        same.UnitKey = "u2:2";
+        after.Own.Add(same);
+        reloaded.OnReview(after, HoldAlloc());
+        AssertTrue(ReconStep.IsReconKey(after, reloaded, "u2:2"), "after a reload the same unit key finds the new instance id");
+    }
+
+    private static void ReconStepAllocatesNothingOnceWarm()
+    {
+        var s = World();
+        for (int i = 2; i <= 5; i++) s.Own.Add(Unit(i, i * 100f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(1, 0f, 0f, 20000f, 0f, 15));
+        s.Beliefs.Add(Belief("a", 900f, 0f, 3000f, Today - 12, 0.4f, 60f));
+        var ledger = new ReconMissionLedger();
+        var tasks = new List<ReconTask>();
+        var alloc = new Allocation { Alliance = 0 };
+        alloc.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Hold, ReconMissionId = -1 });
+        for (int i = 2; i <= 3; i++)
+        {
+            var t = ScreenTask(i * 100f, 0f, i * 100f + 20f, 0f, -1);
+            tasks.Add(t);
+            alloc.Assignments.Add(Recon(i, t));
+        }
+        var last = default(ReconCounts);
+        for (int i = 0; i < 6; i++)
+        {
+            ledger.OnReview(s, alloc);
+            ledger.Sync(s, tasks, alloc);
+            last = ReconStep.CountsOf(s, ledger, tasks);
+            ReconStep.IsReconKey(s, ledger, "u2:2");
+        }
+        AssertEqual(2, ledger.Missions.Count, "fixture: two live missions");
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++)
+        {
+            ledger.OnReview(s, alloc);
+            ledger.Sync(s, tasks, alloc);
+            var counts = ReconStep.CountsOf(s, ledger, tasks);
+            if (!counts.Equals(last)) throw new Exception("the steady state changed");
+            ReconStep.IsReconKey(s, ledger, "u2:2");
+        }
+        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "OnReview, Sync, the row counts and the directive filter allocate nothing in a steady review");
+    }
+
+    // ---- the runtime step, by source (the runtime itself needs the vanilla assembly) ----
+
+    private static void ReconStepPinned()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        string review = BodyOf(src, "internal static void ReviewPlan(");
+        AssertFalse(src.Contains("G1B SEAM") || src.Contains("NoReconTasks"), "the seam and its empty task list are gone");
+        int age = review.IndexOf("AgeRecon(snapshot);", StringComparison.Ordinal);
+        int bookkeeping = review.IndexOf("mode == PlannerReviewMode.Bookkeeping) return;", StringComparison.Ordinal);
+        int plan = review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal);
+        int tasks = review.IndexOf("PlanRecon(snapshot, sectors, plan, year, month, day);", StringComparison.Ordinal);
+        int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
+        int sync = review.IndexOf("SyncRecon(snapshot, allocation);", StringComparison.Ordinal);
+        int publish = review.IndexOf("CampaignPlanStore.Publish(alliance, plan, allocation, sectors);", StringComparison.Ordinal);
+        AssertTrue(age > 0 && bookkeeping > age && plan > bookkeeping && tasks > plan && allocate > tasks && sync > allocate && publish > sync,
+            "mission aging (also a paused day), then the plan, the recon tasks, the allocation that picks their formations, the mission sync, the publish that carries the ids");
+        AssertEqual(1, review.Split(new[] { "AgeRecon(" }, StringSplitOptions.None).Length - 1, "one aging per review");
+        int drain = review.IndexOf("TerrainLineRuntime.PrepareDrain(snapshot);", StringComparison.Ordinal);
+        AssertTrue(drain > 0 && age > drain, "ledger aging beside the other bookkeeping, before the pause return");
+        AssertContains(review, "ReconTasks[alliance], Recon[alliance]", "the allocator gets this alliance's tasks and ledger");
+        AssertFalse(review.Contains("new ReconMissionLedger"), "one ledger per alliance, held by the class");
+
+        string age_ = BodyOf(src, "private static void AgeRecon(");
+        AssertContains(age_, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
+        AssertContains(age_, "CampaignPlanStore.TryGetAllocation(snapshot.Alliance, out var previous)", "the recall point reads the last allocation (null on the first day)");
+        AssertContains(age_, ".OnReview(snapshot, previous)", "transitions from today's snapshot");
+
+        string planRecon = BodyOf(src, "private static void PlanRecon(");
+        AssertContains(planRecon, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
+        AssertContains(planRecon, "if (!FlagOn(Plugin.EnableCampaignReconnaissance)) { tasks.Clear(); return; }", "flag off: no tasks (the sync then clears the missions)");
+        AssertContains(planRecon, "ReconStep.Plan(snapshot, sectors, plan, PendingBattles, BattleHistoryQuery.LegacySerial(year, month, day), Recon[alliance], tasks);", "the shared step: probe verdicts on the battles this review judges, then the tasks");
+
+        string syncRecon = BodyOf(src, "private static void SyncRecon(");
+        AssertContains(syncRecon, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
+        AssertContains(syncRecon, "Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);", "binds the allocation's Recon assignments to missions");
+        AssertContains(syncRecon, "if (FlagOn(Plugin.EnableCampaignReconnaissance)) EmitRecon(snapshot);", "the row only while the flag is on");
+
+        string emit = BodyOf(src, "private static void EmitRecon(");
+        AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a])", "the row's counts");
+        AssertContains(emit, "TelemetryRouter.LegacyInfo(counts.Row(a), TelemetryLayer.Campaign);", "the [Recon] row, on change");
+        AssertContains(emit, "ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])", "rows on change, no string built otherwise");
+
+        string reset = BodyOf(src, "private static void ResetPlanState(");
+        AssertContains(reset, "Recon[a] = new ReconMissionLedger();", "the ledger is per campaign");
+        AssertContains(reset, "ReconTasks[a].Clear();", "so are its tasks");
+        AssertContains(reset, "ReconRowEmitted[a] = false;", "and the row memory");
+
+        string filter = BodyOf(src, "private static bool IsReconUnit(");
+        AssertContains(filter, "FlagOn(Plugin.EnableCampaignReconnaissance) && ReconStep.IsReconKey(Snapshots[alliance], Recon[alliance], unitKey)", "unit key -> the snapshot's index -> IsRecon, only while the flag is on");
+        AssertContains(BodyOf(src, "internal static Func<string, bool> ReconFilterFor(int alliance)"), "return alliance >= 0 && alliance < ReconFilters.Length ? ReconFilters[alliance] : null;", "the directive ledger's filter, for alliances 0 and 1 only");
+        AssertContains(src, "ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };", "one delegate per alliance, built once");
+    }
+
+    // Planner state a patch reads joins the atomic publish (PrepareDay); the mission ledger is read only
+    // inside the review's own jobs (the Plan, Formation and Execute jobs), so it does not. The day a patch
+    // reads it (G5d's #15 stand-down) is the day it must join.
+    private static void ReconLedgerHasNoReaderOutsideTheReview()
+    {
+        foreach (string file in System.IO.Directory.GetFiles(FindRepoPath("src/WhiskeyRealism/Patches"), "*.cs"))
+        {
+            string text = System.IO.File.ReadAllText(file);
+            AssertFalse(text.Contains("ReconMissionLedger") || text.Contains("ReconFilterFor") || text.Contains("ReconStep"), System.IO.Path.GetFileName(file) + " reads no recon mission state outside the review");
+        }
+        string prepare = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs"), "private static StrategicLedgerSet PrepareDay(");
+        AssertFalse(prepare.Contains("Recon"), "the daily publish carries no recon ledger: nothing outside the review reads it");
+        string formation = ReadRepoFile("src/WhiskeyRealism/Strategic/FormationDirectiveRuntime.cs");
+        AssertContains(formation, "FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey, options, CampaignPlannerRuntime.ReconFilterFor(allianceId))", "the directive ledger is told which formations are on a mission");
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertContains(coordinator, "FormationDirectiveRuntime.BuildForAlliance(", "built by the coordinator's Formation job");
+    }
+
+    // The first review of a campaign (and any day after a reset) has no allocation to take a recall point
+    // from: the runtime passes null and the point falls back to the own capital.
+    private static void FirstReviewHasNoPreviousAllocation()
+    {
+        var s = World();
+        s.HasCapital = true;
+        s.CapitalX = 10f;
+        s.CapitalZ = 0f;
+        var tired = Unit(2, 300f, 0f, 3000f, 0.9f, 14);
+        tired.Supply01 = 0.3f;
+        s.Own.Add(tired);
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Screen, 2, 300f, 0f, -1);
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "low supply recalls it");
+        AssertNear(10f, MissionOf(ledger, 2).HoldX, 0.01f, "to the capital: there is no allocation yet");
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "and the next review without one is the same");
+    }
+
+    // OnReview now runs every day: a Cleared mission (a probe's escalation, an unassigned screen) lives one review
+    // for the executor to see and must be dropped by the next, never re-derived into Assigned/Moving/Holding.
+    private static void ClearedMissionIsGoneAfterTheNextReview()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                  // unit 2 on a probe at (700, 0)
+        s.Beliefs.Add(Belief("fresh", 810f, 0f, 5000f, Today, 1f, 5f));
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(ReconState.Cleared, MissionOf(ledger, 2).State, "fixture: the probe cleared on its escalation");
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(0, ledger.Missions.Count, "the next review drops the cleared probe");
+        AssertFalse(ledger.IsRecon(2), "and the formation is no longer on a mission");
+
+        var t = World();
+        t.Own.Add(Unit(3, 300f, 0f, 3000f, 0.9f, 14));
+        var screens = new ReconMissionLedger();
+        AddMission(screens, t, ReconKind.Screen, 3, 300f, 0f, -1);
+        screens.Sync(t, new List<ReconTask>(), HoldAlloc());                         // no task holds it any more
+        AssertEqual(ReconState.Cleared, MissionOf(screens, 3).State, "fixture: unassigned clears");
+        screens.OnReview(t, HoldAlloc());
+        AssertEqual(0, screens.Missions.Count, "the next review drops the unassigned screen");
+        AssertFalse(screens.IsRecon(3), "and it is not a recon formation");
+    }
+
+    // One source for the enemy the odds are judged against: G3's TheaterPlan.MainEnemyStrength (confidence- and
+    // river-weighted, at the objective itself), not a second sum over the snapshot's beliefs.
+    private static void ProbeVerdictEnemyIsThePlansMainEnemy()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                  // mass 12000, required 1.1
+        s.Beliefs.Add(Belief("huge", 810f, 0f, 100000f, Today, 1f, 5f));             // a belief sum here would be overmatched
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "the plan's enemy decides: 12000 / 5000");
+        AssertNear(5000f, MissionOf(ledger, 2).ObservedEnemyStrength, 0.01f, "and is the strength remembered");
+    }
+
+    // A probe serves the main effort. G3 can move the main (another sector) while a probe stands; judging it
+    // against the new main's enemy and the old main's remembered enemy would recall it for a reaction that
+    // never happened and bar the formation from every recon pick for up to 20 days. It is released instead:
+    // cleared, no Recalled state, no verdict, reason main-moved.
+    private static void ProbeIsReleasedNotRecalledWhenTheMainMoves()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                   // probe on unit 2, sector 2 (main), objective 3
+        plan.MainRequiredRatio = 2f;
+        plan.MassStrength = 7000f;
+        plan.MainEnemyStrength = 5000f;
+        s.Beliefs.Add(Belief("a", 805f, 0f, 5000f, Today, 1f, 5f));
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "fixture: day 1 holds and remembers the enemy");
+        int contact = MissionOf(ledger, 2).LastContactDay;
+
+        var moved = MainPlan(5, 1200f);                                              // day 2: the main effort moves to sector 5
+        moved.MainObjectiveId = 4;
+        moved.MainRequiredRatio = 2f;
+        moved.MassStrength = 7000f;
+        moved.MainEnemyStrength = 9000f;                                             // 9000 >= 1.45 x 5000 and the ratio is under 2: a false reaction
+        moved.Sectors.Add(new SectorPlan { SectorId = 2, Posture = TheaterPosture.Hold, TargetX = 800f, TargetZ = 0f });
+        ReconStep.ProbeVerdicts(s, moved, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        var m = MissionOf(ledger, 2);
+        AssertEqual(ReconState.Cleared, m.State, "released");
+        AssertEqual(ReconStep.ReleasedReason, m.Reason, "and says why");
+        AssertEqual(contact, m.LastContactDay, "no verdict was taken");
+        AssertFalse(ledger.IsRecalling(2), "never recalled, so no recall bar");
+        AssertFalse(ledger.IsRecon(2), "and no longer on a mission");
+
+        var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 5, FromX = 700f, FromZ = 0f, HoldX = 1100f, HoldZ = 0f, Priority = 1f, Reason = "t" };
+        AssertEqual(2, ReconPlanner.PickFormation(s, null, moved, ledger, task, new List<int>(), true), "the formation is pickable at once");
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(0, ledger.Missions.Count, "and the released mission is dropped by the next review");
+    }
+
+    private static void ProbeOnTheNewMainSectorIsJudgedWithAFreshReference()
+    {
+        var s = World();
+        s.Own.Add(Unit(2, 700f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(3, 1100f, 0f, 3000f, 0.9f, 14));
+        var ledger = new ReconMissionLedger();
+        AddMissions(ledger, s, (ReconKind.Probe, 2, 700f, 2), (ReconKind.Probe, 3, 1100f, 5));
+        ledger.OnProbeContact(2, ContactEvidenceLedger.Build(Evidence(friendly: 7000f, enemy: 5000f)), Today, 5000f, 3); // the old probe remembers 5000 at objective 3
+
+        var moved = MainPlan(5, 1200f);
+        moved.MainObjectiveId = 4;
+        moved.MainRequiredRatio = 2f;
+        moved.MassStrength = 7000f;
+        moved.MainEnemyStrength = 9000f;                                             // 1.8 x what the old probe remembers
+        ReconStep.ProbeVerdicts(s, moved, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        AssertEqual("main-moved", MissionOf(ledger, 2).Reason, "the old sector's probe is released");
+        var fresh = MissionOf(ledger, 3);
+        AssertTrue(ReconMissionLedger.IsActive(fresh.State), "the probe on the new main sector is judged, and 9000 is no reaction to anything it saw");
+        AssertNear(9000f, fresh.ObservedEnemyStrength, 0.01f, "it now remembers the new main's enemy");
+        AssertEqual(4, fresh.ObservedObjectiveId, "at the new main objective");
+    }
+
+    private static void ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                   // sector 2, objective 3
+        plan.MainRequiredRatio = 2f;
+        plan.MassStrength = 7000f;
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(3, MissionOf(ledger, 2).ObservedObjectiveId, "fixture: remembered at objective 3");
+
+        plan.MainObjectiveId = 4;                                                    // the same sector, another objective
+        plan.MainEnemyStrength = 9000f;                                              // 1.8 x the old objective's enemy
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "an enemy at another objective is no reaction");
+        AssertEqual(4, MissionOf(ledger, 2).ObservedObjectiveId, "the reference restarted at objective 4");
+        AssertNear(9000f, MissionOf(ledger, 2).ObservedEnemyStrength, 0.01f, "with its enemy");
+
+        plan.MainEnemyStrength = 14000f;                                             // 1.56 x the same objective's last look: a reaction
+        plan.MassStrength = 7000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 8), ledger);
+        AssertEqual("probe-withdraw", MissionOf(ledger, 2).Reason, "the same objective's enemy still reacts");
+    }
+
+    // The friendly side of the verdict sits on the plan's required ratio (1.1) and vanilla-probe withdraw ratio (0.55).
+    private static void ProbeVerdictSitsOnTheOddsThresholds()
+    {
+        foreach (var (mass, expect) in new[] { (5600f, "escalate"), (5400f, "hold"), (2700f, "withdraw"), (2900f, "hold") })
+        {
+            var s = World();
+            var ledger = ProbeLedger(s, out var plan);
+            plan.MassStrength = mass;
+            plan.MainEnemyStrength = 5000f;
+            s.Beliefs.Add(Belief("a", 805f, 0f, 5000f, Today, 1f, 5f));
+            ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+            var m = MissionOf(ledger, 2);
+            string got = m.State == ReconState.Cleared ? "escalate" : m.State == ReconState.Recalled ? "withdraw" : "hold";
+            AssertEqual(expect, got, "mass " + mass + " against 5000");
+        }
+    }
+
+    // The belief picture is read before the faction lookup, so a failed or missing faction still leaves the
+    // enemy sum and its confidence (only the own sum zeroes).
+    private static void ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup()
+    {
+        string read = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs"), "private static void ReadLocalForceBalance(");
+        int beliefs = read.IndexOf("EnemyDetectionRuntime.BeliefsFor(alliance)", StringComparison.Ordinal);
+        int faction = read.IndexOf("ResolveAifactionIndexForAlliance(alliance)", StringComparison.Ordinal);
+        AssertTrue(beliefs >= 0 && faction > beliefs, "beliefs, then the faction");
+        AssertFalse(read.Substring(0, faction).Contains("return;"), "nothing returns before the beliefs are read");
+    }
+
+    // The [Recon] row goes through TelemetryRouter.LegacyInfo like [Allocation]: its tag must be the event G0
+    // registered (Campaign layer, State), or the row would fall back to an unregistered main-log line.
+    private static void ReconRowRoutesToTheRegisteredEvent()
+    {
+        var counts = new ReconCounts { Screens = 2, Probes = 1, OldestBeliefDays = 9 };
+        var route = WhiskeyRealism.Telemetry.TelemetryTagPolicy.Route(counts.Row(1));
+        AssertTrue(route.RouteToSidecar, "the row reaches the campaign sidecar");
+        AssertEqual("Recon", route.EventName, "as the event G0 registered");
+        AssertEqual(WhiskeyRealism.Telemetry.TelemetryLayer.Campaign, route.Layer, "on the campaign layer");
+        AssertEqual(WhiskeyRealism.Telemetry.TelemetryCategory.State, route.Category, "as state");
+        AssertTrue(counts.Row(1).StartsWith("[Recon] alliance=1 screens=2 "), "the plan's row text");
+    }
+
+    // Pure means no Unity or vanilla types (plan Global Constraints): positions are float X, Z. The probe verdict
+    // reaches ContactEvidenceLedger and BattleHistoryQuery.Near through their float forms for that reason.
+    private static void ReconFilesHoldNoUnityTypes()
+    {
+        foreach (string file in new[] { "ReconPlanner.cs", "ReconMissionLedger.cs", "ReconOrders.cs", "ReconStep.cs" })
+        {
+            string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/" + file);
+            AssertFalse(src.Contains("UnityEngine") || Regex.IsMatch(src, @"\bVector[23]\b"), file + " holds no Unity type");
+        }
+        string evidence = ReadRepoFile("src/WhiskeyRealism/Strategic/ContactEvidenceLedger.cs");
+        AssertFalse(evidence.Contains("UnityEngine") || evidence.Contains("TargetPosition"), "the evidence ledger's input is float X, Z");
+    }
+
+    private static void ReconFlagIsBoundAndRead()
+    {
+        string plugin = ReadRepoFile("src/WhiskeyRealism/Plugin.cs");
+        AssertContains(plugin, "\"Campaign Planner\", \"Enable Campaign Reconnaissance\", true,", "bound, default on");
+        AssertContains(plugin, "internal static ConfigEntry<bool> EnableCampaignReconnaissance;", "declared");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertEqual(3, System.Text.RegularExpressions.Regex.Matches(runtime, @"FlagOn\(Plugin\.EnableCampaignReconnaissance\)").Count, "read where tasks are planned, the row is emitted and the directive filter answers");
+    }
+
     // ---- fixtures ----
 
     // Alliance 0, review day 100, one own IIP at the origin, vanilla movement minima 1000 / 0.3.
@@ -1104,6 +1737,20 @@ internal static class ReconPlannerTests
         var task = new ReconTask { Kind = kind, SectorId = sector, FromX = hx, FromZ = hz, HoldX = hx, HoldZ = hz, Priority = 1f, Reason = "test" };
         tasks.Add(task);
         a.Assignments.Add(Recon(instanceId, task));
+        ledger.Sync(s, tasks, a);
+    }
+
+    // Puts several formations on missions in one Sync (kind, instance id, x, sector); every task's hold point is (x, 0).
+    private static void AddMissions(ReconMissionLedger ledger, CampaignSnapshot s, params (ReconKind kind, int id, float x, int sector)[] missions)
+    {
+        var tasks = new List<ReconTask>();
+        var a = new Allocation { Alliance = 0 };
+        foreach (var m in missions)
+        {
+            var task = new ReconTask { Kind = m.kind, SectorId = m.sector, FromX = m.x, FromZ = 0f, HoldX = m.x, HoldZ = 0f, Priority = 1f, Reason = "test" };
+            tasks.Add(task);
+            a.Assignments.Add(Recon(m.id, task));
+        }
         ledger.Sync(s, tasks, a);
     }
 

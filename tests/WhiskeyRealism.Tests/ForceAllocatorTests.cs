@@ -1753,7 +1753,7 @@ internal static class ForceAllocatorTests
 
     // The allocation step of ReviewPlan (plan G4 step 5): after the plan, before the publish that carries
     // it, inside the allocate scope, from the plan's own snapshot and sectors, with the live reliability and
-    // the run of unreliable days; the recon inputs are G1b's runtime step (one seam).
+    // the run of unreliable days; the recon tasks and ledger are G1b's runtime step (ReconStepPinned).
     private static void AllocationStepPinned()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
@@ -1767,12 +1767,12 @@ internal static class ForceAllocatorTests
         AssertTrue(bookkeeping >= 0 && plan > bookkeeping && scope > plan && allocate > scope && publish > allocate && emit > publish,
             "bookkeeping return, plan, allocate scope, allocate, publish of that allocation, row");
         AssertEqual(1, review.Split(new[] { "ForceAllocator.Allocate(" }, StringSplitOptions.None).Length - 1, "one allocation per review");
-        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), NoReconTasks, null);", "the plan, its snapshot and sectors, the home theaters; reliability and the unreliable days are telemetry only");
+        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
         AssertContains(review, "float reliability = PlayerComplianceRuntime.Reliability;", "stage F's live reliability (1 outside a career)");
         AssertContains(review, "NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);", "one count per review day, only with a map-group player");
         AssertFalse(review.Contains("new Allocation"), "no empty allocation stands in for the real one");
         int seams = src.Split(new[] { "// G1B SEAM" }, StringSplitOptions.None).Length - 1;
-        AssertEqual(1, seams, "the recon inputs are G1b's runtime step: one seam, deleted with it");
+        AssertEqual(0, seams, "G1b's runtime step replaced the seam: the recon tasks and the mission ledger are real");
         string reset = BodyOf(src, "private static void ResetPlanState(");
         AssertContains(reset, "LastAllocationRow[a] = null;", "the row memory is per campaign");
         AssertContains(reset, "NonCompliance[a].Reset();", "the unreliable-day run is per campaign");

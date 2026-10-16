@@ -10,8 +10,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // Execute jobs of StrategicCoordinator.RunReviewJob (time-sliced since the perf merge), each inside
     // `if (ready)` with the pause the day captured at its start (BeginReviewDay, spec C5):
     //   ReviewPlan    the Plan job, after the fiscal and policy jobs, before the front job: snapshot ->
-    //                 G1 detection and beliefs -> (G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
-    //                 recon mission sync) -> CampaignPlanStore.Publish.
+    //                 G1 detection and beliefs -> G1b recon mission aging -> (G2 profiles, G3 plan, G1b recon
+    //                 tasks, G4 allocation, G1b recon mission sync) -> CampaignPlanStore.Publish.
     //   ReviewExecute the Execute job, after the defense job: G2 appointments (CommanderAppointmentRuntime, on
     //                 this review's snapshot and plan), then the G5b, G5a, G5c, G5d executors.
     //                 Executors write vanilla state only from here.
@@ -40,9 +40,15 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly string[] LastAllocationRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
-        // G1B SEAM: the recon tasks and the mission ledger come with G1b's runtime step (PlanTasks before the
-        // allocation, ReconMissionLedger.Sync after it, plan G1b "Split"); until then no task is placed.
-        private static readonly List<ReconTask> NoReconTasks = new List<ReconTask>();
+        // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
+        // (rows on change) and the directive ledger's Screen test (FormationDirectiveRuntime). Per campaign.
+        // Everything that reads the ledger runs inside a review job (the Plan, Formation and Execute jobs), so
+        // it does not join the atomic publish; a patch that reads it must (plan § G1b runtime as built).
+        private static readonly ReconMissionLedger[] Recon = { new ReconMissionLedger(), new ReconMissionLedger() };
+        private static readonly List<ReconTask>[] ReconTasks = { new List<ReconTask>(), new List<ReconTask>() };
+        private static readonly ReconCounts[] LastReconCounts = new ReconCounts[2];
+        private static readonly bool[] ReconRowEmitted = new bool[2];
+        private static readonly Func<string, bool>[] ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };
 
         static CampaignPlannerRuntime()
         {
@@ -57,6 +63,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastPlanRow[a] = null;
                 LastAllocationRow[a] = null;
                 NonCompliance[a].Reset();
+                Recon[a] = new ReconMissionLedger();
+                ReconTasks[a].Clear();
+                LastReconCounts[a] = default(ReconCounts);
+                ReconRowEmitted[a] = false;
             }
             Battles.Clear();
             PendingBattles.Clear();
@@ -88,6 +98,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (mode == PlannerReviewMode.StandDown) return;
                     CommanderAppointmentRuntime.Age(alliance, snapshot.DaySerial);
                     TerrainLineRuntime.PrepareDrain(snapshot);
+                    AgeRecon(snapshot);
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);
@@ -103,14 +114,18 @@ namespace WhiskeyRealism.Strategic.Planner
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
                             TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace);
                     }
+                    // G1b: the recon tasks for this plan (probe verdicts on the battles it judged, then the tasks);
+                    // G4's allocation below picks their formations and the sync binds the missions.
+                    PlanRecon(snapshot, sectors, plan, year, month, day);
                     // G4: the force allocation over the plan, published with it (the working copy that joins PrepareDay).
                     Allocation allocation;
                     float reliability = PlayerComplianceRuntime.Reliability;
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), NoReconTasks, null);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);
                     }
+                    SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
@@ -146,6 +161,66 @@ namespace WhiskeyRealism.Strategic.Planner
                     OnceLog.Warning("campaign-planner:execute-failed", "[CampaignPlanner] executors failed: " + ex.Message);
                 }
             }
+        }
+
+        // G1b recon mission aging (plan § G1b, ReconMissionLedger.OnReview): the missions' transitions from
+        // today's snapshot, before the plan. Bookkeeping, so it also runs on a paused day and while the flag
+        // is off (missions then drain: the sync below clears what no task holds). The recall point reads the
+        // last allocation, which inside the Plan job is the previous review's (null on the first day).
+        private static void AgeRecon(CampaignSnapshot snapshot)
+        {
+            using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                CampaignPlanStore.TryGetAllocation(snapshot.Alliance, out var previous);
+                Recon[snapshot.Alliance].OnReview(snapshot, previous);
+            }
+        }
+
+        // G1b recon tasks for this review's plan (before the allocation that picks their formations).
+        // Flag off: no tasks, and SyncRecon then clears whatever missions stand.
+        private static void PlanRecon(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlan plan, int year, int month, int day)
+        {
+            int alliance = snapshot.Alliance;
+            var tasks = ReconTasks[alliance];
+            using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                if (!FlagOn(Plugin.EnableCampaignReconnaissance)) { tasks.Clear(); return; }
+                ReconStep.Plan(snapshot, sectors, plan, PendingBattles, BattleHistoryQuery.LegacySerial(year, month, day), Recon[alliance], tasks);
+            }
+        }
+
+        // G1b: binds the allocation's Recon assignments to missions (writing each mission id back into its
+        // assignment) before the allocation is published, then the [Recon] row.
+        private static void SyncRecon(CampaignSnapshot snapshot, Allocation allocation)
+        {
+            using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
+                if (FlagOn(Plugin.EnableCampaignReconnaissance)) EmitRecon(snapshot);
+            }
+        }
+
+        // [Recon] on change of its counts (one row per alliance per change; no string otherwise).
+        private static void EmitRecon(CampaignSnapshot snapshot)
+        {
+            int a = snapshot.Alliance;
+            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a]);
+            if (ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])) return;
+            ReconRowEmitted[a] = true;
+            LastReconCounts[a] = counts;
+            TelemetryRouter.LegacyInfo(counts.Row(a), TelemetryLayer.Campaign);
+        }
+
+        // The directive ledger's Screen test (FormationDirectiveLedger.Build's onReconMission), one delegate per
+        // alliance built once. Read from the Formation job, after today's Plan job rebuilt the snapshot.
+        internal static Func<string, bool> ReconFilterFor(int alliance)
+        {
+            return alliance >= 0 && alliance < ReconFilters.Length ? ReconFilters[alliance] : null;
+        }
+
+        private static bool IsReconUnit(int alliance, string unitKey)
+        {
+            return FlagOn(Plugin.EnableCampaignReconnaissance) && ReconStep.IsReconKey(Snapshots[alliance], Recon[alliance], unitKey);
         }
 
         // A finished battle (StrategicCoordinator.RecordBattleOutcome, after BattleHistory.Add): both
