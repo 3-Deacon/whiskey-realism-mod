@@ -1495,3 +1495,17 @@ PROVE-MODE: harness (red first; mutation plants: rank table reversed → `RearmO
 | Read census of every contract member and flag | G7 |
 | Docs in-slice (AGENTS.md locked choices, doctrine docs, W&L docs, catalog) | G7 |
 | Stage H needs (theater axes, coastal objective) | `TheaterPlan` via `CampaignPlanStore` (G0/G3); stage H adds its own axis fields with their reader |
+
+## Smoke fix (2026-10-16) as built
+
+Branch `fix/planner-scout-first` (from main `ed7f226`); the spec's "Smoke amendments 2026-10-16" carries the root causes and decisions D1-D8. Where the build differs from the stage G text above:
+
+1. **Readiness gate (D4, D5).** `TheaterPlanner.MinReadinessStep = 2`: `MassEligible` and the capital reserve skip a formation below it (vanilla `SetWaypoint` refuses its march onto enemy soil without a message, 91336-91355). The scout pool counts only ready formations.
+2. **Scout first (D1).** `Candidate` gained `Scouted`, `Presumed`, `Need`; `Evaluate` judges odds on `max(believed, presumed)`; `TheaterPlan` gained `MainScouted`, `MainStaged`, `StartLineX/Z`, `MainNeedStrength`, `MainCapacityStrength`. An unscouted main effort is staged at the forward-most mass member's position; the mover gathers there without the tempo roll and the roll runs when the target is scouted.
+3. **Hold floor (D2).** `SectorFacts` gained `Facing` and `Presumed`; a facing sector holds `max(HoldRatio' x believed, MinGarrisonStrength, presumed)` through `HoldNeedAt`.
+4. **Push what it needs (D3).** `MassFor` is the capacity; `SelectMass` picks armies nearest-first until `NeedFor(enemy, required, attackBias)` is met. `ForceAllocator.AssignRemainder` makes everything else `Hold`; `PlanOf` and the map-group player's Support order path (`IssuePlayerOrder`, `OrderPlayerSupport`, `Ordered`) are deleted.
+5. **Departments (D6).** `PlannerState` owns the home department by unit key (sidecar `PlannerStateDto.departments`, plus `reinforcementKey` / `reinforcementDecision`); `HomeTheaterPrior.cs` is deleted and the allocator's `HoldKey` reads the department with a 25 % discount.
+6. **Real scouts (D7).** `ReconPlanner.CanMove(detachment)` drops the 5000-man minimum for an advance guard or probe; `ReconMissionLedger.TaskFor` pairs by reason as well; the probe stands down once the objective is scouted; the `[Recon]` row adds `pool=`.
+7. **Secession (D8).** `SecessionRules` (new), `CampaignSnapshot.Secessions` read live by `CampaignSnapshotRuntime.ReadSecessions`, `FormationRecord.StateId` / `ObjectiveRecord.StateId`, `FormationRole.Garrison = 8`, `TheaterPlan.Garrisons` (`GarrisonPost`), `TheaterPlanner.Garrisons` and `SecessionValue`, `ForceAllocator.AssignGarrisons`, and `Garrison` in the mover's priority list and the perk role map.
+
+Telemetry added: `[CampaignPlan] scouted= staged= depts= xdept=` and per-candidate `scouted|unscouted est= pres=` in the trace; `[Allocation] need= cap= staged= garrison=`; `[Recon] pool=`. Tests: `ScoutFirstTests` (about 40) and `SecessionGarrisonTests` (14), 71 mutation plants killed with a byte-copy restore (build record `scratchpad/loop/build-planner-scout-first.md`).

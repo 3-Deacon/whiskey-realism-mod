@@ -359,7 +359,9 @@ internal static class ScoutFirstTests
         // Road speed in the fixture is 82 units a day: x -1100 is 2000 from the objective, 24 march-days. The old 30-day horizon pulled it
         // into any push. (The far corps is a West-department formation: it is the natural mass of the West objective, 17 days off.)
         var far = Corps(2, -1100f, 30000f);
-        var s = Fronts(Corps(1, 800f, 8000f), far);
+        var guard = Corps(3, 300f, 7000f);
+        guard.Flags |= FormationFlags.InBattle;       // a busy West guard holds the West (counted, never massed): the far corps could leave it
+        var s = Fronts(Corps(1, 800f, 8000f), far, guard);
         var east = CandidateOf(s, 31);
         AssertNear(8000f, east.Mass, 0.5f, "the East push can concentrate its own 8000, not the 30000 24 march-days away");
         var plan = Plan(s, new PlannerState());

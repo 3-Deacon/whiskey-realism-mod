@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Planner;
 
+using static TestFixtures;
 using static TestHarness;
 
 // Smoke amendments 2026-10-16, D8: vanilla's secession rules for Kentucky (state 14, objective 15) and Missouri (state 22, objective 16).
@@ -24,6 +25,7 @@ internal static class SecessionGarrisonTests
             ("UnionPostsTheNearestReadyFormationWhenNoneStandsInTheState", UnionPostsTheNearestReadyFormationWhenNoneStandsInTheState),
             ("TheGarrisonIsSizedByTheHoldNeedAtTheTown", TheGarrisonIsSizedByTheHoldNeedAtTheTown),
             ("AGarrisonIsNeverPartOfTheMass", AGarrisonIsNeverPartOfTheMass),
+            ("TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget", TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget),
             ("NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped", NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped),
             ("TheGarrisonIsReadEachReviewNotCached", TheGarrisonIsReadEachReviewNotCached),
             ("OnlyTheStatesOwnerGarrisonsIt", OnlyTheStatesOwnerGarrisonsIt),
@@ -32,6 +34,7 @@ internal static class SecessionGarrisonTests
             ("CsaSecessionBonusIsAWeightNotAMust", CsaSecessionBonusIsAWeightNotAMust),
             ("AllocationRowNamesTheSecessionGarrison", AllocationRowNamesTheSecessionGarrison),
             ("TheGarrisonMarchesThroughTheMoverAsAGarrisonRole", TheGarrisonMarchesThroughTheMoverAsAGarrisonRole),
+            ("TheSnapshotReadsTheSecessionStatesFromVanillaEachReview", TheSnapshotReadsTheSecessionStatesFromVanillaEachReview),
         });
     }
 
@@ -178,23 +181,49 @@ internal static class SecessionGarrisonTests
         AssertEqual(1, plan.Garrisons[0].InstanceIds[0], "nearest first");
     }
 
+    // The enemy target stands at x 330, so the formations at Louisville (x 300) are the nearest to the push: without the exclusion the
+    // garrison would be the first formation massed.
     private static void AGarrisonIsNeverPartOfTheMass()
     {
         var s = Side(0, 0, 0.6f);
-        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 800f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
-        s.Beliefs.Add(Seen(800f, 3000f));
-        for (int i = 0; i < 6; i++) s.Own.Add(Corps(i + 1, 280f + 40f * i, 9000f, i == 0 ? KentuckyState : -1));
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 330f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+        s.Beliefs.Add(Seen(330f, 3000f));
+        s.Own.Add(Corps(1, 305f, 9000f, KentuckyState));
+        for (int i = 1; i < 6; i++) s.Own.Add(Corps(i + 1, 40f * i, 9000f));
         var plan = Plan(s);
         AssertEqual(31, plan.MainObjectiveId, "a main effort exists");
-        AssertFalse(plan.MassInstanceIds.Contains(1), "the formation holding Kentucky is not massed");
+        AssertTrue(plan.MassInstanceIds.Count > 0, "with a mass");
+        AssertFalse(plan.MassInstanceIds.Contains(1), "the formation holding Kentucky is not massed, though it is the nearest to the target");
 
         var outside = Side(0, 0, 0.6f);
-        outside.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 800f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
-        outside.Beliefs.Add(Seen(800f, 3000f));
-        for (int i = 0; i < 6; i++) outside.Own.Add(Corps(i + 1, 245f + 60f * i, 9000f));
+        outside.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 330f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+        outside.Beliefs.Add(Seen(330f, 3000f));
+        outside.Own.Add(Corps(1, 250f, 9000f));
+        for (int i = 1; i < 6; i++) outside.Own.Add(Corps(i + 1, 40f * i, 9000f));
         var outsidePlan = Plan(outside);
         AssertEqual(1, outsidePlan.Garrisons[0].InstanceIds.Count, "one is posted");
-        AssertFalse(outsidePlan.MassInstanceIds.Contains(outsidePlan.Garrisons[0].InstanceIds[0]), "and it is not in the mass either");
+        int posted = outsidePlan.Garrisons[0].InstanceIds[0];
+        AssertEqual(31, outsidePlan.MainObjectiveId, "the push still goes");
+        AssertFalse(outsidePlan.MassInstanceIds.Contains(posted), "and the posted formation (" + posted + ") is not in the mass either");
+    }
+
+    // The sector's own withhold keeps the formations nearest its threat until its target is met; the garrison is withheld on its own account,
+    // so a hold nearer the sector's centre meeting the 5000 target first does not free it to be taken for an offensive or a defence.
+    private static void TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget()
+    {
+        var s = Side(0, 0, 0.6f);
+        s.Own.Add(Corps(1, 250f, 9000f, KentuckyState));    // the garrison: in Kentucky
+        s.Own.Add(Corps(2, 300f, 9000f));                    // another hold in the same sector, outside the state
+        s.Own.Add(Corps(3, 350f, 9000f));
+        var plan = Plan(s);
+        AssertEqual(1, plan.Garrisons[0].InstanceIds[0], "the one inside Kentucky is the garrison");
+        var alloc = Allocate(s, plan);
+        int withheld = 0;
+        foreach (var a in alloc.Assignments)
+            if (a.Role == FormationRole.Hold && a.Withheld) withheld++;
+        alloc.TryGet(1, out var garrison);
+        AssertTrue(garrison.Withheld, "the garrison is withheld");
+        AssertTrue(withheld >= 1, "withheld holds: " + withheld);
     }
 
     private static void NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped()
@@ -329,5 +358,17 @@ internal static class SecessionGarrisonTests
     private static void TheGarrisonMarchesThroughTheMoverAsAGarrisonRole()
     {
         AssertTrue(CampaignMover.MovesRole(FormationRole.Garrison), "the mover sends a Garrison formation (one owner per formation)");
+    }
+
+    // The runtime is not compiled into the harness: pin the live reads (vanilla's owner and CSA support, never a cached or constant value).
+    private static void TheSnapshotReadsTheSecessionStatesFromVanillaEachReview()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
+        AssertTrue(HasLine(src, "float support = nation.support != null && nation.support.Length > SecessionRules.CsaAlliance ? nation.support[SecessionRules.CsaAlliance] : 0f;"),
+            "the CSA's support in the state (nation.support[1], 178966-178973)");
+        AssertTrue(HasLine(src, "Live = SecessionRules.IsLive(nation.alliance, support)"), "live is vanilla's IsDeactivated rule over today's owner and support");
+        AssertTrue(HasLine(src, "ReadSecessions(s);"), "read on every snapshot build, after the objectives it takes the town from");
+        string body = BodyOf(src, "private static void ReadSecessions(");
+        AssertFalse(body.Contains("static readonly") || body.Contains("Cache"), "nothing is kept between reviews");
     }
 }
