@@ -28,6 +28,12 @@ internal static class PlayerPositionTests
             ("player position: no cover radius means no position cover", NoRadiusNoCover),
             ("player position: capital need counts the player's group, yet it is never pre-pledged", CapitalNeedCountsPlayerNeverPledged),
             ("player position: runtime wiring uses the right meaning per caller", RuntimeWiring),
+            ("player position: corps standing at the second threat covers that one, not the first in order", CorpsCoversNearestThreatNotFirstInOrder),
+            ("player position: corps between a threat and a guard asset covers only the nearer", CorpsCoversNearerOfThreatAndAsset),
+            ("player position: equidistant targets go to the lowest index", EquidistantTargetsGoToLowestIndex),
+            ("player position: a recovered threat does not take the corps", RecoveredThreatDoesNotTakeCorps),
+            ("player position: guard asset covered by position needs no guard budget", GuardCoveredByPositionNeedsNoBudget),
+            ("player position: critical-front rerun keeps the held strength", CriticalFrontRerunKeepsHeld),
         });
     }
 
@@ -185,8 +191,12 @@ internal static class PlayerPositionTests
             "candidates the AI may not commit are marked player-controlled");
         AssertTrue(runtime.Contains("bool holdsPosition = regiment != null && playerControlled && WlChainRules.CountsTowardCoverage(chainClass);"),
             "coverage-only candidates hold their position");
-        AssertTrue(runtime.Contains("regiment.GetLastWaypointPos()"), "the position held is the last waypoint, vanilla's basis");
-        AssertTrue(runtime.Contains("HoldCoverRadius = defOpsRadius"), "cover radius is the defensive-operation radius");
+        AssertTrue(runtime.Contains("Vector3 holdPos = holdsPosition ? regiment.GetLastWaypointPos() : unitPos;"),
+            "the position held is the last waypoint, vanilla's basis");
+        AssertTrue(runtime.Contains("input.HoldCoverRadius = defOpsRadius;"), "cover radius is the defensive-operation radius");
+        AssertTrue(runtime.Contains("if (regiment.inbattle && !holdsPosition) continue;"),
+            "an in-battle holder still counts, an in-battle AI group is skipped");
+        AssertTrue(runtime.Contains("if (ReadBool(unit, \"inbattle\", false)) continue;"), "non-regiment units in battle are skipped");
 
         string ledger = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseIntentLedger.cs");
         AssertFalse(ledger.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
@@ -194,9 +204,114 @@ internal static class PlayerPositionTests
         AssertFalse(rules.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
     }
 
+
+    private static void CorpsCoversNearestThreatNotFirstInOrder()
+    {
+        // Both threats lie inside the cover radius of the corps; it stands at the second one.
+        // The first in processing order must not take the credit: that would leave the corps's
+        // own spot uncovered and send AI units to it.
+        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        input.Threats.Add(Threat(30, ThreatX));
+        input.Threats.Add(Threat(31, ThreatX + 200f));
+        input.Candidates.Add(Player(ThreatX + 200f, ThreatZ));
+        input.Candidates.Add(Ai(AiId, 8000f));
+        var output = DefenseIntentLedger.Build(input);
+        AssertEqual(2, output.Responses.Count, "two responses");
+        AssertNear(0f, output.Responses[0].HeldStrength, 0.01f, "the first threat is 200 away: not the corps's");
+        AssertTrue(output.Responses[0].SelectedPackage.Exists(c => c.UnitInstanceId == AiId), "the first threat gets the AI package");
+        AssertNear(20000f, output.Responses[1].HeldStrength, 0.01f, "the corps covers the threat it stands at");
+        AssertEqual(0, output.Responses[1].SelectedPackage.Count, "the covered threat gets no package");
+    }
+
+    private static void CorpsCoversNearerOfThreatAndAsset()
+    {
+        // Threat 30 at ThreatX; unguarded asset 200 east of it. One corps, in range of both.
+        var atAsset = ThreatAndGuardInput(Player(ThreatX + 200f, ThreatZ), Ai(AiId, 8000f), Ai(3, 2500f));
+        var a = DefenseIntentLedger.Build(atAsset);
+        AssertEqual(2, a.Responses.Count, "a threat response and a guard response");
+        AssertNear(0f, a.Responses[0].HeldStrength, 0.01f, "standing at the asset: the threat is farther");
+        AssertNear(20000f, a.Responses[1].HeldStrength, 0.01f, "the asset it stands at is covered");
+        AssertTrue(a.Responses[1].Adequate, "guard slot covered");
+
+        var atThreat = ThreatAndGuardInput(Player(ThreatX, ThreatZ), Ai(3, 2500f));
+        var t = DefenseIntentLedger.Build(atThreat);
+        AssertEqual(2, t.Responses.Count, "a threat response and a guard response");
+        AssertNear(20000f, t.Responses[0].HeldStrength, 0.01f, "standing at the threat: it is covered");
+        AssertNear(0f, t.Responses[1].HeldStrength, 0.01f, "the asset 200 away gets nothing: one corps, one place");
+        AssertTrue(t.Responses[1].SelectedPackage.Count > 0, "the asset gets an AI guard instead");
+        AssertFalse(t.Responses[1].SelectedPackage.Exists(c => c.UnitInstanceId == PlayerId), "never the player");
+    }
+
+    private static void EquidistantTargetsGoToLowestIndex()
+    {
+        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        input.Threats.Add(Threat(30, ThreatX - 100f));
+        input.Threats.Add(Threat(31, ThreatX + 100f));
+        input.Candidates.Add(Player(ThreatX, ThreatZ));
+        input.Candidates.Add(Ai(AiId, 8000f));
+        var output = DefenseIntentLedger.Build(input);
+        AssertNear(20000f, output.Responses[0].HeldStrength, 0.01f, "the tie goes to the first threat in order");
+        AssertNear(0f, output.Responses[1].HeldStrength, 0.01f, "the second gets nothing");
+    }
+
+    private static void RecoveredThreatDoesNotTakeCorps()
+    {
+        // A recovered threat emits an empty response and spends no cover; the corps, standing
+        // nearest to it, must still cover the live threat in range.
+        var recovered = Threat(30, ThreatX);
+        recovered.VanillaCollapsed = true;
+        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        input.Threats.Add(recovered);
+        input.Threats.Add(Threat(31, ThreatX + 200f));
+        input.Candidates.Add(Player(ThreatX, ThreatZ));
+        input.Candidates.Add(Ai(AiId, 8000f));
+        var output = DefenseIntentLedger.Build(input);
+        DefenseResponse live = output.Responses.Find(r => r.Threat.Posture != DefensePosture.Recovered);
+        AssertTrue(live != null, "a live response");
+        AssertNear(20000f, live.HeldStrength, 0.01f, "the corps covers the live threat in range");
+    }
+
+    private static void GuardCoveredByPositionNeedsNoBudget()
+    {
+        // A guard budget of zero turns away every AI guard, yet a corps standing at the asset
+        // still covers it: cover spends no budget.
+        var held = GuardInput(Player(ThreatX, ThreatZ), Ai(AiId, 2500f));
+        held.GuardBudgetFraction = 0f;
+        var covered = Only(DefenseIntentLedger.Build(held));
+        AssertTrue(covered.Adequate, "covered by position with the budget exhausted");
+        AssertNear(20000f, covered.HeldStrength, 0.01f, "held recorded");
+
+        var away = GuardInput(Player(ThreatX + 3000f, ThreatZ), Ai(AiId, 2500f));
+        away.GuardBudgetFraction = 0f;
+        var uncovered = Only(DefenseIntentLedger.Build(away));
+        AssertFalse(uncovered.Adequate, "corps away and no budget: the slot stays open");
+        AssertTrue(uncovered.Understrength, "understrength");
+    }
+
+    private static void CriticalFrontRerunKeepsHeld()
+    {
+        // Decisive landing, desired 18000 (adequate at 13500). The corps holds 6000; the normal
+        // pool adds 3000 (short), so the critical-front unit is admitted and the aggregator reruns.
+        // The rerun must still count the held 6000: 6000 + 3000 + the critical unit is adequate;
+        // without it the response would read understrength.
+        var threat = Threat(30, ThreatX, strength: 8000f);
+        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 200000f, HoldCoverRadius = Radius };
+        input.Threats.Add(threat);
+        input.Candidates.Add(Player(ThreatX, ThreatZ, strength: 6000f));
+        input.Candidates.Add(Ai(AiId, 3000f));
+        var critical = Ai(3, 8000f);
+        critical.CriticalFront = true;
+        input.Candidates.Add(critical);
+        var response = Only(DefenseIntentLedger.Build(input));
+        AssertEqual(ThreatScale.DecisiveLanding, response.Threat.Scale, "decisive");
+        AssertNear(6000f, response.HeldStrength, 0.01f, "held");
+        AssertTrue(response.SelectedPackage.Exists(c => c.UnitInstanceId == 3), "the critical-front unit was admitted");
+        AssertTrue(response.Adequate, "held strength still counts after the critical-front rerun");
+    }
+
     // ------------------------------------------------------------------ fixtures
 
-    private static DefenseThreatSource Threat(int forceId)
+    private static DefenseThreatSource Threat(int forceId, float x = ThreatX, float strength = 6000f)
     {
         return new DefenseThreatSource
         {
@@ -207,9 +322,9 @@ internal static class PlayerPositionTests
             LandedSignal = true,
             AssetName = "harbor" + forceId,
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
-            X = ThreatX,
+            X = x,
             Z = ThreatZ,
-            EnemyStrength = 6000f
+            EnemyStrength = strength
         };
     }
 
@@ -218,6 +333,18 @@ internal static class PlayerPositionTests
         var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30));
         input.Candidates.AddRange(candidates);
+        return input;
+    }
+
+    // Threat 30 at the origin spot plus an unguarded asset 200 east of it, so one corps can stand in range of both.
+    private static DefenseIntentInput ThreatAndGuardInput(params DefenseCandidate[] candidates)
+    {
+        var input = ThreatInput(candidates);
+        input.GuardCandidateAssets.Add(new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "east-harbor", Owner = 1,
+            StrategicRole = AssetStrategicRole.BlockadeRunnerPort, X = ThreatX + 200f, Z = ThreatZ
+        });
         return input;
     }
 

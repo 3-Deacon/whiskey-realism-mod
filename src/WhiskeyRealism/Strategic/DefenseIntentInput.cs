@@ -40,8 +40,9 @@ namespace WhiskeyRealism.Strategic
         public float GuardBudgetFraction = 0.10f;
         public float CapitalDefenseBudgetFraction = 0.18f;
         public float TotalAllianceEffectiveStrength;
-        // A position-holding candidate covers a threat or asset within this distance of its
-        // hold position (the defensive-operation radius); 0 disables position cover.
+        // A position-holding candidate covers the one threat or asset nearest its hold position,
+        // within this distance (vanilla's maxdistancedefensiveoperations: capital cover
+        // 11733-11740, "already there" 11799, reach to a threat 13615); 0 disables position cover.
         public float HoldCoverRadius;
         public FrontSectorLedger FrontLedger;
         public FormationDirectiveLedger FormationDirectives;

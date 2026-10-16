@@ -42,9 +42,10 @@ namespace WhiskeyRealism.Strategic
             // that the guard-budget cap and global pool depletion work correctly.
             var assignedUnitIds = new HashSet<int>();
 
-            // Candidates credited as holding a position (the W&L map-group player's group):
-            // one group covers one place per build, never an extra package member.
-            var holdingUnitIds = new HashSet<int>();
+            // Each group holding a position (the W&L map-group player's group) is credited to
+            // the one threat or asset it stands nearest to, before either pass runs, so the
+            // order the passes visit places in never decides where it counts.
+            HeldCover heldCover = AssignHeldCover(input);
 
             // Track which asset names are already covered by a threat-source response so
             // we don't double-emit a guard response for the same asset.
@@ -56,8 +57,9 @@ namespace WhiskeyRealism.Strategic
             float guardBudget = Math.Max(0f, input.TotalAllianceEffectiveStrength * input.GuardBudgetFraction);
 
             // 2. Threat-source responses.
-            foreach (var src in input.Threats)
+            for (int threatIndex = 0; threatIndex < input.Threats.Count; threatIndex++)
             {
+                var src = input.Threats[threatIndex];
                 if (src == null) continue;
 
                 string sig = BuildSignature(src);
@@ -108,7 +110,7 @@ namespace WhiskeyRealism.Strategic
                 // Pre-suppression + aggregator pass.
                 var response = BuildThreatResponse(
                     input, src, sig, posture, scale, desired,
-                    caution, aggression, assignedUnitIds, holdingUnitIds);
+                    caution, aggression, assignedUnitIds, heldCover.ByThreat[threatIndex]);
 
                 // Mark units selected in this response as consumed.
                 foreach (var c in response.SelectedPackage)
@@ -118,8 +120,9 @@ namespace WhiskeyRealism.Strategic
             }
 
             // 3. Guard pass for assets not covered by a threat source.
-            foreach (var asset in input.GuardCandidateAssets)
+            for (int assetIndex = 0; assetIndex < input.GuardCandidateAssets.Count; assetIndex++)
             {
+                var asset = input.GuardCandidateAssets[assetIndex];
                 if (asset == null) continue;
                 if (!string.IsNullOrEmpty(asset.Name) && coveredAssets.Contains(asset.Name)) continue;
 
@@ -130,7 +133,7 @@ namespace WhiskeyRealism.Strategic
                     postureCap: CandidateTier.SameTheater);
 
                 // A group already standing at the asset covers its slot and spends no budget.
-                float held = ClaimHeldStrength(input, asset.X, asset.Z, holdingUnitIds);
+                float held = heldCover.ByAsset[assetIndex];
                 bool coveredByPosition = held >= CoastalGuardDesired * DefensePackageAggregator.AdequateRatio;
 
                 if (!coveredByPosition && (guardBudget <= 0f || guardCumulativeEffective >= guardBudget))
@@ -308,7 +311,7 @@ namespace WhiskeyRealism.Strategic
             float caution,
             float aggression,
             HashSet<int> assignedUnitIds,
-            HashSet<int> holdingUnitIds)
+            float held)
         {
             // Partition candidates into normal pool and critical-front candidates.
             var normalPool    = new List<DefenseCandidate>();
@@ -362,9 +365,8 @@ namespace WhiskeyRealism.Strategic
                 normalPool.Add(c);
             }
 
-            // Strength already standing at the threat counts toward it; the aggregator
-            // sends only what is still short.
-            float held = ClaimHeldStrength(input, src.X, src.Z, holdingUnitIds);
+            // `held` is the strength already standing at the threat; it counts toward the
+            // threat and the aggregator sends only what is still short.
 
             // Run aggregator without critical-front candidates first.
             float packageCap = StrategicMovementBudget.CapitalDefenseCap(input, src);
@@ -424,7 +426,7 @@ namespace WhiskeyRealism.Strategic
                     aggression,
                     packageCap,
                     "capital-defense-cap",
-                heldStrength: held);
+                    heldStrength: held);
                 // Re-check escalation reason.
                 foreach (var c in pkgResult.SelectedPackage)
                 {
@@ -480,27 +482,76 @@ namespace WhiskeyRealism.Strategic
             return response;
         }
 
-        // Strength x morale of the unclaimed groups holding a position within the cover radius of
-        // (x, z), as vanilla subtracts own groups from its capital need (AssignUnitToDefendCapital
-        // 11733-11740). Claims each group so it covers one threat or asset per build. A zero
-        // radius means no position cover.
-        private static float ClaimHeldStrength(DefenseIntentInput input, float x, float z, HashSet<int> holdingUnitIds)
+        // Strength x morale of the groups holding a position, per target they cover.
+        private sealed class HeldCover
         {
-            if (input.HoldCoverRadius <= 0f) return 0f;
+            public readonly float[] ByThreat;
+            public readonly float[] ByAsset;
 
-            float held = 0f;
+            public HeldCover(int threatCount, int assetCount)
+            {
+                ByThreat = new float[threatCount];
+                ByAsset = new float[assetCount];
+            }
+        }
+
+        // Credits every position-holding group, at strength x morale, to the one threat source
+        // or unguarded asset nearest to its hold position within HoldCoverRadius (ties go to
+        // the lowest index, threat sources before assets). Vanilla subtracts an own group from
+        // the need of the area its last waypoint lies in (AssignUnitToDefendCapital 11733-11740),
+        // and measures "already there" and "within reach of the threat" against
+        // maxdistancedefensiveoperations (11799, 13615), so one group stands at one place.
+        // Targets that take no cover: a recovered threat (it sends nothing) and an asset
+        // already answered by a threat source (its guard pass is skipped). A zero radius means
+        // no position cover.
+        private static HeldCover AssignHeldCover(DefenseIntentInput input)
+        {
+            var cover = new HeldCover(input.Threats.Count, input.GuardCandidateAssets.Count);
+            if (input.HoldCoverRadius <= 0f) return cover;
+
+            var assetsWithThreat = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var src in input.Threats)
+                if (src != null && !string.IsNullOrEmpty(src.AssetName)) assetsWithThreat.Add(src.AssetName);
+
             foreach (var c in input.Candidates)
             {
-                if (c == null || !c.HoldsPosition || holdingUnitIds.Contains(c.UnitInstanceId)) continue;
+                if (c == null || !c.HoldsPosition) continue;
 
-                float dx = c.HoldX - x;
-                float dz = c.HoldZ - z;
-                if (Math.Sqrt(dx * dx + dz * dz) >= input.HoldCoverRadius) continue;
+                float nearest = input.HoldCoverRadius;
+                int threatIndex = -1;
+                int assetIndex = -1;
 
-                holdingUnitIds.Add(c.UnitInstanceId);
-                held += c.ActiveStrength * c.Morale;
+                for (int i = 0; i < input.Threats.Count; i++)
+                {
+                    var src = input.Threats[i];
+                    if (src == null || DerivePosture(src) == DefensePosture.Recovered) continue;
+                    float d = Distance(c.HoldX, c.HoldZ, src.X, src.Z);
+                    if (d >= nearest) continue;
+                    nearest = d; threatIndex = i; assetIndex = -1;
+                }
+
+                for (int i = 0; i < input.GuardCandidateAssets.Count; i++)
+                {
+                    var asset = input.GuardCandidateAssets[i];
+                    if (asset == null) continue;
+                    if (!string.IsNullOrEmpty(asset.Name) && assetsWithThreat.Contains(asset.Name)) continue;
+                    float d = Distance(c.HoldX, c.HoldZ, asset.X, asset.Z);
+                    if (d >= nearest) continue;
+                    nearest = d; assetIndex = i; threatIndex = -1;
+                }
+
+                float held = c.ActiveStrength * c.Morale;
+                if (threatIndex >= 0) cover.ByThreat[threatIndex] += held;
+                else if (assetIndex >= 0) cover.ByAsset[assetIndex] += held;
             }
-            return held;
+            return cover;
+        }
+
+        private static float Distance(float x1, float z1, float x2, float z2)
+        {
+            float dx = x1 - x2;
+            float dz = z1 - z2;
+            return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
         private static DefenseResponse BuildEmptyRecoveredResponse(
