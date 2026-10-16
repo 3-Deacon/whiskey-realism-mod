@@ -25,7 +25,16 @@ internal static partial class ManeuverFeasibilityTests
     static partial void AddWorksTests(List<(string, Action)> into);
     static partial void AddObjectiveTests(List<(string, Action)> into);
 
-    static (string, Action)[] CoreTests() => new (string, Action)[]
+    // The core's tests, one group per concern, each group in its own partial file (the CommanderOpportunityTests precedent).
+    static (string, Action)[] CoreTests()
+    {
+        var all = new List<(string, Action)>();
+        all.AddRange(StanceTests());
+        all.AddRange(CopySiteTests());       // ManeuverFeasibilityTests.Copy.cs
+        return all.ToArray();
+    }
+
+    static (string, Action)[] StanceTests() => new (string, Action)[]
     {
         ("bc14 FEAS-STANCE-INITIAL a Defender's initial pick refreshes the pick inputs first and is not offensive", FeasStanceInitial),
     };

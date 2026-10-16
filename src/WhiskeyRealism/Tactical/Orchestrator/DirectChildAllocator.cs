@@ -313,6 +313,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 roles[i] = DirectChildRole.Reserve;
             }
 
+            GuardPoint[] guards = GuardScratch(snapshots.Count);
             var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots);
 
             var intents = new DirectChildIntent[snapshots.Count];
@@ -340,9 +341,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     supportPriority,
                     perChildEnemyIntent[i],
                     fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
-                    fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown);
+                    fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown,
+                    guards[i]);
             }
             return intents;
+        }
+
+        // BC14: the per-child guard points the releases fill (the axisOverride precedent), pooled: grow-only scratch that each
+        // allocation clears and the intents copy out of before the call returns. Single-threaded (the coordinator tick).
+        private static GuardPoint[] _guardScratch = new GuardPoint[0];
+
+        private static GuardPoint[] GuardScratch(int count)
+        {
+            if (_guardScratch.Length < count) _guardScratch = new GuardPoint[count];
+            else Array.Clear(_guardScratch, 0, count);
+            return _guardScratch;
         }
 
         /// <summary>
@@ -636,7 +649,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind);
+                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)
