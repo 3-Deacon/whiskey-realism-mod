@@ -44,6 +44,9 @@ internal static class StrategicDirectorTests
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("campaign pace too fast collapse on early national morale crash", CampaignPaceTooFastCollapseOnEarlyMoraleCrash),
             ("campaign pace late war pressure on chapter three", CampaignPaceLateWarPressureOnChapterThree),
+            ("campaign pace union in 1864 before chapter three is not late war", CampaignPaceUnion1864BeforeChapterThreeIsNotLateWar),
+            ("campaign pace csa collapse floor stays on the calendar after a lost election", CampaignPaceCsaFloorIsCalendarAtChapterTwo),
+            ("campaign pace too fast collapse is calendar not chapter", CampaignPaceTooFastCollapseIsCalendarNotChapter),
             ("campaign pace overheated on heavy 14-day battle volume", CampaignPaceOverheatedOnHeavy14DayBattles),
             ("campaign pace too quiet only outside chapter one winter", CampaignPaceTooQuietSuppressedInChapterOneWinter),
             ("campaign pace stalemated when chapter two front static", CampaignPaceStalematedWhenChapterTwoFrontStatic),
@@ -346,7 +349,7 @@ internal static class StrategicDirectorTests
 
     private static CampaignPaceInput BuildPaceInput(
         int allianceId, int year, int month, int chapter,
-        float ownNationalMorale, float enemyNationalMorale,
+        float ownNationalMorale,
         int battlesIn14Days, int majorBattlesIn14Days,
         int capitalStreak, int daysSinceFrontChange,
         bool winter)
@@ -357,7 +360,6 @@ internal static class StrategicDirectorTests
             Year = year, Month = month,
             PolicyChapter = chapter,
             OwnNationalMorale = ownNationalMorale,
-            EnemyNationalMorale = enemyNationalMorale,
             BreakMoraleTrigger = 30f, // arbitrary stable test value
             MinNationalMoraleSurrender = 18f,
             BattlesIn14Days = battlesIn14Days,
@@ -371,7 +373,7 @@ internal static class StrategicDirectorTests
     private static void CampaignPaceTooFastCollapseOnEarlyMoraleCrash()
     {
         var input = BuildPaceInput(allianceId: 1, year: 1862, month: 6, chapter: 2,
-            ownNationalMorale: 30f * 1.10f, enemyNationalMorale: 90f,
+            ownNationalMorale: 30f * 1.10f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         var output = CampaignPaceLedger.Build(input);
@@ -382,17 +384,70 @@ internal static class StrategicDirectorTests
     private static void CampaignPaceLateWarPressureOnChapterThree()
     {
         var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 3,
-            ownNationalMorale: 80f, enemyNationalMorale: 60f,
+            ownNationalMorale: 80f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 60, winter: false);
         var output = CampaignPaceLedger.Build(input);
         AssertEqual(CampaignPace.LateWarPressure, output.Pace);
     }
 
+    private static void CampaignPaceUnion1864BeforeChapterThreeIsNotLateWar()
+    {
+        // The Union runway clause escalated on the calendar (year >= 1864 with the CSA still
+        // fighting). The late-war stage is vanilla's chapter 3 (the election), so June 1864 in
+        // chapter 2 is an ordinary quiet-or-stable month.
+        var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 2,
+            ownNationalMorale: 80f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Stable, output.Pace);
+        AssertEqual("default", output.Reason);
+    }
+
+    // Integrator decision D13: these two CSA rules are historical timing and stay on the calendar,
+    // so they are pinned where the calendar and the chapter disagree.
+    private static void CampaignPaceCsaFloorIsCalendarAtChapterTwo()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.40f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
+        AssertTrue(output.IntentBlockedFromPreserve, "1864, chapter 2 (election pending or lost): the CSA still may not Preserve");
+        var earlier = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.40f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertFalse(CampaignPaceLedger.Build(earlier).IntentBlockedFromPreserve, "1863 is before the floor whatever the chapter");
+    }
+
+    private static void CampaignPaceTooFastCollapseIsCalendarNotChapter()
+    {
+        var critical1863 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863).Pace);
+        var critical1863Chapter3 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863Chapter3).Pace);
+        var critical1864 = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(critical1864);
+        AssertEqual(CollapseRisk.Critical, output.Risk);
+        AssertTrue(output.Pace != CampaignPace.TooFastCollapse, "from 1864 a critical CSA is not 'too fast', chapter 2 or not");
+    }
+
     private static void CampaignPaceOverheatedOnHeavy14DayBattles()
     {
         var input = BuildPaceInput(allianceId: 0, year: 1862, month: 8, chapter: 2,
-            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            ownNationalMorale: 80f,
             battlesIn14Days: 6, majorBattlesIn14Days: 4,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         var output = CampaignPaceLedger.Build(input);
@@ -402,7 +457,7 @@ internal static class StrategicDirectorTests
     private static void CampaignPaceTooQuietSuppressedInChapterOneWinter()
     {
         var input = BuildPaceInput(allianceId: 0, year: 1861, month: 12, chapter: 1,
-            ownNationalMorale: 95f, enemyNationalMorale: 90f,
+            ownNationalMorale: 95f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 30, winter: true);
         var output = CampaignPaceLedger.Build(input);
@@ -413,7 +468,7 @@ internal static class StrategicDirectorTests
     private static void CampaignPaceStalematedWhenChapterTwoFrontStatic()
     {
         var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
-            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            ownNationalMorale: 80f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 75, winter: false);
         var output = CampaignPaceLedger.Build(input);
@@ -423,7 +478,7 @@ internal static class StrategicDirectorTests
     private static void CampaignPaceStableDefault()
     {
         var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
-            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            ownNationalMorale: 80f,
             battlesIn14Days: 2, majorBattlesIn14Days: 1,
             capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
         var output = CampaignPaceLedger.Build(input);
@@ -433,7 +488,7 @@ internal static class StrategicDirectorTests
     private static void DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk()
     {
         var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 3,
-            ownNationalMorale: 30f * 1.40f, enemyNationalMorale: 80f,
+            ownNationalMorale: 30f * 1.40f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         var output = CampaignPaceLedger.Build(input);
@@ -450,7 +505,7 @@ internal static class StrategicDirectorTests
         view.OwnStrengthByTheater[Theater.West] = 4000f;
         view.EnemyStrengthByTheater[Theater.West] = 8000f; // West is the hot theater for us
         var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
-            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            ownNationalMorale: 80f,
             battlesIn14Days: 2, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
         input.TheaterPressure = view;

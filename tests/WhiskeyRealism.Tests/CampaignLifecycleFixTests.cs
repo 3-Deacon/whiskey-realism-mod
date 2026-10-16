@@ -1020,21 +1020,20 @@ internal static class CampaignLifecycleFixTests
 
     private static void R15EraDerivesFromDateBothDirections()
     {
-        TestHarness.AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(6, 1864, false, false), "1864");
-        TestHarness.AssertEqual(EraStage.Amateur1861, EraStageManager.ForDate(6, 1861, false, false), "back to 1861");
-        TestHarness.AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(3, 1863, true, false), "Vicksburg early keeps 1863");
-        TestHarness.AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(3, 1864, false, true), "Atlanta early");
+        TestHarness.AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(12, 1864, false, 3), "chapter 3");
+        TestHarness.AssertEqual(EraStage.Amateur1861, EraStageManager.ForDate(6, 1861, false, 1), "back to 1861");
+        TestHarness.AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(3, 1863, true, 2), "Vicksburg early keeps 1863");
         var era = new EraStageManager { Stage = EraStage.TotalWar1864 };
-        era.ResetToDate(6, 1861);
+        era.ResetToDate(6, 1861, 1);
         TestHarness.AssertEqual(EraStage.Amateur1861, era.Stage, "reset re-derives the era backwards");
     }
 
     private static void R15EraTransitionStaysMonotonic()
     {
         var era = new EraStageManager { Stage = EraStage.Decisive1863 };
-        era.CheckTransition(6, 1862, false, false);
+        era.CheckTransition(6, 1862, false, 2);
         TestHarness.AssertEqual(EraStage.Decisive1863, era.Stage, "CheckTransition never regresses");
-        era.CheckTransition(1, 1864, false, false);
+        era.CheckTransition(11, 1864, false, 3);
         TestHarness.AssertEqual(EraStage.TotalWar1864, era.Stage, "advances");
     }
 

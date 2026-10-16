@@ -20,7 +20,6 @@ namespace WhiskeyRealism.Strategic.Construction
             {
                 AllianceId = alliance,
                 EraStage = era,
-                CurrentChapter = SafePolicyChapter(),
                 CurrentYear = SafeYear(),
                 FiscalPosture = fiscal != null ? fiscal.Posture : FiscalPosture.BalancedWar,
                 FiscalDefendedGate = fiscal != null ? fiscal.DefendedGate : FiscalGate.None,
@@ -38,12 +37,6 @@ namespace WhiskeyRealism.Strategic.Construction
             AddRailroadCandidates(input);
             AddFortSiteObservationCandidates(input);
             return input;
-        }
-
-        private static int SafePolicyChapter()
-        {
-            try { return Policy.CurrentChapter; }
-            catch { return -1; }
         }
 
         private static int SafeYear()

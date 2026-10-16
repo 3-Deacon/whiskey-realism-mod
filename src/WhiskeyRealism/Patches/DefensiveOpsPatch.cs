@@ -30,9 +30,12 @@ namespace WhiskeyRealism.Patches
     // (11791); a player-owned unit can be pledged (its move loop then skips the
     // move, 11860, and issues order 8, 11864) and the map group carrying a player
     // below map-group level is pledged and moved like any AI unit. Whiskey's own
-    // pick follows WlChainRules: the carrying group may be pledged (vanilla moves it,
-    // #69 dispatches the march); the player's own command, his map group (an
-    // unreliable executor is never a committed defender) and a CIC side are not.
+    // pick follows WlChainRules.MayMove: the carrying group may be pledged (vanilla
+    // moves it, #69 dispatches the march); the player's own command, his map group
+    // (an unreliable executor is never pledged) and a CIC side are not. The need
+    // itself (CalculateRequiredDefense) counts every own group at its last waypoint,
+    // the player's map group included, exactly as vanilla's num2 does, so a player
+    // standing at the capital already satisfies it and nothing is pledged.
     [HarmonyPatch(typeof(AICampaign), "AssignUnitToDefendCapital")]
     [HarmonyPriority(Priority.High)]
     internal static class DefensiveOpsPatch
@@ -302,7 +305,7 @@ namespace WhiskeyRealism.Patches
                 var unit = ownUnits[i] as Regiment;
                 if (!EligibleForCapitalDefense(aifactionIndex, unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance)) continue;
                 if (CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, ((UnityEngine.Object)unit).GetInstanceID())) continue;
-                if (!WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;
+                if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;
 
                 float distance = Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition);
                 float readiness = ReadinessStep(unit);

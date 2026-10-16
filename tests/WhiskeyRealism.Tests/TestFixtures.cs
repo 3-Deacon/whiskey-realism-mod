@@ -365,6 +365,15 @@ internal static class TestFixtures
     internal static string ReadRepoFile(string relativePath)
         => File.ReadAllText(FindRepoPath(relativePath));
 
+    // True when one line of the body, trimmed, is exactly `line`: a commented-out or prefixed
+    // copy of the statement does not match.
+    internal static bool HasLine(string body, string line)
+    {
+        foreach (var raw in body.Split('\n'))
+            if (raw.Trim() == line) return true;
+        return false;
+    }
+
     // The division play's order for one child node, default when it has none
     // (the producer walks decision.Orders itself).
     internal static TacticalDivisionPlayOrder PlayOrderFor(TacticalDivisionPlayDecision decision, string nodeId)

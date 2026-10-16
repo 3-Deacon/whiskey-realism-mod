@@ -33,7 +33,13 @@ namespace WhiskeyRealism.Strategic
         public Theater Theater;
         public CandidateTier Tier;
         public bool InOffensiveOperation;
+        // Whiskey may not commit this group (W&L player chain, WlChainRules.MayMove false).
         public bool PlayerControlled;
+        // Counts toward coverage at (HoldX, HoldZ), its last waypoint, without being a package
+        // member: the W&L map-group player (WlChainRules.CountsTowardCoverage). Implies PlayerControlled.
+        public bool HoldsPosition;
+        public float HoldX;
+        public float HoldZ;
         public bool CriticalFront;
         public bool HasFormationDirective;
         public bool DefensiveAllowed = true;
@@ -57,6 +63,9 @@ namespace WhiskeyRealism.Strategic
         public List<DefenseSuppression> Suppressed = new List<DefenseSuppression>();
         public bool Adequate;
         public bool Understrength;
+        // Strength x morale of position-holding groups credited to this threat or asset;
+        // the package only makes up the rest.
+        public float HeldStrength;
         public string TelemetrySignature;
     }
 

@@ -164,9 +164,9 @@ internal static class ArmsFixTests
         AssertTrue(transpiler.Contains("return result;") && transpiler.Contains("return vanilla;"), "transpiler emits the helper's choice, vanilla on failure");
         AssertTrue(src.Contains("[HarmonyPatch(typeof(Autocalc), \"FightUnit\")]"), "targets FightUnit");
         string count = src.Substring(src.IndexOf("class AutoresolveStandardGunCountPatch", StringComparison.Ordinal));
-        AssertTrue(HasLine(count, "CampaignScope.Register(\"autoresolve-standard-gun-count\", () => _counted = false);"), "count flag resets per campaign");
+        AssertTrue(TestFixtures.HasLine(count, "CampaignScope.Register(\"autoresolve-standard-gun-count\", () => _counted = false);"), "count flag resets per campaign");
         AssertTrue(count.IndexOf("static AutoresolveStandardGunCountPatch()", StringComparison.Ordinal) >= 0, "registered from the owner's static constructor");
-        AssertTrue(HasLine(MethodBody(count, "Postfix"), "if (_counted) return;") && HasLine(MethodBody(count, "Postfix"), "_counted = true;"), "counts once until the reset");
+        AssertTrue(TestFixtures.HasLine(MethodBody(count, "Postfix"), "if (_counted) return;") && TestFixtures.HasLine(MethodBody(count, "Postfix"), "_counted = true;"), "counts once until the reset");
     }
 
     // ------------------------------------------------------------------ BUG-BAT-003
@@ -418,8 +418,8 @@ internal static class ArmsFixTests
         string src = PatchSource("AiWeaponPurchaseOrderablePatch.cs");
         string prefix = MethodBody(src, "Prefix");
         AssertTrue(prefix.Contains("if (!Enabled() || !Research.Begin()) return;"), "flag and single pass");
-        AssertTrue(HasLine(prefix, "if (weapons[id] == null || !WeaponOrderabilityRuntime.IsResearchedButUnorderable(_alliance, id)) continue;"), "skips every model the alliance can order (polarity pinned on the whole line)");
-        AssertTrue(HasLine(prefix, "Research.Hide(weapons[id], _alliance);"), "hides the ordering alliance from the rest");
+        AssertTrue(TestFixtures.HasLine(prefix, "if (weapons[id] == null || !WeaponOrderabilityRuntime.IsResearchedButUnorderable(_alliance, id)) continue;"), "skips every model the alliance can order (polarity pinned on the whole line)");
+        AssertTrue(TestFixtures.HasLine(prefix, "Research.Hide(weapons[id], _alliance);"), "hides the ordering alliance from the rest");
         AssertFalse(prefix.Contains("return false"), "never skips vanilla");
         string fin = MethodBody(src, "Finalizer");
         AssertTrue(fin.Contains("string failure = Research.Restore();"), "restore");
@@ -456,19 +456,11 @@ internal static class ArmsFixTests
     {
         string src = File.ReadAllText(Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), "Strategic", "CampaignNeedRuntime.cs"));
         string read = MethodBody(src, "ReadArms");
-        AssertTrue(HasLine(read, "s.Rifles = new ArmsLane { Units = state.otherunits, AverageStrength = state.averageweaponstrengthrifles };"), "rifle lane from other units");
-        AssertTrue(HasLine(read, "s.Guns = new ArmsLane { Units = state.artilleryunits, AverageStrength = state.averageweaponstrengthguns };"), "gun lane from artillery units");
-        AssertTrue(HasLine(read, "ArmsCoverage.Fill(models, s.Rifles, s.Guns, GamePrefs.usedstatsgunsdummy, riflesPerUnit);"), "Fill(rifles, guns, guns per unit, rifles per unit)");
-        AssertTrue(HasLine(read, "IsArtillery = weapon.isari,"), "lane split on isari, as vanilla (16290)");
-        AssertTrue(HasLine(read, "s.MinEquippableShare = GamePrefs.aiminnumberofequippableunits;") && HasLine(read, "s.ImportCutAtFullBlockade = GamePrefs.influenceofblockadesonweaponimports;"), "vanilla prefs");
-    }
-
-    // True when one line of the body, trimmed, is exactly `line`.
-    private static bool HasLine(string body, string line)
-    {
-        foreach (var raw in body.Split('\n'))
-            if (raw.Trim() == line) return true;
-        return false;
+        AssertTrue(TestFixtures.HasLine(read, "s.Rifles = new ArmsLane { Units = state.otherunits, AverageStrength = state.averageweaponstrengthrifles };"), "rifle lane from other units");
+        AssertTrue(TestFixtures.HasLine(read, "s.Guns = new ArmsLane { Units = state.artilleryunits, AverageStrength = state.averageweaponstrengthguns };"), "gun lane from artillery units");
+        AssertTrue(TestFixtures.HasLine(read, "ArmsCoverage.Fill(models, s.Rifles, s.Guns, GamePrefs.usedstatsgunsdummy, riflesPerUnit);"), "Fill(rifles, guns, guns per unit, rifles per unit)");
+        AssertTrue(TestFixtures.HasLine(read, "IsArtillery = weapon.isari,"), "lane split on isari, as vanilla (16290)");
+        AssertTrue(TestFixtures.HasLine(read, "s.MinEquippableShare = GamePrefs.aiminnumberofequippableunits;") && TestFixtures.HasLine(read, "s.ImportCutAtFullBlockade = GamePrefs.influenceofblockadesonweaponimports;"), "vanilla prefs");
     }
 
     // ------------------------------------------------------------------ helpers
