@@ -1077,9 +1077,12 @@ internal static class CampaignSnapshotTests
         AssertFalse(supply.Substring(0, iipLoop).Contains("return"), "no early return before the live IIP reads");
 
         string objectives = MethodBody(src, "private static void ReadObjectives(");
-        AssertContains(objectives, "Rails.LinesNearTown(", "town rail lines come from the cached geometry");
+        // G3c moved the town target's record into TownRecord (shared with the mapped ground).
+        string townRecord = MethodBody(src, "private static ObjectiveRecord TownRecord(");
+        AssertContains(townRecord, "Rails.LinesNearTown(", "town rail lines come from the cached geometry");
+        AssertContains(objectives, "TownRecord(record, town,", "a listed town target is built by TownRecord");
         AssertContains(objectives, "Rails.LinesOfIip(", "iip rail lines come from the cached geometry");
-        AssertFalse(objectives.Contains("IIPsForTransportCapacityUpdate"), "no per-review walk of the rail lines");
+        AssertFalse(objectives.Contains("IIPsForTransportCapacityUpdate") || townRecord.Contains("IIPsForTransportCapacityUpdate"), "no per-review walk of the rail lines");
 
         string rails = MethodBody(src, "private static void ReadRails(");
         AssertContains(rails, "EnsureRailGeometry()", "rails rebuild their geometry only on a new railroad list");
