@@ -9,7 +9,7 @@ Produced-by: claude-opus-5-5 (high)
 - Scenarios: "There could be lots of scenarios. Not just one. Maybe they out number the enemy. 35,000 to 25,000. They divide their forces and attack from two directiosn, if reasonable." The user's own example: a Perryville-like 35,000 against 35,000 where one side holds a crossing. The attacker should consider pinning that crossing and sending a division over another bridge or ford, instead of diving at the held crossing.
 - Placement ("when ever yo uthink is best"): the integrator made it its own slice after BC13.
 
-**Decisions on this spec's open questions (2026-10-16):** recorded in § 14, D14-D19. Four were decided by the user; two are recommendations the user accepted.
+**Decisions on this spec's open questions (2026-10-16):** recorded in § 14, D14-D19.
 
 ## Outline
 
@@ -21,6 +21,7 @@ Produced-by: claude-opus-5-5 (high)
 5. (B) How feasibility enters selection, and replanning: requirements
 6. (C) The scenarios as emergent results (worked numbers)
 7. (D) Interaction with BC11 envelopment and BC13 opportunity: requirements
+7A. (F) Enemy works: turn them first, assault a focal point only when no turn will do
 8. Interfaces (pure types)
 9. Roles, lifecycles, shared rows and conflict rules
 10. Exceptions per step
@@ -55,6 +56,7 @@ The chosen plan's assumptions are watched while it runs, and the army replans wh
 2. **Held crossings are not assaulted head-on when there is a better choice.** When the army can afford a separate crossing, the held crossing is pinned and a flank wing is routed through the unwatched one, on the side that has a route. When it cannot, the army holds its own bank and probes, rather than diving at the bridge.
 3. **Wings strike together.** Wings are released so that they arrive together, from vanilla's own speeds and courier delays, instead of marching only after the centre's contact (BC11).
 4. **Defenders watch their crossings.** A Defender looks at, and guards, the crossings by which it could be turned.
+5. **Works are turned, not stormed, when a turn is there.** Against an entrenched enemy the army leaves a force in front of the works to hold and sends its main body around an open end. When both ends are anchored, an aggressive commander concentrates on one focal point of the works (a salient, the weakest held stretch or a seam between two commands) with a column, its supports and what artillery can reach; a cautious one holds. A Defender in works keeps a reserve behind its most threatened point.
 
 Each of these is an emergent result of one evaluation, not a scripted case (§ 6).
 
@@ -69,7 +71,7 @@ Each of these is an emergent result of one evaluation, not a scripted case (§ 6
 1. **Scale and clock.**
    - One battle world unit is 6.3 m on the ground: `GamePrefs.battlefieldrealdimensionfactor`, `battleprefs` "Calculation factor range to real distances … if terrain size is 2048 and this factor is 6.9 then the total battlefield size is 14150 meters", shipped 6.3. The bullet flight time at 108145 uses it.
    - Whiskey's existing code and docs call world units "meters" (for example `PostureSense.CloseContactMeters` = 250). This spec keeps that naming for constants and calls them **units** in prose: one unit is one Whiskey "meter".
-   - Battle time is game hours (`currenttimefromstart`). The day length is `battledaylengthinmins` = 120 real minutes for 12 game hours (`battleprefs` "Day Length in Realtime Minutes (calculated out of a day of 6-18h)"), so one game hour is 10 real minutes at 1×. This matches `OrderExecutor.RealSecondsPerBattleHourAtOneX` = 600.
+   - Battle time is game hours (`currenttimefromstart`). The day length is `battledaylengthinmins` = 120 real minutes for 12 game hours (`battleprefs` "Day Length in Realtime Minutes (calculated out of a day of 6-18h)"), so one game hour is 10 real minutes at 1×. This matches `TacticalBattleClock.RealSecondsPerBattleHourAtOneX` = 600 (`OrderExecutor.cs`).
 2. **March speed.** `Regiment.RegimentMove` (133063) computes:
    - **The base:** `num11 = unitbasicspeed[unittyp, mounted]` (133354). Infantry is 1, cavalry is 1 dismounted and 2 mounted, artillery is 0.5 unlimbered and 1 limbered, and groups use mounted (`unitprefs` "Basic Unit Speed Factor …").
    - **Terrain:** `num11 *= GetTerrainSpeedAdjustment() * basicunitspeed` (133525). `basicunitspeed` = 1000 (`unitprefs` "Basic unit speed (all)"), and `GetTerrainSpeedAdjustment` = `1 / terrainspeccost[currentterrain]` (132888-132901). The shipped costs: road 1, bridge 1, grass 2, ford ("River Crossing") 2, field 3, forest 4, fences and walls 4, creek 5, river 5 (impassable to the AI pathfinder unless frozen; BC10 finding 6), swamp 6. Road speed does not depend on formation in battle: the `formation != 3` road test at 133527 changes only a local that the campaign branch reads (133919-133923).
@@ -79,14 +81,14 @@ Each of these is an emergent result of one evaluation, not a scripted case (§ 6
 
    So formed infantry marches at 1000 units per game hour on a road and 500 on grass. A route's march time in game hours is `Σ (segment length × terrainspeccost) / (basicunitspeed × base)`. This is the same metre-cost sum that `RoadRoutePlanner.PolylineCost` already computes, divided by `basicunitspeed × base`.
 3. **Order delay.** When `useorderdelay` is set, `SetWaypoint` queues the order on the unit's parent HQ (91487-91492). The delay is built from four pieces:
-   - **Processing:** `AddToOrderQueue` (124917-124998) adds `processingtimegroupstandard` = 0.02 h (`unitprefs` "Standard processing time for group commander to write the order"), × 3 (`additionalprocessingtimefeudsfactor`) for a feuding unit.
+   - **Processing:** `AddToOrderQueue` (124917-124998) adds `processingtimegroupstandard` = 0.02 h (`unitprefs` "Standard processing time for group commander to write the order"). The × 3 (`additionalprocessingtimefeudsfactor`) applies when the queueing HQ's own `ai_feudstance` is set (124949-124953). Orders queued on one HQ are processed one after another (`queueprocessingtime`, 124954-124962), so a second order to the same HQ waits for the first.
    - **The first leg:** `AddOrderCourierline` (125009-125171). Within `standardbuglerange` (75 units) the leg is a bugle with recognition time `buglestandardrecognitiontime` = 0.02 h. Beyond it the leg is a real courier.
    - **Courier speed:** a courier rides mounted and running at `unitbasicspeed[5,1] × runningspeedfact[5] × 1000` = 2.33 × 2.2 × 1000 ≈ 5,126 units per hour on a road, ≈ 2,563 on grass. That is × 0.7 (`slowdowncourieroutsideradius`) when the source unit is detached.
    - **The chain:** at each HQ below, a secondary courier waits `processingtimegrouproute` = 0.02 h before riding on (125163). The group starts moving only when the last line has delivered (125280, `SetOrderStatus(2)` 125353). Movement is blocked while `pathstatus < 2` (134071-134074).
 
-   No commander stat enters the battle delay; the stats are used only on the campaign branch. Vanilla's AI skips the delay entirely for a unit with `combatstatussubordinates > 0` (`debug_aicheat_noorderdelayinfrontofenemy`, default true, 91296-91298): an engaged AI unit moves at once.
+   No commander stat enters the battle delay; the stats are used only on the campaign branch. Vanilla's AI skips the delay entirely for a unit with `combatstatussubordinates > 0` (`debug_aicheat_noorderdelayinfrontofenemy`, default true, 91296-91298): an engaged AI unit moves at once. Vanilla's own long AI moves also skip it: the `BlockedMovingOrder` replay (3139), the two `FlankMove` waypoints (117089-117090) and `CheckForSeparatedEnemy` (8188) all call `SetWaypoint(useorderdelay: false)`. A vanilla-run enemy's shift may therefore arrive sooner than requirement-shift-time's courier hours allow (§ 16).
 
-   Whiskey already models this delay for W&L orders: `WlCourierDelay.BattleHours` (processing on the first leg, route processing on later legs, a bugle within range, otherwise metres over `WlCourierDelay.SpeedPerHour`). The courier speed it is built with is `GamePrefs.unitbasicspeed[5, 1] * GamePrefs.runningspeedfact[5] * GamePrefs.basicunitspeed` (`WlOrderFlowRuntime`).
+   Whiskey already models this delay for W&L orders: `WlCourierDelay.BattleHours` (processing on the first leg, route processing on later legs, a bugle within range, otherwise metres over `BattleCourierPrefs.SpeedPerHour`, `WlCourierDelay.cs`). The courier speed it is built with is `GamePrefs.unitbasicspeed[5, 1] * GamePrefs.runningspeedfact[5] * GamePrefs.basicunitspeed` (`WlOrderFlowRuntime`).
 4. **Crossings.**
    - **The list:** fords (id 5) and bridges (id 6) are listed in `bfs.rivercrossingpositions`, de-duplicated at 20 units (26610-26640). Pontoons (ids 9-13) are not listed.
    - **The blocked set:** `UpdateBlockedCrossings` (7917-7973) marks a crossing blocked when a non-artillery enemy regiment within 1.5 × its fire range faces it within 45°. It also blocks the point one fire range ahead of a standing enemy in cover. The scan is over every enemy unit, with no fog test.
@@ -94,15 +96,22 @@ Each of these is an emergent result of one evaluation, not a scripted case (§ 6
 
    This is vanilla's only "use another bridge" behaviour, and it is reactive pathing, not planning.
 5. **Flank moves and coordination.**
-   - `CheckFlankMoves` (6247-6312) and `FlankMove` (116929-117108) are a local ±45° hook of 0.4 group widths. A hook aborts on river id 4, or on an enemy 5 units above its turn point. Vanilla has no timing.
+   - `CheckFlankMoves` (6247-6312) and `FlankMove` (116929-117108) are a local ±45° hook whose length is the flank unit's own `width` × `rangeofflankingmove` (117008-117009); the `groupwidth` read at 116988 is a discarded expression. A hook aborts on river id 4, or on an enemy 5 units above its turn point. Vanilla has no timing.
    - Arrive-together logic exists only in the campaign AI (`aiarrivalfactor`, `AICampaign` 8852 and 10244). No setter of it is in `AIBattle`.
    - Vanilla's isolated-cluster rule (`CheckForSeparatedEnemy` 8056-8215) attacks a cluster of value at most 0.65 × the group's own whose nearest neighbour is more than 1.3 × the group's distance to it away. That is the rule by which a vanilla-run enemy punishes a separated body.
 6. **End of day.**
    - The day ends at `dayendhours[month − 1]` (`battleprefs` "End Hour per Month": 17 17 18 18 19 20 21 21 20 19 18 17) against `uniStormSystem.hourCounter`. The game then runs the end-of-day cycle (`eodcycle` 1, then 2; 86407-86434).
    - `RegimentMove` returns at once while `eodcycle > 0`, couriers aside (133238). A march not finished by the day's end hour is not finished that day.
-7. **Fog leak (recorded, not used).** `CheckIfUnitIsReinforcement` (87508-87529) returns the enemy's `scheduledarrival` timing with no fog check, and vanilla's hotspot map reads it (7982-7995). Whiskey knows an enemy reinforcement only once its entry point is seen (BC2). BC14 never reads the schedule.
+8. **Works.**
+   - **The unit scan** (`AIBattle`, 7962-7968): an enemy regiment with `covervalue` > 0.15, `coverobject` ≠ 3 (forest), not routed and with no path puts a point one fire range in front of itself into `blockedcrossings`.
+   - **The marches:** line-group moves longer than 150 units use `BlockedMovingOrder` (6955) with those points as NavMesh obstacles. Vanilla therefore routes its marches around the field of fire in front of covered enemies, and does nothing more.
+   - **The hotspot map** weights an enemy by strength × morale × (1 + `covervalue`) (8024).
+   - **Cover:** `CheckCoyCovers` sets `covervalue` as the mean of its companies' cover values (`GetCoverValueFromID`: 1 / (blockobjects − 1) × `coverobjectvalues[id]`) and `coverobject` as the most common id. The ids (`GetCoverIDFromName`, 138490): fence 1, stone wall 2, forest 3, embankment (railroad) 4, creek 5, road 6, trenches 7-10, log wall (breastworks) 11, sunken road 15, unfinished railroad 16. The shipped values (`battleprefs` "COVER VALUES"): stone wall 0.35, earth parapet 0.40, reinforced parapet 0.45, parapet and abatis 0.50, parapet and obstacles 0.55, breastworks 0.15, sunken road 0.3.
+   - **Entrenching at deployment** (85632-85642) picks the AI's fortification tier from `enemyentrenchmentlevel`, which `CalculateAllUnitsOfAlliance` averages from the groups' campaign `entrenchmentlevel` (87381-87399; vanilla divides the AI side's sum by the player side's count, which Whiskey's shipped `Enable Battle Entrenchment Average Fix` corrects). The fortification groups (`BattlefieldSetup.Fortification`, 24315-24660) are occupied at deployment (85675-85733).
+   - **No plan:** vanilla has no plan to fix works and turn them, and no deliberate assault on a chosen point of them.
+9. **Fog leak (recorded, not used).** `CheckIfUnitIsReinforcement` (87508-87529) returns the enemy's `scheduledarrival` timing with no fog check, and vanilla's hotspot map reads it (7982-7995). Whiskey knows an enemy reinforcement only once its entry point is seen (BC2). BC14 never reads the schedule.
 
-### 2.2 Whiskey today (`feat/battle-next` after BC12; BC13 in build)
+### 2.2 Whiskey today (`feat/battle-next` with BC13 merged from `main` at `578bd13`)
 
 - **Selection.** `TacticalPlaybookCatalog.Select` runs the precondition filter (cavalry plays), then the stance filter (`StanceAllowsPlaybook`). It then scores `0.5 × personality + 0.2 × terrain + 0.15 × odds + 0.1 × hint + 0.05 × jitter`, plus three biases: envelopment pressure 0.2 × `EnvelopmentAffinity`, delaying pressure 0.2, and defensive pressure 0.35 × `DelayingAffinity`. The best score wins. Details:
   - The jitter is xorshift32 seeded by `AllianceId × 31 + 7`. It is drawn after the stance filter and before the crest check. BC12 learned that a filter before the draw shifts every later play's jitter (plan § BC12 As built).
@@ -131,12 +140,17 @@ Each of these is an emergent result of one evaluation, not a scripted case (§ 6
   - `RoadRoutePlanner`: an A* on a 25-unit lattice, `MaxCells` 6,000, one plan per side per snapshot, `RoutePlanCache` 0.25 doctrine-h.
   - The posture probe (`PostureTargets.CreateNavFilter`, `AtTerrain`). The test `NavMeshQueriesSitAtTerrainHeight` pins exactly three `CalculatePath` call sites.
   - `TerrainPicture`: a 20-unit lattice whose cell id prefers bridge, then ford, then river, then creek over land (sampled every 5 units). It also gives `TerrainStrength`, `ApproachDifficulty` and `TryNearestCrossing`. `TacticalTerrainLinePlanner.FlankAnchored` is available.
+- **Cover in Whiskey today.** `EnemyObservation` carries `CoverValue`, `CoverObject` and `Standing`, last seen while Visible (BC10), read only by `CoveredCrossings`. Own cover is read by the withdrawal inputs (`TacticalWithdrawalInputAdapter`), the morale pressure (`TacticalMoralePressure`), the artillery state and telemetry (`TacticalMapKnowledgeTelemetry` counts fortification groups). BC13's opening detector reads no cover and no works. Nothing plans against works.
 - **No march-time, ETA or enemy shift-time estimator exists** anywhere in the battle code. The only unit-speed read is the W&L courier (§ 2.1 item 3).
-- **Perception.** `BattleSnapshot.Observations` holds enemy regiments only (Visible, or Remembered with `Confidence01`), with no enemy group positions. `TacticalEnemyContactLedger` gives `EstimatedEnemyStrength`, `Confidence` and the enemy entry points with their watch stamps. `ArmyIntentInference` gives the enemy intent (Attack / Defend / Probe / Refuse / Withdraw).
-- **BC13 (in build; binding spec `2026-10-15-battle-opportunity-design.md`).**
+- **Perception.** `BattleSnapshot.Observations` holds enemy regiments only (Visible, or Remembered with `Confidence01`), with no enemy group positions. `TacticalEnemyContactLedger` gives `EstimatedEnemyStrength`, `Confidence(nowHours)` (a method) and the enemy entry points with their watch stamps. `ArmyIntentInference` gives the enemy intent (Attack / Defend / Probe / Refuse / Withdraw).
+- **BC13 (on `main` at `578bd13`; spec `2026-10-15-battle-opportunity-design.md`).**
   - The per-commander `CommanderPersonalityTable`. The army's vector is the table entry of the side's commanding officer.
   - `IPerceivedGround`: a point is perceived when vanilla's AI fog grid would show an infantry regiment standing there, or within `RangeOnlyReach` in RangeOnly mode.
-  - `ExploitTable.IsExploiting`. Its rule that a maneuvering group is never an exploit asset, and that the play executor never maneuvers an exploiting group.
+  - `ExploitTable.ForAlliance(a).IsExploiting(int instanceId)`. Its rule that a maneuvering group is never an exploit asset, and that the play executor never maneuvers an exploiting group.
+  - `OpeningDetector`: a Defender runs only `PenetrationPass`; `ClusterPass` (single link at `ClusterLinkMeters` 150) runs only on the non-Defender branch, over private arrays that surface only as `IsolatedCluster` openings.
+  - BC13's enemy-sample filter (Visible, or Remembered at `Confidence01` ≥ 0.5; not a reinforcement; infantry, cavalry or artillery) is not a shared function: it is written inline in `OpeningDetector.BuildSamples`, `OpportunityTick` and `CavalryStrikeDisciplinePatch`.
+  - `DirectChildAllocator.ReleaseReserves` runs, in this order: the crisis and stagger releases (`StaggeredRelease` with Enable Staggered Reserve Release, otherwise today's per-child loop), then BC11's flank release (`ReleaseReserveToThreatenedWing`). `ReserveReleaseState` is a per-`ArmyOrchestrator` instance (a child-id → release-hour map, R0, `LastReleaseHours`), cleared by `Replan` and `BattleCoreTick.StandDown`; the context carries it only with the staggered flag on.
+  - BC10's deployed reserve: a child the executor placed as a deployment reserve (`DeploymentDoctrine.IsDeployedReserve`) keeps role `Reserve`; a play's rect never claims it (`DirectChildEvidence.DeployedReserve`), and `DeployedReserveMemory` remembers its release.
   - The `OpportunityIntentProducer`, placed before `Posture`.
 
 ### 2.3 What is missing
@@ -181,9 +195,15 @@ These patterns set the weights and thresholds of §§ 4-7. They are not scripts,
 | Crossing practice | Jomini Art. XXXVII: "It is essential to deceive the enemy as to the point of passage … false attacks must be made near the real one, to divide the attention and means of the enemy." Art. XXVIII: "the army should cross the chain in not more than two masses, and the routes which these follow should not be divergent" | Pin the held crossing with the Center or the Demonstration rect while a wing crosses elsewhere (§ 6 scenario 4); at most two enveloping bodies (the templates already have at most two) |
 | Fredericksburg: the unopposed crossing was ready early | npshistory.com (Civil War Series 15): "Well downstream, at Franklin's crossing, the 15th New York Engineers had already completed a bridge" | A Clear crossing costs nothing extra; the Dijkstra prefers it within `HeldCrossingHours` of march |
 | March rates and halts | Casey, *Infantry Tactics* (1862): "The length of the direct step, or pace, in common time, will be twenty-eight inches … at the rate of ninety in a minute." Civil War Monitor: "Estimated distance covered in one hour at common time in ideal conditions: 3 miles" and "…in less-than-ideal conditions: 1.5–2 miles" | Not used as a clock (D4): vanilla moves formed infantry at 6.3 km per game hour on a road. History sets only the ratio: off-road and woods march at a half or less, which vanilla's terrain costs already give (grass 2, forest 4 against road 1) |
+| Fredericksburg: works assaulted frontally | battlefields.org, Fredericksburg: "Wave after wave of Federal soldiers advance over open ground to take the road" (the sunken lane at the foot of Marye's Heights), and "Burnside's “diversion” against Longstreet's veteran Confederate soldiers produce horrific Union casualties." | A strike point on held works is a works assault: its bar is three times the commander's (requirement-works-pricing) |
+| Cold Harbor: an assault into angled works | battlefields.org, Cold Harbor: "Angles in the Confederate works allow Lee's men to easily enfilade the Federal ranks as they advance." "An estimated 7,000 men are killed or wounded within the first 30 minutes of the assault" | `AssaultHours` 1.0: a break is made within the hour or not at all; the works hold gate keeps a hopeless assault from being ordered (requirement-works-hold) |
+| Kennesaw Mountain: Sherman's one frontal attack of the campaign | battlefields.org, Kennesaw Mountain: "Sherman tried to avoid pitched battles that necessitated head-on assaults against fortified positions." The attack was "the first major frontal attack he ordered during the campaign." "By noon, the Union attack had failed." Then "Sherman maneuvered a force around Johnston's left flank" | Turn first: a strike beyond an open end pays no works bar, and a turning plan's fix holds rather than assaults (requirement-turn-first); a focal assault is offered only when no turn is feasible (requirement-focal-assault) |
+| Franklin: a frontal charge against works over the objections of the commander's subordinates | battlefields.org, Franklin: "Unmoved by his lieutenants’ objections, Hood orders the charge." "The Confederates retreat, reform, and renew the attack as many as six times, but cannot dislodge the Union defenders." | Personality decides willingness, the model prices the odds: an aggressive commander's lower bar can accept an assault the model still scores; a hopeless one is held by the gate |
+| Spotsylvania: a column at a salient, and the support that was missing | battlefields.org, Spotsylvania Court House: "Emory Upton briefly breaches the Confederate line with a tightly packed, fast-moving column of 12 regiments." His men "were left unsupported by other corps and forced to withdraw in the face of enemy artillery and mounting reinforcements." "Grant masses 20,000 men of the Second Corps opposite the tip of the salient." | The focal assault's column in March Column, its echeloned support released 0.1 h after the strike, and the salient factor 0.5 in the focal-point score (requirement-focal-execution, requirement-works-shape) |
+| About three to one at the point of attack | The Dupuy Institute, "The U.S. Army Three-to-One Rule": "Various Three-to-one rules of thumbs have existed in the U.S. Army" "in writings possibly as early as the American Civil War (1861-1865)." | `WorksOddsFactor` = 3.0. The source dates the rule only to "possibly" the Civil War and tests it on 49 Civil War battles with too few 3:1 cases to confirm it, so 3.0 is a weight for smoke tuning, not a law |
 | Column length | Civil War Monitor: "Estimated amount of roadway that 40,000 soldiers, with artillery and wagon trains, occupied on the march: 16 miles" | Not modelled: vanilla's march column is a group formation, and arrival is judged on the HQ as BC11 does. Derived figure (about 0.4 miles per 1,000 men) recorded only; smoke 4 measures whether the omission matters (§ 16) |
 
-URLs: battlefields.org/learn/articles/10-facts-chancellorsville; gutenberg.org/ebooks/13549; nps.gov/frsp/learn/historyculture/cvillehist-flank.htm; battlefields.org/learn/civil-war/battles/chancellorsville; battlefields.org/learn/civil-war/battles/perryville; historyofwar.org/articles/battles_perryville.html; historynet.com/the-sounds-of-silence/; battlefields.org/learn/maps/antietam-burnsides-bridge-sep-17-1862; historynet.com/battle-of-antietam-controversial-crossing-on-burnsides-bridge/; nps.gov/people/isaac-peace-rodman.htm; npshistory.com/handbooks/historical/31/hh31h.htm; npshistory.com/handbooks/historical/31/hh31l.htm; npshistory.com/handbooks/historical/33/hh33l.htm; nps.gov/rich/learn/historyculture/glendalebull.htm; encyclopediavirginia.org/entries/mechanicsville-battle-of/; emergingcivilwar.com/2016/12/01/general-magruder-why-did-you-attack/; historynet.com/7-days-made-robert-e-lee-icon/; battlefields.org/learn/civil-war/battles/stones-river; battlefields.org/learn/articles/bragg-versus-rosecrans; battlefields.org/learn/civil-war/battles/nashville; battlefields.org/learn/civil-war/battles/chattanooga; battlefields.org/learn/civil-war/battles/bentonville; npshistory.com/publications/civil_war_series/15/sec6.htm; archive.org/download/infantrytacticsf01brig/infantrytacticsf01brig_djvu.txt; civilwarmonitor.com/?p=19266. Scourge of War (not installed here; `docs/scourge-of-war-ai-anchors.md`): its army plays wait on `PLAYFTime` and do not check rivers or heights on the way; its division think loop throttles orders by a courier timer (`CourTime + 15 * TICSPERMIN`). Neither times an arrival; BC14 is Whiskey's reading of those ideas.
+URLs: battlefields.org/learn/articles/10-facts-chancellorsville; gutenberg.org/ebooks/13549; nps.gov/frsp/learn/historyculture/cvillehist-flank.htm; battlefields.org/learn/civil-war/battles/chancellorsville; battlefields.org/learn/civil-war/battles/perryville; historyofwar.org/articles/battles_perryville.html; historynet.com/the-sounds-of-silence/; battlefields.org/learn/maps/antietam-burnsides-bridge-sep-17-1862; historynet.com/battle-of-antietam-controversial-crossing-on-burnsides-bridge/; nps.gov/people/isaac-peace-rodman.htm; npshistory.com/handbooks/historical/31/hh31h.htm; npshistory.com/handbooks/historical/31/hh31l.htm; npshistory.com/handbooks/historical/33/hh33l.htm; nps.gov/rich/learn/historyculture/glendalebull.htm; encyclopediavirginia.org/entries/mechanicsville-battle-of/; emergingcivilwar.com/2016/12/01/general-magruder-why-did-you-attack/; historynet.com/7-days-made-robert-e-lee-icon/; battlefields.org/learn/civil-war/battles/stones-river; battlefields.org/learn/articles/bragg-versus-rosecrans; battlefields.org/learn/civil-war/battles/nashville; battlefields.org/learn/civil-war/battles/chattanooga; battlefields.org/learn/civil-war/battles/bentonville; npshistory.com/publications/civil_war_series/15/sec6.htm; archive.org/download/infantrytacticsf01brig/infantrytacticsf01brig_djvu.txt; civilwarmonitor.com/?p=19266; battlefields.org/learn/civil-war/battles/fredericksburg; battlefields.org/learn/civil-war/battles/cold-harbor; battlefields.org/learn/civil-war/battles/kennesaw-mountain; battlefields.org/learn/civil-war/battles/franklin; battlefields.org/learn/civil-war/battles/spotsylvania-court-house; dupuyinstitute.org/2019/10/22/the-u-s-army-three-to-one-rule/ (works rows accessed 2026-10-16). Scourge of War (not installed here; `docs/scourge-of-war-ai-anchors.md`): its army plays wait on `PLAYFTime` and do not check rivers or heights on the way; its division think loop throttles orders by a courier timer (`CourTime + 15 * TICSPERMIN`). Neither times an arrival; BC14 is Whiskey's reading of those ideas.
 
 ---
 
@@ -194,7 +214,7 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
 - **requirement-candidate-set** — The candidates are every playbook that passes the catalog's precondition and stance filters for the side's **current effective** stance: `TacticalStanceReconciler.ResolveEffectiveStance`, the stance `TryPickPlan` filters on, refreshed per requirement-stance-before-pick. Each is paired with its template (`PlayTemplateCatalog.Lookup`):
   - A template with exactly one enveloping rect off the centre line (MobileFlankMarch, WideFlankApproach, ManeuverAndFix) is evaluated **twice**: as authored, and mirrored by flipping the sign of every rect's lateral coordinate in the projection frame (the frame `PlayProjection` lays the rects out in, so the mirror matches what the executor will project). The better of the two sides is the candidate's result, and the side is recorded (`Mirrored`). Sides rank by verdict first (Feasible and Risky, then Unknown, then Impossible), then by the lower penalty; a tie keeps the authored side.
   - CavalryRaid is evaluated once, as authored. Its only enveloping rect (DeepRaid) lies at lateral 0, so the mirror would be the same layout; its side comes from `EnvelopmentManeuver.OutflankPoint`, as BC11 chooses it. `Mirrored` is false for it.
-  - DoubleEnvelopment is evaluated once: it is symmetric.
+  - DoubleEnvelopment is evaluated once: it is symmetric. So is FocalAssault, which is centred on its focal point (requirement-focal-assault).
   - A template with no enveloping rect is evaluated once, as one body (requirement-bodies).
 - **requirement-hypothetical-layout** — Per candidate (and side), the evaluation projects the template and assigns direct children exactly as the play executor would, through allocation-free overloads:
   - `PlayProjection.ProjectInto(template, …, Span<WorldPlayRect>)` and `PlayCorpsAssignment.AssignInto(rects, corps, Span<CorpsAssignment>)`, the same rules as the shipped methods; parity tests pin them.
@@ -206,18 +226,18 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
   - **`wing-unfilled`:** an enveloping rect that gets no child makes the candidate's verdict `Impossible`, reason `wing-unfilled`. The template cannot do what it says.
   - **`no-fixing-force`:** a template whose fixing rect (Center or Demonstration) gets no child while an enveloping rect does is not filtered. Its bodies are evaluated with no fixing force: no enemy strength is pinned (requirement-detail-risk). This is how "divide if reasonable" depends on the number of bodies the army has.
 - **requirement-bodies** — A candidate's **bodies** are:
-  - each child assigned to an enveloping rect, a separate body moving on its own route to its rect anchor (a DeepRaid to its outflank point first, `EnvelopmentManeuver.OutflankPoint`);
+  - each child assigned to an enveloping rect, a separate body moving on its own route to its rect anchor (a DeepRaid to its outflank point first, `EnvelopmentManeuver.OutflankPoint`). FocalAssault's `AssaultColumn` rect is enveloping in this sense (`Envelops`: a separate body on its own route), and the child on its `AssaultSupport` rect joins the column's body, the assault body;
   - every other assigned child together, the **main body**, whose members stand within one frontage of each other and support each other.
 
   The main body's **route** is evaluated per member (each member to its rect anchor), and its contact time is the latest fixing member's arrival (requirement-strike-time).
   - **Fixing members:** every main-body member on a rect that is not Reserve or ReserveLine. They pin enemy strength (requirement-detail-risk).
   - **Reserve members:** they count in the main body's strength `S_main`, but pin nothing.
 
-  **Detail risk applies only where a body is separate.** In a template with enveloping bodies, every body is judged, the main body included. Its isolated odds measure the fix standing alone while the wings are away. A template with no enveloping rect has one body and no detail term: one line supports itself.
+  **Detail risk applies only where a body is separate.** In a template with enveloping bodies, every body is judged, the main body included. Its isolated odds measure the fix standing alone while the wings are away. A template with no enveloping rect has one body and no detail term, unless that body assaults held works (requirement-works-pricing): one line supports itself, but not against works.
 
   **Strike points:**
-  - an enveloping body's: the perceived enemy line end on its rect's side (`EnvelopmentManeuver.EnemyLineEnd`), or, for a DeepRaid, its outflank point;
-  - the main body's: the play's enemy anchor (`PlayAnchor`'s enemy point, the strength-weighted centroid of the perceived enemy).
+  - an enveloping body's: the perceived enemy line end on its rect's side (`EnvelopmentManeuver.EnemyLineEnd`), or, for a DeepRaid, its outflank point, or, for an `AssaultColumn`, the focal point (requirement-works-shape);
+  - the main body's: the play's enemy anchor (`PlayAnchor`'s enemy point, the strength-weighted centroid of the **Visible** enemy observations).
 
   **Approach axis:** a body's approach axis at its strike point points from the strike point back toward the body's rect anchor, the ground the body crosses. That is the direction `TerrainPicture.ApproachDifficulty` and `TerrainStrength` expect: their axis points toward the side that has to cross the ground.
 
@@ -237,24 +257,36 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
   - **Clear:** neither, and the crossing point was perceived (BC13's `IPerceivedGround.IsPerceived`) within the last `ClearMemoryHours` = 0.25 doctrine-h.
   - **Unknown:** everything else.
 
-  **Probes.** Every link crossing is a probe candidate, oldest probe first, under its own cap: `MaxCrossingProbesPerTick` = 16 per side. Probes go through BC13's perceived-ground runtime (`IPerceivedGround.IsPerceived`; BC13 spec § 8, about 1 ms per 512 points). They run before the tick's classification, so a probe made this tick counts. A probe result is stamped with the doctrine hour. A crossing is never Clear on the strength of a stale probe.
-- **requirement-route-screen** — Each body member's route is screened on the crossing graph: from its current position (the child's record) to its target (the rect anchor, or the DeepRaid outflank point and then the anchor), **and** on to its strike point (the inward leg BC11 attacks along). An enveloping body's inward leg is the anchor → enemy line end leg. The main body's members stop at their anchors: a fix does not cross to strike.
+  **Probes.** Every link crossing is a probe candidate, oldest probe first, under its own cap: `MaxCrossingProbesPerTick` = 16 per side. Probes go through BC13's perceived-ground runtime (`IPerceivedGround.IsPerceived`). That runtime has no budget of its own (BC13's 128-point cap is enforced only in `PerceivedGroundLattice.Serve`), so BC14 opens its own handle (`PerceivedGroundRuntime.Open`) for the tick's probes and disposes it after them, and the probes run inside the `tactical.feasibility.evaluate` scope and count against its slice (requirement-frame-budget). They run before the tick's classification, so a probe made this tick counts. A probe result is stamped with the doctrine hour. A crossing is never Clear on the strength of a stale probe.
+- **requirement-route-screen** — Every body member has two legs, and both are screened on the crossing graph by one rule, single-body plays included:
+  - **The march leg:** from the member's current position (the child's record) to its target: the rect anchor, or for a DeepRaid the outflank point and then the anchor.
+  - **The strike leg:** from the target on to the member's strike point (requirement-bodies). For an enveloping body that is the inward leg BC11 attacks along (anchor → enemy line end, or the outflank point for a DeepRaid). For a member of the main body it is its anchor → the main body's strike point (the enemy anchor). A fix that holds its anchor is still screened on the leg it would attack along, because a frontal attack across a river is the plan's own risk and must be priced like any other.
+
+  Each leg is routed alike:
   - **Same region** (or a frozen map): one leg, origin to target.
-  - **Different regions:** Dijkstra over the link crossings of the regions on the way. A node is a link crossing. An edge is a leg between two points in one region, priced by requirement-leg-cost. A Held crossing adds `HeldCrossingHours` (requirement-held-crossing) to the edge through it. The cheapest path is the route, and its crossings are the route's crossings.
-  - **No path** (no chain of link crossings joins the two regions on an unfrozen map): verdict `Impossible`, reason `no-crossing`. On the inward leg the reason is `river-on-leg`, BC11's own abandon reason, so the screen refuses before selection what BC11 would abandon after it.
+  - **Different regions:** the cheapest path over the link crossings (requirement-link-legs). A node is a link crossing. An edge is a leg between two points in one region, priced by requirement-leg-cost. A Held crossing adds `HeldCrossingHours` (requirement-held-crossing) to the edge through it. Its crossings are the leg's crossings, and its **first** crossing is the leg's via (requirement-crossing-via): a march via for the march leg, an attack via for an enveloping body's inward leg.
+  - **No path** (no chain of link crossings joins the two regions on an unfrozen map):
+    - on a march leg: verdict `Impossible`, reason `no-crossing`;
+    - on an enveloping body's inward leg: verdict `Impossible`, reason `river-on-leg`. BC11 would abandon it for that reason (requirement-crossing-via), so the screen refuses it before selection;
+    - on a main-body member's strike leg: not `Impossible`. The member can still hold its anchor; its `contested` term is 1 at full weight and the term's reason is `no-strike-crossing` (requirement-held-crossing).
+  - **A linked river on an inward leg is not `Impossible`.** The leg is routed through its chosen crossing and the attack via carries that crossing to BC11 (requirement-crossing-via), whose river check then judges the two sub-legs (§ 15 item 4). This keeps pin-and-cross (D14) launchable.
   - **Map unknown** (the picture or the regions not ready, or no grid): the screen has no result. The candidate's route term is neutral, and the verdict is `Unknown` (requirement-verdict). This is today's behaviour: BC11 still refuses to launch without a route.
 - **requirement-leg-cost** — A leg's cost is the BC10 grid sampled every `LegStepMeters` = 10 units along the straight segment (`SampleLine`), summing `step × SpeedCost(id)`. The last sample is pro-rated to the leg's remaining length, so a 1,000-unit road leg costs exactly 1,000.
   - **Beside the leg's own crossing:** a sample on open river (4) within `CrossingLinkMeters` of the crossing the leg starts or ends at is that crossing's footprint. It is priced at the crossing's own cost (ford or bridge id).
   - **A bend:** any other open-river sample is a bend of a river the leg skirts. It is priced at the swamp cost, as a detour proxy, and the leg is marked `estimated` until a NavMesh result replaces it.
   - **March hours:** `cost / (BasicUnitSpeed × base) / fatigueFactor` (requirement-march-time).
   - **Dijkstra:** it runs in the body's hours. A Held crossing adds `HeldCrossingHours` to the edge through it, so the chosen crossing can depend on the body's speed.
+- **requirement-link-legs** — Leg costs are computed once and reused:
+  - **The link table (per battle).** When the regions are built, the leg cost between every pair of link crossings that share a region is computed by requirement-leg-cost (the footprint rule at both ends) and stored in cost units, which do not depend on the mover's speed. It is built in the same stepped build as the regions, one pair per unit of work, under `tactical.river-regions.build`; the map is unknown until it is complete. At most `MaxRoutedLinks` = 64 links are routed: beyond, the links farthest from the own centroid at build time are kept as crossings but not routed, with the `river-regions-truncated` OnceLog. That bounds the table at 2,016 pairs.
+  - **The leg cache (per evaluation).** A leg from a point to a link of its region is keyed by (the point's 50-unit bucket, link); a leg between two points of one region by (bucket, bucket). The first point that fills an entry is the one priced, so two points in one bucket share a cost to within one bucket's diagonal (71 units). The cache is a pooled open-addressing table of `MaxLegCache` = 4,096 entries, cleared when an evaluation starts. On overflow a leg is computed and not stored, and the `TacticalManeuverFeasibility` row counts it (`legOverflow`). A NavMesh-confirmed leg (requirement-navmesh-confirm) replaces the cached estimate.
+  - **The path search.** One query is a Dijkstra over the routed links of the two regions plus its two end points, in the mover's hours: cost / (`BasicUnitSpeed` × base) / fatigueFactor, plus `HeldCrossingHours` per Held crossing passed (for the enemy: per own-covered crossing, requirement-shift-time). Its arrays are pooled and sized `MaxRoutedLinks` + 2. Every route of every requirement (march, strike, `σ`, `τ`, the Defender's crossing arrivals and shifts) goes through this one query. A courier ride is a straight leg (requirement-courier-time) read from the same cache, with no path search.
 - **requirement-navmesh-confirm** — NavMesh confirms screened routes on the evaluation's own budget:
   - **The queue:** the bodies of the top `ConfirmCandidates` = 3 candidates by catalog score without the feasibility term, the selected plan's bodies first.
   - **The query:** each route is confirmed leg by leg, through its chosen crossing (child → crossing, crossing → target), with the posture probe's filter (`PostureTargets.CreateNavFilter`) and ends at terrain height (`PostureTargets.AtTerrain`).
   - **The budget:** at most `ConfirmQueriesPerTick` = 1 `NavMesh.CalculatePath` per side per coordinator tick, separate from the posture producer's `NavPlanBudget` and from BC11's route pick, so contact groups never wait behind planning.
   - **The cache:** each result is cached per (origin 50-unit bucket, target 50-unit bucket, crossing index) for `ConfirmCacheHours` = 0.25 doctrine-h (the `RoutePlanCache` precedent).
   - **Results:**
-    - A complete path replaces the leg's estimate with the path's polyline cost (`RoadRoutePlanner.PolylineCost`, the BC10 metre-cost sum).
+    - A complete path replaces the leg's estimate with the path's polyline cost (`RoadRoutePlanner.PolylineCost`, the BC10 metre-cost sum; private today, made `internal` by BC14, § 15).
     - A path that is not `PathComplete` makes the leg `no-path`. If no other crossing gives the body a route, the verdict becomes `Impossible`, reason `no-route`.
   - **The call site:** this is a fourth `CalculatePath` call site. `NavMeshQueriesSitAtTerrainHeight` changes its pinned count from 3 to 4 and pins the new site.
 - **requirement-march-time** — A body member's march hours are `Σ legs (cost / (BasicUnitSpeed × base)) / fatigueFactor`:
@@ -269,8 +301,11 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
   - **Engaged members:** a member with a Visible enemy within `PostureSense.CloseContactMeters` (the snapshot's perceived contact) gets 0 courier hours for its own order to strike, because vanilla's AI moves an engaged unit at once (§ 2.1 item 3). This applies to `T` only. A support ride (requirement-detail-risk's `σ`) and the enemy's shift (requirement-shift-time) always carry their courier hours: each is a new order, sent after the evaluation can see its need, to a body whose engagement at that later hour is not known now. Both sides are charged alike, so the comparison of `σ` with `τ` stays even (§ 16 lists the vanilla cheat as unverified for these orders).
   - **Order delays off:** with `GameVars.useorderdelays` off, every courier time is 0, as vanilla's `SetWaypoint` sends at once.
 
-  Whiskey's executor issues AI moves with the order delay (`ShouldUseOrderDelayForExecutorWaypoint`), so this is the delay its own orders meet.
-- **requirement-strike-time** — Each body's time to strike if ordered now is `T = courier + march (+ HeldCrossingHours per Held crossing on its route) + DeployHours`. `DeployHours` = `processingtimegroupstandard` + `EnvelopmentManeuver.TurnHoldHours`: the Turn phase BC11 already runs before the Attack.
+  Whiskey's executor issues AI moves with the order delay (`CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint`), so this is the delay its own orders meet.
+- **requirement-strike-time** — Each body's time to strike if ordered now is `T = courier + march (+ HeldCrossingHours per Held crossing on its march leg) + DeployHours (+ inward surplus)`. `DeployHours` = `processingtimegroupstandard` + `EnvelopmentManeuver.TurnHoldHours`: the Turn phase BC11 already runs before the Attack.
+  - **What `T` measures:** the hour a body launches its attack from its anchor. The straight inward leg is not in `T`: BC11 attacks from the Turn along it, and every template sets it short.
+  - **The inward surplus** (enveloping bodies only): when the inward leg crosses a river, `T` adds the inward route's hours less the straight inward leg's hours, with `HeldCrossingHours` per Held crossing on it. A detour to a crossing delays the strike, and synchronization must see it.
+  - **The main body's strike leg is not in `T`.** A fix pins by standing at its anchor; its own attack is a later decision of the plan's phase. Its strike leg is priced in the penalty (requirement-held-crossing).
   - **The fix's own time:** `T_main` is the latest fixing member's `T`. A main body already in contact (any fixing member with a perceived enemy within `EnvelopmentManeuver.ContactMeters`) has `T_main` = 0.
   - **The common plan:** the fix makes contact at `C* = max(T_main, max over enveloping bodies (T_j − offset_j))`, where `offset_j` is the rect's `StartTimeOffsetSeconds` in hours:
     - MobileFlankMarch 900 s, WideFlankApproach 600 s, ManeuverAndFix 300 s;
@@ -283,27 +318,28 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
     - the fix waits rather than going in alone. That is the Mechanicsville lesson (§ 3): when the turning column is late, the frontal attack holds.
   - **A fix in contact is not held:** a fixing member in contact has release 0 and no planned release is published for it. `C*` is then the wings' own pace (`max (T_j − offset_j)`), and the fix's exposure is what requirement-detail-risk measures.
   - **Bodies already moving:** a body whose child has left its Hold has `T` measured from now: march from its current position plus `HeldCrossingHours` for each Held crossing not yet passed, plus `DeployHours`, and no courier hours, because vanilla charges the order delay once, when the order is issued. A body still in its Hold has `T` measured from its planned release.
-  - **Several rivers:** a route may cross more than one river. `HeldCrossingHours` is added once per Held crossing. `contested_j` takes the worst state over all of them, and the monitor watches every one. The via (requirement-crossing-via) is the **first** crossing on the route; the pathfinder takes the legs after it.
+  - **Several rivers:** a leg may cross more than one river. `HeldCrossingHours` is added once per Held crossing. `contested_j` takes the worst weighted state over all of them (requirement-held-crossing), and the monitor watches every one. Each leg's via (requirement-crossing-via) is its **first** crossing; the pathfinder takes the legs after it.
   - **Absolute hours:** a release is published as absolute doctrine hours, `PlannedReleaseHours = EvaluatedHours + R`.
 
   BC11 uses the planned releases (requirement-synchronized-release).
 - **requirement-daylight** — `DaylightHours = dayendhours[month − 1] − hourCounter` (vanilla's own test, `uniStormSystem`), read by the runtime each evaluation. A body whose strike `S*` exceeds `DaylightHours − DaylightMarginHours` (0.25) gets `daylight_j` = 1 and the `after-dark` reason. Its verdict stays `Risky`: a night intervenes, and the night replan (`ReplanForNewBattleDay`) re-evaluates on the next day (D16).
 - **requirement-enemy-picture** — The enemy as the side perceives it, built once per evaluation:
-  - **Samples:** observations that are Visible, or Remembered at confidence ≥ 0.5; not reinforcements; infantry, cavalry or artillery. This is BC13's `requirement-enemy-samples`, and it is shared, not copied.
+  - **Samples:** observations that are Visible, or Remembered at confidence ≥ 0.5; not reinforcements; infantry, cavalry or artillery. This is BC13's `requirement-enemy-samples`. BC13 writes that filter inline in three places (§ 2.2), so BC14 extracts it into one pure predicate, `EnemySamples.Accepts(in EnemyObservation)`, and the three BC13 sites call it (§ 15). It is one rule, not a fourth copy.
   - **Perceived strength** `P` = Σ Visible strength + Σ Remembered strength × confidence. **Perceived morale** `m_E` = the strength-weighted mean of the samples' `Morale` (last seen while Visible), or 1.0 with no samples.
-  - **Effective strength:** `N = max(P, ledger EstimatedEnemyStrength) × (1 + FogPremium)`, with `FogPremium = 0.5 × (1 − confidence) × (0.5 + caution01)`. Here `confidence` is the contact ledger's `Confidence`, and `caution01` is the army commander's BC13 entry. A cautious commander assumes more of the unseen. Perryville is the weight (§ 3).
+  - **Effective strength:** `N = max(P, ledger EstimatedEnemyStrength) × (1 + FogPremium)`, with `FogPremium = 0.5 × (1 − confidence) × (0.5 + caution01)`. Here `confidence` is the contact ledger's `Confidence(nowHours)`, and `caution01` is the army commander's BC13 entry. A cautious commander assumes more of the unseen. Perryville is the weight (§ 3).
   - **The enemy mass:** the strength-weighted centroid of the samples.
   - **The local enemy** per own body, `L_j`: the samples within `OddsRadiusMeters` (BC13, 300 units) of the body's strike point (requirement-bodies), scaled by `N / P` when `P > 0`.
-  - **No samples:** the enemy mass is BC10's assumed enemy point (`DeploymentDoctrine.AssumedEnemyPoint`, the nearest enemy-owned entry point), and `L_j = N / (bodies + 1)`.
+  - **Enemy bodies** (the Defender run, for requirement-defender-exposure, requirement-defender-crossing-release and requirement-defender-works-reserve; and the Attacker run when works exist, for the junctions of requirement-works-shape): the samples linked singly at `OpeningDetector.ClusterLinkMeters` (150), each body with its strength-weighted centroid and its strength. BC14 builds them itself, with the labelling extracted from `OpeningDetector.ClusterPass` into a pure `SingleLinkClusters.Label` that both call (§ 15, D24). At most `MaxEnemyBodies` = 16; beyond, the weakest are merged into the nearest kept body.
+  - **No samples:** the enemy mass, and the one enemy body, is BC10's assumed enemy point (`DeploymentDoctrine.AssumedEnemyPoint`: the Visible enemy centroid outside RangeOnly when there is one, otherwise the nearest enemy-owned entry point), and `L_j = N / (bodies + 1)`.
 - **requirement-shift-time** — The enemy's shift time to body `j` is `τ_j = EnemyCourierHours + march hours`.
   - **The march:** from the enemy mass (or, for a body whose strike point lies beyond the enemy's line end, from the perceived enemy line end on that side, `EnvelopmentManeuver.EnemyLineEnd`) to the body's strike point. It runs over the same crossing graph with the same leg cost, as infantry, base 1, unfatigued. When both points lie in one region the enemy crosses nothing.
   - **Crossing costs for the enemy:** a crossing costs the enemy `HeldCrossingHours` only when an own regiment covers it, by the own-side form of `CoveredCrossings.Covers` (the regiment's `RotationY` and `FireRange`; the form requirement-defender-exposure uses). Every other crossing costs it nothing extra: one it holds itself, so interior lines across the enemy's own bridges are counted, and one that is Watched, Clear or Unknown to the own side. The same rule applies in the attacker's run and in the Defender's (requirement-defender-exposure).
   - **`EnemyCourierHours`:** `processingtimegroupstandard` + `processingtimegrouproute` + the ride from the enemy mass to the strike point, priced as requirement-courier-time's ride. The enemy commander's position is not perceived, and his chain is assumed one relay deep. It is charged whether or not the enemy is engaged, as `σ`'s courier is (requirement-courier-time).
   - **A perceived passive enemy** (intent `Defend` from `ArmyIntentInference`, confidence ≥ its `ConfidenceFloor`) shifts slower: `τ_j × PassiveShiftFactor` (1.5). Hooker at Chancellorsville is the weight (§ 3).
-- **requirement-detail-risk** — Per body `j` of a template with enveloping bodies (requirement-bodies):
+- **requirement-detail-risk** — Per body `j` of a template with enveloping bodies (requirement-bodies), and of any plan whose body assaults held enemy works (requirement-works-pricing):
   1. **Pinned enemy:** `Pin_j` = Σ over the other bodies `k` with `S*_k ≤ S*_j` of `S_pin,k / DefenseRatio_k`.
      - `S_pin,k` is an enveloping body's strength, or the main body's fixing members' strength (never its reserve members).
-     - `DefenseRatio_k = BaseDefenseRatio (1.5) + TerrainStrength` at `k`'s strike point on `k`'s approach axis (requirement-bodies; 1.5 when the picture is not ready). The enemy holds against superior numbers.
+     - `DefenseRatio_k = BaseDefenseRatio (1.5) + TerrainStrength` at `k`'s strike point on `k`'s approach axis (requirement-bodies; 1.5 when the picture is not ready). The enemy holds against superior numbers. When `k`'s strike point lies on a held works segment, `DefenseRatio_k` is at least `WorksDefenseRatio` = 3.0 (requirement-works-pricing): works hold a fix with a third of its strength.
      - A body that has not struck yet pins nothing: support out of earshot is not support (§ 3, Perryville).
   2. **Exposure window:** `W_j = (latest S* over the other bodies − S*_j)⁺ + σ_j`. `σ_j` is the **own support time**: the least, over the other bodies `k`, of `k`'s courier hours plus its march hours over the crossing graph (Held crossings at `HeldCrossingHours`) from where `k` stands when it has struck to `j`'s strike point.
      - `k`'s courier hours are those requirement-courier-time computes for an order from the army HQ to `k` at its current position, never zeroed for engagement (requirement-courier-time's engaged rule applies to `T` only). For the main body, they are the fixing member's that gives the least `σ`.
@@ -316,16 +352,19 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
      - `own_j` is 1 for an enveloping body, which attacks.
      - `own_j` is `BaseDefenseRatio + TerrainStrength` for the main body, which fixes and holds. It is taken at the anchor of its highest-priority fixing member (the Center when filled), on the axis toward the enemy anchor.
      - With `E_j = 0` the odds are `EnemyVisibleSector.MaxKnowableOdds` (10).
-  5. **The commander's bar:** `Bar = clamp(1.0 + 0.3 × (caution01 − 0.5) − 0.3 × (audacity01 − 0.5) − 0.2 × (agg01 − 0.5), 0.6, 1.4)` (the army commander's BC13 entry).
-  6. **The detail penalty:** `detail_j = clamp01((Bar − odds_j) / (Bar × DetailSlope))`, `DetailSlope` = 0.25. Odds a quarter below the bar give the full penalty.
+  5. **The commander's bar:** `Bar = clamp(1.0 + 0.3 × (caution01 − 0.5) − 0.3 × (audacity01 − 0.5) − 0.2 × (agg01 − 0.5), 0.6, 1.4)` (the army commander's BC13 entry). A body that assaults held works is held to `Bar_j = WorksOddsFactor × Bar` (3.0 × `Bar`, requirement-works-pricing); every other body to `Bar_j = Bar`.
+  6. **The detail penalty:** `detail_j = clamp01((Bar_j − odds_j) / (Bar_j × DetailSlope))`, `DetailSlope` = 0.25. Odds a quarter below the bar give the full penalty.
 
   A template whose fixing rect is unfilled has no fixing force: its wings pin each other (by the formula above), and nothing else is pinned (requirement-hypothetical-layout).
 
   **The strike times are an input.** Steps 1-6 are one pure function, `ManeuverFeasibility.DetailRisk`, that takes the bodies and their strike hours as a span (`ReadOnlySpan<float> strikeHours`, one per body). `Evaluate` passes the synchronized `S*` of requirement-strike-time. The harness passes other strike hours to measure a plan without the synchronized release (FEAS-SCN-2: every body at its own `T`). It is the same function, so the comparison needs no test-only path.
 - **requirement-route-exposure** — For an enveloping body only: the share of its route samples, outside its last `EnvelopmentManeuver.ContactMeters` (250 units), that lie within a perceived enemy sample's own reach (the `RangeOnlyReach` of requirement-crossing-state: where that regiment would see the column). Forest (14) samples count at half weight, because woods screen a column. It gives `exposure_j` in [0, 1]. A flank march seen on its way can be met. Chancellorsville is the weight: Jackson's column was seen and the warning was ignored (§ 3). The main body's route ends in contact by design and carries no exposure term.
 - **requirement-held-crossing** — A route through a Held crossing costs time and blood:
-  - **Time:** `HeldCrossingHours` = 1.0 is added to the edge through it in the Dijkstra (requirement-leg-cost) and to the body's `T` (requirement-strike-time). It is the time to carry the crossing. The Dijkstra therefore prefers any Clear or Unknown alternative that is less than an hour's march longer.
-  - **Blood:** `contested_j` is 1 for a body whose route still uses a Held crossing, 0.5 for a Watched one, 0.25 for an Unknown one and 0 for a Clear one. Antietam's Rohrbach Bridge and Snavely's Ford are the weights (§ 3).
+  - **Time:** `HeldCrossingHours` = 1.0 is added to the edge through it in the path search (requirement-link-legs) and, on a march leg or an enveloping body's inward leg, to the body's `T` (requirement-strike-time). It is the time to carry the crossing. The search therefore prefers any Clear or Unknown alternative that is less than an hour's march longer.
+  - **Blood:** a crossing's state value is 1 for Held, 0.5 for Watched, 0.25 for Unknown and 0 for Clear. Antietam's Rohrbach Bridge and Snavely's Ford are the weights (§ 3). `contested_j` is the largest **weighted** value over the crossings the body's members still have to pass:
+    - a crossing on a march leg or on an enveloping body's inward leg counts at full weight: the body takes it whatever happens next, the march now and the wing's attack at its planned hour;
+    - a crossing on a main-body member's strike leg counts at `StrikeLegWeight` = 0.5: that attack is ordered only when the plan's phase later reaches it, a decision taken on the odds of that moment, and the evaluation re-reads the crossing's state every `EvaluateIntervalHours` until then;
+    - a main-body strike leg with no path counts 1 at full weight (`no-strike-crossing`, requirement-route-screen).
   - **Not impossible:** a route whose crossings are all Held is costly, not impossible. Burnside's bridge was carried.
 - **requirement-approach** — Per body, at its strike point and on its approach axis (requirement-bodies):
   - `approach_j = 0.5 × TerrainPicture.ApproachDifficulty + 0.5 × enemyGround`;
@@ -339,7 +378,7 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
   - **For a Defender** (stance Defender, the candidates of requirement-defender-exposure): `penalty = 1 − (1 − 0.6 × turn)`. Its `daylight`, `detail`, `approach` and `exposure` are 0, and `contested` is replaced by `turn`: it attacks no one, so its strike time, the ground in front of the enemy and its own route's crossings are no costs. The route screen's `Impossible` reasons (requirement-verdict step 3) still apply, because a rect anchor across an unbridged river cannot be reached in either stance.
   - The time a plan takes is not a cost by itself: the synchronized releases make a long march wait-free for the others (requirement-strike-time). Its costs are the night (`daylight`), the enemy's chance to shift (`detail`) and the chance to be seen (`exposure`).
 
-  The candidate's penalty is the **worst body's** penalty: a plan fails at its weakest body. The reason is the verdict reason, or else the name of the largest term above `ReasonThreshold` = 0.2 (`after-dark`, `detail`, `contested`, `approach`, `exposure`).
+  The candidate's penalty is the **worst body's** penalty: a plan fails at its weakest body. The reason is the verdict reason, or else the name of the largest term above `ReasonThreshold` = 0.2 (`after-dark`, `detail`, `contested`, `approach`, `exposure`); a `contested` that comes from a strike leg with no path reads `no-strike-crossing`.
 - **requirement-verdict** — Each candidate (with its side) gets one verdict. The first match wins:
   1. no valid front axis or no direct children → `Unknown`, reason `no-axis` / `no-children`;
   2. the map unknown → `Unknown`, reason `map-unknown`;
@@ -351,7 +390,10 @@ The evaluation is pure (`ManeuverFeasibility`, `Tactical/Orchestrator/Plays/`). 
   - **`Unknown`**: the penalty is 0.
   - **`Risky`**: the penalty is at least `RiskyPenalty` = 0.35.
   - **`Feasible`**: otherwise.
-- **requirement-evaluation-cadence** — The ledger re-evaluates every candidate at most every `EvaluateIntervalHours` = 0.05 doctrine-h, on the coordinator's heavy path, before `ArmyTickCycle.MaybeReplan`. It also re-evaluates at once before the initial pick and before the night replan. At battle start the initial pick's evaluation is normally `Unknown` (no direct children attached yet, the picture not ready), and requirement-assumption-monitor's `map-known` screens that pick once the map is known. The selected plan is re-evaluated on every new heavy snapshot (`_snapshotGeneration`) for the monitor. A replan always reads a ledger no older than `EvaluateIntervalHours` (requirement-runtime-wiring).
+- **requirement-evaluation-cadence** — The ledger re-evaluates every candidate at most every `EvaluateIntervalHours` = 0.05 doctrine-h, on the coordinator's heavy path, before `ArmyTickCycle.MaybeReplan`. It also re-evaluates at once before the initial pick and before the night replan. At battle start the initial pick's evaluation is normally `Unknown` (no direct children attached yet, the picture not ready), and requirement-assumption-monitor's `map-known` screens that pick once the map is known. The selected plan is re-evaluated on every new heavy snapshot (`_snapshotGeneration`) for the monitor.
+  - **Slices.** A scheduled evaluation is a resumable job: it runs in slices of at most `EvaluateSliceMs` on successive heavy ticks (requirement-frame-budget), on a second buffer, and the ledger publishes it whole when its last candidate is done, so a reader never sees a half-evaluated ledger. A new evaluation starts when the previous one is published and `EvaluateIntervalHours` has passed since it started.
+  - **Forced evaluations** (before the initial pick and the night replan) run to completion in one tick, under the same scope, marked `forced` on the row.
+  - **Freshness:** a replan reads the latest published ledger, at most `EvaluateIntervalHours` plus one evaluation's slices old; `TacticalPlanSelection` reports its age (`ledgerAgeHours`).
 
 ---
 
@@ -446,37 +488,56 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
    - **The single-body plays** (MeetingEngagement, GenericMethodical, HesitatedCommit, ContinuousAttrition, FrontalShockAssault, ForcedFrontalAttack, GenericAggressive, GenericDesperate) carry no detail term. They win unless the commander's personality fit outweighs the penalty.
    - The army then opens in its Probe phase. BC9's reconnaissance in force nominates a probe per empty band: **fix and probe**.
 4. **A held crossing with an unwatched alternative (35,000 against 35,000, Perryville-like).** The fixture:
-   - **Own side:** three corps of 12,000 (left, lateral −300), 11,000 (middle, 0) and 12,000 (right, +300) at depth 0.
-   - **The river:** open, across the front on grid depths [300, 320), aligned with the picture's 20-unit rows. Bridge B at lateral 0 is Held by a Visible 1,500-man brigade at depth 380 facing it. Ford F at lateral −900 is Clear (probed 0.1 h ago, no perceived regiment within reach).
-   - **The enemy:** three perceived clusters of 11,000, 11,500 and 11,000 at lateral −400, 0 and +400, depth 620; extent ±450. With the brigade, the enemy anchor is at depth ≈ 610 and `P` = 35,000. The ledger estimate is 35,000, so `N` = 38,500. Its intent is not `Defend`.
+   - **Own side:** three corps of 12,000 (left, lateral −300), 11,000 (middle, 0) and 12,000 (right, +300) at depth 0. The projection's half frontage is 450 (spread 600 × 1.5).
+   - **The river:** open, across the front on grid depths [240, 260), one 20-unit picture row. Bridge B at (0, 250) is Held by a Visible 1,500-man brigade at (0, 300) facing it. Ford F at (−900, 250) is Clear (probed 0.1 h ago, no perceived regiment within reach). The speed-cost table is the shipped one (grass 2, ford 2, bridge 1, river 5).
+   - **The enemy:** three perceived clusters of 11,000, 11,500 and 11,000 at lateral −400, 0 and +400, depth 556; its line extent ±450. With the brigade, `P` = 35,000 and the enemy anchor (`PlayAnchor`, Visible observations) is (0, 545). The ledger estimate is 35,000, so `N` = 38,500. Its intent is not `Defend`.
+   - **Where the anchors fall:** forward fractions × 545. Every rect at forward 0.4 or less (depth ≤ 218) stands on the own bank, at least 22 units short of the river; every rect at forward 0.5 or more (depth ≥ 272.5) stands on the far bank, at least 12.5 units past it. No anchor falls in the river row, so TARGET-SNAP moves none.
+   - **The ground at the enemy anchor:** the BC12 transect 300 units in front (depth 245) lies in the river row, so `TerrainStrength` there is 0.4 (`DefenseRatio` 1.9). `ApproachDifficulty` is 0.05 (one river sample of fifteen). A main body's approach is 0.5 × 0.05 + 0.5 × 0.4 = 0.225.
    - **The rest:** the scenario 1-3 conventions otherwise, AllianceId 0 (jitter seed 7).
    - **At even odds:**
-     - **FrontalShockAssault and MeetingEngagement:** their Center rects (forward 0.5) lie beyond the river, and the cheapest route crosses at B (+1.0 h against a 1,850-unit detour through F, 3.7 h). `contested` = 1, so the penalty is ≥ 0.6.
-     - **WideFlankApproach, authored on the right:** the FlankMarch route crosses at B, `contested` = 1, penalty ≥ 0.6.
-     - **WideFlankApproach mirrored to the left:**
-       - The wing routes through F, `contested` = 0.
-       - Its support must re-cross the river (σ ≈ 2.5 h > 2τ ≈ 2.2), so the whole free enemy can reach it. The enemy holds the river against the Center with 11,000 / 1.9 ≈ 5,800 (`DefenseRatio` 1.9: BC12's water term at the enemy anchor). So `E` ≈ 32,700, `odds` ≈ 0.37 and `detail` = 1.
-       - Its own fix (Center and Reserve on their own bank, `own` 1.5: the river lies within 100 units of the Center's anchor, outside BC12's 100-300-unit water strip) has `odds` ≈ 0.90 and `detail` ≈ 0.42.
-       - Both sides score 1.0, and the authored side is kept by the tie rule. It is not selected either way.
-     - **The bank-holding single-body plays** (GenericAggressive, GenericMethodical, HesitatedCommit, ContinuousAttrition, whose rects stand at forward 0.4 or less, short of the river) cross nothing. Their penalty is half the approach term, ≈ 0.1 (the river in front of the enemy anchor). One of them wins.
-     - **So, at even odds,** the AI never dives at the held bridge and does not throw one corps over the ford against an equal enemy. It closes to its own bank, probes, and looks at the crossings (requirement-crossing-look).
+     - **Every dividing play pays `detail` 1.** The mirrored ManeuverAndFix wing (left corps, 12,000) marches to (−382.5, 272.5) through F (2.34 h, `T` 2.73), and the Center and Demonstration fix on the own bank (`T` 0.72; they wait 1.93 h). The wing's support must re-cross the river through B (`σ` = 0.32 + 2.25 = 2.57 h against `τ` 1.12), so the whole free enemy can reach it: `Pin` = 23,000 / 1.9 ≈ 12,100, `E` ≈ 26,400, `odds` 0.45. The mirrored WideFlankApproach wing: `Pin` ≈ 5,800, `E` ≈ 32,700, `odds` 0.37. Every authored side marches through B. DoubleEnvelopment's right wing attacks through B on its inward leg (`contested` 1).
+     - **The plays that cross at once pay the held bridge in full.** FrontalShockAssault, MeetingEngagement, ForcedFrontalAttack and GenericDesperate put their Center at forward 0.5, on the far bank. Its march leg takes B (+1.0 h; F is a 1,834-unit detour, 3.7 h): `contested` 1, penalty 1 − 0.4 × (1 − 0.5 × 0.225) ≈ 0.645, a term of about −0.26.
+     - **The bank-holding single-body plays** (GenericAggressive, ContinuousAttrition, HesitatedCommit, GenericMethodical; every rect at forward 0.4 or less) cross nothing on the march. Each fixing member's strike leg to the enemy anchor takes B, which counts at `StrikeLegWeight` 0.5: penalty 1 − 0.7 × (1 − 0.5 × 0.225) ≈ 0.379, a term of about −0.15.
+     - **So, at even odds,** the hold outcome comes from the model: dividing costs −0.4 (the detail term), crossing at once costs about −0.26, holding the bank costs about −0.15. With the flag off, the shipped scores pick ManeuverAndFix (0.618 against GenericAggressive's 0.591, the crit probe of the shipped catalog at odds 1.0); with it on, GenericAggressive (≈ 0.44) wins, and every bridge-crossing play trails every bank-holder by at least 0.1 in the term, so the result does not rest on the base scores' order among single-body plays. The army closes to its own bank, probes, and looks at the crossings (requirement-crossing-look). FEAS-SCN-HOLD pins it.
    - **At 2:1** (corps of 24,000, 22,000 and 24,000 against the same 35,000; `EnvelopmentPressure` on):
-     - **ManeuverAndFix mirrored:**
-       - The Center and the Demonstration pin 46,000 / 1.9 ≈ 24,200 of the enemy along the river.
-       - The wing (24,000) crosses at F. Its `odds` ≈ 1.68: `detail` 0, `contested` 0, penalty ≈ 0.1.
-       - It is selected for a mid commander. The Center fixes B by fire, and the wing marches with F as its via point (requirement-crossing-via): **pin and cross**. It emerges when the army can afford a separate crossing: Jomini's "vastly preponderating" condition, and the Fredericksburg-downstream / Antietam-ford pattern of § 3.
-     - **DoubleEnvelopment:** its wings' anchors stand on the own bank, but their inward legs to the enemy line ends cross the river. The inward-leg screen (requirement-route-screen) routes them through B (`contested` 1) or the long way round, so the penalty is ≥ 0.6. It is never launched into BC11's `river-on-leg` abandon.
-     - **WideFlankApproach mirrored:** only the Center pins (22,000 / 1.9 ≈ 11,600), so the wing's `odds` ≈ 0.89 and penalty ≈ 0.5. That is still below its authored side and FrontalShockAssault (≥ 0.6).
-   - **A bold commander needs less of an edge** (D14). The mirrored ManeuverAndFix wing's odds rise with own strength, and a commander with audacity01 0.9 has `Bar` 0.88. So the own-to-enemy ratio at which that wing's `detail` reaches 0 is lower for him than for the mid commander. FEAS-SCN-BOLD finds both ratios by bisection on this fixture (corps scaled together, the enemy fixed).
-   - **If F were Unknown instead:** `contested` = 0.25, and F becomes a look request (requirement-crossing-look): the Snavely's Ford lesson.
+     - **ManeuverAndFix mirrored:** the Center and the Demonstration pin 46,000 / 1.9 ≈ 24,200 along the river. The wing (24,000) crosses at F on its march leg, so its march via is F and its inward leg stays on the far bank: `E` ≈ 14,300, `odds` 1.68, `detail` 0, `contested` 0, penalty ≈ 0.01. The fix's own odds are 46,000 × 1.5 / 38,500 = 1.79, `detail` 0; its strike legs take B at half weight, penalty ≈ 0.379. The candidate's penalty is 0.379 (`Risky`), the field's least: every bank-holder shares it, and every other candidate is higher (the authored side and DoubleEnvelopment through B, ≥ 0.6; WideFlankApproach and MobileFlankMarch mirrored, wing `detail` ≈ 0.43). So the term cannot move it below any rival, and its base lead under `EnvelopmentPressure` selects it (crit probe: 0.711 against ContinuousAttrition's 0.596). The Center fixes B by fire, and the wing marches with F as its via: **pin and cross**. It emerges when the army can afford a separate crossing: Jomini's "vastly preponderating" condition, and the Fredericksburg-downstream / Antietam-ford pattern of § 3.
+   - **A bold commander needs less of an edge** (D14). The mirrored ManeuverAndFix wing's odds rise with own strength. Scaling the three corps together against the fixed enemy, its `detail` reaches 0 at a strength ratio of 1.60 for the mid commander (`Bar` 1.0) and 1.50 for one with audacity01 0.9 (`Bar` 0.88). FEAS-SCN-BOLD finds both ratios by bisection.
+   - **If F were Unknown instead:** `contested` = 0.25 on the wing's march, and F becomes a look request (requirement-crossing-look): the Snavely's Ford lesson.
 5. **The Defender's options.** A Defender (vanilla battle type 2) is never offered an offensive candidate (the stance filter, now applied at the initial pick by requirement-stance-before-pick). Its candidates are the five Defensive and two Neutral playbooks, all single-body, so the attacker's detail and contested terms do not discriminate between them. Three things act for it:
-   - **Turning exposure** (requirement-defender-exposure): the evaluation is run from the enemy's side against the Defender's line. Every uncovered link crossing on the Defender's flank is timed: the perceived enemy's march to it and on to the line's flank end, against the Defender's shift from its reserve rect. A line that can be turned before it can be shifted is penalized. A crossing in front of the line's middle half is not a turning threat; the line faces it.
+   - **Turning exposure** (requirement-defender-exposure): the evaluation is run from the enemy's side against the Defender's line. Every uncovered link crossing on the Defender's flank is timed: the earliest enemy body's march to it and on to the line's flank end, against the Defender's fastest reserve. A line that can be turned before it can be shifted is penalized. A crossing in front of the line's middle half is not a turning threat; the line faces it.
    - **Look requests** for Unknown crossings within the enemy's reach (requirement-crossing-look).
-   - **A reserve released to a threatened crossing** (requirement-defender-crossing-release), the interior-lines answer Lee used at Antietam. The nearest actual Reserve child guards the crossing and stays there while the threat holds.
+   - **A reserve released to a threatened crossing** (requirement-defender-crossing-release), the interior-lines answer Lee used at Antietam. The fastest real Reserve child guards the crossing from its own bank and stays while the threat holds.
 
-   **The fixture (FEAS-SCN-5).** The Defender's three corps stand at depth 0, lateral −300, 0 and +300 (its line, extent ±300), on the own bank of a river at depth [300, 320). A bridge at lateral 0 is covered by the middle corps. Ford F at lateral +700 is uncovered. The enemy (the scenario 4 enemy) stands on the far bank at depth 620, one cluster of 11,000 at lateral +400. Candidates differ by where their Reserve or ReserveLine rect lies. The other scenario 1-3 conventions hold.
+   **The fixture (FEAS-SCN-5).** Stance Defender.
+   - **Own side:** three corps of 11,000 in line at (−300, 200), (0, 200) and (+300, 200), facing +z, and a fourth child of 8,000, a BC10 deployed reserve, at (−500, −100). The middle corps' lead regiment stands at (0, 250), facing the bridge, with `FireRange` 150. The own units' lateral extent is −500 to +300.
+   - **The river:** open on grid depths [300, 320). Bridge B at (0, 310) is covered by that regiment (own-side `Covers`). Ford F at (+1,000, 310) is uncovered (the nearest own regiment is 708 units away), on the flank (lateral 1,000 > +100, the outer quarter's edge) and Clear.
+   - **The enemy:** three Visible bodies on the far bank: 22,000 at (0, 700), and two columns of 5,000 at (±1,000, 420). Their centroid is (0, 612.5), so the projection distance is 412.5 and the half frontage 450 (the three line corps; the deployed reserve is not offered to the layout).
+   - **The rest:** the scenario 1-3 conventions (grass, fresh infantry, courier hours ≈ 0.32 per child, mid commander, June 10:00).
+   - **The candidates** with these inputs (no crest, cavalry fraction 0): PreparedDefense, DelayingDefense, GenericCautious, MeetingEngagement and GenericMethodical.
+   - **The threat at F:** the right column is the earliest body: 110 units of march plus its courier, `enemyAtCrossing` = 0.30 h.
+   - **DelayingDefense** (ForwardScreen → middle, CenterHold → left, ReserveLine (0, 35) → right): the flank end is CenterHold (0, 241), so `enemyAtFlank` = 0.30 + 2.00 = 2.31 h. Its fastest reserve source is the ReserveLine child from (0, 35): `ownShift` = 0.32 + 2.07 = 2.39 h (the deployed reserve needs 3.43). `turn` ≈ 0.09.
+   - **PreparedDefense** (CenterHold → middle, LeftFlank → left, RightFlank (+360, 200) → right; its ReserveLine is empty): the flank end is RightFlank, so `enemyAtFlank` = 0.30 + 1.30 = 1.60 h. Its only reserve source is the deployed reserve, `ownShift` 3.43 h: `turn` = 1, penalty 0.6. A wide line whose only reserve stands at the far rear can be turned at F.
+   - **Without the deployed reserve:** PreparedDefense has no reserve source and falls back to its RightFlank anchor (`ownShift` 1.62, `turn` ≈ 0.02), and it has no Reserve child at all, so no crossing release is possible.
+   - **The release** (DelayingDefense selected): the eligible Reserve children are the ReserveLine child (the right corps, now at (+300, 200): `ownShift_c` = 0.32 + 1.42 = 1.74 h) and the deployed reserve (3.43 h). The right corps is chosen; 0.30 ≤ 1.74 + 0.25, so it is released to `RefuseRight` with its guard point at (1,000, 210), facing F. With the right column at (1,000, 1,500) instead (`enemyAtCrossing` 2.88 h > 1.99), nothing is released.
 
    Nothing in it is offensive. BC13's bounded counterstroke stays the Defender's only attack.
+6. **An entrenched line with an open flank (35,000 against 25,000): turn it.** The scenario 1 armies and conventions, but the enemy's left and centre clusters stand in earth parapets (Visible, `CoverObject` 7, `CoverValue` 0.40, standing), on a held segment from lateral −600 to +150 at depth 600 whose works points the side has perceived. Its left end is anchored on a river (a river column beyond lateral −620); its right end is open, and the right cluster (450, 600) stands in the open beyond it.
+   - **ManeuverAndFix, authored on the right:** the wing strikes the right line end (450, 600), 300 units beyond the open end, so it is not a works assault. The fix, facing the works, pins at the works defence ratio: `Pin` = 23,000 / 3.0 ≈ 7,700 (15,300 on open ground). With scenario 1's `σ` 1.55 and `τ` 1.12, `E` ≈ 9,200 + 0.38 × 10,700 ≈ 13,300 and `odds` ≈ 0.90: `detail` ≈ 0.38, `Risky`. The fix's own exposure counts only the enemy outside works (the open cluster, `N_open` ≈ 9,200): `odds` ≈ 3.8, `detail` 0.
+   - **Every works assault pays the bar of three:** the mirrored side and DoubleEnvelopment's left wing strike (−450, 600) on the works; the single-body plays' main body strikes the enemy anchor on the works with `W` = 1.0 and the whole free enemy against it (`odds` 35,000 / 27,500 ≈ 1.27 against `Bar_j` 3.0): `detail` 1.
+   - **FocalAssault** is `Impossible`, `turn-available`.
+   - **So** the authored ManeuverAndFix (≈ 0.38) is the least-penalized candidate and is selected; its Center holds in front of the works with `FixEnemy` while the wing goes around the open end, and the works hold gate keeps the main effort uncommitted until the wing strikes. FEAS-SCN-6 pins it.
+7. **An anchored entrenched line (51,000 against 25,000).** Three corps of 17,000 at lateral −300, 0 and +300, depth 0; the scenario 1 conventions otherwise. The enemy holds one segment from −600 to +600 at depth 600, both ends anchored (river columns beyond ±620), in earth parapets: bodies of 6,000 at −450, 5,000 at −150, 5,000 at +150 and 7,000 at +450 on the works, and 2,000 at (0, 700) behind them. `N` = 27,500; line extent ±450.
+   - **No turn will do:** every line end lies on the works, so every enveloping body is a works assault; FocalAssault is offered.
+   - **The focal point:** the junction (−300, 600) between the −450 and −150 bodies scores 11,000 × 1.4 / 600 × 0.8 ≈ 20.5 per unit, the lowest (next, the point (−500, 600) at 21.0).
+   - **The assault:** column and support 34,000 against the focal point; the demonstration (17,000) pins 17,000 / 3.0 ≈ 5,700. `L` = 11,000 × 1.1 = 12,100; the enemy's shift from its mass (18, 608) is `τ` ≈ 0.80 h, so within `AssaultHours` 1.0 `shiftShare` = 0.25 and `E` ≈ 14,500: `odds` ≈ 2.34.
+   - **An aggressive commander** (agg01 0.9, caution01 0.1, audacity01 0.9: `Bar` 0.68, willingness 0.85): `Bar_j` 2.04, `detail` 0. FocalAssault is `Feasible` and selected over the whole army's frontal assault (`odds` 1.85, `detail` ≈ 0.36). The column forms at the Turn and goes in after a 0.25 h preparation where batteries reach, the support follows 0.1 h behind it, and the demonstration pins.
+   - **A cautious commander** (agg01 0.2, caution01 0.9, audacity01 0.2: willingness −0.25): FocalAssault is `Impossible`, `declined`. Every other candidate is a works assault with `detail` 1, and whichever wins, the works hold gate keeps the army at `Probe`: he holds.
+   - **A mid commander:** willing (0.25), but `Bar_j` 3.0 gives `detail` ≈ 0.88. A hopeless assault scores low, and if it is still selected the gate holds it.
+   - FEAS-SCN-7 pins all three.
+8. **An entrenched salient (51,000 against 25,000).** Scenario 7's armies and anchored ends, but the works bulge to an apex at (0, 350): the profile runs at depth 600 except within 250 units of lateral 0, where it rises linearly to the apex. Bodies: 7,000 at −450, 6,000 at −200, 3,000 at the apex, 6,000 at +200 and 3,000 at +450.
+   - **The focal point** is the apex: only its own 3,000 stand within 300 of it (the ±200 bodies are 320 units away), so it scores 3,000 × 1.4 / 600 × 0.5 = 3.5 per unit, half the next.
+   - **The assault:** `L` = 3,300; the enemy's mass (−72, 570) is 230 units off, `τ` ≈ 0.59, `shiftShare` ≈ 0.69, `E` ≈ 16,000 and `odds` ≈ 2.12: `detail` 0 for the aggressive commander (`Bar_j` 2.04), selected; 1 for the mid one, held.
+   - FEAS-SCN-8 pins it. The Mule Shoe is the weight (§ 3).
 
 ---
 
@@ -510,16 +571,18 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
   - `TimeBudgetHours = Min(Max(1.5 × (courier + march + HeldCrossingHours × held crossings) + EnvelopmentManeuver.TurnHoldHours, MaxManeuverHours), Max(DaylightHours, EnvelopmentManeuver.TurnHoldHours))`.
   - It is never below today's 1.0 h, except when less daylight than that remains; then the day's end wins.
   - Today's 1.0 h is 500 units of grass for infantry, shorter than many rect anchors' routes (§ 2.2).
-- **requirement-crossing-via** — A body whose chosen route crosses a river carries the chosen crossing to BC11:
-  - **The order:** `ManeuverOrder` and the doctrine order (`CommandDoctrineOrder.ViaX`, `ViaZ`, additive; NaN none) carry the crossing point for the March. The posture pipeline puts it into `BattleOrderIntent` as `via0` (BC10's `ViaCount` = 1). The executor validates it and issues the two-leg `SetWaypoint` exactly as for a road route (BC10 decision 6).
-  - **No road route:** a maneuver March with a crossing via gets no road route on top of it.
+- **requirement-crossing-via** — An enveloping body whose chosen legs cross a river carries each leg's chosen crossing to BC11. There are two vias, one per leg, and each is the leg's first crossing (requirement-route-screen):
+  - **The march via** rides on the March order; **the attack via** rides on the Attack order (anchor → line end, or the outflank point for a DeepRaid). `ManeuverOrder` gains `HasVia`, `ViaX`, `ViaZ` for whichever phase it carries, and the doctrine order (`CommandDoctrineOrder.ViaX`, `ViaZ`, additive; NaN none) passes it on. The posture pipeline puts it into `BattleOrderIntent` as `via0` (BC10's `ViaCount` = 1). The executor validates it and issues the two-leg `SetWaypoint` exactly as for a road route (BC10 decision 6). The Attack task keeps its target, the line end; the via only routes the move to it.
+  - **No road route:** a maneuver March or Attack with a crossing via gets no road route on top of it.
   - **No `AvoidCoveredCrossings`:** the via already avoids the held crossings. That avoids BC10's "a covered-crossing move takes no via points" rule, which would drop it.
-  - **Which leg:** the via rides on the leg it lies on. For a DeepRaid, that is the outflank leg or the anchor leg, whichever the route crosses on.
+  - **Which leg:** for a DeepRaid, the march via is on the outflank leg or the anchor leg, whichever the route crosses on.
   - **BC11's route check:** it plans the march leg as two half-queries (child → via, via → anchor), one per step on its own one-per-step budget. The leg has a result when both halves have one.
-  - **Dropped once crossed:** once the child stands in the via's far region (`RiverRegions.RegionAt`), the March order carries no via, so an order re-issued each step never walks it back to the crossing.
-  - **When the via turns Held:** the assumption monitor fires `crossing-held` (requirement-assumption-monitor).
-  - **Lanes:** the via applies to the child node and its lane nodes (`ManeuverNodeTable`), all of which pass the same crossing.
-  - **Pinned at the March:** the via is latched into `ManeuverState` at the March transition and does not change for that leg. A mirror flip (requirement-selected-side) drops it.
+  - **BC11's river check (`FlankMoveCheck`, `river-on-leg`).** With an attack via, `PlayExecutorRuntime` samples the inward leg as two sub-legs, anchor → via and via → line end, at `InwardStepMeters`. A river sample (id 4) within `RiverRegions.CrossingLinkMeters` (60) of the via is the crossing's own footprint (the requirement-leg-cost rule) and does not count. `InwardLegHitsRiver` is true only when a sub-leg samples open river elsewhere, and only then does BC11 abandon with `river-on-leg`. Without an attack via, today's straight check stands. This is § 15 item 4's BC11 change.
+  - **Dropped once crossed:** once the child stands in a via's far region (`RiverRegions.RegionAt`), the order carries no via, so an order re-issued each step never walks it back to the crossing.
+  - **When a via turns Held:** the assumption monitor fires `crossing-held` for a body not yet in Turn or Attack (requirement-assumption-monitor). After the Turn the wing is committed; the attack via stands.
+  - **Lanes:** a via applies to the child node and its lane nodes (`ManeuverNodeTable`), all of which pass the same crossing.
+  - **Pinned at the March:** both vias are latched into `ManeuverState` at the March transition (`HasVia`/`ViaX`/`ViaZ`, `HasAttackVia`/`AttackViaX`/`AttackViaZ`) and do not change after it. A mirror flip (requirement-selected-side) drops both.
+  - **A main-body member gets no via.** Its strike leg is priced (requirement-held-crossing), not routed: its attack, when the plan's phase orders it, is today's posture order.
 - **requirement-wing-abandon-replan** — BC11's abandons reach the army. `PlayExecutorRuntime` queues the side's abandoned enveloping children (child id and reason) in its own per-side queue. The heavy path drains the queue into `MonitorFacts` on its next run, one tick later, because `DriveTickCycle` runs before `DriveDirectChildCycle`. The monitor reads them as `wing-abandoned` (requirement-assumption-monitor). The ledger keeps its one writer, and no new BC11 abandon reason is added.
 - **requirement-bc13-commitment** — The opportunity layer and the maneuver layer stay mutually exclusive, as BC13 defined it:
   - A child that is itself a live exploit asset is not offered to the hypothetical layout (requirement-hypothetical-layout).
@@ -532,32 +595,44 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
   2. on the top confirm candidates' routes;
   3. for a Defender, within the perceived enemy's reach, earliest enemy arrival first.
 
-  BC9's recon producer gains a target kind `Crossing`, after its stale-entry-point and stale-band targets and inside its existing cap of 4 starts per side per doctrine hour. One cavalry regiment rides to the crossing's stand point (150 units short, BC9's rule), observes and returns. A crossing look never sends a regiment toward a visible enemy at least as strong (BC9's rule). A request expires when the crossing becomes Clear, Watched or Held.
+  BC9's recon producer gains a target kind `Crossing`, after its stale-entry-point and stale-band targets and inside its existing cap of 4 starts per side per doctrine hour. One cavalry regiment rides to the crossing's stand point, 150 units short of it on the own side, observes and returns. BC9 applies that stand-off only to its EntryPoint and RememberedEnemy targets today; the `Crossing` kind adopts it (§ 15). A crossing look never sends a regiment toward a visible enemy at least as strong (BC9's rule). A request expires when the crossing becomes Clear, Watched or Held.
 - **requirement-defender-exposure** — For a Defender, each Defensive or Neutral candidate gets a turning-exposure term from the same graph, run from the enemy's side:
   - **The crossings counted:** every link crossing that is:
-    - not covered by an own regiment, by the own-side form of `CoveredCrossings.Covers` (the regiment's `RotationY` and `FireRange`). A child released to guard that crossing (requirement-defender-crossing-release) and its subtree are left out of this test;
-    - within the enemy's reach, meaning its arrival at the crossing comes before `DaylightHours`;
+    - not covered by an own regiment, by the own-side form of `CoveredCrossings.Covers` (the regiment's `RotationY` and `FireRange`). A child bound to guard that crossing (requirement-defender-crossing-release) and its subtree are left out of this test;
+    - within the enemy's reach, meaning the earliest enemy body's arrival at the crossing comes before `DaylightHours`;
     - on the Defender's flank. In the front-axis frame of the own units (`TacticalFrontAxis`, lateral and depth): its lateral lies in the outer quarter of the own line or beyond it (lateral < `LateralMin + 0.25 × width` or > `LateralMax − 0.25 × width`, `width = LateralMax − LateralMin`), and its depth lies between one frontage behind the own centroid and the enemy anchor. A crossing in front of the line's middle half is a frontal crossing, which the line already faces; one far behind the line is not on the way to a flank.
-  - **Two arrivals per crossing** (both on the threat list, requirement-runtime-wiring):
-    - `enemyAtCrossing`: the shift-time model (requirement-shift-time) from the perceived enemy mass to the crossing;
-    - `enemyAtFlank`: `enemyAtCrossing` plus the crossing's legs to the flank end of the candidate's projected line. The flank end is the outermost projected rect anchor on the crossing's side.
-  - **`ownShift`:** the courier and march time (requirement-courier-time, requirement-march-time, infantry base 1, unfatigued) to the same crossing, from the candidate's Reserve or ReserveLine rect anchor. When that rect is unfilled, from the nearest assigned rect anchor. This is the candidate's own score term; the release uses the actual reserve child (requirement-defender-crossing-release).
+  - **Two arrivals per crossing** (both on the threat list, requirement-runtime-wiring), from the enemy bodies of requirement-enemy-picture:
+    - `enemyAtCrossing`: the earliest arrival at the crossing over the enemy bodies that stand in another region than the own bank's, each by the shift-time model (requirement-shift-time) from the body's centroid, its courier ride priced from there too;
+    - `enemyAtFlank`: `enemyAtCrossing` plus the crossing's legs to the flank end of the candidate's projected line. The flank end is the filled, non-Reserve rect anchor with the outermost lateral on the crossing's side; a tie goes to the smaller depth (the line, not a forward screen).
+  - **`ownShift`:** the fastest of the candidate's reserve sources to reach the crossing, each by requirement-courier-time and requirement-march-time over the path search (requirement-link-legs):
+    - each BC10 deployed reserve (`DirectChildEvidence.DeployedReserve`), from its current position with its own `base` and fatigue. The layout never claims it (requirement-hypothetical-layout), so it is a reserve under every candidate;
+    - each child the candidate assigns to a Reserve or ReserveLine rect, from that rect's anchor, infantry base 1, unfatigued.
+
+    With no reserve source, from the nearest filled rect anchor to the crossing: a line child would have to leave its place.
   - `turn = clamp01((ownShift − enemyAtFlank) / LateHours)`, the worst crossing taken.
   - It enters `penalty` as `(1 − 0.6 × turn)`, in place of the attacker's `contested` term (requirement-penalty).
   - A Defender's verdict is never `Impossible` from this term.
-- **requirement-defender-crossing-release** (D17) — A Defender's allocator gains a fifth reserve release, reason `crossing-threat`. It reads the threat list the ledger writes for the **selected** candidate only (requirement-runtime-wiring).
-  - **Enemy bodies.** An enemy body is a cluster of BC13's requirement-detect-isolated-cluster: the same samples, linked singly at `ClusterLinkMeters` (150), shared and not rebuilt. Each body's arrival at a crossing is the shift-time model (requirement-shift-time) from the body's centroid, not from the mass, so a column heading for a ford is seen as itself. With BC13's opportunity flag off, its detector does not run and the whole perceived mass is the one body.
-  - **The trigger,** per counted crossing of requirement-defender-exposure: the earliest enemy body's arrival at the crossing is ≤ `ownShift_c + ThreatLeadHours` (0.25). `ownShift_c` is measured from the **actual** nearest Reserve child (by distance to the crossing point; ties to the lower index): its courier hours from the army HQ and its march hours from its current position, with its own `base` and fatigue (requirement-courier-time, requirement-march-time). With no Reserve child, no trigger.
-  - **The release.** That child is given role `RefuseLeft` or `RefuseRight` by the crossing's lateral side (task `GuardFlank` for a Defender node, as BC11's flank release), with the crossing's lateral band as its sector override and the crossing point as its guard point (`DirectChildIntent.HasGuardPoint`, `GuardX`, `GuardZ`). The posture producer moves it to the guard point and holds there, facing the far bank. The intent carries the reason, so the `TacticalReserveRelease` row reads `reason=crossing-threat`, not BC11's `flank-threat`. It is applied after the role budgets, as BC11's flank release is, and does not count against the Refuse caps.
-  - **One per crossing,** ordered by the earliest enemy arrival when several crossings trigger in one allocation.
-  - **The latch.** The released child is bound to its crossing in BC13's `ReserveReleaseState` (`Record(childId, hours)`, with the crossing index). It stays released while the threat holds: the earliest body's arrival at that crossing ≤ `ownShiftAtRelease + ThreatLeadHours + ThreatHoldMarginHours` (0.25), with `ownShiftAtRelease` latched at the release. The guard's own cover does not end the threat, because the guard is left out of the cover test (requirement-defender-exposure). When the threat stops (the arrival recedes past that bound, or no body is perceived), the child reverts to Reserve on the next allocation. A plan change, a new battle day and a stand-down clear the binding, as BC13's state is cleared.
-  - **The floor.** It respects BC13's reserve floor (it is not a crisis), in the same `ReserveReleaseState` as BC13's stagger: `R0` (`InitialReserves`) is set when the first of the exploit, odds or crossing triggers holds, if it is not set yet. A crossing release does not move `LastReleaseHours`, so it does not consume the stagger's interval. BC13's exploit and odds releases are "the stagger" of § 9's order.
-  - Absent BC13's staggered release (flag off), it releases one child per crossing without a floor, with the same latch.
+- **requirement-defender-crossing-release** (D17) — A Defender's allocator gains a reserve release with reason `crossing-threat`. It reads the threat list the ledger writes for the **selected** candidate only (requirement-runtime-wiring), and it chooses among the side's real Reserve children, never among template rects.
+  - **Its place in the shipped order** (`DirectChildAllocator.ReleaseReserves`): crisis and stagger (`StaggeredRelease`, or today's per-child loop with the staggered flag off), then BC11's flank release (`ReleaseReserveToThreatenedWing`), **then the crossing release** (`ReleaseReserveToCrossings`), appended last. A crisis is contact now and goes first (defence first); BC11's flank release answers a wing already in contact; a crossing threat is a predicted one, with the enemy not yet across, so it takes what the two contact releases leave. Appending it changes none of the shipped releases, so the BC11 and BC13 allocator tests stay green. The stagger runs first and may take a reserve in an Exploit phase or with the odds reached; a Defender at that point is committing its reserves anyway, and the floor below still holds.
+  - **Who may go.** A child whose role is `Reserve` when the crossing release runs: a BC10 deployed reserve, a child on a Reserve or ReserveLine rect, or one the allocator left in reserve. Never one that is a live BC13 exploit asset (`ReserveReleaseContext.Exploiting`), and never one with player-owned strength in its subtree (`ReserveReleaseContext.PlayerOwned`, from BC3's ownership): the W&L player's command is not released.
+  - **Travel time is BC14's own.** The ledger computes `ownShift_c` on the heavy path for every direct child with no player-owned strength and every counted crossing: courier hours from the army HQ (requirement-courier-time) plus march hours from the child's current position with its own `base` and fatigue (requirement-march-time), over the path search (requirement-link-legs). These are the functions `T` uses. It writes them into the threat list (`OwnShiftByChild`); the allocator only compares, with no grid and no snapshot.
+  - **The trigger,** per counted crossing: among the eligible Reserve children, the one with the least `ownShift_c` (ties to the lower index) is chosen, and it is released when `enemyAtCrossing` ≤ `ownShift_c + ThreatLeadHours` (0.25). With no eligible Reserve child, no release (for example PreparedDefense with three corps and no deployed reserve: every child holds a line rect).
+  - **An enemy already across** (the earliest body stands in the own bank's region) is not a crossing threat: it is contact, and BC13's crisis release answers it (a sector in contact and outmatched draws the nearest reserve). No new crossing release is made toward that crossing; a guard already bound there stays bound (its arrival test below holds at 0).
+  - **The release.** The child gets role `RefuseLeft` or `RefuseRight` by the crossing's lateral side (task `GuardFlank` for a Defender node, as BC11's flank release), the crossing's lateral band as its sector override, and a guard point (`DirectChildIntent.HasGuardPoint`, `GuardX`, `GuardZ`, `GuardHeading`):
+    - **where:** `GuardStandOffMeters` = 100 behind the crossing along the own front axis (the crossing point minus 100 × forward). When that point is not land of the crossing's own-bank region (its linked region that holds the own centroid, or else the one whose nearest land cell is nearest to it), it snaps to that region's nearest land cell, by TARGET-SNAP's rule;
+    - **facing:** toward the crossing point;
+    - the posture producer moves the child there and holds. The intent carries the reason, so the `TacticalReserveRelease` row reads `reason=crossing-threat`, not BC11's `flank-threat`. It does not count against the Refuse caps, as BC11's flank release does not.
+  - **One per crossing,** crossings taken in order of the earliest `enemyAtCrossing`.
+  - **The floor.** A crossing release never leaves the held reserves (Reserve role, not exploiting) below `FloorOf(R0x, floorShare)`, BC13's floor with the army commander's caution and casualty tolerance, where `R0x` = the Reserve children before the crossing release plus the children already bound to a crossing. `R0x` is recomputed each allocation and stays stable while the bindings hold; it touches neither BC13's `InitialReserves` nor `LastReleaseHours`, so the stagger's R0 and interval are untouched. With `R0x` = 1 the single reserve may go (BC13's rule). The floor applies with BC13's staggered flag on or off.
+  - **The binding.** `ReserveReleaseState` gains a crossing binding per released child, `CrossingBinding { ChildId, Link, OwnShiftAtRelease, ReleasedAtHours }`, in a pooled table of `MaxCrossingGuards` = 8, separate from the stagger's map (BC13's `ClearTrigger` does not touch it). While bound, the child keeps its role and guard point as long as the threat holds: `enemyAtCrossing` ≤ `OwnShiftAtRelease + ThreatLeadHours + ThreatHoldMarginHours` (0.25). The guard's own cover does not end the threat, because the guard is left out of the cover test (requirement-defender-exposure). The binding ends when the threat stops (the arrival recedes past that bound, or no enemy body is perceived), when the child is gone, becomes an exploit asset or holds player-owned strength, and on a plan change, a new battle day and a stand-down (§ 9). The child then reverts to Reserve on the next allocation.
+  - **The state's scope.** `ReserveReleaseState` becomes one instance per alliance (`ReserveReleaseState.ForAlliance(int)`, the `ExploitTable.ForAlliance` precedent), registered with `BattleScope` from its static constructor, and `ArmyOrchestrator` uses its alliance's instance. `ReplanForNewBattleDay` clears it before it replans, whether or not a plan is picked; `Replan` and `BattleCoreTick.StandDown` clear it as today. The release context carries the state, the exploit and player-owned flags and the threats whenever BC13's staggered flag or BC14's flag is on; `ReserveReleaseContext.Staggered` becomes its own flag instead of `State != null` (§ 15 item 6).
 
 - **requirement-runtime-wiring** — Runtime details the plan must follow:
   - **Files.** Pure:
-    - `Tactical/Battle/RiverRegions.cs` and `CrossingWatch.cs`;
-    - `Tactical/Orchestrator/Plays/ManeuverFeasibility.cs` (the evaluation, the monitor and the types of § 8) and `FeasibilityLedger.cs`.
+    - `Tactical/Battle/RiverRegions.cs` (the regions and the link table), `CrossingWatch.cs`, `EnemySamples.cs` (the extracted sample filter) and `SingleLinkClusters.cs` (the extracted labelling);
+    - `Tactical/Orchestrator/Plays/ManeuverFeasibility.cs` (the evaluation, the monitor and the types of § 8), `FeasibilityLedger.cs` and `LegCostCache.cs` (requirement-link-legs).
+
+    These pure files, with the two runtime files below, are **the BC14 file set** the source pins read (MARCH-RULES-PIN, FEAS-PIN).
 
     Runtime:
     - `Tactical/Battle/RiverRegionsRuntime.cs` (stepped from `TerrainPictureRuntime.Step`);
@@ -567,7 +642,7 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
   - **Order within the coordinator tick** (`DriveTacticalCommanderSide`):
     1. the pick inputs: `ArmyPostureInputsRuntime.Refresh` is split. `RefreshPickInputs` (stance, live initiative, reinforcement opportunity) runs first, here and in `AttachArmyIfActive` before `PickInitialPlan`. `RefreshPostureCaches` (AI pool, leaf map, which read this tick's intents) stays where `Refresh` runs today;
     2. the crossing probes and classification;
-    3. the evaluation, when `now − EvaluatedHours ≥ EvaluateIntervalHours` (a cheap compare every tick; forced before the initial pick and the night replan);
+    3. the evaluation: the next slice of a running evaluation, or a new one when the last was published and `now − EvaluatedHours ≥ EvaluateIntervalHours` (a cheap compare every tick; forced to completion before the initial pick and the night replan);
     4. the monitor, on a new snapshot generation;
     5. `MaybeReplan`.
   - **The pure seam for the stance fix:** `TacticalBattleCoordinator.PickInitialPlanInOrder(army, refreshPickInputs, evaluate, evidence)`, in the partial the harness compiles (where `ReplanForNewBattleDay` lives), is the one place the order is written. FEAS-STANCE-INITIAL drives it with a recording fake.
@@ -581,7 +656,62 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
   - **Per-child values:** the ledger keeps a pooled per-child table for the selected candidate and side, refreshed at each evaluation: child id → planned release, time budget, via, predicted arrival (`S* − DeployHours`). It covers every fixing member and every enveloping child. `TryPlannedRelease` reads it. BC11 latches the predicted arrival with the via and budget at the March, for the `TacticalEnvelopment` row.
   - **The fix's hold spec:** `CorpsAssignment` gains `TemplateEnvelops` (set by `PlayCorpsAssignment`). `ManeuverOf` returns a start-delay spec with `HoldsForRelease` for the Center and Demonstration rects when it is set. `StepStartDelay` tests `HoldsForRelease` before its offset gate, so a zero offset does not reset the latch. The exemptions (a fix in contact, a deployed reserve, no ledger entry) are resolved in `PlayExecutorRuntime.BuildInput` by leaving `HasPlannedRelease` false: the fix is released at once, today's behaviour.
   - **The mirrored fallback's frame:** a `ProjectedMirrored` spec also carries the authored anchor. BC11's one mirrored try for such a spec goes to that stored anchor, not to `MirrorAcrossAxis`, because the two frames (projection and front axis) need not coincide.
-  - **Crossing threats:** the Defender evaluation writes a pooled threat list for the selected candidate only, one entry per counted crossing: link index, crossing point, lateral side, `enemyAtCrossing` and `enemyAtFlank` (from the mass; the exposure term), `earliestBodyAtCrossing` (from BC13's clusters; the release trigger), and the candidate's rect `ownShift`. `ArmyOrchestrator` reads it through the pushed lookup when it builds `ReserveReleaseContext.CrossingThreats`. The allocator computes `ownShift_c` from the actual nearest Reserve child (requirement-defender-crossing-release) with the `MarchRules` the context carries, and writes the guard point on the `DirectChildIntent`. The posture producer reads `HasGuardPoint` as the `GuardFlank` target in place of the sector's flank point.
+  - **Crossing threats:** the Defender evaluation writes a pooled threat list for the selected candidate only, one entry per counted crossing: link index, crossing point, lateral side, own-bank region, the guard point and heading, `enemyAtCrossing` and `enemyAtFlank`, the candidate's `ownShift`, and `OwnShiftByChild` (one value per direct child, NaN for a child with player-owned strength). `ArmyOrchestrator` reads it through the pushed lookup when it builds `ReserveReleaseContext.CrossingThreats`. The allocator compares and writes the guard point on the `DirectChildIntent`; the posture producer reads `HasGuardPoint` as the `GuardFlank` target and heading in place of the sector's flank point.
+---
+
+## 7A. (F) Enemy works: turn them first, assault a focal point only when no turn will do
+
+The same flag, evaluation and selection serve entrenched enemies (integrator scope addition, 2026-10-16, from the user's question). The user's intent: go around the works when that is feasible, leaving a division or brigade in front so the enemy cannot shift; when going around is not feasible, charge a focal point of the works. Vanilla routes its marches around the field of fire in front of covered enemies and weights covered enemies in its hotspot map, and that is all (§ 2.1 item 8).
+
+- **requirement-works-picture** — The enemy's works as the side perceives them, built once per evaluation from two fog-honest sources:
+  - **Works samples:** enemy samples (`EnemySamples.Accepts`) whose fields last seen while Visible (BC10's `EnemyObservation.CoverValue`, `CoverObject`, `Standing`) show `Standing`, `CoverValue` > 0.15 (vanilla's own threshold at 7962, `CoveredCrossings.MinCoverValue`) and `CoverObject` in `WorksCoverIds` = {2 stone wall, 4 embankment, 7 earth parapet, 8 reinforced parapet, 9 parapet and abatis, 10 parapet and obstacles, 11 breastworks, 15 sunken road, 16 unfinished railroad} (`GetCoverIDFromName`, the `battleprefs` cover list). Forest (3), creek (5), road (6), fence (1) and buildings (12-14) are not works: BC12's `TerrainStrength` already prices woods and towns.
+  - **Works points:** the points of vanilla's fortification groups (`BattlefieldSetup.Fortification`, read once per battle by the runtime, as the crossing list is). A point counts once the side has perceived it (`IPerceivedGround.IsPerceived`), and stays known for the battle: works do not move. Probes: at most `MaxWorksProbesPerTick` = 16 per side, oldest first, in the same handle, scope and slice as the crossing probes.
+  - **No hidden unit is read.** An enemy regiment that is not a sample contributes nothing; a works point not yet perceived contributes nothing.
+- **requirement-works-shape** — The perceived works become segments with ends and focal points, in the enemy's front frame (`TacticalFrontAxis`, lateral and depth):
+  - **Segments:** works samples and works points sorted by lateral; neighbours within `WorksGapMeters` = 150 laterally join one segment. A segment carries its lateral extent, its depth profile (the points in lateral order), and its **holders**: the works samples in it, with their strength (Visible full, Remembered × confidence), morale and cover. A segment with no holder is empty works: it shapes the picture but is not **held**.
+  - **On a segment:** a point lies on a segment when its lateral is within the segment's extent ± `WorksEndMeters` (50) and its depth within 100 of the profile there.
+  - **Ends:** each end of a held segment is **anchored** when `TacticalTerrainLinePlanner.FlankAnchored` reports it anchored outward along the front axis, or another held segment begins within `WorksGapMeters` beyond it; otherwise it is **open**.
+  - **Salients:** a profile point that stands at least `SalientDepthMeters` = 150 nearer the own side than the chord between the profile points 300 units either side of it is a salient apex.
+  - **Junctions:** the midpoint between two adjacent enemy bodies (requirement-enemy-picture's single-link clusters, here built in the Attacker run too when works exist) whose centroids both lie on held works. It stands for the seam between two commands: Whiskey sees regiments, not their chain, so two separate bodies are the honest stand-in.
+  - **Focal points:** every profile point of a held segment every `FocalSampleMeters` = 50, every salient apex and every junction. Each scores `Σ holders within OddsRadiusMeters (strength × morale × (1 + cover)) / (works frontage within ±300 laterally) × shape`, with `shape` = `SalientFactor` 0.5 at an apex (the Mule Shoe: the defenders of a salient are hit from three sides and their supports must cross its base), `JunctionFactor` 0.8 at a junction, 1 elsewhere. The lowest score is the chosen focal point; a tie goes to the point nearer the own centroid, then the lower lateral.
+- **requirement-works-pricing** — Assaulting held works takes about three times the odds:
+  - **Who assaults works:** an enveloping body whose strike point lies on a held segment; the main body of a single-body plan whose strike point (the enemy anchor) lies on one; the assault body of a focal assault (requirement-focal-assault).
+  - **Its bar:** `Bar_j = WorksOddsFactor × Bar`, `WorksOddsFactor` = 3.0: the rule of thumb of about three to one at the point of attack (§ 3). Its detail term (requirement-detail-risk) runs against that bar.
+  - **A single-body plan** that assaults works gets the detail term too, with no other body: its window is `W_j = AssaultHours` = 1.0, the time a break must be made in before the defender's shift closes it, and `Pin` is 0.
+  - **The defence ratio:** a body whose strike point lies on held works pins enemy at `DefenseRatio_k ≥ WorksDefenseRatio` = 3.0.
+  - **A body whose strike lands beyond an open end, or on a flank or the rear of the works** (its strike point on no held segment), is priced exactly as on open ground. That is the turn's advantage, and it emerges: nothing scores the turn as such.
+  - The reason literal is `works` when a works-assaulting body's detail is the largest term.
+- **requirement-turn-first** — In a plan with an enveloping body or a focal assault, a fixing member whose strike point lies on held works **holds, it does not assault**:
+  - **It is not a works assault:** its bar stays `Bar`, and it pays no works term.
+  - **Its exposure:** an enemy holding works gives up their value to come out, so the enemy against such a fixing body counts only the perceived enemy **outside** works: `E_j = L_j^open + shiftShare_j × max(0, N_open − Pin_j − L_j^open)`, with `N_open = N × P_open / P`. It still pins at the works defence ratio, which is why a turn against works is harder than on open ground.
+  - **Its task:** the zone assignment gives it the Fix role's `FixEnemy` at its anchor, as today; BC14 creates no `AttackObjective` for it, and the phase gate below holds the plan's assault until the turn has struck.
+  - This is the user's "a brigade or division in front, the main body around the edges"; Sherman against Johnston in 1864 is the weight (§ 3).
+- **requirement-works-hold** — The phase gate. `TacticalPhaseProgressionDoctrine.Input` gains `WorksHold`, computed from the selected plan's ledger entry each heavy tick (false with the flag off). It is true while:
+  - the selected plan's assaulting body (a single-body plan's main body, an enveloping body or a focal assault's assault body) faces held works and its detail term is at least `RiskyPenalty`; or
+  - the plan has an enveloping body that faces no held works and has not yet reached BC11's Attack phase, and its fixing members face held works (the turn has not struck).
+
+  While `WorksHold` is true, the recommendation stays at `Probe`, past the probe budget too: the army closes, fixes and probes, and does not commit its main effort against the works. When it turns false, the shipped rules apply. A hopeless assault therefore holds, whatever plan won the selection.
+- **requirement-focal-assault** — A new offensive playbook, `FocalAssault` (`BattlePlanId.FocalAssault`, appended last to the catalog), offered only when no turn will do:
+  - **Precondition (before the jitter draw):** `PlaybookContext.Feasibility` is set and the ledger has a focal point. With the flag off, or with no held works, it is never offered and the jitter stream is unchanged.
+  - **Feasibility (after the jitter draw, as every candidate's):** `Impossible`, reason `turn-available`, when any other enveloping candidate has a verdict other than `Impossible`, no `after-dark` body, and every enveloping body's strike point off held works. That is, a turn is feasible: both ends anchored, a river, no route or no daylight are what leave it unavailable. `Impossible`, reason `declined`, when the army commander's willingness `0.5 × agg01 + 0.5 × audacity01 − 0.5 × caution01` is below `FocalWillingness` = 0.2: a cautious commander declines, and the works hold (requirement-works-hold) keeps his army probing. Otherwise its penalty is the model's, so a hopeless assault scores low and, if it still wins, is held by the gate.
+  - **Personality:** `PersonalityFit(aggression: 0.6, caution: −0.6, audacity: 0.5)`, `TerrainPreference(open: 0.6, wooded: 0.5, river: 0.4, mountain: 0.4)`, `OddsRange(min: 1.2, max: 4.0)`, reserve commit trigger 1.2: Grant at Spotsylvania and Upton, not Burnside's schedule.
+  - **Its template** (`PlayTemplateCatalog`, projected toward the focal point instead of the enemy anchor; centred, so never mirrored): `AssaultColumn` (0, +0.6, priority 10), `AssaultSupport` (0, +0.45, priority 9), `Demonstration` (−0.7, +0.5, priority 7) and (+0.7, +0.5, priority 7), `Reserve` (0, −0.3, priority 5). The column and the support form one **assault body** striking the focal point; the demonstrations are the main body and pin.
+  - **Its bodies** are priced like any other: the assault body by requirement-works-pricing, the demonstrations by requirement-turn-first.
+- **requirement-focal-execution** — The assault runs through BC11's maneuver path and the executor, with no new writer:
+  - **The column:** the `AssaultColumn` child is a BC11 maneuver (`ManeuverSpec` kind `AssaultColumn`), timed and watched like an enveloping body (synchronized release, time budget, vias, the assumption monitor): Hold until its synchronized release (requirement-synchronized-release), March to its rect anchor (the form-up point, outside the works' fire), Turn, then Attack on the focal point. At the Turn its `ManeuverOrder` carries `Formation = March Column` (the formation BC10's road route issues; BC16 records it as `assault-column`), which the posture pipeline submits as a formation intent and the executor issues through `SetGroupFormation`; the Attack moves by waypoint. BC11's `anchored-high-ground` check is skipped for this kind: the works are the target and the model has priced them.
+  - **The support:** the `AssaultSupport` child holds through the start-delay path (`HoldsForRelease`) until the column's strike plus `EchelonDelayHours` = 0.1, then is released to `SupportMain` behind the column, to exploit a break: Upton's breach failed for want of it (§ 3).
+  - **The demonstrations** hold their anchors (`Screen`), released with the column so the pin lands with the assault.
+  - **The focal point is latched** into the column's `ManeuverState` at its March, with its vias; until then each evaluation's focal point applies. A plan change drops it.
+  - **Artillery preparation:** while the column holds, the doctrine order of the focal assault's children carries `PreparationX/Z` = the focal point. The artillery doctrine (`DoctrineConsumerDecisions.DecideArtillery`) treats it as requested support at that point for each of the side's batteries already within its fire range of it, and bombards (vanilla picks the target in range). When at least one battery is in range, the column's release is no earlier than the plan's activation plus `PreparationHours` = 0.25; with none, there is no preparation and no wait.
+  - **Never the player's:** a child with player-owned strength is not offered to the layout (requirement-player-share), so no part of the assault, its formation or its preparation reaches the W&L player's command, and the player decides nothing in it.
+- **requirement-defender-works-reserve** — A Defender whose own line holds works keeps a reserve behind its most threatened focal point:
+  - **Its own works:** the same shape functions over its own regiments (their `CoverValue` and `CoverObject`, standing; own data, no fog) and its own fortification points.
+  - **The most threatened focal point:** among its own focal points (requirement-works-shape), the one with the earliest enemy-body arrival (the shift-time model, as `enemyAtCrossing`), within `FocalThreatHours` = 1.0; a tie goes to the larger perceived enemy strength within `OddsRadiusMeters` of it.
+  - **The station:** the eligible Reserve child (as requirement-defender-crossing-release: not exploiting, no player-owned strength) with the least shift time to the station is given a guard point `ReserveStationMeters` = 150 behind that focal point along the own front axis, snapped to own land, facing it, with role `Reserve` and task `ReserveWait`. It is a station, not a release: the floor does not apply, and the role stays `Reserve` for every later release.
+  - **Hysteresis:** the station moves to a new focal point only when that point's arrival is earlier by `StationSwitchHours` = 0.25.
+  - **Order:** after the crossing release, among the children still `Reserve`. One child is stationed per side.
+  - **The ledger computes it** (focal points, arrivals and `OwnShiftByChild` to each station) and the allocator compares, as for the crossing release.
+
 ---
 
 ## 8. Interfaces (pure unless marked runtime)
@@ -594,7 +724,17 @@ namespace WhiskeyRealism.Tactical.Battle {
     public int RegionAt(float x, float z);                             // -1 on open river or outside the map
     public int LinkCrossing(int link, out float x, out float z, out int gridCrossingIndex, out int crossingId);   // ford 5 / bridge 6
     public int RegionsOfLink(int link, Span<int> regions);
-    public bool Step(TerrainPicture picture, BattleTerrainGrid grid, long deadlineTicks, Func<long> clock);   // true when Ready
+    public bool Step(TerrainPicture picture, BattleTerrainGrid grid, long deadlineTicks, Func<long> clock);   // true when Ready (regions, then the link table)
+    public const int MaxRoutedLinks = 64;
+    public bool IsRouted(int link);
+    public float LinkLegCost(int linkA, int linkB);                    // cost units (speed-independent); NaN when the two share no region
+  }
+  public static class EnemySamples {                                   // BC13's requirement-enemy-samples, extracted; BC13's three inline copies call it
+    public const float RememberedMinConfidence = 0.5f;
+    public static bool Accepts(in EnemyObservation o);
+  }
+  public sealed class SingleLinkClusters {                             // extracted from OpeningDetector.ClusterPass; pooled scratch, grown at first use
+    public int Label(ReadOnlySpan<float> xs, ReadOnlySpan<float> zs, int count, float linkMeters, Span<int> labels);   // returns the cluster count
   }
   public enum CrossingState : byte { Unknown = 0, Clear = 1, Watched = 2, Held = 3 }
   public sealed class CrossingWatch {                                  // per side, BattleScope
@@ -617,7 +757,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
   public struct BodyEstimate {
     public int Body, ChildCount; public string ChildId; public bool Envelops, Main; public PlayRectKind Kind;
     public float Strength, Morale, TargetX, TargetZ;
-    public float RouteCost; public bool RouteEstimated, RouteConfirmed; public int CrossingLink; public CrossingState Crossing;
+    public float RouteCost; public bool RouteEstimated, RouteConfirmed;
+    public int MarchVia, AttackVia; public CrossingState MarchCrossing, AttackCrossing;   // link indexes, -1 none
+    public float InwardSurplusHours, StrikeContested;   // StrikeContested: the main-body strike legs' weighted value
     public float CourierHours, MarchHours, StrikeHours, DesiredStrikeHours, ReleaseHours, OffsetHours;
     public float EnemyShiftHours, ExposureWindowHours, LocalEnemy, EnemyAgainst, Pin, IsolatedOdds;
     public float Daylight, Detail, Contested, Approach, Exposure, Turn, Penalty, OwnRatio;   // OwnRatio: 1 for an enveloping body, BaseDefenseRatio + TerrainStrength for the main body
@@ -634,25 +776,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
     public ReadOnlySpan<BodyEstimate> Bodies(in CandidateResult r);
     public double EvaluatedHours { get; }
     public int LookRequests(Span<float> xs, Span<float> zs);           // requirement-crossing-look
-    public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ);
+    public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
+      out float attackViaX, out float attackViaZ);   // NaN vias: none
+    public int ThreatCount { get; }                                   // the selected Defender candidate's counted crossings
+    public bool TryThreat(int index, out CrossingThreat threat, Span<float> ownShiftByChild);   // NaN: a child with player-owned strength
+    public int LegOverflow { get; }
   }
+  public interface IExploitLookup { bool IsExploiting(int instanceId); }   // new BC14 seam; runtime adapter over ExploitTable.ForAlliance(a)
+  public sealed class LegCostCache {                                   // per side, pooled; cleared when an evaluation starts
+    public const int MaxLegCache = 4096;
+    public bool TryGet(int bucketKey, int otherKey, out float cost); public void Put(int bucketKey, int otherKey, float cost); public int Overflow { get; }
+  }
+  public sealed class FeasibilityJob { public bool Running { get; } public int NextCandidate { get; } }   // the resumable evaluation, double-buffered into the ledger
   public struct FeasibilityInput {                                     // one evaluation; pooled arrays
     public BattleSnapshot Snapshot; public TacticalFrontAxis Axis; public BattleStance Stance;
     public BattleTerrainGrid Grid; public TerrainPicture Picture; public RiverRegions Regions; public CrossingWatch Crossings;
     public MarchRules Rules; public OpportunityPersonality Army;        // BC13's struct: Agg01, Caution01, Audacity01
     public float EnemyEstimate, Confidence; public TacticalIntentModel EnemyIntent;   // ArmyIntentInference.Build's result: intent and confidence
     public double NowHours, DaylightHours; public BattlePlanId CurrentPlan; public bool HasPlan;
-    public IExploitLookup Exploits;                                    // BC13 ExploitTable.IsExploiting
+    public IExploitLookup Exploits;                                    // new BC14 seam over BC13's ExploitTable.ForAlliance(a).IsExploiting(int)
     public IConfirmedLegs Legs;                                        // NavMesh results by (origin bucket, target bucket, crossing)
+    public bool[] DeployedReserve;                                     // per direct child: BC10's DirectChildEvidence.DeployedReserve
+    public LegCostCache Cache; public SingleLinkClusters Clusters;
   }
   public interface IConfirmedLegs { bool TryGet(float x0, float z0, float x1, float z1, int crossing, out float cost, out bool noPath); void Request(float x0, float z0, float x1, float z1, int crossing); }
   public static class ManeuverFeasibility {
     public const float LegStepMeters = 10f, HeldCrossingHours = 1.0f,
       DaylightMarginHours = 0.25f, LateHours = 1.0f, DetailSlope = 0.25f, RiskyPenalty = 0.35f, ReasonThreshold = 0.2f,
       AnchoredEndPenalty = 0.5f, PassiveShiftFactor = 1.5f, BaseDefenseRatio = 1.5f, FeasibilityWeight = 0.4f,
-      ReplanPenaltyMargin = 0.3f, ReplanScoreMargin = 0.1f, ThreatLeadHours = 0.25f, ThreatHoldMarginHours = 0.25f, ConfirmCacheHours = 0.25f;
-    public const int ConfirmCandidates = 3, ConfirmQueriesPerTick = 1, MaxLookRequests = 2, MaxBodies = 6;
-    public static void Evaluate(in FeasibilityInput input, FeasibilityLedger into);              // every stance-eligible candidate
+      ReplanPenaltyMargin = 0.3f, ReplanScoreMargin = 0.1f, ThreatLeadHours = 0.25f, ThreatHoldMarginHours = 0.25f, ConfirmCacheHours = 0.25f,
+      StrikeLegWeight = 0.5f, GuardStandOffMeters = 100f, EvaluateSliceMs = 1.5f;
+    public const int ConfirmCandidates = 3, ConfirmQueriesPerTick = 1, MaxLookRequests = 2, MaxBodies = 6, MaxEnemyBodies = 16;
+    public static void Evaluate(in FeasibilityInput input, FeasibilityLedger into);              // every stance-eligible candidate, to completion (forced)
+    public static bool EvaluateSlice(in FeasibilityInput input, FeasibilityJob job, FeasibilityLedger into, long deadlineTicks, Func<long> clock);   // true when published
     public static void EvaluateSelected(in FeasibilityInput input, FeasibilityLedger into);      // the monitor: the selected plan only
     public static float Bar(in OpportunityPersonality p);
     public static float FogPremium(float confidence, float caution01);
@@ -663,6 +819,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
     public static bool TryBrokenAssumption(in CandidateResult atSelection, in CandidateResult now, ReadOnlySpan<BodyEstimate> before,
       ReadOnlySpan<BodyEstimate> after, in MonitorFacts facts, out string reason);   // reasons in the order of requirement-assumption-monitor
   }
+  public static class WorksRules {
+    public const float WorksGapMeters = 150f, WorksEndMeters = 50f, SalientDepthMeters = 150f, FocalSampleMeters = 50f,
+      SalientFactor = 0.5f, JunctionFactor = 0.8f, WorksOddsFactor = 3.0f, WorksDefenseRatio = 3.0f, AssaultHours = 1.0f,
+      FocalWillingness = 0.2f, PreparationHours = 0.25f, EchelonDelayHours = 0.1f, ReserveStationMeters = 150f,
+      FocalThreatHours = 1.0f, StationSwitchHours = 0.25f;
+    public const int MaxWorksProbesPerTick = 16, MaxSegments = 32, MaxFocalPoints = 256;
+    public static bool IsWorksCover(int coverObject);                  // {2, 4, 7, 8, 9, 10, 11, 15, 16}
+    public static float Willingness(in OpportunityPersonality p);
+  }
+  public struct WorksSegment { public float LateralMin, LateralMax; public int ProfileStart, ProfileCount; public float HeldStrength, MeanCover, MeanMorale; public bool Held, MinEndAnchored, MaxEndAnchored; }
+  public enum FocalKind : byte { Point = 0, Salient = 1, Junction = 2 }
+  public struct FocalPoint { public float X, Z, Score; public FocalKind Kind; public int Segment; }
+  public sealed class WorksPicture {                                   // per side, rebuilt per evaluation into pooled arrays; the enemy's or (Defender) the own works
+    public int SegmentCount { get; } public ref readonly WorksSegment Segment(int i);
+    public bool OnHeldWorks(float x, float z, out int segment);
+    public bool TryFocal(out FocalPoint best);                         // the lowest score
+    public void BuildEnemy(BattleSnapshot s, in TacticalFrontAxis axis, ReadOnlySpan<int> enemyBodyLabels, IFortificationPoints points, TerrainPicture picture);
+    public void BuildOwn(BattleSnapshot s, in TacticalFrontAxis axis, IFortificationPoints points, TerrainPicture picture);
+  }
+  public interface IFortificationPoints { int Count { get; } void Get(int i, out float x, out float z); bool Perceived(int i); }   // runtime: BattlefieldSetup.Fortification groups' points with the side's probe stamps
   public struct MonitorFacts {                                         // per selected plan; pooled arrays indexed like the bodies
     public double SelectedAtHours, NowHours; public ManeuverPhase[] Phase; public int[] CrossingStart, CrossingCount; public bool[] CrossingPassed;   // per crossing on each body's route
     public double[] PlannedReleaseHours;
@@ -673,12 +849,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
 // PlaybookContext.Feasibility (IFeasibilityLookup, null = off); TacticalPlaybookCatalog.Select: Impossible skipped after the jitter and crest draws, − FeasibilityWeight × penalty;
 //   Select reports its candidates (ranked, with the feasibility term) into a pooled SelectionReport for the TacticalPlanSelection row.
 // ReplanTrigger.ManeuverAssumptionBroken (appended); ReplanTriggerInput.AssumptionReason (static literal, null none).
-// ManeuverInput.HasPlannedRelease/PlannedReleaseHours, HasTimeBudget/TimeBudgetHours; ManeuverState.HasFirstPlannedRelease/FirstPlannedReleaseHours, HasBudget/BudgetHours, HasVia/ViaX/ViaZ (latched); ManeuverSpec.ProjectedMirrored, HoldsForRelease;
-//   ManeuverOrder.ViaX, ViaZ; CommandDoctrineOrder.ViaX, ViaZ (NaN none); ManeuverNodeEntry via; the fix's planned release reaches StepStartDelay through a start-delay ManeuverSpec;
-// BattleRecon target kind Crossing; DirectChildAllocator release reason crossing-threat (ReserveReleaseContext.CrossingThreats: pooled CrossingThreat
-//   { int Link; float X, Z; bool Left; float EnemyAtCrossing, EnemyAtFlank, EarliestBodyAtCrossing, RectOwnShift; } plus the MarchRules);
-//   DirectChildIntent.HasGuardPoint/GuardX/GuardZ and its release reason; ReserveReleaseState binds a released child to its crossing with OwnShiftAtRelease.
-// EnemyPicture (samples, P, N, m_E, mass, L_j, BC13 cluster bodies) and CrossingGraphView (regions, links, states, own-side covers) are the evaluation's pooled internal views.
+// ManeuverInput.HasPlannedRelease/PlannedReleaseHours, HasTimeBudget/TimeBudgetHours, HasVia/ViaX/ViaZ, HasAttackVia/AttackViaX/AttackViaZ;
+//   ManeuverState.HasFirstPlannedRelease/FirstPlannedReleaseHours, HasBudget/BudgetHours, HasVia/ViaX/ViaZ, HasAttackVia/AttackViaX/AttackViaZ (latched at the March); ManeuverSpec.ProjectedMirrored, HoldsForRelease;
+//   ManeuverOrder.HasVia/ViaX/ViaZ (the March's or the Attack's via); CommandDoctrineOrder.ViaX, ViaZ (NaN none); ManeuverNodeEntry via; the fix's planned release reaches StepStartDelay through a start-delay ManeuverSpec;
+//   PlayExecutorRuntime samples the inward leg as anchor→attack via→line end, the via's 60-unit footprint excluded (EnvelopmentManeuver.InwardLegClear unchanged; its input changes);
+// BattleRecon target kind Crossing (150-unit stand-off on the own side); DirectChildAllocator.ReleaseReserveToCrossings after ReleaseReserveToThreatenedWing, reason crossing-threat.
+// public struct CrossingThreat { int Link; float X, Z; bool Left; int OwnBankRegion; float GuardX, GuardZ, GuardHeading; float EnemyAtCrossing, EnemyAtFlank, CandidateOwnShift; }
+// ReserveReleaseContext gains CrossingThreats (pooled CrossingThreat[] plus a pooled OwnShiftByChild matrix, crossing × child), PlayerOwned (bool per child),
+//   and an explicit Staggered flag (State and Exploiting are passed whenever BC13's staggered flag or BC14's flag is on).
+// DirectChildIntent.HasGuardPoint/GuardX/GuardZ/GuardHeading and its release reason.
+// ReserveReleaseState.ForAlliance(int) (per alliance, BattleScope.Register in its static constructor);
+//   public struct CrossingBinding { string ChildId; int Link; double OwnShiftAtRelease, ReleasedAtHours; } in a pooled table of MaxCrossingGuards = 8:
+//   BindCrossing(in CrossingBinding), TryCrossingOf(string childId, out CrossingBinding), UnbindCrossing(string childId), BoundCount; Clear() clears it, ClearTrigger() does not.
+// Works: BattlePlanId.FocalAssault and FocalAssaultPlaybook (appended last; precondition: Feasibility set and a focal point); PlayTemplateCatalog "FocalAssault" projected toward FeasibilityLedger.FocalPoint;
+//   PlayRectKind.AssaultColumn (role Main, a BC11 maneuver of ManeuverSpec kind AssaultColumn: Attack on the focal point, Turn carries ManeuverOrder.Formation = March Column, no anchored-high-ground check)
+//   and PlayRectKind.AssaultSupport (role SupportMain, start-delay HoldsForRelease until the column's strike + EchelonDelayHours); ManeuverOrder.Formation (none by default);
+//   CommandDoctrineOrder.PreparationX/Z (NaN none) read by DoctrineConsumerDecisions.DecideArtillery; TacticalPhaseProgressionDoctrine.Input.WorksHold;
+//   FeasibilityLedger.FocalPoint, WorksHold(), DefenderStation (focal point, station point and heading, OwnShiftByChild to it); DirectChildAllocator.StationReserveBehindFocalPoint after ReleaseReserveToCrossings.
+// EnemyPicture (samples, P, N, m_E, mass, L_j, and in the Defender run the SingleLinkClusters bodies) and CrossingGraphView (regions, the link table, states, own-side covers) are the evaluation's pooled internal views.
 // Runtime: FeasibilityRuntime (MarchRules from GamePrefs, DaylightHours from uniStormSystem, the confirm queue's NavMesh call, the per-side ledgers),
 //   RiverRegionsRuntime stepping inside TerrainPictureRuntime.Step, CrossingWatch's perceived-ground probe through BC13's PerceivedGroundRuntime.
 ```
@@ -698,21 +886,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
 | Raise `ManeuverAssumptionBroken` | `ArmyTickCycle` from the ledger's monitor result | BC11 directly |
 | Release, march and turn a wing | BC11 (`PlayExecutorRuntime`, `EnvelopmentManeuver`), its orders executed by the posture producer through the arbiter and executor | The ledger |
 | Ride to look at a crossing | BC9's recon producer | The ledger |
-| Release a reserve to a threatened crossing | `DirectChildAllocator`, executed by the posture producer | — |
+| Release a reserve to a threatened crossing | `DirectChildAllocator.ReleaseReserveToCrossings` (after the flank release), comparing the ledger's precomputed `OwnShiftByChild`; executed by the posture producer | The ledger; a player-owned or exploiting child is never the one released |
+| Build the works picture and choose the focal point | The coordinator's heavy path (the evaluation), per AI-run side | Patches; producers; any reader of a hidden unit |
+| Hold the phase against works (`WorksHold`) | `TacticalPhaseProgressionDoctrine`, from the ledger's selected entry | BC11; the allocator |
+| Form the column, march it and launch the assault | BC11 (`AssaultColumn` maneuver), its orders executed by the posture producer through the arbiter and executor (formation intent, waypoints) | The ledger; any new writer |
+| Request artillery preparation on the focal point | The doctrine order's `PreparationX/Z`, read by the artillery doctrine producer | The ledger directly |
+| Station a Defender's reserve behind a focal point | `DirectChildAllocator.StationReserveBehindFocalPoint`, executed by the posture producer | The ledger; a player-owned or exploiting child is never stationed |
 | Move a player-owned unit | Nobody: no feasibility output reaches a `PlayerOwned` unit (the executor's guard as today) | Every Whiskey path |
 
 **Lifecycle table.**
 
 | Entity / binding | Create | Change | Unbind | Delete | Migration of live dependents |
 |---|---|---|---|---|---|
-| River regions | First step after the picture is ready | Never (terrain is static for the battle; frozen state read once) | — | `BattleScope` reset | Consumers see "map unknown" until ready |
+| River regions and the link table | First steps after the picture is ready (regions, then link pairs) | Never (terrain is static for the battle; frozen state read once) | — | `BattleScope` reset | Consumers see "map unknown" until both are ready |
 | Crossing state | First heavy tick with regions ready | Every heavy tick | — | `BattleScope` reset | A state change on a selected route raises the monitor |
 | Ledger candidate results | Each evaluation | Each evaluation (replaced whole) | — | `BattleScope` reset; a stand-down or new battle day clears it | Selection reads the latest. **Version semantics: latest**; the replan reads results no older than `EvaluateIntervalHours` |
 | Selected-plan snapshot (the results at selection, for the monitor) | Each selection | Never | Replan | Replan, `BattleScope` | The monitor compares against it; a replan replaces it |
 | Planned release / time budget / via of a child (binding ledger → BC11), wings and the holding fix | Selection of a plan with enveloping bodies | Every heavy tick until the child leaves its Hold (release time); the Hold ceiling is anchored to the first planned release (latched) | Release (the release time is spent); a mirror flip (the ledger values stop applying); plan change; abandon | With the plan | **Pin at release:** once BC11 launches the March, its via and budget are latched in `ManeuverState` for that leg; a later estimate changes nothing except through the monitor's replan |
 | Confirmed leg cache | A NavMesh result | — | Expiry after `ConfirmCacheHours` | `BattleScope` reset | An expired leg is re-queued; the estimate stands meanwhile |
+| Leg cost cache | A leg first priced in an evaluation | Never within the evaluation | — | Cleared when the next evaluation starts | A confirmed leg replaces its estimate; overflow is priced uncached and counted |
+| Evaluation job (second buffer) | A scheduled evaluation's first slice | Each slice adds candidates | — | Published whole into the ledger at its last candidate, then reused | A replan reads the last published ledger; a forced evaluation completes the job at once |
 | Look request | Each evaluation | — | The crossing turns Clear, Watched or Held | Next evaluation | BC9 ends a mission whose request vanished at its next step |
-| Crossing-threat reserve release (binding child → crossing) | The allocator, when the earliest enemy body's arrival at an uncovered flank crossing is within `ownShift_c + ThreatLeadHours` | Never: `ownShiftAtRelease` and the crossing are latched at the release | The threat stops (arrival beyond `ownShiftAtRelease + ThreatLeadHours + ThreatHoldMarginHours`, or no body perceived); a plan change, a new battle day, a stand-down | With BC13's `ReserveReleaseState` (`BattleScope`) | The released child reverts to Reserve on the next allocation, as BC13 does. The guard's own cover never ends the threat (it is left out of the cover test), so release and revert cannot alternate |
+| Crossing-threat binding (child → crossing, in `ReserveReleaseState.ForAlliance(a)`) | The allocator's crossing release, when `enemyAtCrossing` ≤ the chosen child's `ownShift_c` + `ThreatLeadHours` | Never: the crossing and `OwnShiftAtRelease` are latched at the release | The threat stops (arrival beyond `OwnShiftAtRelease + ThreatLeadHours + ThreatHoldMarginHours`, or no enemy body perceived); the child gone, exploiting or holding player-owned strength | A plan change (`Replan`), a new battle day (`ReplanForNewBattleDay`, before it replans), a stand-down (`BattleCoreTick.StandDown`), and `BattleScope` at battle end | The child reverts to Reserve on the next allocation. The guard's own cover never ends the threat (it is left out of the cover test), so release and revert cannot alternate. BC13's `ClearTrigger` leaves it alone |
+| Works picture (segments, ends, focal points) | Each evaluation | Each evaluation (replaced whole); perceived works points accumulate for the battle | — | `BattleScope` reset | **Latest**; the focal point a FocalAssault plan was selected on is latched with the plan and the monitor re-reads the current one: a focal point that loses its holders' advantage raises `detail` like any body |
+| Focal-assault plan state (the column, support and demonstration maneuvers) | Selection of FocalAssault | As BC11's maneuvers | Plan change, abandon | With the plan | As BC11's; the support's planned release follows the column's strike |
+| Reserve station (child → focal point) | The allocator, on the most threatened own focal point | Moves only for an arrival earlier by `StationSwitchHours` | No enemy body within `FocalThreatHours` of any own focal point; the child gone, exploiting or player-owned | Plan change, new battle day, stand-down (with `ReserveReleaseState`) | The child keeps role `Reserve` throughout; every release still sees it |
 
 **Shared rows and conflict rules.**
 
@@ -723,7 +921,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
 | A wing's via and road route | The ledger (via) and BC10's road router | A maneuver March with a via gets no road route (requirement-crossing-via); without a via, BC10's rules as today |
 | `AvoidCoveredCrossings` vs a via | Posture pipeline | A maneuver March with a via never sets it (BC10's rule would drop the via) |
 | A child wanted by a play rect and a BC13 exploit | BC11, BC13 | Mutually exclusive as BC13 defined; the hypothetical layout honours the same exclusion |
-| A Reserve child wanted by an exploit, a crisis, a flank threat and a crossing threat | `DirectChildAllocator` | Order within one allocation: crisis (BC13, defence first), BC11's flank-threat, crossing-threat (crossings by earliest enemy arrival), then the stagger (BC13's exploit and odds releases); one release per reason per sector or crossing; a child already released for one reason is not released again. Crossing releases share BC13's `R0` and floor and do not move `LastReleaseHours` |
+| A Reserve child wanted by an exploit, a crisis, a flank threat and a crossing threat | `DirectChildAllocator.ReleaseReserves` | The shipped order, then BC14's: crisis and stagger (`StaggeredRelease`, or today's loop), BC11's flank release, then the crossing release (crossings by earliest `enemyAtCrossing`). Each step takes only children still `Reserve`, so a child is released once. The crossing release keeps the held reserves at or above `FloorOf(R0x, floorShare)` and touches neither BC13's `InitialReserves` nor `LastReleaseHours`. An exploiting or player-owned child is never released to a crossing |
+| A Reserve child's position (works station) | `DirectChildAllocator` | After the crossing release; only a child still `Reserve`; a stationed child stays `Reserve`, so a later crisis, stagger, flank or crossing release takes it first and the station is then re-chosen |
+| The phase against works | `TacticalPhaseProgressionDoctrine` (shipped rules) and `WorksHold` | `WorksHold` wins while true; the shipped rules otherwise |
 | BC9 recon targets | BC9's planner | Crossing looks come after stale entry points and stale bands, inside the same cap; one mission per target |
 | The plan | Replan triggers (existing and `ManeuverAssumptionBroken`) | One replan per cooldown; the first trigger evaluated wins, as today (`ArmyReplanTriggers.Evaluate` order; the new trigger is appended last). A pre-empted assumption is named `preempted` on its row; the replan that pre-empted it reads the ledger and so sees the broken assumption anyway |
 
@@ -736,12 +936,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays {
 | Picture / regions | Not ready, or no grid → map unknown, verdicts `Unknown`, BC11 as today | — (static) | — | Build exception → OnceLog `tactical-battle-core:river-regions-failed`, map unknown for the battle |
 | Crossing classification | No perceived-ground runtime (BC13 off) → no crossing is ever Clear; Held and Watched still apply | A probe older than `ClearMemoryHours` → not Clear | An observation dropped → re-classified next tick | `IsPerceived` throws → that point unperceived (BC13's rule) |
 | Hypothetical layout | No direct children → no candidate has bodies; every verdict `Unknown` | Child positions are this snapshot's | A child destroyed between evaluations → absent next evaluation | — |
-| Route screen | No link between regions → `Impossible` `no-crossing` | Estimates replaced by confirmations as they arrive | — | — |
+| Route screen | No link between regions → march leg `Impossible` `no-crossing`; inward leg `river-on-leg`; main-body strike leg `contested` 1 (`no-strike-crossing`) | Estimates replaced by confirmations as they arrive | — | — |
 | NavMesh confirmation | Budget spent → the estimate stands, the leg stays queued | Older than `ConfirmCacheHours` → re-queued | — | A query that throws → logged once (`tactical-battle-core:feasibility-nav-failed`), the estimate stands and the leg is not retried for `ConfirmCacheHours` |
-| Enemy picture | No samples → the assumed enemy point (BC10) and the ledger estimate | Remembered below 0.5 ignored | — | — |
+| Enemy picture | No samples → the assumed enemy point (BC10), the one enemy body there, and the ledger estimate | Remembered below 0.5 ignored | — | — |
 | Daylight | `uniStormSystem` unreadable → `DaylightHours` = +∞ (no `after-dark`), OnceLog `tactical-battle-core:feasibility-daylight-missing` | — | — | — |
 | Selection | Ledger null (flag off) → today's selection | Ledger older than `EvaluateIntervalHours` → an evaluation runs first (requirement-evaluation-cadence) | A candidate missing from the ledger → term 0, not filtered | All `Impossible` → requirement-never-empty |
 | Monitor | No enveloping bodies → only `map-known` is watched (requirement-assumption-monitor) | — | A body's child destroyed → BC11's `lost-strength` → `wing-abandoned` | — |
+| Crossing release | No threat list (flag off, not a Defender, map unknown) → no crossing release; no eligible Reserve child → none | The threat list is the last published evaluation's | The bound child destroyed or detached → binding ends | — |
+| Works picture | No works sample and no perceived works point → no works: no bar, no gate, FocalAssault not offered | Remembered works samples below 0.5 ignored; a works point once perceived stays | A holder destroyed → gone from the next picture | `BattlefieldSetup.Fortification` unreadable → OnceLog `tactical-battle-core:works-points-missing`, works from samples only |
+| Focal assault | No focal point → not offered; no battery in range → no preparation | The focal point is the latest evaluation's until the column's March latches it | The column's child destroyed → BC11's `lost-strength` → `wing-abandoned` | BC11 abandons the column → the monitor replans as for any wing |
 | BC11 release | No ledger entry for the child → BC11's rule | The release recomputed every heavy tick until release | — | — |
 
 References are **latest**, never pinned, except the via and time budget pinned at release (§ 9).
@@ -750,29 +953,36 @@ References are **latest**, never pinned, except the via and time budget pinned a
 
 ## 11. Performance, configuration, telemetry
 
-- **requirement-frame-budget** — Cost:
-  - **The evaluation** runs at most every `EvaluateIntervalHours` per side on the heavy path. Its work is at most 21 evaluations (18 playbooks less the stance-filtered ones, plus the mirrored side of the three off-centre single-flank templates; CavalryRaid is evaluated once, requirement-candidate-set) × `MaxBodies` bodies. Each body costs one Dijkstra over at most `MaxCrossings` link nodes (in practice a handful), with legs priced by `SampleLine` at 10 units. A 2,000-unit leg is 200 samples.
-  - **The monitor** is one candidate per heavy tick.
+- **requirement-frame-budget** — The work, counted, and how it is spread:
+  - **Path searches per evaluation.** A candidate has at most `m` = 8 members (the direct children) in at most `b` = 3 bodies (DoubleEnvelopment's two wings and the main body; the other templates have fewer). Its queries (requirement-link-legs) are at most: `m` march legs + `m` strike legs + `b` shift times `τ` + `b(b − 1)` support times `σ` between bodies + `m(b − 1)` more for `σ` measured from each fixing member's anchor = 8 + 8 + 3 + 6 + 16 = **41**. With at most 22 candidates (19 playbooks, FocalAssault included, less the stance-filtered ones, plus the mirrored side of the three off-centre single-flank templates; CavalryRaid and FocalAssault are evaluated once) that is at most **902** queries. A Defender candidate has no `σ` or `τ`; its run adds, per counted crossing `c`, one arrival per enemy body (≤ `MaxEnemyBodies`) and one shift per child: at most 16 + 8 = 24 per crossing, computed once per evaluation, not per candidate.
+  - **Each query** is a Dijkstra over at most `MaxRoutedLinks` + 2 nodes. With the routed links `k` of the two regions on the way (a handful on real maps; 10 in FEAS-TIME), it relaxes at most `(k + 2)²` = 144 edges: about 130,000 relaxations for 902 queries.
+  - **Sampled legs** are the dominant cost and are cached (requirement-link-legs). Link-to-link legs are in the per-battle table and are never sampled during an evaluation. A point's legs to its region's links are sampled once per (50-unit bucket, link): with `U` distinct point buckets (children, rect anchors, strike points, enemy points and crossings; at most 8 + 6 × 22 + 4 + 16 + 16 = 176) that is at most `U × k` = 1,760 sampled legs at `k` = 10, plus one point-to-point leg per same-region query (≤ 902).
+  - **The works picture** (requirement-works-picture, -shape) is built once per evaluation: one sort of the works samples and perceived works points by lateral, one pass for segments, ends and salients, and one score per focal point over the holders within 300 (at most `MaxFocalPoints` × `MaxEnemyBodies` = 4,096 distance tests). The works probes are at most 16 per side per tick, in the slice. Each leg is at most 300 samples at `LegStepMeters` (3,000 units).
+  - **Slices.** A scheduled evaluation runs in slices of at most `EvaluateSliceMs` = 1.5 ms per side per heavy tick, the deadline checked between legs (`EvaluateSlice`, the BC12 stepped-clock pattern). The 16 crossing probes of the tick run first, inside the same scope and against the same slice (requirement-crossing-state). A forced evaluation completes in one tick; at battle start the map is normally unknown and it costs only the verdict pass.
+  - **The monitor** is one candidate per heavy tick (≤ 41 queries, its legs mostly cached), not sliced.
   - **NavMesh:** one query per side per tick at most.
-  - **The region build:** inside the picture runtime's 4 ms steps.
-  - Scopes: `tactical.feasibility.evaluate` (threshold 2.0 ms), `tactical.feasibility.monitor` (0.5 ms), `tactical.feasibility.navmesh` (2.0 ms), `tactical.river-regions.build` (5.0 ms, as the picture's step). Target: criterion-frame-budget.
-- **requirement-zero-alloc** — No allocation after warm-up: pooled ledger arrays (`MaxBodies` per candidate), the pooled projection and assignment overloads, Dijkstra on pooled arrays sized at first use, string literals for reasons, telemetry strings built only on emitted rows. Pinned by FEAS-ALLOC.
+  - **The region and link-table build:** inside the picture runtime's 4 ms steps; at most 2,016 link pairs.
+  - **Scopes:** `tactical.feasibility.evaluate` (threshold 2.0 ms; one slice, the probes included), `tactical.feasibility.monitor` (0.5 ms), `tactical.feasibility.navmesh` (2.0 ms), `tactical.river-regions.build` (5.0 ms, as the picture's step). Target: criterion-frame-budget.
+- **requirement-zero-alloc** — No allocation after warm-up: pooled ledger arrays (`MaxBodies` per candidate) on both buffers, the pooled projection and assignment overloads, the Dijkstra's pooled arrays (`MaxRoutedLinks` + 2), the `LegCostCache` open-addressing table (`MaxLegCache`, allocated once), the link table (allocated once per battle at the build), `SingleLinkClusters`' scratch (grown at first use), the resumable job's state, the threat list and the `OwnShiftByChild` matrix, the `ReserveReleaseState` crossing table (`MaxCrossingGuards`), string literals for reasons, telemetry strings built only on emitted rows. Pinned by FEAS-ALLOC.
 - **requirement-config** — `Tactical` section, default `true`, with a reader and a truthful description:
 
   | Flag | Covers | Off |
   |---|---|---|
-  | `Enable Maneuver Feasibility` | §§ 4-7 except requirement-stance-before-pick: the evaluation, the selection term, the side choice, the monitor and its replan trigger, the synchronized release, the time budget, the crossing via, the look requests, the defender exposure and the crossing-threat release | `PlaybookContext.Feasibility` null; BC11's Hold, ceiling, timeout and route exactly as today; no look requests; no crossing-threat release; the ledger, regions and crossing watch are not built |
+  | `Enable Maneuver Feasibility` | §§ 4-7A except requirement-stance-before-pick (the works picture, the works bar, turn-first, the works hold gate, FocalAssault and its execution, and the Defender's works station included): the evaluation, the selection term, the side choice, the monitor and its replan trigger, the synchronized release, the time budget, the crossing via, the look requests, the defender exposure and the crossing-threat release | `PlaybookContext.Feasibility` null; BC11's Hold, ceiling, timeout and route exactly as today; no look requests; no crossing-threat release, no FocalAssault (its precondition fails), no works hold, no reserve station; the ledger, regions and crossing watch are not built |
 
   requirement-stance-before-pick is a bug fix and is not behind the flag. Rollback of every Whiskey command write stays Commander Mode `MonitorOnly` / `Off`.
 - **requirement-telemetry** — Through the TelemetryRouter tuning-log sink, bounded:
-  - `TacticalPlanSelection` (Decision, one per selection or kept plan, emitted by `ArmyOrchestrator.TryPickPlan` after `Select`, with the flag off too, so on/off runs compare): `trigger` (`initial`, the replan trigger, `new-day`), `kept`, `stance`, `odds` (`CurrentOdds`), `winner`, `mirrored`, `candidates`, `preconditionFiltered`, `stanceFiltered`, `crestFiltered`, `feasibilityFiltered`, `allImpossible`, and the top three by final score, each with `plan`, `score`, `feasibilityTerm`, `verdict`, `reason`. This also fills today's gap: no row carries candidate scores (control: the plan-selection emitters `[TacticalPlan]`, `[TacticalReplan]`, `TacticalPlayExecution` and `TacticalEnvelopment` and `Select`'s unemitted `preconditionFiltered`, reads 5, under: source; failure-under: source).
-  - `TacticalManeuverFeasibility` (Decision, per candidate per evaluation when its verdict or penalty bucket (0.1) changed, throttled per candidate to one per 0.05 doctrine-h): `plan`, `mirrored`, `verdict`, `penalty`, `reason`, `bodies`, `selected`.
-  - `TacticalManeuverBody` (Decision, per body of the selected plan at selection and on each monitor change, and of the top confirm candidates per evaluation): `plan`, `body`, `child`, `kind`, `strength`, `routeUnits`, `routeSource` (`estimate` / `navmesh`), `crossing` (link index or −1), `crossingState`, `courierHours`, `marchHours`, `strikeHours`, `desiredStrikeHours`, `releaseHours`, `enemyShiftHours`, `windowHours`, `pin`, `enemyAgainst`, `isolatedOdds`, `bar`, `ownRatio`, the six terms (`daylight`, `detail`, `contested`, `approach`, `exposure`, `turn`), `penalty`, and on a monitor row `assumption` and `suppression` (`cooldown`, `committed`, `margin`, `preempted`, or none).
+  - `TacticalPlanSelection` (Decision, one per selection or kept plan, emitted by `ArmyOrchestrator.TryPickPlan` after `Select`, with the flag off too, so on/off runs compare): `trigger` (`initial`, the replan trigger, `new-day`), `kept`, `stance`, `odds` (`CurrentOdds`), `winner`, `mirrored`, `candidates`, `preconditionFiltered`, `stanceFiltered`, `crestFiltered`, `feasibilityFiltered`, `allImpossible`, `ledgerAgeHours`, and the top three by final score, each with `plan`, `score`, `feasibilityTerm`, `verdict`, `reason`. This also fills today's gap: no row carries candidate scores (control: the plan-selection emitters `[TacticalPlan]`, `[TacticalReplan]`, `TacticalPlayExecution` and `TacticalEnvelopment` and `Select`'s unemitted `preconditionFiltered`, reads 5, under: source; failure-under: source).
+  - `TacticalManeuverFeasibility` (Decision, per candidate per evaluation when its verdict or penalty bucket (0.1) changed, throttled per candidate to one per 0.05 doctrine-h): `plan`, `mirrored`, `verdict`, `penalty`, `reason`, `bodies`, `selected`; and once per published evaluation a summary row (`plan=all`) with `slices`, `forced`, `queries`, `legsSampled`, `legOverflow`.
+  - `TacticalManeuverBody` (Decision, per body of the selected plan at selection and on each monitor change, and of the top confirm candidates per evaluation): `plan`, `body`, `child`, `kind`, `strength`, `routeUnits`, `routeSource` (`estimate` / `navmesh`), `marchVia` and `attackVia` (link index or −1) with their states, `strikeContested`, `courierHours`, `marchHours`, `inwardSurplusHours`, `strikeHours`, `desiredStrikeHours`, `releaseHours`, `enemyShiftHours`, `windowHours`, `pin`, `enemyAgainst`, `isolatedOdds`, `bar`, `ownRatio`, the six terms (`daylight`, `detail`, `contested`, `approach`, `exposure`, `turn`), `penalty`, and on a monitor row `assumption` and `suppression` (`cooldown`, `committed`, `margin`, `preempted`, or none).
   - `TacticalReplan` (Decision, structured, one per replan and per kept plan, never deduped): `trigger`, `assumption`, `kept`, `newPlan`, `mirrored`, `doctrineHours`. Today's deduped `[TacticalReplan]` log line stays for the main log.
   - `TacticalCrossingWatch` (State, per side every 0.1 doctrine-h): `held`, `watched`, `clear`, `unknown`, `probes`, `lookRequests`, `regions`, `links`.
-  - `TacticalEnvelopment` (existing) gains `doctrineHours` (the doctrine clock at the row's transition, on every row: Hold, March, Turn, Attack, abandon, and a holding fix's start-delay rows), `plannedReleaseHours`, `timeBudgetHours`, `via` and, on the Turn transition, `arrivedHours`, `predictedArrivalHours` and `predictedMarchHours` (the body's march hours latched at the March; criterion-arrival-prediction). A holding fix's `Released` row carries `plannedReleaseHours` beside its `doctrineHours` (criterion-strike-spread's guardrail).
+  - `TacticalEnvelopment` (existing) gains `doctrineHours` (the doctrine clock at the row's transition, on every row: Hold, March, Turn, Attack, abandon, and a holding fix's start-delay rows), `plannedReleaseHours`, `timeBudgetHours`, `via`, `attackVia` and, on the Turn transition, `arrivedHours`, `predictedArrivalHours` and `predictedMarchHours` (the body's march hours latched at the March; criterion-arrival-prediction). A holding fix's `Released` row carries `plannedReleaseHours` beside its `doctrineHours` (criterion-strike-spread's guardrail).
   - `TacticalReplan` rows carry `trigger=ManeuverAssumptionBroken` and `assumption=<reason>`.
-  - `TacticalReserveRelease` gains `reason=crossing-threat`, with `crossing` (link index), `guardX`, `guardZ`, `ownShiftHours` and `enemyArrivalHours` on those rows, and a revert row (`reverted=true`) when the threat stops.
+  - `TacticalReserveRelease` gains `reason=crossing-threat`, with `crossing` (link index), `guardX`, `guardZ`, `guardHeading`, `ownShiftHours`, `enemyArrivalHours`, `held` and `floor` on those rows, and a revert row (`reverted=true`) when the threat stops.
+  - `TacticalEnemyWorks` (State, per side every 0.1 doctrine-h, works picture present): `segments`, `heldSegments`, `openEnds`, `anchoredEnds`, `salients`, `junctions`, `worksSamples`, `worksPointsPerceived`, `worksProbes`, and the focal point (`focalX`, `focalZ`, `focalKind`, `focalScore`); the Defender's own-works row carries the station's focal point and child.
+  - `TacticalWorksHold` (Decision, on each change of the gate per side): `hold`, `reason` (`hopeless-assault` / `turn-not-struck`), `plan`, `detail`, `barUsed`, `doctrineHours`.
+  - `TacticalManeuverBody` gains `assaultsWorks`, `barUsed` and `enemyOpen` (the outside-works enemy of a holding fix); `TacticalPlanSelection`'s top three carry FocalAssault's reason when it is filtered (`turn-available`, `declined`) and its `willingness`; `TacticalEnvelopment` rows of an `AssaultColumn` carry `focalKind`, `preparationHours` and `formation`; `TacticalReserveRelease` gains `reason=works-station` rows (child, focal point, station).
   - OnceLog (static keys):
     - `[once:tactical-battle-core:river-regions] [RiverRegions] regions=<n> links=<n> crossings=<n> frozen=<b> buildMs=<ms>`;
     - `[once:tactical-battle-core:feasibility-first] [Feasibility] first evaluation: candidates=<n> impossible=<n> risky=<n>`;
@@ -791,13 +1001,19 @@ References are **latest**, never pinned, except the via and time budget pinned a
 - **criterion-scenario-outcomes** — In the harness fixtures of § 6 (scenario S6), each emergent outcome holds:
   1. 35,000 against 25,000 selects a dividing play (`Feasible`);
   2. even odds penalizes every dividing play ≥ 0.3 and selects a single-body play with the mid commander;
-  3. on the held-crossing map at even odds, no candidate whose route uses the held bridge is selected, and a bank-holding single-body play is; at 2:1 a mirrored ManeuverAndFix (pin and cross) is selected, with the clear ford as its via;
+  3. on the held-crossing map at even odds, no dividing play and no play that marches across the held bridge is selected; a bank-holding single-body play is, every bridge-crossing play's term is at least 0.1 below every bank-holder's, and with the flag off a dividing play is selected instead (the hold comes from the model). At 2:1 a mirrored ManeuverAndFix (pin and cross) is selected, with the clear ford as its march via;
   4. the piecemeal fixture shows `detail` ≥ 0.7 without the synchronized release and 0 with it;
-  5. on the held-crossing fixture, a bold commander (audacity01 0.9) reaches pin-and-cross `detail` 0 at a lower own-to-enemy ratio than the mid commander (D14).
+  5. on the held-crossing fixture, a bold commander (audacity01 0.9) reaches pin-and-cross `detail` 0 at a lower own-to-enemy ratio than the mid commander (D14);
+  6. against an entrenched line with an open end, the turn around the open end is selected and its fix holds (FEAS-SCN-6);
+  7. against an anchored entrenched line, an aggressive commander assaults the focal point, a cautious one declines and holds, a mid one holds a hopeless assault (FEAS-SCN-7);
+  8. against an entrenched salient, the focal point is the apex (FEAS-SCN-8).
 
-  Basis: § 6, computed. Measured: FEAS-SCN-1 to FEAS-SCN-5 and FEAS-SCN-BOLD.
+  Basis: § 6, computed. Measured: FEAS-SCN-1 to FEAS-SCN-8, FEAS-SCN-HOLD and FEAS-SCN-BOLD.
   - guardrail: temperament moves the term. With an audacity01 0.9 commander (`Bar` 0.88 at caution 0.5, agg 0.5) in the even-odds fixture, every dividing play's worst-body `detail` is below 1 (≈ 0.87-0.90, against the mid commander's 1), so its penalty is below the mid commander's, and none is filtered. On the held-crossing fixture, the ratio at which pin-and-cross reaches `detail` 0 is lower for him than for the mid commander (D14). Temperament can choose the risk; nothing forbids it.
   - read path: the harness only, with the same fields on `TacticalManeuverBody` rows in the game.
+- **criterion-works-no-hopeless-assault** — Against held works, 0 transitions to `MainEffort` while `WorksHold` is true, and 0 focal-assault columns launched (BC11 Attack) whose works-bar `detail` at release was at least `RiskyPenalty`. Basis: requirement-works-hold and requirement-focal-assault: a hopeless assault is never ordered, whatever won the selection. Measured: `TacticalWorksHold` rows against the phase rows, and `TacticalEnvelopment` `AssaultColumn` rows with their `detail`, over the smoke battles against entrenched enemies (smoke 10 and 11).
+  - guardrail: the army does not freeze. In every such battle where a focal assault priced `detail` < `RiskyPenalty` was selected, its column is launched (at least one `AssaultColumn` Attack row), and where a turn was available (`turn-available` on the FocalAssault row) the selected plan's wing launches (a March row).
+  - read path: `TacticalWorksHold`, `TacticalPlanSelection` (FocalAssault's reason), `TacticalEnvelopment` rows.
 - **criterion-arrival-prediction** — For enveloping wings that reach Turn, the median of `|arrivedHours − predictedArrivalHours| / max(predictedMarchHours, 0.25)`, where `predictedArrivalHours` = `S* − DeployHours` recorded at release, is ≤ 0.30 over at least five wings in the smoke battles. Basis: vanilla's own speed and courier formulas (§ 2.1); terrain cost along a NavMesh polyline; the unmodelled part is slope (`1 − Δy/0.25`), overlap waits and column length. Measured: `TacticalEnvelopment` Turn rows.
   - guardrail: no wing's Turn arrives after its `TimeBudgetHours` with the release at its planned hour (0 `timeout` abandons on planned releases over the smoke battles), so the budget is never shorter than the prediction's error.
   - read path: `TacticalEnvelopment` Turn rows (`arrivedHours`, `predictedArrivalHours`, `predictedMarchHours`).
@@ -810,7 +1026,7 @@ References are **latest**, never pinned, except the via and time budget pinned a
 - **criterion-selection-regression** — On every existing playbook-selection harness fixture (no picture, no regions), `Select` with the flag on returns the same playbook as with it off. Basis: the term is 0 for `Unknown` and the filter follows the jitter draw. Measured: FEAS-REGRESS over the existing fixtures.
   - no-guardrail: an equality bound.
   - read path: the harness. In the game, the `TacticalPlanSelection` rows written before the river regions are ready (every verdict `Unknown`, every term 0) are the same check.
-- **criterion-fog-honest** — 0 evaluations whose enemy inputs include an enemy that is not a sample under BC13's `requirement-enemy-samples` or the ledger estimate. 0 crossings Clear without a perceived probe within `ClearMemoryHours`. 0 reads of `scheduledarrival` or `EnemyRecords` beyond a Visible observation's row. Basis: the AGENTS fog rule. Measured: FEAS-FOG and the source pin FEAS-PIN.
+- **criterion-fog-honest** — 0 evaluations whose enemy inputs include an enemy that is not a sample under BC13's `requirement-enemy-samples` or the ledger estimate. 0 crossings Clear without a perceived probe within `ClearMemoryHours`. 0 reads of `scheduledarrival` or `EnemyRecords` beyond a Visible observation's row. 0 works segments, focal points or bars built from a regiment that is not a sample or from a fortification point not yet perceived. Basis: the AGENTS fog rule. Measured: FEAS-FOG, WORKS-FOG and the source pin FEAS-PIN.
   - no-guardrail: a pure exclusion. Its cost (more `Unknown` crossings) is visible as `unknown` on `TacticalCrossingWatch`.
   - no-read-path: a runtime measurement needs an omniscient comparison that the evaluation may not make. The instrumentation package in this wave is the source pin plus the `unknown` count.
 - **criterion-player-never-moved** — 0 tasks, releases, vias or look missions planned onto a `PlayerOwned` unit, and 0 player-owned strength counted in any body. Basis: the standing rule. Measured: FEAS-PLAYER and the executor's `PlayerOwned` skips for maneuver reasons.
@@ -819,7 +1035,7 @@ References are **latest**, never pinned, except the via and time budget pinned a
 - **criterion-defender-no-offense** — 0 offensive playbooks selected for a Defender, the initial pick included. 0 Attack-task orders created by BC14 for a Defender (its outputs are a holding release and recon looks). Basis: the standing rule and requirement-stance-before-pick. Measured: FEAS-DEF and the `TacticalPlanSelection` rows' winner by stance.
   - no-guardrail: a zero bound.
   - read path: `TacticalPlanSelection` rows (the winner and the side's stance), and the `TacticalEnvelopment` rows of that side: BC14's only route to an Attack task is a BC11 maneuver, so a Defender side has 0 Attack rows (uncontrolled: a target, not a reading; smoke 8's Defender battle and FEAS-DEF settle it). Its releases are visible as `TacticalReserveRelease` `reason=crossing-threat` rows, a holding task.
-- **criterion-frame-budget** — Per side: `tactical.feasibility.evaluate` p95 ≤ 2.0 ms and max ≤ 6.0 ms; `tactical.feasibility.monitor` p95 ≤ 0.5 ms; `tactical.feasibility.navmesh` p95 ≤ 2.0 ms. The region build steps stay within the picture's 4 ms deadline (`maxMs` ≤ 5.0). Measured in a battle with a river and about 500 regiments a side. Basis: the evaluation runs at most every 0.05 doctrine-h (≈ 30 real seconds at 1×), so its cost is not per frame. The monitor is per heavy tick, and the NavMesh query count is the BC11 precedent.
+- **criterion-frame-budget** — Per side: `tactical.feasibility.evaluate` p95 ≤ 2.0 ms and max ≤ 6.0 ms; `tactical.feasibility.monitor` p95 ≤ 0.5 ms; `tactical.feasibility.navmesh` p95 ≤ 2.0 ms. The region build steps stay within the picture's 4 ms deadline (`maxMs` ≤ 5.0). Measured in a battle with a river and about 500 regiments a side. Basis: requirement-frame-budget's counts and slices. A slice stops at 1.5 ms between legs and the longest leg is 300 samples, so a slice ends within about 0.5 ms of its deadline; the probes run inside it. The monitor is per heavy tick over cached legs, and the NavMesh query count is the BC11 precedent.
   - guardrail: the `tactical.patch.battle-core-arbiter` scope's mean per call does not rise by more than 5 % with the flag on against off. BC14 does no work in the arbiter tick.
   - read path: `PerformanceAggregate` rows of the four scopes. The p95 is within the threshold when `Σ slowCount / Σ count` ≤ 0.05; the max is the largest `maxMs`.
 - **criterion-zero-alloc** — 0 bytes allocated per evaluation and per monitor step after warm-up. Basis: the Global Constraints. Measured: FEAS-ALLOC (`AssertNoAllocation`, the BC10 pattern).
@@ -830,7 +1046,7 @@ References are **latest**, never pinned, except the via and time budget pinned a
 
 ## 13. (E) Tests, plants, smoke, coverage matrix (frozen test plan)
 
-Test file `ManeuverFeasibilityTests.cs` (`internal static partial class ManeuverFeasibilityTests { public static void Run() }`, partials allowed), with `<Compile Include>` lines for each new pure file. Red first: FEAS-SCN-3, FEAS-SCN-4, FEAS-STANCE-INITIAL and FEAS-SYNC must fail against today's code before any implementation.
+Test file `ManeuverFeasibilityTests.cs` (`internal static partial class ManeuverFeasibilityTests { public static void Run() }`, partials allowed), with `<Compile Include>` lines for each new pure file. Red first: FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-6, FEAS-SCN-7, FEAS-SCN-HOLD, FEAS-STANCE-INITIAL, FEAS-SYNC and INWARD-VIA-BC11 must fail against today's code before any implementation.
 
 ### Acceptance scenarios and cases
 
@@ -858,13 +1074,15 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
   - MARCH-TIME: 1,000 units of road → exactly 1.0 h for infantry (the last sample pro-rated); 500 of grass → 1.0 h; cavalry-only base 2 halves it; fatigue 0.5 → divided by 0.5^0.2.
   - LEG-FOOTPRINT: open-river samples within 60 units of the leg's own ford are priced as the ford and do not mark the leg estimated; an open-river sample elsewhere in the region is a bend (swamp cost, estimated).
   - TARGET-SNAP: a rect anchor on open river snaps to the nearest land cell; a tie goes to the body's own region.
-  - MARCH-RULES-PIN: a source pin that no literal 1000, 0.02, 75, 2.33 or 2.2 appears in `ManeuverFeasibility.cs` (all from `MarchRules`).
+  - MARCH-RULES-PIN: a source pin over **the BC14 file set** (requirement-runtime-wiring, every file by name) that no literal 1000, 0.02, 75, 2.33 or 2.2 appears (all from `MarchRules`). The test first runs its scanner over a planted line holding `* 1000f` and asserts it fires, so its zero is shown to detect.
   - COURIER-TIME: a first leg within 75 units → max(0.02, 0.02) = 0.02; a 2,563-unit first leg on grass → 0.02 + 5,126 / 5,126 = 1.02 h; the same on road → 0.52 h; a relay leg beyond bugle range → 0.02 + its ride; the longest branch counts; an engaged member → 0 for its own `T`; order delays off → 0.
   - STRIKE-OFFSET: MobileFlankMarch (offset 0.25 h) with `T_main` 0.6 and `T_wing` 1.0 → `C*` = max(0.6, 0.75) = 0.75, `S*_wing` = 1.0, releases: wing 0, fix 0.15. With `T_wing` 0.4 → `C*` = 0.6, `S*_wing` = 0.85, releases: wing 0.45, fix 0.
   - STRIKE-FIX-CONTACT: a fix in contact has `T_main` 0 and release 0, and the wing is released at once.
   - STRIKE-ABSOLUTE: `PlannedReleaseHours` = `EvaluatedHours` + R.
   - STRIKE-DOUBLE: DoubleEnvelopment wings at 1.2 h and 2.4 h, fix at 0.79 h → `C*` = `S*` = 2.4 for all; releases: the faster wing 1.2, the fix 1.61, the slower wing 0.
-  - STRIKE-HELD: a route through a Held crossing adds 1.0 h to `T`.
+  - STRIKE-HELD: a march leg through a Held crossing adds 1.0 h to `T`.
+  - INWARD-SURPLUS: an enveloping body whose inward leg crosses a river through a Clear ford 300 units off the straight line adds (route hours − straight hours) to `T`; through a Held one, + 1.0 h more; a main-body strike leg through a Held crossing adds nothing to `T`.
+  - STRIKE-LEG: a main-body member's strike leg through a Held crossing gives `contested` 0.5 (`StrikeLegWeight`), through a Watched one 0.25; with no path, `contested` 1 and reason `no-strike-crossing`, verdict not `Impossible`; a march leg through the same Held crossing gives 1.
   - DAYLIGHT: `S*` past day end − 0.25 → `after-dark`, `daylight` 1, verdict Risky (never Impossible).
 - **S3 Enemy and detail.**
   - ENEMY-FOG-PREMIUM: confidence 0.8, caution 0.5 → × 1.1; caution 1.0 → × 1.15.
@@ -876,7 +1094,9 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
   - DETAIL-PIN: an engaged fixing body pins `S/(1.5 + TerrainStrength)`.
   - DETAIL-WINDOW: `shiftShare` 0 when τ ≥ W, 1 when W ≥ 2τ, linear between.
   - SUPPORT-TIME: `σ` is the least of the other bodies' courier plus march hours from where each stands when it has struck (an enveloping body's strike point; a fixing member's anchor) to the body's strike point, over the crossing graph, Held crossings at +1.0 h; no other body → +∞; a supporting body that is engaged keeps its courier hours in `σ` (0.32 h in the fixture, never 0).
-  - ENEMY-BODIES: the release's enemy bodies are BC13's clusters at 150 units, not rebuilt; two clusters 400 units apart give two arrivals at a ford, and the earlier one triggers; with BC13's opportunity flag off the mass is the one body.
+  - ENEMY-BODIES: in the Defender run, BC14 builds its own bodies with `SingleLinkClusters` at 150 units: two clusters 400 units apart give two arrivals at a ford, and the earlier triggers; it works with BC13's opportunity flag on (a Defender's `OpeningDetector` runs no `ClusterPass`) and off alike; no samples → one body at the assumed enemy point.
+  - CLUSTER-PARITY: `OpeningDetector`'s isolated-cluster openings are identical before and after `ClusterPass` calls the extracted `SingleLinkClusters.Label` (BC13's DET-CLUSTER stays green), on 50 random sample sets.
+  - SAMPLES-PARITY: `EnemySamples.Accepts` agrees with each of BC13's three former inline filters on 200 random observations.
   - DETAIL-BAR: Bar 1.0 for a mid commander; 0.6 and 1.4 at the clamps; caution raises, audacity and aggression lower.
   - DETAIL-PENALTY: odds 0.91 at bar 1.0 → 0.36; odds 0.75 → 1.
   - DETAIL-NO-FIX: a template whose fixing rect is unfilled pins nothing.
@@ -894,9 +1114,10 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
   - SELECT-FILTER: an `Impossible` winner-by-score is skipped and the next taken; `feasibilityFiltered` counted.
   - SELECT-JITTER: the jitter of every other candidate is identical with and without a filtered candidate (the filter follows the draw).
   - SELECT-NEVER-EMPTY: every candidate `Impossible` → lifted, `allImpossible`.
-  - CANDIDATE-CENTRED: CavalryRaid is evaluated once with `Mirrored` false; MobileFlankMarch, WideFlankApproach and ManeuverAndFix twice; a Defender's candidates are each evaluated once.
+  - CANDIDATE-CENTRED: CavalryRaid and FocalAssault are evaluated once with `Mirrored` false; MobileFlankMarch, WideFlankApproach and ManeuverAndFix twice; a Defender's candidates are each evaluated once.
   - SELECT-SIDE: a single-flank play mirrored when its left side scores better; the zone assignment projects the template mirrored and gives the rect to the child the evaluation timed.
-  - INWARD-LEG: a DoubleEnvelopment wing whose anchor stands on its own bank and whose line end lies across an open river with no link → `Impossible`, `river-on-leg`; with a Held link → `contested` 1 and +1.0 h.
+  - INWARD-LEG: a DoubleEnvelopment wing whose anchor stands on its own bank and whose line end lies across an open river with no link → `Impossible`, `river-on-leg`; with a Clear link → not `Impossible`, its attack via the link and its inward surplus in `T`; with a Held link → `contested` 1 and + 1.0 h in `T`.
+  - INWARD-VIA-BC11 (red today): BC11 with an attack via at a ford samples the inward leg as anchor → via → line end; river samples within 60 units of the via do not count, so the wing is not abandoned and its Attack order carries the via; a sub-leg that crosses open river elsewhere still abandons `river-on-leg`; without an attack via, today's straight check abandons as before. Red today: `ManeuverInput` has no attack via and the straight check abandons.
   - FEAS-REGRESS: every existing selection fixture returns the same winner with the flag on (criterion-selection-regression).
   - FEAS-STANCE-INITIAL: through `PickInitialPlanInOrder` with a recording fake, the pick inputs are refreshed before the pick, and a Defender's initial pick never returns an offensive playbook (red today: the seam does not exist and the order is pick-first).
   - FEAS-DEF: a Defender's candidates never include offensive playbooks; no Attack task from BC14.
@@ -916,42 +1137,74 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
   - FEAS-SCN-1: 35,000 against 25,000, three corps (`EnvelopmentPressure` on) → ManeuverAndFix and DoubleEnvelopment `Feasible` with the § 6 numbers (wing `odds` 1.17, fix 1.25 / 1.43); a dividing play selected.
   - FEAS-SCN-2: the piecemeal fixture → every `detail` 0 with the synchronized release (`Evaluate`); `DetailRisk` called with every body's strike hours at its own `T` → the right wing's and the fix's `detail` are 1.
   - FEAS-SCN-3: 25,000 against 25,000, two corps → DoubleEnvelopment's wings `detail` 1 (`σ` 2.12 > `τ`), the single-fix plays' main body `detail` 1; every dividing play penalized ≥ 0.3; a single-body play selected for the mid commander (red today: a dividing play, ManeuverAndFix, has the best base score at odds 1.0).
-  - FEAS-SCN-4: the § 6 scenario 4 fixture. At even odds → FrontalShockAssault, MeetingEngagement and the authored WideFlankApproach penalty ≥ 0.6, the mirrored WideFlankApproach wing `detail` 1, a bank-holding single-body play selected (red today: no term sees the bridge). At 2:1 → ManeuverAndFix selected with `Mirrored` true and via = the ford; DoubleEnvelopment penalty ≥ 0.6 (its inward legs through B); the mirrored WideFlankApproach below its authored side and below FrontalShockAssault.
-  - FEAS-SCN-5: the § 6 scenario 5 fixture → turning exposure > 0 for a candidate whose Reserve rect lies at the left end, and lower for one whose Reserve rect lies at the right end; the covered bridge at lateral 0 counts for neither; a look request for F when Unknown; a crossing-threat release when the enemy cluster's arrival at F falls within the nearest Reserve child's `ownShift_c + 0.25`.
+  - FEAS-SCN-4: the § 6 scenario 4 fixture. At even odds → every dividing play's worst-body `detail` 1 (mirrored ManeuverAndFix wing `odds` 0.45, mirrored WideFlankApproach wing 0.37); FrontalShockAssault, MeetingEngagement, ForcedFrontalAttack and GenericDesperate penalty 0.645 ± 0.05 (Center march through B); GenericAggressive, ContinuousAttrition, HesitatedCommit and GenericMethodical penalty 0.379 ± 0.05 (strike legs through B at half weight); a bank-holding single-body play selected (red today: ManeuverAndFix is selected). At 2:1 → ManeuverAndFix selected with `Mirrored` true, march via = F, no attack via, wing `odds` 1.68 ± 0.05, candidate penalty 0.379 ± 0.05 and no candidate lower; DoubleEnvelopment and the authored ManeuverAndFix ≥ 0.6.
+  - FEAS-SCN-HOLD: on the scenario 4 fixture at even odds, (1) with the flag off the selected play divides (ManeuverAndFix); (2) with it on a bank-holding single-body play is selected; (3) every candidate that marches across B has a feasibility term at least 0.1 below every bank-holding candidate's, and every dividing play's term is −0.4. The hold therefore does not rest on the base-score order among the single-body plays.
+  - FEAS-SCN-5: the § 6 scenario 5 fixture → DelayingDefense `turn` 0.09 ± 0.05 and PreparedDefense `turn` 1 (its only reserve source the deployed reserve at the rear); B (covered, lateral 0) counts for neither; a look request for F when Unknown; with DelayingDefense selected, the right corps (the ReserveLine child, `ownShift_c` 1.74) is released to `RefuseRight` with its guard point at (1,000, 210) facing F; with the right column at (1,000, 1,500), no release; without the deployed reserve, PreparedDefense `turn` 0.02 ± 0.05 and, selected, no crossing release (no Reserve child).
   - FEAS-SCN-AUDACITY: the guardrail case of criterion-scenario-outcomes: at even odds, an audacity01 0.9 commander's dividing plays have worst-body `detail` < 1 (DoubleEnvelopment ≈ 0.87, the single-fix plays' Center ≈ 0.90) where the mid commander's are 1; none filtered.
-  - FEAS-SCN-BOLD: on the scenario 4 fixture with the corps scaled together, bisection to 0.01 on the own-to-enemy ratio finds where the mirrored ManeuverAndFix wing's `detail` reaches 0; the audacity01 0.9 commander's ratio is strictly below the mid commander's, and the mid commander's is at most 2.0 (D14).
+  - FEAS-SCN-BOLD: on the scenario 4 fixture with the three corps scaled together against the fixed enemy, bisection to 0.01 on the own-to-enemy strength ratio finds where the mirrored ManeuverAndFix wing's `detail` reaches 0: 1.60 ± 0.05 for the mid commander and 1.50 ± 0.05 for audacity01 0.9; the bold ratio is strictly below the mid one, and the mid one is at most 2.0 (D14).
 - **S7 BC11 and BC13 interaction.**
   - FEAS-SYNC: `PlannedReleaseHours` set → the Hold releases at it, not at contact + offset (red today: the field does not exist).
   - SYNC-UNSET: no ledger entry → BC11's rule unchanged (the BC11 tests stay green).
-  - SYNC-PIN-AT-RELEASE: the via and the budget do not change after the March starts.
+  - SYNC-PIN-AT-RELEASE: the march via, the attack via and the budget do not change after the March starts.
   - BUDGET: a predicted courier 0.1 h and march 1.9 h → `TimeBudgetHours` 3.05 (1.5 × 2.0 + 0.05); never below 1.0 with daylight to spare; with 0.6 h of daylight left → 0.6; latched at the March.
   - CEILING-LATCH: a planned release that recedes every tick still ends the Hold at `FirstPlannedReleaseHours` + 1.0; a fast wing waiting for a slow one (release 2.1 h after activation) is not launched by the ceiling before its release.
   - FIX-HOLD: a fixing child with a future release holds (FormUp at its position) through the start-delay path and is `Released` at its planned hour; a fix in contact, a deployed reserve or a child with no ledger entry is never held.
-  - MIRROR-FALLBACK: a child on a mirrored projection can still mirror once (BC11's own try) to the authored side; after the flip the ledger's release, budget and via are not applied.
+  - MIRROR-FALLBACK: a child on a mirrored projection can still mirror once (BC11's own try) to the authored side; after the flip the ledger's release, budget and both vias are not applied.
   - STATE-FLAGS: a `default(ManeuverState)` has no first planned release, no budget and no via (the `Has…` flags false), whatever the hour fields hold.
   - VIA-PASSED: once the child stands in the via's far region, the March order carries no via, so a re-issued order never walks it back.
-  - VIA-ORDER: a March with a via → `BattleOrderIntent.ViaCount` 1 at the crossing, no road route, no `AvoidCoveredCrossings`.
+  - VIA-ORDER: a March with a via → `BattleOrderIntent.ViaCount` 1 at the crossing, no road route, no `AvoidCoveredCrossings`; an Attack with an attack via → the same, its target still the line end; a main-body member's posture order carries no via.
   - VIA-ROUTE-CHECK: BC11's march-leg check runs as two legs through the via.
   - BC13-EXCLUDE: a child with a live exploit is not offered to the layout.
   - BC13-HALF: a main-body child with a live exploit counts half in `Pin` and `S`.
   - BC13-PERSONALITY: the evaluation reads the army entry of the personality table; with that flag off, the roster vector.
   - LOOK-PRIORITY: the selected route's Unknown crossing first; at most two; a look request expires when the crossing turns Clear.
   - LOOK-RECON: the recon producer takes a `Crossing` target after stale entry points and bands, within its cap.
-  - RELEASE-CROSSING: one release per crossing, ordered by the earliest enemy arrival; the reason `crossing-threat`; never for a non-Defender; with no Reserve child, no release.
-  - RELEASE-TARGET: the released child gets `RefuseRight` for a crossing on the right, task `GuardFlank`, the crossing's band as sector and the crossing point as `GuardX`/`GuardZ`; a crossing beyond the line's end is guarded at the crossing, not at the end band; the nearest Reserve child by distance to the crossing is the one released, and its own position, base and fatigue give `ownShift_c`.
+  - RELEASE-CROSSING: one release per crossing, crossings ordered by the earliest `enemyAtCrossing`; the reason `crossing-threat`; never for a non-Defender; with no eligible Reserve child, no release; the child chosen is the eligible one with the least `ownShift_c` (ties to the lower index), read from the ledger's `OwnShiftByChild`, which equals courier plus march over the path search for that child (the functions `T` uses).
+  - RELEASE-ORDER: with a crisis, a threatened wing in contact and a crossing threat in one allocation, the crisis takes the nearest reserve, then BC11's flank release, then the crossing release takes from what remains; the shipped BC11 and BC13 allocator tests stay green.
+  - RELEASE-ELIGIBLE: a Reserve child that is a live exploit asset, or holds player-owned strength, is never released to a crossing; a BC10 deployed reserve is eligible.
+  - RELEASE-ACROSS: an enemy body already standing in the own bank's region triggers no new crossing release; a guard already bound to that crossing stays bound.
+  - RELEASE-TARGET: the released child gets `RefuseRight` for a crossing on the right, task `GuardFlank`, the crossing's band as sector, and its guard point 100 units behind the crossing along the own front axis, facing the crossing; when that point is open river or the far bank, it snaps to the nearest land cell of the own-bank region; a crossing beyond the line's end is guarded there, not at the end band.
   - RELEASE-LATCH: a guard that reaches the crossing and covers it stays released while the enemy's arrival stays within `ownShiftAtRelease + 0.5`; it reverts once the arrival recedes beyond that or no body is perceived; across 40 allocation runs with a stationary enemy, release and revert never alternate; a plan change clears it.
-  - RELEASE-FLOOR: `R0` is set by the first crossing threat when no exploit or odds trigger held before; the floor of BC13's RES-FLOOR applies; a crossing release leaves `LastReleaseHours` unchanged, so the next stagger release is not delayed.
+  - RELEASE-FLOOR: `R0x` = the Reserve children before the crossing release plus the bound guards; with `R0x` 4 at floor share 0.30 two stay held; `R0x` 1 may go; a crossing release leaves BC13's `InitialReserves` and `LastReleaseHours` unchanged, so the next stagger release is not delayed; the floor applies with BC13's staggered flag off too.
+  - RELEASE-STATE-SCOPE: `ReserveReleaseState.ForAlliance(a)` is one instance per alliance; `BattleScope.ResetAll` clears its crossing bindings; `ReplanForNewBattleDay` clears it even when no plan is picked; BC13's `ClearTrigger` leaves the bindings alone; a stand-down clears them.
   - DEF-FLANK: with the own line at lateral ±300, a crossing at lateral 0 or ±100 does not count; one at ±200 (the outer quarter) or ±700 does; one 2,000 units behind the line (beyond one frontage) does not.
   - DEF-PENALTY: a Defender candidate whose main body cannot strike before dark, and faces ground of `ApproachDifficulty` 1 at the enemy anchor, has penalty `1 − (1 − 0.6 × turn)` exactly: `daylight`, `detail`, `approach` and `exposure` 0.
-  - DEF-ARRIVALS: the threat list carries `enemyAtCrossing`, `enemyAtFlank` = `enemyAtCrossing` + the legs to the flank end, and `earliestBodyAtCrossing` from the clusters; `turn` reads `enemyAtFlank`, the release reads `earliestBodyAtCrossing`.
+  - DEF-ARRIVALS: the threat list carries `enemyAtCrossing` (the earliest body not in the own bank's region), `enemyAtFlank` = `enemyAtCrossing` + the legs to the flank end (the outermost filled non-Reserve rect; a tie to the smaller depth), the candidate's `ownShift` from its reserve sources (deployed reserves from their positions, Reserve and ReserveLine rects from their anchors; none → the nearest filled rect), and `OwnShiftByChild`; `turn` reads `enemyAtFlank`.
 - **S8 Fog, player, performance.**
   - FEAS-FOG: a hidden enemy (not an observation) changes no crossing state, no `N`, no shift time.
-  - FEAS-PIN: a source pin that the evaluation reads `EnemyRecords` only through a Visible observation's row, and never `scheduledarrival` or `durationleft`.
+  - FEAS-PIN: a source pin over **the BC14 file set** that `EnemyRecords` is read only through a Visible observation's row, and that `scheduledarrival` and `durationleft` never appear. The test first runs its scanner over a planted `scheduledarrival` read and asserts it fires.
   - FEAS-PLAYER: player-owned strength excluded from `S`; a wholly player-owned child not offered; no via or release on a player-owned unit.
-  - FEAS-ALLOC: 0 bytes after warm-up for one full evaluation (21 evaluations, 6 bodies, a 64-link graph) and one monitor step.
-  - FEAS-TIME: an informational timing of the full evaluation on the harness; the binding measurement is smoke 6.
+  - FEAS-ALLOC: 0 bytes after warm-up for one full evaluation (22 evaluations, 6 bodies, a 64-link graph, a works picture of 32 segments and 256 focal points), one evaluation run in slices, one monitor step and one crossing release.
+  - LINK-TABLE: the per-battle table holds every link pair of a region at the requirement-leg-cost sum; it is built across steps under a scripted clock and the map is unknown until it is complete; a 65th link to be routed is kept as a crossing, not routed, with the OnceLog.
+  - LEG-CACHE: a second query from the same 50-unit bucket samples no new leg; a confirmed leg replaces the estimate; past `MaxLegCache` a leg is priced uncached and `legOverflow` counts it.
+  - FEAS-SLICE: under a scripted clock an evaluation stops at the slice deadline between legs, resumes on the next call and publishes a ledger identical to the forced `Evaluate` result; no reader sees a half-published ledger.
+  - FEAS-TIME: a 10-link river, 22 candidates, 8 children: the evaluation issues at most 902 queries and samples at most 2,662 legs (`U × k` + same-region legs), counted, as asserted bounds; the slice times are recorded (the harness machine is not the game's; the binding ms measurement is smoke 6).
   - NAV-SITES: `NavMeshQueriesSitAtTerrainHeight` counts 4 and pins the new site at terrain height.
   - PROJECT-PARITY / ASSIGN-PARITY: the pooled overloads equal `Project` / `Assign` on every template.
+
+- **S9 Works.**
+  - WORKS-SAMPLES: an enemy sample standing with `CoverObject` 7 and `CoverValue` 0.40 is a works sample; with `CoverValue` 0.15, or moving, or `CoverObject` 3 (forest), 5, 6, 1 or 12, it is not; a Remembered one at confidence 0.4 is not; a regiment that is not an observation contributes nothing.
+  - WORKS-POINTS: a fortification point counts only after a probe found it perceived, and then for the rest of the battle; at most 16 works probes per side per tick, oldest first.
+  - WORKS-SEGMENTS: works 150 units apart laterally join one segment, 160 apart make two; a segment with no holder is not held.
+  - WORKS-ENDS: an end that `FlankAnchored` reports anchored, or that another held segment continues within 150, is anchored; otherwise open.
+  - WORKS-SALIENT: a profile point 250 nearer the own side than its ±300 chord is an apex; 100 nearer is not.
+  - WORKS-JUNCTION: two enemy bodies with centroids on held works give a junction at their midpoint; with one of them off works, none.
+  - FOCAL-SCORE: per-frontage scoring with the salient (0.5) and junction (0.8) factors and the tie rules; the scenario 7 junction (−300, 600) at ≈ 20.5 per unit ahead of (−500, 600) at 21.0; the scenario 8 apex at 3.5.
+  - WORKS-BAR: a body whose strike point lies on held works is held to 3 × `Bar`; one striking 300 units beyond the open end, to `Bar`.
+  - WORKS-PIN: a body striking on held works pins at a defence ratio of at least 3.0.
+  - WORKS-SINGLE: a single-body plan whose strike point lies on held works gets a detail term with `W` = 1.0 and `Pin` 0; off works, none.
+  - TURN-FIX-OPEN: a fixing member of a turning plan facing held works keeps `Bar`, and its `E` counts only the enemy outside works (`N_open`).
+  - WORKS-HOLD-GATE: with `WorksHold` true the phase recommendation stays `Probe` past the probe budget; it lifts when the turn's wing reaches Attack, or when the assaulting body's works detail falls below `RiskyPenalty`; with the flag off `WorksHold` is false.
+  - FOCAL-OFFER: with the flag off, or with no held works, FocalAssault fails its precondition and every other candidate's jitter is unchanged; with a feasible turn it is `Impossible`, `turn-available`; with willingness below 0.2, `Impossible`, `declined`; otherwise it carries the model's penalty and is never mirrored.
+  - FOCAL-WILLINGNESS: willingness 0.85 for agg01 0.9, caution01 0.1, audacity01 0.9; 0.25 for the mid commander; −0.25 for agg01 0.2, caution01 0.9, audacity01 0.2.
+  - FOCAL-EXEC: the `AssaultColumn` child runs Hold → March → Turn → Attack, its Turn order carries `Formation` = March Column and its Attack targets the focal point; no `anchored-high-ground` abandon for it; the `AssaultSupport` child is released at the column's strike + 0.1 h; the demonstrations are released with the column; every write is a `BattleOrderIntent` through the executor (formation intent, waypoint).
+  - FOCAL-PREP: with a battery within its fire range of the focal point, the children's doctrine orders carry `PreparationX/Z` and the column's release is at least activation + 0.25 h; with none in range, no preparation point and no wait.
+  - FOCAL-PLAYER: a child with player-owned strength is in no rect of the focal assault, gets no preparation point and no formation order.
+  - DEF-WORKS-STATION: a Defender holding works stations the fastest eligible Reserve child 150 units behind the focal point with the earliest enemy arrival within 1.0 h, role `Reserve`, task `ReserveWait`, facing it; the station moves only for an arrival 0.25 h earlier; an exploiting or player-owned child is not stationed; the floor is not consulted; one child per side.
+  - WORKS-FOG: a hidden entrenched regiment and an unperceived fortification point change no segment, focal point, bar or gate.
+  - FEAS-SCN-6: the § 6 scenario 6 fixture → the authored ManeuverAndFix wing off the works, `Pin` ≈ 7,700, wing `detail` 0.38 ± 0.05, fix `detail` 0 from the outside-works enemy; the mirrored side, DoubleEnvelopment and the single-body plays at `detail` 1 under the works bar; FocalAssault `turn-available`; the authored ManeuverAndFix selected; `WorksHold` true (`turn-not-struck`) until the wing's Attack (red today: no term sees the works, and the shipped scores pick by base).
+  - FEAS-SCN-7: the § 6 scenario 7 fixture → focal point the junction (−300, 600); assault `odds` 2.34 ± 0.1; the aggressive commander's FocalAssault `detail` 0 and selected; the cautious commander's FocalAssault `Impossible` `declined` and `WorksHold` true (`hopeless-assault`) for whatever is selected; the mid commander's FocalAssault `detail` 0.88 ± 0.05 and `WorksHold` true if it is selected.
+  - FEAS-SCN-8: the § 6 scenario 8 fixture → the apex (0, 350) is the focal point (salient); assault `odds` 2.12 ± 0.1; the aggressive commander's FocalAssault `detail` 0 and selected.
 
 ### Mutation plants (each must make a listed test fail)
 
@@ -979,7 +1232,7 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 - an exploiting child offered to the layout (BC13-EXCLUDE);
 - the stance refresh moved back after the initial pick (FEAS-STANCE-INITIAL);
 - a literal speed in place of `MarchRules` (MARCH-RULES-PIN);
-- the crossing-threat release past the floor (RELEASE-CROSSING);
+- the crossing-threat release past the floor (RELEASE-FLOOR);
 - an allocation in the Dijkstra (FEAS-ALLOC);
 - the fix's synchronized hold removed (STRIKE-DOUBLE, FIX-HOLD);
 - the Hold ceiling anchored to the live planned release instead of the latched one (CEILING-LATCH);
@@ -998,6 +1251,34 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 - a Defender's `daylight` or `approach` term left in its penalty (DEF-PENALTY);
 - the release triggered from the mass instead of the earliest cluster (ENEMY-BODIES, DEF-ARRIVALS);
 - CavalryRaid evaluated mirrored (CANDIDATE-CENTRED);
+- the attack via dropped from the Attack order (INWARD-VIA-BC11, VIA-ORDER);
+- BC11's sub-leg check counting the via's own footprint as river (INWARD-VIA-BC11);
+- the inward leg screened as `Impossible` whenever it crosses a river (INWARD-LEG, FEAS-SCN-4);
+- `StrikeLegWeight` set to 1 (STRIKE-LEG, FEAS-SCN-HOLD);
+- the main-body strike leg left unscreened (STRIKE-LEG, FEAS-SCN-4, FEAS-SCN-HOLD);
+- the inward surplus left out of `T` (INWARD-SURPLUS);
+- the crossing release placed before the flank release (RELEASE-ORDER);
+- an exploiting or player-owned reserve released to a crossing (RELEASE-ELIGIBLE);
+- a body already across triggering a release (RELEASE-ACROSS);
+- the crossing bindings cleared by BC13's `ClearTrigger`, or the new-day clear left to `Replan` (RELEASE-STATE-SCOPE);
+- the guard point set on the crossing itself (RELEASE-TARGET);
+- the deployed reserve left out of a Defender candidate's reserve sources (FEAS-SCN-5, DEF-ARRIVALS);
+- the link table bypassed, each link leg sampled per query (LEG-CACHE, FEAS-TIME);
+- the slice deadline ignored (FEAS-SLICE);
+- a half-evaluated ledger published (FEAS-SLICE);
+- `WorksOddsFactor` set to 1 (WORKS-BAR, FEAS-SCN-7);
+- the open-end turn charged the works bar (WORKS-BAR, FEAS-SCN-6);
+- a holding fix's `E` counting the enemy in works (TURN-FIX-OPEN, FEAS-SCN-6);
+- the works hold gate removed (WORKS-HOLD-GATE, FEAS-SCN-7);
+- FocalAssault offered while a turn is available (FOCAL-OFFER, FEAS-SCN-6);
+- the willingness check removed (FOCAL-WILLINGNESS, FEAS-SCN-7);
+- the salient factor set to 1 (FOCAL-SCORE, FEAS-SCN-8);
+- the support released with the column (FOCAL-EXEC);
+- the column abandoned on `anchored-high-ground` (FOCAL-EXEC);
+- an unperceived fortification point counted (WORKS-POINTS, WORKS-FOG);
+- forest counted as works (WORKS-SAMPLES);
+- the reserve station run through the floor as a release (DEF-WORKS-STATION);
+- a literal `1000f` written into `FeasibilityRuntime.cs` (MARCH-RULES-PIN), and a `scheduledarrival` read written into `CrossingWatch.cs` (FEAS-PIN): the pins read the whole BC14 file set.
 - the enemy's shift charged `HeldCrossingHours` at its own crossings, or not at own-covered ones (SHIFT-RIVER, SHIFT-COVERED).
 
 ### Smoke items (added to the BC7 checklist; item numbers assigned when the plan section is written, after 2.54 and 3.11)
@@ -1011,6 +1292,9 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 7. `[Feasibility] first assumption replan` and `TacticalReplan` rows with `trigger=ManeuverAssumptionBroken` (criterion-replan-stability).
 8. A Defender battle on a river map (the player attacks): the AI never opens with an offensive playbook (`TacticalPlanSelection` winner at `trigger=initial`); `TacticalReserveRelease` rows with `reason=crossing-threat` when the player's column heads for a ford, the guard point at the ford, and one revert row when the column turns away (no release and revert pairs in between); BC9 `Crossing` looks (criterion-defender-no-offense).
 9. Session B (W&L): a player whose division is a wing of a dividing plan receives the March by dispatch, and the plan's `TacticalManeuverBody` strength excludes the player's command (criterion-player-never-moved).
+10. An entrenched enemy with an open end (a save whose enemy army holds campaign entrenchments above the trench tier, so vanilla entrenches it at deployment, or a battle map with fortification groups): `TacticalEnemyWorks` rows (segments, open and anchored ends, focal point), a turning plan selected, `TacticalWorksHold` `turn-not-struck` until the wing's Attack row, no `MainEffort` before it (criterion-works-no-hopeless-assault).
+11. An anchored entrenched line, run twice from the same pre-battle save with the army commander's personality aggressive and then cautious (BC13's table): FocalAssault selected and its `AssaultColumn` launched after its preparation, the support 0.1 h behind; then FocalAssault `declined` and `TacticalWorksHold` `hopeless-assault` with no `MainEffort` (the criterion and its guardrail).
+12. A Defender in works: `TacticalReserveRelease` `reason=works-station` rows, the station behind the focal point nearest the attacker's approach.
 
 ### Coverage matrix (result column blank until prove)
 
@@ -1021,23 +1305,24 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 | requirement-bodies | § 4 | FEAS-SCN-1, FEAS-SCN-3, TARGET-SNAP, ODDS-MORALE | | |
 | requirement-river-regions | § 4 | REG-SPLIT, REG-CREEK, REG-FROZEN, REG-LINK-RADIUS, REG-STEP, REG-TRUNC | | |
 | requirement-crossing-state | § 4 | XING-HELD, XING-WATCHED, XING-CLEAR, XING-REMEMBERED, XING-SHARED-RULE, XING-PROBE-CAP | | |
-| requirement-route-screen | § 4 | ROUTE-SAME-REGION, ROUTE-VIA-CROSSING, ROUTE-NO-CROSSING, INWARD-LEG, VERDICT-UNKNOWN | | |
+| requirement-route-screen | § 4 | ROUTE-SAME-REGION, ROUTE-VIA-CROSSING, ROUTE-NO-CROSSING, INWARD-LEG, VERDICT-UNKNOWN, STRIKE-LEG, INWARD-VIA-BC11 | | |
 | requirement-leg-cost | § 4 | ROUTE-SAME-REGION, ROUTE-BEND, LEG-FOOTPRINT, MARCH-TIME | | |
+| requirement-link-legs | § 4 | LINK-TABLE, LEG-CACHE, FEAS-TIME, ROUTE-VIA-CROSSING | | |
 | requirement-navmesh-confirm | § 4 | ROUTE-CONFIRM, ROUTE-CONFIRM-BUDGET, NAV-SITES | | |
 | requirement-march-time | § 4 | MARCH-TIME, MARCH-RULES-PIN | | |
 | requirement-courier-time | § 4 | COURIER-TIME, SUPPORT-TIME, SHIFT-COURIER | | |
-| requirement-strike-time | § 4 | STRIKE-OFFSET, STRIKE-DOUBLE, STRIKE-FIX-CONTACT, STRIKE-ABSOLUTE, STRIKE-HELD, FIX-MEMBER-RELEASE, MULTI-RIVER | | |
+| requirement-strike-time | § 4 | STRIKE-OFFSET, STRIKE-DOUBLE, STRIKE-FIX-CONTACT, STRIKE-ABSOLUTE, STRIKE-HELD, FIX-MEMBER-RELEASE, MULTI-RIVER, INWARD-SURPLUS | | |
 | requirement-daylight | § 4 | DAYLIGHT | | |
-| requirement-enemy-picture | § 4 | ENEMY-FOG-PREMIUM, ENEMY-NO-SAMPLES, FEAS-FOG, FEAS-PIN | | |
+| requirement-enemy-picture | § 4 | ENEMY-FOG-PREMIUM, ENEMY-NO-SAMPLES, FEAS-FOG, FEAS-PIN, ENEMY-BODIES, CLUSTER-PARITY, SAMPLES-PARITY | | |
 | requirement-shift-time | § 4 | SHIFT-PASSIVE, SHIFT-RIVER, SHIFT-COVERED, SHIFT-COURIER | | |
 | requirement-detail-risk | § 4 | DETAIL-PIN, DETAIL-WINDOW, SUPPORT-TIME, DETAIL-BAR, DETAIL-PENALTY, DETAIL-NO-FIX, ODDS-MORALE, FEAS-SCN-2, FEAS-SCN-3, FEAS-SCN-BOLD | | |
 | requirement-route-exposure | § 4 | EXPOSURE-FOREST | | |
-| requirement-held-crossing | § 4 | ROUTE-HELD-DETOUR, STRIKE-HELD, FEAS-SCN-4 | | |
+| requirement-held-crossing | § 4 | ROUTE-HELD-DETOUR, STRIKE-HELD, FEAS-SCN-4, STRIKE-LEG, FEAS-SCN-HOLD | | |
 | requirement-approach | § 4 | APPROACH-ANCHORED | | |
 | requirement-player-share | § 4 | FEAS-PLAYER | | |
-| requirement-penalty | § 4 | DETAIL-PENALTY, DEF-PENALTY, FEAS-SCN-3, FEAS-SCN-AUDACITY | | |
+| requirement-penalty | § 4 | DETAIL-PENALTY, DEF-PENALTY, FEAS-SCN-3, FEAS-SCN-AUDACITY, FEAS-SCN-HOLD | | |
 | requirement-verdict | § 4 | VERDICT-UNFILLED, VERDICT-UNKNOWN, VERDICT-RISKY, VERDICT-ORDER, DAYLIGHT | | |
-| requirement-evaluation-cadence | § 4 | ROUTE-CONFIRM-BUDGET, smoke 2 | | |
+| requirement-evaluation-cadence | § 4 | ROUTE-CONFIRM-BUDGET, smoke 2, FEAS-SLICE | | |
 | requirement-stance-before-pick | § 5 | FEAS-STANCE-INITIAL, smoke 8 | | |
 | requirement-selection-term | § 5 | SELECT-FILTER, SELECT-JITTER, FEAS-REGRESS | | |
 | requirement-never-empty | § 5 | SELECT-NEVER-EMPTY | | |
@@ -1046,18 +1331,26 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 | requirement-assumption-replan | § 5 | REPLAN-HYSTERESIS, REPLAN-COOLDOWN, MON-SUPPRESSION, smoke 7 | | |
 | requirement-synchronized-release | § 7 | FEAS-SYNC, SYNC-UNSET, SYNC-PIN-AT-RELEASE, CEILING-LATCH, FIX-HOLD, STATE-FLAGS, FEAS-SCN-2 | | |
 | requirement-maneuver-time-budget | § 7 | BUDGET | | |
-| requirement-crossing-via | § 7 | VIA-ORDER, VIA-ROUTE-CHECK, VIA-PASSED, FEAS-SCN-4 | | |
+| requirement-crossing-via | § 7 | VIA-ORDER, VIA-ROUTE-CHECK, VIA-PASSED, FEAS-SCN-4, INWARD-VIA-BC11, SYNC-PIN-AT-RELEASE | | |
 | requirement-wing-abandon-replan | § 7 | MON-ABANDON | | |
 | requirement-bc13-commitment | § 7 | BC13-EXCLUDE, BC13-HALF | | |
 | requirement-bc13-personality | § 7 | BC13-PERSONALITY, DETAIL-BAR, FEAS-SCN-AUDACITY, FEAS-SCN-BOLD | | |
 | requirement-crossing-look | § 7 | LOOK-PRIORITY, LOOK-RECON | | |
 | requirement-defender-exposure | § 7 | FEAS-SCN-5, DEF-FLANK, DEF-PENALTY, DEF-ARRIVALS, SHIFT-COVERED | | |
-| requirement-defender-crossing-release | § 7 | RELEASE-CROSSING, RELEASE-TARGET, RELEASE-LATCH, RELEASE-FLOOR, ENEMY-BODIES, DEF-ARRIVALS, FEAS-SCN-5, smoke 8 | | |
+| requirement-defender-crossing-release | § 7 | RELEASE-CROSSING, RELEASE-TARGET, RELEASE-LATCH, RELEASE-FLOOR, ENEMY-BODIES, DEF-ARRIVALS, FEAS-SCN-5, smoke 8, RELEASE-ORDER, RELEASE-ELIGIBLE, RELEASE-ACROSS, RELEASE-STATE-SCOPE | | |
 | requirement-runtime-wiring | § 7 | FEAS-STANCE-INITIAL, MON-SUPPRESSION, FIX-HOLD, MIRROR-FALLBACK, RELEASE-CROSSING, RELEASE-TARGET, DEF-ARRIVALS, smoke 2, smoke 7 | | |
-| requirement-frame-budget | § 11 | FEAS-TIME, smoke 6 | | |
+| requirement-frame-budget | § 11 | FEAS-TIME, smoke 6, FEAS-SLICE, LEG-CACHE | | |
 | requirement-zero-alloc | § 11 | FEAS-ALLOC | | |
 | requirement-config | § 11 | config-audit 0 findings | | |
-| requirement-telemetry | § 11 | smoke 1-9 | | |
+| requirement-telemetry | § 11 | smoke 1-12 | | |
+| requirement-works-picture | § 7A | WORKS-SAMPLES, WORKS-POINTS, WORKS-FOG, FEAS-SCN-6 | | |
+| requirement-works-shape | § 7A | WORKS-SEGMENTS, WORKS-ENDS, WORKS-SALIENT, WORKS-JUNCTION, FOCAL-SCORE, FEAS-SCN-7, FEAS-SCN-8 | | |
+| requirement-works-pricing | § 7A | WORKS-BAR, WORKS-PIN, WORKS-SINGLE, FEAS-SCN-6, FEAS-SCN-7 | | |
+| requirement-turn-first | § 7A | TURN-FIX-OPEN, FEAS-SCN-6 | | |
+| requirement-works-hold | § 7A | WORKS-HOLD-GATE, FEAS-SCN-6, FEAS-SCN-7, smoke 10, smoke 11 | | |
+| requirement-focal-assault | § 7A | FOCAL-OFFER, FOCAL-WILLINGNESS, CANDIDATE-CENTRED, FEAS-SCN-7, FEAS-SCN-8 | | |
+| requirement-focal-execution | § 7A | FOCAL-EXEC, FOCAL-PREP, FOCAL-PLAYER, smoke 11 | | |
+| requirement-defender-works-reserve | § 7A | DEF-WORKS-STATION, smoke 12 | | |
 
 ---
 
@@ -1123,7 +1416,7 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 - **D13 The stance is read before the pick (bug fix).**
   - Problem: the initial pick runs on the default `Meeting` stance.
   - Effect: a Defender opens defensively.
-  - Rejected: leave it to the first replan, which may be 600 battle-s away.
+  - Rejected: leave it to the first replan. `PickInitialPlan` never stamps the replan cooldown, so when the refreshed inputs carry an opportunity other than `NoOpportunity`, the `OpportunityChange` trigger replans on the second coordinator tick. But when the doctrine stays at `NoOpportunity`, or its flag is off, nothing fires and the wrong opening stands until some other trigger does.
 
 - **D14 Even odds across a held river (question-even-odds-crossing).** Decided by the user, 2026-10-16: "keep as designed".
   - Pin-and-cross is taken only with a real edge: about 2:1, or less for a bold commander, whose `Bar` is lower.
@@ -1158,6 +1451,52 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
   - Effect: Defensive and Neutral candidates differ only by how well each guards its flank crossings.
   - Rejected: keep the attacker's terms for a Defender's main body. That penalizes holding a line in front of a strong enemy, the line's purpose.
 
+- **D24 A Defender's enemy bodies are BC14's own clustering, over the shared labelling.**
+  - Problem: the release needs the enemy's separate bodies, and BC13's detector runs no `ClusterPass` for a Defender; its clusters live in private per-tick arrays that surface only as isolated-cluster openings.
+  - Effect: a column heading for a ford is timed as itself, with BC13's opportunity flag on or off.
+  - Chosen: BC14 labels its own samples with `SingleLinkClusters.Label`, extracted from `ClusterPass` so there is one labelling rule, at BC13's 150-unit link.
+  - Rejected: a public read-only interface on BC13's detector. It would have to run `ClusterPass` for a Defender, which changes BC13's opening set and its cost per tick, and it would tie BC14's cadence to the detector's.
+- **D25 The inward leg gets its own crossing via, and BC11 judges the two sub-legs.**
+  - Problem: BC11 abandons a wing whose straight inward leg crosses open river, so a wing whose attack must cross is abandoned after it was selected.
+  - Effect: a wing attacks over the crossing the plan chose, and pin-and-cross (D14) can launch wherever its ford lies relative to the anchor.
+  - Rejected: rate every inward leg that crosses a river `Impossible`. That would kill the pin-and-cross the user approved whenever the ford lies on the attack leg.
+  - Rejected: leave BC11's straight check unchanged. The screen would select plans BC11 then abandons (criterion-no-doomed-launch).
+- **D26 Every strike leg is priced; a main body's at half weight.**
+  - Problem: a single-body attack's strike leg was never screened, so "never dives at the held bridge" depended on where a river fell against the rect fractions.
+  - Effect: a frontal attack across a held river is priced by the model. Crossing at once costs more than holding the bank and attacking later, so at even odds the army holds and probes by the model, not by the base scores' order (§ 6 scenario 4, FEAS-SCN-HOLD).
+  - Rejected: the strike leg at full weight. Holding the bank and crossing at once would cost the same, and the choice between them would fall back to the base scores.
+  - Rejected: a strike leg that is `Impossible` without a crossing. An army can still hold its bank against an enemy it cannot reach.
+- **D27 The crossing release is appended after the flank release and draws on the real reserve.**
+  - Problem: the release must fit the shipped order and must send a unit the army has.
+  - Effect: contact releases come first, a predicted threat takes what is left, the floor holds, and the guard is a real Reserve child timed by the same functions as every other body.
+  - Rejected: release from the template's reserve rect. No shipped template puts its reserve anywhere but lateral 0, and most three-corps Defender layouts leave it empty.
+  - Rejected: fold it into BC13's stagger. The stagger's `R0` and interval would move with predicted threats, and BC13's tests would change.
+- **D28 Leg costs are tabled per battle, cached per evaluation, and the evaluation runs in slices.**
+  - Problem: every candidate's routes, supports and shifts sample the same legs again; priced on demand, an evaluation samples far past its budget.
+  - Effect: link-to-link legs are sampled once per battle, point legs once per evaluation, and no tick spends more than its slice.
+  - Rejected: evaluate one candidate per tick. A full evaluation would lag the battle by 21 ticks whatever its cost.
+- **D29 Works are priced by the same model: a bar of three at the point of attack (integrator scope addition, 2026-10-16).**
+  - Problem: the user asked how the AI meets an entrenched enemy; vanilla only routes its marches around the fire zone in front of covered enemies.
+  - Effect: an assault on works needs about three to one where it strikes; a turn beyond an open end pays nothing extra; the choice between them emerges from the evaluation.
+  - Rejected: a fixed penalty per entrenched candidate. It would not see where a plan strikes, so it would punish a turn as much as a frontal assault.
+  - Rejected: an `Impossible` filter for works assaults. Grant and Hood did assault works; temperament must be able to choose it (D3).
+- **D30 A turning plan's fix holds in front of the works, and a phase gate keeps the army from committing against them.**
+  - Problem: the shipped phase machine commits the main effort on a time budget, and a fix facing works would assault them.
+  - Effect: "a brigade or division in front, the main body around the edges"; a hopeless assault is never ordered, whatever won the selection.
+  - Rejected: re-scoring the plan every tick to force a replan. The monitor already replans on broken assumptions; the gate is the one rule that holds the phase.
+- **D31 FocalAssault is a playbook, offered only when no turn will do, and willingness is the commander's.**
+  - Problem: a deliberate assault on one point needs its own layout (column, support, demonstrations) and must not crowd out a feasible turn.
+  - Effect: the catalog weighs it like any play, the model prices it, BC11 executes it, and a cautious commander declines it.
+  - Rejected: a mode switch inside the existing frontal plays. Their rects are laid out on the enemy anchor, not on a chosen point, and they have no column or echeloned support.
+  - Rejected: always offering it. It would compete with a feasible turn on base score alone.
+- **D32 The focal point is the lowest defence per frontage, with salients and seams discounted.**
+  - Problem: "a salient, the weakest held stretch or a junction" must become one choice.
+  - Effect: one score ranks every point: a salient's defenders are hit from three sides (0.5), a seam between commands is weaker than its numbers (0.8).
+  - Rejected: a fixed priority (salient first, then junction, then weakest). A strongly held salient would be assaulted ahead of a thin stretch.
+- **D33 A Defender in works stations a reserve behind its most threatened point, without releasing it.**
+  - Problem: works hold a line cheaply, and their weak point is where a reserve must stand.
+  - Effect: the reserve is where it is needed and remains a reserve for every release.
+  - Rejected: a release to the focal point (the crossing release's form). It would spend the floor before any assault comes.
 ---
 
 ## 15. Amendments owed to the plan (the integrator writes them; this spec does not edit the plan)
@@ -1173,11 +1512,18 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 2. **Level of detail (now BC15).** BC14 adds no producer, so the "13 producers" count stays. BC14's state that the tiered posture producer reads (a maneuver order's via, a planned release that changes the order's target on release) reaches it through promotion trigger (c), order target. A March with a via is not a static task, so the group is never `Distant` while it marches. No new trigger is owed. The level-of-detail equivalence test gains one case: a planned release on a group that was `Distant` the tick before.
 3. **Formations (now BC16).** A maneuver March carrying a crossing via takes the road-route formation reason (`road-route`, March Column) for the legs up to the crossing. BC16's formation table must treat a via March like a routed move.
 4. **BC11 code touch points** (BC14 edits them; the BC11 tests stay green with the flag off): `ManeuverInput.PlannedReleaseHours` / `TimeBudgetHours`; the Hold and timeout tests; `ManeuverOrder` and `ManeuverNodeEntry` via; `PlayExecutorRuntime`'s two-leg route check, abandon queue and mirrored projection (`ManeuverSpec.ProjectedMirrored`; BC11's own `Mirrored` keeps its meaning and starts false); `ManeuverOf`'s `HoldsForRelease` spec and `StepStartDelay`'s planned-release branch.
-5. **BC9 code touch point.** `BattleRecon` gains the `Crossing` target kind.
-6. **BC13 dependency.** BC14 reads `CommanderPersonalityTable`, `IPerceivedGround` (through `PerceivedGroundRuntime`), `ExploitTable.IsExploiting`, `OpportunityPersonality` and the reserve release state. BC14 cannot start before BC13 merges.
-7. **`AGENTS.md`.** No write-owner change: BC14 adds no writer and no patch. The quick reference "Battle stance + plays" gains one sentence: plays are screened for feasibility before selection (`ManeuverFeasibility`), and a Defender's initial pick is stance-filtered.
-8. **Patch catalog and bug ledger.** No new patch, so no ordinal. requirement-stance-before-pick is a Whiskey defect, not a vanilla bug, and it is recorded in the BC14 section's As built. Vanilla's reinforcement-schedule fog leak (§ 2.1 item 7) is a Backlog entry in `docs/bug-fixes/vanilla-tactical-battlefield.md` (D19), added with this spec's decisions.
-9. **Docs.** `docs/tactical-orchestrator.md` (Battle Core: feasibility, river regions, crossing watch; Doctrine Components: playbook feasibility), `docs/scourge-of-war-ai-anchors.md` (plays are screened before selection; Scourge's `PLAYFTime` timing is now an arrival-synchronized release), `docs/telemetry.md` (the new rows), `docs/tactical-operations-ledger.md` (the crossing-threat release).
+   - **The attack via and the sub-leg river check (D25).** `ManeuverInput` gains `HasAttackVia`/`AttackViaX`/`AttackViaZ`, latched into `ManeuverState` at the March with the march via; the Attack order (`ManeuverOrder.HasVia`/`ViaX`/`ViaZ`) carries it. `PlayExecutorRuntime` (the inward-leg sampling today at its `SampleLine(anchor → line end, InwardStepMeters)` call) samples anchor → attack via and attack via → line end, and drops river samples within `RiverRegions.CrossingLinkMeters` of the via before `EnvelopmentManeuver.InwardLegClear`; `FlankMoveCheck` then abandons `river-on-leg` only when a sub-leg crosses open river. Without an attack via the straight check is unchanged. Test INWARD-VIA-BC11 is red against today's code.
+5. **BC9 code touch point.** `BattleRecon` gains the `Crossing` target kind, and its 150-unit stand-off (today applied only to EntryPoint and RememberedEnemy) applies to it, on the own side of the crossing.
+6. **BC13 dependency and touch points** (BC13 is on `main` at `578bd13`; its allocator, detector and opportunity tests stay green):
+   - BC14 reads `CommanderPersonalityTable`, `IPerceivedGround` (through `PerceivedGroundRuntime`, opening and disposing its own handle), `ExploitTable.ForAlliance(a).IsExploiting(int)` (behind BC14's new `IExploitLookup` seam), `OpportunityPersonality` and `OpportunityDoctrine.FloorShare`.
+   - **Extractions (one rule each):** BC13's enemy-sample filter, written inline in `OpeningDetector.BuildSamples`, `OpportunityTick` and `CavalryStrikeDisciplinePatch`, becomes `EnemySamples.Accepts`, which the three call; `OpeningDetector.ClusterPass`'s union-find labelling becomes `SingleLinkClusters.Label`, which `ClusterPass` calls (CLUSTER-PARITY, SAMPLES-PARITY).
+   - **The allocator:** `ReleaseReserves` gains `ReleaseReserveToCrossings` after `ReleaseReserveToThreatenedWing`; `ReserveReleaseContext` gains `CrossingThreats`, `PlayerOwned` and an explicit `Staggered` flag (so `State` and `Exploiting` are passed whenever BC13's staggered flag or BC14's flag is on); `DirectChildIntent` gains the guard point and heading; the posture producer reads them for `GuardFlank`; `ArmyOrchestrator`'s release row emits `reason=crossing-threat`.
+   - **The state:** `ReserveReleaseState` becomes `ReserveReleaseState.ForAlliance(int)` with a `BattleScope` registration and gains the crossing-binding table; `ArmyOrchestrator` holds its alliance's instance; `TacticalBattleCoordinator.ReplanForNewBattleDay` clears it before its `HasPlan` check.
+7. **BC10 and play-layer touch points.** `RoadRoutePlanner.PolylineCost` becomes `internal` (private today) for the confirmation's polyline cost.
+   - **Works (§ 7A).** `BattlePlanId.FocalAssault`, `FocalAssaultPlaybook` (appended last to `BuiltInPlaybooks`, so the jitter stream of the 18 is unchanged), its `PlayTemplateCatalog` entry and `PlayRectKind.AssaultColumn` / `AssaultSupport` (with `RoleForRectKind`: `Main` / `SupportMain`); BC11's `ManeuverSpec` kind `AssaultColumn` (Attack on the focal point, `ManeuverOrder.Formation` at the Turn, no `anchored-high-ground`); `CommandDoctrineOrder.PreparationX/Z` read by `DoctrineConsumerDecisions.DecideArtillery`; `TacticalPhaseProgressionDoctrine.Input.WorksHold`; `DirectChildAllocator.StationReserveBehindFocalPoint`. The level-of-detail slice (now BC15) promotes a group whose order gains a formation (trigger (c), order target and formation). The formations slice (now BC16) records `assault-column` (March Column) as the column's formation reason.
+8. **`AGENTS.md`.** No write-owner change: BC14 adds no writer and no patch. The quick reference "Battle stance + plays" gains one sentence: plays are screened for feasibility before selection (`ManeuverFeasibility`), and a Defender's initial pick is stance-filtered. It also gains: against perceived enemy works the AI turns an open end first and assaults a focal point only when no turn will do (`FocalAssault`, the 19th playbook).
+9. **Patch catalog and bug ledger.** No new patch, so no ordinal. requirement-stance-before-pick is a Whiskey defect, not a vanilla bug, and it is recorded in the BC14 section's As built. Vanilla's reinforcement-schedule fog leak (§ 2.1 item 9) is a Backlog entry in `docs/bug-fixes/vanilla-tactical-battlefield.md` (D19), added with this spec's decisions.
+10. **Docs.** `docs/tactical-orchestrator.md` (Battle Core: feasibility, river regions, crossing watch; Doctrine Components: playbook feasibility), `docs/scourge-of-war-ai-anchors.md` (plays are screened before selection; Scourge's `PLAYFTime` timing is now an arrival-synchronized release), `docs/telemetry.md` (the new rows), `docs/tactical-operations-ledger.md` (the crossing-threat release).
 
 ---
 
@@ -1190,12 +1536,16 @@ Test file `ManeuverFeasibilityTests.cs` (`internal static partial class Maneuver
 - BC11's two-leg route check through a via is served within BC11's per-step budget (smoke 4).
 - The day-end hour read from `uniStormSystem` matches the end-of-day cycle's trigger (smoke 4 near dusk).
 - Whether vanilla's no-delay cheat for engaged AI units (`combatstatussubordinates > 0`) also skips the order delay of a support order or of the enemy's shift order. BC14 charges both their courier hours alike (requirement-courier-time), so the comparison of `σ` with `τ` is even either way; smoke 4's prediction error would show an engaged body arriving early.
+- That `BattlefieldSetup.Fortification`'s points are the works vanilla's entrenching places at deployment, and that the cover ids of trenches the AI digs read 7-11 on its regiments (smoke 10 reads `worksSamples` and `worksPointsPerceived`).
+- That vanilla's March Column formation keeps an assault column together through the Attack waypoint (smoke 11 watches the column's formation on its rows).
+- That the artillery doctrine's requested support at the preparation point puts batteries in range on bombardment (smoke 11).
+- Whether a vanilla-run enemy's shift pays any courier hours. Its long moves call `SetWaypoint(useorderdelay: false)` (`BlockedMovingOrder` 3139, `FlankMove` 117089-117090, `CheckForSeparatedEnemy` 8188), so `τ`'s `EnemyCourierHours` may overstate it by up to 0.04 h plus a ride. Against a Whiskey-commanded enemy (AI against AI) the executor's moves do pay it. Smoke 3 and 8 read `enemyShiftHours` against the enemy's observed arrival.
 
 ---
 
 ## 17. Open questions for the user
 
-None. The six questions of the review draft are decided: § 14, D14-D19 (2026-10-16).
+None. The review draft's questions are decided: § 14, D14-D19 (2026-10-16).
 
 ---
 
@@ -1209,5 +1559,6 @@ None. The six questions of the review draft are decided: § 14, D14-D19 (2026-10
 - Retuning the catalog's existing weights, personality fit squash or affinity tables (BC13's out-of-scope item stands).
 - New vanilla bug fixes. requirement-stance-before-pick is a Whiskey defect; the reinforcement-schedule leak is a backlog entry only (D19).
 - Orders to the W&L player beyond BC11's existing dispatch of a maneuvering ancestor.
+- Siege operations against works: approaches, mines (the Crater), parallels; digging own works during the battle; artillery positioning for the preparation beyond the batteries already in range.
 
 <!-- author-sweep: applied purpose-advantage-measurement, fit-criteria, guardrails, read-paths, roles, lifecycle, exceptions, concurrency, decision-records; n/a: none -->
