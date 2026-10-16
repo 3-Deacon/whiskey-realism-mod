@@ -6,11 +6,12 @@ using static TestHarness;
 //   .Personality  PERS-*  (spec § 4)
 //   .Detection    DET-*   (spec § 5)
 //   .Probe        the perceived-ground lattice, penetration, Counterstroke (spec § 5)
+//   .Decision     OPP-*   (spec § 6)
 internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

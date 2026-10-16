@@ -416,6 +416,18 @@ internal static partial class CommanderOpportunityTests
         AssertNear(2f * 100f * 0.8f, value, 1e-3f, "value = sum strength x morale");
         AssertNear(700f, nearest, 1e-3f, "nearest other cluster: centroid to centroid");
         AssertEqual(1000, west.TargetObservation, "target = the strongest member");
+        AssertNear(2f * 100f * 0.8f, west.ClusterValue, 1e-3f, "the opening carries the cluster value");
+        AssertNear(700f, west.ClusterNearestMeters, 1e-3f, "and the nearest neighbour");
+        AssertFalse(west.Shaken, "steady infantry is not a shaken cluster");
+        var broken = new DetFixture();
+        broken.Inf(0f, 600f, strength: 100f, morale: 0.2f);
+        broken.Inf(100f, 600f, strength: 100f, morale: 0.3f);
+        broken.Inf(700f, 600f, strength: 800f);
+        var db = new OpeningDetector();
+        Detect(db, broken);
+        Opening shakenWest = default;
+        foreach (Opening o in db.Openings.ToArray()) if (o.Kind == OpeningKind.IsolatedCluster && o.AimX < 400f) shakenWest = o;
+        AssertTrue(shakenWest.Id > 0 && shakenWest.Shaken, "a cluster whose mean visible morale is under the bar is shaken");
 
         // vanilla's rule for an asset of strength x morale 400 at 400 m: 160 <= 0.65 x 400 = 260 and 700 > 1.3 x 400 = 520.
         AssertTrue(OpeningDetector.ClusterQualifies(160f, 700f, 400f, 400f), "the weak, distant cluster qualifies");

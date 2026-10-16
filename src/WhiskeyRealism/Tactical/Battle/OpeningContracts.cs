@@ -41,6 +41,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public int TargetObservation;
         public double FirstSeenHours, LastSeenHours;
         public bool Confirmed, Claimed;
+        /// <summary>The target is below the shaken bar: a ShakenSector always; an IsolatedCluster when its mean visible
+        /// morale is. Cavalry may strike a shaken cluster, never a steady one (spec § 3).</summary>
+        public bool Shaken;
+        /// <summary>IsolatedCluster only: the sum of strength x morale of its samples (a Remembered one x confidence) and the
+        /// distance from its centroid to the nearest other cluster's, the inputs of vanilla's per-asset rule
+        /// (OpeningDetector.ClusterQualifies). 0 for every other kind.</summary>
+        public float ClusterValue, ClusterNearestMeters;
     }
 
     /// <summary>

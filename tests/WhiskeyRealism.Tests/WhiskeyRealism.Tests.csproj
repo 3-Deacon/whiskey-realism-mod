@@ -237,6 +237,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningDetector.cs" Link="Battle\OpeningDetector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningTerrain.cs" Link="Battle\OpeningTerrain.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedGroundLattice.cs" Link="Battle\PerceivedGroundLattice.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpportunityDoctrine.cs" Link="Battle\OpportunityDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ChargeDoctrine.cs" Link="Battle\ChargeDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshot.cs" Link="Battle\BattleSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshotAssembler.cs" Link="Battle\BattleSnapshotAssembler.cs" />

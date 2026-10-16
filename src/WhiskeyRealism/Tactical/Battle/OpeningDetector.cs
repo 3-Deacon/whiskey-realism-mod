@@ -68,14 +68,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private struct Candidate
         {
             public Opening O;
-            public float ClusterX, ClusterZ, ClusterValue, ClusterNearest;
             /// <summary>The pooled lattice proving the ground this candidate asserts, or -1 when it needs none.</summary>
             public int Lattice;
-        }
-
-        private struct ClusterInfo
-        {
-            public float X, Z, Value, Nearest;
         }
 
         // ---- pooled state ------------------------------------------------------------------
@@ -93,13 +87,13 @@ namespace WhiskeyRealism.Tactical.Battle
         private Candidate[] _cand = new Candidate[64];
         private int _candCount;
         private Opening[] _open = new Opening[MaxOpenings];
-        private ClusterInfo[] _info = new ClusterInfo[MaxOpenings];
         private bool[] _matched = new bool[MaxOpenings];
         private bool[] _candMatched = new bool[64];
         private int _openCount;
         private int _nextId = 1;
         private readonly float[] _secTotal = new float[MaxBands], _secVisible = new float[MaxBands], _secShaken = new float[MaxBands], _secRouted = new float[MaxBands];
         private float[] _cx = new float[64], _cz = new float[64], _cvalue = new float[64], _cstrength = new float[64], _cconf = new float[64], _cbest = new float[64];
+        private float[] _cmorale = new float[64], _cvisible = new float[64];
         private int[] _cbestId = new int[64], _cidx = new int[256], _uf = new int[256], _ckey = new int[256], _corder = new int[256];
         private bool[] _ckeep = new bool[64];
         private float[] _cnearest = new float[64];
@@ -191,10 +185,10 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = 0; i < _openCount; i++)
             {
                 if (_open[i].Id != id || _open[i].Kind != OpeningKind.IsolatedCluster) continue;
-                x = _info[i].X;
-                z = _info[i].Z;
-                value = _info[i].Value;
-                nearestOtherMeters = _info[i].Nearest;
+                x = _open[i].AimX;
+                z = _open[i].AimZ;
+                value = _open[i].ClusterValue;
+                nearestOtherMeters = _open[i].ClusterNearestMeters;
                 return true;
             }
             x = z = value = nearestOtherMeters = 0f;
@@ -634,7 +628,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
                 float aimX = sumX / sumW, aimZ = sumZ / sumW;
                 int target = NearestShaken(aimX, aimZ, b, bands);
-                AddCandidate(OpeningKind.ShakenSector, aimX, aimZ, 0f, 0f, _secVisible[b] / total, target, false, default);
+                int slot = AddCandidate(OpeningKind.ShakenSector, aimX, aimZ, 0f, 0f, _secVisible[b] / total, target, false, default);
+                if (slot >= 0) _cand[slot].O.Shaken = true;
             }
         }
 
@@ -823,7 +818,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     EnsureClusterArrays(clusters + 1);
                     _cidx[root] = clusters;
-                    _cx[clusters] = _cz[clusters] = _cvalue[clusters] = _cstrength[clusters] = 0f;
+                    _cx[clusters] = _cz[clusters] = _cvalue[clusters] = _cstrength[clusters] = _cmorale[clusters] = _cvisible[clusters] = 0f;
                     _cbest[clusters] = -1f;
                     _cconf[clusters] = 1f;
                     _cbestId[clusters] = -1;
@@ -836,6 +831,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 _cstrength[c] += w;
                 _cvalue[c] += _s[i].Visible ? _s[i].Strength * _s[i].Morale : _s[i].Strength * _s[i].Conf * _s[i].Morale;
                 _cconf[c] *= _s[i].Conf;
+                if (_s[i].Visible)
+                {
+                    _cmorale[c] += _s[i].Morale * w;
+                    _cvisible[c] += w;
+                }
                 if (_s[i].Strength > _cbest[c])
                 {
                     _cbest[c] = _s[i].Strength;
@@ -883,10 +883,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!_ckeep[c] || !(_cnearest[c] > ClusterIsolationFloorMeters) || _cnearest[c] == float.MaxValue) continue;
                 int slot = AddCandidate(OpeningKind.IsolatedCluster, _cx[c], _cz[c], 0f, 0f, _cconf[c], _cbestId[c], false, default);
                 if (slot < 0) continue;
-                _cand[slot].ClusterX = _cx[c];
-                _cand[slot].ClusterZ = _cz[c];
-                _cand[slot].ClusterValue = _cvalue[c];
-                _cand[slot].ClusterNearest = _cnearest[c];
+                _cand[slot].O.ClusterValue = _cvalue[c];
+                _cand[slot].O.ClusterNearestMeters = _cnearest[c];
+                _cand[slot].O.Shaken = _cvisible[c] > 0f && _cmorale[c] / _cvisible[c] < _rules.ShakenMorale;
             }
         }
 
@@ -903,6 +902,8 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Resize(ref _cbestId, size);
             Array.Resize(ref _ckeep, size);
             Array.Resize(ref _cnearest, size);
+            Array.Resize(ref _cmorale, size);
+            Array.Resize(ref _cvisible, size);
         }
 
         private int Find(int i)
@@ -1033,7 +1034,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 o.LastSeenHours = now;
                 o.Claimed = _open[best].Claimed;
                 _open[best] = o;
-                _info[best] = new ClusterInfo { X = cand.ClusterX, Z = cand.ClusterZ, Value = cand.ClusterValue, Nearest = cand.ClusterNearest };
             }
 
             // 2. drop what was not seen for LostHours
@@ -1044,7 +1044,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (kept != i)
                 {
                     _open[kept] = _open[i];
-                    _info[kept] = _info[i];
                     _matched[kept] = _matched[i];
                 }
                 kept++;
@@ -1062,7 +1061,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (_openCount == MaxOpenings && !MakeRoomFor(in o)) continue;
                 o.Id = _nextId++;
                 _open[_openCount] = o;
-                _info[_openCount] = new ClusterInfo { X = cand.ClusterX, Z = cand.ClusterZ, Value = cand.ClusterValue, Nearest = cand.ClusterNearest };
                 _openCount++;
             }
 
@@ -1095,7 +1093,6 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = victim; i + 1 < _openCount; i++)
             {
                 _open[i] = _open[i + 1];
-                _info[i] = _info[i + 1];
             }
             _openCount--;
             return true;
