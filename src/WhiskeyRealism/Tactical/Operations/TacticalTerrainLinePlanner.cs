@@ -246,6 +246,7 @@ namespace WhiskeyRealism.Tactical.Operations
         // 8-neighbour flood fill of one run inside the window; the members are left in _members[0..count).
         private static int Flood(TerrainPicture p, TerrainLineKind kind, int start, float objX, float objZ)
         {
+            int seedAxis = p.CrestAxis(start % p.Columns, start / p.Columns);
             int top = 0, count = 0;
             _stack[top++] = start;
             _stamp[start] = _generation;
@@ -265,9 +266,9 @@ namespace WhiskeyRealism.Tactical.Operations
                         if (nx < 0 || nx >= p.Columns) continue;
                         int n = nz * p.Columns + nx;
                         if (_stamp[n] == _generation || !InWindow(p, nx, nz, objX, objZ) || !IsMember(p, kind, nx, nz)) continue;
-                        // Crest cells join only along one ridge: neighbouring profile axes within 45 degrees, so two ridges that meet
-                        // are two runs, not one blob with no direction.
-                        if (kind == TerrainLineKind.Crest && !AxesJoin(p.CrestAxis(cx, cz), p.CrestAxis(nx, nz))) continue;
+                        // A crest run keeps to its seed's profile axis (within 45 degrees of it, not chained neighbour to neighbour), so two
+                        // ridges that meet are two runs, not one blob with no direction; a diagonal cell at the meeting joins only the first.
+                        if (kind == TerrainLineKind.Crest && !AxesJoin(seedAxis, p.CrestAxis(nx, nz))) continue;
                         _stamp[n] = _generation;
                         _stack[top++] = n;
                     }

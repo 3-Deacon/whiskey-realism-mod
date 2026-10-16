@@ -306,14 +306,15 @@ internal static partial class TerrainPictureTests
 
     private static void CrestRunsDoNotJoinAcrossAxes()
     {
-        // Two 10 m ridges that cross: one along x at world z -390 (across the +z threat axis), one along z at x 410. Joined into one
-        // blob they would have no direction; by profile axis they are two runs and the cross-axis one is the line.
+        // A long ridge along z (x 410) met by a shorter ridge along x (world z -390, x 100-400): a T. Joined into one blob the
+        // principal axis is the long one (along the +z threat axis) and the blob is rejected; by profile axis the short ridge is its
+        // own run and is the line across the front.
         BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
         Func<float, float, float> alongX = RidgeAlongX(30f, 5f, Map), alongZ = RidgeAlongZ(30f, 5f);
-        TerrainPicture p = Build(grid, Map, (x, z) => Math.Max(alongX(x, z), alongZ(x, z)));
+        TerrainPicture p = Build(grid, Map, (x, z) => Math.Max(x >= 100f && x <= 400f ? alongX(x, z) : 0f, alongZ(x, z)));
         TerrainLine line = TacticalTerrainLinePlanner.BestCrest(p, ObjX, ObjZ, 0f, 1f, 600f);
         AssertTrue(line.Has, "the ridge across the axis is found among the crossing ridges");
-        AssertTrue(line.Length >= 500f, "a long run, not a fragment: " + line.Length);
+        AssertTrue(line.Length >= 250f, "a long run, not a fragment: " + line.Length);
         AssertTrue(Math.Abs(line.CenterZ - (-390f)) < 15f, "it is the ridge along x, z " + line.CenterZ);
         // Along-z only: no line across a +z axis.
         TerrainPicture alongOnly = Build(grid, Map, alongZ);
@@ -448,10 +449,10 @@ internal static partial class TerrainPictureTests
 
     // ------------------------------------------------------------------ decision 7: inference
 
-    private static EnemyVisibleState OneSector(float own, float enemy, bool recentFire, float strongShare)
+    private static EnemyVisibleState OneSector(float own, float enemy, bool recentFire, float strongShare, float reserveCommit = 0.5f)
     {
         return new EnemyVisibleState(new[] { new EnemyVisibleSector(0, own, enemy, recentFire, strongShare) },
-            enemyReserveCommitFraction: 0.5f, anyContactSpotted: true, anyContactBroken: false);
+            enemyReserveCommitFraction: reserveCommit, anyContactSpotted: true, anyContactBroken: false);
     }
 
     private static void EnemyStandingOnStrongGroundReadsDefend()
@@ -468,6 +469,14 @@ internal static partial class TerrainPictureTests
             "recent fire does not turn the strong-ground rule on");
         AssertFalse(firing.PrimaryIntent == InferredIntent.Defend && Array.IndexOf(firing.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) >= 0,
             "no strong-ground Defend with recent fire from the sector");
+        // The fire exemption is decided where the rule is reached: an uncommitted reserve (0.1) would read Refuse; strong ground without
+        // fire turns that into Defend, strong ground under fire leaves it Refuse.
+        TacticalIntentModel refuse = ArmyIntentInference.Build(OneSector(5000f, 4000f, true, 0.8f, reserveCommit: 0.1f));
+        AssertEqual(InferredIntent.Refuse, refuse.PrimaryIntent, "an enemy firing from strong ground keeps the shipped reading");
+        AssertTrue(Array.IndexOf(refuse.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) < 0, "...with no strong-ground tag");
+        TacticalIntentModel quiet = ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.8f, reserveCommit: 0.1f));
+        AssertEqual(InferredIntent.Defend, quiet.PrimaryIntent, "the same quiet enemy on strong ground reads Defend");
+        AssertTrue(Array.IndexOf(quiet.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) >= 0, "...with the tag");
         // Under the 0.6 share nothing changes.
         AssertEqual(InferredIntent.Probe, ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.59f)).PrimaryIntent, "0.59 is under the 0.6 share");
         AssertEqual(InferredIntent.Defend, ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.6f)).PrimaryIntent, "exactly 0.6 counts");
@@ -500,6 +509,18 @@ internal static partial class TerrainPictureTests
         foreach (EnemyVisibleSector sec in sectors) { strongTotal += sec.EnemyStrongGroundShare * sec.EnemyStrength; all += sec.EnemyStrength; }
         share = all > 0f ? strongTotal / all : 0f;
         AssertNear(800f / 2400f, share, 0.01f, "one of three equal enemies stands on strong ground");
+        // A remembered enemy adds band strength but not visible strength: 800 visible on the wall + 800 x 0.5 remembered elsewhere
+        // in the same band is still a band whose visible enemy is all on strong ground.
+        BattleSnapshot mixed = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f, strength: 1000) },
+            BattlePerceptionTests.Seen(21, 400f, -390f, 800f, standing: true),
+            BattlePerceptionTests.Seen(22, 430f, -330f, 800f, confidence: 0.5f, remembered: true, standing: true));
+        var mv = new List<FrontUnitSample>(); var mw = new List<FrontUnitSample>(); var mk = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(mixed, new HashSet<int>(), mv, mw, mk, p);
+        EnemyVisibleSector[] mixedSectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, mw);
+        float mixedStrength = 0f, mixedShare = 0f;
+        foreach (EnemyVisibleSector sec in mixedSectors) { mixedStrength += sec.EnemyStrength; if (sec.EnemyStrongGroundShare > mixedShare) mixedShare = sec.EnemyStrongGroundShare; }
+        AssertNear(1200f, mixedStrength, 0.01f, "band strength counts the remembered enemy at its confidence");
+        AssertNear(1f, mixedShare, 0.0001f, "the share is over visible strength only");
         // No picture: no flag.
         var plainVisible = new List<FrontUnitSample>(); var plainWeighted = new List<FrontUnitSample>(); var plainKnown = new List<FrontUnitSample>();
         ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int>(), plainVisible, plainWeighted, plainKnown);
