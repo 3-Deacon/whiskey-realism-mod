@@ -92,6 +92,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HomeTheaterPrior.cs" Link="Planner\HomeTheaterPrior.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CapitalFloorPolicy.cs" Link="Planner\CapitalFloorPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReinforcementRouting.cs" Link="Planner\ReinforcementRouting.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReplacementFlowPolicy.cs" Link="Planner\ReplacementFlowPolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

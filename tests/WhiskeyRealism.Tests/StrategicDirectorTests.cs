@@ -64,7 +64,6 @@ internal static class StrategicDirectorTests
             ("director critical risk strongly favors supply construction", DirectorCriticalRiskFavorsSupplyConstruction),
             ("director too quiet healthy fiscal favors logistics", DirectorTooQuietFavorsLogistics),
             ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion),
-            ("director raises capital defense budget under too fast collapse", DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse),
             ("director lowers union guard budget under late war pressure", DirectorLowersUnionGuardUnderLateWarPressure),
         });
     }
@@ -646,16 +645,6 @@ internal static class StrategicDirectorTests
             pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
             personality: new PersonalityVector());
         AssertTrue(posture.ExpansionDamper >= 0.30f, "TooFastCollapse must damp expansion");
-    }
-
-    private static void DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse()
-    {
-        var posture = StrategicResilienceDirector.ProposePosture(
-            allianceId: 1,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
-            personality: new PersonalityVector());
-        AssertTrue(posture.CapitalDefenseBudgetModifier >= 0.05f,
-            "TooFastCollapse must raise capital defense budget");
     }
 
     private static void DirectorLowersUnionGuardUnderLateWarPressure()

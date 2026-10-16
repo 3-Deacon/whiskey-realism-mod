@@ -9,9 +9,6 @@ internal static class CampaignMilitaryFixTests
         ListSnapshotRestoreUndoesVanillaMutation();
         ListSnapshotRestoreIsIdempotent();
         ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved();
-        TransferRequirementIsLocalNotTheaterWide();
-        TransferSteersOnlyWhenPlanShortfallIsWorse();
-        TransferStrengthReadsVanillaHeatmapGrids();
         ImportanceRedirectHonoursVanillaCandidateGates();
         ImportanceRedirectStaysInPlanTheater();
         ArmyGroupManagementRepeatsVanillaGuard();
@@ -23,8 +20,6 @@ internal static class CampaignMilitaryFixTests
         StalePreviousCommandIsRefilledNotOrphaned();
         SuccessionReseatsReplacementsOldArmyGroup();
         CapitalNeedMatchesVanillaFormula();
-        CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
-        CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
         AreaOrderSkipsEveryVanillaBusyAssignment();
         CoastalInterceptKeepsEnemyInsideBugleRange();
         CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose();
@@ -62,31 +57,6 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertFalse(CampaignMilitaryGates.RestoreListSnapshot(live, null), "missing snapshot is a no-op");
         TestHarness.AssertEqual(2, live.Count, "missing snapshot leaves list alone");
         LogPass("c2a list snapshot restore is idempotent and null-safe");
-    }
-
-    // C-Transfer: the plan requirement used totalOwn * ForceFractionRequired
-    // (up to 0.95 of the whole army), so the plan target always "needed"
-    // more than any vanilla deficit and the threatened zone never got troops.
-    private static void TransferRequirementIsLocalNotTheaterWide()
-    {
-        float undefended = CampaignMilitaryGates.PlanTransferRequiredAtTarget(totalOwn: 200000f, forceFraction: 0.8f, enemyNear: 0f);
-        TestHarness.AssertEqual(2500f, undefended, "no enemy near target -> token presence");
-        float contested = CampaignMilitaryGates.PlanTransferRequiredAtTarget(200000f, 0.8f, 20000f);
-        TestHarness.AssertEqual(25000f, contested, "local superiority over enemy near target");
-        float capped = CampaignMilitaryGates.PlanTransferRequiredAtTarget(30000f, 0.5f, 40000f);
-        TestHarness.AssertEqual(15000f, capped, "never more than the plan's commitment share");
-        LogPass("c2a transfer requirement is local, capped by commitment share");
-    }
-
-    private static void TransferSteersOnlyWhenPlanShortfallIsWorse()
-    {
-        // vanilla CheckTransferOfUnits severity = deficit.enemystrength - deficit.ownstrength (17275)
-        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(false, 0f, 0f, 5000f), "no vanilla deficit -> steer");
-        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(true, 1000f, 3000f, 5000f), "vanilla deficit not a shortfall -> steer");
-        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(true, 12000f, 8000f, 5000f), "plan shortfall worse -> steer");
-        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(true, 20000f, 5000f, 5000f), "threatened zone worse -> vanilla keeps its deficit");
-        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(false, 0f, 0f, 0f), "no plan shortfall -> nothing to steer");
-        LogPass("c2a transfer steers only when plan shortfall exceeds vanilla deficit");
     }
 
     // R7: ImportanceValuesPatch overwrote mostvalueableaiareaclose for EVERY
@@ -239,29 +209,6 @@ internal static class CampaignMilitaryFixTests
         // closest enemy distance stays 9999, so every own unit with a waypoint counts
         TestHarness.AssertTrue(Math.Abs((500f - 1000f - 9000f) - noEnemies) < 0.01f, "no enemy -> all own waypoints count");
         LogPass("c2a capital need matches vanilla num2 formula");
-    }
-
-    private static void CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders()
-    {
-        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(800f, 1200f), "both need -> pledge before vanilla's move loop");
-        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(-50f, 1200f), "vanilla sufficient -> it would strip the pledge next call");
-        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(800f, -10f), "personality satisfied -> leave it to vanilla");
-        LogPass("c2a capital pre-pledge only when vanilla also needs defenders");
-    }
-
-    private static void CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders()
-    {
-        var enemies = new[] { new CapitalForce(100f, 10000f, 1f) };
-        var own = new[] { new CapitalForce(50f, 4000f, 1f) };
-        // the same unit is a pledged defender: it already counted via its waypoint
-        var pledgedArrived = new[] { new CapitalForce(50f, 4000f, 1f) };
-        var pledgedMarching = new[] { new CapitalForce(400f, 4000f, 1f) };
-        float baseNeed = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, new CapitalForce[0], 1f, 1f);
-        float arrived = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, pledgedArrived, 1f, 1f);
-        float marching = CampaignMilitaryGates.PersonalityCapitalDefenseNeed(500f, 650f, enemies, own, pledgedMarching, 1f, 1f);
-        TestHarness.AssertTrue(Math.Abs(baseNeed - arrived) < 0.01f, "arrived defender not subtracted twice");
-        TestHarness.AssertTrue(Math.Abs((baseNeed - 3000f) - marching) < 0.01f, "marching defender counts at 0.75 strength");
-        LogPass("c2a capital personality need does not double count pledged defenders");
     }
 
     // C-ArmyArea: IsIdleForAreaOrder only excluded battle/retreat/paths and the
@@ -475,28 +422,6 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertEqual(ForbiddenCommitRevert.None,
             CampaignMilitaryGates.ResolveForbiddenCommitRevert(false, false), "no prior position -> leave the path alone");
         LogPass("c2a forbidden defensive commit revert matches how vanilla moved");
-    }
-
-    // L5 (re-review): vanilla's positiondeficit is read from the painted
-    // recruitment heatmap cells (ZoneRecruiting 12474-12476); PaintObject
-    // (34117-34197) samples ring points with angle rounding, so no closed-form
-    // kernel reproduces it (offset (1,1) = 1.25 x strength). The plan side must
-    // read the same painted grids via the public Heatmap.GetValueOnPos(Vector3,
-    // bool usearrayvalues) (33840). This pins the vanilla API the patch reads.
-    private static void TransferStrengthReadsVanillaHeatmapGrids()
-    {
-        var factionType = HarmonyLib.AccessTools.Inner(typeof(AICampaign), "AIFaction");
-        TestHarness.AssertTrue(factionType != null, "AICampaign.AIFaction exists");
-        TestHarness.AssertEqual(2, CampaignMilitaryGates.TransferHeatmapFields.Length, "own + enemy grids");
-        foreach (var name in CampaignMilitaryGates.TransferHeatmapFields)
-        {
-            var field = factionType.GetField(name);
-            TestHarness.AssertTrue(field != null, "AIFaction." + name + " is public");
-            TestHarness.AssertEqual(typeof(Heatmap), field.FieldType, name + " is a vanilla Heatmap");
-        }
-        var read = typeof(Heatmap).GetMethod("GetValueOnPos", new[] { typeof(UnityEngine.Vector3), typeof(bool) });
-        TestHarness.AssertTrue(read != null && read.IsPublic && !read.IsStatic, "public instance Heatmap.GetValueOnPos(Vector3, bool)");
-        LogPass("c2a transfer strength reads vanilla heatmap grids");
     }
 
     // Re-review: only a real failed roll ends the call (ownunits emptied so

@@ -55,6 +55,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal static ConfigEntry<bool> EnableWlAttritionScopeFix;
         internal static ConfigEntry<bool> EnableWlBuySuppliesFix;
+        internal static ConfigEntry<bool> EnableWlCareerTransferFix;
         internal static ConfigEntry<bool> EnableWlStaffScopeFix;
         internal static ConfigEntry<bool> EnableWlStaffPanelScopeFix;
         internal static ConfigEntry<bool> EnableWlSupplyEfficiencySignFix;
@@ -439,6 +440,14 @@ namespace WhiskeyRealism
                 "Default ON. W&L career only. Vanilla \"Buy Supplies\" (and the average-supply value it and its conditions read) tests the " +
                 "player's command type instead of each subordinate's, so a division, corps or army commander pays 1000 money and no unit gets " +
                 "supplies. With this on, an HQ commander's owned basic units are filled the way vanilla fills a brigade commander's. Off: vanilla.");
+            EnableWlCareerTransferFix = Config.Bind(
+                "W&L",
+                "Enable W&L Career Transfer Fix",
+                true,
+                "Default ON. W&L career only. Vanilla's AI transfer of units never happens in a career: CheckTransferOfUnits queues the unit and " +
+                "then BattleUnits.MoveUnit refuses unless both units are player-owned, so no AI faction ever reinforces a weak front by transfer. " +
+                "With this on, the AI's own transfers go through (the vanilla check is skipped for the calls CheckTransferOfUnits makes), never " +
+                "for a unit the player owns. Off: vanilla.");
             EnableWlStaffScopeFix = Config.Bind(
                 "W&L",
                 "Enable W&L Staff Scope Fix",
