@@ -6,7 +6,7 @@ namespace WhiskeyRealism.Strategic
     internal enum DailyReviewJobKind
     {
         Map,
-        Cic,
+        Head,
         Fiscal,
         Policy,
         Plan,
@@ -14,8 +14,6 @@ namespace WhiskeyRealism.Strategic
         Defense,
         Execute,
         Formation,
-        Probe,
-        ArmyArea,
         Construction,
         Report
     }
@@ -33,10 +31,10 @@ namespace WhiskeyRealism.Strategic
     }
 
     // The daily strategic review as an explicit ordered job list: the campaign map, then for
-    // alliance 0 and then alliance 1 the CIC review, fiscal, policy, the campaign planner's
-    // review (Plan: snapshot, beliefs, plan), front, defense, the planner's executors
-    // (Execute), formation directives, operational probe, army areas, construction and the
-    // report lines.
+    // alliance 0 and then alliance 1 the head (who runs today, era, succession, capital threat,
+    // director posture), fiscal, policy, the campaign planner's review (Plan: snapshot,
+    // beliefs, plan), front, defense, the planner's executors (Execute), formation
+    // directives, construction and the report lines.
     // This is the order StrategicCoordinator ran them in one frame before the review was
     // time-sliced. Each job decides inside itself whether it has work today (the cadence and
     // source-signature gates read signatures that earlier jobs of the same day write).
@@ -44,7 +42,7 @@ namespace WhiskeyRealism.Strategic
     {
         private static readonly DailyReviewJobKind[] PerAlliance =
         {
-            DailyReviewJobKind.Cic,
+            DailyReviewJobKind.Head,
             DailyReviewJobKind.Fiscal,
             DailyReviewJobKind.Policy,
             DailyReviewJobKind.Plan,
@@ -52,8 +50,6 @@ namespace WhiskeyRealism.Strategic
             DailyReviewJobKind.Defense,
             DailyReviewJobKind.Execute,
             DailyReviewJobKind.Formation,
-            DailyReviewJobKind.Probe,
-            DailyReviewJobKind.ArmyArea,
             DailyReviewJobKind.Construction,
             DailyReviewJobKind.Report
         };

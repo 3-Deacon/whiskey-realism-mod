@@ -779,11 +779,11 @@ internal static class CampaignSnapshotTests
     private static void CoordinatorPauseGuardsOrderIssuingSteps()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string cic = MethodBody(src, "private void RunCicReviewJob(");
-        foreach (string call in new[] { "Succession.CheckEvents(", "SwapOfficer(", "ReviewPlanWithTruth(", "cic.Replan(" })
-            AssertGuardedByPause(cic, call, "!d.JobMachinePaused");
+        string head = MethodBody(src, "private void RunHeadReviewJob(");
+        foreach (string call in new[] { "Succession.CheckEvents(", "SwapOfficer(" })
+            AssertGuardedByPause(head, call, "!d.JobMachinePaused");
         foreach (string call in new[] { "UpdateCapitalThreat(", "PublishDirectorPosture(" })
-            AssertFalse(IsGuardedByPause(cic, cic.IndexOf(call, StringComparison.Ordinal), "!d.JobMachinePaused"), call + " keeps running during the pause");
+            AssertFalse(IsGuardedByPause(head, head.IndexOf(call, StringComparison.Ordinal), "!d.JobMachinePaused"), call + " keeps running during the pause");
 
         string job = MethodBody(src, "private void RunReviewJob(");
         AssertContains(job, "bool paused = d.JobMachinePaused;", "the day's pause");
@@ -794,8 +794,6 @@ internal static class CampaignSnapshotTests
             ("Defense", "if (!paused)", "UpdateDefenseIntent("),
             ("Execute", "if (ready && !paused)", "CampaignPlannerRuntime.ReviewExecute("),
             ("Formation", "if (!ready || paused) break;", "UpdateFormationDirectiveLedger("),
-            ("Probe", "if (ready && !paused)", "UpdateOperationalProbe("),
-            ("ArmyArea", "if (ready && !paused)", "UpdateArmyAreaLedger("),
         })
         {
             string body = CaseBody(job, kind);

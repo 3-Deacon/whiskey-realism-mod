@@ -58,17 +58,5 @@ namespace WhiskeyRealism.Strategic
 
             return false;
         }
-
-        public float StrategyWeight(GrandStrategyProfile strategy)
-        {
-            if (strategy == null || StrategyTags == null)
-                return 0f;
-
-            float weight = 0f;
-            for (int i = 0; i < StrategyTags.Length; i++)
-                weight += strategy.WeightFor(StrategyTags[i]);
-
-            return weight;
-        }
     }
 }

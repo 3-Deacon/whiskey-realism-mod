@@ -94,7 +94,6 @@ internal static class ReconPlannerTests
             ("ProbeOnTheNewMainSectorIsJudgedWithAFreshReference", ProbeOnTheNewMainSectorIsJudgedWithAFreshReference),
             ("ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector", ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector),
             ("ProbeVerdictSitsOnTheOddsThresholds", ProbeVerdictSitsOnTheOddsThresholds),
-            ("ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup", ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup),
             ("ReconRowRoutesToTheRegisteredEvent", ReconRowRoutesToTheRegisteredEvent),
             ("ReconFilesHoldNoUnityTypes", ReconFilesHoldNoUnityTypes),
         });
@@ -1058,8 +1057,8 @@ internal static class ReconPlannerTests
 
     // ---- G1b runtime step (docs/superpowers/plans/2026-10-15-campaign-planner.md § G1b runtime as built) ----
 
-    // The enemy numbers the surviving probe layer and phase truth read are the side's beliefs: an enemy
-    // the side has not seen (no belief), an expired one and one outside the radius add nothing.
+    // The local enemy number is the side's beliefs: an enemy the side has not seen (no belief), an expired one and one
+    // outside the radius add nothing.
     private static void LocalForceBalanceFromBeliefsExcludesUnseen()
     {
         var beliefs = new List<EnemyBelief>
@@ -1071,22 +1070,6 @@ internal static class ReconPlannerTests
         };
         AssertNear(13000f, EnemyBeliefQuery.StrengthWithin(beliefs, 100f, 0f, 150f), 0.01f, "seen in full, the decayed one at its confidence; expired and far add nothing");
         AssertNear(0f, EnemyBeliefQuery.StrengthWithin(new List<EnemyBelief>(), 100f, 0f, 150f), 0.01f, "no belief, no enemy: an unseen army is not counted");
-
-        // The runtime read: ReadLocalForceBalance sums beliefs, never vanilla's omniscient enemyunits.
-        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string read = BodyOf(coordinator, "private static void ReadLocalForceBalance(");
-        AssertContains(read, "EnemyDetectionRuntime.BeliefsFor(alliance)", "the side's beliefs");
-        AssertContains(read, "EnemyBeliefQuery.StrengthWithin(beliefs, center.x, center.z, radius)", "the pure sum");
-        AssertContains(read, "EnemyBeliefQuery.ConfidenceWithin(beliefs, center.x, center.z, radius)", "and how fresh it is");
-        AssertFalse(read.Contains("enemyunits") || read.Contains("_enemyUnitsField"), "no omniscient enemy list");
-        AssertFalse(coordinator.Contains("\"enemyunits\""), "the coordinator no longer reads enemyunits at all");
-        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(coordinator, @"ReadLocalForceBalance\(alliance, ").Count, "the phase-truth and probe call sites");
-        string probeUpdate = BodyOf(coordinator, "private bool UpdateOperationalProbe(");
-        AssertContains(probeUpdate, "out localEnemy, out localEnemyConfidence);", "the probe call site reads the confidence");
-        AssertContains(probeUpdate, "localEnemy,\n                    localEnemyConfidence)", "and hands it to the input builder");
-        string probe = ReadRepoFile("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs");
-        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(probe, @"BeliefConfidence01 = localEnemyConfidence01").Count, "the probe input and its contact-evidence input both carry the confidence");
-        AssertContains(probe, "CurrentEnemyStrength = target.HasValue ? localEnemyStrength : -1f", "the probe's enemy strength is the belief sum the coordinator passes");
     }
 
     private static void BeliefConfidenceIsStrengthWeightedAndIgnoresExpired()
@@ -1594,17 +1577,6 @@ internal static class ReconPlannerTests
         }
     }
 
-    // The belief picture is read before the faction lookup, so a failed or missing faction still leaves the
-    // enemy sum and its confidence (only the own sum zeroes).
-    private static void ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup()
-    {
-        string read = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs"), "private static void ReadLocalForceBalance(");
-        int beliefs = read.IndexOf("EnemyDetectionRuntime.BeliefsFor(alliance)", StringComparison.Ordinal);
-        int faction = read.IndexOf("ResolveAifactionIndexForAlliance(alliance)", StringComparison.Ordinal);
-        AssertTrue(beliefs >= 0 && faction > beliefs, "beliefs, then the faction");
-        AssertFalse(read.Substring(0, faction).Contains("return;"), "nothing returns before the beliefs are read");
-    }
-
     // The [Recon] row goes through TelemetryRouter.LegacyInfo like [Allocation]: its tag must be the event G0
     // registered (Campaign layer, State), or the row would fall back to an unregistered main-log line.
     private static void ReconRowRoutesToTheRegisteredEvent()
@@ -1637,7 +1609,7 @@ internal static class ReconPlannerTests
         AssertContains(plugin, "\"Campaign Planner\", \"Enable Campaign Reconnaissance\", true,", "bound, default on");
         AssertContains(plugin, "internal static ConfigEntry<bool> EnableCampaignReconnaissance;", "declared");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
-        AssertEqual(4, System.Text.RegularExpressions.Regex.Matches(runtime, @"FlagOn\(Plugin\.EnableCampaignReconnaissance\)").Count, "read where tasks are planned, the row is emitted, the directive filter answers and the executor is declared active (G5d)");
+        AssertEqual(3, System.Text.RegularExpressions.Regex.Matches(runtime, @"FlagOn\(Plugin\.EnableCampaignReconnaissance\)").Count, "read where tasks are planned, the row is emitted and the directive filter answers (G5d)");
     }
 
     // ---- fixtures ----

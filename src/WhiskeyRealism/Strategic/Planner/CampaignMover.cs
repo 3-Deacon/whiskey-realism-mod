@@ -256,7 +256,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int i = s.IndexOfOwn(a.InstanceId);
                 if (i < 0) continue;
                 var f = s.Own[i];
-                if (WlChainRules.MayMove(f.Chain) && TheaterPlanner.Movable(f) && !host.PackageLocked(f.InstanceId)) return true;
+                if (WlChainRules.MayMove(f.Chain) && TheaterPlanner.Movable(f)) return true;
             }
             return false;
         }
@@ -309,7 +309,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 tally.SkippedPlayer++;
                 return;
             }
-            if (!TheaterPlanner.Movable(f) || host.PackageLocked(f.InstanceId))
+            if (!TheaterPlanner.Movable(f))
             {
                 tally.SkippedBusy++;
                 return;

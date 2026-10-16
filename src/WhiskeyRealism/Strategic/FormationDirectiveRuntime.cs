@@ -157,19 +157,6 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        internal static bool ShouldAllowAreaMovement(int allianceId, string unitKey)
-        {
-            try
-            {
-                return FormationDirectiveLedger.AllowsAreaMovement(GetAssignment(allianceId, unitKey), CampaignPlannerRuntime.ReconExecutorActive());
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:area-movement", "[FormationDirective] area movement gate failed: " + ex.Message);
-                return true;
-            }
-        }
-
         internal static bool AllowsArmyGroupAttachment(int allianceId, string unitKey)
         {
             try

@@ -40,8 +40,6 @@ namespace WhiskeyRealism.Strategic
         public bool DirectMovementAllowed;
         public bool InheritsFromParent;
         public string ParentUnitKey;
-
-        internal FormationDirectiveAssignment Copy() => (FormationDirectiveAssignment)MemberwiseClone();
     }
 
     public sealed class FormationPressureSummary
@@ -52,8 +50,6 @@ namespace WhiskeyRealism.Strategic
         public int GuardCount;
         public int MassCount;
         public string TopSupplyAreaKey;
-
-        internal FormationPressureSummary Copy() => (FormationPressureSummary)MemberwiseClone();
     }
 
     public sealed class FormationDirectiveLedger
@@ -124,18 +120,6 @@ namespace WhiskeyRealism.Strategic
             return ledger;
         }
 
-        // Copy for StrategicLedgerSet.PublishFrom: the assignments and the pressure summary are
-        // copied, so the probe overlay (ApplyOperationalProbe) on the working ledger never
-        // reaches the published one.
-        public FormationDirectiveLedger Clone()
-        {
-            var copy = new FormationDirectiveLedger();
-            for (int i = 0; i < _ordered.Count; i++)
-                copy.Add(_ordered[i].Copy());
-            copy.Pressure = Pressure?.Copy();
-            return copy;
-        }
-
         public FormationDirectiveAssignment GetAssignment(string unitKey)
         {
             if (unitKey == null) return null;
@@ -150,72 +134,6 @@ namespace WhiskeyRealism.Strategic
             foreach (var assignment in _ordered)
                 parts.Add($"{assignment.UnitKey}:{assignment.StableUnitId}:{assignment.Directive}:{assignment.Reason}:{Math.Round(assignment.X, 1)}:{Math.Round(assignment.Z, 1)}");
             return string.Join(",", parts);
-        }
-
-        public bool ApplyOperationalProbe(OperationalProbeOutput probe)
-        {
-            if (probe == null || string.IsNullOrEmpty(probe.SelectedUnitKey)) return false;
-            var assignment = GetAssignment(probe.SelectedUnitKey);
-            if (assignment == null) return false;
-
-            switch (probe.Decision)
-            {
-                case OperationalProbeDecision.Probe:
-                    assignment.Directive = FormationDirective.Probe;
-                    assignment.Reason = probe.Reason ?? "operational-probe";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Pause:
-                    assignment.Directive = FormationDirective.Delay;
-                    assignment.Reason = probe.Reason ?? "probe-pause";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Withdraw:
-                    assignment.Directive = FormationDirective.Recover;
-                    assignment.Reason = probe.Reason ?? "probe-withdraw";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = false;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Escalate:
-                    assignment.Directive = assignment.Level == FormationLevel.Army
-                        ? FormationDirective.Mass
-                        : FormationDirective.Counterstroke;
-                    assignment.Reason = probe.Reason ?? "probe-escalate";
-                    assignment.OffensiveAllowed = true;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                default:
-                    return false;
-            }
-
-            if (probe.Package != null)
-            {
-                foreach (var supportKey in probe.Package.SupportDisplayUnitKeys)
-                {
-                    var support = GetAssignment(supportKey);
-                    if (support == null) continue;
-                    support.Directive = probe.Package.Decision == CoordinatedOperationDecision.Reinforce
-                        ? FormationDirective.Reinforce
-                        : FormationDirective.Counterstroke;
-                    support.Reason = "probe-support:" + (probe.Package.Reason ?? probe.Reason ?? "package");
-                    support.OffensiveAllowed = probe.Package.Decision == CoordinatedOperationDecision.CoordinateAttack;
-                    support.DefensiveAllowed = true;
-                    support.TransferDonorAllowed = false;
-                }
-            }
-
-            RecomputePressure();
-            return true;
         }
 
         private void Add(FormationDirectiveAssignment assignment)
@@ -315,19 +233,6 @@ namespace WhiskeyRealism.Strategic
             assignment.DefensiveAllowed = defensive;
             assignment.TransferDonorAllowed = donor;
             return assignment;
-        }
-
-        // May the old army-area path (#15, deleted in G6) move this formation back to its area? The rule
-        // FormationDirectiveRuntime.ShouldAllowAreaMovement applies. A formation on a recon mission (directive Screen,
-        // produced only by one) stands at its post while the reconnaissance executor sends and holds it (plan G5d, P10).
-        internal static bool AllowsAreaMovement(FormationDirectiveAssignment assignment, bool reconExecutorActive)
-        {
-            if (assignment == null) return true;
-            if (!assignment.DirectMovementAllowed) return false;
-            if (assignment.Directive == FormationDirective.Delay) return false;
-            if (assignment.Directive == FormationDirective.Concede) return false;
-            if (assignment.Directive == FormationDirective.Screen && reconExecutorActive) return false;
-            return true;
         }
 
         public static float CombatAvailability(FormationSnapshot snapshot)

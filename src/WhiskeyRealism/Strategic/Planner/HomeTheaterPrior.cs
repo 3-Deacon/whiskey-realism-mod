@@ -3,14 +3,12 @@ using System;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // The theater a historical army belongs to (plan P12): the allocator's tie-break toward keeping
-    // a formation in its home theater (ForceAllocator.HomeTheaterTieBreak). It reduces
-    // HistoricalArmyAreaRegistry's doctrines, army name by army name, to the Theater of the
-    // doctrine's primary area, and is a prior only: a formation with no home (Unknown) gets no
-    // tie-break, and a live margin never reads it. The primary areas map to theaters through
-    // TheaterClassifier.FromPosition at a point inside each area (ArmyAreaClassifier): the Virginia
-    // capital corridor, the Shenandoah Valley, Washington and Maryland-Pennsylvania are East, the
-    // Ohio valley and north-west Virginia are West. The registry goes in G6; the table is pinned
-    // against it until then (HomeTheaterPriorMatchesRegistry).
+    // a formation in its home theater (ForceAllocator.HomeTheaterTieBreak). It maps a historical
+    // army's name to the Theater of its doctrine's primary area, and is a prior only: a formation
+    // with no home (Unknown) gets no tie-break, and a live margin never reads it. The Virginia
+    // capital corridor and the Shenandoah Valley are East, the Ohio valley and north-west Virginia
+    // are West (TheaterClassifier.FromPosition at a point inside each area); the rows are pinned in
+    // ForceAllocatorTests.HomeTheaterPriorRows.
     public static class HomeTheaterPrior
     {
         private struct Rule
@@ -20,7 +18,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public string[] Names;
         }
 
-        // Order is the registry's: the first doctrine whose names match the (lowercased) unit name wins.
+        // Order matters: the first doctrine whose names match the (lowercased) unit name wins.
         private static readonly Rule[] Rules =
         {
             new Rule { Alliance = 0, Home = Theater.East, Names = new[] { "army of the potomac", "army of virginia" } },

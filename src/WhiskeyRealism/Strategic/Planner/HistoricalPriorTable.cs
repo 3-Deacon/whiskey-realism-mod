@@ -3,12 +3,11 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
-    // History as a weight (spec decision; plan P12). HistoricalOperationCatalog's six profiles
-    // reduced to (alliance, objective ids, date window, priority); the per-phase machinery is not
-    // carried. Copied here so G6 can delete the catalog; TheaterPlannerTests.PriorTableMatchesCatalog
-    // pins every row against the catalog until then.
+    // History as a weight (spec decision; plan P12): the retired historical operation catalog's six
+    // profiles reduced to (alliance, objective ids, date window, priority); the per-phase machinery
+    // is not carried. TheaterPlannerTests.PriorTableRows pins every row.
     //   Window: the first day of the start month to the last day of the end month (the day before
-    //     the first of the next month), as the catalog's InDateWindow compares months; serials are
+    //     the first of the next month), as the retired catalog's window test compared months; serials are
     //     ReviewCadenceCatchUp.DaySerial. Outside the window the decay counts months of
     //     MeanMonthDays, the serial's own mean month over four years (a leap cycle), so the table is
     //     right whether DaySerial counts calendar days or the legacy 31-day months.

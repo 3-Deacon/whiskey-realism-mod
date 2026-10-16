@@ -27,15 +27,6 @@ internal static class StrategicMapTests
     {
         TestHarness.RunAll(new (string name, Action run)[]
         {
-            ("historical registry maps ANV to Virginia corridor", HistoricalRegistryMapsAnv),
-            ("historical registry maps CSA northwest commands to Allegheny approaches", HistoricalRegistryMapsCsaNorthwest),
-            ("historical registry leaves inactive full-war armies unassigned", HistoricalRegistryLeavesInactiveFullWarArmiesUnassigned),
-            ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
-            ("army area ledger redirects CSA northwest command to northwest Virginia", ArmyAreaLedgerRedirectsCsaNorthwestCommand),
-            ("army area ledger leaves inactive full-war army in current area", ArmyAreaLedgerLeavesInactiveFullWarArmyInCurrentArea),
-            ("army area ledger gives dynamic fallback local doctrine", ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine),
-            ("army area ledger lets dynamic fallback counterstroke its local plan area", ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea),
-            ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("battle history query matches inside spatial and date window", BattleHistoryQueryMatchesInsideSpatialAndDateWindow),
             ("battle history query rejects outside spatial window", BattleHistoryQueryRejectsOutsideSpatialWindow),
             ("battle history query rejects outside date window", BattleHistoryQueryRejectsOutsideDateWindow),
@@ -54,9 +45,8 @@ internal static class StrategicMapTests
             ("asset role catalog distinguishes known neutral anchors from unknown names", AssetRoleCatalogDistinguishesKnownNeutralAnchors),
             ("asset role catalog resolves real gtcw names", AssetRoleCatalogResolvesRealGtcwNames),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
-            ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
+            ("coast objectives default to the blockade and port access tags", CoastObjectivesDefaultToBlockadeTags),
             ("theater classifier maps wl capitals to east", TheaterClassifierMapsWlCapitalsToEast),
-            ("army area classifier maps W&L northwest Virginia towns", ArmyAreaClassifierMapsWlNorthwestVirginiaTowns),
             ("campaign map ledger only maps states represented by towns", CampaignMapLedgerOnlyMapsRepresentedStates),
             ("campaign map ledger ranks owned capitals for defense", CampaignMapLedgerRanksOwnedCapitalsForDefense),
             ("campaign map ledger tracks ports and forts", CampaignMapLedgerTracksPortsAndForts),
@@ -64,7 +54,6 @@ internal static class StrategicMapTests
             ("objective catalog exposes known objective positions", ObjectiveCatalogExposesKnownObjectivePositions),
             ("objective adapter falls back to catalog positions when vanilla objectives are unavailable", ObjectiveAdapterFallsBackToCatalogWhenVanillaUnavailable),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
-            ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
             ("perk scorer favors raid armies for irregular pressure", PerkScorerFavorsRaidArmiesForIrregularPressure),
             ("perk scorer favors union blockade fleets", PerkScorerFavorsUnionBlockadeFleets),
@@ -84,166 +73,6 @@ internal static class StrategicMapTests
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
         });
-    }
-
-    private static void HistoricalRegistryMapsAnv()
-    {
-        var doctrine = HistoricalArmyAreaRegistry.Resolve(1, "Army of Northern Virginia", "Lee");
-        AssertEqual("VirginiaCapitalCorridor", doctrine.PrimaryAreaKey);
-        AssertTrue(doctrine.PreferredAreaKeys.Contains("ShenandoahValley"), "expected ShenandoahValley preference");
-    }
-
-    private static void HistoricalRegistryMapsCsaNorthwest()
-    {
-        var army = HistoricalArmyAreaRegistry.Resolve(1, "Army of the Northwest", "Garnett");
-        AssertEqual("NorthwestVirginia", army.PrimaryAreaKey);
-        AssertTrue(army.PreferredAreaKeys.Contains("ShenandoahValley"), "expected Shenandoah fallback preference");
-
-        var porterfield = HistoricalArmyAreaRegistry.Resolve(1, "Porterfield's Division", "Porterfield");
-        AssertEqual("NorthwestVirginia", porterfield.PrimaryAreaKey);
-    }
-
-    private static void HistoricalRegistryLeavesInactiveFullWarArmiesUnassigned()
-    {
-        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(0, "Army of the Tennessee", "Grant").PrimaryAreaKey);
-        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(1, "Army of Tennessee", "Johnston").PrimaryAreaKey);
-        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(1, "Army of Mississippi", "Pemberton").PrimaryAreaKey);
-        AssertEqual("OhioValley", HistoricalArmyAreaRegistry.Resolve(0, "Army of the Ohio", "McClellan").PrimaryAreaKey);
-    }
-
-    private static void ArmyAreaLedgerHoldsHistoricalArea()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "anv",
-                AllianceId = 1,
-                UnitName = "Army of Northern Virginia",
-                CommanderName = "Lee",
-                CurrentAreaKey = "VirginiaCapitalCorridor",
-                Strength = 45000f,
-                Readiness = 0.8f
-            }
-        }, planTargetAreaKey: "VirginiaCapitalCorridor");
-
-        var assignment = ledger.GetAssignment("anv");
-        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
-        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
-        AssertEqual(false, assignment.OutOfArea);
-    }
-
-    private static void ArmyAreaLedgerRedirectsCsaNorthwestCommand()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "northwest",
-                AllianceId = 1,
-                UnitName = "Army of the Northwest",
-                CommanderName = "Garnett",
-                CurrentAreaKey = "VirginiaCapitalCorridor",
-                Strength = 6000f,
-                Readiness = 0.5f
-            }
-        }, planTargetAreaKey: "VirginiaCapitalCorridor");
-
-        var assignment = ledger.GetAssignment("northwest");
-        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
-        AssertEqual(true, assignment.OutOfArea);
-        AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
-    }
-
-    private static void ArmyAreaLedgerLeavesInactiveFullWarArmyInCurrentArea()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "aot",
-                AllianceId = 1,
-                UnitName = "Army of Tennessee",
-                CommanderName = "Johnston",
-                CurrentAreaKey = "VirginiaCapitalCorridor",
-                Strength = 30000f,
-                Readiness = 0.75f
-            }
-        }, planTargetAreaKey: "VirginiaCapitalCorridor");
-
-        var assignment = ledger.GetAssignment("aot");
-        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
-        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
-        AssertEqual(false, assignment.OutOfArea);
-    }
-
-    private static void ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "new-corps",
-                AllianceId = 1,
-                UnitName = "2nd Corps",
-                CommanderName = "Jackson",
-                CurrentAreaKey = "NorthwestVirginia",
-                Strength = 9000f,
-                Readiness = 0.6f
-            }
-        }, planTargetAreaKey: "VirginiaCapitalCorridor");
-
-        var assignment = ledger.GetAssignment("new-corps");
-        AssertEqual("csa-dynamic-NorthwestVirginia", assignment.Doctrine.DoctrineId);
-        AssertEqual("NorthwestVirginia", assignment.Doctrine.PrimaryAreaKey);
-        AssertTrue(assignment.Doctrine.PreferredAreaKeys.Contains("ShenandoahValley"), "expected adjacent active-map preference");
-        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
-        AssertEqual(false, assignment.OutOfArea);
-        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
-    }
-
-    private static void ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "new-army",
-                AllianceId = 1,
-                UnitName = "Provisional Army",
-                CommanderName = "Garnett",
-                CurrentAreaKey = "NorthwestVirginia",
-                Strength = 14000f,
-                Readiness = 0.72f
-            }
-        }, planTargetAreaKey: "NorthwestVirginia");
-
-        var assignment = ledger.GetAssignment("new-army");
-        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
-        AssertEqual(false, assignment.OutOfArea);
-        AssertEqual(ArmyAreaBehavior.Counterstroke, assignment.Behavior);
-        AssertEqual("plan-target-dynamic-area", assignment.Reason);
-    }
-
-    private static void ArmyAreaLedgerCanRedirectIndependentDivisionInput()
-    {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "division",
-                AllianceId = 1,
-                UnitName = "Army of Northern Virginia",
-                CommanderName = "Lee",
-                CurrentAreaKey = "OhioValley",
-                Strength = 5000f,
-                Readiness = 0.75f
-            }
-        }, planTargetAreaKey: null);
-
-        var assignment = ledger.GetAssignment("division");
-        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
-        AssertEqual(true, assignment.OutOfArea);
     }
 
     private static void BattleHistoryQueryMatchesInsideSpatialAndDateWindow()
@@ -343,21 +172,8 @@ internal static class StrategicMapTests
             "CSA early should strongly weight foreign recognition");
     }
 
-    private static void GrandStrategyTagsAffectObjectiveScore()
+    private static void CoastObjectivesDefaultToBlockadeTags()
     {
-        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
-        var p = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-
-        var blockade = ObjectiveMetadata.DefaultDerived(Theater.Coast, 900f, -200f)
-            .WithTag(StrategyTag.Blockade)
-            .WithTag(StrategyTag.PortAccess);
-        var capital = ObjectiveMetadata.DefaultDerived(Theater.East, 700f, 100f)
-            .WithTag(StrategyTag.CapitalDefense);
-
-        AssertTrue(
-            ObjectiveScoring.Score(0, p, profile, blockade) > ObjectiveScoring.Score(0, p, profile, capital),
-            "Union early strategy tags should lift blockade objectives above capital defense");
-
         var tagged = ObjectiveStrategyTagger.ApplyDefaultTags(
             ObjectiveMetadata.DefaultDerived(Theater.Coast, 900f, -200f));
 
@@ -417,14 +233,6 @@ internal static class StrategicMapTests
     {
         AssertEqual(Theater.East, TheaterClassifier.FromPosition(1263f, -1010f));
         AssertEqual(Theater.East, TheaterClassifier.FromPosition(1350f, -631f));
-    }
-
-    private static void ArmyAreaClassifierMapsWlNorthwestVirginiaTowns()
-    {
-        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(703f, -518f));
-        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(740f, -653f));
-        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(702f, -696f));
-        AssertEqual("OhioValley", ArmyAreaClassifier.FromPosition(552f, -310f));
     }
 
     private static void CampaignMapLedgerOnlyMapsRepresentedStates()
@@ -552,44 +360,6 @@ internal static class StrategicMapTests
     private static void ObjectiveCatalogKeepsUnknownIdsUnresolved()
     {
         AssertEqual(false, ObjectiveCatalog.TryResolve(9999, out _));
-    }
-
-    private static void RecomputePressureResetsCountersBeforeCounting()
-    {
-        var snap = new FormationSnapshot
-        {
-            UnitKey = "U1",
-            AllianceId = 0,
-            UnitType = 16,
-            IsTopUnit = true,
-            AreaKey = "RichmondCorridor",
-            SectorKey = "RichmondCorridor",
-            GroupStrengthActive = 8000f,
-            Morale = 0.2f,
-            Readiness = 0.2f,
-            RifleAmmo = 0.2f,
-            ArtilleryAmmo = 0.2f,
-            Supply = 0.2f
-        };
-        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Decisive1863, "RichmondCorridor");
-
-        int recoverAfterBuild = ledger.Pressure.RecoverCount;
-        AssertEqual(1, recoverAfterBuild, "recover after build");
-
-        for (int i = 0; i < 100; i++)
-        {
-            ledger.ApplyOperationalProbe(new OperationalProbeOutput
-            {
-                Decision = OperationalProbeDecision.Probe,
-                SelectedUnitKey = "U1",
-                Reason = "test"
-            });
-        }
-
-        AssertTrue(ledger.Pressure.RecoverCount <= 1,
-            "RecoverCount must be bounded by Assignments.Count after 100 overlays — was " + ledger.Pressure.RecoverCount);
-        AssertTrue(ledger.Pressure.LowSupplyCount <= 1, "LowSupplyCount bounded");
-        AssertTrue(ledger.Pressure.LowAmmoCount <= 1,   "LowAmmoCount bounded");
     }
 
     private static void PerkScorerFavorsSiegeArmiesForFortPressure()
@@ -1028,8 +798,8 @@ internal static class StrategicMapTests
     private static void PersistenceDtoLoadToleratesLegacyTheaterCommanders()
     {
         // Old sidecar JSON included a theaterCommanders array on each faction.
-        // After deleting TheaterCommander + FactionDto.TheaterCommanders, Newtonsoft
-        // must silently ignore that field rather than throwing or losing the known fields.
+        // After deleting TheaterCommander + FactionDto.TheaterCommanders (and, in G6, the cic field),
+        // Newtonsoft must silently ignore those fields rather than throwing or losing the known fields.
         string legacyJson = @"{
             ""version"":1,
             ""factions"":[
@@ -1045,7 +815,7 @@ internal static class StrategicMapTests
         var dto = Newtonsoft.Json.JsonConvert.DeserializeObject<SidecarDto>(legacyJson);
         AssertTrue(dto != null, "dto should deserialize");
         AssertTrue(dto.Factions != null && dto.Factions.Count == 1, "one faction loaded");
-        AssertEqual("Lincoln", dto.Factions[0].Cic.OfficerName);
+        AssertEqual("Union", dto.Factions[0].FactionName);
     }
 
     private static void HistoricalRegistryCoversHunterAndBeauregard()

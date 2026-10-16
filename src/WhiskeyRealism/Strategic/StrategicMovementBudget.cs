@@ -55,28 +55,6 @@ namespace WhiskeyRealism.Strategic
             return allianceStrength * fraction;
         }
 
-        public static TransferBudgetDecision EvaluateAreaMovement(
-            FrontSectorLedger frontLedger,
-            string sourceSectorKey,
-            string destinationSectorKey,
-            float strengthToMove)
-        {
-            if (frontLedger == null ||
-                string.IsNullOrEmpty(sourceSectorKey) ||
-                string.IsNullOrEmpty(destinationSectorKey) ||
-                string.Equals(sourceSectorKey, destinationSectorKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return new TransferBudgetDecision
-                {
-                    Allowed = true,
-                    Action = TransferBudgetAction.Allowed,
-                    Reason = "local-area"
-                };
-            }
-
-            return frontLedger.EvaluateTransfer(sourceSectorKey, destinationSectorKey, strengthToMove);
-        }
-
         private static TransferBudgetDecision EvaluateFrontBudget(
             FrontSectorLedger frontLedger,
             DefenseThreatSource source,

@@ -52,7 +52,6 @@ internal static class CampaignTempoGateTests
             ("AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne", AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne),
             ("TempoRowsAreBoundedToTwoPerDecision", TempoRowsAreBoundedToTwoPerDecision),
             ("PlannerReadsNoCalendarEra", PlannerReadsNoCalendarEra),
-            ("TempoGateMovedOutOfThePackageLedger", TempoGateMovedOutOfThePackageLedger),
             ("PlannerIdlesPreWar001", PlannerIdlesPreWar001),
             ("PreWarGateOnlyScenario001", PreWarGateOnlyScenario001),
             ("PreWarWithholdsNothing", PreWarWithholdsNothing),
@@ -765,16 +764,6 @@ internal static class CampaignTempoGateTests
             AssertFalse(src.Contains("EraStage"), System.IO.Path.GetFileName(file) + " reads no EraStage: the late war reaches the planner only through DirectorPosture (decision 7)");
             AssertFalse(Regex.IsMatch(src, @"Year\s*[<>]=?\s*18[0-9]{2}"), System.IO.Path.GetFileName(file) + " tests no calendar year");
         }
-    }
-
-    private static void TempoGateMovedOutOfThePackageLedger()
-    {
-        string ledger = ReadRepoFile("src/WhiskeyRealism/Strategic/CoordinatedOperationPackageLedger.cs");
-        AssertFalse(ledger.Contains("TempoProbability"), "TempoProbability left CoordinatedOffensiveVanillaGates (it is CampaignTempoGate's now)");
-        AssertTrue(ledger.Contains("TempoPasses"), "TempoPasses stays until G6 deletes the file with #38");
-        string patch = ReadRepoFile("src/WhiskeyRealism/Patches/CoordinatedOffensiveOperationsPatch.cs");
-        AssertTrue(patch.Contains("float tval = CampaignTempoGate.TempoProbability("), "#38 rolls with the planner's copy until G6 deletes it");
-        AssertFalse(patch.Contains("CoordinatedOffensiveVanillaGates.TempoProbability"), "no second copy");
     }
 
     // ---- the pre-war gate ----

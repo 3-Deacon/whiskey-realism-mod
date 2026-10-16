@@ -112,7 +112,7 @@ namespace WhiskeyRealism.Patches
                 if (faction == null) return;
 
                 var factionType = faction.GetType();
-                var deficitField = VanillaFieldCache.Field(factionType, "positiondeficit");
+                var deficitField = VanillaFieldCache.Field(factionType, "positiondeficit"); // the holder is swapped for the plan's pair and restored; its enemy figures are never read
                 var surplusField = VanillaFieldCache.Field(factionType, "positionsurplus");
                 if (deficitField == null || surplusField == null)
                 {

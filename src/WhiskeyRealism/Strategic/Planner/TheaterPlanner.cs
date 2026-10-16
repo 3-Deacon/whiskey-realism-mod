@@ -835,16 +835,26 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // ---- telemetry ----
 
+        // "<theater>/<objective>" of the main effort, "none" with no main effort: the [CampaignPlan] row's main field
+        // and the monthly heartbeat's.
+        internal static string MainLabel(TheaterPlan plan)
+        {
+            if (plan == null || plan.MainObjectiveId < 0) return "none";
+            Theater theater = Theater.Unknown;
+            for (int i = 0; i < plan.Sectors.Count; i++)
+                if (plan.Sectors[i].Posture == TheaterPosture.MainEffort) theater = plan.Sectors[i].Theater;
+            return theater + "/" + plan.MainObjectiveId;
+        }
+
         // The [CampaignPlan] row (plan G3 Steps): changes only when the decision does.
         internal static string Summary(TheaterPlan plan)
         {
             int support = 0, hold = 0, eof = 0, screen = 0, recover = 0, main = 0;
-            Theater mainTheater = Theater.Unknown;
             for (int i = 0; i < plan.Sectors.Count; i++)
             {
                 switch (plan.Sectors[i].Posture)
                 {
-                    case TheaterPosture.MainEffort: main++; mainTheater = plan.Sectors[i].Theater; break;
+                    case TheaterPosture.MainEffort: main++; break;
                     case TheaterPosture.Support: support++; break;
                     case TheaterPosture.Hold: hold++; break;
                     case TheaterPosture.EconomyOfForce: eof++; break;
@@ -853,7 +863,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             return "[CampaignPlan] alliance=" + plan.Alliance
-                + " main=" + (plan.MainObjectiveId >= 0 ? mainTheater + "/" + plan.MainObjectiveId : "none")
+                + " main=" + MainLabel(plan)
                 + " ratio=" + plan.MainRequiredRatio.ToString("0.00", CultureInfo.InvariantCulture)
                 + " sectors=main:" + main + ",support:" + support + ",hold:" + hold + ",eof:" + eof + ",screen:" + screen + ",recover:" + recover
                 + " switch=" + (plan.SwitchReason ?? "none")

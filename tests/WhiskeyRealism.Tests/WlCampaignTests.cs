@@ -948,7 +948,6 @@ internal static class WlCampaignTests
             ("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
             ("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "for (int i = defOps.Count - 1; i >= 0; i--)", true),
             ("src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs", "foreach (var candidate in response.SelectedPackage)", true),
-            ("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "if (output.Decision == OperationalProbeDecision.Pause ||", false),
         })
         {
             string text = File.ReadAllText(FindRepoPath(path));

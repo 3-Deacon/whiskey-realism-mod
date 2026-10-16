@@ -4,8 +4,8 @@ using WhiskeyRealism.Patches;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // The vanilla side of sending one formation (IMoveHost), shared by the mover (G5a) and the reconnaissance executor
-    // (G5d): the group of the reviewing alliance by instance id, the final-waypoint test, the old package layer's lock, the
-    // move itself and vanilla's AI transport default. A subclass binds Alliance for the pass.
+    // (G5d): the group of the reviewing alliance by instance id, the final-waypoint test, the move itself and vanilla's AI
+    // transport default. A subclass binds Alliance for the pass.
     //
     // Vanilla it rests on (decompile build 14703111): AICampaign.MoveUnitTo 14479-14540 (the move is a queued
     // DefensiveMovingOrder when movearoundenemyunits is set, one order served at a time, 9933-10052; it refuses a target in a
@@ -27,14 +27,6 @@ namespace WhiskeyRealism.Strategic.Planner
             var bfs = CampaignSnapshotRuntime.ResolveBattlefieldSetup();
             if ((UnityEngine.Object)bfs == null) return false;
             return bfs.IsTerrainPositionRestricted(new Vector3(x, 0f, z), Alliance);
-        }
-
-        public bool PackageLocked(int instanceId)
-        {
-            var unit = UnitOf(instanceId);
-            if (unit == null) return true;
-            if (CoordinatedOperationRuntime.IsPackageLocked(unit)) return true;
-            return false;
         }
 
         public bool Move(int instanceId, float x, float z)

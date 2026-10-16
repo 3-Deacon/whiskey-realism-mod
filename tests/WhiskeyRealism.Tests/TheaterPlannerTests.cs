@@ -19,7 +19,7 @@ internal static class TheaterPlannerTests
             ("DepotTasksSkipSiteNearAnExistingDepot", DepotTasksSkipSiteNearAnExistingDepot),
             ("PriorInsideWindowIsFull", PriorInsideWindowIsFull),
             ("PriorDecaysOutsideWindow", PriorDecaysOutsideWindow),
-            ("PriorTableMatchesCatalog", PriorTableMatchesCatalog),
+            ("PriorTableRows", PriorTableRows),
             ("LiveMarginAbovePriorMaxWins", LiveMarginAbovePriorMaxWins),
             ("PriorBreaksNearTie", PriorBreaksNearTie),
             ("HysteresisHoldsBelowMargin", HysteresisHoldsBelowMargin),
@@ -167,17 +167,30 @@ internal static class TheaterPlannerTests
         AssertTrue(HistoricalPriorTable.Weight(june, ReviewCadenceCatchUp.DaySerial(1, 7, 1861)) < 1f, "1 July outside");
     }
 
-    private static void PriorTableMatchesCatalog()
+    // The six rows as the retired historical operation catalog had them (the catalog went in G6): id, alliance, objectives,
+    // first and last month of the window, and the tier its catalog priority (10 / 15 / 20) maps to.
+    private static void PriorTableRows()
     {
-        AssertEqual(6, HistoricalPriorTable.Entries.Count, "six catalog profiles");
-        foreach (var e in HistoricalPriorTable.Entries)
+        var rows = new (string Id, int Alliance, int Objective, int StartMonth, int StartYear, int EndMonth, int EndYear, int Tier)[]
         {
-            AssertTrue(HistoricalOperationCatalog.TryGetById(e.Id, out var p), "catalog has " + e.Id);
-            AssertEqual(p.AllianceId, e.Alliance, e.Id + " alliance");
-            AssertEqual(string.Join(",", p.ObjectiveAllowList), string.Join(",", e.ObjectiveIds), e.Id + " objectives");
-            AssertEqual(ReviewCadenceCatchUp.DaySerial(1, p.StartMonth, p.StartYear), e.StartSerial, e.Id + " window start");
-            AssertEqual(ReviewCadenceCatchUp.DaySerial(1, p.EndMonth + 1, p.EndYear) - 1, e.EndSerial, e.Id + " window end: the end month's last day");
-            AssertEqual(HistoricalPriorTable.TierOf(p.Priority), e.Priority, e.Id + " tier");
+            ("union-east-pressure", 0, 3, 4, 1861, 12, 1861, 3),
+            ("csa-valley-disruption", 1, 32, 4, 1861, 12, 1861, 2),
+            ("union-coastal-pressure", 0, 37, 1, 1862, 12, 1862, 1),
+            ("union-western-pressure", 0, 29, 1, 1862, 12, 1862, 3),
+            ("csa-western-depth", 1, 30, 1, 1862, 12, 1862, 3),
+            ("union-late-pressure", 0, 3, 5, 1864, 12, 1865, 3)
+        };
+        AssertEqual(rows.Length, HistoricalPriorTable.Entries.Count, "six catalog profiles");
+        for (int i = 0; i < rows.Length; i++)
+        {
+            var r = rows[i];
+            var e = HistoricalPriorTable.Entries[i];
+            AssertEqual(r.Id, e.Id, "row " + i + " id");
+            AssertEqual(r.Alliance, e.Alliance, r.Id + " alliance");
+            AssertEqual(r.Objective.ToString(), string.Join(",", e.ObjectiveIds), r.Id + " objectives");
+            AssertEqual(ReviewCadenceCatchUp.DaySerial(1, r.StartMonth, r.StartYear), e.StartSerial, r.Id + " window start");
+            AssertEqual(ReviewCadenceCatchUp.DaySerial(1, r.EndMonth + 1, r.EndYear) - 1, e.EndSerial, r.Id + " window end: the end month's last day");
+            AssertEqual(r.Tier, e.Priority, r.Id + " tier");
         }
         AssertEqual(3, HistoricalPriorTable.TierOf(10), "catalog 10 is the top tier");
         AssertEqual(2, HistoricalPriorTable.TierOf(15), "catalog 15");

@@ -130,10 +130,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 else Days = 0;
             }
 
+            public int LastDay => _lastDay;
+
             public void Reset()
             {
                 _lastDay = int.MinValue;
                 Days = 0;
+            }
+
+            // The sidecar's run: restored with its last review day, so the first review after a load neither counts that day twice
+            // nor restarts the run (a day that goes backwards still does, Observe).
+            public void Restore(int days, int lastDay)
+            {
+                Days = days < 0 ? 0 : days;
+                _lastDay = lastDay;
             }
         }
 

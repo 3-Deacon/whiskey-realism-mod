@@ -105,6 +105,23 @@ namespace WhiskeyRealism.Strategic.Planner
             return null;
         }
 
+        // The sidecar's rebinding rule (G6): the exact unit key, else the one formation whose name is the key's name part when
+        // the commander part no longer matches; -1 when there is none or the name is ambiguous.
+        public int IndexOfKeyOrName(string unitKey)
+        {
+            int exact = IndexOfKey(unitKey);
+            if (exact >= 0 || string.IsNullOrEmpty(unitKey)) return exact;
+            string name = EnemyArmyModel.NameOf(unitKey);
+            int found = -1;
+            for (int i = 0; i < Own.Count; i++)
+            {
+                if (!string.Equals(Own[i].Name, name, StringComparison.Ordinal)) continue;
+                if (found >= 0) return -1;
+                found = i;
+            }
+            return found;
+        }
+
         // Sidecar rebinding (G6): a persisted unitKey back to this session's formation.
         public int IndexOfKey(string unitKey)
         {

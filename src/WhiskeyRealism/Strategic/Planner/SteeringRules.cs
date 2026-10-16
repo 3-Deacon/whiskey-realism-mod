@@ -53,15 +53,19 @@ namespace WhiskeyRealism.Strategic.Planner
         // An existing centre within this fraction of the box already serves the formation: no rewrite.
         public const float RewriteTolerance = 0.1f;
 
-        // Spec C6: the value to write into AIFaction.followedcampaignobjective, CampaignObjectiveSteering.NoWrite for none.
+        // ObjectiveWrite's answer for "write nothing".
+        public const int NoWrite = int.MinValue;
+
+        // Spec C6: the value to write into AIFaction.followedcampaignobjective, NoWrite for none.
         // Follow the plan's main objective while vanilla offers it (written only when it differs from what is followed); with no
         // main effort, or one vanilla no longer offers, release a value this mod wrote (-1, so vanilla re-picks, 17780-17786)
         // and leave vanilla's own pick alone.
         public static int ObjectiveWrite(int planMain, bool planMainAvailable, int current, int lastWrittenByMod)
         {
-            var steer = CampaignObjectiveSteering.Decide(planMain >= 0 && planMainAvailable, planMain, current, lastWrittenByMod);
-            if (steer.WriteFollowed == CampaignObjectiveSteering.NoWrite || steer.WriteFollowed == current) return CampaignObjectiveSteering.NoWrite;
-            return steer.WriteFollowed;
+            int write;
+            if (planMain >= 0 && planMainAvailable) write = planMain;
+            else write = lastWrittenByMod >= 0 && current == lastWrittenByMod ? -1 : NoWrite;
+            return write == NoWrite || write == current ? NoWrite : write;
         }
 
         // Spec C8: the theater centre toward a target that keeps the formation inside the box, on both axes.

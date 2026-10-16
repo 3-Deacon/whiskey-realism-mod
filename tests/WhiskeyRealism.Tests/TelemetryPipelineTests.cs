@@ -354,10 +354,6 @@ internal static class TelemetryPipelineTests
         AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[Director:trace]"), "director trace typed");
         AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[OperationalProbe]"), "operational probe typed");
 
-        string objectivePatch = ReadRepoFile("src/WhiskeyRealism/Patches/PickCampaignObjectivePatch.cs");
-        AssertFalse(objectivePatch.Contains("TelemetryRouter.LegacyInfo(\n                            $\"[HistoricalOperation]"), "historical operation patch typed");
-        AssertFalse(objectivePatch.Contains("TelemetryRouter.LegacyInfo($\"[Plan]"), "campaign objective plan patch typed");
-
         string projectPatch = ReadRepoFile("src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs");
         AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\"[ProjectDoctrine]"), "project doctrine observer rows typed");
         AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\n                                $\"[ProjectDoctrine]"), "project doctrine starved lane typed");
@@ -366,13 +362,8 @@ internal static class TelemetryPipelineTests
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/FinancialAIPatch.cs", "FiscalTelemetry");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/PolicySelectionPatch.cs", "FiscalIntent");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "DefenseIntent");
-        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "OperationalProbe");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/ImportanceValuesPatch.cs", "Plan");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/TransferOfUnitsPatch.cs", "Plan");
-        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/CoordinatedOffensiveOperationsPatch.cs", "CoordinatedOps");
-        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "CoordinatedOps");
-        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/CoordinatedOperationRuntime.cs", "CoordinatedOps");
-        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/CIC.cs", "HistoricalOperation");
     }
 
     private static void AssertNoLegacyTask7Tag(string relativePath, string tag)
@@ -403,23 +394,9 @@ internal static class TelemetryPipelineTests
                     segment.Contains("\"[" + tag + ":") ||
                     segment.Contains("$\"[" + tag + ":"),
                     relativePath + " legacy " + tag + " row");
-                if (marker == "Plugin.Log.LogInfo(" || marker == "Plugin.Log.LogWarning(")
-                {
-                    string plainName = RequiredTask7PlainName(tag);
-                    AssertFalse(!string.IsNullOrEmpty(plainName) &&
-                        segment.IndexOf(plainName, StringComparison.OrdinalIgnoreCase) >= 0,
-                        relativePath + " direct plugin log " + plainName + " row");
-                }
                 index += marker.Length;
             }
         }
-    }
-
-    private static string RequiredTask7PlainName(string tag)
-    {
-        if (tag == "HistoricalOperation") return "Historical operation";
-        if (tag == "CoordinatedOps") return "Coordinated operation";
-        return null;
     }
 
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)

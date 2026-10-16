@@ -15,9 +15,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // Objective: AIFaction.followedcampaignobjective is an offensive importance weight on the objective's towns and IIPs
     // (UpdateImportanceValues 14922/14961) and recruiting reads it (12337); vanilla picks it at random when it is < 0
     // (PickCampaignObjective 17769-17789). The planner writes its main objective and releases a value it wrote when there is
-    // no main effort; the value the mod wrote is recorded through PickCampaignObjectivePatch's statics (the coordinator
-    // persists them at 1911/1957 until G6 moves the field), and that patch stands down while the executors run (P10: one
-    // writer per surface).
+    // no main effort; the value the mod wrote is recorded in ModWrittenObjective (the sidecar persists it). This executor is
+    // the one writer of the field (P10: one writer per surface); with the executors off vanilla's pick runs untouched.
     //
     // Theater box: Regiment.theaterposition is the centre of the operations box vanilla tests an offensive target against
     // (IsWithinOperationsTheater 17105; UpdateCampaignTheaters 17034-17110 sets it when default and resets it when the unit
@@ -53,9 +52,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (faction == null) return;
                 int objective = WriteObjective(alliance, snapshot, plan, faction);
                 int boxes = WriteTheaters(alliance, snapshot, allocation);
-                if (objective != CampaignObjectiveSteering.NoWrite || boxes > 0)
+                if (objective != SteeringRules.NoWrite || boxes > 0)
                     TelemetryRouter.LegacyInfo("[CampaignSteer] alliance=" + alliance
-                        + " objective=" + (objective == CampaignObjectiveSteering.NoWrite ? "kept" : objective < 0 ? "released" : objective.ToString())
+                        + " objective=" + (objective == SteeringRules.NoWrite ? "kept" : objective < 0 ? "released" : objective.ToString())
                         + " theaters=" + boxes, TelemetryLayer.Campaign);
             }
         }
@@ -66,13 +65,13 @@ namespace WhiskeyRealism.Strategic.Planner
             if (field == null)
             {
                 OnceLog.Warning("campaign-planner:steer-objective-field", "[CampaignPlanner] AIFaction.followedcampaignobjective not found; objective steering off");
-                return CampaignObjectiveSteering.NoWrite;
+                return SteeringRules.NoWrite;
             }
             int current = Convert.ToInt32(field.GetValue(faction));
-            int write = SteeringRules.ObjectiveWrite(plan.MainObjectiveId, ObjectiveAvailable(snapshot, plan.MainObjectiveId), current, PickCampaignObjectivePatch.WrittenByMod(alliance));
-            if (write == CampaignObjectiveSteering.NoWrite) return write;
+            int write = SteeringRules.ObjectiveWrite(plan.MainObjectiveId, ObjectiveAvailable(snapshot, plan.MainObjectiveId), current, ModWrittenObjective.Get(alliance));
+            if (write == SteeringRules.NoWrite) return write;
             field.SetValue(faction, write);
-            PickCampaignObjectivePatch.NoteWrittenByMod(alliance, write);
+            ModWrittenObjective.Note(alliance, write);
             return write;
         }
 

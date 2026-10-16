@@ -17,16 +17,15 @@ using static TestFixtures;
 // model review whose jobs read and write the working set through the coordinator's View rule
 // (working inside a job, published outside), using the real pure ledgers. Its jobs reproduce
 // the coordinator's dependency web: same-day reads of earlier jobs (posture -> front ->
-// formation -> probe), previous-day reads of later jobs (fiscal and defense read yesterday's
-// front / formation), and the in-place mutations (CIC plan, era, director memory, policy plan,
-// the probe overlay on a formation ledger that was not rebuilt today).
+// formation), previous-day reads of later jobs (fiscal and defense read yesterday's
+// front / formation), and the in-place mutations (era, director memory, policy plan).
 internal static class DailyReviewSchedulerTests
 {
     public static void Run()
     {
         RunAll(new (string name, Action run)[]
         {
-            ("daily review job list is map then per alliance cic through report", JobListOrder),
+            ("daily review job list is map then per alliance head through report", JobListOrder),
             ("daily review zero budget runs exactly one job per pump", ZeroBudgetOneJobPerPump),
             ("daily review slice is at most budget plus one job", SliceBoundedByBudgetPlusOneJob),
             ("daily review drain finishes the day in one call", DrainFinishesDay),
@@ -61,11 +60,11 @@ internal static class DailyReviewSchedulerTests
     {
         var jobs = DailyReviewJobList.Ordered;
         var expected = new List<string> { "Map:-1" };
-        string[] perAlliance = { "Cic", "Fiscal", "Policy", "Plan", "Front", "Defense", "Execute", "Formation", "Probe", "ArmyArea", "Construction", "Report" };
+        string[] perAlliance = { "Head", "Fiscal", "Policy", "Plan", "Front", "Defense", "Execute", "Formation", "Construction", "Report" };
         for (int a = 0; a < 2; a++)
             foreach (var kind in perAlliance)
                 expected.Add(kind + ":" + a);
-        AssertEqual(expected.Count, jobs.Length, "25 jobs");
+        AssertEqual(expected.Count, jobs.Length, "21 jobs");
         for (int i = 0; i < jobs.Length; i++)
             AssertEqual(expected[i], jobs[i].Kind + ":" + jobs[i].Alliance, "job " + i);
     }
@@ -615,23 +614,8 @@ internal static class DailyReviewSchedulerTests
                     }
                     break;
 
-                case DailyReviewJobKind.Cic:
+                case DailyReviewJobKind.Head:
                 {
-                    if (View.CICs[a] == null || _day % 10 == 0)
-                    {
-                        Work.CICs[a] = Work.CICs[a] ?? new CIC { AllianceId = a, OfficerName = "cic" + a };
-                        Work.CICs[a].ActivePlan = new OperationalPlan
-                        {
-                            OperationId = "op" + _day,
-                            Phases = { new Phase { TargetObjectiveId = 10 + a }, new Phase { TargetObjectiveId = 20 + rng.Next(5) } }
-                        };
-                    }
-                    var plan = View.CICs[a].ActivePlan;
-                    plan.CurrentPhaseIndex = (_day / 3) % plan.Phases.Count;
-                    plan.IsDirty = rng.Next(2) == 0;
-                    plan.OperationLastDecisionDaySerial = _day;
-                    plan.Phases[plan.CurrentPhaseIndex].PhaseStartedDaySerial = _day;
-
                     Work.Eras[a] = Work.Eras[a] ?? new EraStageManager();
                     View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, 1);
 
@@ -676,7 +660,7 @@ internal static class DailyReviewSchedulerTests
                 }
 
                 case DailyReviewJobKind.Plan:
-                    // Today's posture (CIC) and policy, yesterday's front (the front runs later); the force
+                    // Today's posture (the head job) and policy, yesterday's front (the front runs later); the force
                     // allocation (G4) runs inside the Plan job, after the plan, with the recon ledger that carries over.
                     // While the job machine is paused the planner keeps its bookkeeping only: no replan, no allocation.
                     if (PauseNow)
@@ -754,29 +738,6 @@ internal static class DailyReviewSchedulerTests
                     }
                     break;
 
-                case DailyReviewJobKind.Probe:
-                {
-                    // On days the formations were not rebuilt this mutates yesterday's ledger.
-                    var decisions = new[] { OperationalProbeDecision.Probe, OperationalProbeDecision.Pause, OperationalProbeDecision.Withdraw, OperationalProbeDecision.Escalate };
-                    View.FormationDirectives[a].ApplyOperationalProbe(new OperationalProbeOutput
-                    {
-                        SelectedUnitKey = "u" + a + (_day % 3),
-                        Decision = decisions[rng.Next(decisions.Length)],
-                        Reason = "probe" + _day
-                    });
-                    break;
-                }
-
-                case DailyReviewJobKind.ArmyArea:
-                    if (_day % 7 == 3)
-                    {
-                        var inputs = new List<ArmyAreaInput>();
-                        for (int i = 0; i < 3; i++)
-                            inputs.Add(new ArmyAreaInput { UnitKey = "u" + a + i, AllianceId = a, CurrentAreaKey = "A" + rng.Next(3), Strength = rng.Next(9000) });
-                        Work.ArmyAreas[a] = ArmyAreaLedger.Build(inputs, "A1");
-                    }
-                    break;
-
                 case DailyReviewJobKind.Construction:
                     Work.ConstructionIntents[a] = new ConstructionOutput
                     {
@@ -798,22 +759,8 @@ internal static class DailyReviewSchedulerTests
         for (int a = 0; a < 2; a++)
         {
             sb.Append("|A").Append(a);
-            var cic = set.CICs[a];
-            if (cic == null) sb.Append("|cic:-");
-            else
-            {
-                sb.Append("|cic:").Append(cic.AllianceId).Append(',').Append(cic.OfficerName);
-                var plan = cic.ActivePlan;
-                if (plan != null)
-                {
-                    sb.Append(',').Append(plan.OperationId).Append(',').Append(plan.CurrentPhaseIndex).Append(',').Append(plan.IsDirty)
-                      .Append(',').Append(plan.OperationLastDecisionDaySerial);
-                    foreach (var p in plan.Phases) sb.Append(",p").Append(p.TargetObjectiveId).Append('@').Append(p.PhaseStartedDaySerial);
-                }
-            }
             sb.Append("|era:").Append(set.Eras[a]?.Stage.ToString() ?? "-");
             sb.Append("|front:").Append(set.Fronts[a]?.Signature() ?? "-");
-            sb.Append("|area:").Append(set.ArmyAreas[a]?.Summary() ?? "-");
             var f = set.FormationDirectives[a];
             sb.Append("|form:").Append(f == null ? "-" : f.Summary() + "/" + f.Pressure.LowSupplyCount + "/" + f.Pressure.MassCount + "/" + f.Pressure.RecoverCount + "/" + f.Pressure.TopSupplyAreaKey);
             sb.Append("|fiscal:").Append(set.FiscalIntents[a]?.Signature ?? "-");
@@ -862,7 +809,7 @@ internal static class DailyReviewSchedulerTests
         AssertContains(src, "private StrategicLedgerSet View => _review.RunningJob ? _work : _published;", "view rule");
         string[] fields =
         {
-            "CIC[] CICs", "EraStageManager[] Eras", "FrontSectorLedger[] Fronts", "ArmyAreaLedger[] ArmyAreas",
+            "EraStageManager[] Eras", "FrontSectorLedger[] Fronts",
             "FormationDirectiveLedger[] FormationDirectives", "FiscalOutput[] FiscalIntents", "ConstructionOutput[] ConstructionIntents",
             "DefenseIntentLedgerOutput[] DefenseIntents", "NeedVector[] Needs", "NeedSnapshot[] NeedSnapshots",
             "PolicyPlanLedger[] PolicyPlans", "DirectorMemory[] DirectorMemories", "CampaignMapLedger CampaignMap"
@@ -905,19 +852,18 @@ internal static class DailyReviewSchedulerTests
         AssertContains(job, "DailyReviewJobList.Ordered[jobIndex]", "jobs come from the ordered list");
     }
 
-    private static StrategicLedgerSet WorkingWithCic(string officer)
+    private static StrategicLedgerSet WorkingInEra(EraStage stage)
     {
         var working = new StrategicLedgerSet();
-        working.CICs[0] = new CIC { AllianceId = 0, OfficerName = officer };
-        working.Eras[0] = new EraStageManager { Stage = EraStage.Amateur1861 };
+        working.Eras[0] = new EraStageManager { Stage = stage };
         return working;
     }
 
     private static void CommitKeepsPreviousDayWhenCopyThrows()
     {
-        StrategicLedgerSet published = StrategicLedgerSet.PublishedCopyOf(WorkingWithCic("Monday"));
+        StrategicLedgerSet published = StrategicLedgerSet.PublishedCopyOf(WorkingInEra(EraStage.Amateur1861));
         StrategicLedgerSet monday = published;
-        var tuesday = WorkingWithCic("Tuesday");
+        var tuesday = WorkingInEra(EraStage.Operational1862);
         bool threw = false;
         try
         {
@@ -935,13 +881,13 @@ internal static class DailyReviewSchedulerTests
         }
         AssertTrue(threw, "the failure reaches the caller");
         AssertTrue(ReferenceEquals(monday, published), "previous day still published");
-        AssertEqual("Monday", published.CICs[0].OfficerName, "previous day whole");
+        AssertEqual(EraStage.Amateur1861, published.Eras[0].Stage, "previous day whole");
 
         ReviewDayCommit.Publish(ref published, tuesday, StrategicLedgerSet.PublishedCopyOf);
         AssertFalse(ReferenceEquals(monday, published), "a completed copy replaces the set");
-        AssertEqual("Tuesday", published.CICs[0].OfficerName, "new day published");
-        AssertEqual("Monday", monday.CICs[0].OfficerName, "a replaced set is never written again");
-        AssertFalse(ReferenceEquals(tuesday.CICs[0], published.CICs[0]), "published CIC is a copy");
+        AssertEqual(EraStage.Operational1862, published.Eras[0].Stage, "new day published");
+        AssertEqual(EraStage.Amateur1861, monday.Eras[0].Stage, "a replaced set is never written again");
+        AssertFalse(ReferenceEquals(tuesday.Eras[0], published.Eras[0]), "published era is a copy");
     }
 
     private static void CommitAppliesDeferredWhenPublishThrows()
@@ -1022,8 +968,6 @@ internal static class DailyReviewSchedulerTests
             "case DailyReviewJobKind.Front: { a.FrontChanged = false; if (paused) break;",
             "case DailyReviewJobKind.Defense: if (!paused)",
             "if (!ready || paused) break;",
-            "case DailyReviewJobKind.Probe: if (ready && !paused)",
-            "case DailyReviewJobKind.ArmyArea: if (ready && !paused)",
             "EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);",
             "frontChanged = UpdateFrontLedger(alliance)",
             "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.LegacySerial;",
@@ -1032,9 +976,6 @@ internal static class DailyReviewSchedulerTests
             "a.FormationChanged = false;",
             "StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) || StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) || a.FrontChanged;",
             "a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Era)",
-            "if (UpdateOperationalProbe(alliance, a.Cic, d.Day, d.Month, d.Year)) a.FormationChanged = true;",
-            "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, armyAreaSource, _armyAreaSourceSignatures[alliance], a.FormationChanged || d.WeeklyCatchUp)",
-            "UpdateArmyAreaLedger(alliance, a.Cic)",
             "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, constructionSource, _constructionSourceSignatures[alliance], d.WeeklyCatchUp)",
             "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat, paused)",
         };
@@ -1042,14 +983,14 @@ internal static class DailyReviewSchedulerTests
             AssertContains(job, pin, "hand-off: " + pin);
         AssertBefore(job, "a.FormationChanged = false;", "a.FormationChanged = UpdateFormationDirectiveLedger(", "formation flag reset before the ledger runs");
         AssertBefore(job, "EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);", "if (d.OperationalRuntimeReady)", "the belief day is stamped by the first job, before any reader");
-        string cic = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunCicReviewJob("), @"\s+", " ");
-        foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.Cic = cic;", "a.LegacySerial = legacySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;",
-            "if (!d.JobMachinePaused) { var fired = Succession.CheckEvents(" })
-            AssertContains(cic, pin, "cic hand-off: " + pin);
-        // The planner reads today's director posture (CIC job) and runs before the front and its
+        string head = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunHeadReviewJob("), @"\s+", " ");
+        foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.LegacySerial = legacySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;",
+            "if (!d.JobMachinePaused) { var fired = Succession.CheckEvents(", "SwapOfficer(alliance, e);", "PublishDirectorPosture(alliance, day, month, year, legacySerial);" })
+            AssertContains(head, pin, "head hand-off: " + pin);
+        // The planner reads today's director posture (head job) and runs before the front and its
         // executors after the defense ledger, as in the single-frame review.
         string list = string.Join(",", Array.ConvertAll(DailyReviewJobList.Ordered, j => j.Kind + ":" + j.Alliance));
-        AssertBefore(list, "Cic:0", "Plan:0", "plan after today's CIC review");
+        AssertBefore(list, "Head:0", "Plan:0", "plan after today's head review");
         AssertBefore(list, "Policy:0", "Plan:0", "plan after policy");
         AssertBefore(list, "Plan:0", "Front:0", "plan before the front ledger");
         AssertBefore(list, "Defense:0", "Execute:0", "executors after the defense ledger");

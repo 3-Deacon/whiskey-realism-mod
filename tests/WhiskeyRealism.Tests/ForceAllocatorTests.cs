@@ -69,7 +69,7 @@ internal static class ForceAllocatorTests
             ("NonComplianceCounterCountsConsecutiveUnreliableDays", NonComplianceCounterCountsConsecutiveUnreliableDays),
             ("CicPlayerYieldsEmptyAllocation", CicPlayerYieldsEmptyAllocation),
             ("HomeTheaterBreaksTies", HomeTheaterBreaksTies),
-            ("HomeTheaterPriorMatchesRegistry", HomeTheaterPriorMatchesRegistry),
+            ("HomeTheaterPriorRows", HomeTheaterPriorRows),
             ("AllocationDeterministic", AllocationDeterministic),
             ("ReconAssignedBeforeSupportAndMainEffort", ReconAssignedBeforeSupportAndMainEffort),
             ("ReconPrefersCavalryFormations", ReconPrefersCavalryFormations),
@@ -1409,31 +1409,28 @@ internal static class ForceAllocatorTests
         AssertTrue(NamedCorpsWithheld(true), "the Army of the Ohio (home West) sits in a West sector and is withheld first");
     }
 
-    // Pinned against HistoricalArmyAreaRegistry until G6 deletes it: the home theater is the theater of the
-    // doctrine's primary area (ArmyAreaClassifier key -> a point inside it -> TheaterClassifier).
-    private static void HomeTheaterPriorMatchesRegistry()
+    // The historical army-to-home-theater table, row by row (the registry it was reduced from went in G6): the primary
+    // areas lie East (Virginia capital corridor, Shenandoah Valley) or West (Ohio valley, north-west Virginia) by
+    // TheaterClassifier at a point inside each area, and every historical name maps to its doctrine's home.
+    private static void HomeTheaterPriorRows()
     {
-        var areaPoint = new Dictionary<string, float[]>
+        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1300f, -1000f), "Virginia capital corridor");
+        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1087f, -580f), "Shenandoah Valley");
+        AssertEqual(Theater.West, TheaterClassifier.FromPosition(0f, 0f), "Ohio valley");
+        AssertEqual(Theater.West, TheaterClassifier.FromPosition(575f, -650f), "north-west Virginia");
+        var rows = new (int Alliance, string Name, Theater Home)[]
         {
-            ["VirginiaCapitalCorridor"] = new[] { 1300f, -1000f },
-            ["ShenandoahValley"] = new[] { 1087f, -580f },
-            ["NorthwestVirginia"] = new[] { 575f, -650f },
-            ["OhioValley"] = new[] { 0f, 0f },
-            ["WashingtonDefenses"] = new[] { 1300f, -500f },
-            ["MarylandPennsylvaniaCorridor"] = new[] { 1200f, -300f }
+            (0, "Army of the Potomac", Theater.East), (0, "Army of Virginia", Theater.East), (0, "Shenandoah Corps", Theater.East),
+            (0, "Army of the Ohio", Theater.West), (0, "Army of Northern Virginia", Theater.Unknown), (0, "Army of the Valley", Theater.Unknown),
+            (0, "Army of the Northwest", Theater.Unknown), (0, "Porterfield's Column", Theater.Unknown), (0, "Army of the Tennessee", Theater.Unknown),
+            (0, "3rd Corps", Theater.Unknown), (0, "", Theater.Unknown),
+            (1, "Army of the Potomac", Theater.East), (1, "Army of Virginia", Theater.East), (1, "Army of Northern Virginia", Theater.East),
+            (1, "Army of the Valley", Theater.East), (1, "Army of the Northwest", Theater.West), (1, "Porterfield's Column", Theater.West),
+            (1, "Shenandoah Corps", Theater.Unknown), (1, "Army of the Ohio", Theater.Unknown), (1, "Army of the Tennessee", Theater.Unknown),
+            (1, "3rd Corps", Theater.Unknown), (1, "", Theater.Unknown)
         };
-        foreach (var pair in areaPoint)
-            AssertEqual(pair.Key, ArmyAreaClassifier.FromPosition(pair.Value[0], pair.Value[1]), "the probe point lies in " + pair.Key);
-        var names = new[] { "Army of the Potomac", "Army of Virginia", "Shenandoah Corps", "Army of the Ohio", "Army of Northern Virginia",
-            "Army of the Valley", "Army of the Northwest", "Porterfield's Column", "Army of the Tennessee", "3rd Corps", "" };
-        foreach (int alliance in new[] { 0, 1 })
-            foreach (string name in names)
-            {
-                var doctrine = HistoricalArmyAreaRegistry.Resolve(alliance, name);
-                var expected = doctrine.PrimaryAreaKey == "Unassigned" ? Theater.Unknown
-                    : TheaterClassifier.FromPosition(areaPoint[doctrine.PrimaryAreaKey][0], areaPoint[doctrine.PrimaryAreaKey][1]);
-                AssertEqual(expected, HomeTheaterPrior.For(alliance, name), "alliance " + alliance + " '" + name + "'");
-            }
+        foreach (var row in rows)
+            AssertEqual(row.Home, HomeTheaterPrior.For(row.Alliance, row.Name), "alliance " + row.Alliance + " '" + row.Name + "'");
         AssertEqual(Theater.Unknown, HomeTheaterPrior.For(2, "Army of the Potomac"), "no home for alliance 2");
         AssertEqual(Theater.Unknown, HomeTheaterPrior.ForAlliance(5)("Army of the Potomac"), "no delegate for an unplanned alliance");
         AssertEqual(Theater.Unknown, HomeTheaterPrior.For(0, null), "null name");

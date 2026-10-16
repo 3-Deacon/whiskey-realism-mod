@@ -925,10 +925,10 @@ internal static class EnemyArmyModelTests
         string beforeDetect = review.Substring(0, detect);
         AssertFalse(beforeDetect.Contains("PlannerReviewMode.StandDown") || beforeDetect.Contains("PlannerReviewMode.Bookkeeping"), "no mode return before detection");
 
-        // Sliced review (perf merge): the CIC job marks the CIC player's alliance PlayerCic, and that
+        // Sliced review (perf merge): the head job marks the CIC player's alliance PlayerCic, and that
         // mode's Plan job runs the bookkeeping review.
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string cicJob = MethodBody(coordinator, "private void RunCicReviewJob(");
+        string cicJob = MethodBody(coordinator, "private void RunHeadReviewJob(");
         int cicBranch = cicJob.IndexOf("if (operationalRuntimeReady && IsPlayerCICOf(alliance, d.PlayerAlliance))", StringComparison.Ordinal);
         AssertTrue(cicBranch >= 0 && cicJob.IndexOf("a.Mode = AllianceReviewMode.PlayerCic;", cicBranch, StringComparison.Ordinal) > cicBranch, "the CIC player's alliance is reviewed as PlayerCic");
         string job = MethodBody(coordinator, "private void RunReviewJob(");
@@ -1112,15 +1112,14 @@ internal static class EnemyArmyModelTests
     private static void ReviewDayScalesNeverMix()
     {
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        // Sliced review (perf merge): the day's inputs, the CIC job and the other jobs.
-        string core = MethodBody(coordinator, "private bool BeginReviewDay(") + MethodBody(coordinator, "private void RunCicReviewJob(")
+        // Sliced review (perf merge): the day's inputs, the head job and the other jobs.
+        string core = MethodBody(coordinator, "private bool BeginReviewDay(") + MethodBody(coordinator, "private void RunHeadReviewJob(")
             + MethodBody(coordinator, "private void RunReviewJob(");
         AssertContains(core, "int calendarDay = ReviewCadenceCatchUp.DaySerial(day, month, year);", "the calendar day");
         AssertContains(core, "int legacySerial = year * 372 + month * 31 + day;", "the legacy serial");
         AssertContains(core, "UpdateCapitalThreat(alliance, legacySerial);", "capital threat streak: legacy (persisted)");
-        AssertContains(core, "PublishDirectorPosture(alliance, cic, era, day, month, year, legacySerial);", "director LastFullRefreshDay: legacy (persisted)");
-        AssertContains(core, "OperationMemories[alliance].RecordReplan(legacySerial);", "replan memory: legacy (persisted)");
-        AssertContains(core, "a.LegacySerial = legacySerial;", "the CIC job hands the legacy serial on");
+        AssertContains(core, "PublishDirectorPosture(alliance, day, month, year, legacySerial);", "director LastFullRefreshDay: legacy (persisted)");
+        AssertContains(core, "a.LegacySerial = legacySerial;", "the head job hands the legacy serial on");
         AssertContains(core, "_frontChangedDay[alliance] = a.LegacySerial;", "front change day: legacy");
         AssertContains(core, "CalendarDay = calendarDay,", "the day's calendar day");
         AssertEqual(2, core.Split(new[] { "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay)" }, StringSplitOptions.None).Length - 1, "CIC player and AI policy steps: calendar");
@@ -1129,7 +1128,7 @@ internal static class EnemyArmyModelTests
         AssertContains(MethodBody(coordinator, "private void UpdatePolicyPlanCore("),
             "int days = _needCalendarDay[alliance] >= 0 ? calendarDay - _needCalendarDay[alliance] : 1;", "need step gap in calendar days");
         AssertContains(coordinator, "private void UpdateCapitalThreat(int alliance, int legacySerial)", "named by scale");
-        AssertContains(coordinator, "private void PublishDirectorPosture(int alliance, CIC cic, EraStageManager era, int day, int month, int year, int legacySerial)", "named by scale");
+        AssertContains(coordinator, "private void PublishDirectorPosture(int alliance, int day, int month, int year, int legacySerial)", "named by scale");
         int calendarProducers = 0;
         for (int at = coordinator.IndexOf("ReviewCadenceCatchUp.DaySerial(", StringComparison.Ordinal); at >= 0; at = coordinator.IndexOf("ReviewCadenceCatchUp.DaySerial(", at + 1, StringComparison.Ordinal)) calendarProducers++;
         AssertEqual(1, calendarProducers, "one calendar producer in the coordinator (calendarDay)");

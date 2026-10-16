@@ -184,7 +184,7 @@ namespace WhiskeyRealism.Strategic.Planner
             // One owner per formation per review: a formation in transit now was sent today by the mover (or is a recon move still
             // waiting on its order, or one not yet judged), and a second move would overwrite its record. A queued record whose order
             // has ended or whose mission is over was settled above (and by the mover's pass), so it does not stand here for good.
-            if (!TheaterPlanner.Movable(f) || host.PackageLocked(f.InstanceId) || tracker.InTransit(f.InstanceId))
+            if (!TheaterPlanner.Movable(f) || tracker.InTransit(f.InstanceId))
             {
                 tally.SkippedBusy++;
                 return;

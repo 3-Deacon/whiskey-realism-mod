@@ -50,6 +50,12 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly List<ReconTask>[] ReconTasks = { new List<ReconTask>(), new List<ReconTask>() };
         private static readonly ReconCounts[] LastReconCounts = new ReconCounts[2];
         private static readonly bool[] ReconRowEmitted = new bool[2];
+        // Sidecar (v3): the saved own-unit records (moves, depot tasks, recon missions) wait here, as unit keys, until the first
+        // review after a load has a snapshot to rebind them against (PlannerRebind); a save in between writes them back.
+        private static readonly PlannerSnapshot[] PendingRebind = new PlannerSnapshot[2];
+        private static readonly List<MoveRecord> ReboundMoves = new List<MoveRecord>();
+        private static readonly List<DepotTaskRecord> ReboundDepotTasks = new List<DepotTaskRecord>();
+        private static readonly List<ReconMission> ReboundMissions = new List<ReconMission>();
         private static readonly Func<string, bool>[] ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };
 
         static CampaignPlannerRuntime()
@@ -72,6 +78,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             Battles.Clear();
             PendingBattles.Clear();
+            for (int a = 0; a < PendingRebind.Length; a++) PendingRebind[a] = null;
         }
 
         internal static void ReviewPlan(int alliance, int day, int month, int year, DirectorPosture tempo, bool jobMachinePaused)
@@ -93,6 +100,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
                     var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, daySerial,
                         player, in chain, tempo, Snapshots[alliance]);
+                    RebindSaved(alliance, snapshot);
 
                     // G1: fog-honest detection and the belief update. Bookkeeping: it runs in every
                     // mode, for a W&L CIC player's stand-down alliance and during the pause (no writes).
@@ -198,6 +206,66 @@ namespace WhiskeyRealism.Strategic.Planner
                     OnceLog.Warning("campaign-planner:execute-failed", "[CampaignPlanner] executors failed: " + ex.Message);
                 }
             }
+        }
+
+        // ---- sidecar v3 (PlannerSnapshot) ----
+
+        // The alliance's planner state as the sidecar writes it. The live ledgers' records, or the saved ones not yet rebound
+        // (a save between a load and the first review).
+        internal static PlannerSnapshot Export(int alliance)
+        {
+            if (alliance < 0 || alliance >= States.Length) return null;
+            var saved = new PlannerSnapshot { State = States[alliance], UnreliableDays = NonCompliance[alliance].Days, UnreliableLastDay = NonCompliance[alliance].LastDay };
+            saved.Beliefs.AddRange(EnemyDetectionRuntime.ModelFor(alliance).Beliefs);
+            var protection = CommanderAppointmentRuntime.Book.For(alliance);
+            if (protection != null) foreach (var entry in protection.ProtectedUntil) saved.Appointments.Add(entry);
+            var pending = PendingRebind[alliance];
+            if (pending != null)
+            {
+                saved.DepotTasks.AddRange(pending.DepotTasks);
+                saved.Moves.AddRange(pending.Moves);
+                saved.ReconMissions.AddRange(pending.ReconMissions);
+                return saved;
+            }
+            var depots = DepotTaskLedgers.For(alliance);
+            if (depots != null) saved.DepotTasks.AddRange(depots.Tasks);
+            var moves = MoveTrackers.For(alliance);
+            if (moves != null) saved.Moves.AddRange(moves.Records);
+            saved.ReconMissions.AddRange(Recon[alliance].Missions);
+            return saved;
+        }
+
+        // A loaded sidecar's state (null: a v1/v2 file, the planner starts fresh). What names no formation is restored now; the
+        // records that do wait for RebindSaved.
+        internal static void Restore(int alliance, PlannerSnapshot saved)
+        {
+            if (alliance < 0 || alliance >= States.Length || saved == null) return;
+            States[alliance] = saved.State;
+            NonCompliance[alliance].Restore(saved.UnreliableDays, saved.UnreliableLastDay);
+            EnemyDetectionRuntime.ModelFor(alliance).Restore(saved.Beliefs);
+            CommanderAppointmentRuntime.Book.For(alliance)?.Restore(saved.Appointments);
+            MoveTrackers.For(alliance)?.Restore(null);
+            DepotTaskLedgers.For(alliance)?.Restore(null);
+            Recon[alliance].Restore(null);
+            PendingRebind[alliance] = saved;
+        }
+
+        // The first review that sees this alliance's formations after a load: the saved moves, depot tasks and recon missions
+        // are bound to this session's formations by unit key and handed to their ledgers. A snapshot with no formation yet
+        // (the units are not loaded) waits for the next review rather than dropping every record.
+        private static void RebindSaved(int alliance, CampaignSnapshot snapshot)
+        {
+            var saved = PendingRebind[alliance];
+            if (saved == null || snapshot.Own.Count == 0) return;
+            PendingRebind[alliance] = null;
+            var result = PlannerRebind.Resolve(saved, snapshot, ReboundMoves, ReboundDepotTasks, ReboundMissions);
+            MoveTrackers.For(alliance)?.Restore(ReboundMoves);
+            DepotTaskLedgers.For(alliance)?.Restore(ReboundDepotTasks);
+            Recon[alliance].Restore(ReboundMissions);
+            TelemetryRouter.LegacyInfo("[CampaignPlanner] saved state rebound alliance=" + alliance
+                + " moves=" + result.MovesKept + "/" + (result.MovesKept + result.MovesDropped)
+                + " missions=" + result.MissionsKept + "/" + (result.MissionsKept + result.MissionsDropped)
+                + " depotTasks=" + ReboundDepotTasks.Count, TelemetryLayer.Campaign);
         }
 
         // The alliance's snapshot of today's review (the directive ledger reads the command hierarchy from it,
@@ -366,18 +434,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 " player=" + s.Player);
         }
 
-        // Both planner flags: the planner runs and its executors may write. PickCampaignObjectivePatch (P10) and the
-        // availability and importance patches stand down or read the plan only while this holds.
+        // Both planner flags: the planner runs and its executors may write. The availability and importance patches, the
+        // army-group patch and the replacement-flow patch steer only while this holds.
         internal static bool ExecutorsEnabled()
         {
             return FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors);
-        }
-
-        // The reconnaissance executor sends and holds the formations on a mission (G5d): both flags above plus the recon flag.
-        // The old probe's runner stands down and #15 leaves a Screen formation at its post only while this holds.
-        internal static bool ReconExecutorActive()
-        {
-            return ExecutorsEnabled() && FlagOn(Plugin.EnableCampaignReconnaissance);
         }
 
         // What the executors' patches read with the plan (G5a): the decision and its release, the pre-war gate and the map-group

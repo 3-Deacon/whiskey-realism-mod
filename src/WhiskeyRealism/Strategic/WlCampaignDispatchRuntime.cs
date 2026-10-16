@@ -430,9 +430,9 @@ namespace WhiskeyRealism.Strategic
             if (factionIndex < 0 || AICampaign.aiareas == null) return false;
             var area = AICampaign.AIArea.GetAIArea(AICampaign.aiareas.GetColorOnPos(destination));
             if (area == null) return false;
-            float[] strength = area.enemycampaignunitsstrengthclose;
+            float[] strength = area.enemycampaignunitsstrengthclose; // vanilla's own order typing (14228-14229), mirrored for the player's dispatch text
             float[] morale = area.avgtroopmoraleinzone;
-            float[] weapon = area.enemycampaignunitsstrengthcloseweapon;
+            float[] weapon = area.enemycampaignunitsstrengthcloseweapon; // vanilla's own order typing (14228-14229)
             if (strength == null || morale == null || weapon == null
                 || factionIndex >= strength.Length || factionIndex >= morale.Length || factionIndex >= weapon.Length) return false;
             return WlCampaignDispatchPolicy.VanillaEnemyAtTarget(strength[factionIndex], morale[factionIndex],
@@ -452,7 +452,7 @@ namespace WhiskeyRealism.Strategic
         // Vanilla names the engaged enemy unit (13715, 13775).
         private static string NearestEnemyName(object faction, Vector3 destination)
         {
-            IList enemies = faction != null ? VanillaFieldCache.List(faction, "enemyunits") : null;
+            IList enemies = faction != null ? VanillaFieldCache.List(faction, "enemyunits") : null; // vanilla's engaged-enemy name (13715, 13775) for the player's dispatch text, not a decision
             if (enemies == null) return null;
             string best = null;
             float bestDistance = float.MaxValue;
