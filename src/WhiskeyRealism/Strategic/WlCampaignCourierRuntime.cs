@@ -264,7 +264,8 @@ namespace WhiskeyRealism.Strategic
         // order by vanilla (8366) or by Whiskey (2026-10-16). One still on his panel is a leftover of the removed
         // #69 dispatch, from a save made before: it is cleared by setting the slot to null, as vanilla does
         // for a reached or end-of-day order (HoldsStaleCarriedOrder), so he is not left holding an order no
-        // one can reach. The first pass of the UpdateUnitAI Postfix, before delivery.
+        // one can reach. Runs on every pass of the UpdateUnitAI Postfix (no latch: it also covers a player later attached under a corps), before delivery,
+        // behind the master switch only, not Enable Campaign Chain Dispatches: it undoes what the removed dispatch left behind.
         internal static void ClearStaleCarriedOrder()
         {
             try
