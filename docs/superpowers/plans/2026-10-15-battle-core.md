@@ -1910,7 +1910,7 @@ Deviations from the plan and spec, each a finding or a decision:
 
 **Patch and producer surfaces:** no Harmony patch in any BC14 slice. No new producer: `BattleProducerRegistry.Order` and `BattleCoreTick.CreateProducer` are untouched, so smoke item 1.4's `count=13` holds. The evaluation, the monitor and the crossing probes run on the coordinator's heavy path (`DriveTacticalCommanderSide`), never in the arbiter tick. The producers that read BC14 state: `PostureIntentProducer` (the crossing via on the March and Attack orders, the `GuardFlank` guard point; BC14W the works hold, its stance and the contest; BC14O the screen target), `ReconIntentProducer` (the crossing look requests; BC14W the works-band skip of the probe), `DivisionPlayIntentProducer` and #45's `GroupStanceIntentProducer` (BC14W: they leave a works hold a hold), and BC14W's `ArtilleryIntentProducer` (the preparation and the `BombardStart` intent).
 
-**Spec amendments applied by this plan (spec § 15):** item 1 (renumbering: the level-of-detail section is now § BC15 and the formations section § BC16, with the dependency diagram, the BC10-BC12 rules, the "Later slices" line, BC13's section and the smoke labels; the BC13 spec's § 15 items 2-3 and `docs/superpowers/plans/2026-10-15-wl-order-flow.md`'s "BC14 decision 11" get the errata note in § BC13); item 2 (§ BC15 decision 13); item 3 (§ BC16 decision 14); items 4-7 (the tasks below; BC14W's reader table and works rows in § BC14W, the objective rows in § BC14O); item 8 (the core's quick-reference sentence in task 17; the write-owner and standing-rule text in § BC14W task 12; the fog sentence in § BC14O task 7); item 9 (above); item 10 (task 17, and each later slice's docs task).
+**Spec amendments applied by this plan (spec § 15):** item 1 (renumbering: the level-of-detail section is now § BC15 and the formations section § BC16, with the dependency diagram, the BC10-BC12 rules, the "Later slices" line, BC13's section and the smoke labels; the BC13 spec's § 15 items 2-3 and `docs/superpowers/plans/2026-10-15-wl-order-flow.md`'s "BC14 decision 11" get the errata note in § BC13); item 2 (§ BC15 decision 13); item 3 (§ BC16 decision 14); items 4-7 (the tasks below; BC14W's reader table and works rows in § BC14W, the objective rows in § BC14O); item 8 (the core's quick-reference sentence in task 16; the write-owner and standing-rule text in § BC14W task 11; the fog sentence in § BC14O task 6); item 9 (above); item 10 (task 16, and each later slice's docs task).
 
 ### Owned files
 
@@ -1934,7 +1934,7 @@ Deviations from the plan and spec, each a finding or a decision:
   - BC13 files: `OpeningDetector.cs` (`BuildSamples` calls `EnemySamples.Accepts`; `ClusterPass` calls `SingleLinkClusters.Label`), `OpportunityTick.cs` and `src/WhiskeyRealism/Patches/CavalryStrikeDisciplinePatch.cs` (call `EnemySamples.Accepts`).
   - BC9 files: `src/WhiskeyRealism/Tactical/Battle/BattleRecon.cs` (target kind `Crossing`, its 150-unit stand-off on the own side), `Producers/ReconIntentProducer.cs` (reads the ledger's `LookRequests`).
   - `src/WhiskeyRealism/Plugin.cs` (one bind and its accessor), `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (one `<Compile Include>` per pure file), `tests/WhiskeyRealism.Tests/FlankResponseTests.Maneuver.cs` (the inward-leg source pin re-pinned on `EnvelopmentManeuver.InwardLegHitsRiver(`), `tests/WhiskeyRealism.Tests/FlankResponseTests.cs` (the `return new ReserveReleaseContext(_lastGlobalOdds, flank);` pin re-pinned on `BuildReserveReleaseContext`'s full-constructor call), `tests/WhiskeyRealism.Tests/FlankResponseTests.Review.cs` (`NavMeshQueriesSitAtTerrainHeight` counts 4).
-  - Docs (task 17): `AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/scourge-of-war-ai-anchors.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`, `docs/bug-fixes/vanilla-tactical-battlefield.md` (BUG-TAC-031 confirmed at merge).
+  - Docs (task 16): `AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/scourge-of-war-ai-anchors.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`, `docs/bug-fixes/vanilla-tactical-battlefield.md` (BUG-TAC-031 confirmed at merge).
 - **Test files:** `tests/WhiskeyRealism.Tests/ManeuverFeasibilityTests.cs` (the core's tests; it holds `Run()` for all three slices) and `tests/WhiskeyRealism.Tests/ManeuverFeasibilityFixtures.cs` (the § 6 scenario fixtures as builders, shared by the three slices; no tests in it). Harness auto-discovery picks up `Run()`; add no `Program.cs` line. The later slices add `ManeuverFeasibilityTests.Works.cs` and `ManeuverFeasibilityTests.Objectives.cs` through two partial methods the core declares:
 
   ```csharp
@@ -1955,61 +1955,49 @@ Deviations from the plan and spec, each a finding or a decision:
 
   Test names follow the BC13 form, `("bc14 FEAS-SCN-3 even odds with two corps selects a single-body play", FeasScn3)`, with the spec's test id first.
 
+**Red-first rule (the BC13 pattern; every task below follows it):** a task writes its own tests before its code. It first adds each member its tests name with today's behaviour (spec § 13 preamble: an enum member with no reader edit, a field unread, an argument ignored, a private method made `internal`, a copy not yet forwarding), so the tests compile; runs `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj 2>&1 | grep FAIL` and sees each new test fail on its assertion (not on a compile error or an exception); pastes those FAIL lines, under the task number, into the build record `evidence/bc14/red-first.txt` in the session scratchpad; then implements, and commits only with the harness exiting 0, so every commit is green and bisect works. A test that passes before its code is a defect in the test or the stub, fixed before going on. A § 6 scenario fixture goes into `ManeuverFeasibilityFixtures.cs` with the first test that uses it. The ids each task marks **Red first (spec list)** are the spec's § 13.1 red-first list; every other test of the task is written first in the same way. Task 1 creates `ManeuverFeasibilityTests.cs` with the `Run()` above.
+
 ### Config (`Tactical`, default `true`; the description states the real default and the effect)
 
 | Bind | Accessor | Spec |
 |---|---|---|
 | `Enable Maneuver Feasibility` | `Plugin.ManeuverFeasibilityEnabled()` | requirement-config (core row) |
 
-requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.Feasibility` null, BC11's Hold, ceiling, timeout and route exactly as today, no look requests, no crossing-threat release, and the ledger, regions and crossing watch are not built. `python3 -I tools/config-audit.py .` must report 0 findings after task 16.
+requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.Feasibility` null, BC11's Hold, ceiling, timeout and route exactly as today, no look requests, no crossing-threat release, and the ledger, regions and crossing watch are not built. `python3 -I tools/config-audit.py .` must report 0 findings after task 15.
 
 ### Task 0 — branch, baseline
 
 - [ ] `git -C ~/Projects/whiskey-realism-mod worktree add .worktrees/battle-next-bc14 -b feat/battle-next-bc14 feat/battle-next`, then `cd ~/Projects/whiskey-realism-mod/.worktrees/battle-next-bc14 && ln -s ../../refs refs`.
 - [ ] Baseline: `./build.sh` (expected `0 Warning(s)` and `0 Error(s)`), `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj 2>&1 | tail -3` (record the PASS count; `docs/handoff.md` records 3050 PASS after the BC13 merge), `python3 -I tools/config-audit.py .` (0), `python3 -I tools/orphan-sweep.py .` (0) and `python3 -I tools/orphan-sweep.py . --include-test-only` (record the count as the slice baseline). Paste the counts into `evidence/bc14/baseline.txt` in the session scratchpad.
 
-### Task 1 — the red-first tests and their compile stubs
+### Task 1 — the stance before the pick (bug fix, outside the flag)
 
-**Requirements:** the spec's red-first rule (§ 13 preamble). **Red first:** FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD, FEAS-STANCE-INITIAL, FEAS-SYNC, INWARD-VIA-BC11, READER-DOCTRINE-COPY, READER-CHILD-COPY.
-
-- [ ] Add each member the eight tests name, with today's behaviour, so the tests compile and fail on their assertions:
-  - `TacticalBattleCoordinator.PickInitialPlanInOrder(ArmyOrchestrator army, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)` in today's order (`army.PickInitialPlan(evidence)` first, then `refreshPickInputs()`, `evaluate()` unused);
-  - `ManeuverInput.HasPlannedRelease`/`PlannedReleaseHours` and `HasAttackVia`/`AttackViaX`/`AttackViaZ`, unread; `EnvelopmentManeuver.InwardLegHitsRiver(BattleTerrainGrid g, float ax, float az, bool hasVia, float vx, float vz, float ex, float ez, float footprintMeters, int[] scratch)` sampling the straight leg anchor → line end and ignoring the via (today's check);
-  - `CommandDoctrineOrder.HasVia`/`ViaX`/`ViaZ` and `WithVia(float x, float z)`, with `Create` giving none and `WithSop`, `WithTask`, `WithManeuver` and `WithExploit` not yet forwarding them;
-  - `DirectChildIntent`'s optional `guardPoint` parameter after `zoneRectKind` (stored), `HasGuardPoint`/`GuardX`/`GuardZ`/`GuardHeading`, `WithGuardPoint(float x, float z, float heading)`; `DirectChildAllocator.With` not yet forwarding it;
-  - `PlaybookContext.Feasibility` (unread); `RiverRegions` (never `Ready`), `CrossingWatch`, `FeasibilityInput`, `IFeasibilityLookup`, `FeasibilityLedger` and `ManeuverFeasibility.Evaluate`, which publishes every candidate `Unknown` at penalty 0 (no screen: today's behaviour);
-  - the § 6 scenario fixtures 3 and 4 in `ManeuverFeasibilityFixtures.cs` (the BC10 grid and the BC12 picture built from fixture cells; the corps, the enemy samples and the crossings at the spec's coordinates).
-- [ ] Write the eight tests in `ManeuverFeasibilityTests.cs` exactly as § 13.1 states them; add the `<Compile Include>` lines for the new pure files.
-- [ ] Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj 2>&1 | grep -E "FAIL|PASS" | tail -20`: exactly the eight fail, each on an assertion (not a compile error and not an exception), and every other test passes. Paste the eight FAIL lines into `evidence/bc14/red-first.txt`. A red-first test that passes against its stub is a defect in the stub or the test: fix it before going on.
-- [ ] Commit `test(battle-core): BC14 core red-first tests with today's behaviour stubbed - FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD, FEAS-STANCE-INITIAL, FEAS-SYNC, INWARD-VIA-BC11, READER-DOCTRINE-COPY, READER-CHILD-COPY fail [BC14]`. From here until task 18 the harness gate of each task is "every test passes except the red-first ids a later task owns"; each task names the red-first ids it turns green.
-
-### Task 2 — the stance before the pick (bug fix, outside the flag)
-
-**Requirements:** requirement-stance-before-pick, requirement-runtime-wiring (pick-input split, the pure seam). **Turns green:** FEAS-STANCE-INITIAL.
+**Requirements:** requirement-stance-before-pick, requirement-runtime-wiring (pick-input split, the pure seam). **Red first (spec list):** FEAS-STANCE-INITIAL.
 **Produces:** `ArmyPostureInputsRuntime.RefreshPickInputs(...)` (stance, live initiative, reinforcement opportunity) and `RefreshPostureCaches(...)` (AI pool, leaf map; they read this tick's intents); `TacticalBattleCoordinator.PickInitialPlanInOrder`.
 
+- [ ] Red first: add `PickInitialPlanInOrder` in today's order (`army.PickInitialPlan(evidence)`, then `refreshPickInputs()`, `evaluate()` unused), write FEAS-STANCE-INITIAL, see it fail (the Defender's initial pick is offensive), record the FAIL line.
 - [ ] Write the seam in its fixed order (the one place the order is written):
   ```csharp
   internal static void PickInitialPlanInOrder(ArmyOrchestrator army, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)
   {
       refreshPickInputs();          // stance, live initiative, reinforcement opportunity: this tick's
-      evaluate();                   // the forced feasibility evaluation (a no-op until task 16, and with the flag off)
+      evaluate();                   // the forced feasibility evaluation (a no-op until task 15, and with the flag off)
       army.PickInitialPlan(evidence);
   }
   ```
 - [ ] Split `ArmyPostureInputsRuntime.Refresh`: `RefreshPickInputs` runs first in `DriveTacticalCommanderSide` and in `AttachArmyIfActive` (through `PickInitialPlanInOrder`); `RefreshPostureCaches` stays where `Refresh` runs today. No other caller of `Refresh` remains.
 - [ ] Harness: FEAS-STANCE-INITIAL passes (a Defender's initial pick never returns an offensive playbook); `./build.sh` 0/0. Commit `fix(battle-core): refresh the stance and opportunity inputs before every plan pick, so a Defender never opens with an offensive playbook [BC14]`.
 
-### Task 3 — copy sites: the via, the guard point and the mirrored frame survive every copy
+### Task 2 — copy sites: the via, the guard point and the mirrored frame survive every copy
 
-**Requirements:** requirement-crossing-via (the carry), requirement-defender-crossing-release (the guard point's carry), requirement-selected-side (the mirrored frame), requirement-runtime-wiring (the fix's hold spec); the core rows of spec § 15 item 7's copy-site census. **Tests:** READER-NODE-COPY, READER-MIRROR-COPY. **Turns green:** READER-DOCTRINE-COPY, READER-CHILD-COPY.
+**Requirements:** requirement-crossing-via (the carry), requirement-defender-crossing-release (the guard point's carry), requirement-selected-side (the mirrored frame), requirement-runtime-wiring (the fix's hold spec); the core rows of spec § 15 item 7's copy-site census. **Tests:** READER-NODE-COPY, READER-MIRROR-COPY. **Red first (spec list):** READER-DOCTRINE-COPY, READER-CHILD-COPY.
 **Produces:** `CommandDoctrineOrder.WithVia`, the forwarding copies; `DirectChildIntent.WithGuardPoint`; `ManeuverNodeEntry.HasVia`/`ViaX`/`ViaZ`; `EnvelopmentManeuver.Hash` folding `HasVia`, `ViaX/50`, `ViaZ/50`; `WorldPlayRect.Mirrored`/`AuthoredX`/`AuthoredZ`; `CorpsAssignment.TemplateEnvelops`/`ProjectedMirrored`/`AuthoredAnchorX`/`AuthoredAnchorZ`; `ManeuverSpec.ProjectedMirrored`/`HoldsForRelease` and its authored anchor.
 
-- [ ] Failing tests first: READER-NODE-COPY and READER-MIRROR-COPY ("red today, once the field exists": add the field, leave the copy not forwarding it, run, see the assertion fail, paste the FAIL line into `evidence/bc14/red-first.txt`).
+- [ ] Red first, all four ("red today, once the field exists"): add `CommandDoctrineOrder.HasVia`/`ViaX`/`ViaZ` and `WithVia`, `DirectChildIntent`'s optional `guardPoint` with `WithGuardPoint`, the `ManeuverNodeEntry` via and the mirror fields of `WorldPlayRect`, `CorpsAssignment` and `ManeuverSpec`, each with no copy yet forwarding it; write the four tests; see each fail on its assertion; record the FAIL lines.
 - [ ] Forward every new field at every census row: `CommandDoctrineOrder` `WithSop`, `WithTask` (its callers: the reinforcement-opportunity override, `PostureStanceGuard`, the cavalry follow, BC9's probe-nomination rewrite, the GT recon rewrite, `DivisionPlayIntentProducer`), `WithManeuver`, `WithExploit`; `DirectChildAllocator`'s allocation loop (a per-child guard-point array the releases fill, the `axisOverride` precedent) and `With` inside `StabilizeMain`; `EnvelopmentManeuver.ExpandToNodes` (positional) and `Hash`; `CommandDoctrineAssignment.Build` sets the node's via with `WithVia` after `WithManeuver`; `PlayProjection.Project` sets the mirror fields when it projects mirrored; `PlayCorpsAssignment.Assign` copies them; `DirectChildAllocator.ManeuverOf` copies them into the spec and sets `HoldsForRelease` on the Center and Demonstration start-delay specs when `TemplateEnvelops`. The positional test fixtures (`TacticalEvidenceFixTests`, `ReserveMigrationTests`, `FlankResponseTests.Maneuver`, `TacticalDirectChildTests`, `TestFixtures`, `FlankResponseTests.Review`) compile unchanged through the optional trailing parameters.
 - [ ] Harness: the four READER tests pass; every BC11 and BC13 test stays green. Commit `feat(battle-core): the crossing via, the guard point and the mirrored frame forwarded by every copy site [BC14]`.
 
-### Task 4 — BC13 extractions: one sample filter, one clustering
+### Task 3 — BC13 extractions: one sample filter, one clustering
 
 **Requirements:** requirement-enemy-picture (its BC13 extractions: BC13's requirement-enemy-samples filter and its clustering), spec § 15 item 6 "Extractions". **Tests:** SAMPLES-PARITY, CLUSTER-PARITY.
 **Produces:** `EnemySamples.Accepts(in EnemyObservation o)` (`RememberedMinConfidence` = 0.5f); `SingleLinkClusters.Label(ReadOnlySpan<float> xs, ReadOnlySpan<float> zs, int count, float linkMeters, Span<int> labels) → int`.
@@ -2018,7 +2006,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Implement both files; `OpeningDetector.BuildSamples`, `OpportunityTick` and `CavalryStrikeDisciplinePatch` call `EnemySamples.Accepts`; `OpeningDetector.ClusterPass` calls `SingleLinkClusters.Label`. The scratch arrays grow at first use and never shrink.
 - [ ] Harness: the two tests pass and all `CommanderOpportunityTests` stay green (DET-CLUSTER included). Commit `refactor(battle-core): BC13's enemy-sample filter and single-link clustering extracted for BC14 [BC14]`.
 
-### Task 5 — river regions and the link table
+### Task 4 — river regions and the link table
 
 **Requirements:** requirement-river-regions, requirement-link-legs (the per-battle link table). **Tests:** REG-SPLIT, REG-CREEK, REG-FROZEN, REG-LINK-RADIUS, REG-STEP, REG-TRUNC, LINK-TABLE.
 **Produces:** `RiverRegions` as spec § 8 (`CrossingLinkMeters` 60, `MaxRegions` 64, `MaxCrossings` 256, `MaxRoutedLinks` 64; `RegionAt`, `LinkCrossing`, `RegionsOfLink`, `Step`, `IsRouted`, `LinkLegCost`).
@@ -2028,7 +2016,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] `RiverRegionsRuntime.cs`: one instance per battle (`BattleScope.Register` from its static constructor), stepped by `TerrainPictureRuntime.Step` after the picture is `Ready`, inside the picture's 4 ms step deadline; scope `tactical.river-regions.build` (5.0 ms); `[once:tactical-battle-core:river-regions] [RiverRegions] regions=<n> links=<n> crossings=<n> frozen=<b> buildMs=<ms>`; any exception → `OnceLog.Warning("tactical-battle-core:river-regions-failed", …)` and the regions stay not `Ready` (every verdict `Unknown`).
 - [ ] Harness: the seven tests pass. Commit `feat(battle-core): river regions and the per-battle link table, built in the picture's time-sliced steps [BC14]`.
 
-### Task 6 — the crossing watch
+### Task 5 — the crossing watch
 
 **Requirements:** requirement-crossing-state. **Tests:** XING-HELD, XING-WATCHED, XING-CLEAR, XING-REMEMBERED, XING-SHARED-RULE, XING-PROBE-CAP.
 **Produces:** `CrossingWatch` as spec § 8 (`HoldRadiusMeters` 300, `ClearMemoryHours` 0.25, `MaxCrossingProbesPerTick` 16; `Classify`, `StateOf`, `HeldStrength`, `LastPerceivedHours`, `CountBy`); `CoveredCrossings.Covers(in EnemyObservation o, float cx, float cz)` and `Covers(in UnitRecord u, float cx, float cz)`.
@@ -2037,7 +2025,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Extract rule (a) from `CoveredCrossings.BuildPoints` into `Covers(in EnemyObservation, …)`, which `BuildPoints` now calls; add the own-side form over `RotationY` and `FireRange`. Implement `CrossingWatch.cs`: Held, Watched, Clear (a perceived probe within `ClearMemoryHours`), Unknown; only samples (`EnemySamples.Accepts`) count; probes at most 16 per tick, oldest first; `reachByUnitType` is BC13's `RangeOnlyReach` per enemy unit type.
 - [ ] Harness: the six tests pass, BC10's covered-crossing tests stay green. Commit `feat(battle-core): crossing watch - held, watched, clear and unknown crossings from perceived enemies [BC14]`.
 
-### Task 7 — legs, routes, march, courier and strike times
+### Task 6 — legs, routes, march, courier and strike times
 
 **Requirements:** requirement-route-screen, requirement-leg-cost, requirement-link-legs (the leg cache), requirement-march-time, requirement-courier-time, requirement-strike-time, requirement-daylight, requirement-held-crossing. **Tests:** ROUTE-SAME-REGION, ROUTE-VIA-CROSSING, ROUTE-HELD-DETOUR, ROUTE-NO-CROSSING, ROUTE-BEND, ROUTE-CONFIRM, LEG-FOOTPRINT, TARGET-SNAP, LEG-CACHE, MARCH-TIME, MARCH-RULES-PIN, COURIER-TIME, STRIKE-OFFSET, STRIKE-FIX-CONTACT, STRIKE-ABSOLUTE, STRIKE-DOUBLE, STRIKE-HELD, INWARD-SURPLUS, STRIKE-LEG, MULTI-RIVER, FIX-MEMBER-RELEASE, DAYLIGHT.
 **Produces:** `MarchRules`; `LegCostCache` (`MaxLegCache` 4096, open addressing, allocated once; `TryGet`, `Put`, `Overflow`); `ManeuverFeasibility.MarchHours`, the constants of spec § 8 (`LegStepMeters` 10, `HeldCrossingHours` 1.0, `StrikeLegWeight` 0.5, `DaylightMarginHours` 0.25, …); the internal `CrossingGraphView` with its pooled Dijkstra over at most `MaxRoutedLinks` + 2 nodes; `IConfirmedLegs`.
@@ -2046,7 +2034,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Implement the leg sampler (10-unit samples over BC10's grid, the leg's own ford footprint priced as the ford, a bend inside one region at swamp cost and marked estimated), the route over the crossing graph (Held crossings at + `HeldCrossingHours`, the worst `contested`, the first crossing as the via), the strike legs (main body at `StrikeLegWeight`, no path → `contested` 1 and `no-strike-crossing`), the inward surplus, march and courier hours from `MarchRules`, the strike time `T` and the desired strike `S*` with each body's release, and `DaylightHours` as an input (requirement-daylight: `after-dark` makes Risky, never Impossible). Every speed and delay comes from `MarchRules`; no literal of the pin's list appears.
 - [ ] Harness: the 22 tests pass. Commit `feat(battle-core): leg costs, routes over the crossing graph, march, courier and strike times [BC14]`.
 
-### Task 8 — the hypothetical layout, the bodies and the verdict
+### Task 7 — the hypothetical layout, the bodies and the verdict
 
 **Requirements:** requirement-candidate-set, requirement-hypothetical-layout, requirement-bodies, requirement-player-share, requirement-verdict, requirement-bc13-commitment, requirement-bc13-personality (the input). **Tests:** CANDIDATE-CENTRED, VERDICT-UNFILLED, VERDICT-UNKNOWN, VERDICT-RISKY, VERDICT-ORDER, SIDE-RANK, DETAIL-NO-FIX, PROJECT-PARITY, ASSIGN-PARITY, BC13-EXCLUDE, BC13-HALF, BC13-PERSONALITY, FEAS-PLAYER, INWARD-LEG.
 **Produces:** `PlayProjection.ProjectInto(template, …, Span<WorldPlayRect>)` and `PlayCorpsAssignment.AssignInto(rects, corps, Span<CorpsAssignment>)` (allocation-free, parity with `Project` / `Assign`); `IExploitLookup`; `BodyEstimate`, `CandidateResult`; the candidate pass of `Evaluate` (centred templates once, the three off-centre single-flank templates on both sides, a Defender's candidates once each).
@@ -2055,7 +2043,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Implement the candidate set from the catalog's precondition and stance filters, the layout through the pooled overloads with the evaluation's own front axis, the bodies and their strength (player-owned strength excluded, an exploiting descendant at half, a live exploit asset not offered), the verdict order (no axis or map unknown → `Unknown` before `wing-unfilled`, then `no-crossing`, `no-route`, `river-on-leg`) and the side rank. The personality comes from BC13's `CommanderPersonalityTable` army entry with `Enable Per-Commander Personality` on, the roster's army vector with it off.
 - [ ] Harness: the 14 tests pass. Commit `feat(battle-core): feasibility candidates, the hypothetical layout, bodies and verdicts [BC14]`.
 
-### Task 9 — the enemy picture, shift times and the detail risk
+### Task 8 — the enemy picture, shift times and the detail risk
 
 **Requirements:** requirement-enemy-picture, requirement-shift-time, requirement-detail-risk, requirement-route-exposure, requirement-approach, requirement-penalty. **Tests:** ENEMY-FOG-PREMIUM, ENEMY-NO-SAMPLES, ENEMY-BODIES, SHIFT-PASSIVE, SHIFT-RIVER, SHIFT-COVERED, SHIFT-COURIER, DETAIL-PIN, DETAIL-WINDOW, SUPPORT-TIME, DETAIL-BAR, DETAIL-PENALTY, EXPOSURE-FOREST, ODDS-MORALE, APPROACH-ANCHORED, FEAS-FOG, FEAS-PIN, FEAS-SCN-2.
 **Produces:** `ManeuverFeasibility.Bar`, `FogPremium`, `DetailPenalty`, `DetailRisk(Span<BodyEstimate>, ReadOnlySpan<float> strikeHours, in EnemyPicture, in CrossingGraphView, float bar)`, `CombinePenalty(in BodyEstimate)`; the internal `EnemyPicture` (samples, `P`, `N`, `m_E`, the mass, `L_j`, and in the Defender run the `SingleLinkClusters` bodies at 150 units).
@@ -2066,28 +2054,28 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
   public static float CombinePenalty(in BodyEstimate b) =>
       1f - (1f - b.Daylight) * (1f - b.Detail) * (1f - 0.6f * b.Contested) * (1f - 0.5f * b.Approach) * (1f - 0.4f * b.Exposure);
   ```
-  The main body's `contested`, `approach` and `daylight` are the worst fixing member's; the candidate's penalty is the worst body's; the reason is the verdict reason or the largest term above `ReasonThreshold` (`after-dark`, `detail`, `contested`, `approach`, `exposure`; `no-strike-crossing` for a strike leg with no path). A Defender's form, `1 − (1 − 0.6 × turn)`, is task 14's.
+  The main body's `contested`, `approach` and `daylight` are the worst fixing member's; the candidate's penalty is the worst body's; the reason is the verdict reason or the largest term above `ReasonThreshold` (`after-dark`, `detail`, `contested`, `approach`, `exposure`; `no-strike-crossing` for a strike leg with no path). A Defender's form, `1 − (1 − 0.6 × turn)`, is task 13's.
 - [ ] Harness: the 18 tests pass. Commit `feat(battle-core): the perceived enemy, its shift times and the risk of defeat in detail [BC14]`.
 
-### Task 10 — the evaluation job, the ledger and the selection
+### Task 9 — the evaluation job, the ledger and the selection
 
-**Requirements:** requirement-evaluation-cadence (the job and the slices), requirement-selection-term, requirement-never-empty, requirement-selected-side, requirement-frame-budget (the counted bounds). **Tests:** FEAS-SLICE, FEAS-TIME, SELECT-FILTER, SELECT-JITTER, SELECT-NEVER-EMPTY, SELECT-SIDE, FEAS-REGRESS, FEAS-DEF, FEAS-SCN-1, FEAS-SCN-AUDACITY, FEAS-SCN-BOLD. **Turns green:** FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD.
+**Requirements:** requirement-evaluation-cadence (the job and the slices), requirement-selection-term, requirement-never-empty, requirement-selected-side, requirement-frame-budget (the counted bounds). **Tests:** FEAS-SLICE, FEAS-TIME, SELECT-FILTER, SELECT-JITTER, SELECT-NEVER-EMPTY, SELECT-SIDE, FEAS-REGRESS, FEAS-DEF, FEAS-SCN-1, FEAS-SCN-AUDACITY, FEAS-SCN-BOLD. **Red first (spec list):** FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD.
 **Produces:** `ManeuverFeasibility.Evaluate` (to completion), `EvaluateSlice(in FeasibilityInput, FeasibilityJob, FeasibilityLedger, long deadlineTicks, Func<long> clock) → bool` (the deadline checked between legs, `EvaluateSliceMs` 1.5), `FeasibilityJob`; `FeasibilityLedger` (`TryGet`, `Bodies`, `EvaluatedHours`, `CaptureSelection`, `TryPlannedRelease`, `LegOverflow`; published whole from the second buffer); `PlaybookContext.Feasibility`, `TacticalPlaybookCatalog.Select`'s term `− FeasibilityWeight × penalty` after the jitter and crest draws, the `Impossible` skip (`feasibilityFiltered`), the never-empty lift (`allImpossible`, `OnceLog.Warning("tactical-battle-core:feasibility-all-impossible", …)`), the pooled `SelectionReport`; the published `Mirrored` and `PlayExecutorRuntime.ComputeZoneAssignments` projecting mirrored.
 
-- [ ] Failing tests. FEAS-TIME's fixture (a 10-link river, the 21 core candidates, 8 children) asserts at most 29 path searches per candidate, 609 in all, and at most 2,309 sampled legs: `U` = 8 + 6 × 21 + 4 + 16 + 16 = 170 point buckets, `U × k` = 1,700 at `k` = 10, plus one same-region leg per path search (≤ 609). requirement-frame-budget's 2,869 legs is the same sum at the 64-child bound (`U` = 226). Record the slice times and count.
-- [ ] Implement `Evaluate` / `EvaluateSlice` over a resumable job (a reader never sees a half-published ledger), the ledger, and the selection term; `Select` scores the current plan in the same pass for the hysteresis inputs (filled in task 13).
-- [ ] Harness: the 11 tests and FEAS-SCN-3, FEAS-SCN-4 and FEAS-SCN-HOLD pass; every existing `TacticalPlaybookTests` selection fixture returns the same winner with the term on (FEAS-REGRESS). Commit `feat(battle-core): sliced feasibility evaluation and the selection term - impossible plays skipped after the jitter draw, risky ones penalized [BC14]`.
+- [ ] Red first: add `PlaybookContext.Feasibility` unread, write the tests (the § 6 fixtures 1, 3 and 4), and see FEAS-SCN-3, FEAS-SCN-4 and FEAS-SCN-HOLD fail with today's selection (it picks ManeuverAndFix, a dividing play); record the FAIL lines. FEAS-TIME's fixture (a 10-link river, the 21 core candidates, 8 children) asserts at most 29 path searches per candidate, 609 in all, and at most 2,309 sampled legs: `U` = 8 + 6 × 21 + 4 + 16 + 16 = 170 point buckets, `U × k` = 1,700 at `k` = 10, plus one same-region leg per path search (≤ 609). requirement-frame-budget's 2,869 legs is the same sum at the 64-child bound (`U` = 226). Record the slice times and count.
+- [ ] Implement `Evaluate` / `EvaluateSlice` over a resumable job (a reader never sees a half-published ledger), the ledger, and the selection term; `Select` scores the current plan in the same pass for the hysteresis inputs (filled in task 12).
+- [ ] Harness exits 0: the 14 tests pass; every existing `TacticalPlaybookTests` selection fixture returns the same winner with the term on (FEAS-REGRESS). Commit `feat(battle-core): sliced feasibility evaluation and the selection term - impossible plays skipped after the jitter draw, risky ones penalized [BC14]`.
 
-### Task 11 — BC11: synchronized release, time budget and the crossing vias
+### Task 10 — BC11: synchronized release, time budget and the crossing vias
 
-**Requirements:** requirement-synchronized-release, requirement-maneuver-time-budget, requirement-crossing-via (BC11's half), requirement-selected-side (the fallback), spec § 15 item 4. **Tests:** SYNC-UNSET, SYNC-PIN-AT-RELEASE, BUDGET, CEILING-LATCH, FIX-HOLD, MIRROR-FALLBACK, STATE-FLAGS, VIA-PASSED, VIA-ROUTE-CHECK. **Turns green:** FEAS-SYNC, INWARD-VIA-BC11.
+**Requirements:** requirement-synchronized-release, requirement-maneuver-time-budget, requirement-crossing-via (BC11's half), requirement-selected-side (the fallback), spec § 15 item 4. **Tests:** SYNC-UNSET, SYNC-PIN-AT-RELEASE, BUDGET, CEILING-LATCH, FIX-HOLD, MIRROR-FALLBACK, STATE-FLAGS, VIA-PASSED, VIA-ROUTE-CHECK. **Red first (spec list):** FEAS-SYNC, INWARD-VIA-BC11.
 **Produces:** the spec § 8 fields of `ManeuverInput` (`HasPlannedRelease`/`PlannedReleaseHours`, `HasTimeBudget`/`TimeBudgetHours`, `HasVia`/`ViaX`/`ViaZ`, `HasAttackVia`/`AttackViaX`/`AttackViaZ`), `ManeuverState` (`HasFirstPlannedRelease`/`FirstPlannedReleaseHours`, `HasBudget`/`BudgetHours`, `HasVia`/…, `HasAttackVia`/…, latched at the March), `ManeuverOrder.HasVia`/`ViaX`/`ViaZ`; `EnvelopmentManeuver.InwardLegHitsRiver` (anchor → attack via → line end, the via's 60-unit footprint excluded).
 
-- [ ] Failing tests.
+- [ ] Red first: add the `ManeuverInput` fields unread and `EnvelopmentManeuver.InwardLegHitsRiver(BattleTerrainGrid g, float ax, float az, bool hasVia, float vx, float vz, float ex, float ez, float footprintMeters, int[] scratch)` sampling the straight leg anchor → line end and ignoring the via (today's check); write the tests; see FEAS-SYNC (the Hold waits for the Center's contact) and INWARD-VIA-BC11 (the wing abandons `river-on-leg`) fail with the others; record the FAIL lines.
 - [ ] `EnvelopmentManeuver.Step`: the Hold's time test `NowHours ≥ PlannedReleaseHours` replaces `await-center-contact` and `hold-offset` when set (`ProceedReason` `planned-release`); the ceiling `max(PlayActivatedHours + MaxManeuverHours, FirstPlannedReleaseHours + MaxManeuverHours)` from the latched value; the `timeout` abandon from `BudgetHours` when `HasBudget`; the vias and budget latched at the March and never changed after it. `StepStartDelay` tests `HoldsForRelease` before its offset gate. `PlayExecutorRuntime.BuildInput` fills the inputs from `IFeasibilityLookup.TryPlannedRelease`, leaving `HasPlannedRelease` false for a fix in contact, a BC10 deployed reserve and a child with no ledger entry; the march leg's route check runs as two half-queries through the via, one per step; the inward-leg check calls `InwardLegHitsRiver` in place of its straight `SampleLine` (re-pin `FlankResponseTests.Maneuver.cs`'s source pin on `EnvelopmentManeuver.InwardLegHitsRiver(`); a child in a via's far region (`RiverRegions.RegionAt`) gets no via; a mirror flip drops the ledger's release, budget and both vias for that child; a `ProjectedMirrored` spec's one mirrored try goes to its authored anchor, not to `MirrorAcrossAxis`.
-- [ ] Harness: the nine tests, FEAS-SYNC and INWARD-VIA-BC11 pass; every `FlankResponseTests` case stays green (SYNC-UNSET is BC11's rule unchanged with no ledger entry). Commit `feat(battle-core): BC11 wings released on the synchronized plan, inside a time budget, through the chosen crossings [BC14]`.
+- [ ] Harness exits 0: the 11 tests pass; every `FlankResponseTests` case stays green (SYNC-UNSET is BC11's rule unchanged with no ledger entry). Commit `feat(battle-core): BC11 wings released on the synchronized plan, inside a time budget, through the chosen crossings [BC14]`.
 
-### Task 12 — the via on the posture order
+### Task 11 — the via on the posture order
 
 **Requirements:** requirement-crossing-via (the posture half), requirement-runtime-wiring (the via's path). **Tests:** VIA-ORDER.
 **Produces:** `PostureIntentPlan.RouteFlagsFor(CommandTaskType task, bool hasManeuverVia, out bool useRoadRoute, out bool avoidCoveredCrossings)`.
@@ -2096,7 +2084,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] `PostureIntentProducer` reads the doctrine order's via and calls `RouteFlagsFor`; the posture executor puts the via into the intent as `via0` (BC10's `ViaCount` = 1); the executor validates and issues the two-leg `SetWaypoint` as for a road route (BC10 decision 6).
 - [ ] Harness green. Commit `feat(battle-core): a maneuvering wing's crossing via carried on its posture order as a BC10 via point [BC14]`.
 
-### Task 13 — the assumption monitor and its replan
+### Task 12 — the assumption monitor and its replan
 
 **Requirements:** requirement-assumption-monitor, requirement-assumption-replan, requirement-wing-abandon-replan. **Tests:** MON-HELD, MON-LATE, MON-DETAIL, MON-ABANDON, MON-COMMITTED, MON-ROUTE-MISSING, MON-MAP-KNOWN, MON-SUPPRESSION, MON-ESTIMATE, REPLAN-HYSTERESIS, REPLAN-COOLDOWN.
 **Produces:** `ManeuverFeasibility.EvaluateSelected`, `TryBrokenAssumption(in CandidateResult atSelection, in CandidateResult now, ReadOnlySpan<BodyEstimate> before, ReadOnlySpan<BodyEstimate> after, in MonitorFacts facts, out string reason)`; `MonitorFacts`; `ReplanTrigger.ManeuverAssumptionBroken` (appended); `ReplanTriggerInput.AssumptionReason`; `ArmyTickCycle.MaybeReplan(..., string assumptionReason) → ReplanOutcome { Trigger, Replanned, Kept, Suppression }`; `ArmyOrchestrator.Replan(evidence, intent, trigger, hysteresis)` reporting `kept`; `PlaybookContext.HysteresisPlan`/`HysteresisMargin`; `PlayExecutorRuntime`'s per-side abandon queue, drained into `MonitorFacts` on the next heavy run.
@@ -2105,7 +2093,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Implement the reasons in the spec's order (`crossing-held`, `route-missing`, `late`, `detail` with `ReplanPenaltyMargin` 0.3, `wing-abandoned`, `map-known` once per selection), the committed-wings exemption, the hysteresis (`ReplanScoreMargin` 0.1; a kept plan stamps the cooldown, refreshes the selection snapshot, keeps its side, phase and age), and the named suppressions (`cooldown`, `committed`, `margin`, `preempted`).
 - [ ] Harness green. Commit `feat(battle-core): broken maneuver assumptions replan under the cooldown and a hysteresis, every suppression named [BC14]`.
 
-### Task 14 — the Defender: turning exposure and the crossing-threat release
+### Task 13 — the Defender: turning exposure and the crossing-threat release
 
 **Requirements:** requirement-defender-exposure, requirement-defender-crossing-release, spec § 15 item 6 (the allocator and the state). **Tests:** DEF-FLANK, DEF-PENALTY, DEF-ARRIVALS, RELEASE-CROSSING, RELEASE-ORDER, RELEASE-ELIGIBLE, RELEASE-ACROSS, RELEASE-TARGET, RELEASE-LATCH, RELEASE-FLOOR, RELEASE-STATE-SCOPE, FEAS-SCN-5.
 **Produces:** `CrossingThreat`; `FeasibilityLedger.ThreatCount`, `TryThreat(int, out CrossingThreat, Span<float> ownShiftByChild)`; `ReserveReleaseState.ForAlliance(int)`, `CrossingBinding`, `BindCrossing`, `TryCrossingOf`, `UnbindCrossing`, `BoundCount`, `Clear()` (both tables) and `ClearTrigger()` (neither); `ReserveReleaseContext.CrossingThreats`, `PlayerOwned`, `Staggered` (the full constructor defaults it to `State != null`); `DirectChildAllocator.ReleaseReserveToCrossings`; `FeasibilityInput.BoundGuardChildIds`/`BoundGuardCount`.
@@ -2115,7 +2103,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] The allocator: `ReleaseReserveToCrossings` appended after `ReleaseReserveToThreatenedWing` (the eligible child with the least `ownShift_c`; released when `enemyAtCrossing` ≤ `ownShift_c + ThreatLeadHours`; an enemy already across makes no new release; role `RefuseLeft`/`RefuseRight`, task `GuardFlank`, the crossing's band, the guard point `GuardStandOffMeters` behind the crossing snapped to own-bank land, facing the crossing; the floor `FloorOf(R0x, floorShare)` without touching `InitialReserves` or `LastReleaseHours`; the binding and its latch `OwnShiftAtRelease + ThreatLeadHours + ThreatHoldMarginHours`). `ArmyOrchestrator.BuildReserveReleaseContext` passes `Staggered = Plugin.StaggeredReserveReleaseEnabled()` explicitly and uses BC13's full constructor (state, exploit flags, personality, `CrossingThreats`, `PlayerOwned`) whenever BC13's staggered flag or BC14's flag is on; re-pin `FlankResponseTests.cs`'s `return new ReserveReleaseContext(_lastGlobalOdds, flank);` pin on that call. `ReserveReleaseState` per alliance with its `BattleScope` registration; `ReplanForNewBattleDay` clears it before its `HasPlan` check; `Replan` and `BattleCoreTick.StandDown` clear it as today. The posture producer reads `HasGuardPoint` as the `GuardFlank` target and heading. The release row reads `reason=crossing-threat` with the fields of requirement-telemetry and a `reverted=true` row when the binding ends.
 - [ ] Harness: the 12 tests pass, and BC13's reserve and allocator tests run unchanged and stay green: `CommanderOpportunityTests.Reserve.cs` (ResStagger, ResFloor, ResSingle, ResCrisisOne, ResCrisisLatency, ResCrisisHeld, ResPersist, ResRevert, ResExploitingSkipped, ResTie, ResOff, ResOutcomes) and the BC11 flank-release tests. Commit `feat(battle-core): a Defender's turning exposure and a reserve released to guard a crossing the enemy can reach first [BC14]`.
 
-### Task 15 — the crossing look (BC9)
+### Task 14 — the crossing look (BC9)
 
 **Requirements:** requirement-crossing-look, spec § 15 item 5. **Tests:** LOOK-PRIORITY, LOOK-RECON.
 **Produces:** `FeasibilityLedger.LookRequests(Span<float> xs, Span<float> zs) → int` (at most `MaxLookRequests` = 2); `BattleRecon` target kind `Crossing`.
@@ -2124,7 +2112,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] The ledger publishes the Unknown crossings in priority order (the selected plan's routes, the top confirm candidates' routes, for a Defender the earliest enemy arrival); a request expires when the crossing turns Clear, Watched or Held. `ReconIntentProducer` reads them; `BattleRecon` takes a `Crossing` target after its stale entry points and bands, inside its cap of 4 starts per side per doctrine hour, with its 150-unit stand-off applied on the own side; BC9's rule against a visible enemy at least as strong holds.
 - [ ] Harness: the two tests pass, `BattleReconTests` stay green. Commit `feat(battle-core): cavalry looks at the unknown crossings the plan depends on [BC14]`.
 
-### Task 16 — runtime wiring, the bind, telemetry
+### Task 15 — runtime wiring, the bind, telemetry
 
 **Requirements:** requirement-runtime-wiring, requirement-evaluation-cadence (forced evaluations, freshness), requirement-navmesh-confirm, requirement-config (core row), requirement-telemetry (core rows). **Tests:** ROUTE-CONFIRM-BUDGET, NAV-SITES.
 **Produces:** `ArmyOrchestrator.SetFeasibility(IFeasibilityLookup)`; `Plugin.ManeuverFeasibilityEnabled()`.
@@ -2148,7 +2136,7 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
   and the accessor `internal static bool ManeuverFeasibilityEnabled()` in the `CommanderOpportunityEnabled()` form.
 - [ ] Harness green; `./build.sh` 0/0; `python3 -I tools/config-audit.py .` 0. Commit `feat(battle-core): maneuver feasibility wired into the coordinator tick, its flag and telemetry [BC14]`.
 
-### Task 17 — allocation proof, docs and the `AGENTS.md` sentence
+### Task 16 — allocation proof, docs and the `AGENTS.md` sentence
 
 **Requirements:** requirement-zero-alloc. **Tests:** FEAS-ALLOC.
 
@@ -2157,16 +2145,16 @@ requirement-stance-before-pick is not behind it. With it off: `PlaybookContext.F
 - [ ] Living docs: `docs/tactical-orchestrator.md` § Battle Core (feasibility, river regions, crossing watch, the synchronized release, the crossing-threat release) and § Doctrine Components (playbook feasibility); `docs/scourge-of-war-ai-anchors.md` (plays are screened before selection; Scourge's `PLAYFTime` timing is now an arrival-synchronized release); `docs/telemetry.md` (`TacticalPlanSelection`, `TacticalManeuverFeasibility`, `TacticalManeuverBody`, `TacticalReplan`, `TacticalCrossingWatch`, the new `TacticalEnvelopment` and `TacticalReserveRelease` fields); `docs/tactical-operations-ledger.md` (the crossing-threat release); `docs/bug-fixes/vanilla-tactical-battlefield.md` (BUG-TAC-031 stays Backlog; drop "provisional" at the merge to `main`).
 - [ ] Commit `docs(battle-core): BC14 core living docs, telemetry rows, AGENTS.md plays sentence; allocation proof [BC14]`.
 
-### Task 18 — gates and mutation proof
+### Task 17 — gates and mutation proof
 
 - [ ] `./build.sh`: `0 Warning(s)` and `0 Error(s)`.
-- [ ] `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`: exit 0, all PASS (every red-first id green); record the count against task 0's baseline.
+- [ ] `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`: exit 0, all PASS; record the count against task 0's baseline.
 - [ ] `python3 -I tools/config-audit.py .`: 0 findings. `python3 -I tools/orphan-sweep.py .`: 0; `--include-test-only` at task 0's count (nothing BC14 added).
 - [ ] `rg -n "realtimeSinceStartup|Environment.TickCount|DateTime" src/WhiskeyRealism/Tactical/Battle/{RiverRegions,CrossingWatch}.cs src/WhiskeyRealism/Tactical/Orchestrator/Plays/{ManeuverFeasibility,FeasibilityLedger,LegCostCache}.cs`: nothing. The BC7 writer grep is unchanged (the core adds no writer). `rg -n "\.Clone\(\)" src/WhiskeyRealism`: no `CodeInstruction.Clone()` (`TranspilerLabelTests.SourcesNeverCloneInstructions`).
 - [ ] Mutation: apply each plant of spec § 13.1 "Mutation plants" in a scratch copy of the tree, one at a time, run the harness and confirm its named test fails; record each as `plant → test → FAIL` in `evidence/bc14/mutation.txt` in the session scratchpad. Every plant must be killed; a survivor drives a test change, recorded in As built.
 - [ ] Integrator: merge to `feat/battle-next` and `main`, deploy and hash-check per `AGENTS.md`, then run smoke items 2.55-2.62 and 3.12.
 
-PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests` core cases, red first for FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD, FEAS-STANCE-INITIAL, FEAS-SYNC, INWARD-VIA-BC11, READER-DOCTRINE-COPY and READER-CHILD-COPY; every § 13.1 plant killed; the coverage matrix's result column filled from the run). The harness settles criterion-scenario-outcomes (FEAS-SCN-1 to FEAS-SCN-5, FEAS-SCN-HOLD, FEAS-SCN-AUDACITY, FEAS-SCN-BOLD), criterion-selection-regression (FEAS-REGRESS), criterion-fog-honest (FEAS-FOG and the FEAS-PIN source pin; in game only the `unknown` count on item 2.55) and criterion-zero-alloc (FEAS-ALLOC). Runtime proof is in-game: Session A items 2.55-2.62 and Session B item 3.12, including criterion-no-doomed-launch (item 2.57, the on/off comparison), criterion-arrival-prediction (item 2.58), criterion-strike-spread (item 2.59), criterion-frame-budget (item 2.60), criterion-replan-stability (item 2.61), criterion-defender-no-offense (item 2.62) and criterion-player-never-moved (item 3.12).
+PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests` core cases, each red in its task's recorded run before its code, the spec's list included: FEAS-SCN-3, FEAS-SCN-4, FEAS-SCN-HOLD, FEAS-STANCE-INITIAL, FEAS-SYNC, INWARD-VIA-BC11, READER-DOCTRINE-COPY and READER-CHILD-COPY; every § 13.1 plant killed; the coverage matrix's result column filled from the run). The harness settles criterion-scenario-outcomes (FEAS-SCN-1 to FEAS-SCN-5, FEAS-SCN-HOLD, FEAS-SCN-AUDACITY, FEAS-SCN-BOLD), criterion-selection-regression (FEAS-REGRESS), criterion-fog-honest (FEAS-FOG and the FEAS-PIN source pin; in game only the `unknown` count on item 2.55) and criterion-zero-alloc (FEAS-ALLOC). Runtime proof is in-game: Session A items 2.55-2.62 and Session B item 3.12, including criterion-no-doomed-launch (item 2.57, the on/off comparison), criterion-arrival-prediction (item 2.58), criterion-strike-spread (item 2.59), criterion-frame-budget (item 2.60), criterion-replan-stability (item 2.61), criterion-defender-no-offense (item 2.62) and criterion-player-never-moved (item 3.12).
 
 ### Smoke watch (BC7 checklist, Session A items 2.55-2.62, Session B item 3.12)
 
@@ -2189,7 +2177,7 @@ See `### BC7 smoke checklist`, items 2.55-2.62 and 3.12. Spec smoke numbers map 
 
 **Ordinals and bug ids:** no Harmony patch, no ordinal (#125 stays free), no bug id.
 
-**Global-constraint deltas for BC14W:** one new executor write path, the bombard start (D34): the artillery doctrine producer submits a `BombardStart` intent and the executor calls `OrderExecutorRuntime.StartBombard`, which writes `ChangeCombatBehavior(go, 9)` through `TacticalCombatBehaviorWriter` and the regiment's `bombardposition` and `bombardrange`, behind `TacticalWriteGuard.CanWrite` and Commander Mode Active. No Prefix, no Transpiler. Two standing-rule changes, written into `AGENTS.md` and the two headers in task 12: a works-hold stance intent replaces a vanilla assault, and a contest move skips the order delay. One `Tactical` bind.
+**Global-constraint deltas for BC14W:** one new executor write path, the bombard start (D34): the artillery doctrine producer submits a `BombardStart` intent and the executor calls `OrderExecutorRuntime.StartBombard`, which writes `ChangeCombatBehavior(go, 9)` through `TacticalCombatBehaviorWriter` and the regiment's `bombardposition` and `bombardrange`, behind `TacticalWriteGuard.CanWrite` and Commander Mode Active. No Prefix, no Transpiler. Two standing-rule changes, written into `AGENTS.md` and the two headers in task 11: a works-hold stance intent replaces a vanilla assault, and a contest move skips the order delay. One `Tactical` bind.
 
 ### Owned files
 
@@ -2204,7 +2192,7 @@ See `### BC7 smoke checklist`, items 2.55-2.62 and 3.12. Spec smoke numbers map 
   - The column and the bombard: `Tactical/Operations/CommandFormationCorrection.cs` (`TargetFormationForTask(task, current, hasOrderFormation, orderFormation)`, read at its two `PostureIntentProducer` call sites), `CommandDoctrineAssignment.cs` (`Build` gains the `FocalPreparation` input; `WithFormation` from the node), `Tactical/BattleWriterPolicy.cs` (`TryBombardStartIntent`, `BattleArtilleryState.HasPreparation`/`PreparationX`/`PreparationZ`/`AmmoMean`, the preparation exemption in `ArtilleryDoctrineIntents`), `Producers/ArtilleryIntentProducer.cs` (the one writer of `PreparationTable`; submits `BombardStart`), `Tactical/Battle/OrderExecutorRuntime.cs` (`StartBombard(Regiment unit, float x, float z)`), `Tactical/Battle/RoadRoutePlanner.cs` (`ColumnWaitHours` read by the Turn).
   - The ledger: `Plays/ManeuverFeasibility.cs` and `FeasibilityLedger.cs` (the works members of § 8: `BodyEstimate.AssaultsWorks`, `TryFocalPoint`, `WorksHold`, `AssaultsWorks`, `FacesWorks`, `WorksHoldHash`, `TryStation`, `AdvancesOnWorks`, `BandEntries`, `VanillaChainContest`, `OnsetContests`), `ReserveReleaseState.cs` (`StationBinding`, `SetStation`, `TryStation`, `ClearStation`), `Plays/FeasibilityRuntime.cs` (the works picture, probes and rows).
   - `Plugin.cs` (one bind), the test csproj, `tests/WhiskeyRealism.Tests/FlankResponseTests.Maneuver.cs` (`EnvelopsSetOnExactlySixRects` expects `FocalAssault:AssaultColumn` too, seven), `TestFixtures.SeedCatalog.AllHistoricalAndGeneric` and `TacticalPlaybookTests.SeedCatalogRegistersAllEighteenPlaybooks` (register `FocalAssaultPlaybook`; expect 19), `BattleWriteGateTests.cs` (the regex below).
-  - Docs (task 12): `AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`, `docs/scourge-of-war-ai-anchors.md`.
+  - Docs (task 11): `AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`, `docs/scourge-of-war-ai-anchors.md`.
 - **Test file:** `tests/WhiskeyRealism.Tests/ManeuverFeasibilityTests.Works.cs`, implementing `static partial void AddWorksTests(List<(string, Action)> into)` with names `("bc14w WORKS-GUARD …", WorksGuard)`.
 
 ### Config
@@ -2215,32 +2203,30 @@ See `### BC7 smoke checklist`, items 2.55-2.62 and 3.12. Spec smoke numbers map 
 
 Off: no works picture (works priced as open ground), no FocalAssault (its precondition fails), no works hold, no bombard start, no column formation, no reserve station; the core and BC14O run unchanged.
 
+**Red-first rule:** as § BC14 (the BC13 pattern): each task adds the members its tests name with today's behaviour, sees its tests fail on their assertions, records the FAIL lines under the task number in `evidence/bc14w/red-first.txt`, implements, and commits with the harness exiting 0. The ids marked **Red first (spec list)** are the spec's § 13.2 red-first list. A § 6 fixture (scenarios 6-9) goes into `ManeuverFeasibilityFixtures.cs` with the first test that uses it.
+
 ### Task 0 — branch, baseline
 
 - [ ] `git -C ~/Projects/whiskey-realism-mod worktree add .worktrees/battle-next-bc14w -b feat/battle-next-bc14w feat/battle-next`, then `cd ~/Projects/whiskey-realism-mod/.worktrees/battle-next-bc14w && ln -s ../../refs refs`. Baseline as § BC14 task 0 into `evidence/bc14w/baseline.txt`.
 
-### Task 1 — the red-first tests and their compile stubs
+### Task 1 — the reader table
 
-**Red first** (spec § 13.2): FEAS-SCN-6, FEAS-SCN-7, WORKS-GUARD, WORKS-HOLD-BC11, FORMATION-CARRY, READER-STANCE, READER-AFFINITY, READER-AXIS, READER-MANEUVEROF, READER-ROLE, READER-MIRROR, READER-FOCAL-ANCHOR, WORKS-ADVANCE, READER-DOCTRINE-COPY-W.
+**Requirements:** requirement-focal-assault (the readers), requirement-hypothetical-layout (its BC14W case). **Red first (spec list):** READER-STANCE, READER-AFFINITY, READER-AXIS, READER-MANEUVEROF, READER-ROLE, READER-MIRROR, READER-FOCAL-ANCHOR.
 
-- [ ] Stubs with today's behaviour: the three enum members with no reader edit; the `FocalAssault` template in `PlayTemplateCatalog` (`EnvelopsSetOnExactlySixRects` updated to seven in this commit, so it passes); `PlayExecutorRules.CanMirror` returning today's rule (one enveloping rect); `PlayAnchor.PlayTarget(BattlePlanId plan, bool hasFocal, float fx, float fz, float enemyX, float enemyZ, out float x, out float z)` returning the enemy anchor; `ResponseTargetFor` and `AllowsProvisionalAttackAxis` made `internal`; `ManeuverInput.HoldForWorks` (unread) and `EnvelopmentManeuver.HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay)` returning false; the four-argument `TargetFormationForTask` ignoring its new arguments; `CommandDoctrineOrder.HasFormation`/`Formation`/`HasPreparation`/`PreparationX`/`PreparationZ`/`PreGuardTask`, `WithFormation`, `WithPreparation`, the copies not yet forwarding them; `WorksHoldGuard.Holds`, `Apply`, `ApplyState`, `ApplyLeaf` returning their input unchanged; `FeasibilityLedger.WorksHold` false, `AdvancesOnWorks` 0; an empty `WorksPicture`; the § 6 scenario fixtures 6 and 7 in `ManeuverFeasibilityFixtures.cs`.
-- [ ] Write the 14 tests; run; exactly these fail on assertions; paste the FAIL lines into `evidence/bc14w/red-first.txt`. Commit `test(battle-core): BC14W red-first tests with today's behaviour stubbed [BC14W]`.
-
-### Task 2 — the reader table
-
-**Requirements:** requirement-focal-assault (the readers), requirement-hypothetical-layout (its BC14W case). **Turns green:** READER-STANCE, READER-AFFINITY, READER-AXIS, READER-MANEUVEROF, READER-ROLE, READER-MIRROR, READER-FOCAL-ANCHOR.
-
+- [ ] Red first: add `BattlePlanId.FocalAssault` and `PlayRectKind.AssaultColumn`/`AssaultSupport` with no reader edit, the `FocalAssault` template in `PlayTemplateCatalog` (update `EnvelopsSetOnExactlySixRects` to seven in this task), `PlayExecutorRules.CanMirror` returning today's rule (one enveloping rect), `PlayAnchor.PlayTarget(BattlePlanId plan, bool hasFocal, float fx, float fz, float enemyX, float enemyZ, out float x, out float z)` returning the enemy anchor, and `ResponseTargetFor` / `AllowsProvisionalAttackAxis` made `internal`; write the seven tests; see each fail; record the FAIL lines.
 - [ ] Each row of spec § 15 item 7's reader table: `StanceOf(FocalAssault)` Offensive; `DelayingAffinity` 0, `EnvelopmentAffinity` 0.10, `ResponseTargetFor` 0.6; `AllowsProvisionalAttackAxis` true; `ManeuverOf` gives `AssaultColumn` a full spec of kind `AssaultColumn` and `AssaultSupport` a start-delay spec with `HoldsForRelease`; `RoleForRectKind` `AssaultColumn` → `Main`, `AssaultSupport` → `SupportMain`; `CanMirror` false for an `AssaultColumn` template; the executor's `ComputeZoneAssignmentsCore` and the evaluation's layout both call `PlayAnchor.PlayTarget`.
-- [ ] Harness: the seven READER tests pass. Commit `feat(battle-core): FocalAssault and its two rect kinds read by every catalog, allocator and executor reader [BC14W]`.
+- [ ] Harness exits 0: the seven READER tests pass. Commit `feat(battle-core): FocalAssault and its two rect kinds read by every catalog, allocator and executor reader [BC14W]`.
 
-### Task 3 — copy sites for the formation, the preparation and the works hold
+### Task 2 — copy sites for the formation, the preparation and the works hold
 
-**Requirements:** requirement-focal-execution (the carry), requirement-works-hold (the marks), the W rows of the copy-site census. **Tests:** READER-NODE-COPY-W, READER-LEAF-COPY, READER-STATE-COPY (each red today once its field exists: add the field, see the FAIL, paste it into `evidence/bc14w/red-first.txt`, then forward). **Turns green:** READER-DOCTRINE-COPY-W.
+**Requirements:** requirement-focal-execution (the carry), requirement-works-hold (the marks), the W rows of the copy-site census. **Tests:** READER-NODE-COPY-W, READER-LEAF-COPY, READER-STATE-COPY (each red today once its field exists). **Red first (spec list):** READER-DOCTRINE-COPY-W.
+
+- [ ] Red first: add `CommandDoctrineOrder.HasFormation`/`Formation`/`HasPreparation`/`PreparationX`/`PreparationZ`/`PreGuardTask`, `WithFormation`, `WithPreparation`, the `ManeuverNodeEntry` formation, `LeafAssignment.WorksHeld` and `CommandNodeOperationalState.Reason`/`PreGuardTask`, no copy yet forwarding them; write the four tests; see each fail; record the FAIL lines.
 
 - [ ] Forward `HasFormation`/`Formation`, `HasPreparation`/`PreparationX`/`PreparationZ` and `PreGuardTask` through `WithSop`, `WithTask`, `WithManeuver`, `WithExploit`; `ManeuverNodeEntry` formation through `ExpandToNodes`, folded into `Hash`; `LeafAssignment.WorksHeld` (the two `TacticalLeafBrigadeMap` constructions unchanged, the guard's copy forwards every field); `CommandNodeOperationalState.Reason`/`PreGuardTask` through `WithRoleAndTask` (`PostureIntentProducer.cs`; cleared for a task other than `HoldObjective`), `PostureStanceGuard.Apply`, the posture executor's order-to-state decision; `ExploitPosture.Overlay` takes them from the exploit state. The nine positional test constructions compile unchanged.
-- [ ] Harness green but the red-first ids owned later. Commit `feat(battle-core): the column formation, the preparation point and the works-hold marks survive every copy [BC14W]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): the column formation, the preparation point and the works-hold marks survive every copy [BC14W]`.
 
-### Task 4 — the works picture
+### Task 3 — the works picture
 
 **Requirements:** requirement-works-picture, requirement-works-shape, requirement-enemy-picture (its BC14W case), requirement-runtime-wiring (its BC14W case). **Tests:** WORKS-SAMPLES, WORKS-POINTS, WORKS-SEGMENTS, WORKS-ENDS, WORKS-SALIENT, WORKS-JUNCTION, FOCAL-SCORE, WORKS-FOG, WORKS-LINES, FEAS-PIN-W.
 
@@ -2249,7 +2235,7 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 - [ ] `FortificationPointsRuntime.cs`: every `ObstacleLine` (`FindObjectsOfType<ObstacleLine>`) at battle start and when deployment ends, `BattleUI.obstaclelines` re-read each evaluation, a piece counted at its `modelobj` position when the object exists and its `completion` ≥ `WorksMinCompletion`; at most `MaxWorksProbesPerTick` = 16 probes per side per tick through `PerceivedGroundRuntime`, oldest first; `BattlefieldSetup.fortifications`' `fortificationpoints` and `occupiedby` are never read.
 - [ ] Harness: the ten tests pass. Commit `feat(battle-core): the perceived enemy works - samples in works cover and seen ObstacleLine pieces, segments, ends and focal points [BC14W]`.
 
-### Task 5 — works pricing and turn first
+### Task 4 — works pricing and turn first
 
 **Requirements:** requirement-works-pricing, requirement-turn-first, requirement-detail-risk and requirement-bodies (their BC14W cases). **Tests:** WORKS-BAR, WORKS-PIN, WORKS-SINGLE, TURN-FIX-OPEN.
 
@@ -2257,50 +2243,52 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 - [ ] A body striking on held works is held to `WorksOddsFactor` × `Bar` and pins at a defence ratio of at least `WorksDefenseRatio`; a single-body plan striking on works gets a detail term with `W` = 1.0, `Pin` 0, `own` 1 (a FocalAssault body's `W` = `AssaultHours` + the strike spread); a turning plan's fixing member facing held works keeps `Bar` and counts only the enemy outside works (`N_open`). `BodyEstimate.AssaultsWorks`.
 - [ ] Harness: the four tests pass. Commit `feat(battle-core): works priced at three times the odds, the open-end turn at the field bar [BC14W]`.
 
-### Task 6 — the FocalAssault playbook and the works-hold predicate
+### Task 5 — the FocalAssault playbook and the works-hold predicate
 
-**Requirements:** requirement-focal-assault, requirement-candidate-set (its BC14W case), requirement-frame-budget (its BC14W case), requirement-works-hold (the predicate). **Tests:** FOCAL-OFFER, FOCAL-WILLINGNESS, CANDIDATE-CENTRED-W, FEAS-TIME-W, FEAS-SCN-8, FEAS-SCN-9. **Turns green:** FEAS-SCN-6.
+**Requirements:** requirement-focal-assault, requirement-candidate-set (its BC14W case), requirement-frame-budget (its BC14W case), requirement-works-hold (the predicate). **Tests:** FOCAL-OFFER, FOCAL-WILLINGNESS, CANDIDATE-CENTRED-W, FEAS-TIME-W, FEAS-SCN-8, FEAS-SCN-9. **Red first (spec list):** FEAS-SCN-6.
 
 - [ ] Failing tests. FEAS-TIME-W: FEAS-TIME's fixture with FocalAssault, 22 candidates, at most 638 path searches and 2,398 legs (`U` = 8 + 6 × 22 + 36 = 176, 1,760 + 638).
 - [ ] `FocalAssaultPlaybook` appended last to `BuiltInPlaybooks` (the jitter stream of the 18 unchanged): precondition `Feasibility` set and a focal point; `Impossible` `turn-available` with a feasible turn, `declined` below `FocalWillingness`; evaluated once, never mirrored. `FeasibilityLedger.WorksHold(out reason)` (`hopeless-assault` / `turn-not-struck`), `FacesWorks`, `AssaultsWorks`, `WorksHoldHash`. Register it in `TestFixtures.SeedCatalog.AllHistoricalAndGeneric` and expect 19 in `TacticalPlaybookTests`.
-- [ ] Harness: the six tests and FEAS-SCN-6 pass. Commit `feat(battle-core): FocalAssault, the 19th playbook, offered only when no turn will do and the commander is willing [BC14W]`.
+- [ ] Harness exits 0: the seven tests pass. Commit `feat(battle-core): FocalAssault, the 19th playbook, offered only when no turn will do and the commander is willing [BC14W]`.
 
-### Task 7 — the works hold on the stored orders, states, leaves and stance
+### Task 6 — the works hold on the stored orders, states, leaves and stance
 
-**Requirements:** requirement-works-hold. **Tests:** WORKS-STANCE, WORKS-ORDER, WORKS-FALLBACK, WORKS-PROBE, WORKS-HOLD-GATE (WORKS-STANCE, WORKS-ORDER and WORKS-FALLBACK are red today: see each fail before its code, paste the lines into `evidence/bc14w/red-first.txt`). **Turns green:** WORKS-GUARD, WORKS-HOLD-BC11.
+**Requirements:** requirement-works-hold. **Tests:** WORKS-STANCE, WORKS-ORDER, WORKS-FALLBACK, WORKS-PROBE, WORKS-HOLD-GATE. **Red first (spec list):** WORKS-GUARD, WORKS-HOLD-BC11.
+
+- [ ] Red first: add `WorksHoldGuard` (`Holds`, `Apply`, `ApplyState`, `ApplyLeaf` returning their input unchanged), `ManeuverInput.HoldForWorks` unread and `EnvelopmentManeuver.HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay)` returning false; write the seven tests; see each fail (WORKS-STANCE, WORKS-ORDER and WORKS-FALLBACK are red today too); record the FAIL lines.
 
 - [ ] `WorksHoldGuard` (`Holds(task, reason)`, `Reason` = `"works-hold"`, `Apply`, `ApplyState`, `ApplyLeaf`: `AttackObjective`, `SupportAttack` and `FixEnemy` → `HoldObjective`, `PreGuardTask` kept; a node in the `ManeuverNodeTable`, a `Gap` or `Penetration` exploit and a child that does not face works pass). `ArmyOrchestrator.UpdateOperationsLedger` guards the copied states, builds the orders, guards them into its own pooled array (`CurrentDoctrineOrders`); the ledger's own list stays unguarded; the guarded leaf map is cached (key: leaf signature, `WorksHoldHash`, `ManeuverHash`). `PostureLedger.GuardFallback` on the `TryBuildSingle` state. `ExploitTable.SetWorksView` per alliance each heavy tick and `Build` guarding non-breach exploits aimed on held works. The posture executor plans a guarded former `FixEnemy` with its target outside the band as a formation and waypoint, any other guarded order as a formation only.
 - [ ] The stance: `PosturePipeline.Run` submits `Map(HoldObjective)` (2) at Executor priority with `IntentFlags.WorksHold` before `Decide`, for a guarded order or state; `TacticalStanceOwnership` applies it after the `macroai` 3 retreat yield and the charge demotion, yields to vanilla's per-group stance 1, and against 3 or 4 skips `YieldsToVanilla` and the vanilla-assault refusal; `DecideStance` → `Deny` for `works-hold` and #45's ledger step on a `works-hold` state feed only the charge demotion; `TacticalOpportunityTaskOverride.Override(…, worksHold, …)`, the cavalry follow and `DivisionPlayIntentProducer` leave a guarded order a hold. `OperationStrength.CountsAsAssigned`; `intentsHash` folds `WorksHoldHash`, so a hold that turns true forces a store on the same heavy tick.
 - [ ] BC11 and the phase: `EnvelopmentManeuver.Step` keeps Hold under `HoldForWorks`, suppresses its ceiling, clears the latched release and budget, and latches `WorksClearHours` when it clears (ceiling `max(PlayActivatedHours, FirstPlannedReleaseHours, WorksClearHours) + MaxManeuverHours`); `StepStartDelay` holds a start delay under it; `PlayExecutorRuntime.StepManeuvers` sets it through `HoldForWorksFor` and publishes no planned release. `TacticalPhaseProgressionDoctrine.Input.WorksHold` keeps the phase at `Probe` and stops `Consolidate` resuming into `MainEffort`. `BattleRecon.ProbeTick` skips a look point on held works or in the band. The ledger counts `AdvancesOnWorks`, `BandEntries` and `OnsetContests` each heavy tick from the snapshot's `X`/`Z`, `LastWaypointX`/`Z` and `AiStance`.
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): the works hold - a hopeless assault is never ordered: stored orders, states, leaves, exploits, stance, BC11 and the phase [BC14W]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): the works hold - a hopeless assault is never ordered: stored orders, states, leaves, exploits, stance, BC11 and the phase [BC14W]`.
 
-### Task 8 — the move contest
+### Task 7 — the move contest
 
-**Requirements:** requirement-works-hold (the contest). **Tests:** WORKS-CONTEST (red today: see it fail first). **Turns green:** WORKS-ADVANCE (its onset clause is the contest's).
+**Requirements:** requirement-works-hold (the contest). **Tests:** WORKS-CONTEST (red today: see it fail first). **Red first (spec list):** WORKS-ADVANCE (written here: its onset clause is the contest's).
 **Produces:** `MoveContest.Decide(in ContestInput) → ContestAction` (`None`, `HoldStop` within `OrderArbiter.DedupeMeters` of the hold point, `HoldMove`, `Reissue`), `MoveContest.RecoveryAllowed(bool holds, float x, float z, IWorksQuery works)`, `ContestToleranceMeters` 50; `MoveContestState.ForAlliance(int)` (`BattleScope`; per group the last seen waypoint and path, the hold point latched at the first hold, the last contest tick); `OrderExecutor.LastIssuedMove`.
 
 - [ ] `PosturePipeline.Run` asks `MoveContest.Decide` for each works-held group and submits the hold's Stop or Move with `IntentFlags.Contest`; `OrderExecutor` issues a `Contest` Move inside the recent-order window and the courier cadence; `RecoveryAllowed` is called after `TryRecoveryPath` and plans the hold with the interrupted flag cleared. No cap: the bound is vanilla's skip-while-moving gate (spec WL-r5-2).
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): one contest rule turns a vanilla move into the works band back to the hold [BC14W]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): one contest rule turns a vanilla move into the works band back to the hold [BC14W]`.
 
-### Task 9 — the focal assault's execution: column, preparation, bombard start
+### Task 8 — the focal assault's execution: column, preparation, bombard start
 
-**Requirements:** requirement-focal-execution, requirement-player-share (its BC14W case). **Tests:** FOCAL-EXEC, FOCAL-PREP, FOCAL-PLAYER, BOMBARD-START. **Turns green:** FORMATION-CARRY, FEAS-SCN-7 (its aggressive run launches the column, which needs the `AssaultColumn` kind).
+**Requirements:** requirement-focal-execution, requirement-player-share (its BC14W case). **Tests:** FOCAL-EXEC, FOCAL-PREP, FOCAL-PLAYER, BOMBARD-START. **Red first (spec list):** FORMATION-CARRY, FEAS-SCN-7 (written here: its aggressive run launches the column, which needs the `AssaultColumn` kind).
 
-- [ ] Failing tests.
+- [ ] Red first: add the four-argument `TargetFormationForTask(task, current, hasOrderFormation, orderFormation)` ignoring its new arguments; write the six tests (the § 6 fixture 7); see each fail (FORMATION-CARRY: `AttackObjective` gives line); record the FAIL lines.
 - [ ] The column: `ManeuverSpec` kind `AssaultColumn` (Attack on the focal point latched at the March; March, Turn and Attack orders carry `HasFormation` / `Formation` = March Column; the Turn ends at first contact, or at formation 4, or after `RoadRoutePlanner.ColumnWaitHours`, never before the preparation floor; `BuildInput`'s inward target, corridor and river checks run anchor → focal point; no `anchored-high-ground` abandon). `AssaultSupport` released at the column's strike + `EchelonDelayHours`; the demonstrations with the column; under `HoldForWorks` the support and demonstrations hold. `TargetFormationForTask(task, current, hasOrderFormation, orderFormation)` returns the order's formation when set.
 - [ ] The preparation: `PreparationTable.ForAlliance(a)` (one writer, `ArtilleryIntentProducer`; reset when the plan, its activation hour or the focal point by more than `FocalSampleMeters` changes); the children's orders carry `PreparationX`/`Z` from the plan's activation until the column's Attack (not under `HoldForWorks`); `BattleWriterPolicy.TryBombardStartIntent(snapshot, index, in state, out BattleOrderIntent)` (vanilla's per-battery test at 3889-3893 with the point within `FireRange`; refused for a routed, marked-for-rout, gunless, permanently detached, counter-battery or bombarding, pathing battery, or `AmmoMean` ≤ 0.2); the intent: channel CombatBehavior, value 9, target the point, `IntentFlags.BombardStart`, source `ArtilleryDoctrine`, priority Executor; the preparation exemption in `ArtilleryDoctrineIntents`.
 - [ ] The writer: `OrderExecutorRuntime.StartBombard(Regiment unit, float x, float z)` after the guard (Commander Mode Active, `TacticalWriteGuard.CanWrite`, never `PlayerOwned`): `ChangeCombatBehavior(go, 9)` through `TacticalCombatBehaviorWriter`, then `bombardposition` = the point and `bombardrange` = `GamePrefs.bombardmentmaxrangesize`, in that order (vanilla's `CheckAIBombardment` 3897-3900, without `lastfeudactiontime`). `BattleWriteGateTests`' `VanillaBattleWrite` regex gains `|\.bombardposition\s*=(?!=)|\.bombardrange\s*=(?!=)` after `\.macroai\s*=(?!=)`; BOMBARD-START asserts the pattern matches the two writes and finds them only in `OrderExecutorRuntime.StartBombard` behind its gate.
 - [ ] The player: `PlayAnchor.ContainsPlayerOwned` is the one filler for `CorpsPosition.ContainsPlayerOwned` in the executor and the evaluation; `Assign` and `AssignInto` never give such a child `AssaultColumn` or `AssaultSupport`.
-- [ ] Harness green but the ids owned later; `./build.sh` 0/0. Commit `feat(battle-core): the focal assault in March Column after a bombardment, through the executor's new bombard start [BC14W]`.
+- [ ] Harness exits 0; `./build.sh` 0/0. Commit `feat(battle-core): the focal assault in March Column after a bombardment, through the executor's new bombard start [BC14W]`.
 
-### Task 10 — the Defender's works station
+### Task 9 — the Defender's works station
 
 **Requirements:** requirement-defender-works-reserve. **Tests:** DEF-WORKS-STATION.
 
 - [ ] `WorksPicture.BuildOwn` for a Defender; `IFeasibilityLookup.TryStation`; `ReserveReleaseState.StationBinding`; `DirectChildAllocator.StationReserveBehindFocalPoint` after `ReleaseReserveToCrossings`: the fastest eligible Reserve child (never exploiting, never player-owned) `ReserveStationMeters` behind the focal point with the earliest enemy arrival within `FocalThreatHours`, role `Reserve`, task `ReserveWait`, facing it; it moves only for an arrival `StationSwitchHours` earlier; `ClearTrigger` leaves it; the floor is not consulted; one child per side. Release rows `reason=works-station`.
 - [ ] Harness green. Commit `feat(battle-core): a Defender in works stations a reserve behind its most threatened focal point [BC14W]`.
 
-### Task 11 — runtime wiring, the bind, telemetry, allocation proof
+### Task 10 — runtime wiring, the bind, telemetry, allocation proof
 
 **Requirements:** requirement-config (BC14W row), requirement-telemetry (BC14W rows), requirement-zero-alloc (its BC14W case). **Tests:** FEAS-ALLOC-W.
 
@@ -2320,22 +2308,22 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
   ```
   with `internal static bool EnemyWorksDoctrineEnabled()` returning `ManeuverFeasibilityEnabled() && EnableEnemyWorksDoctrine.Value` (guarded as the other accessors).
 - [ ] FEAS-ALLOC-W: 0 bytes after warm-up for the works picture (32 segments, 256 focal points), the guard pass over the stored products and the `AdvancesOnWorks` count.
-- [ ] Harness: every test passes (no red-first id left); `./build.sh` 0/0; config-audit 0. Commit `feat(battle-core): enemy works doctrine wired, its flag and telemetry [BC14W]`.
+- [ ] Harness exits 0; `./build.sh` 0/0; config-audit 0. Commit `feat(battle-core): enemy works doctrine wired, its flag and telemetry [BC14W]`.
 
-### Task 12 — `AGENTS.md`, the two headers and the docs
+### Task 11 — `AGENTS.md`, the two headers and the docs
 
 - [ ] `AGENTS.md` quick reference "Battle write owners" and § Patch hygiene "Battle write owners": add the bombard start — "BC14W adds one executor write path, the bombard start (D34): the artillery doctrine producer submits a `BombardStart` intent and `OrderExecutorRuntime.StartBombard` writes `ChangeCombatBehavior(go, 9)` through `TacticalCombatBehaviorWriter` and the battery's `bombardposition` and `bombardrange`, as vanilla's `CheckAIBombardment` does (3897-3900, without the feud timer), behind `TacticalWriteGuard.CanWrite` and Commander Mode Active." — and the BC7 grep gate list gains it. Add the two standing-rule changes: "A works-hold stance intent (`IntentFlags.WorksHold`, stance 2 for a group under the works hold) replaces a vanilla assault; until BC14W only an explicit charge denial could." and "A contest move (`IntentFlags.Contest`) skips the order delay." Quick reference "Battle stance + plays" gains: "Against perceived enemy works the AI turns an open end first and assaults a focal point only when no turn will do (`FocalAssault`, the 19th playbook, Offensive)." The quick reference's "18 geometric play templates" reads 19.
 - [ ] `src/WhiskeyRealism/Tactical/TacticalStanceOwnership.cs` header: beside "A vanilla assault is never replaced except by an explicit charge denial", add "or by a works-hold stance intent (`IntentFlags.WorksHold`, BC14W): stance 2 for a group under the works hold." `src/WhiskeyRealism/Tactical/Battle/OrderExecutor.cs` header: beside the no-delay moves (vanilla's in-contact reactions, the withdrawal under contact, BC13's exploit moves), add "a contest move (`IntentFlags.Contest`, BC14W)".
 - [ ] Living docs: `docs/tactical-orchestrator.md` (the works picture, turn-first, the works hold and the contest, FocalAssault's execution, the bombard start, the works station), `docs/telemetry.md` (the BC14W rows and fields), `docs/tactical-operations-ledger.md` (the works guard on stored orders and states, the works station), `docs/scourge-of-war-ai-anchors.md` (works: turn first, assault a focal point).
 - [ ] Commit `docs(battle-core): BC14W - the bombard start as an executor write path, the works-hold stance and contest rules, docs [BC14W]`.
 
-### Task 13 — gates and mutation proof
+### Task 12 — gates and mutation proof
 
-- [ ] The gate list of § BC14 task 18, with the BC14W files in the clock grep (`src/WhiskeyRealism/Tactical/Battle/Works/{WorksRules,WorksPicture,PreparationTable}.cs`, `src/WhiskeyRealism/Tactical/Battle/MoveContest.cs`); the BC7 writer grep is unchanged except `OrderExecutorRuntime.StartBombard` (named in `AGENTS.md`), and `rg -n "\.bombardposition\s*=[^=]|\.bombardrange\s*=[^=]" src/WhiskeyRealism` lists only `OrderExecutorRuntime.cs` (BOMBARD-START pins the same through `BattleWriteGateTests`).
+- [ ] The gate list of § BC14 task 17, with the BC14W files in the clock grep (`src/WhiskeyRealism/Tactical/Battle/Works/{WorksRules,WorksPicture,PreparationTable}.cs`, `src/WhiskeyRealism/Tactical/Battle/MoveContest.cs`); the BC7 writer grep is unchanged except `OrderExecutorRuntime.StartBombard` (named in `AGENTS.md`), and `rg -n "\.bombardposition\s*=[^=]|\.bombardrange\s*=[^=]" src/WhiskeyRealism` lists only `OrderExecutorRuntime.cs` (BOMBARD-START pins the same through `BattleWriteGateTests`).
 - [ ] Mutation: every plant of spec § 13.2 in a scratch copy, one at a time, each killed by its named test; `evidence/bc14w/mutation.txt`.
 - [ ] Integrator: merge, deploy and hash-check, smoke items 2.63-2.66 and 3.13, and re-run item 2.60 with the flag on.
 
-PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests.Works`, red first for the 14 ids of task 1, and WORKS-STANCE, WORKS-ORDER, WORKS-FALLBACK, WORKS-CONTEST, READER-NODE-COPY-W, READER-LEAF-COPY and READER-STATE-COPY red before their code; every § 13.2 plant killed). The harness settles criterion-scenario-outcomes-works (FEAS-SCN-6 to FEAS-SCN-9), the works clauses of criterion-fog-honest (WORKS-FOG, FEAS-PIN-W) and criterion-zero-alloc's BC14W case (FEAS-ALLOC-W). Runtime proof is in-game: Session A items 2.63-2.66 and Session B item 3.13 (criterion-works-no-hopeless-assault and its guardrail, items 2.63-2.64), and item 2.60 re-run.
+PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests.Works`, each test red in its task's recorded run before its code, the spec's 14 red-first ids included; every § 13.2 plant killed). The harness settles criterion-scenario-outcomes-works (FEAS-SCN-6 to FEAS-SCN-9), the works clauses of criterion-fog-honest (WORKS-FOG, FEAS-PIN-W) and criterion-zero-alloc's BC14W case (FEAS-ALLOC-W). Runtime proof is in-game: Session A items 2.63-2.66 and Session B item 3.13 (criterion-works-no-hopeless-assault and its guardrail, items 2.63-2.64), and item 2.60 re-run.
 
 ### Smoke watch (BC7 checklist, Session A items 2.63-2.66, Session B item 3.13)
 
@@ -2364,7 +2352,7 @@ See `### BC7 smoke checklist`, items 2.63-2.66 and 3.13. Spec smoke numbers map 
 
 - **Create (pure, test csproj; they join the BC14 file set):** `src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveScoring.cs` (`ObjectiveFact`, `VictoryClock`, `ObjectivePressure`, `ObjectiveEstimate`, `ObjectiveScoring`), `ObjectiveLatch.cs` (`ObjectiveLatch.ForAlliance(int)`, `BattleScope`).
 - **Create (runtime):** `src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveRuntime.cs` (the live objectives' `points` and `owner`, `BattleUnits.sideinformation[].objectivepoints` in continuous mode only, `GetVictoryPointsRelation`, the side's `AIBattle.objectivechain` through `TryResolveOwnAiBattle`; never `objectivepointsheld` or `alliancepoints`).
-- **Modify:** `Tactical/Orchestrator/MapObjectiveCapture.cs` (`Points`, `LiveInHierarchy`, optional trailing parameters), `TacticalStableSceneCache.cs` (the cached builder reads both live each call), `TacticalVisionRuntimeAdapter.cs` (`ObjectiveObservationInput.value` from requirement-objective-value under the flag; the live capture `CaptureMapObjectivesLive` reads both), `Tactical/Operations/TacticalOperationDirector.cs` (`TryPickBestObjective` calls `ObjectiveScoring.PickMainEffort` with every term of the internal static method `ObjectiveSelectionScore` but `Value` as the director's terms; no `ParallelObjectives` under the flag), `Tactical/Orchestrator/ArmyEvidenceBuilder.cs` and `ArmyEvidenceBuilder.Pure.cs` (`PlaybookContext.DefaultMainEffortSector` from the chosen objective's band; `TryResolveOwnAiBattle(BattleUnits bunits, int alliance, out AIBattle battle)` and the pure `SelectAiBattleIndexForSide`), `ArmyTickCycle.cs` (`SetObjectiveMainEffort` on a change; `ConsiderMainEffortShift` skipped under the flag with a main-effort objective), `ArmyOrchestrator.cs` (`SetObjectiveMainEffort(int sector)`, refused in `Consolidate` and `Withdraw`), `TacticalBattleCoordinator.cs` (`ReplanForNewBattleDay` clears `ObjectiveLatch`), `TacticalPlaybookCatalog.cs` (`Select` reads `U` and `H`: `SelectRiskWeight`, `HoldBias`), `DirectChildContracts.cs` (`DirectChildIntent` optional `screenTarget`, `HasScreenTarget`/`ScreenX`/`ScreenZ`, `WithScreenTarget`), `DirectChildAllocator.cs` (`ScreenSecondaryObjectives` after `StabilizeMain`; `With` forwards the screen target), `Producers/PostureIntentProducer.cs` (a Screen child moves to its screen target), `Battle/MoveContest.cs` (the chain contest's `Reissue` under the BC14O flag), `Plays/ManeuverFeasibility.cs` and `FeasibilityLedger.cs` (the objective table, `Pressure`, `ObjectiveCount`, `TryObjective`, `MaxObjectives` 16), `Plays/FeasibilityRuntime.cs`, `Plugin.cs` (one bind), the test csproj; docs (task 7): `AGENTS.md`, `src/WhiskeyRealism/Tactical/AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`.
+- **Modify:** `Tactical/Orchestrator/MapObjectiveCapture.cs` (`Points`, `LiveInHierarchy`, optional trailing parameters), `TacticalStableSceneCache.cs` (the cached builder reads both live each call), `TacticalVisionRuntimeAdapter.cs` (`ObjectiveObservationInput.value` from requirement-objective-value under the flag; the live capture `CaptureMapObjectivesLive` reads both), `Tactical/Operations/TacticalOperationDirector.cs` (`TryPickBestObjective` calls `ObjectiveScoring.PickMainEffort` with every term of the internal static method `ObjectiveSelectionScore` but `Value` as the director's terms; no `ParallelObjectives` under the flag), `Tactical/Orchestrator/ArmyEvidenceBuilder.cs` and `ArmyEvidenceBuilder.Pure.cs` (`PlaybookContext.DefaultMainEffortSector` from the chosen objective's band; `TryResolveOwnAiBattle(BattleUnits bunits, int alliance, out AIBattle battle)` and the pure `SelectAiBattleIndexForSide`), `ArmyTickCycle.cs` (`SetObjectiveMainEffort` on a change; `ConsiderMainEffortShift` skipped under the flag with a main-effort objective), `ArmyOrchestrator.cs` (`SetObjectiveMainEffort(int sector)`, refused in `Consolidate` and `Withdraw`), `TacticalBattleCoordinator.cs` (`ReplanForNewBattleDay` clears `ObjectiveLatch`), `TacticalPlaybookCatalog.cs` (`Select` reads `U` and `H`: `SelectRiskWeight`, `HoldBias`), `DirectChildContracts.cs` (`DirectChildIntent` optional `screenTarget`, `HasScreenTarget`/`ScreenX`/`ScreenZ`, `WithScreenTarget`), `DirectChildAllocator.cs` (`ScreenSecondaryObjectives` after `StabilizeMain`; `With` forwards the screen target), `Producers/PostureIntentProducer.cs` (a Screen child moves to its screen target), `Battle/MoveContest.cs` (the chain contest's `Reissue` under the BC14O flag), `Plays/ManeuverFeasibility.cs` and `FeasibilityLedger.cs` (the objective table, `Pressure`, `ObjectiveCount`, `TryObjective`, `MaxObjectives` 16), `Plays/FeasibilityRuntime.cs`, `Plugin.cs` (one bind), the test csproj; docs (task 6): `AGENTS.md`, `src/WhiskeyRealism/Tactical/AGENTS.md`, `docs/tactical-orchestrator.md`, `docs/telemetry.md`, `docs/tactical-operations-ledger.md`.
 - **Test file:** `tests/WhiskeyRealism.Tests/ManeuverFeasibilityTests.Objectives.cs`, implementing `static partial void AddObjectiveTests(List<(string, Action)> into)` with names `("bc14o OBJ-VALUE …", ObjValue)`.
 
 ### Config
@@ -2375,54 +2363,51 @@ See `### BC7 smoke checklist`, items 2.63-2.66 and 3.13. Spec smoke numbers map 
 
 Off: today's 0.45 / 0.80 objective values, the director's shipped best-score choice with `ParallelObjectives`, the shipped odds-based main-effort shift, no screens, `U` = `H` = 0 in `Select`, no prior; the core and BC14W unchanged.
 
+**Red-first rule:** as § BC14 (the BC13 pattern), with the build record `evidence/bc14o/red-first.txt`; the ids marked **Red first (spec list)** are the spec's § 13.3 red-first list. A § 6 fixture (scenarios 10-12) goes into `ManeuverFeasibilityFixtures.cs` with the first test that uses it.
+
 ### Task 0 — branch, baseline
 
 - [ ] `git -C ~/Projects/whiskey-realism-mod worktree add .worktrees/battle-next-bc14o -b feat/battle-next-bc14o feat/battle-next`, then `cd ~/Projects/whiskey-realism-mod/.worktrees/battle-next-bc14o && ln -s ../../refs refs`. Baseline as § BC14 task 0 into `evidence/bc14o/baseline.txt`.
 
-### Task 1 — the red-first tests and their compile stubs
-
-**Red first** (spec § 13.3): FEAS-SCN-12, READER-CHILD-COPY-O.
-
-- [ ] Stubs with today's behaviour: `DirectChildIntent`'s optional `screenTarget` (stored), `WithScreenTarget`, `DirectChildAllocator.With` not yet forwarding it; `ObjectiveScoring.PickMainEffort` returning −1 (the director's shipped choice stands); `DirectChildAllocator.ScreenSecondaryObjectives` doing nothing; the § 6 scenario fixtures 10-12 in `ManeuverFeasibilityFixtures.cs`.
-- [ ] Write the two tests; run; both fail on assertions; `evidence/bc14o/red-first.txt`. Commit `test(battle-core): BC14O red-first tests with today's behaviour stubbed [BC14O]`.
-
-### Task 2 — the objective's value, live
+### Task 1 — the objective's value, live
 
 **Requirements:** requirement-objective-value. **Tests:** OBJ-CAPTURE-CACHE (red today: see it fail first), OBJ-VALUE, OBJ-ALLIANCEPOINTS.
 
 - [ ] `MapObjectiveCapture.Points` and `LiveInHierarchy`, both read live each call by `CaptureMapObjectivesLive` and by `TacticalStableSceneCache`'s cached builder (`gameObject.activeInHierarchy`, not `isActiveAndEnabled`); `ObjectiveScoring.Normalised`, `Value` (`ValueFloor` + `ValueSpan` × `v`, × `OwnHeldFactor` for an own one; 0.5 when no live objective has points); `TacticalVisionRuntimeAdapter` sets `ObjectiveObservationInput.value` from it under the flag.
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): objective value from vanilla's own points, read live [BC14O]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): objective value from vanilla's own points, read live [BC14O]`.
 
-### Task 3 — the victory clock and objective feasibility
+### Task 2 — the victory clock and objective feasibility
 
 **Requirements:** requirement-victory-pressure, requirement-objective-feasibility, requirement-runtime-wiring (its BC14O case). **Tests:** OBJ-PRESSURE, OBJ-THREAT, OBJ-FEASIBILITY, OBJ-PENALTY, FEAS-PIN-O.
 
 - [ ] Failing tests. FEAS-PIN-O scans the BC14O files: `totallosses`, `averagemorale`, `routedratio`, `totalpoints`, `objectivepointsheld` and `alliancepoints` never appear, and `aibattle[` is never indexed.
 - [ ] `ObjectiveScoring.Pressure` (`Behind`, `Ahead`, `Late`, `U`, `H` by the spec's formulas; the shares Σ held live points ÷ max(1, Σ live points), or the accrued `objectivepoints` in continuous mode; `Bar` = `GetVictoryPointsRelation(GetSideFromAlliance(own))`, 0.5 read as even); `Threatened` only from a perceived sample within `ThreatRadiusMeters`; the objective table in the evaluation (at most `MaxObjectives`, from at most `MaxObjectiveMembers` members of the one hypothetical main body; `own` 1 to take, `BaseDefenseRatio + TerrainStrength` to hold; `W` = `AssaultHours`; `Pin` 0; `contested` at `StrikeLegWeight`; `ContestedWeight` 0.6; the works bar with BC14W on, `Bar` with it off). `ObjectiveRuntime` reads it once per evaluation.
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): the victory clock as displayed and each objective's feasibility for the main body [BC14O]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): the victory clock as displayed and each objective's feasibility for the main body [BC14O]`.
 
-### Task 4 — one main effort and its latch
+### Task 3 — one main effort and its latch
 
 **Requirements:** requirement-main-effort-objective (the choice). **Tests:** OBJ-MAIN-EFFORT, OBJ-HYSTERESIS, FEAS-SCN-10, FEAS-SCN-11.
 
 - [ ] `ObjectiveScoring.Score`, `PickMainEffort(table, directorTerms, currentId)` (feasible only; `ObjectiveSwitchMargin` 0.1 on the current; −1 none), `SelectRiskWeight`, `HoldBias`; `TacticalOperationDirector.TryPickBestObjective` through it, an entry without points keeping its shipped score times `(1 + U)` on its value, no `ParallelObjectives` under the flag; `ArmyEvidenceBuilder` gives `DefaultMainEffortSector` the chosen objective's band; `ArmyTickCycle` calls `ArmyOrchestrator.SetObjectiveMainEffort` on a change and skips `ConsiderMainEffortShift`; `ObjectiveLatch` cleared by `Replan`, `ReplanForNewBattleDay` and the objective's deactivation; `Select` uses `SelectRiskWeight` and `HoldBias` (Defensive and Neutral only).
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): one main effort on the best feasible objective, with hysteresis [BC14O]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): one main effort on the best feasible objective, with hysteresis [BC14O]`.
 
-### Task 5 — secondary screens and the screen target's copy
+### Task 4 — secondary screens and the screen target's copy
 
-**Requirements:** requirement-main-effort-objective (the screens). **Tests:** OBJ-SCREEN. **Turns green:** READER-CHILD-COPY-O, FEAS-SCN-12.
+**Requirements:** requirement-main-effort-objective (the screens). **Tests:** OBJ-SCREEN. **Red first (spec list):** READER-CHILD-COPY-O, FEAS-SCN-12.
+
+- [ ] Red first: add `DirectChildIntent`'s optional `screenTarget` (stored) with `WithScreenTarget`, `DirectChildAllocator.With` not yet forwarding it, and `ScreenSecondaryObjectives` doing nothing; write the three tests; see each fail; record the FAIL lines.
 
 - [ ] `DirectChildAllocator.With` forwards the screen target; `ScreenSecondaryObjectives` (after `StabilizeMain`): at most `MaxSecondaryScreens` objectives, one Screen-role child each, the laterally nearest, 150 short of an enemy-held objective on the own side (at it when own-held); never a Main, Fix, Support or Reserve child, a child with player-owned strength or a FocalAssault demonstration; the posture producer moves it there with task `Screen`; the next evaluation leaves it out of its body (`FeasibilityInput.ScreenChildIds`).
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): secondary objectives screened by at most two screen-role children [BC14O]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): secondary objectives screened by at most two screen-role children [BC14O]`.
 
-### Task 6 — the historical chains as a prior, and the chain contest
+### Task 5 — the historical chains as a prior, and the chain contest
 
 **Requirements:** requirement-historical-chain. **Tests:** HIST-PRIOR, OBJ-CHAIN-CONTEST (red today: see it fail first).
 
 - [ ] `ArmyEvidenceBuilder.SelectAiBattleIndexForSide` (pure: the `AIBattle` whose `sideofai` is the side, never the feud instance, never by array position; −1 with no match) and `TryResolveOwnAiBattle` (false on −1, a source pin); the due chains' next objectives (`objectivetimetomove[0] ≤ Hour + 24 × battlepasseddays`, dynamic chains and null entries give none), de-duplicated into `FeasibilityInput.DueChainObjectiveIds`; `HistoricalPriorWeight` 0.3 from the due hour; the player's alliance outside `ai_vs_ai` gets no prior. `MoveContest.Decide` returns `Reissue` for a group with a `LastIssuedMove` under the current plan and a non-hold task whose waypoint moved more than `ContestToleranceMeters` to a point that is not its `LastIssuedMove`, carried with `IntentFlags.Contest`; counted `vanillaChainContest`.
-- [ ] Harness green but the ids owned later. Commit `feat(battle-core): designer chains as a timed prior; vanilla's chain move against a Whiskey move re-issued [BC14O]`.
+- [ ] Harness exits 0. Commit `feat(battle-core): designer chains as a timed prior; vanilla's chain move against a Whiskey move re-issued [BC14O]`.
 
-### Task 7 — runtime wiring, the bind, telemetry, allocation and time proof, docs
+### Task 6 — runtime wiring, the bind, telemetry, allocation and time proof, docs
 
 **Requirements:** requirement-config (BC14O row), requirement-telemetry (BC14O rows), requirement-zero-alloc and requirement-frame-budget (their BC14O cases). **Tests:** FEAS-TIME-O, FEAS-ALLOC-O.
 
@@ -2443,15 +2428,15 @@ Off: today's 0.45 / 0.80 objective values, the director's shipped best-score cho
   with `internal static bool ObjectiveDoctrineEnabled()` returning `ManeuverFeasibilityEnabled() && EnableObjectiveDoctrine.Value`.
 - [ ] The fog rule in `src/WhiskeyRealism/Tactical/AGENTS.md` ("Read enemies only through the snapshot's observations (fog-honest), never vanilla's unfiltered enemy fields."): add "The AI reads the victory bar exactly as the player sees it, `GetVictoryPointsRelation`, and no other aggregate of the enemy's true state: user decision D39, pinned by FEAS-PIN-O." Quick reference "Battle stance + plays" gains: "The main effort goes to the most valuable feasible objective by vanilla's points (BC14O)."
 - [ ] Living docs: `docs/tactical-orchestrator.md` (objective value, pressure, the main effort, screens, chains), `docs/telemetry.md` (the two rows), `docs/tactical-operations-ledger.md` (the main-effort objective and the screens).
-- [ ] Harness: every test passes; build 0/0; config-audit 0. Commit `feat(battle-core): objective doctrine wired, its flag, telemetry and the D39 fog sentence [BC14O]`.
+- [ ] Harness exits 0; build 0/0; config-audit 0. Commit `feat(battle-core): objective doctrine wired, its flag, telemetry and the D39 fog sentence [BC14O]`.
 
-### Task 8 — gates and mutation proof
+### Task 7 — gates and mutation proof
 
-- [ ] The gate list of § BC14 task 18, with `src/WhiskeyRealism/Tactical/Battle/Objectives/{ObjectiveScoring,ObjectiveLatch}.cs` in the clock grep; no writer added.
+- [ ] The gate list of § BC14 task 17, with `src/WhiskeyRealism/Tactical/Battle/Objectives/{ObjectiveScoring,ObjectiveLatch}.cs` in the clock grep; no writer added.
 - [ ] Mutation: every plant of spec § 13.3 in a scratch copy, one at a time, each killed by its named test; `evidence/bc14o/mutation.txt`.
 - [ ] Integrator: merge, deploy and hash-check, smoke items 2.67-2.68, and re-run item 2.60 with the flag on.
 
-PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests.Objectives`, red first for FEAS-SCN-12 and READER-CHILD-COPY-O, OBJ-CAPTURE-CACHE and OBJ-CHAIN-CONTEST red before their code; every § 13.3 plant killed). The harness settles criterion-scenario-outcomes-objectives (FEAS-SCN-10 to FEAS-SCN-12), the bar clause of criterion-fog-honest (FEAS-PIN-O) and criterion-zero-alloc's BC14O case (FEAS-ALLOC-O). Runtime proof is in-game: Session A items 2.67-2.68 (criterion-main-effort-value and its guardrail) and item 2.60 re-run.
+PROVE-MODE: harness for every pure rule (`ManeuverFeasibilityTests.Objectives`, each test red in its task's recorded run before its code, FEAS-SCN-12 and READER-CHILD-COPY-O (the spec's list) included; every § 13.3 plant killed). The harness settles criterion-scenario-outcomes-objectives (FEAS-SCN-10 to FEAS-SCN-12), the bar clause of criterion-fog-honest (FEAS-PIN-O) and criterion-zero-alloc's BC14O case (FEAS-ALLOC-O). Runtime proof is in-game: Session A items 2.67-2.68 (criterion-main-effort-value and its guardrail) and item 2.60 re-run.
 
 ### Smoke watch (BC7 checklist, Session A items 2.67-2.68)
 
