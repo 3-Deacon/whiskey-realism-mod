@@ -45,6 +45,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static readonly IReadOnlyList<CorpsAssignment>[] _lastResult = new IReadOnlyList<CorpsAssignment>[SideCount];
         private static readonly double[] _lastComputeHours = { -1.0, -1.0 };
         private static readonly BattlePlanId[] _lastComputePlan = { BattlePlanId.Unknown, BattlePlanId.Unknown };
+        private static readonly bool[] _lastComputeMirrored = new bool[SideCount];
 
         // ---- Pooled scratch buffers (per-side; cleared per call) ----
         private static readonly List<float>[] _ownXsScratch = { new List<float>(64), new List<float>(64) };
@@ -69,18 +70,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <param name="frontAxis">The side's front axis, the play's heading when
         /// the side sees no enemy (PlayAnchor.EnemyAnchor).</param>
         /// <param name="directChildIds">The side's direct children ("child-&lt;id&gt;"): only they are offered a rect (BC11).</param>
+        /// <param name="mirrored">BC14 requirement-selected-side: the plan's published side. The template is projected mirrored, in the frame the
+        /// feasibility evaluation used, so each rect goes to the child the evaluation timed.</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
             int commandHierarchyShift,
             int childCount,
             TacticalFrontAxis frontAxis,
-            IReadOnlyList<string> directChildIds)
+            IReadOnlyList<string> directChildIds,
+            bool mirrored)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored);
             }
         }
 
@@ -90,7 +94,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int commandHierarchyShift,
             int childCount,
             TacticalFrontAxis frontAxis,
-            IReadOnlyList<string> directChildIds)
+            IReadOnlyList<string> directChildIds,
+            bool mirrored)
         {
             try
             {
@@ -103,7 +108,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // same plan, reuse the cache without reading the snapshot.
                 double now = TacticalDoctrineTime.NowBattleHours;
                 var cachedEarly = _lastResult[allianceId];
-                if (!PlayAnchor.RecomputeDue(cachedEarly != null, _lastComputePlan[allianceId] == planId,
+                if (!PlayAnchor.RecomputeDue(cachedEarly != null, _lastComputePlan[allianceId] == planId && _lastComputeMirrored[allianceId] == mirrored,
                         _lastComputeHours[allianceId], now))
                     return cachedEarly;
 
@@ -131,7 +136,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Build a per-side signature from plan + bucketed centroids +
                 // bucketed corps positions. If unchanged since last call, return
                 // the cached result without recomputing projection/assignment.
-                string sig = BuildSignature(planId, armyX, armyZ, enemyX, enemyZ, corpsPositions);
+                string sig = BuildSignature(planId, mirrored, armyX, armyZ, enemyX, enemyZ, corpsPositions);
                 string lastSig = _lastSignature[allianceId];
                 var cached = _lastResult[allianceId];
                 if (cached != null && string.Equals(sig, lastSig, StringComparison.Ordinal))
@@ -151,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
                     ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
                     : default(TerrainLine);
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.
@@ -164,6 +169,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastResult[allianceId] = assignments;
                 _lastComputeHours[allianceId] = now;
                 _lastComputePlan[allianceId] = planId;
+                _lastComputeMirrored[allianceId] = mirrored;
                 EmitPlayExecutionTelemetry(allianceId, planId, template, assignments, armyX, armyZ, enemyX, enemyZ, frontage);
                 return assignments;
             }
@@ -178,6 +184,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static string BuildSignature(
             BattlePlanId planId,
+            bool mirrored,
             float armyX, float armyZ,
             float enemyX, float enemyZ,
             List<CorpsPosition> corpsPositions)
@@ -185,7 +192,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             // Bucket positions to PositionBucketMeters so jitter doesn't
             // invalidate the cache. Stable ordering: sort corps by ChildId.
             var sb = new System.Text.StringBuilder();
-            sb.Append((int)planId).Append('|');
+            sb.Append((int)planId).Append(mirrored ? 'M' : 'A').Append('|');
             sb.Append((int)(armyX / PositionBucketMeters)).Append(',').Append((int)(armyZ / PositionBucketMeters)).Append('|');
             sb.Append((int)(enemyX / PositionBucketMeters)).Append(',').Append((int)(enemyZ / PositionBucketMeters)).Append('|');
             // Sort corps for stable ordering.
@@ -265,6 +272,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastResult[i] = null;
                 _lastComputeHours[i] = -1.0;
                 _lastComputePlan[i] = BattlePlanId.Unknown;
+                _lastComputeMirrored[i] = false;
             }
             _lastPlayExecutionTelemetryAt.Clear();
             for (int i = 0; i < SideCount; i++) _maneuvers[i].Clear();

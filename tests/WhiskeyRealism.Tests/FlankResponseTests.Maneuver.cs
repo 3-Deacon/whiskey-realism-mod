@@ -689,7 +689,7 @@ internal static partial class FlankResponseTests
     private static void ManeuverPlumbingIsWired()
     {
         string coordinator = SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
-        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);", "the direct children reach CollectOwn");
+        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored);", "the direct children reach CollectOwn");
         AssertPinned(coordinator, "PlayExecutorRuntime.StepManeuvers(", "the coordinator steps the maneuvers each direct-child cycle");
         AssertPinned(coordinator, "side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance", "from the side's evidence and stance");
         AssertPinned(coordinator, "unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash)", "a phase change ticks the ledger gate");

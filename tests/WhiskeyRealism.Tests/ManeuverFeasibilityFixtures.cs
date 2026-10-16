@@ -70,7 +70,10 @@ internal static class ManeuverFeasibilityFixtures
             {
                 var a = Answers[i];
                 if (a.crossing != crossing) continue;
-                if (Math.Abs(a.x0 - x0) > 60f || Math.Abs(a.z0 - z0) > 60f || Math.Abs(a.x1 - x1) > 60f || Math.Abs(a.z1 - z1) > 60f) continue;
+                bool straight = Math.Abs(a.x0 - x0) <= 60f && Math.Abs(a.z0 - z0) <= 60f && Math.Abs(a.x1 - x1) <= 60f && Math.Abs(a.z1 - z1) <= 60f;
+                // A path costs the same walked either way: the route search asks for a link leg from the point side or from the crossing side.
+                bool reversed = Math.Abs(a.x0 - x1) <= 60f && Math.Abs(a.z0 - z1) <= 60f && Math.Abs(a.x1 - x0) <= 60f && Math.Abs(a.z1 - z0) <= 60f;
+                if (!straight && !reversed) continue;
                 cost = a.cost;
                 noPath = a.noPath;
                 return true;
@@ -175,6 +178,8 @@ internal static class ManeuverFeasibilityFixtures
         public Func<float, float, bool> Perceived = (x, z) => true;
         public readonly int ArmyIndex;
         public bool HasAssumedEnemy;
+        /// <summary>The enemy line's lateral half extent when it is stated by the scenario rather than read from the samples.</summary>
+        public float? EnemyHalfExtent;
         /// <summary>Tree indexes of units with a Visible enemy inside the contact distance (the snapshot's perceived contact).</summary>
         public readonly List<int> Contact = new List<int>();
         /// <summary>Enemy unit records that are not observations: units the side does not perceive.</summary>
@@ -182,6 +187,15 @@ internal static class ManeuverFeasibilityFixtures
         public float AssumedEnemyLateral, AssumedEnemyDepth;
 
         private static FeasField _flat;
+
+        /// <summary>A field on the same map as <paramref name="donor"/> (its grid, picture and regions are shared, read-only).</summary>
+        public FeasField(FeasField donor)
+        {
+            Grid = donor.Grid;
+            Picture = donor.Picture;
+            Regions = donor.Regions;
+            ArmyIndex = Tree.Add(TacticalUnitType.BattleGroupArmy, X(0f), Z(-700f), -1, active: false);
+        }
 
         public FeasField(BattleTerrainGrid grid = null)
         {
@@ -300,7 +314,8 @@ internal static class ManeuverFeasibilityFixtures
                 if (lat > emax) emax = lat;
             }
             if (lmin <= lmax) axis = axis.WithOwnExtent(lmin, lmax);
-            if (emin <= emax) axis = axis.WithEnemyExtent(emin, emax);
+            if (EnemyHalfExtent.HasValue) axis = axis.WithEnemyExtent(-EnemyHalfExtent.Value, EnemyHalfExtent.Value);
+            else if (emin <= emax) axis = axis.WithEnemyExtent(emin, emax);
 
             Crossings.Classify(s, Regions, Grid, new FnProbe(Perceived), ShippedReachByType, Now);
             return new FeasibilityInput

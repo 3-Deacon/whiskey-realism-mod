@@ -87,6 +87,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private float _planAgeSeconds;
         private float _historyGlobalOdds;
         private TacticalIntentModel _currentIntentModel;
+        private Plays.IFeasibilityLookup _feasibility;
+        private readonly SelectionReport _selection = new SelectionReport();
 
         public ArmyOrchestrator(int allianceId, TacticalPlaybookCatalog catalog, PersonalityVector commanderPersonality)
             : base(EchelonKind.Army, allianceId)
@@ -106,6 +108,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float PlanAgeSeconds => _planAgeSeconds;
         public float HistoryGlobalOdds => _historyGlobalOdds;
         public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
+
+        /// <summary>BC14: the side's feasibility ledger the next pick reads (null: the shipped selection, unchanged).</summary>
+        public void SetFeasibility(Plays.IFeasibilityLookup lookup) => _feasibility = lookup;
+
 
         private ReplanBaseline _replanBaseline = ReplanBaseline.Initial;
         public ReplanBaseline LastReplanBaseline => _replanBaseline;
@@ -142,7 +148,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _phaseAgeSeconds += deltaSeconds;
         }
 
+        /// <summary>
+        /// The playbooks that reach scoring for this evidence and the side's current effective stance (precondition, stance and crest gates):
+        /// the candidates BC14's feasibility evaluation times before a pick. Returns how many were written.
+        /// </summary>
+        public int EligiblePlans(ArmyEvidence evidence, BattlePlanId[] into)
+            => _catalog == null ? 0 : _catalog.EligiblePlans(BuildPickContext(evidence, 0f), into);
+
         private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
+        {
+            PlaybookContext ctx = BuildPickContext(evidence, opposingCommanderHint);
+            bool envelopmentPressure = ctx.EnvelopmentPressure;
+            var pb = _catalog?.Select(ctx, _selection);
+            if (pb == null)
+            {
+                nextPlan = default;
+                return false;
+            }
+            nextPlan = pb.Instantiate(ctx);
+            // The side the feasibility evaluation scored the winner on goes out with the plan (requirement-selected-side).
+            if (_feasibility != null && _feasibility.TryGet(pb.Id, out Plays.CandidateResult scored)) nextPlan = nextPlan.WithMirrored(scored.Mirrored);
+
+            // Envelopment-active tightening: commit reserves sooner when the
+            // doctrine signaled AttackNow + clear advantage. Caps to the
+            // EnvelopmentReserveCommitOddsCap floor so a playbook that already
+            // commits earlier than the cap (e.g., GenericDesperate=0.9) is not
+            // worsened. Sympathetic to SoW's "all engaged" posture under clear
+            // advantage (offai.cpp:947) without going to full commit.
+            if (envelopmentPressure && nextPlan.ReserveCommitTriggerOdds > EnvelopmentReserveCommitOddsCap)
+            {
+                nextPlan = nextPlan.WithReserveCommitTriggerOdds(EnvelopmentReserveCommitOddsCap);
+            }
+            return true;
+        }
+
+        private PlaybookContext BuildPickContext(ArmyEvidence evidence, float opposingCommanderHint)
         {
             // Envelopment pressure: replan-time read of the latest reinforcement
             // opportunity decision. AttackNow + personality-aware ratio threshold
@@ -252,26 +292,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 delayingDefensePressure: delayingDefensePressure,
                 defensivePressure: defensivePressure,
                 stance: stance,
-                hasCrestLine: evidence.CrestLine.Has);
-            var pb = _catalog?.Select(ctx);
-            if (pb == null)
-            {
-                nextPlan = default;
-                return false;
-            }
-            nextPlan = pb.Instantiate(ctx);
-
-            // Envelopment-active tightening: commit reserves sooner when the
-            // doctrine signaled AttackNow + clear advantage. Caps to the
-            // EnvelopmentReserveCommitOddsCap floor so a playbook that already
-            // commits earlier than the cap (e.g., GenericDesperate=0.9) is not
-            // worsened. Sympathetic to SoW's "all engaged" posture under clear
-            // advantage (offai.cpp:947) without going to full commit.
-            if (envelopmentPressure && nextPlan.ReserveCommitTriggerOdds > EnvelopmentReserveCommitOddsCap)
-            {
-                nextPlan = nextPlan.WithReserveCommitTriggerOdds(EnvelopmentReserveCommitOddsCap);
-            }
-            return true;
+                hasCrestLine: evidence.CrestLine.Has,
+                feasibility: _feasibility);
+            return ctx;
         }
 
         /// <summary>

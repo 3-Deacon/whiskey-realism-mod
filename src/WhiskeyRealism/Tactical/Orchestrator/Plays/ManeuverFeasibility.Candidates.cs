@@ -53,7 +53,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     public static partial class ManeuverFeasibility
     {
         public const int MaxBodies = 6, MaxChildren = 64;
-        public const float RiskyPenalty = 0.35f, StrikeLegWeight = 0.5f;
+        public const float RiskyPenalty = 0.35f, StrikeLegWeight = 0.5f, FeasibilityWeight = 0.4f;
         internal const int MaxRects = 8;
         /// <summary>Slots of the per-plan tables: BattlePlanId values are 0 to 18, with room for the later slices' plans.</summary>
         internal const int PlanSlots = 24;
@@ -164,11 +164,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (!filled) w.WingUnfilled = true;
             }
 
+            int searches = job.Graph.Searches;
             BuildMembers(job, w, assigned);
             ScreenRoutes(job, w);
             PlanTimes(job, w);
             ComputeRisk(job, template, w);
             Conclude(job, w);
+            if (job.Graph.Searches - searches > job.MaxSearchesPerSide) job.MaxSearchesPerSide = job.Graph.Searches - searches;
         }
 
         // ---- members and bodies (requirement-bodies) -----------------------------------------------------------

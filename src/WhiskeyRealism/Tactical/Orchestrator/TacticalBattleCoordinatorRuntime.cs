@@ -1611,7 +1611,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     for (int c = 0; c < childCount; c++)
                         childIds[c] = deployedReserve[c] ? string.Empty : side.Army.CurrentDirectChildIntents[c].ChildId;
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
-                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
                 // BC11 decision 4: the enveloping children's state machines (the doctrine build overrides their nodes).

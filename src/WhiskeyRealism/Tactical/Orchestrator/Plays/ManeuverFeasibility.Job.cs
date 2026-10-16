@@ -79,6 +79,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>How many sides each candidate of the last evaluation was evaluated on (CANDIDATE-CENTRED), by candidate index.</summary>
         internal readonly int[] SidesEvaluated = new int[FeasibilityLedger.MaxCandidates];
 
+        /// <summary>The most path searches one candidate side needed in this evaluation (requirement-frame-budget's counted bound).</summary>
+        internal int MaxSearchesPerSide;
+
         internal readonly CandidateScratch SideA = new CandidateScratch();
         internal readonly CandidateScratch SideB = new CandidateScratch();
 
@@ -124,6 +127,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             PlanCount = Math.Min(Math.Max(input.CandidateCount, 0), FeasibilityLedger.MaxCandidates);
             for (int i = 0; i < PlanCount; i++) Plans[i] = input.Candidates[i];
             Array.Clear(SidesEvaluated, 0, SidesEvaluated.Length);
+            MaxSearchesPerSide = 0;
             NextCandidate = 0;
 
             LegCostCache cache = input.Cache ?? _ownCache;

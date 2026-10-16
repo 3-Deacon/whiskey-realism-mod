@@ -126,9 +126,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool delayingDefensePressure = false,
             bool defensivePressure = false,
             BattleStance stance = BattleStance.Meeting,
-            bool hasCrestLine = false)
+            bool hasCrestLine = false,
+            Plays.IFeasibilityLookup feasibility = null)
         {
             HasCrestLine = hasCrestLine;
+            Feasibility = feasibility;
             CommanderPersonality = commanderPersonality;
             Terrain = terrain;
             CurrentOdds = currentOdds;
@@ -196,6 +198,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <see cref="TacticalPlaybook.RequiresCrest"/> is only eligible when this is set.
         /// </summary>
         public bool HasCrestLine { get; }
+
+        /// <summary>
+        /// BC14: the side's published feasibility ledger (null with Enable Maneuver Feasibility off, or before the first evaluation). The catalog
+        /// skips an Impossible candidate and subtracts <see cref="Plays.ManeuverFeasibility.FeasibilityWeight"/> times the penalty of the rest.
+        /// </summary>
+        public Plays.IFeasibilityLookup Feasibility { get; }
 
         /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry
