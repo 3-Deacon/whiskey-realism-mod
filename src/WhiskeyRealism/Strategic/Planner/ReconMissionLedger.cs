@@ -231,7 +231,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // Sidecar (G6): instance ids are stale after a load; OnReview rebinds them by UnitKey.
+        // Sidecar (G6): instance ids are stale after a load; PlannerRebind.Resolve rebinds them by unit key before this is called (a mission whose formation is gone is dropped).
         public void Restore(IEnumerable<ReconMission> missions)
         {
             _missions.Clear();

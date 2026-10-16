@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -10,13 +11,9 @@ namespace WhiskeyRealism.Strategic
     // (transactional apply — PER-version).
     internal sealed class SidecarSnapshot
     {
-        public CIC[] Cics = new CIC[2];
         public EraStage?[] Eras = new EraStage?[2];
         public DirectorMemory[] DirectorMemories = { new DirectorMemory(), new DirectorMemory() };
-        public int[][] RecentReplans = new int[2][];
-        public OperationalProbeState[] ProbeStates = new OperationalProbeState[2];
         public FiscalStateMemory[] FiscalMemories = { new FiscalStateMemory(), new FiscalStateMemory() };
-        public Dictionary<int, PersonalityVector> MinorOfficers = new Dictionary<int, PersonalityVector>();
         public HashSet<int> FiredEvents = new HashSet<int>();
         public HashSet<int> AppliedEvents = new HashSet<int>();
         // Ids marked fired by the ForceAllSuccessionEvents test flag; never persisted (PER-force).
@@ -25,13 +22,18 @@ namespace WhiskeyRealism.Strategic
         public int LastSeenMonth = -1;
         public int LastSeenYear = -1;
         public long SaveSequence;
-        // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance;
+        // followedcampaignobjective value the objective executor last wrote (ModWrittenObjective), per alliance;
         // null = unknown (sidecar written before the field existed).
         public int?[] ModWrittenObjective = { -1, -1 };
         // Runtime counters that would otherwise restart on every battle round-trip.
         public int[] FrontChangedDay = { -1, -1 };
         public int[] CapitalStreakDay = { -1, -1 };
-        public ProbeHysteresisDto[] ProbeHysteresis = new ProbeHysteresisDto[2];
+        // The campaign planner's state per alliance (sidecar v3); null = a file without it (v1/v2): the planner starts fresh.
+        public PlannerSnapshot[] Planner = new PlannerSnapshot[2];
+        // The version of the file this snapshot was decoded from, and how many saved operational plans (v1/v2 CIC plans) it
+        // dropped; the coordinator logs the migration once.
+        public int SourceVersion = SidecarDto.CurrentVersion;
+        public int PlansDropped;
         // W&L player compliance (PlayerComplianceRuntime); null when none.
         public PlayerComplianceDto PlayerCompliance;
         // W&L campaign courier queue (order flow); null or empty when none.
@@ -139,7 +141,7 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
             dto.Factions = dto.Factions ?? new List<FactionDto>();
-            dto.MinorOfficerProfiles = dto.MinorOfficerProfiles ?? new List<MinorOfficerDto>();
+            if (dto.Version < SidecarDto.CurrentVersion) dto.PlansDropped = CountSavedPlans(json);
             dto.Succession = dto.Succession ?? new SuccessionDto();
             dto.Succession.FiredEvents = dto.Succession.FiredEvents ?? new List<int>();
             dto.Succession.AppliedEvents = dto.Succession.AppliedEvents ?? new List<int>();
@@ -160,34 +162,21 @@ namespace WhiskeyRealism.Strategic
             };
             for (int alliance = 0; alliance < 2; alliance++)
             {
-                var cic = snap.Cics[alliance];
-                var faction = new FactionDto
+                dto.Factions.Add(new FactionDto
                 {
                     FactionId = alliance,
                     FactionName = alliance == 1 ? "CSA" : "Union",
                     CurrentEra = (snap.Eras[alliance] ?? EraStage.Amateur1861).ToString(),
-                    Cic = cic == null ? null : new CICDto
-                    {
-                        OfficerName = cic.OfficerName,
-                        Personality = PersonalityDto.FromVector(cic.OfficerPersonality),
-                        ActivePlan = cic.ActivePlan != null ? PlanToDto(cic.ActivePlan) : null
-                    },
                     DirectorMemory = StrategicResilienceDirector.MemoryToDto(snap.DirectorMemories[alliance]),
-                    ProbeState = ProbeToDto(snap.ProbeStates[alliance]),
                     ModWrittenObjective = snap.ModWrittenObjective[alliance],
                     FrontChangedDay = snap.FrontChangedDay[alliance],
                     CapitalStreakDay = snap.CapitalStreakDay[alliance],
-                    ProbeHysteresis = snap.ProbeHysteresis[alliance],
                     FiscalMemory = FiscalToDto(snap.FiscalMemories[alliance]),
                     PolicyNeeds = snap.PolicyNeeds[alliance],
-                    PolicyPick = snap.PolicyPicks[alliance] >= 0 ? snap.PolicyPicks[alliance] : (int?)null
-                };
-                if (faction.DirectorMemory != null)
-                    faction.DirectorMemory.RecentOperationReplanDaySerials = snap.RecentReplans[alliance];
-                dto.Factions.Add(faction);
+                    PolicyPick = snap.PolicyPicks[alliance] >= 0 ? snap.PolicyPicks[alliance] : (int?)null,
+                    Planner = PlannerToDto(snap.Planner[alliance])
+                });
             }
-            foreach (var kv in snap.MinorOfficers)
-                dto.MinorOfficerProfiles.Add(new MinorOfficerDto { CommanderId = kv.Key, Personality = PersonalityDto.FromVector(kv.Value) });
             foreach (int id in snap.FiredEvents)
                 if (!snap.ForcedEvents.Contains(id)) dto.Succession.FiredEvents.Add(id);
             dto.Succession.FiredEvents.Sort();
@@ -219,31 +208,14 @@ namespace WhiskeyRealism.Strategic
                     if (f == null || f.FactionId < 0 || f.FactionId >= 2) continue;
                     int a = f.FactionId;
                     if (Enum.TryParse<EraStage>(f.CurrentEra, out var era)) result.Eras[a] = era;
-                    if (f.Cic != null)
-                    {
-                        result.Cics[a] = new CIC
-                        {
-                            AllianceId = a,
-                            OfficerName = f.Cic.OfficerName,
-                            OfficerPersonality = f.Cic.Personality?.ToVector() ?? default(PersonalityVector),
-                            ActivePlan = f.Cic.ActivePlan != null ? PlanFromDto(f.Cic.ActivePlan, a) : null
-                        };
-                    }
                     result.DirectorMemories[a] = StrategicResilienceDirector.MemoryFromDto(f.DirectorMemory);
-                    result.RecentReplans[a] = f.DirectorMemory?.RecentOperationReplanDaySerials;
-                    result.ProbeStates[a] = ProbeFromDto(f.ProbeState);
                     result.FiscalMemories[a] = FiscalFromDto(f.FiscalMemory);
                     result.ModWrittenObjective[a] = f.ModWrittenObjective;
                     result.FrontChangedDay[a] = f.FrontChangedDay ?? -1;
                     result.CapitalStreakDay[a] = f.CapitalStreakDay ?? -1;
-                    result.ProbeHysteresis[a] = f.ProbeHysteresis;
                     result.PolicyNeeds[a] = f.PolicyNeeds;
                     result.PolicyPicks[a] = f.PolicyPick ?? -1;
-                }
-                foreach (var m in dto.MinorOfficerProfiles)
-                {
-                    if (m?.Personality == null) continue;
-                    result.MinorOfficers[m.CommanderId] = m.Personality.ToVector();
+                    result.Planner[a] = PlannerFromDto(f.Planner);
                 }
                 result.FiredEvents.UnionWith(dto.Succession.FiredEvents);
                 result.AppliedEvents.UnionWith(dto.Succession.AppliedEvents);
@@ -258,6 +230,8 @@ namespace WhiskeyRealism.Strategic
                 result.LastSeenYear = dto.LastSeenYear ?? -1;
                 result.PlayerCompliance = dto.PlayerCompliance;
                 result.CampaignCouriers = dto.CampaignCouriers;
+                result.SourceVersion = dto.Version;
+                result.PlansDropped = dto.PlansDropped;
                 snap = result;
                 reason = "ok";
                 return true;
@@ -360,125 +334,6 @@ namespace WhiskeyRealism.Strategic
             return false;
         }
 
-        internal static OperationalPlanDto PlanToDto(OperationalPlan p)
-        {
-            var dto = new OperationalPlanDto
-            {
-                OperationId = p.OperationId,
-                OperationName = p.OperationName,
-                OperationTempo = p.OperationTempo.ToString(),
-                OperationPosture = p.OperationPosture.ToString(),
-                OperationStartedDaySerial = p.OperationStartedDaySerial,
-                OperationLastDecisionDaySerial = p.OperationLastDecisionDaySerial,
-                PendingRetarget = p.PendingRetarget,
-                PendingRetargetReason = p.PendingRetargetReason,
-                AssignedTheaterId = p.AssignedTheaterId,
-                CurrentPhaseIndex = p.CurrentPhaseIndex,
-                PlanDeadlineMonth = p.PlanDeadlineMonth,
-                PlanDeadlineYear = p.PlanDeadlineYear,
-                Rationale = p.Rationale,
-                IsDirty = p.IsDirty
-            };
-            foreach (var ph in p.Phases)
-            {
-                if (ph == null) continue;
-                dto.Phases.Add(new PhaseDto
-                {
-                    PhaseId = ph.PhaseId,
-                    PhaseName = ph.PhaseName,
-                    TargetAreaId = ph.TargetAreaId,
-                    TargetObjectiveId = ph.TargetObjectiveId,
-                    TargetAreaKey = ph.TargetAreaKey,
-                    TargetSectorKey = ph.TargetSectorKey,
-                    ForceFractionRequired = ph.ForceFractionRequired,
-                    Transition = ph.Transition.ToString(),
-                    DeadlineMonth = ph.DeadlineMonth,
-                    DeadlineYear = ph.DeadlineYear,
-                    OperationPosture = ph.OperationPosture.ToString(),
-                    AllowCoordinatedAttack = ph.AllowCoordinatedAttack,
-                    AllowReinforcementPackage = ph.AllowReinforcementPackage,
-                    AllowProbeOnly = ph.AllowProbeOnly,
-                    PhaseStartedDaySerial = ph.PhaseStartedDaySerial
-                });
-            }
-            return dto;
-        }
-
-        internal static OperationalPlan PlanFromDto(OperationalPlanDto dto, int allianceId)
-        {
-            var p = new OperationalPlan
-            {
-                CICFactionAllianceId = allianceId,
-                OperationId = dto.OperationId,
-                OperationName = dto.OperationName,
-                OperationStartedDaySerial = dto.OperationStartedDaySerial,
-                OperationLastDecisionDaySerial = dto.OperationLastDecisionDaySerial,
-                PendingRetarget = dto.PendingRetarget,
-                PendingRetargetReason = dto.PendingRetargetReason,
-                AssignedTheaterId = dto.AssignedTheaterId,
-                CurrentPhaseIndex = dto.CurrentPhaseIndex,
-                PlanDeadlineMonth = dto.PlanDeadlineMonth,
-                PlanDeadlineYear = dto.PlanDeadlineYear,
-                Rationale = dto.Rationale,
-                IsDirty = dto.IsDirty
-            };
-            Enum.TryParse<OperationTempoPreset>(dto.OperationTempo, out p.OperationTempo);
-            Enum.TryParse<OperationPosture>(dto.OperationPosture, out p.OperationPosture);
-            if (dto.Phases != null)
-            {
-                foreach (var ph in dto.Phases)
-                {
-                    if (ph == null) continue;
-                    Enum.TryParse<PhaseTransition>(ph.Transition, out var trans);
-                    Enum.TryParse<OperationPosture>(ph.OperationPosture, out var posture);
-                    p.Phases.Add(new Phase
-                    {
-                        PhaseId = ph.PhaseId,
-                        PhaseName = ph.PhaseName,
-                        TargetAreaId = ph.TargetAreaId,
-                        TargetObjectiveId = ph.TargetObjectiveId,
-                        TargetAreaKey = ph.TargetAreaKey,
-                        TargetSectorKey = ph.TargetSectorKey,
-                        ForceFractionRequired = ph.ForceFractionRequired,
-                        Transition = trans,
-                        DeadlineMonth = ph.DeadlineMonth,
-                        DeadlineYear = ph.DeadlineYear,
-                        OperationPosture = posture,
-                        AllowCoordinatedAttack = ph.AllowCoordinatedAttack,
-                        AllowReinforcementPackage = ph.AllowReinforcementPackage,
-                        AllowProbeOnly = ph.AllowProbeOnly,
-                        PhaseStartedDaySerial = ph.PhaseStartedDaySerial,
-                        Fallback = null
-                    });
-                }
-            }
-            // A plan whose phase index no longer fits its phases is unusable: replan.
-            if (p.CurrentPhase == null) p.IsDirty = true;
-            // A historical plan saved under an older catalog (e.g. CSA defense ops aimed at
-            // objective 4 before R5) is replanned instead of steering an outdated target.
-            if (!string.IsNullOrEmpty(p.OperationId) && !MatchesCatalog(p)) p.IsDirty = true;
-            return p;
-        }
-
-        private static bool MatchesCatalog(OperationalPlan plan)
-        {
-            if (!HistoricalOperationCatalog.TryGetById(plan.OperationId, out var profile) || profile.Phases == null)
-                return false;
-            foreach (var phase in plan.Phases)
-            {
-                bool found = false;
-                foreach (var template in profile.Phases)
-                {
-                    if (template == null || !string.Equals(template.PhaseId, phase.PhaseId, StringComparison.Ordinal)) continue;
-                    if (template.TargetObjectiveId != phase.TargetObjectiveId) return false;
-                    found = true;
-                    break;
-                }
-                if (!found) return false;
-            }
-            return true;
-        }
-
         internal static BattleHistoryDto BattleToDto(BattleHistoryRecord record)
         {
             if (record == null) return null;
@@ -529,36 +384,6 @@ namespace WhiskeyRealism.Strategic
             return record;
         }
 
-        private static OperationalProbeStateDto ProbeToDto(OperationalProbeState state)
-        {
-            if (state == null) return null;
-            return new OperationalProbeStateDto
-            {
-                ProbeId = state.ProbeId,
-                UnitKey = state.UnitKey,
-                TargetAreaKey = state.TargetAreaKey,
-                SourceSectorKey = state.SourceSectorKey,
-                StartedDaySerial = state.StartedDaySerial,
-                LastObservedEnemyStrength = state.LastObservedEnemyStrength,
-                LastObservedFriendlyStrength = state.LastObservedFriendlyStrength
-            };
-        }
-
-        private static OperationalProbeState ProbeFromDto(OperationalProbeStateDto dto)
-        {
-            if (dto == null || string.IsNullOrEmpty(dto.UnitKey)) return null;
-            return new OperationalProbeState
-            {
-                ProbeId = dto.ProbeId,
-                UnitKey = dto.UnitKey,
-                TargetAreaKey = dto.TargetAreaKey,
-                SourceSectorKey = dto.SourceSectorKey,
-                StartedDaySerial = dto.StartedDaySerial,
-                LastObservedEnemyStrength = dto.LastObservedEnemyStrength,
-                LastObservedFriendlyStrength = dto.LastObservedFriendlyStrength
-            };
-        }
-
         private static FiscalMemoryDto FiscalToDto(FiscalStateMemory memory)
         {
             if (memory == null) return null;
@@ -578,6 +403,140 @@ namespace WhiskeyRealism.Strategic
             memory.StableTicksAboveEmergency = dto.StableTicksAboveEmergency;
             memory.EmergencyResidue = dto.EmergencyResidue;
             return memory;
+        }
+
+        // The v1/v2 files' saved operational plans (factions[].cic.activePlan), for the migration line. Never throws.
+        private static int CountSavedPlans(string json)
+        {
+            try
+            {
+                int plans = 0;
+                var factions = Newtonsoft.Json.Linq.JObject.Parse(json)["factions"] as Newtonsoft.Json.Linq.JArray;
+                if (factions == null) return 0;
+                foreach (var faction in factions)
+                {
+                    // A faction whose "cic" is null (or not an object) holds no plan; it must not end the count.
+                    var cic = (faction as Newtonsoft.Json.Linq.JObject)?["cic"] as Newtonsoft.Json.Linq.JObject;
+                    var plan = cic?["activePlan"];
+                    if (plan != null && plan.Type != Newtonsoft.Json.Linq.JTokenType.Null) plans++;
+                }
+                return plans;
+            }
+            catch { return 0; }
+        }
+
+        // ---- the campaign planner's state (sidecar v3) ----
+
+        internal static PlannerStateDto PlannerToDto(PlannerSnapshot p)
+        {
+            if (p == null) return null;
+            var s = p.State ?? new PlannerState();
+            var dto = new PlannerStateDto
+            {
+                CurrentMainSector = s.CurrentMainSector,
+                CurrentMainObjective = s.CurrentMainObjective,
+                ChallengerObjective = s.ChallengerObjective,
+                ChallengerDays = s.ChallengerDays,
+                DecisionSerial = s.DecisionSerial,
+                CampaignSeed = s.CampaignSeed,
+                BelowOddsDays = s.BelowOddsDays,
+                CapitalThreatLatched = s.CapitalThreatLatched,
+                TempoReleasedDecision = s.TempoReleasedDecision,
+                LastFullReviewDay = s.LastFullReviewDay,
+                UnreliableDays = p.UnreliableDays,
+                UnreliableLastDay = p.UnreliableLastDay
+            };
+            foreach (var b in p.Beliefs)
+            {
+                if (string.IsNullOrEmpty(b.UnitKey)) continue;
+                dto.Beliefs.Add(new EnemyBeliefDto
+                {
+                    UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
+                    LastSeenDay = b.LastSeenDay, Confidence = b.Confidence01, Radius = b.UncertaintyRadius,
+                    Source = (int)b.LastSource, Traits = (int)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
+                });
+            }
+            foreach (var a in p.Appointments)
+                dto.Appointments.Add(new AppointmentDto { CommanderId = a.Key, ProtectedUntilDay = a.Value });
+            foreach (var d in p.DepotTasks)
+                dto.DepotTasks.Add(new DepotTaskDto
+                {
+                    X = d.X, Z = d.Z, SectorId = d.SectorId, BuilderUnitKey = d.BuilderUnitKey, State = d.State.ToString(),
+                    StartedDay = d.StartedDay, EndedDay = d.EndedDay, WishX = d.WishX, WishZ = d.WishZ
+                });
+            foreach (var m in p.Moves)
+            {
+                if (string.IsNullOrEmpty(m.UnitKey)) continue;
+                dto.Moves.Add(new MoveDto { UnitKey = m.UnitKey, TargetX = m.TargetX, TargetZ = m.TargetZ, IssuedDay = m.IssuedDay, Retries = m.Retries, ObjectiveId = m.ObjectiveId });
+            }
+            foreach (var m in p.ReconMissions)
+            {
+                if (string.IsNullOrEmpty(m.UnitKey)) continue;
+                dto.ReconMissions.Add(new ReconMissionDto
+                {
+                    MissionId = m.MissionId, Kind = m.Kind.ToString(), UnitKey = m.UnitKey, HoldX = m.HoldX, HoldZ = m.HoldZ, SectorId = m.SectorId,
+                    State = m.State.ToString(), IssuedDay = m.IssuedDay, LastContactDay = m.LastContactDay, Reason = m.Reason,
+                    ObservedEnemyStrength = m.ObservedEnemyStrength, ObservedObjectiveId = m.ObservedObjectiveId,
+                    StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
+                });
+            }
+            return dto;
+        }
+
+        // A record without the identity it needs (a belief or a move with no unit key) is skipped; an unknown enum name decodes to
+        // the enum's default.
+        internal static PlannerSnapshot PlannerFromDto(PlannerStateDto dto)
+        {
+            if (dto == null) return null;
+            var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
+            p.State.Restore(dto.CurrentMainSector, dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
+                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay);
+            if (dto.Beliefs != null)
+                foreach (var b in dto.Beliefs)
+                {
+                    if (b == null || string.IsNullOrEmpty(b.UnitKey)) continue;
+                    p.Beliefs.Add(new EnemyBelief
+                    {
+                        InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
+                        LastSeenDay = b.LastSeenDay, Confidence01 = b.Confidence, UncertaintyRadius = b.Radius,
+                        LastSource = (DetectionSource)b.Source, Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
+                    });
+                }
+            if (dto.Appointments != null)
+                foreach (var a in dto.Appointments)
+                    if (a != null && a.CommanderId >= 0) p.Appointments.Add(new KeyValuePair<int, int>(a.CommanderId, a.ProtectedUntilDay));
+            if (dto.DepotTasks != null)
+                foreach (var d in dto.DepotTasks)
+                {
+                    if (d == null) continue;
+                    Enum.TryParse<DepotTaskState>(d.State, out var state);
+                    p.DepotTasks.Add(new DepotTaskRecord
+                    {
+                        X = d.X, Z = d.Z, SectorId = d.SectorId, BuilderInstanceId = -1, BuilderUnitKey = d.BuilderUnitKey, State = state,
+                        StartedDay = d.StartedDay, EndedDay = d.EndedDay, WishX = d.WishX, WishZ = d.WishZ
+                    });
+                }
+            if (dto.Moves != null)
+                foreach (var m in dto.Moves)
+                {
+                    if (m == null || string.IsNullOrEmpty(m.UnitKey)) continue;
+                    p.Moves.Add(new MoveRecord { InstanceId = -1, UnitKey = m.UnitKey, TargetX = m.TargetX, TargetZ = m.TargetZ, IssuedDay = m.IssuedDay, Retries = m.Retries, ObjectiveId = m.ObjectiveId });
+                }
+            if (dto.ReconMissions != null)
+                foreach (var m in dto.ReconMissions)
+                {
+                    if (m == null || string.IsNullOrEmpty(m.UnitKey)) continue;
+                    Enum.TryParse<ReconKind>(m.Kind, out var kind);
+                    Enum.TryParse<ReconState>(m.State, out var state);
+                    p.ReconMissions.Add(new ReconMission
+                    {
+                        MissionId = m.MissionId, Kind = kind, InstanceId = -1, UnitKey = m.UnitKey, HoldX = m.HoldX, HoldZ = m.HoldZ, SectorId = m.SectorId,
+                        State = state, IssuedDay = m.IssuedDay, LastContactDay = m.LastContactDay, Reason = m.Reason,
+                        ObservedEnemyStrength = m.ObservedEnemyStrength, ObservedObjectiveId = m.ObservedObjectiveId,
+                        StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
+                    });
+                }
+            return p;
         }
 
         private static void CopyList<T>(List<T> source, T[] target)

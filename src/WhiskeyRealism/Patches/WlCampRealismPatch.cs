@@ -500,7 +500,7 @@ namespace WhiskeyRealism.Patches
             if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(5);
             if (!campaignGroup.inbattle)
             {
-                Regiment closestEnemy = campaignGroup.GetClosestEnemyUnitReg(campaignGroup.commanderrange);
+                Regiment closestEnemy = campaignGroup.GetClosestEnemyUnitReg(campaignGroup.commanderrange); // player diary pre-flight, not a decision
                 if (UnityAlive(closestEnemy)) closestEnemy.GetCommanderNameAndUnit();
                 return MarkDiaryCycleReady(5);
             }

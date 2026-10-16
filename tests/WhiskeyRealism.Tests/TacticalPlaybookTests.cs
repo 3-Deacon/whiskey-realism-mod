@@ -38,7 +38,6 @@ internal static class TacticalPlaybookTests
             ("play corps assignment skips rects with no available corps", PlayCorpsAssignmentSkipsRectsWithNoAvailableCorps),
             ("play rect kind to role maps correctly", PlayRectKindToRoleMapsCorrectly),
             ("csa coherent outnumbered division delays instead of retreating", CsaCoherentOutnumberedDivisionDelays),
-            ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
@@ -139,34 +138,6 @@ internal static class TacticalPlaybookTests
         AssertEqual(CommandTaskType.SupportAttack, PlayOrderFor(decision, "idle-support").Task, "idle support receives play slot");
     }
 
-    private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
-    {
-        var hard = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-            overrideVanillaSettings: true,
-            lockedDifficultyIndex: 3);
-
-        AssertEqual(0f, hard.Aggression);
-        AssertEqual(0f, hard.Caution);
-        AssertEqual(0f, hard.Audacity);
-        AssertEqual(0.10f, hard.CasualtyTolerance);
-        AssertEqual(0f, hard.PoliticalResponsiveness);
-
-        var disabled = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-            overrideVanillaSettings: false,
-            lockedDifficultyIndex: 3);
-        AssertEqual(0f, disabled.CasualtyTolerance);
-
-        var veryHard = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-            overrideVanillaSettings: true,
-            lockedDifficultyIndex: 4);
-        AssertEqual(0f, veryHard.CasualtyTolerance);
-
-        var outOfRange = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-            overrideVanillaSettings: true,
-            lockedDifficultyIndex: 99);
-        AssertEqual(0f, outOfRange.CasualtyTolerance);
-    }
-
     private static void CsaCoherentOutnumberedDivisionDelays()
     {
         var snap = Snapshot("csa-delay", 1, 14, 6000f, 14000f, FormationLevel.Corps, FrontPosture.Delay);
@@ -177,7 +148,6 @@ internal static class TacticalPlaybookTests
         var assignment = ledger.GetAssignment("csa-delay");
 
         AssertEqual(FormationDirective.Delay, assignment.Directive);
-        AssertEqual(false, assignment.OffensiveAllowed);
         AssertEqual(true, assignment.DefensiveAllowed);
     }
 

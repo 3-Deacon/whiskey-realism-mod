@@ -14,21 +14,14 @@ internal static class CampaignMilitaryFixTests
         ArmyGroupManagementRepeatsVanillaGuard();
         CommanderNameMatchDisambiguatesHistoricalSurnames();
         CommanderNameMatchFallsBackToExactSurname();
-        ArmyGroupCommanderEligibilityMirrorsVanilla();
         ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange();
-        ArmyGroupAppointsOnlyOnGroupHoldingPlanUnits();
+        ArmyGroupFullOwnGroupTakesNoMore();
         StalePreviousCommandIsRefilledNotOrphaned();
         SuccessionReseatsReplacementsOldArmyGroup();
         CapitalNeedMatchesVanillaFormula();
-        AreaOrderSkipsEveryVanillaBusyAssignment();
         CoastalInterceptKeepsEnemyInsideBugleRange();
         CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose();
         CoastalAssignmentsCarryForwardWhileHeld();
-        CoordinatedSingleLeadNeedsReinforceRatio();
-        CoordinatedOffensiveMirrorsVanillaEarlyOuts();
-        CoordinatedOffensiveTempoGateMatchesVanilla();
-        CoordinatedTempoErrorLeavesVanillaUntouched();
-        CoordinatedPackageLockExpiresWithPath();
     }
 
     private static void LogPass(string message)
@@ -128,18 +121,6 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a commander name match falls back to exact surname token");
     }
 
-    // FindPreferredCommander must use vanilla Commander.CanBePickedForAIReplacement
-    // (decompile 60748: alliance, IsAvailable, not serving under player, not
-    // staff, not already army-group commander, not CIC) and skip the W&L avatar.
-    private static void ArmyGroupCommanderEligibilityMirrorsVanilla()
-    {
-        TestHarness.AssertTrue(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, true), "vanilla-pickable, commands a member unit");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(false, false, true), "vanilla says not pickable");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, true, true), "W&L chosen commander");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, false), "commands an unrelated formation");
-        LogPass("c2a army group commander eligibility mirrors vanilla replacement filter");
-    }
-
     // vanilla GetArmyGroupInRange (75631) skips the W&L player's group; capacity
     // (CanAddFurtherUnits 75770) gates attaching only.
     private static void ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange()
@@ -150,25 +131,21 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a army group player exclusion mirrors GetArmyGroupInRange");
     }
 
-    // M3: the group the plan's units attach to and the group whose commander is
-    // changed are different questions. A full own group must not divert the
-    // appointment onto an unrelated group found in range.
-    private static void ArmyGroupAppointsOnlyOnGroupHoldingPlanUnits()
+    // The sector's formations join the army group already holding one of them while it has room; a full own
+    // group takes no more and nothing else is done (the planner's appointment executor owns commanders), and a
+    // group in range of the sector never takes over from a full own group.
+    private static void ArmyGroupFullOwnGroupTakesNoMore()
     {
-        TestHarness.AssertEqual(ArmyGroupPlanAction.AppointOwnOnly,
+        TestHarness.AssertEqual(ArmyGroupPlanAction.None,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(ownGroupFound: true, ownGroupHasRoom: false, areaGroupFound: true),
-            "full own group + unrelated group in range -> appoint on own group only");
+            "full own group + unrelated group in range -> nothing");
         TestHarness.AssertEqual(ArmyGroupPlanAction.AttachToOwn,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(true, true, true), "own group with room");
         TestHarness.AssertEqual(ArmyGroupPlanAction.AttachToArea,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(false, false, true), "no own group -> join area group");
         TestHarness.AssertEqual(ArmyGroupPlanAction.CreateNew,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(false, false, false), "nothing in range -> create");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AttachToArea, 0), "area group with none of our units attached -> no appointment");
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AttachToArea, 1), "area group now holds a plan unit");
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AppointOwnOnly, 0), "own group holds plan units");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.None, 0), "no action");
-        LogPass("c2a army group appoints only on a group holding plan units");
+        LogPass("c2a army group: a full own group takes no more and nothing else");
     }
 
     // CommanderAssignmentPreviousCommandPatch set prior.commander = -1, leaving a
@@ -210,31 +187,6 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a capital need matches vanilla num2 formula");
     }
 
-    // C-ArmyArea: IsIdleForAreaOrder only excluded battle/retreat/paths and the
-    // two operation lists, so capital defenders, depot/fort builders, raid and
-    // sea-invasion forces were sent "home" and vanilla sent them back: ping-pong.
-    // The busy set mirrors vanilla's own exclusions (IsUnitAvailableForOffensive
-    // Operations 14080, AssignUnitToDefendCapital 11800).
-    private static void AreaOrderSkipsEveryVanillaBusyAssignment()
-    {
-        TestHarness.AssertTrue(CampaignMilitaryGates.IsIdleForAreaOrder(new AreaOrderBusyFlags()), "idle unit");
-        string[] names =
-        {
-            "InBattle", "OnRetreat", "HasPaths", "InOffensiveOperation", "InDefensiveOperation",
-            "DefendingCapital", "BuildingSupplyDepot", "BuildingFort", "RaidForce", "SeaInvasionForce",
-            "DefensiveOrderQueued", "TakingTown"
-        };
-        foreach (var name in names)
-        {
-            object flags = new AreaOrderBusyFlags();
-            var field = typeof(AreaOrderBusyFlags).GetField(name);
-            TestHarness.AssertTrue(field != null, "flag " + name + " exists");
-            field.SetValue(flags, true);
-            TestHarness.AssertFalse(CampaignMilitaryGates.IsIdleForAreaOrder((AreaOrderBusyFlags)flags), name + " blocks area orders");
-        }
-        LogPass("c2a area order skips every vanilla busy assignment");
-    }
-
     // C-Coastal: vanilla CheckForEndOfDefensiveOperations (decompile 13836) stops
     // and drops a defensive-op unit once no enemy is within its buglerange of its
     // last path position. Ordering coastal guards onto the asset itself meant a
@@ -256,97 +208,6 @@ internal static class CampaignMilitaryFixTests
         CampaignMilitaryGates.CoastalInterceptPoint(10f, 5f, 10f, 5f, 0f, out x, out z);
         TestHarness.AssertEqual(10f, x, "degenerate bugle range keeps anchor");
         LogPass("c2a coastal intercept holds the anchor when enemy already close");
-    }
-
-    // C-CoordOff -------------------------------------------------------------
-    private static CoordinatedOperationCandidate Candidate(int id, float strength)
-    {
-        return new CoordinatedOperationCandidate
-        {
-            StableUnitId = id,
-            DisplayUnitKey = "unit-" + id,
-            AllianceId = 1,
-            Level = FormationLevel.Corps,
-            Directive = FormationDirective.Counterstroke,
-            AreaKey = "VirginiaCapitalCorridor",
-            SectorKey = "VirginiaCapitalCorridor",
-            CombatAvailability = strength,
-            Readiness = 0.8f,
-            Morale = 0.8f,
-            Ammo = 0.8f,
-            Supply = 0.8f,
-            OffensiveAllowed = true,
-            DefensiveAllowed = true,
-            DirectMovementAllowed = true,
-            CommitMode = CoordinatedCommitMode.DirectMovement
-        };
-    }
-
-    // Any eligible lead became SingleLead at any ratio ("single-committable-lead").
-    private static void CoordinatedSingleLeadNeedsReinforceRatio()
-    {
-        var input = new CoordinatedOperationInput
-        {
-            AllianceId = 1,
-            Intent = CoordinatedOperationIntent.Attack,
-            TargetAreaKey = "VirginiaCapitalCorridor",
-            TargetSectorKey = "VirginiaCapitalCorridor",
-            TargetEnemyStrength = 20000f,
-            Options = CoordinatedOperationOptions.StableDefaults(20000f),
-            Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 5000f) }
-        };
-        var weak = CoordinatedOperationPackageLedger.Build(input);
-        TestHarness.AssertEqual(CoordinatedOperationDecision.Delay, weak.Decision, "0.25 ratio lone lead must not attack");
-
-        input.Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 18000f) };
-        var adequate = CoordinatedOperationPackageLedger.Build(input);
-        TestHarness.AssertEqual(CoordinatedOperationDecision.SingleLead, adequate.Decision, "0.9 ratio lone lead may commit");
-
-        // OperationalProbeLedger probes are deliberately small contact-making
-        // packages; the ratio gate is for attack/reinforce commitments only.
-        input.Intent = CoordinatedOperationIntent.Probe;
-        input.Candidates = new System.Collections.Generic.List<CoordinatedOperationCandidate> { Candidate(10, 5000f) };
-        var probe = CoordinatedOperationPackageLedger.Build(input);
-        TestHarness.AssertEqual(CoordinatedOperationDecision.SingleLead, probe.Decision, "probe lead commits below reinforce ratio");
-        LogPass("c2a coordinated single lead needs the reinforce ratio");
-    }
-
-    // vanilla CheckOffensiveMovements early return (decompile 14200).
-    private static void CoordinatedOffensiveMirrorsVanillaEarlyOuts()
-    {
-        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, false, false), "normal call");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(0, 0.1f, true, true, true, false, false, false), "no own units");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0f, true, true, true, false, false, false), "timediff <= 0");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, false, true, true, false, false, false), "null lead");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, false, true, false, false, false), "inactive lead");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, false, false, false, false), "recruitingzonesupdated false: one commit per job cycle");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, true, false, false), "lead already in offensive op");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, true, false), "lead in defensive op");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.VanillaWouldEvaluate(5, 0.1f, true, true, true, false, false, true), "lead building depot");
-        LogPass("c2a coordinated offensive mirrors vanilla early outs");
-    }
-
-    // vanilla tempo roll (14336-14350): the probability arithmetic moved to CampaignTempoGate (G5a,
-    // CampaignTempoGateTests); what stays here is the target weight and the pass test of #38's mirror.
-    private static void CoordinatedOffensiveTempoGateMatchesVanilla()
-    {
-        // num2 at the TARGET area (14230): enemy strength * avgtroopmorale * importance * weapon / national morale factor
-        float num2 = CoordinatedOffensiveVanillaGates.TargetEnemyWeight(1000f, 0.8f, 2f, 0.5f, 2f);
-        TestHarness.AssertTrue(Math.Abs(400f - num2) < 1e-3f, "vanilla num2 (1000*0.8*2*0.5/2), got " + num2);
-        TestHarness.AssertEqual(0f, CoordinatedOffensiveVanillaGates.TargetEnemyWeight(0f, 0.8f, 2f, 0.5f, 2f), "no enemy -> no roll");
-        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.05f, 0.1f, false), "roll under tval goes");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.TempoPasses(0.5f, 0.1f, false), "roll over tval waits");
-        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.TempoPasses(0.99f, 0f, true), "scripted/debug forcing always goes");
-        LogPass("c2a coordinated offensive tempo gate matches vanilla");
-    }
-
-    // Package locks protect only units placed in unitsinoffensiveoperations; a
-    // W&L current-order commit never enters that list, so its lock never cleared.
-    private static void CoordinatedPackageLockExpiresWithPath()
-    {
-        TestHarness.AssertTrue(CoordinatedOperationRuntime.PackageLockLive(3), "path still running keeps lock");
-        TestHarness.AssertFalse(CoordinatedOperationRuntime.PackageLockLive(0), "path consumed expires lock");
-        LogPass("c2a coordinated package lock expires once the path is consumed");
     }
 
     // Vanilla seats historical figures on auto-created army groups early
@@ -412,14 +273,4 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a forbidden defensive commit revert matches how vanilla moved");
     }
 
-    // Re-review: only a real failed roll ends the call (ownunits emptied so
-    // vanilla does not roll twice); a tempo-gate exception must let vanilla run
-    // unchanged, and a pass proceeds to commit.
-    private static void CoordinatedTempoErrorLeavesVanillaUntouched()
-    {
-        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Wait), "failed roll ends the call");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Error), "gate error: vanilla runs unchanged");
-        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Go), "pass proceeds to commit");
-        LogPass("c2a coordinated tempo error leaves vanilla untouched");
-    }
 }

@@ -44,7 +44,6 @@ internal static class WlCampaignTests
             ("wl dispatch sanitizer leaves normal content unchanged", WlDispatchSanitizerLeavesNormalContentUnchanged),
             ("wl bridge inactive allows direct movement", WlBridgeInactiveAllowsDirectMovement),
             ("wl bridge null tryissue fails closed", WlBridgeNullTryIssueFailsClosed),
-            ("wl bridge null classify fails closed", WlBridgeNullClassifyFailsClosed),
             ("wl bridge non-player alliance allows direct movement", WlBridgeNonPlayerAllianceAllowsDirectMovement),
             ("wl bridge report only under wl player alliance blocks movement", WlBridgeReportOnlyUnderWlPlayerAllianceBlocksMovement),
             ("wl bridge report only inactive stays not wl", WlBridgeReportOnlyInactiveStaysNotWl),
@@ -412,13 +411,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayMutateOperationList);
     }
 
-    private static void WlBridgeNullClassifyFailsClosed()
-    {
-        var decision = WlStrategicOrderBridge.ClassifyOnly(null);
-        AssertEqual(WlStrategicOrderResult.InvalidRequest, decision.Result);
-        AssertEqual(false, decision.MayDirectMove);
-        AssertEqual(false, decision.MayMutateOperationList);
-    }
     private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
     {
         var decision = WlStrategicOrderBridge.Classify(
@@ -948,7 +940,6 @@ internal static class WlCampaignTests
             ("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
             ("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "for (int i = defOps.Count - 1; i >= 0; i--)", true),
             ("src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs", "foreach (var candidate in response.SelectedPackage)", true),
-            ("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "if (output.Decision == OperationalProbeDecision.Pause ||", false),
         })
         {
             string text = File.ReadAllText(FindRepoPath(path));

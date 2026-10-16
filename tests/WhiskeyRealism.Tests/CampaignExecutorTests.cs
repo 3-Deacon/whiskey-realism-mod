@@ -41,7 +41,7 @@ internal static class CampaignExecutorTests
             ("PlannerFactionMapReadsTheAllianceNotTheIndex", PlannerFactionMapReadsTheAllianceNotTheIndex),
             ("MoverDispatchesTheRolesInPriorityOrder", MoverDispatchesTheRolesInPriorityOrder),
             ("MoverListsMainEffortAndSupportInTheOffensiveList", MoverListsMainEffortAndSupportInTheOffensiveList),
-            ("MoverSkipsBusyLockedAndArrivedFormations", MoverSkipsBusyLockedAndArrivedFormations),
+            ("MoverSkipsBusyAndArrivedFormations", MoverSkipsBusyAndArrivedFormations),
             ("MoverSkipsARestrictedTarget", MoverSkipsARestrictedTarget),
             ("MoverQueuesBehindARunningOrder", MoverQueuesBehindARunningOrder),
             ("MoverJudgesLastReviewsMovesFirst", MoverJudgesLastReviewsMovesFirst),
@@ -69,7 +69,6 @@ internal static class CampaignExecutorTests
             ("SteeringRuntimeStatementsPinned", SteeringRuntimeStatementsPinned),
             ("AvailabilityPatchesPinned", AvailabilityPatchesPinned),
             ("ImportancePatchPinned", ImportancePatchPinned),
-            ("PickObjectiveStandsDownForTheExecutors", PickObjectiveStandsDownForTheExecutors),
             ("ReviewExecuteWiringPinned", ReviewExecuteWiringPinned),
             ("ReviewPlanStampsTheClockAndPublishesTheContext", ReviewPlanStampsTheClockAndPublishesTheContext),
             ("TempoWorldReadsVanillasInputs", TempoWorldReadsVanillasInputs),
@@ -683,13 +682,12 @@ internal static class CampaignExecutorTests
         AssertTrue(host.Listed.TrueForAll(l => l.listed), "added, never removed, by a dispatch");
     }
 
-    private static void MoverSkipsBusyLockedAndArrivedFormations()
+    private static void MoverSkipsBusyAndArrivedFormations()
     {
         var s = ExecutorFixtures.Wide();
         var busy = ExecutorFixtures.Corps(1, 350f, 9000f);
         busy.Flags |= FormationFlags.InBattle;
         s.Own.Add(busy);
-        s.Own.Add(ExecutorFixtures.Corps(2, 360f, 9000f));
         var arrived = ExecutorFixtures.Corps(3, 99f, 9000f);
         s.Own.Add(arrived);
         var underway = ExecutorFixtures.Corps(4, 400f, 9000f);
@@ -698,14 +696,13 @@ internal static class CampaignExecutorTests
         var defending = ExecutorFixtures.Corps(5, 370f, 9000f);
         defending.Flags |= FormationFlags.InDefensiveOps;
         s.Own.Add(defending);
-        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2, 3, 4, 5 });
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 3, 4, 5 });
         var a = new Allocation { Alliance = 0 };
-        for (int id = 1; id <= 5; id++) a.Assignments.Add(ExecutorFixtures.Assign(id, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
+        foreach (int id in new[] { 1, 3, 4, 5 }) a.Assignments.Add(ExecutorFixtures.Assign(id, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
         var host = new FakeMoverHost();
-        host.Locked.Add(2);
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
-        AssertEqual(0, host.Moves.Count, "busy, package-locked, arrived, underway and defending formations are not moved");
-        AssertEqual(3, tally.SkippedBusy, "busy, locked and in a vanilla defensive operation are counted as skipped");
+        AssertEqual(0, host.Moves.Count, "busy, arrived, underway and defending formations are not moved");
+        AssertEqual(2, tally.SkippedBusy, "busy and in a vanilla defensive operation are counted as skipped");
     }
 
     private static void MoverSkipsARestrictedTarget()
@@ -1124,8 +1121,8 @@ internal static class CampaignExecutorTests
 
     private static void ObjectiveWriteOnlyWhenChanged()
     {
-        AssertEqual(CampaignObjectiveSteering.NoWrite, SteeringRules.ObjectiveWrite(5, true, 5, 5), "already followed: no write");
-        AssertEqual(CampaignObjectiveSteering.NoWrite, SteeringRules.ObjectiveWrite(5, true, 5, -1), "already followed (vanilla's own pick equal to the plan's): no write");
+        AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(5, true, 5, 5), "already followed: no write");
+        AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(5, true, 5, -1), "already followed (vanilla's own pick equal to the plan's): no write");
         AssertEqual(5, SteeringRules.ObjectiveWrite(5, true, 3, 3), "a different objective is replaced");
         AssertEqual(5, SteeringRules.ObjectiveWrite(5, true, -1, -1), "nothing followed yet");
         AssertEqual(5, SteeringRules.ObjectiveWrite(5, true, 12, -1), "a vanilla pick is overridden by the plan's main objective (spec C6)");
@@ -1134,10 +1131,10 @@ internal static class CampaignExecutorTests
     private static void ObjectiveResetOnlyWhenModWritten()
     {
         AssertEqual(-1, SteeringRules.ObjectiveWrite(-1, false, 5, 5), "no main effort and the mod wrote it: reset so vanilla re-picks (17780-17786)");
-        AssertEqual(CampaignObjectiveSteering.NoWrite, SteeringRules.ObjectiveWrite(-1, false, 5, 7), "vanilla's own pick is left alone");
-        AssertEqual(CampaignObjectiveSteering.NoWrite, SteeringRules.ObjectiveWrite(-1, false, -1, 5), "nothing followed: nothing to reset");
+        AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(-1, false, 5, 7), "vanilla's own pick is left alone");
+        AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(-1, false, -1, 5), "nothing followed: nothing to reset");
         AssertEqual(-1, SteeringRules.ObjectiveWrite(5, false, 5, 5), "a main objective vanilla no longer offers is not followed: reset what the mod wrote");
-        AssertEqual(CampaignObjectiveSteering.NoWrite, SteeringRules.ObjectiveWrite(5, false, 9, 5), "...and only that");
+        AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(5, false, 9, 5), "...and only that");
     }
 
     private static void ImportanceRedirectOnlyForMainOrSupportSectors()
@@ -1207,21 +1204,19 @@ internal static class CampaignExecutorTests
     {
         // The host's move half is VanillaMoveHost (G5d shares it with the recon executor): the pins follow it.
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
-        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy,"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
+        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
-        AssertTrue(HasLine(src, "SourceSystem = \"campaign-planner\""), "the dispatch names its source");
         AssertTrue(HasLine(src, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
         AssertFalse(src.Contains("EnterMoveSource"), "G5a does not call EnterMoveSource: stage F's Postfix types the march by list membership");
-        AssertTrue(HasLine(src, "if (CoordinatedOperationRuntime.IsPackageLocked(unit)) return true;"), "the mover refuses #38's locked packages until G6 deletes them (P10)");
+        AssertFalse(src.Contains("IsPackageLocked") || src.Contains("CoordinatedOperation"), "the old package layer is gone (G6): the mover refuses nothing on its account");
         AssertTrue(HasLine(src, "unit.userails = true;"), "vanilla's AI default for rails (112862-112867)");
         AssertTrue(HasLine(src, "unit.userivers = true;"), "...and rivers");
-        AssertTrue(HasLine(src, "AifactionIndex = _faction,") || HasLine(src, "AifactionIndex = faction,"), "the dispatch carries the faction index (OperationalProbeRuntime's shape)");
     }
 
     private static void SteeringRuntimeStatementsPinned()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSteeringRuntime.cs");
-        AssertTrue(HasLine(src, "PickCampaignObjectivePatch.NoteWrittenByMod(alliance, write);"), "the mod-written value goes through PickCampaignObjectivePatch's statics (still persisted by the coordinator at 1911/1957)");
+        AssertTrue(HasLine(src, "ModWrittenObjective.Note(alliance, write);"), "the mod-written value goes through ModWrittenObjective (the coordinator persists it)");
         AssertTrue(HasLine(src, "unit.theaterposition = new Vector3(write.X, unit.GetPosition().y, write.Z);"), "theaterposition is written whole");
     }
 
@@ -1254,20 +1249,8 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "__instance.mostvalueableaiareaclose[aifaction] = target;") || HasLine(src, "picks[aifaction] = targetArea;"), "the close pointer");
         AssertTrue(HasLine(src, "var distanceOnly = __instance.mostvaluealbeaiareaclosedistanceonly;"), "the distance-only pointer (14243-14248 reads it when the source area has no enemy)");
         AssertTrue(HasLine(src, "if (distanceOnly != null && aifaction < distanceOnly.Length) distanceOnly[aifaction] = targetArea;"), "...is set too, bound-checked");
-        AssertFalse(src.Contains("ActivePlan") || src.Contains("CICs"), "the phased-plan CIC is no longer read");
+        AssertFalse(src.Contains("ActivePlan") || src.Contains("CICs"), "the phased-plan CIC is gone (G6)");
         AssertTrue(src.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "rollback: Enable Campaign Planner Executors (with Enable Campaign Planner)");
-    }
-
-    private static void PickObjectiveStandsDownForTheExecutors()
-    {
-        string src = ReadRepoFile("src/WhiskeyRealism/Patches/PickCampaignObjectivePatch.cs");
-        string body = BodyOf(src, "internal static bool Prefix(int _aifaction)");
-        int mark = body.IndexOf("PatchFirstFire.Mark(\"campaign.patch.pick-campaign-objective\");", StringComparison.Ordinal);
-        int stand = body.IndexOf("if (CampaignPlannerRuntime.ExecutorsEnabled()) return true;", StringComparison.Ordinal);
-        AssertTrue(mark >= 0 && stand > mark, "the first-fire mark comes first, then the stand-down (P10: one writer per surface)");
-        AssertTrue(HasLine(body, "if (CampaignPlannerRuntime.ExecutorsEnabled()) return true;"), "whole line");
-        AssertTrue(src.Contains("internal static void NoteWrittenByMod(int alliance, int objectiveId)"), "the executor records its writes here");
-        AssertTrue(src.Contains("SnapshotWrittenByMod") && src.Contains("RestoreWrittenByMod"), "the coordinator's sidecar calls keep their statics until G6");
     }
 
     private static void ReviewPlanStampsTheClockAndPublishesTheContext()
@@ -1326,10 +1309,10 @@ internal static class CampaignExecutorTests
     private static void SteeringRuntimeWritesWhatTheRulesDecide()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSteeringRuntime.cs");
-        AssertTrue(HasLine(src, "int write = SteeringRules.ObjectiveWrite(plan.MainObjectiveId, ObjectiveAvailable(snapshot, plan.MainObjectiveId), current, PickCampaignObjectivePatch.WrittenByMod(alliance));"), "the objective rule's inputs");
+        AssertTrue(HasLine(src, "int write = SteeringRules.ObjectiveWrite(plan.MainObjectiveId, ObjectiveAvailable(snapshot, plan.MainObjectiveId), current, ModWrittenObjective.Get(alliance));"), "the objective rule's inputs");
         AssertTrue(HasLine(src, "int current = Convert.ToInt32(field.GetValue(faction));"), "what is followed now");
         AssertTrue(HasLine(src, "field.SetValue(faction, write);"), "written once");
-        AssertTrue(HasLine(src, "if (write == CampaignObjectiveSteering.NoWrite) return write;"), "only when the rule says so");
+        AssertTrue(HasLine(src, "if (write == SteeringRules.NoWrite) return write;"), "only when the rule says so");
         AssertTrue(HasLine(src, "if (s.Objectives[i].ObjectiveId == objectiveId && s.Objectives[i].Available) return true;"), "GetAvailableObjectives as the snapshot recorded it");
         AssertTrue(HasLine(src, "SteeringRules.PlanTheaterWrites(snapshot, allocation, sectors, limiter, Writes);"), "the box rule");
         AssertTrue(HasLine(src, "limiter.Record(write.InstanceId, snapshot.DaySerial);"), "each write is recorded for the weekly cap");
@@ -1377,7 +1360,7 @@ internal static class ExecutorFixtures
     internal static CampaignSnapshot Line(int alliance, int areas, int dayOffset = 0)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day + dayOffset, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, Day + dayOffset, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -1416,7 +1399,7 @@ internal static class ExecutorFixtures
 
     internal static SupplySourceRecord Iip(int id, float x, int owner)
     {
-        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true };
+        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, Condition = 1f, Built = true };
     }
 
     internal static EnemyBelief Belief(float x, float z, float strength)
@@ -1548,7 +1531,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public int Own;
     public Func<float, float, int> State = (x, z) => x <= 150f ? 1 : 0;
     public Func<float, float, bool> Restricted = (x, z) => false;
-    public readonly HashSet<int> Locked = new HashSet<int>();
     public bool MoveResult = true;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
     public readonly List<(int id, float x, float z)> Orders = new List<(int id, float x, float z)>();
@@ -1558,7 +1540,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public bool TargetRestricted(float x, float z) { return Restricted(x, z); }
     public int StateAllianceAt(float x, float z) { return State(x, z); }
     public bool AtWar(int otherAlliance) { return otherAlliance != Own && otherAlliance >= 0 && otherAlliance <= 1; }
-    public bool PackageLocked(int instanceId) { return Locked.Contains(instanceId); }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
     public bool IssuePlayerOrder(int instanceId, float x, float z) { Orders.Add((instanceId, x, z)); return true; }
     public void ListOffensive(int instanceId, bool listed) { Listed.Add((instanceId, listed)); }

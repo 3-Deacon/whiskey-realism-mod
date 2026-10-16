@@ -47,7 +47,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 Inputs.WlPlayerAlliance = wlActive && GameVars.playeralliance == alliance;
                 Inputs.Chapter = Policy.CurrentChapter;
                 Inputs.Tempo = ReadTempoWorld(alliance, wlActive);
-                Host.Bind(alliance, snapshot.FactionIndex, faction, plan.MainObjectiveId);
+                Host.Bind(alliance, faction);
 
                 var tally = CampaignMover.Review(Inputs, Host, MoveTrackers.For(alliance), state);
 
@@ -83,16 +83,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private sealed class VanillaMoverHost : VanillaMoveHost, IMoverHost
         {
-            private int _faction, _mainObjective;
             private object _factionObject;
             private IList _offensive;
 
-            internal void Bind(int alliance, int faction, object factionObject, int mainObjective)
+            internal void Bind(int alliance, object factionObject)
             {
                 Alliance = alliance;
-                _faction = faction;
                 _factionObject = factionObject;
-                _mainObjective = mainObjective;
                 _offensive = null;
             }
 
@@ -124,12 +121,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
                 {
                     AllianceId = Alliance,
-                    AifactionIndex = _faction,
                     Unit = unit,
                     TargetPosition = new Vector3(x, unit.GetPosition().y, z),
-                    ObjectiveId = _mainObjective,
-                    Intent = WlStrategicIntent.Redeploy,
-                    SourceSystem = "campaign-planner"
+                    Intent = WlStrategicIntent.Redeploy
                 });
                 return decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder;
             }

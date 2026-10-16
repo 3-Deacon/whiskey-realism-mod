@@ -20,7 +20,9 @@ namespace WhiskeyRealism.Strategic
             internal int OwnCount;
         }
 
-        internal static FrontSectorLedger BuildForAlliance(int allianceId, int targetObjectiveId)
+        // The plan target is the published plan's main objective (CampaignPlanStore.TryGetMainTarget): its
+        // theater is flagged critical; no main effort leaves every theater unflagged.
+        internal static FrontSectorLedger BuildForAlliance(int allianceId)
         {
             try
             {
@@ -44,9 +46,9 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 var targetTheater = Theater.Unknown;
-                var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
-                if (targetPosition.HasValue)
-                    targetTheater = TheaterFromPosition(targetPosition.Value);
+                bool hasMainTarget = CampaignPlanStore.TryGetMainTarget(allianceId, out _, out float targetX, out float targetZ);
+                if (hasMainTarget)
+                    targetTheater = TheaterFromPosition(new Vector3(targetX, 0f, targetZ));
 
                 var acc = new Dictionary<Theater, Accumulator>();
                 AddOwnUnits(acc, ownUnits);
@@ -70,7 +72,7 @@ namespace WhiskeyRealism.Strategic
                     a = a ?? new Accumulator();
 
                     float importance = BaseImportance(theater);
-                    bool isPlanTarget = targetTheater == theater && targetObjectiveId >= 0;
+                    bool isPlanTarget = hasMainTarget && targetTheater == theater;
                     if (isPlanTarget) importance = Math.Max(importance, 0.95f);
 
                     inputs.Add(new FrontSectorInput

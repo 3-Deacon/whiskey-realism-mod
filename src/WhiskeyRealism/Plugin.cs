@@ -197,7 +197,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<float> TacticalHeavyReviewCycleHours;
         internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
-        internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableNeedDrivenPolicySelection;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
@@ -330,10 +329,10 @@ namespace WhiskeyRealism
                 "Master enable. Disable to short-circuit every patch in this mod.");
             VerboseLogging = Config.Bind(
                 "Diagnostics", "Verbose Logging", true,
-                "Default ON. Emits campaign decision-trace rows: daily ledger summaries (DailyOps, front, army-area, formation-directive, fiscal, defense, construction) every day instead of only on change, plus plan steering rows (importance target, campaign objective, unit transfer — each only when its signature changes) and construction probability-bias rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
+                "Default ON. Emits campaign decision-trace rows: daily ledger summaries (DailyOps, front, formation-directive, fiscal, defense, construction) every day instead of only on change, plus plan steering rows (importance target, campaign objective, unit transfer — each only when its signature changes) and construction probability-bias rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             PlanTrace = Config.Bind(
                 "Diagnostics", "Plan Trace Logging", true,
-                "Default ON. When the CIC builds a generic (non-historical) plan, emits the pick and the top-5 objective scores (id, score, theater, category). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
+                "Default ON. When the campaign planner's plan row changes, emits the per-candidate trace behind it (at most 12 candidates: score and its terms, odds against the required ratio, eligibility) as a CampaignPlan:trace row. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             SuccessionTrace = Config.Bind(
                 "Diagnostics", "Succession Trace Logging", true,
                 "Default ON. Each day, per alliance, emits one row per not-yet-fired scripted succession event with its date-gate and war-state-gate result (at most 24 rows a day, fewer as events fire). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
@@ -1071,10 +1070,8 @@ namespace WhiskeyRealism
                 "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
                 "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
                 "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
-                "Campaign: a coordinated offensive package (#38, which replaces vanilla's offensive gathering) needs its attack and reinforce " +
-                "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
-                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
-                "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
+                "Off: headcount ratios and sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter. The battle " +
+                "rules read this flag once per battle (a change applies from the next battle).");
             EnableDeploymentAndMarchDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Deployment And March Doctrine",
@@ -1141,13 +1138,6 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. Computes the per-alliance construction intent weekly (sooner when its inputs change) during the daily strategic " +
                 "review. Feeds construction telemetry, Construction Site Steering and Telegraph AI; off disables those.");
-            EnableHistoricalOperationDoctrine = Config.Bind(
-                "Strategic",
-                "Enable Historical Operation Doctrine",
-                true,
-                "Default ON. AI CICs plan named historical operations when one fits. With no matching profile the CIC uses a generic plan only on " +
-                "objectives vanilla itself would pick that have towns/IIPs; otherwise vanilla picks. A phase in a defensive posture never sets the " +
-                "campaign objective. Off: historical operations are skipped and only generic plans are built.");
             EnableNeedDrivenPolicySelection = Config.Bind(
                 "Strategic",
                 "Enable Need-Driven Policy Selection",
@@ -1224,7 +1214,7 @@ namespace WhiskeyRealism
                 "Default ON. Vanilla fills each AI area's IIP, building and town lists only during the first two AI runs, so depots and other buildings created later never count toward the area's supply capacity or as offensive objectives. Registers them into their area with vanilla's own position rule (no duplicates) and drops destroyed buildings once per full pass. Off: vanilla.");
             EnableWinterOffensiveModifierFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Winter Offensive Modifier Fix", true,
-                "Default ON. Vanilla's winter roll for AI offensives uses the 'Probability modifier for defensive operations in winter' (0.2) and never reads the offensive one (0.05). Uses the offensive modifier for vanilla's offensive roll and for Whiskey's coordinated-offensive mirror of it; it scales the roll's time term (the idle-time term is not scaled, as in vanilla). Off: vanilla.");
+                "Default ON. Vanilla's winter roll for AI offensives uses the 'Probability modifier for defensive operations in winter' (0.2) and never reads the offensive one (0.05). Uses the offensive modifier for vanilla's offensive roll and for the campaign planner's chapter tempo roll, which mirrors it; it scales the roll's time term (the idle-time term is not scaled, as in vanilla). Off: vanilla.");
             EnableSupplyDepotBuilderFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Supply Depot Builder Fix", true,
                 "Default ON. In vanilla's depot job a unit near any depot its side started, even a finished, empty or captured one, is skipped (no move to resupply, no depot wish), and depot 'builders' (kept out of offensive, defensive and fort jobs) are counted within command range and several per depot, while construction only advances with a unit inside bugle range. Only depots still under construction skip a unit, and each such depot keeps one builder, its smallest unit inside bugle range. Off: vanilla.");
@@ -1289,8 +1279,7 @@ namespace WhiskeyRealism
                 "advance guard ahead of a main effort with strength to spare, and a belief-driven probe short of a main objective whose picture is stale. " +
                 "A formation on a mission gets the Screen formation directive and the Scouting perk role, is sent to its post by a plain move " +
                 "(no forced march) and kept there, and the [Recon] and [ReconMission] rows log the missions. A cavalry-majority screen also gets the " +
-                "Scouting cavalry order (the one vanilla's AI never gives) and loses it when recalled or cleared. While it runs the old army-area " +
-                "moves (#15) leave a formation on a mission at its post and the old probe stands down. " +
+                "Scouting cavalry order (the one vanilla's AI never gives) and loses it when recalled or cleared. " +
                 "Never uses the W&L player's own command. A formation the allocation gives a marching role is released from its mission. " +
                 "OFF = every mission ends at the next review (a recalled formation stays where it stands, vanilla's again), screens lose " +
                 "the Scouting order and nothing is moved; needs Enable Campaign Planner and " +
@@ -1371,7 +1360,7 @@ namespace WhiskeyRealism
                 "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
             TimeSliceDailyReview = Config.Bind(
                 "Performance", "Time-Slice Daily Review", true,
-                "Default ON. Spreads the daily strategic review (campaign map, then per alliance the CIC review and every ledger) over a few " +
+                "Default ON. Spreads the daily strategic review (campaign map, then per alliance the head job and every ledger) over a few " +
                 "frames as an ordered job list, using at most Daily Review Frame Budget Ms plus one job per frame, instead of running it all " +
                 "on the frame the date changes. Jobs keep their order and inputs; vanilla state they read (unit positions, strengths, " +
                 "treasury) is read when each job runs, a few frames after the date change. Patches keep seeing the previous day's complete " +
@@ -1457,7 +1446,7 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. At campaign creation locks Aggressiveness to Mediocre, Historic AI Personality to true and Difficulty to Locked " +
                 "Difficulty (default Hard), and forces Fog of War, order delays, feuds, readiness gameplay and all automanage options on with those " +
-                "menu controls frozen. The locked difficulty also feeds the CIC personality modifier. Set false to allow vanilla settings " +
+                "menu controls frozen. Set false to allow vanilla settings " +
                 "(advanced; may produce incoherent AI behavior).");
             LockedDifficulty = Config.Bind(
                 "Strategic", "Locked Difficulty", 3,

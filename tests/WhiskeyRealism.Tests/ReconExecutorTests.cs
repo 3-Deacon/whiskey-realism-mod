@@ -33,7 +33,7 @@ internal static class ReconExecutorTests
             ("ReconBudgetSeparateFromMainEffort", ReconBudgetSeparateFromMainEffort),
             ("ReconMovesCappedAtThreePerReview", ReconMovesCappedAtThreePerReview),
             ("RecalledMissionsAreServedFirstUnderTheCap", RecalledMissionsAreServedFirstUnderTheCap),
-            ("BusyLockedAndNonCombatFormationsAreSkipped", BusyLockedAndNonCombatFormationsAreSkipped),
+            ("BusyAndNonCombatFormationsAreSkipped", BusyAndNonCombatFormationsAreSkipped),
             ("RestrictedPostIsRefusedThenGivenUp", RestrictedPostIsRefusedThenGivenUp),
             ("RefusedMoveIsAMissNotAnIssue", RefusedMoveIsAMissNotAnIssue),
             ("MoveQueuesBehindARunningOrder", MoveQueuesBehindARunningOrder),
@@ -71,13 +71,10 @@ internal static class ReconExecutorTests
             ("ReconSyncAndFlagOffWiringPinned", ReconSyncAndFlagOffWiringPinned),
             ("CavalryModeIsTheCodeMinusOneTwenty", CavalryModeIsTheCodeMinusOneTwenty),
             ("QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals", QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals),
-            ("ReconFormationStandsDownFromAreaMoves", ReconFormationStandsDownFromAreaMoves),
             ("ReconExecutorFilesHoldNoUnityTypes", ReconExecutorFilesHoldNoUnityTypes),
             ("ReconExecutorRuntimeStatementsPinned", ReconExecutorRuntimeStatementsPinned),
             ("ReconExecutorHostReadsLiveStateAndSendsOnlyNewOrders", ReconExecutorHostReadsLiveStateAndSendsOnlyNewOrders),
             ("ReconExecutorWiringPinned", ReconExecutorWiringPinned),
-            ("OldProbeStandsDownWhileTheReconExecutorRuns", OldProbeStandsDownWhileTheReconExecutorRuns),
-            ("AreaMoveStandDownIsReadByTheRuntimeGate", AreaMoveStandDownIsReadByTheRuntimeGate),
             ("ReconFlagDescriptionNamesTheExecutor", ReconFlagDescriptionNamesTheExecutor),
             ("ReconMissionRowRoutesToTheRegisteredEvent", ReconMissionRowRoutesToTheRegisteredEvent),
         });
@@ -386,20 +383,18 @@ internal static class ReconExecutorTests
         AssertEqual(5, host.Moves[0].id, "a recalled formation is sent first");
     }
 
-    private static void BusyLockedAndNonCombatFormationsAreSkipped()
+    private static void BusyAndNonCombatFormationsAreSkipped()
     {
         var s = World();
         s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.InBattle));
-        s.Own.Add(Unit(2, 0f, 10f, cavalry: 0.1f));
         var nonCombat = Unit(3, 0f, 20f, cavalry: 0.1f);
         nonCombat.Flags = FormationFlags.None;
         s.Own.Add(nonCombat);
-        var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f), (ReconKind.Picket, 2, 300f, 10f), (ReconKind.Picket, 3, 300f, 20f));
+        var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f), (ReconKind.Picket, 3, 300f, 20f));
         var host = new FakeReconHost();
-        host.Locked.Add(2);
         var tally = new ReconExecutor().Review(s, ledger, host, new MoveTracker(), false);
-        AssertEqual(0, host.Moves.Count, "a formation in battle, one the old package layer holds and a non-combat group are not sent");
-        AssertEqual(3, tally.SkippedBusy, "counted");
+        AssertEqual(0, host.Moves.Count, "a formation in battle and a non-combat group are not sent");
+        AssertEqual(2, tally.SkippedBusy, "counted");
     }
 
     private static void RestrictedPostIsRefusedThenGivenUp()
@@ -1217,21 +1212,6 @@ internal static class ReconExecutorTests
         AssertTrue(HasLine(BodyOf(src, "private static void Reset()"), "Noted.Clear();"), "and forgotten with the campaign");
     }
 
-    // ---- #15 and the old probe ----
-
-    private static void ReconFormationStandsDownFromAreaMoves()
-    {
-        var onMission = new FormationDirectiveAssignment { UnitKey = "a:1", Directive = FormationDirective.Screen, Reason = "recon-mission", DirectMovementAllowed = true };
-        AssertFalse(FormationDirectiveLedger.AllowsAreaMovement(onMission, reconExecutorActive: true), "a Screen formation is not pulled back to its area while the executor runs");
-        AssertTrue(FormationDirectiveLedger.AllowsAreaMovement(onMission, reconExecutorActive: false), "with the executor off #15 may move it, as before");
-        var guard = new FormationDirectiveAssignment { UnitKey = "a:2", Directive = FormationDirective.Guard, DirectMovementAllowed = true };
-        AssertTrue(FormationDirectiveLedger.AllowsAreaMovement(guard, reconExecutorActive: true), "another directive is unaffected");
-        AssertFalse(FormationDirectiveLedger.AllowsAreaMovement(new FormationDirectiveAssignment { Directive = FormationDirective.Delay, DirectMovementAllowed = true }, false), "Delay still blocks");
-        AssertFalse(FormationDirectiveLedger.AllowsAreaMovement(new FormationDirectiveAssignment { Directive = FormationDirective.Concede, DirectMovementAllowed = true }, false), "Concede still blocks");
-        AssertFalse(FormationDirectiveLedger.AllowsAreaMovement(new FormationDirectiveAssignment { Directive = FormationDirective.Guard, DirectMovementAllowed = false }, false), "a formation that cannot take direct movement still cannot");
-        AssertTrue(FormationDirectiveLedger.AllowsAreaMovement(null, true), "no assignment: unchanged");
-    }
-
     // ---- source pins ----
 
     private static void ReconExecutorFilesHoldNoUnityTypes()
@@ -1258,7 +1238,6 @@ internal static class ReconExecutorTests
         AssertTrue(HasLine(src, "var tally = Executors[alliance].Review(snapshot, ledger, Host, tracker, DLC_WL.dlc_scenarioactive && GameVars.playeralliance == alliance);"), "the pure pass over the alliance's tracker, on the W&L player's side flagged");
         string host = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
         AssertTrue(HasLine(host, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
-        AssertTrue(HasLine(host, "if (CoordinatedOperationRuntime.IsPackageLocked(unit)) return true;"), "the old package layer's lock holds until G6 (P10)");
         AssertTrue(HasLine(host, "unit.userails = true;") && HasLine(host, "unit.userivers = true;"), "the transport defaults of the mover");
     }
 
@@ -1284,26 +1263,8 @@ internal static class ReconExecutorTests
         int pause = body.IndexOf("PlayerCommandClassifier.ReviewMode(live", StringComparison.Ordinal);
         int preWar = body.IndexOf("PlannerChapterRules.ExecutorsAllowed(", StringComparison.Ordinal);
         AssertTrue(pause >= 0 && preWar > pause && recon > preWar, "behind the pause, the pre-war gate and today's-plan test, like every executor");
-        AssertTrue(HasLine(src, "return ExecutorsEnabled() && FlagOn(Plugin.EnableCampaignReconnaissance);"), "ReconExecutorActive: both planner flags and the recon flag");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
         AssertTrue(runtime.Contains("CampaignScope.Register(\"campaign-planner-recon-executors\""), "the row memory resets with the campaign");
-    }
-
-    private static void OldProbeStandsDownWhileTheReconExecutorRuns()
-    {
-        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs");
-        string run = BodyOf(src, "internal static void Run(");
-        AssertTrue(HasLine(run, "if (CampaignPlannerRuntime.ReconExecutorActive()) return;"), "the old probe never moves, stops or releases a formation beside the new probe missions");
-        int standDown = run.IndexOf("ReconExecutorActive()", StringComparison.Ordinal);
-        int firstWrite = run.IndexOf("StopRegiment", StringComparison.Ordinal);
-        AssertTrue(standDown >= 0 && standDown < firstWrite, "before any write");
-    }
-
-    private static void AreaMoveStandDownIsReadByTheRuntimeGate()
-    {
-        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/FormationDirectiveRuntime.cs");
-        string gate = BodyOf(src, "internal static bool ShouldAllowAreaMovement(");
-        AssertTrue(HasLine(gate, "return FormationDirectiveLedger.AllowsAreaMovement(GetAssignment(allianceId, unitKey), CampaignPlannerRuntime.ReconExecutorActive());"), "the one rule, with the executor's state");
     }
 
     private static void ReconFlagDescriptionNamesTheExecutor()
@@ -1334,7 +1295,7 @@ internal static class ReconExecutorTests
     private static CampaignSnapshot World(int day = Day)
     {
         var s = new CampaignSnapshot();
-        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -1401,7 +1362,6 @@ internal sealed class FakeReconHost : IReconHost
 {
     public readonly Dictionary<int, WlChainClass> Chain = new Dictionary<int, WlChainClass>();
     public Func<float, float, bool> Restricted = (x, z) => false;
-    public readonly HashSet<int> Locked = new HashSet<int>();
     public bool MoveResult = true;
     public CavalrySend OrderResult = CavalrySend.Sent;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
@@ -1410,7 +1370,6 @@ internal sealed class FakeReconHost : IReconHost
 
     public WlChainClass LiveChain(int instanceId) { return Chain.TryGetValue(instanceId, out var c) ? c : WlChainClass.None; }
     public bool TargetRestricted(float x, float z) { return Restricted(x, z); }
-    public bool PackageLocked(int instanceId) { return Locked.Contains(instanceId); }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
     public CavalrySend SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return OrderResult; }
@@ -1427,7 +1386,6 @@ internal sealed class OneReviewHost : IMoverHost, IReconHost
     private readonly HashSet<int> _running = new HashSet<int>();
 
     public bool TargetRestricted(float x, float z) { return false; }
-    public bool PackageLocked(int instanceId) { return false; }
     public bool Move(int instanceId, float x, float z)
     {
         Moves.Add((instanceId, x, z));

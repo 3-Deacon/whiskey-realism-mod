@@ -8,7 +8,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // clock; not the legacy year x 372 serial); a window is the appointment day plus the next 59
     // calendar days. Written
     // only by CommanderAppointmentRuntime inside the daily review; read by the #6 guard
-    // (CommanderReplacementPatch). G6 persists ProtectedUntil in sidecar v3 and calls Restore.
+    // (CommanderReplacementPatch). The sidecar (v3) persists ProtectedUntil; CampaignPlannerRuntime.Restore calls Restore.
     public sealed class AppointmentProtection
     {
         public const int ProtectionDays = 60;

@@ -305,18 +305,15 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // The sidecar's records (G6): builders come back by unit key, instance ids are rebound at the next Sync.
+        // The sidecar's records (G6) as PlannerRebind.Resolve left them: a builder found in this session is already bound (instance
+        // id and rekeyed unit key), so the first review after a load pins it before Sync runs; one not found keeps id -1 and Sync
+        // abandons its task. The decode sets -1, so a record straight from the file is unbound.
         public void Restore(IEnumerable<DepotTaskRecord> tasks)
         {
             _tasks.Clear();
             _transitions.Clear();
             if (tasks == null) return;
-            foreach (var t in tasks)
-            {
-                var r = t;
-                r.BuilderInstanceId = -1;
-                _tasks.Add(r);
-            }
+            foreach (var t in tasks) _tasks.Add(t);
         }
 
         internal void ClearTransitions()

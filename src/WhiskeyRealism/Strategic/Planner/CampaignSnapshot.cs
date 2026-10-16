@@ -15,7 +15,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public int DaySerial { get; private set; }
         public PlayerCommandClass Player { get; private set; }
         public int PlayerCommandInstanceId { get; private set; } // -1 none; G2's no-vertical-swap check
-        public bool UseFog { get; private set; }
         // MassRatioModifier -> G3 required ratio, MinimumHoldRatioModifier -> G4 hold ratio.
         // Nullable: DirectorMemories[alliance].LastPosture is null until PublishDirectorPosture has
         // run once (the first review after a reset, or a CIC player's alliance); G3/G4 treat null as
@@ -24,8 +23,6 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public float CapitalX, CapitalZ;
         public bool HasCapital;
-        public float EnemyCapitalX, EnemyCapitalZ;
-        public bool HasEnemyCapital;
         public float RelocationRange;       // GamePrefs.aimaximumdistancetosearchforunitrelocations
         // GamePrefs.theatersize is a Vector2 (49166): IsWithinOperationsTheater tests x against
         // theatersize.x and z against theatersize.y (17105).
@@ -49,20 +46,17 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
 
         internal void Reset(int alliance, int factionIndex, int daySerial, PlayerCommandClass player,
-                            int playerCommandInstanceId, bool useFog, DirectorPosture tempo)
+                            int playerCommandInstanceId, DirectorPosture tempo)
         {
             Alliance = alliance;
             FactionIndex = factionIndex;
             DaySerial = daySerial;
             Player = player;
             PlayerCommandInstanceId = playerCommandInstanceId;
-            UseFog = useFog;
             Tempo = tempo;
 
             CapitalX = CapitalZ = 0f;
             HasCapital = false;
-            EnemyCapitalX = EnemyCapitalZ = 0f;
-            HasEnemyCapital = false;
             RelocationRange = 0f;
             TheaterHalfExtentX = TheaterHalfExtentZ = 0f;
             OffensiveDominance = 0f;
@@ -87,6 +81,39 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < Own.Count; i++)
                 if (Own[i].InstanceId == instanceId) return i;
             return -1;
+        }
+
+        // The unit key of a formation's command parent (the D5 rule's ParentInstanceId), null for a root or an
+        // unknown formation. The one place the command hierarchy is read for the directive ledger.
+        public string ParentKeyOf(int instanceId)
+        {
+            for (int i = 0; i < Own.Count; i++)
+            {
+                if (Own[i].InstanceId != instanceId) continue;
+                int parent = Own[i].ParentInstanceId;
+                if (parent < 0) return null;
+                for (int j = 0; j < Own.Count; j++)
+                    if (Own[j].InstanceId == parent) return Own[j].UnitKey;
+                return null;
+            }
+            return null;
+        }
+
+        // The sidecar's rebinding rule (G6): the exact unit key, else the one formation whose name is the key's name part when
+        // the commander part no longer matches; -1 when there is none or the name is ambiguous.
+        public int IndexOfKeyOrName(string unitKey)
+        {
+            int exact = IndexOfKey(unitKey);
+            if (exact >= 0 || string.IsNullOrEmpty(unitKey)) return exact;
+            string name = EnemyArmyModel.NameOf(unitKey);
+            int found = -1;
+            for (int i = 0; i < Own.Count; i++)
+            {
+                if (!string.Equals(Own[i].Name, name, StringComparison.Ordinal)) continue;
+                if (found >= 0) return -1;
+                found = i;
+            }
+            return found;
         }
 
         // Sidecar rebinding (G6): a persisted unitKey back to this session's formation.
@@ -181,13 +208,6 @@ namespace WhiskeyRealism.Strategic.Planner
             if (partOfFollowedObjective) value += objectiveBonus;
             if (isTown && capitalOfFactionIndex) value += capitalBonus;
             return value;
-        }
-
-        // Fog (spec C14/C25): the side knows the garrison strength of its own and allied forts only;
-        // an enemy fort's garrison is known only as G1 believes it (seen or contacted).
-        internal static bool SideKnowsGarrison(int alliance, int fortOwner, bool fortOwnerAllied)
-        {
-            return fortOwner == alliance || fortOwnerAllied;
         }
 
         internal static float Clamp01(float value)

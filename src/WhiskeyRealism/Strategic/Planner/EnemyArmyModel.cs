@@ -157,7 +157,6 @@ namespace WhiskeyRealism.Strategic.Planner
                     X = detection.X,
                     Z = detection.Z,
                     Strength = detection.Strength,
-                    Guns = detection.Guns,
                     LastSeenDay = daySerial,
                     Confidence01 = 1f,
                     UncertaintyRadius = SeenRadius,
@@ -254,8 +253,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
     // The per-alliance models (alliances 0 and 1 only) and the readers' one decision: with
     // `Enable Campaign Planner` and `Enable Campaign Fog-Honest Beliefs` both on, a reader always
-    // gets the model as the last review left it (empty on a new campaign's first day and after a
-    // load until G6 restores the sidecar's beliefs: EnemyArmyModel.Restore has no caller yet); only with either flag off does it get the rollback list (vanilla's
+    // gets the model as the last review left it (empty on a new campaign's first day; after a load
+    // it holds the sidecar's beliefs, restored by CampaignPlannerRuntime.Restore and rebound by unit
+    // key on the first review); only with either flag off does it get the rollback list (vanilla's
     // omniscient enemies at full confidence). Per campaign: cleared by CampaignScope.
     // A reader inside a review job gets the model itself; a reader outside (a patch between the
     // slices of a time-sliced review, RecruitmentPatch, FortConstructionGovernorPatch) gets the

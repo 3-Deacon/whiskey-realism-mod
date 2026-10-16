@@ -120,7 +120,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Accomplished;      // IDAccomplished
         public ObjectiveRole Roles;
         public float Importance01;
-        public float GarrisonStrength; // fort garrison groupstrengthdirect at the target, 0 for none
     }
 
     public enum SupplySourceKind
@@ -135,7 +134,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public SupplySourceKind Kind;
         public int Owner;
         public float X, Z;
-        public float TransportCapacity, Condition;
+        public float Condition;
         public bool Built;
         public bool Invisible;
     }
@@ -143,8 +142,6 @@ namespace WhiskeyRealism.Strategic.Planner
     public struct RailLineRecord
     {
         public int Index;
-        public bool Startable;          // StartConstruction(alliance, checkonly: true)
-        public bool UnderConstruction;
         public float Progress;
         // The line's two farthest-apart IIPs (ConstructionSymbol.IIPsForTransportCapacityUpdate,
         // 188134): their positions and instance ids (= SupplySourceRecord.Id of the same IIP),
@@ -186,7 +183,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public string UnitKey;
         public int UnitTyp;
-        public float X, Z, Strength, Guns;
+        public float X, Z, Strength;
         public DetectionSource Source;
         public EnemyTraits Traits;
     }
@@ -196,7 +193,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public string UnitKey;
         public int UnitTyp;
-        public float X, Z, Strength, Guns;
+        public float X, Z, Strength;
         public int LastSeenDay;
         public float Confidence01, UncertaintyRadius;
         public DetectionSource LastSource;
@@ -304,6 +301,10 @@ namespace WhiskeyRealism.Strategic.Planner
         public int DaySerial;
         public int MainSectorId = -1;
         public int MainObjectiveId = -1;
+        // The main candidate's target (ObjectiveRecord.X/Z): the objective's position for readers outside
+        // the planner (the front ledger's target theater, the formation directives' target area). Not the
+        // clamped frontier point of SectorPlan.TargetX/Z.
+        public float MainObjectiveX, MainObjectiveZ;
         public float MainRequiredRatio;
         public List<SectorPlan> Sectors = new List<SectorPlan>();
         public float CapitalFloorStrength;
@@ -319,11 +320,19 @@ namespace WhiskeyRealism.Strategic.Planner
         // weighted, within the relocation range of the objective itself, not of the clamped frontier point
         // in SectorPlan.TargetX/Z): G4's reserve split keeps the odds it judged.
         public float MainEnemyStrength;
+
+        // The plan's sector with this id, null for none (-1 included).
+        public SectorPlan SectorById(int sectorId)
+        {
+            if (sectorId < 0) return null;
+            for (int i = 0; i < Sectors.Count; i++)
+                if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
+            return null;
+        }
     }
 
     public struct CommanderProfile
     {
-        public int CommanderId;
         public float RequiredOddsShift; // (initiative - 0.5) * -0.5: bold commanders accept worse odds
         public float AttackBias;        // initiative - leadership * 0.5, clamped [-1, 1]
         public float SupplySlack;       // administration * 0.25 of commandrange

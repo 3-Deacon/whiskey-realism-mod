@@ -32,8 +32,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // Enemy objective-fort garrisons (CBuilding.garrisonunit, 81985-82093) at enemy-held objective
     // targets (the snapshot's ObjectiveRecord.HolderAlliance) go through the same rule and become
     // one ObjectiveGarrison detection at the target.
-    // Position is GetPosition() (never GetLastTransmittedPathPos), strength groupstrengthdirect,
-    // guns groupstatsgunsactive. Traits: Embarked (the G0 predicate), CavalryMajority (direct
+    // Position is GetPosition() (never GetLastTransmittedPathPos), strength groupstrengthdirect.
+    // Traits: Embarked (the G0 predicate), CavalryMajority (direct
     // strength per unit type, the array 14213 sums), OnOwnSoil (GetStateOfField -> nation alliance,
     // the test 13601-13603 uses) and NearOwnCoast (an own harbour IIP within relocation range).
     internal static class EnemyDetectionRuntime
@@ -342,7 +342,6 @@ namespace WhiskeyRealism.Strategic.Planner
                         X = p.x,
                         Z = p.z,
                         Strength = e.groupstrengthdirect,
-                        Guns = e.groupstatsgunsactive,
                         Source = source,
                         Traits = TraitsOf(e, p, side, s.RelocationRange)
                     });
@@ -535,7 +534,6 @@ namespace WhiskeyRealism.Strategic.Planner
                         X = p.x,
                         Z = p.z,
                         Strength = e.groupstrengthdirect,
-                        Guns = e.groupstatsgunsactive,
                         LastSeenDay = day,
                         Confidence01 = 1f,
                         UncertaintyRadius = EnemyArmyModel.SeenRadius,

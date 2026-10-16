@@ -38,14 +38,6 @@ namespace WhiskeyRealism.Strategic
         public string SourceSignature;
         public bool Stale;
 
-        // Threshold modifiers — applied on top of OperationalTempoDoctrine output.
-        // Each is bounded to ±50% of the personality delta on the same field.
-        public float MinimumProbeDaysModifier;
-        public float MaximumProbeStrengthFractionModifier;
-        public float EscalateFriendlyRatioModifier;
-        public float EnemyReactionMultiplierModifier;
-        public float WithdrawFriendlyRatioModifier;
-
         // FrontLedger transfer/hold modifiers — applied on top of FrontLedgerOptions defaults.
         // Bounded to [-0.05, +0.10].
         public float MinimumHoldRatioModifier;

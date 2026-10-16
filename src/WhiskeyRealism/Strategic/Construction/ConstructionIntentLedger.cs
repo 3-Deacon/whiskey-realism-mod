@@ -36,7 +36,6 @@ namespace WhiskeyRealism.Strategic.Construction
 
                 var scored = candidate;
                 scored.Score = Score(input, options, output.Posture, scored);
-                scored.Reason = output.Posture.ToString();
                 AssignTop(output, scored);
                 if (scored.Kind == ConstructionCandidateKind.Railroad || scored.Kind == ConstructionCandidateKind.Fort)
                     siteCandidates.Add(scored);

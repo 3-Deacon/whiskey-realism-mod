@@ -53,7 +53,6 @@ internal static class StrategicDirectorTests
             ("campaign pace stable default", CampaignPaceStableDefault),
             ("director cannot publish preserve for late csa under elevated risk", DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk),
             ("campaign pace publishes theater priority from highest pressure theater", CampaignPacePublishesTheaterPriorityFromHighestPressureTheater),
-            ("director clamps threshold modifier to half personality delta", DirectorClampsThresholdModifierToHalfPersonalityDelta),
             ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
@@ -512,25 +511,11 @@ internal static class StrategicDirectorTests
         AssertEqual(Theater.West, output.TheaterPriority);
     }
 
-    private static void DirectorClampsThresholdModifierToHalfPersonalityDelta()
-    {
-        var personality = new PersonalityVector { Audacity = 0.5f, Caution = 0.0f };
-        // Personality contributes: MaximumProbeStrengthFraction += 0.05*audacity - 0.04*caution = +0.025
-        float personalityDeltaOnFraction = 0.05f * personality.Audacity - 0.04f * personality.Caution;
-        var posture = StrategicResilienceDirector.ProposePosture(
-            allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low, IntentBlockedFromPreserve = false },
-            personality: personality);
-        AssertTrue(System.Math.Abs(posture.MaximumProbeStrengthFractionModifier) <= 0.5f * System.Math.Abs(personalityDeltaOnFraction) + 1e-6f,
-            "director modifier must be ≤50% of personality delta — was " + posture.MaximumProbeStrengthFractionModifier);
-    }
-
     private static void DirectorMapsOverheatedToRecoverLeaning()
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low, IntentBlockedFromPreserve = false },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low, IntentBlockedFromPreserve = false });
         AssertTrue(posture.Intent == StrategicIntent.Recover || posture.Intent == StrategicIntent.Delay,
             "overheated pace should propose recover/delay intent");
     }
@@ -539,8 +524,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 1,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Elevated, IntentBlockedFromPreserve = true },
-            personality: new PersonalityVector { Caution = 0.6f });
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Elevated, IntentBlockedFromPreserve = true });
         AssertTrue(posture.Intent != StrategicIntent.Preserve,
             "1864 CSA under elevated risk cannot publish Preserve");
     }
@@ -593,8 +577,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 1,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical, IntentBlockedFromPreserve = false },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical, IntentBlockedFromPreserve = false });
         AssertTrue(posture.MinimumHoldRatioModifier > 0f,
             "TooFastCollapse for CSA must raise MinimumHoldRatio — was " + posture.MinimumHoldRatioModifier);
         AssertTrue(posture.MinimumHoldRatioModifier <= 0.10f,
@@ -605,8 +588,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low });
         AssertTrue(posture.RecoverFloorModifier > 0f, "overheated must raise recover floor");
     }
 
@@ -614,8 +596,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low });
         AssertTrue(posture.MassRatioModifier < 0f, "Union late-war pressure must lower mass ratio gate");
     }
 
@@ -623,8 +604,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 1,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical });
         AssertTrue(posture.SupplyConstructionBias >= 0.30f,
             "Critical risk must strongly favor supply — was " + posture.SupplyConstructionBias);
     }
@@ -633,8 +613,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.TooQuiet, Risk = CollapseRisk.Low },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooQuiet, Risk = CollapseRisk.Low });
         AssertTrue(posture.LogisticsBias >= 0.20f, "TooQuiet must favor logistics");
     }
 
@@ -642,8 +621,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 1,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical });
         AssertTrue(posture.ExpansionDamper >= 0.30f, "TooFastCollapse must damp expansion");
     }
 
@@ -651,8 +629,7 @@ internal static class StrategicDirectorTests
     {
         var posture = StrategicResilienceDirector.ProposePosture(
             allianceId: 0,
-            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
-            personality: new PersonalityVector());
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low });
         AssertTrue(posture.GuardBudgetFractionModifier <= 0f,
             "Union late-war pressure can slightly lower guard for source-sector concentration");
     }

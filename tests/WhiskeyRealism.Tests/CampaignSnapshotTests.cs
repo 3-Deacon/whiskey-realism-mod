@@ -56,7 +56,7 @@ internal static class CampaignSnapshotTests
             ("ContractEnumValuesPinned", ContractEnumValuesPinned),
             ("ContractRecordsCarryCensusFields", ContractRecordsCarryCensusFields),
             ("ImportanceMirrorsVanillaTerms", ImportanceMirrorsVanillaTerms),
-            ("FortGarrisonReadOnlyForOwnOrAlliedForts", FortGarrisonReadOnlyForOwnOrAlliedForts),
+            ("SnapshotReadsNoFortGarrison", SnapshotReadsNoFortGarrison),
             ("SectorAdjacencyCacheFollowsGeometry", SectorAdjacencyCacheFollowsGeometry),
             ("CoordinatorPauseGuardsOrderIssuingSteps", CoordinatorPauseGuardsOrderIssuingSteps),
             ("CoordinatorPauseGatesAreTheVanillaPredicates", CoordinatorPauseGatesAreTheVanillaPredicates),
@@ -244,13 +244,12 @@ internal static class CampaignSnapshotTests
         var own = s.Own;
 
         var tempo = new DirectorPosture();
-        s.Reset(0, 2, 77, PlayerCommandClass.MapGroup, 55, false, tempo);
+        s.Reset(0, 2, 77, PlayerCommandClass.MapGroup, 55, tempo);
         AssertEqual(0, s.Alliance, "alliance");
         AssertEqual(2, s.FactionIndex, "faction index");
         AssertEqual(77, s.DaySerial, "day serial");
         AssertEqual(PlayerCommandClass.MapGroup, s.Player, "player class");
         AssertEqual(55, s.PlayerCommandInstanceId, "player command");
-        AssertFalse(s.UseFog, "use fog");
         AssertTrue(ReferenceEquals(tempo, s.Tempo), "tempo");
         AssertTrue(ReferenceEquals(own, s.Own), "lists are pooled");
         AssertEqual(0, s.Own.Count + s.Areas.Count + s.Objectives.Count + s.Supply.Count + s.Rails.Count
@@ -458,7 +457,7 @@ internal static class CampaignSnapshotTests
     private static void ReachTrueWithOwnIipInCommandRange()
     {
         var s = NewSnapshot(0);
-        s.Supply.Add(new SupplySourceRecord { Id = 7, Kind = SupplySourceKind.Iip, Owner = 0, X = 30f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
+        s.Supply.Add(new SupplySourceRecord { Id = 7, Kind = SupplySourceKind.Iip, Owner = 0, X = 30f, Z = 0f, Condition = 1f, Built = true });
         var r = LogisticsGate.Evaluate(s, 0f, 0f, 40f, 0f);
         AssertTrue(r.InReach, "own IIP 30 away, command range 40");
         AssertEqual(7, r.NearestSourceId, "nearest source");
@@ -473,7 +472,7 @@ internal static class CampaignSnapshotTests
     private static void EnemyOwnedIipDoesNotSupply()
     {
         var s = NewSnapshot(0);
-        s.Supply.Add(new SupplySourceRecord { Id = 7, Kind = SupplySourceKind.Iip, Owner = 1, X = 10f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
+        s.Supply.Add(new SupplySourceRecord { Id = 7, Kind = SupplySourceKind.Iip, Owner = 1, X = 10f, Z = 0f, Condition = 1f, Built = true });
         var r = LogisticsGate.Evaluate(s, 0f, 0f, 40f, 0f);
         AssertFalse(r.InReach, "enemy IIP");
         AssertEqual(-1, r.NearestSourceId, "no source");
@@ -501,7 +500,7 @@ internal static class CampaignSnapshotTests
     private static void ClampToReachPullsBackToLastInReachPoint()
     {
         var s = NewSnapshot(0);
-        s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = 0, X = 0f, Z = 0f, TransportCapacity = 1f, Condition = 1f, Built = true });
+        s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = 0, X = 0f, Z = 0f, Condition = 1f, Built = true });
         float tx = 200f, tz = 0f;
         AssertTrue(LogisticsGate.ClampToReach(s, 0f, 0f, ref tx, ref tz, 40f, 0f), "clamped");
         AssertTrue(tx <= 40.001f && tx >= 30f, "hold point pulled back to the edge of reach, got " + tx);
@@ -658,12 +657,11 @@ internal static class CampaignSnapshotTests
     // every field's shape compiled and round-tripping.
     private static void ContractRecordsCarryCensusFields()
     {
-        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Guns = 60f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
+        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
         AssertEqual("Army of Tennessee:40", detection.UnitKey, "detection key");
-        AssertEqual(60f, detection.Guns, "detection guns");
         AssertEqual(EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, detection.Traits, "detection traits");
 
-        var belief = new EnemyBelief { InstanceId = 1, UnitKey = "k:1", UnitTyp = 15, X = 3f, Z = 4f, Strength = 9000f, Guns = 20f, LastSeenDay = 700, Confidence01 = 0.5f, UncertaintyRadius = 12f, LastSource = DetectionSource.Contact, Traits = EnemyTraits.NearOwnCoast };
+        var belief = new EnemyBelief { InstanceId = 1, UnitKey = "k:1", UnitTyp = 15, X = 3f, Z = 4f, Strength = 9000f, LastSeenDay = 700, Confidence01 = 0.5f, UncertaintyRadius = 12f, LastSource = DetectionSource.Contact, Traits = EnemyTraits.NearOwnCoast };
         AssertEqual(700, belief.LastSeenDay, "belief last seen");
         AssertEqual(12f, belief.UncertaintyRadius, "belief radius");
         AssertEqual(DetectionSource.Contact, belief.LastSource, "belief source");
@@ -672,7 +670,7 @@ internal static class CampaignSnapshotTests
         AssertEqual(0.55f, commander.Average, "commander average");
         AssertEqual(16, commander.CommandUnitTyp, "commander command type");
 
-        var profile = new CommanderProfile { CommanderId = 3, RequiredOddsShift = -0.05f, AttackBias = 0.35f, SupplySlack = 0.1f };
+        var profile = new CommanderProfile { RequiredOddsShift = -0.05f, AttackBias = 0.35f, SupplySlack = 0.1f };
         AssertEqual(-0.05f, profile.RequiredOddsShift, "profile odds shift");
         AssertEqual(0.35f, profile.AttackBias, "profile attack bias");
         AssertEqual(0.1f, profile.SupplySlack, "profile supply slack");
@@ -698,13 +696,11 @@ internal static class CampaignSnapshotTests
         AssertEqual(6, allocation.Shortfalls[0], "shortfall");
         AssertEqual(7, allocation.Surpluses[0], "surplus");
 
-        var rail = new RailLineRecord { Index = 2, Startable = true, UnderConstruction = false, Progress = 0f, AX = 1f, AZ = 2f, BX = 3f, BZ = 4f, AIipId = 11, BIipId = 12 };
-        AssertTrue(rail.Startable, "rail startable");
+        var rail = new RailLineRecord { Index = 2, Progress = 0f, AX = 1f, AZ = 2f, BX = 3f, BZ = 4f, AIipId = 11, BIipId = 12 };
         AssertEqual(12, rail.BIipId, "rail endpoint iip");
         var crossing = new CrossingRecord { X = 5f, Z = 6f };
         AssertEqual(6f, crossing.Z, "crossing");
-        var objective = new ObjectiveRecord { ObjectiveId = 4, HolderAlliance = 1, Available = true, Accomplished = false, Roles = ObjectiveRole.Port, Importance01 = 0.4f, GarrisonStrength = 800f };
-        AssertEqual(800f, objective.GarrisonStrength, "objective garrison");
+        var objective = new ObjectiveRecord { ObjectiveId = 4, HolderAlliance = 1, Available = true, Accomplished = false, Roles = ObjectiveRole.Port, Importance01 = 0.4f };
         var band = new RankBand { UnitTyp = 15, MinRank = 7, MaxRank = 8 };
         AssertEqual(8, band.MaxRank, "rank band");
 
@@ -733,18 +729,12 @@ internal static class CampaignSnapshotTests
         AssertNear(3.5f, SnapshotRules.TargetImportance(false, 0f, 50f, false, false, false, pop, transport, nonWar, objective, capital), 0.001f, "own IIP x 0.35");
     }
 
-    private static void FortGarrisonReadOnlyForOwnOrAlliedForts()
+    private static void SnapshotReadsNoFortGarrison()
     {
-        AssertTrue(SnapshotRules.SideKnowsGarrison(1, 1, false), "own fort");
-        AssertTrue(SnapshotRules.SideKnowsGarrison(0, 3, true), "allied fort");
-        AssertFalse(SnapshotRules.SideKnowsGarrison(1, 0, false), "enemy fort: a G1 belief, not a snapshot read");
-
-        // Every garrisonunit read in the snapshot runtime sits after the side check.
+        // Fog (spec C14/C25): a fort's garrison reaches the side only as a G1 belief; the snapshot reads no garrison at all
+        // (its own and allied forts' strength had no reader, so the scan went in G6).
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
-        int check = src.IndexOf("SnapshotRules.SideKnowsGarrison(", StringComparison.Ordinal);
-        AssertTrue(check >= 0, "side check present");
-        foreach (Match m in Regex.Matches(src, @"\bgarrisonunit\b"))
-            AssertTrue(m.Index > check, "garrisonunit read after the side check at " + m.Index);
+        AssertFalse(Regex.IsMatch(src, @"\bgarrisonunit\b|\bBattleUnits\.fort\b"), "the snapshot runtime reads no fort garrison");
     }
 
     private static void SectorAdjacencyCacheFollowsGeometry()
@@ -779,11 +769,11 @@ internal static class CampaignSnapshotTests
     private static void CoordinatorPauseGuardsOrderIssuingSteps()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
-        string cic = MethodBody(src, "private void RunCicReviewJob(");
-        foreach (string call in new[] { "Succession.CheckEvents(", "SwapOfficer(", "ReviewPlanWithTruth(", "cic.Replan(" })
-            AssertGuardedByPause(cic, call, "!d.JobMachinePaused");
+        string head = MethodBody(src, "private void RunHeadReviewJob(");
+        foreach (string call in new[] { "Succession.CheckEvents(", "SwapOfficer(" })
+            AssertGuardedByPause(head, call, "!d.JobMachinePaused");
         foreach (string call in new[] { "UpdateCapitalThreat(", "PublishDirectorPosture(" })
-            AssertFalse(IsGuardedByPause(cic, cic.IndexOf(call, StringComparison.Ordinal), "!d.JobMachinePaused"), call + " keeps running during the pause");
+            AssertFalse(IsGuardedByPause(head, head.IndexOf(call, StringComparison.Ordinal), "!d.JobMachinePaused"), call + " keeps running during the pause");
 
         string job = MethodBody(src, "private void RunReviewJob(");
         AssertContains(job, "bool paused = d.JobMachinePaused;", "the day's pause");
@@ -794,8 +784,6 @@ internal static class CampaignSnapshotTests
             ("Defense", "if (!paused)", "UpdateDefenseIntent("),
             ("Execute", "if (ready && !paused)", "CampaignPlannerRuntime.ReviewExecute("),
             ("Formation", "if (!ready || paused) break;", "UpdateFormationDirectiveLedger("),
-            ("Probe", "if (ready && !paused)", "UpdateOperationalProbe("),
-            ("ArmyArea", "if (ready && !paused)", "UpdateArmyAreaLedger("),
         })
         {
             string body = CaseBody(job, kind);
@@ -916,7 +904,7 @@ internal static class CampaignSnapshotTests
     private static CampaignSnapshot NewSnapshot(int alliance)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, 100, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, 100, PlayerCommandClass.NotCareer, -1, null);
         return s;
     }
 
@@ -1087,8 +1075,6 @@ internal static class CampaignSnapshotTests
 
         string rails = MethodBody(src, "private static void ReadRails(");
         AssertContains(rails, "EnsureRailGeometry()", "rails rebuild their geometry only on a new railroad list");
-        AssertContains(rails, "line.StartConstruction(alliance, checkonly: true)", "startable read every review");
-        AssertContains(rails, "UnderConstruction = line.constructionprogress > 0f && line.constructionprogress < 1f", "under construction read every review");
         AssertContains(rails, "Progress = line.constructionprogress", "construction progress read every review");
         AssertContains(rails, "Rails.CopyEndpoints(", "endpoints come from the cache");
         AssertFalse(rails.Contains("IIPsForTransportCapacityUpdate"), "no per-review endpoint search");

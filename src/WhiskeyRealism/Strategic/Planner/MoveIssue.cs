@@ -7,8 +7,6 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         // BattlefieldSetup.IsTerrainPositionRestricted (25755): a target no final waypoint can be put on.
         bool TargetRestricted(float x, float z);
-        // CoordinatedOperationRuntime.IsPackageLocked until G6 deletes #38 (P10).
-        bool PackageLocked(int instanceId);
         // AICampaign.MoveUnitTo(unit, point, movearoundenemyunits: true): true when vanilla took the move.
         bool Move(int instanceId, float x, float z);
         // userails = userivers = true on the group: vanilla's AI default (112862-112867).

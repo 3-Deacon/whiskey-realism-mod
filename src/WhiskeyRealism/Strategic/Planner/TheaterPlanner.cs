@@ -63,7 +63,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // and while it stands the margin rule applies as normal), the current objective accomplished /
     // no longer offered / below its odds (below RequiredRatio - OddsDeadband, or below RequiredRatio
     // on SwitchDays consecutive reviews), or a decisive battle in its theater or near it
-    // (CicReviewRouter.BattleInvalidatesPlan, the R4 rule). A trigger keeps the current main effort
+    // (PlanTriggers.BattleInvalidatesPlan). A trigger keeps the current main effort
     // while it is within Epsilon of the best.
     // Randomness (P5) only at a decision: softmax (Temperature) over the candidates within Epsilon of
     // the best, System.Random seeded with CampaignSeed ^ alliance x 7919 ^ DecisionSerial.
@@ -175,6 +175,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 var force = s.Own[m.Force];
                 var profile = ProfileOf(inputs, m.Force);
                 plan.MainObjectiveId = m.ObjectiveId;
+                plan.MainObjectiveX = m.X;
+                plan.MainObjectiveZ = m.Z;
                 plan.MainSectorId = m.SectorId;
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
@@ -416,7 +418,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     var record = battles[i];
                     if (record == null) continue;
                     query.BattleTheater = TheaterClassifier.FromPosition(record.PositionX, record.PositionZ);
-                    if (!CicReviewRouter.BattleInvalidatesPlan(record, query)) continue;
+                    if (!PlanTriggers.BattleInvalidatesPlan(record, query)) continue;
                     reason = "battle";
                     return true;
                 }
@@ -833,16 +835,26 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // ---- telemetry ----
 
+        // "<theater>/<objective>" of the main effort, "none" with no main effort: the [CampaignPlan] row's main field
+        // and the monthly heartbeat's.
+        internal static string MainLabel(TheaterPlan plan)
+        {
+            if (plan == null || plan.MainObjectiveId < 0) return "none";
+            Theater theater = Theater.Unknown;
+            for (int i = 0; i < plan.Sectors.Count; i++)
+                if (plan.Sectors[i].Posture == TheaterPosture.MainEffort) theater = plan.Sectors[i].Theater;
+            return theater + "/" + plan.MainObjectiveId;
+        }
+
         // The [CampaignPlan] row (plan G3 Steps): changes only when the decision does.
         internal static string Summary(TheaterPlan plan)
         {
             int support = 0, hold = 0, eof = 0, screen = 0, recover = 0, main = 0;
-            Theater mainTheater = Theater.Unknown;
             for (int i = 0; i < plan.Sectors.Count; i++)
             {
                 switch (plan.Sectors[i].Posture)
                 {
-                    case TheaterPosture.MainEffort: main++; mainTheater = plan.Sectors[i].Theater; break;
+                    case TheaterPosture.MainEffort: main++; break;
                     case TheaterPosture.Support: support++; break;
                     case TheaterPosture.Hold: hold++; break;
                     case TheaterPosture.EconomyOfForce: eof++; break;
@@ -851,7 +863,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             return "[CampaignPlan] alliance=" + plan.Alliance
-                + " main=" + (plan.MainObjectiveId >= 0 ? mainTheater + "/" + plan.MainObjectiveId : "none")
+                + " main=" + MainLabel(plan)
                 + " ratio=" + plan.MainRequiredRatio.ToString("0.00", CultureInfo.InvariantCulture)
                 + " sectors=main:" + main + ",support:" + support + ",hold:" + hold + ",eof:" + eof + ",screen:" + screen + ",recover:" + recover
                 + " switch=" + (plan.SwitchReason ?? "none")

@@ -70,7 +70,6 @@ internal static class CommanderPlannerTests
         AssertNear(0.65f, bold.AttackBias, 1e-5f, "initiative - leadership * 0.5");
         AssertNear(-0.15f, timid.AttackBias, 1e-5f, "attack bias can be negative");
         AssertNear(0.2f, bold.SupplySlack, 1e-5f, "administration * 0.25");
-        AssertEqual(1, bold.CommanderId, "profile carries the commander id");
         var extreme = CommanderProfiles.From(Cmd(3, 8, 0.6f, initiative: 3f, leadership: -4f, administration: 2f));
         AssertNear(1f, extreme.AttackBias, 1e-5f, "attack bias clamped to [-1, 1]");
     }
@@ -79,7 +78,6 @@ internal static class CommanderPlannerTests
     {
         var list = new List<CommanderRecord> { Cmd(7, 8, 0.6f, initiative: 0.8f, leadership: 0.4f, administration: 0.4f) };
         var neutral = CommanderProfiles.Neutral;
-        AssertEqual(-1, neutral.CommanderId, "neutral has no commander");
         AssertEqual(0f, neutral.RequiredOddsShift, "neutral odds");
         AssertEqual(0f, neutral.AttackBias, "neutral bias");
         AssertEqual(0f, neutral.SupplySlack, "neutral slack");
@@ -753,7 +751,7 @@ internal static class CommanderPlannerTests
 
         internal Fixture(PlayerCommandClass player = PlayerCommandClass.NotCareer, int alliance = 1, int playerCommand = -1)
         {
-            Snapshot.Reset(alliance, alliance, Day, player, playerCommand, true, null);
+            Snapshot.Reset(alliance, alliance, Day, player, playerCommand, null);
             Snapshot.RelocationRange = 30f;
             Snapshot.Areas.Add(new AreaRecord { Index = EastArea, X = 1263f, Z = -1010f, EdgeX = new[] { 1263f }, EdgeZ = new[] { -1010f }, SupplyCapacity = 100f });
             Snapshot.Areas.Add(new AreaRecord { Index = WestArea, X = 0f, Z = 0f, EdgeX = new[] { 0f }, EdgeZ = new[] { 0f }, SupplyCapacity = 100f });

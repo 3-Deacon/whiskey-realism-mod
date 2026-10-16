@@ -21,26 +21,6 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
-    // Every vanilla assignment that makes a campaign formation "busy". Mirrors
-    // the exclusions vanilla applies before it moves a unit itself:
-    // IsUnitAvailableForOffensiveOperations (decompile 14080),
-    // AssignUnitToDefendCapital (11800), CheckForEndOfDefensiveOperations (13860).
-    internal struct AreaOrderBusyFlags
-    {
-        public bool InBattle;
-        public bool OnRetreat;
-        public bool HasPaths;
-        public bool InOffensiveOperation;
-        public bool InDefensiveOperation;
-        public bool DefendingCapital;      // aifaction.groupstodefendcapital
-        public bool BuildingSupplyDepot;   // aifaction.unitsconstructingsupplydepots
-        public bool BuildingFort;          // FortConstructionOrder.UnitAlreadyConstructing
-        public bool RaidForce;             // RaidForce.IsRaidUnit
-        public bool SeaInvasionForce;      // SeaInvasionForce.GetSeaInvasionForceReference != null
-        public bool DefensiveOrderQueued;  // DefensiveMovingOrder.OrderRunning
-        public bool TakingTown;            // AICampaign.IsUnitTakingTown
-    }
-
     internal enum ForbiddenCommitRevert { None, CancelQueuedOrder, MoveBack }
 
     internal static class CampaignMilitaryGates
@@ -133,16 +113,6 @@ namespace WhiskeyRealism.Strategic
             return need;
         }
 
-        // ---- C-ArmyArea -----------------------------------------------------
-        internal static bool IsIdleForAreaOrder(AreaOrderBusyFlags busy)
-        {
-            return !busy.InBattle && !busy.OnRetreat && !busy.HasPaths &&
-                !busy.InOffensiveOperation && !busy.InDefensiveOperation &&
-                !busy.DefendingCapital && !busy.BuildingSupplyDepot && !busy.BuildingFort &&
-                !busy.RaidForce && !busy.SeaInvasionForce && !busy.DefensiveOrderQueued &&
-                !busy.TakingTown;
-        }
-
         // ---- C-Coastal ------------------------------------------------------
         // Vanilla CheckForEndOfDefensiveOperations (decompile 13836) keeps a
         // defensive-operation unit only while some enemy (or enemy depot) is
@@ -204,37 +174,6 @@ namespace WhiskeyRealism.Strategic
         internal static bool Allow(bool insideCheckTransferOfUnits, bool careerActive, bool sourceOwnedByPlayer, bool destinationOwnedByPlayer)
         {
             return insideCheckTransferOfUnits && careerActive && !sourceOwnedByPlayer && !destinationOwnedByPlayer;
-        }
-    }
-
-    // Cached FieldInfo lookups keyed by (declaring runtime type, field name) for
-    // vanilla objects read via reflection - AICampaign.AIFaction and its nested
-    // types, AICampaign, Regiment fields read from untyped lists - so per-call
-    // campaign code does not re-run AccessTools.Field. A missing field caches as
-    // null (callers handle null).
-    internal static class VanillaFieldCache
-    {
-        private static readonly System.Collections.Generic.Dictionary<(Type, string), FieldInfo> _fields =
-            new System.Collections.Generic.Dictionary<(Type, string), FieldInfo>();
-
-        internal static FieldInfo Field(Type owner, string name)
-        {
-            if (owner == null || name == null) return null;
-            var key = (owner, name);
-            if (_fields.TryGetValue(key, out var field)) return field;
-            field = AccessTools.Field(owner, name);
-            _fields[key] = field;
-            return field;
-        }
-
-        internal static object Get(object instance, string name)
-        {
-            return instance == null ? null : Field(instance.GetType(), name)?.GetValue(instance);
-        }
-
-        internal static System.Collections.IList List(object instance, string name)
-        {
-            return Get(instance, name) as System.Collections.IList;
         }
     }
 }

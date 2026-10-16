@@ -21,7 +21,7 @@ namespace WhiskeyRealism.Patches
 
         internal static FieldInfo ResolveCompleteUnitList()
         {
-            return AccessTools.Field(typeof(BattleUnits), "completeunitlist");
+            return AccessTools.Field(typeof(BattleUnits), "completeunitlist"); // battle IL fix (BC13), not a campaign read
         }
 
         internal static MethodInfo ResolveToListOfRegiment()

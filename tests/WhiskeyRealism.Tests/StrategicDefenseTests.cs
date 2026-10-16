@@ -352,7 +352,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "XII Corps",
             ActiveStrength = 18000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -386,7 +385,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "Far Army",
             ActiveStrength = 20000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -422,7 +420,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Division",
             ActiveStrength = 4000f,
             Morale = 0.8f,
             ReadinessStep = 2f,
@@ -433,7 +430,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Adjacent Army",
             ActiveStrength = 15000f,
             Morale = 0.85f,
             ReadinessStep = 2f,
@@ -475,7 +471,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Brigade Alpha",
             ActiveStrength = 3000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -485,7 +480,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Brigade Beta",
             ActiveStrength = 3000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -496,7 +490,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "Far Army",
             ActiveStrength = 20000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -548,7 +541,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 10 + i,
-                UnitName = $"Guard Unit {i}",
                 ActiveStrength = 2500f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -597,7 +589,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Brigade",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -645,7 +636,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Garrison",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -703,7 +693,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Division A",
             ActiveStrength = 10000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -733,7 +722,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Player Division",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -745,7 +733,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "AI Brigade",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -786,7 +773,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 1,
-                UnitName = "Critical Front Division",
                 ActiveStrength = 6000f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -820,7 +806,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 1,
-                UnitName = "Critical Front Division",
                 ActiveStrength = 6000f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -899,7 +884,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Guard",
             ActiveStrength = 6000f,
             Morale = 0.85f,
             ReadinessStep = 2f,
@@ -934,7 +918,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Guard Brigade",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -959,7 +942,6 @@ internal static class StrategicDefenseTests
     {
         var output = new DefenseIntentLedgerOutput
         {
-            AllianceId = 1,
             Signature = "sig-a"
         };
         output.Responses.Add(new DefenseResponse
@@ -994,7 +976,6 @@ internal static class StrategicDefenseTests
 
         AssertTrue(caught == null, $"expected no exception for allianceId=2, got: {caught}");
         AssertTrue(output != null, "Build must return a non-null output for allianceId=2");
-        AssertEqual(2, output.AllianceId);
         AssertTrue(output.Responses != null,
             "Responses list must not be null even for europe alliance");
     }
@@ -1015,22 +996,18 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Garrison",
             ActiveStrength = 4000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.East,
             Tier = CandidateTier.Local,
             DistanceToThreat = 20f
         });
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Distant Army",
             ActiveStrength = 25000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.West,
             Tier = CandidateTier.AdjacentTheater,
             TransferDonorAllowed = true,
             DirectMovementAllowed = true,
@@ -1095,11 +1072,9 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Eastern Field Army",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.East,
             SectorKey = "VirginiaCapitalCorridor",
             Tier = CandidateTier.AdjacentTheater,
             TransferDonorAllowed = true,
@@ -1133,7 +1108,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Recovering Corps",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -1172,11 +1146,9 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 10 + i,
-                UnitName = "Capital Reserve " + i,
                 ActiveStrength = 7000f,
                 Morale = 1f,
                 ReadinessStep = 2f,
-                Theater = Theater.East,
                 Tier = CandidateTier.SameTheater,
                 TransferDonorAllowed = true,
                 DirectMovementAllowed = true,

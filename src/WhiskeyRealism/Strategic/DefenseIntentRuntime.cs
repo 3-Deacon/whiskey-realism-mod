@@ -58,7 +58,7 @@ namespace WhiskeyRealism.Strategic
 
         internal static DefenseIntentInput BuildInput(
             int allianceId,
-            CIC cic,
+            bool plannerRuns,
             EraStageManager era,
             CampaignMapLedger map,
             DefenseCooldownTable cooldown,
@@ -76,10 +76,8 @@ namespace WhiskeyRealism.Strategic
             var input = new DefenseIntentInput
             {
                 AllianceId = allianceId,
-                PlayerIsCIC = cic == null,
-                CICPersonality = cic != null && era != null
-                    ? cic.Effective(era)
-                    : default(PersonalityVector),
+                PlayerIsCIC = !plannerRuns,
+                CICPersonality = PersonalityVector.ForAlliance(allianceId, era),
                 Cooldown = cooldown,
                 CooldownDays = 4,
                 GuardBudgetFraction = 0.10f,
@@ -492,7 +490,6 @@ namespace WhiskeyRealism.Strategic
                     ? ((Component)regiment).transform.position
                     : ObjectPosition(unit);
                 Theater unitTheater = TheaterClassifier.FromPosition(unitPos.x, unitPos.z);
-                string areaKey = ArmyAreaRuntime.AreaKey(unitPos);
                 string sectorKey = FrontSectorRuntime.SectorKey(unitPos);
 
                 // Readiness step.
@@ -596,16 +593,12 @@ namespace WhiskeyRealism.Strategic
                 input.Candidates.Add(new DefenseCandidate
                 {
                     UnitInstanceId = unitInstanceId,
-                    UnitKey = unitKey,
-                    UnitName = unitName,
-                    AreaKey = areaKey,
                     SectorKey = sectorKey,
                     X = unitPos.x,
                     Z = unitPos.z,
                     ActiveStrength = (float)strength,
                     Morale = morale,
                     ReadinessStep = readinessStep,
-                    Theater = unitTheater,
                     Tier = tier,
                     InOffensiveOperation = inOffensive,
                     PlayerControlled = playerControlled,

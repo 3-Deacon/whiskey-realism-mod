@@ -36,7 +36,9 @@ namespace WhiskeyRealism.Strategic
 
                 // Own top formations by area once per call (friendly support), and the side's
                 // fog-honest beliefs (G1) for the enemy pressure.
-                var unitsByArea = BuildAreaIndex(allianceId);
+                CampaignPlanStore.TryGetSectors(allianceId, out var sectors);
+                var unitsByArea = BuildAreaIndex(allianceId, sectors);
+                var commandTree = CampaignPlannerRuntime.SnapshotOf(allianceId);
                 var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
 
                 var snapshots = new List<FormationSnapshot>();
@@ -44,7 +46,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     var unit = ownUnits[i];
                     if (unit == null) continue;
-                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea, beliefs);
+                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea, beliefs, sectors, commandTree);
                     if (snapshot != null)
                     {
                         snapshot.IsPlanTargetArea = !string.IsNullOrEmpty(planTargetAreaKey) &&
@@ -77,7 +79,7 @@ namespace WhiskeyRealism.Strategic
         // Builds a Dictionary<areaKey, List<Regiment>> over this alliance's top-formation top-units
         // only (own side: the enemy enters only as beliefs, G1). Used to turn the O(n²)
         // PopulateLocalPressure friendly-support scan into an O(bucket) scan.
-        private static Dictionary<string, List<Regiment>> BuildAreaIndex(int allianceId)
+        private static Dictionary<string, List<Regiment>> BuildAreaIndex(int allianceId, SectorModel sectors)
         {
             var index = new Dictionary<string, List<Regiment>>(StringComparer.Ordinal);
             try
@@ -88,7 +90,7 @@ namespace WhiskeyRealism.Strategic
                     var u = BattleUnits.campaignunitlist[i];
                     if (u == null || u.alliance != allianceId) continue;
                     if (!IsTopFormation(u)) continue;
-                    string key = ArmyAreaRuntime.AreaKey(u.transform.position);
+                    string key = PlannerAreaKeys.At(sectors, u.transform.position.x, u.transform.position.z);
                     if (!index.TryGetValue(key, out var bucket))
                     {
                         bucket = new List<Regiment>();
@@ -105,7 +107,7 @@ namespace WhiskeyRealism.Strategic
         }
 
         internal static FormationSnapshot SnapshotUnit(int allianceId, Regiment unit, bool grandArmyStructure,
-            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
+            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs, SectorModel sectors, CampaignSnapshot commandTree)
         {
             try
             {
@@ -115,11 +117,8 @@ namespace WhiskeyRealism.Strategic
                 var snapshot = new FormationSnapshot
                 {
                     UnitKey = UnitKey(unit),
-                    ParentUnitKey = ParentUnitKey(unit),
-                    AllianceId = allianceId,
+                    ParentUnitKey = commandTree?.ParentKeyOf(((UnityEngine.Object)unit).GetInstanceID()),
                     StableUnitId = ((UnityEngine.Object)unit).GetInstanceID(),
-                    UnitName = ((UnityEngine.Object)unit).name,
-                    CommanderName = CommanderName(unit),
                     UnitType = unit.unittyp,
                     IsTopUnit = unit.istopunit,
                     IsGarrisoned = unit.garrisonreference != null,
@@ -133,15 +132,13 @@ namespace WhiskeyRealism.Strategic
                     ArtilleryAmmo = ReadSupplyState(unit, 1, unit.groupammo),
                     Supply = ReadSupply(unit),
                     Fatigue = FormationSnapshot.Clamp01(unit.groupfatigue),
-                    WeaponFirepower = EstimateWeaponFirepower(unit),
                     CommandRange = unit.commanderrange,
                     BugleRange = unit.buglerange,
-                    InBattle = unit.inbattle,
                     OnRetreat = unit.onretreat,
                     HasActivePath = unit.regimentpaths > 0
                 };
 
-                snapshot.AreaKey = ArmyAreaRuntime.AreaKey(unit.transform.position);
+                snapshot.AreaKey = PlannerAreaKeys.At(sectors, unit.transform.position.x, unit.transform.position.z);
                 snapshot.SectorKey = FrontSectorRuntime.SectorKey(unit.transform.position);
                 PopulateFrontContext(allianceId, snapshot);
 
@@ -152,19 +149,6 @@ namespace WhiskeyRealism.Strategic
             {
                 OnceLog.Warning("formation-directive:snapshot", "[FormationDirective] snapshot failed: " + ex.Message);
                 return null;
-            }
-        }
-
-        internal static bool ShouldAllowAreaMovement(int allianceId, string unitKey)
-        {
-            try
-            {
-                return FormationDirectiveLedger.AllowsAreaMovement(GetAssignment(allianceId, unitKey), CampaignPlannerRuntime.ReconExecutorActive());
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:area-movement", "[FormationDirective] area movement gate failed: " + ex.Message);
-                return true;
             }
         }
 
@@ -218,8 +202,8 @@ namespace WhiskeyRealism.Strategic
         }
 
         // Friendly support from the formation's own area bucket; the enemy from the believed
-        // armies within 2 x bugle range (G1: confidence-weighted strength, strength + guns x 65
-        // exchange pressure, the largest believed unit type).
+        // armies within 2 x bugle range (G1: confidence-weighted strength, the largest believed
+        // unit type).
         private static void PopulateLocalPressure(FormationSnapshot snapshot, Regiment unit,
             Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
         {
@@ -244,9 +228,8 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 EnemyBeliefReadings.LocalPressure(beliefs, position.x, position.z, enemyRange,
-                    out float strength, out float exchange, out FormationLevel level);
+                    out float strength, out FormationLevel level);
                 snapshot.LocalEnemyStrength += strength;
-                snapshot.LocalEnemyExchangePressure += exchange;
                 if ((int)level > (int)snapshot.VisibleEnemyLevel)
                     snapshot.VisibleEnemyLevel = level;
             }
@@ -299,44 +282,9 @@ namespace WhiskeyRealism.Strategic
                    unit.unittyp <= 16;
         }
 
-        // Uses Unity hierarchy (canonical) — parentregiment GameObject field is not needed.
-        private static string ParentUnitKey(Regiment unit)
-        {
-            try
-            {
-                if (unit == null) return null;
-                if (unit.transform.parent != null)
-                {
-                    var parent = unit.transform.parent.GetComponent<Regiment>();
-                    if (parent != null) return UnitKey(parent);
-                }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:parent", "[FormationDirective] parent lookup failed: " + ex.Message);
-            }
-            return null;
-        }
-
         private static string UnitKey(Regiment unit)
         {
             return ((UnityEngine.Object)unit).name + ":" + unit.commander.ToString();
-        }
-
-        private static string CommanderName(Regiment unit)
-        {
-            try
-            {
-                int commanderId = unit.commander;
-                var commanders = GameVars.commander;
-                if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return null;
-                return commanders[commanderId].combinedname;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:commander", "[FormationDirective] commander lookup failed: " + ex.Message);
-                return null;
-            }
         }
 
         private static float ReadSupplyState(Regiment unit, int index, float fallback)
@@ -365,27 +313,6 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return 1f;
-        }
-
-        private static float EstimateWeaponFirepower(Regiment unit)
-        {
-            // groupstrengthperunittypcampaigndirect: infantry/cavalry/artillery strength breakdown
-            float direct = Sum(unit.groupstrengthperunittypcampaigndirect);
-            if (direct <= 0f)
-                direct = Sum(unit.groupstrengthperunittyp);
-            if (direct <= 0f)
-                direct = Math.Max(0f, unit.groupstrengthactive);
-
-            float guns = Math.Max(0, unit.groupstatsgunsactive);
-            return Math.Max(1f, direct + guns * 65f);
-        }
-
-        private static float Sum(int[] values)
-        {
-            if (values == null) return 0f;
-            float total = 0f;
-            for (int i = 0; i < values.Length; i++) total += Math.Max(0, values[i]);
-            return total;
         }
 
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);

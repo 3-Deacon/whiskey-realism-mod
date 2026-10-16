@@ -1,5 +1,6 @@
 using System;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Strategic.Policies;
 using static TestHarness;
 
@@ -46,15 +47,9 @@ internal static class ChapterFixTests
             ("chapter militia act one hold follows the selection flag and never an emergency", WarStartHoldFollowsTheFlag),
             ("chapter militia act one pick filter and fallback hold share one predicate", WarStartPredicateIsShared),
             ("chapter fiscal and construction inputs carry no chapter nobody reads", FiscalAndConstructionInputsCarryNoChapter),
-            ("chapter late operation is available May to October 1864 at chapter two", LateOperationAvailableInSummer1864),
-            ("chapter late operation survives a lost election", LateOperationSurvivesALostElection),
-            ("chapter late operation is not available before May 1864", LateOperationNotBeforeMay1864),
-            ("chapter late operation needs the decisive era or later", LateOperationNeedsDecisiveEraOrLater),
-            ("chapter every other operation keeps its single era so its match set is unchanged", OtherOperationsKeepTheirSingleEra),
-            ("chapter an unset era span means the single era", UnsetEraSpanMeansTheSingleEra),
-            ("chapter validate profile rejects an era span that ends before it starts", ValidateProfileRejectsInvertedEraSpan),
-            ("chapter early operations still reject every later era in their window", EarlyOperationsRejectLaterErasInTheirWindow),
             ("chapter grand strategy profile is decisive before chapter three", GrandStrategyStaysDecisiveBeforeChapterThree),
+            ("chapter the late prior window opens in May 1864 and runs to March 1865", LatePriorWindowOpensMay1864AndRunsToMarch1865),
+            ("chapter the late prior is a calendar weight, not an era gate", LatePriorIsACalendarWeight),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -198,7 +193,7 @@ internal static class ChapterFixTests
         AssertTrue(notify.IndexOf("_eraMigrationPending", StringComparison.Ordinal) < notify.IndexOf("OnMonthlyTick(", StringComparison.Ordinal),
             "before the review reads the era");
         AssertContains(MethodText(src, "private void ApplySnapshot(", "PublishStrategicState();"), "if (snap.Eras[alliance].HasValue) { _erasSeededFromSave = true; _eraMigrationPending = true; }", "a sidecar era arms the migration");
-        AssertContains(MethodText(src, "public void ResetAll(", "private CIC BuildCICForAlliance"), "_eraMigrationPending = false;", "a reset disarms it");
+        AssertContains(MethodText(src, "public void ResetAll(", "public void NotifyDateAdvanced("), "_eraMigrationPending = false;", "a reset disarms it");
     }
 
     private static WhiskeyRealism.Strategic.Projects.ProjectDoctrineDecision SelectWithVanilla1864Project(int campaignYear)
@@ -496,115 +491,49 @@ internal static class ChapterFixTests
         AssertFalse(Flat("src/WhiskeyRealism/Strategic/Construction/ConstructionRuntime.cs").Contains("SafePolicyChapter"), "construction runtime no longer reads the chapter");
     }
 
-    // ---- historical operations are calendar priors; the era stage follows the chapter ----
+    // ---- the historical priors are calendar weights; the era stage follows the chapter ----
 
-    private static HistoricalOperationMatch ResolveUnionEast(EraStage era, int chapter, int month, int year)
+    private static float LatePrior(int day, int month, int year, out string id)
     {
-        AssertTrue(ObjectiveCatalog.TryResolve(3, out var objective), "objective 3");
-        var candidate = new HistoricalOperationCandidate { ObjectiveId = 3, Objective = objective, ObjectiveScore = 10f };
-        return HistoricalOperationCatalog.Resolve(0, era, chapter, month, year, candidate, null, default(PersonalityVector), null, null);
+        return HistoricalPriorTable.PriorFor(0, 3, ReviewCadenceCatchUp.DaySerial(day, month, year), out id);
     }
 
-    private static void LateOperationAvailableInSummer1864()
+    // Grant and Sherman opened their campaigns in May 1864; the election (chapter 3) comes in November and a lost one
+    // leaves the campaign running to 4 Mar 1865: the window is dates alone (ported from the catalog's LateOperation tests).
+    private static void LatePriorWindowOpensMay1864AndRunsToMarch1865()
     {
-        // Grant and Sherman opened their campaigns in May 1864; the election (chapter 3) comes in November.
-        for (int month = 5; month <= 10; month++)
+        for (int month = 5; month <= 12; month++)
         {
-            var match = ResolveUnionEast(EraStage.Decisive1863, 2, month, 1864);
-            AssertEqual(HistoricalOperationMatchKind.Matched, match.Kind, "1864-" + month);
-            AssertEqual("union-late-pressure", match.Profile.OperationId, "1864-" + month);
-            AssertEqual("matched:chapter-drift", match.Reason, "chapter 2 is before the profile's chapters 3-4, allowed by AllowDateDrift");
+            AssertNear(1f, LatePrior(15, month, 1864, out string id), 0.0001f, "1864-" + month);
+            AssertEqual("union-late-pressure", id, "1864-" + month);
         }
-        var election = ResolveUnionEast(EraStage.TotalWar1864, 3, 11, 1864);
-        AssertEqual("union-late-pressure", election.Profile.OperationId, "after the election");
-        AssertEqual("matched", election.Reason, "chapter 3 is in window");
-    }
-
-    private static void LateOperationSurvivesALostElection()
-    {
-        // Chapter stays 2 and the era Decisive1863 (EraStageManager.ForDate); the campaign runs to 4 Mar 1865.
-        AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(1, 1865, false, 2), "era after a lost election");
-        foreach (int month in new[] { 11, 12 })
-            AssertEqual("union-late-pressure", ResolveUnionEast(EraStage.Decisive1863, 2, month, 1864).Profile.OperationId, "1864-" + month);
-        foreach (int month in new[] { 1, 2, 3 })
-            AssertEqual("union-late-pressure", ResolveUnionEast(EraStage.Decisive1863, 2, month, 1865).Profile.OperationId, "1865-" + month);
-    }
-
-    private static void LateOperationNotBeforeMay1864()
-    {
+        for (int month = 1; month <= 3; month++)
+        {
+            AssertNear(1f, LatePrior(15, month, 1865, out string id), 0.0001f, "1865-" + month);
+            AssertEqual("union-late-pressure", id, "1865-" + month);
+        }
+        HistoricalPriorTable.Entry late = default(HistoricalPriorTable.Entry);
+        foreach (var e in HistoricalPriorTable.Entries)
+            if (e.Id == "union-late-pressure") late = e;
+        AssertEqual(ReviewCadenceCatchUp.DaySerial(1, 5, 1864), late.StartSerial, "starts 1 May 1864");
+        AssertEqual(ReviewCadenceCatchUp.DaySerial(31, 12, 1865), late.EndSerial, "ends 31 Dec 1865");
         foreach (int month in new[] { 1, 2, 3, 4 })
-            AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(EraStage.Decisive1863, 2, month, 1864).Kind, "1864-" + month);
-        AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(EraStage.Decisive1863, 2, 12, 1863).Kind, "Dec 1863");
-        AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(EraStage.Decisive1863, 2, 6, 1865 + 1).Kind, "after the profile's window");
-        AssertTrue(HistoricalOperationCatalog.TryGetById("union-late-pressure", out var profile), "profile");
-        AssertEqual(5, profile.StartMonth, "starts in May");
-        AssertEqual(1864, profile.StartYear, "of 1864");
+            AssertTrue(HistoricalPriorTable.Weight(late, ReviewCadenceCatchUp.DaySerial(15, month, 1864)) < 1f, "not full before May: 1864-" + month);
+        AssertTrue(HistoricalPriorTable.Weight(late, ReviewCadenceCatchUp.DaySerial(15, 12, 1863)) < 1f, "Dec 1863");
+        AssertTrue(HistoricalPriorTable.Weight(late, ReviewCadenceCatchUp.DaySerial(15, 6, 1866)) < 1f, "after the window");
+        AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(1, 1865, false, 2), "era after a lost election stays Decisive");
     }
 
-    private static void LateOperationNeedsDecisiveEraOrLater()
+    // The old profile also needed the Decisive era or later; the planner's prior takes no era (history is a weight, the live
+    // margin decides): the same date gives the same weight in any era.
+    private static void LatePriorIsACalendarWeight()
     {
-        AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(EraStage.Amateur1861, 2, 6, 1864).Kind, "Amateur");
-        AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(EraStage.Operational1862, 2, 6, 1864).Kind, "Operational");
-        AssertTrue(HistoricalOperationCatalog.TryGetById("union-late-pressure", out var profile), "profile");
-        AssertEqual(EraStage.Decisive1863, profile.Era, "lowest era");
-        AssertEqual(EraStage.TotalWar1864, profile.MaxEra, "highest era");
-        AssertEqual(OperationChapterPolicy.AllowDateDrift, profile.ChapterPolicy, "chapter policy unchanged");
-    }
-
-    private static void OtherOperationsKeepTheirSingleEra()
-    {
-        // Matching is `profile.Era <= era <= profile.MaxEra`. With MaxEra == Era that is the old
-        // `era == profile.Era`, so these profiles match exactly as before for every era and date.
-        foreach (string id in new[] { "union-east-pressure", "csa-valley-disruption", "union-coastal-pressure", "union-western-pressure", "csa-western-depth" })
-        {
-            AssertTrue(HistoricalOperationCatalog.TryGetById(id, out var profile), id);
-            AssertEqual(profile.Era, profile.MaxEra, id + " single era");
-        }
-    }
-
-    // A profile built outside Profile(): every field of an existing one, MaxEra left alone.
-    private static HistoricalOperationProfile CopyOfEastPressure()
-    {
-        AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var p), "source profile");
-        return new HistoricalOperationProfile
-        {
-            OperationId = "test-copy", OperationName = p.OperationName, AllianceId = p.AllianceId, Theater = p.Theater,
-            Era = EraStage.Operational1862, MinChapter = p.MinChapter, MaxChapter = p.MaxChapter,
-            StartMonth = p.StartMonth, StartYear = p.StartYear, EndMonth = p.EndMonth, EndYear = p.EndYear,
-            PrimaryObjectiveId = p.PrimaryObjectiveId, ObjectiveAllowList = p.ObjectiveAllowList, ChapterPolicy = p.ChapterPolicy,
-            Priority = p.Priority, RequiredTags = p.RequiredTags, PreferredTags = p.PreferredTags, Tempo = p.Tempo,
-            Posture = p.Posture, Phases = p.Phases, DynamicRules = p.DynamicRules, AlternateOperationIds = p.AlternateOperationIds,
-            NearTargetRadius = p.NearTargetRadius
-        };
-    }
-
-    private static void UnsetEraSpanMeansTheSingleEra()
-    {
-        var profile = CopyOfEastPressure();
-        AssertEqual(EraStage.Operational1862, profile.MaxEra, "unset MaxEra follows Era, not Amateur1861");
-        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "valid");
-        profile.MaxEra = EraStage.TotalWar1864;
-        AssertEqual(EraStage.TotalWar1864, profile.MaxEra, "an explicit span is kept");
-    }
-
-    private static void ValidateProfileRejectsInvertedEraSpan()
-    {
-        var profile = CopyOfEastPressure();
-        profile.MaxEra = EraStage.Amateur1861;
-        AssertFalse(HistoricalOperationCatalog.ValidateProfile(profile, out string reason), "MaxEra below Era");
-        AssertEqual("invalid-era-span", reason, "reason");
-        profile.MaxEra = EraStage.Operational1862;
-        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "MaxEra equal to Era");
-        profile.MaxEra = EraStage.Decisive1863;
-        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "MaxEra above Era");
-    }
-
-    private static void EarlyOperationsRejectLaterErasInTheirWindow()
-    {
-        // The behaviour behind the single-era check: a profile with MaxEra == Era matches that era only.
-        AssertEqual("union-east-pressure", ResolveUnionEast(EraStage.Amateur1861, 1, 6, 1861).Profile.OperationId, "its own era");
-        foreach (var later in new[] { EraStage.Operational1862, EraStage.Decisive1863, EraStage.TotalWar1864 })
-            AssertEqual(HistoricalOperationMatchKind.NoProfile, ResolveUnionEast(later, 1, 6, 1861).Kind, "1861-06 in " + later);
+        AssertEqual(3, HistoricalPriorTable.MaxTier, "tier cap");
+        var late = default(HistoricalPriorTable.Entry);
+        foreach (var e in HistoricalPriorTable.Entries)
+            if (e.Id == "union-late-pressure") late = e;
+        AssertEqual(3, late.Priority, "the late operation is a top-tier prior");
+        AssertFalse(typeof(HistoricalPriorTable.Entry).GetField("Era") != null || typeof(HistoricalPriorTable.Entry).GetField("MaxEra") != null, "a prior row carries no era");
     }
 
     private static void GrandStrategyStaysDecisiveBeforeChapterThree()

@@ -228,10 +228,10 @@ internal static class ObjectiveGroundTests
     private static void MappedCountIsResetAndLoggedOnFirstReview()
     {
         var s = new CampaignSnapshot();
-        s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, null);
         AssertEqual(0, s.MappedObjectiveCount, "a fresh snapshot has none");
         s.MappedObjectiveCount = 5;
-        s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, null);
         AssertEqual(0, s.MappedObjectiveCount, "Reset clears the pooled snapshot's count");
         string log = MethodBody(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "private static void LogFirstReview(");
         int objectives = log.IndexOf("\" objectives=\" + s.Objectives.Count", StringComparison.Ordinal);
@@ -248,7 +248,7 @@ internal static class ObjectiveGroundTests
     private static CampaignSnapshot Ground001(int alliance, params int[] objectiveIds)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -297,7 +297,7 @@ internal static class ObjectiveGroundTests
 
     private static SupplySourceRecord Iip(int id, float x, int owner)
     {
-        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true };
+        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, Condition = 1f, Built = true };
     }
 
     // unitbasicspeed[t, 1] = 2 for groups, basicunitspeed 1000 (unitprefs 853-854), factor 30

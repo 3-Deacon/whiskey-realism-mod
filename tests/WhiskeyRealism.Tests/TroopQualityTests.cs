@@ -43,8 +43,6 @@ internal static class TroopQualityTests
             ("troop-quality ChargeRefusedBelowVanillaOdds", ChargeRefusedBelowVanillaOdds),
             ("troop-quality ArmedChargeNotRevertedByOdds", ArmedChargeNotRevertedByOdds),
             ("troop-quality FlagOffDisablesBreakAndChargeOdds", FlagOffDisablesBreakAndChargeOdds),
-            ("troop-quality OffensiveRatioScaledByInitiative", OffensiveRatioScaledByInitiative),
-            ("troop-quality CautiousLeadNeedsMoreForAnOffensive", CautiousLeadNeedsMoreForAnOffensive),
             ("troop-quality SectorBlendsWeighGroupMorale", SectorBlendsWeighGroupMorale),
             ("troop-quality SideBlendsWeighMorale", SideBlendsWeighMorale),
             ("troop-quality LadderAttackBoundaryIsDividedLikeVanillaAttack", LadderAttackBoundaryIsDividedLikeVanillaAttack),
@@ -644,64 +642,6 @@ internal static class TroopQualityTests
         off.Enabled = false;
         AssertFalse(off.BreakToleranceOn, "off: no break input");
         AssertNear(0f, off.ChargeOddsRulesIfEnabled.Trigger, 1e-6f, "off: no charge pre-filter");
-    }
-
-    // ---------------------------------------------------------------- F: campaign offensives
-
-    // CheckOffensiveMovements 14250/14281: required strength × (1 + (1 - initiative) ×
-    // commanderinfluenceinitiativeforoperations), campaignprefs 0.25.
-    private static void OffensiveRatioScaledByInitiative()
-    {
-        var cautious = CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0f, 0.25f);
-        AssertNear(1.25f * 1.25f, cautious.RequiredAttackRatio, 1e-5f, "initiative 0: attack ratio x 1.25");
-        AssertNear(0.85f * 1.25f, cautious.RequiredReinforceRatio, 1e-5f, "initiative 0: reinforce ratio x 1.25");
-        var bold = CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(1f, 0.25f);
-        AssertNear(1.25f, bold.RequiredAttackRatio, 1e-5f, "initiative 1: unchanged");
-        AssertNear(0.85f, bold.RequiredReinforceRatio, 1e-5f, "initiative 1: unchanged");
-        var mid = CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0.5f, 0.25f);
-        AssertNear(1.25f * 1.125f, mid.RequiredAttackRatio, 1e-5f, "initiative 0.5: x 1.125");
-        var off = CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0f, 0f);
-        AssertNear(1.25f, off.RequiredAttackRatio, 1e-5f, "influence 0 (weighting off): unchanged");
-        var nan = CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(float.NaN, 0.25f);
-        AssertNear(1.25f * 1.25f, nan.RequiredAttackRatio, 1e-5f, "unreadable initiative reads as 0 (cautious)");
-        AssertNear(1250f, mid.MaxSupportEffectiveStrength, 1e-3f, "support cap untouched");
-    }
-
-    private static CoordinatedOperationInput OffensiveInput(CoordinatedOperationOptions options)
-    {
-        return new CoordinatedOperationInput
-        {
-            AllianceId = 0,
-            Intent = CoordinatedOperationIntent.Attack,
-            TargetEnemyStrength = 1000f,
-            TargetX = 0f,
-            TargetZ = 0f,
-            PreferredLeadStableUnitId = 1,
-            Options = options,
-            Candidates = new List<CoordinatedOperationCandidate>
-            {
-                new CoordinatedOperationCandidate
-                {
-                    StableUnitId = 1, AllianceId = 0, Directive = FormationDirective.Mass, X = 10f, Z = 10f,
-                    CombatAvailability = 1300f, Readiness = 0.9f, Morale = 0.9f, Ammo = 0.9f, Supply = 0.9f,
-                    OffensiveAllowed = true, DirectMovementAllowed = true,
-                },
-            },
-        };
-    }
-
-    private static void CautiousLeadNeedsMoreForAnOffensive()
-    {
-        var bold = CoordinatedOperationPackageLedger.Build(OffensiveInput(
-            CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(1f, 0.25f)));
-        AssertEqual(CoordinatedOperationDecision.SingleLead, bold.Decision, "bold lead at 1.3: overmatch, goes alone");
-        AssertEqual("lead-overmatch", bold.Reason, "bold reason");
-        var cautious = CoordinatedOperationPackageLedger.Build(OffensiveInput(
-            CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0f, 0.25f)));
-        AssertEqual("single-committable-lead", cautious.Reason, "cautious lead at 1.3 < 1.56: no overmatch, commits only at the reinforce ratio 1.06");
-        var timid = CoordinatedOperationPackageLedger.Build(OffensiveInput(
-            CoordinatedOperationOptions.StableDefaults(1000f).ScaledByCommanderInitiative(0f, 1f)));
-        AssertEqual(CoordinatedOperationDecision.Delay, timid.Decision, "influence 1: 1.3 < 0.85 x 2 = 1.7, the lead waits");
     }
 
     // ---------------------------------------------------------------- review follow-ups

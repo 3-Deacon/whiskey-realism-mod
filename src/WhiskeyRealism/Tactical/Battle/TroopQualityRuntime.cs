@@ -124,27 +124,6 @@ namespace WhiskeyRealism.Tactical.Battle
             return value;
         }
 
-        /// <summary>
-        /// Campaign (BC8, read at call time, not battle-scoped):
-        /// GamePrefs.commanderinfluenceinitiativeforoperations (campaignprefs 0.25), the factor
-        /// CheckOffensiveMovements scales its dominance requirement by (14250 / 14281); 0 with
-        /// the weighting off or the pref unreadable.
-        /// </summary>
-        internal static float CampaignOffensiveInitiativeInfluence()
-        {
-            if (!FlagOn()) return 0f;
-            try
-            {
-                return GamePrefs.commanderinfluenceinitiativeforoperations;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("campaign-troop-quality:initiative-pref",
-                    "[TroopQuality] commanderinfluenceinitiativeforoperations unreadable; offensive ratios unscaled: " + ex.GetType().Name + " " + ex.Message);
-                return 0f;
-            }
-        }
-
         private static bool FlagOn()
         {
             try

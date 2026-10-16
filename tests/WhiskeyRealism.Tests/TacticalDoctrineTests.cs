@@ -1564,7 +1564,6 @@ internal static class TacticalDoctrineTests
         var assignment = ledger.GetAssignment("low-ammo");
 
         AssertEqual(FormationDirective.Recover, assignment.Directive);
-        AssertEqual(false, assignment.OffensiveAllowed);
     }
 
     private static void DoctrineStanceGateDefenderNeverAttacks()

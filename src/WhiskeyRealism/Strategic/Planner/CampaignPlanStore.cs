@@ -51,6 +51,21 @@ namespace WhiskeyRealism.Strategic.Planner
             return allocation != null;
         }
 
+        // The published plan's main objective and its position (false with no main effort). The one reader
+        // of "where is this alliance's main target" outside the planner: the front ledger and the formation
+        // directives key their target on it.
+        public static bool TryGetMainTarget(int alliance, out int objectiveId, out float x, out float z)
+        {
+            objectiveId = -1;
+            x = 0f;
+            z = 0f;
+            if (!TryGetPlan(alliance, out var plan) || plan.MainObjectiveId < 0) return false;
+            objectiveId = plan.MainObjectiveId;
+            x = plan.MainObjectiveX;
+            z = plan.MainObjectiveZ;
+            return true;
+        }
+
         // The defensive availability Postfix's SectorAt (G5a).
         public static bool TryGetSectors(int alliance, out SectorModel sectors)
         {

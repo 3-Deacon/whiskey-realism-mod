@@ -137,15 +137,12 @@ namespace WhiskeyRealism.Strategic
                         var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
                         {
                             AllianceId = allianceId,
-                            AifactionIndex = aifactionIndex,
                             Unit = unit,
                             TargetPosition = anchor,
                             TargetName = sig,
-                            ObjectiveId = -1,
                             Intent = WlStrategicIntent.EngageEnemy,
                             Width = 20f,
-                            Depth = 20f,
-                            SourceSystem = "CoastalDefense"
+                            Depth = 20f
                         });
 
                         if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
