@@ -3,6 +3,7 @@ using System.Collections;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Construction
@@ -16,7 +17,37 @@ namespace WhiskeyRealism.Strategic.Construction
             FrontSectorLedger front,
             FormationDirectiveLedger formation)
         {
-            var input = new ConstructionInput
+            var input = NewInput(alliance, era, fiscal);
+            input.ActiveRailroadStarts = CountActiveRailroads(alliance);
+
+            FillPressure(input, front, formation);
+            AddPrivateBuildingCandidates(input);
+            AddRailroadCandidates(input);
+            AddFortSiteObservationCandidates(input);
+            AddDepotTaskCandidates(input);
+            return input;
+        }
+
+        // The depot task executor's own evaluation (plan G5c): the fiscal and pressure facts and one SupplyDepot candidate per plan
+        // depot task, today's, so the ledger's verdict and its TopSupplyDepot name today's tasks (the full BuildInput above runs
+        // weekly and lags the plan). The private-building, railroad and fort scans are not repeated.
+        // The ledger's depot rules read the fiscal posture, the bond floor and the pressures, never the era stage, so none is passed
+        // (the planner reads no era stage, plan decision 7).
+        internal static ConstructionInput BuildDepotInput(
+            int alliance,
+            FiscalOutput fiscal,
+            FrontSectorLedger front,
+            FormationDirectiveLedger formation)
+        {
+            var input = NewInput(alliance, default(EraStage), fiscal);
+            FillPressure(input, front, formation);
+            AddDepotTaskCandidates(input);
+            return input;
+        }
+
+        private static ConstructionInput NewInput(int alliance, EraStage era, FiscalOutput fiscal)
+        {
+            return new ConstructionInput
             {
                 AllianceId = alliance,
                 EraStage = era,
@@ -28,15 +59,8 @@ namespace WhiskeyRealism.Strategic.Construction
                 SupplyProtection = fiscal != null && fiscal.SupplyProtection,
                 LogisticsExpansion = fiscal != null && fiscal.LogisticsExpansion,
                 ForceCapWarning = fiscal != null && fiscal.ForceCapWarning,
-                TopSupplyTheater = fiscal != null ? fiscal.TheaterSupplyPriority ?? "" : "",
-                ActiveRailroadStarts = CountActiveRailroads(alliance)
+                TopSupplyTheater = fiscal != null ? fiscal.TheaterSupplyPriority ?? "" : ""
             };
-
-            FillPressure(input, front, formation);
-            AddPrivateBuildingCandidates(input);
-            AddRailroadCandidates(input);
-            AddFortSiteObservationCandidates(input);
-            return input;
         }
 
         private static int SafeYear()
@@ -163,6 +187,7 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.Candidates.Add(new ConstructionCandidate
                     {
                         Kind = ConstructionCandidateKind.Railroad,
+                        SiteIndex = i,
                         Name = RailroadName(railroad, i),
                         Theater = TheaterFromPosition(position),
                         VanillaValid = RailroadVanillaValid(railroad, input.AllianceId),
@@ -195,6 +220,7 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.Candidates.Add(new ConstructionCandidate
                     {
                         Kind = ConstructionCandidateKind.Fort,
+                        SiteIndex = i,
                         Name = "fort-site-" + i,
                         Theater = theater,
                         VanillaValid = true,
@@ -208,6 +234,48 @@ namespace WhiskeyRealism.Strategic.Construction
             {
                 OnceLog.Warning("construction-runtime:fort-sites", "[ConstructionRuntime] fort site read failed: " + ex.Message);
             }
+        }
+
+        // The planner's depot tasks as SupplyDepot candidates (plan G5c): the ledger's depot kind was never fed before. The plan is the
+        // published one (CampaignPlanStore), so a patch-side caller and the review read the same day's tasks.
+        private static void AddDepotTaskCandidates(ConstructionInput input)
+        {
+            try
+            {
+                if (!CampaignPlanStore.TryGetPlan(input.AllianceId, out var plan)) return;
+                int alliance = input.AllianceId;
+                DepotCandidates.Add(input, plan,
+                    (x, z) => TheaterFromPosition(new Vector3(x, 0f, z)),
+                    (x, z) => NearestOwnIip(alliance, x, z) != null);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("construction-runtime:depot-candidates", "[ConstructionRuntime] depot candidate read failed: " + ex.Message);
+            }
+        }
+
+        // The IIP a depot wish at (x, z) calls (AddConstructionWish needs one, 97488; vanilla's job 19 passes the unit's
+        // closestiipforsupply, 14770): the nearest visible IIP the alliance owns that has no building under construction (a wish
+        // at an IIP with one returns that building and places nothing, 97481-97484). Null when none.
+        internal static IIP NearestOwnIip(int alliance, float x, float z)
+        {
+            var iips = BattleUnits.iips;
+            if (iips == null) return null;
+            IIP best = null;
+            float bestSq = float.MaxValue;
+            for (int i = 0; i < iips.Count; i++)
+            {
+                var iip = iips[i];
+                if ((UnityEngine.Object)iip == null || iip.allianceowner != alliance || iip.IIPType == IIP.id_invisible) continue;
+                if ((UnityEngine.Object)iip.currentlyunderconstruction != null) continue;
+                Vector3 p = ((Component)iip).transform.position;
+                float dx = p.x - x, dz = p.z - z;
+                float sq = dx * dx + dz * dz;
+                if (sq >= bestSq) continue;
+                bestSq = sq;
+                best = iip;
+            }
+            return best;
         }
 
         private static int CountActiveRailroads(int alliance)

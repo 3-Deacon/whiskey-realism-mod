@@ -22,6 +22,14 @@ namespace WhiskeyRealism.Patches
     // the vanilla list in Postfix/Finalizer. It mirrors those early returns before any
     // scoring, scores only sites inside the unit's construction range, and caches site
     // decisions for the faction's job-21 cycle.
+    //
+    // Campaign planner fort steering (plan G5c, Enable Fort Steering): vanilla orders the unit onto the FIRST site in list order
+    // that passes its tests (16383-16392), so the list order is its only preference. When a site the planner's board marks as on a
+    // MainEffort axis or in a Hold / Screen sector passes every test vanilla applies to this unit (other forts, frontline, the
+    // unit's ability, the capital defender's own distance rule: asked of vanilla's own calls) and the governor, every other site in
+    // the unit's range is hidden for the call, the one the construction ledger ranks highest first (FortSitePreference). Out-of-range
+    // sites stay (vanilla rejects them itself); when no such site is eligible nothing extra is hidden. The one-order-per-alliance
+    // rule, the range and the builder logic are vanilla's. The same snapshot-restore carries both filters.
     [HarmonyPatch(typeof(AICampaign), "CheckFortConstruction")]
     internal static class FortConstructionGovernorPatch
     {
@@ -33,6 +41,7 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<string, FieldInfo> _factionFields = new Dictionary<string, FieldInfo>();
         private static readonly FortSiteDecisionCache[] _siteCaches = { new FortSiteDecisionCache(), new FortSiteDecisionCache() };
         private static readonly HashSet<string> _loggedSuppressions = new HashSet<string>();
+        private static readonly HashSet<string> _loggedPreferences = new HashSet<string>();
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, ref List<Vector3> __state)
@@ -44,7 +53,9 @@ namespace WhiskeyRealism.Patches
 
             try
             {
-                if (!Enabled()) return;
+                bool governor = Enabled();
+                bool steering = SteeringEnabled();
+                if (!governor && !steering) return;
 
                 var field = FortSitesField();
                 var original = field?.GetValue(null) as List<Vector3>;
@@ -74,18 +85,15 @@ namespace WhiskeyRealism.Patches
 
                 Vector3 unitPosition = ((Component)unit).transform.position;
                 float range = GamePrefs.rangefortconstructionsite;
-                var filtered = new List<Vector3>(original.Count);
-                int suppressed = 0;
-
+                var inRange = new bool[original.Count];
+                var allowed = new bool[original.Count];
                 for (int i = 0; i < original.Count; i++)
                 {
                     var site = original[i];
                     // Out of this unit's range vanilla rejects the site itself (16389).
-                    if (Tools.GetXZDistance(unitPosition, site) > range)
-                    {
-                        filtered.Add(site);
-                        continue;
-                    }
+                    inRange[i] = Tools.GetXZDistance(unitPosition, site) <= range;
+                    allowed[i] = true;
+                    if (!inRange[i] || !governor) continue;
 
                     if (!cache.TryGet(i, out var decision))
                     {
@@ -93,14 +101,19 @@ namespace WhiskeyRealism.Patches
                         cache.Store(i, decision);
                     }
 
-                    if (decision.Allow)
-                    {
-                        filtered.Add(site);
-                        continue;
-                    }
+                    allowed[i] = decision.Allow;
+                    if (!decision.Allow) LogSuppression(alliance, site, decision);
+                }
 
-                    suppressed++;
-                    LogSuppression(alliance, site, decision);
+                int preferredSite = steering ? PreferredSite(alliance, faction, unit, original, inRange, allowed) : -1;
+                var filtered = new List<Vector3>(original.Count);
+                int suppressed = 0;
+                for (int i = 0; i < original.Count; i++)
+                {
+                    if (!inRange[i]) filtered.Add(original[i]);
+                    else if (!allowed[i]) suppressed++;
+                    else if (preferredSite >= 0 && i != preferredSite) suppressed++;
+                    else filtered.Add(original[i]);
                 }
 
                 if (suppressed <= 0) return;
@@ -137,6 +150,76 @@ namespace WhiskeyRealism.Patches
                 RestoreSites(__state);
                 return __exception;
             }
+        }
+
+        // The site index (into the original list) of the preferred, eligible site to leave visible, -1 when steering has none: the
+        // board must be fresh, and the site must be on an axis or in a threatened sector, in this unit's range, allowed by the governor
+        // and one that vanilla's own tests accept for this unit. Only preferred sites are put through vanilla's tests (a handful per
+        // call at most), and only when the board has any.
+        private static int PreferredSite(int alliance, object faction, Regiment unit, List<Vector3> sites, bool[] inRange, bool[] allowed)
+        {
+            if (!ConstructionSteeringBoard.TryRead(alliance, out var board)) return -1;
+            var preferred = new bool[sites.Count];
+            var eligible = new bool[sites.Count];
+            bool any = false;
+            for (int i = 0; i < sites.Count; i++)
+            {
+                if (!inRange[i] || !allowed[i] || i >= board.FortPreferred.Length || !board.FortPreferred[i]) continue;
+                preferred[i] = true;
+                eligible[i] = VanillaWouldTake(faction, unit, sites[i], alliance);
+                any |= eligible[i];
+            }
+            if (!any) return -1;
+            int chosen = FortSitePreference.Choose(preferred, eligible, board.FortRank);
+            if (chosen >= 0) LogPreference(alliance, chosen);
+            return chosen;
+        }
+
+        // The per-site tests of CheckFortConstruction (16383-16392), asked of vanilla's own calls: no fort of any owner within
+        // maxdistancetootherfort (x 0.6 for a capital defender), the site close to the frontline, the unit able to build there, and a
+        // capital defender only on a site no nearer the capital than itself. The unit's range was tested by the caller.
+        private static bool VanillaWouldTake(object faction, Regiment unit, Vector3 site, int alliance)
+        {
+            try
+            {
+                var bunits = StaticValue<BattleUnits>(ref _bunitsField, "bunits");
+                var bfs = StaticValue<BattlefieldSetup>(ref _bfsField, "bfs");
+                var capital = GameVars.alliance[alliance].capital;
+                if ((UnityEngine.Object)bunits == null || (UnityEngine.Object)bfs == null || (UnityEngine.Object)capital == null) return false;
+                bool capitalDefender = Contains(faction, "groupstodefendcapital", unit);
+                Vector3 capitalPosition = ((Component)capital).transform.position;
+                if (capitalDefender && Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition) > Tools.GetXZDistance(site, capitalPosition))
+                    return false;
+                float factor = capitalDefender ? 0.6f : 1f;
+                return bunits.GetClosestBuilding(site, CBuilding.id_fort, -1, 0f, GamePrefs.maxdistancetootherfort * factor) == null
+                    && bfs.CheckIfPositionIsCloseToFrontline(site, alliance, GamePrefs.maxdistancefrontlinefortconstruction)
+                    && AICampaign.FortConstructionOrder.IsUnitAbleToConstructFort(unit, site);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("fort-governor:preference", "[Patch:FortGovernor] a preferred site could not be tested (vanilla's list order stands): " + ex.Message);
+                return false;
+            }
+        }
+
+        private static T StaticValue<T>(ref FieldInfo cached, string name) where T : class
+        {
+            if (cached == null) cached = AccessTools.Field(typeof(AICampaign), name);
+            return cached?.GetValue(null) as T;
+        }
+
+        private static bool SteeringEnabled()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    Plugin.Instance.Enabled != null &&
+                    Plugin.Instance.Enabled.Value &&
+                    Plugin.EnableFortSteering != null &&
+                    Plugin.EnableFortSteering.Value &&
+                    CampaignPlannerRuntime.ExecutorsEnabled();
+            }
+            catch { return false; }
         }
 
         private static bool Enabled()
@@ -375,6 +458,16 @@ namespace WhiskeyRealism.Patches
             TelemetryRouter.LegacyInfo(
                 $"[ConstructionTelemetry] alliance={alliance} reason={decision.Reason} " +
                 $"current={decision.CurrentCount} soft={decision.SoftCap} hard={decision.HardCap}",
+                TelemetryLayer.Campaign);
+        }
+
+        // At most 16 distinct rows per session, as the suppression rows (a set of their own, so neither starves the other).
+        private static void LogPreference(int alliance, int site)
+        {
+            if (_loggedPreferences.Count >= 16) return;
+            if (!_loggedPreferences.Add(alliance + ":" + site)) return;
+            TelemetryRouter.LegacyInfo(
+                $"[ConstructionTelemetry] alliance={alliance} reason=planner-axis-preference site={site}",
                 TelemetryLayer.Campaign);
         }
 

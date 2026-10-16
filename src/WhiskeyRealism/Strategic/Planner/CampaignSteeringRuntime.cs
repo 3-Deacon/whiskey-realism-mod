@@ -41,6 +41,10 @@ namespace WhiskeyRealism.Strategic.Planner
 
         internal static void Execute(int alliance, CampaignSnapshot snapshot)
         {
+            // Construction steering (G5c) is a steering executor too: the depot wishes and the rail and fort preferences. It rides
+            // here, ahead of the mover and behind the same pre-war and today's-plan gates, because ReviewExecute's own list of
+            // executors belongs to the reconnaissance slice (G5d); it has its own scope and flags.
+            DepotSteeringRuntime.Execute(alliance, snapshot);
             using (TelemetryPerf.Scope("campaign.planner.steering", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 if (snapshot == null || alliance < 0 || alliance >= Limiters.Length) return;

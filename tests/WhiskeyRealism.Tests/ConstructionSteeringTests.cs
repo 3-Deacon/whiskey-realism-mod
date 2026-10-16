@@ -65,6 +65,14 @@ internal static class ConstructionSteeringTests
             ("TopRailroadBreaksScoreTies", TopRailroadBreaksScoreTies),
             ("LedgerKeepsEveryScoredRailAndFortCandidateWithItsIndex", LedgerKeepsEveryScoredRailAndFortCandidateWithItsIndex),
             ("BoardIsPerAllianceFreshAndPerCampaign", BoardIsPerAllianceFreshAndPerCampaign),
+            ("DepotSteeringRuntimeStatementsPinned", DepotSteeringRuntimeStatementsPinned),
+            ("DepotSteeringRuntimeIssuesNoUnitOrder", DepotSteeringRuntimeIssuesNoUnitOrder),
+            ("ConstructionRuntimeFeedsTheLedgerPlanDepotsAndSiteIndexes", ConstructionRuntimeFeedsTheLedgerPlanDepotsAndSiteIndexes),
+            ("DepotExecutorRidesTheSteeringExecutorBehindTheGates", DepotExecutorRidesTheSteeringExecutorBehindTheGates),
+            ("RailroadPatchStatementsPinned", RailroadPatchStatementsPinned),
+            ("RailroadPatchDrawsBeforeItStartsAndNeverSkipsVanillaBeforeTheDraws", RailroadPatchDrawsBeforeItStartsAndNeverSkipsVanillaBeforeTheDraws),
+            ("FortPatchStatementsPinned", FortPatchStatementsPinned),
+            ("ConstructionSteeringFlagsAreBoundAndRead", ConstructionSteeringFlagsAreBoundAndRead),
             ("ConstructionSteeringFilesHoldNoUnityTypesOrEraReads", ConstructionSteeringFilesHoldNoUnityTypesOrEraReads),
         });
     }
@@ -1012,9 +1020,157 @@ internal static class ConstructionSteeringTests
         AssertFalse(ConstructionSteeringBoard.TryRead(0, out _), "a new campaign starts with none");
     }
 
+    // ---- Runtime pins ---------------------------------------------------------------------------------------------------------
+
     private static string Src(string path)
     {
         return ReadRepoFile("src/WhiskeyRealism/" + path);
+    }
+
+    private static void DepotSteeringRuntimeStatementsPinned()
+    {
+        string src = Src("Strategic/Planner/DepotSteeringRuntime.cs");
+        string execute = BodyOf(src, "internal static void Execute(");
+        AssertTrue(HasLine(execute, "PublishBoard(alliance, snapshot, plan);"), "the rail and fort board is built every review");
+        AssertTrue(HasLine(execute, "ledger.AbandonActive(\"flag-off\", snapshot.DaySerial);"), "flag off releases every held builder");
+        AssertTrue(HasLine(execute, "ledger.Sync(plan, allocation, snapshot, EvaluateDepots(alliance));"), "the ledger syncs with today's plan, allocation, snapshot and the construction ledger's verdict");
+        AssertTrue(execute.IndexOf("ledger.AbandonActive(", StringComparison.Ordinal) < execute.IndexOf("ledger.Sync(", StringComparison.Ordinal), "the flag decides before any task starts");
+        string watch = BodyOf(src, "private static void PlaceWishesAndWatchBuilds(");
+        AssertTrue(HasLine(watch, "float builtRadius = GamePrefs.buildingsitemaxradius + CampaignMover.ArrivalRadius;"), "the finished depot is looked for within the wish's placement radius (97557-97585) of a builder that may stand an arrival radius off the site");
+        AssertTrue(HasLine(watch, "if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t);"), "built is read from the snapshot's depots, never from the placeholder");
+        AssertTrue(HasLine(watch, "if (!ledger.ShouldWish(t, builder.X, builder.Z, Math.Max(builder.BugleRange, CampaignMover.ArrivalRadius), snapshot.DaySerial)) continue;"), "the wish waits for the builder's arrival (its bugle range, or the mover's arrival radius), once per task");
+        string wish = BodyOf(src, "private static void Wish(");
+        AssertTrue(HasLine(wish, "IIP iip = ConstructionRuntime.NearestOwnIip(alliance, task.X, task.Z);"), "the IIP the wish calls");
+        AssertTrue(HasLine(wish, "if ((UnityEngine.Object)iip == null) return;"), "no IIP: wait, record nothing");
+        AssertTrue(HasLine(wish, "CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(builder.X, y, builder.Z), iip, alliance);"), "vanilla's own wish at the builder's position, as vanilla's depot job passes the unit's (14766-14770; 97479)");
+        AssertTrue(HasLine(wish, "ledger.Abandon(taskIndex, \"wish-refused\", snapshot.DaySerial);"), "a null building (the IIP, the company-founding cap) abandons the task");
+        AssertTrue(HasLine(wish, "ledger.RecordWished(taskIndex, snapshot.DaySerial);"), "a real building records the wish");
+        AssertTrue(wish.IndexOf("AddConstructionWish(", StringComparison.Ordinal) < wish.IndexOf("RecordWished(", StringComparison.Ordinal), "wished only after the wish exists");
+        AssertEqual(1, CountOccurrences(src, "= CBuilding.AddConstructionWish("), "one wish call in the executor");
+        AssertTrue(src.Contains("TelemetryPerf.Scope(\"campaign.planner.construction\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)"), "the executor's scope");
+        string emit = BodyOf(src, "private static void EmitTransitions(");
+        AssertTrue(emit.Contains("\"[DepotTask] alliance=\" + alliance + \" site=\""), "the [DepotTask] row names the alliance and the site");
+        AssertTrue(emit.Contains("\" state=\" + t.State + \" reason=\" + t.Reason"), "...the state and the reason");
+        AssertTrue(HasLine(emit, "ledger.ClearTransitions();"), "drained once logged");
+    }
+
+    private static int CountOccurrences(string text, string needle)
+    {
+        int n = 0;
+        for (int at = text.IndexOf(needle, StringComparison.Ordinal); at >= 0; at = text.IndexOf(needle, at + needle.Length, StringComparison.Ordinal)) n++;
+        return n;
+    }
+
+    // The depot builder is moved by G5a's mover; this executor only wishes. It must give no unit an order of any kind.
+    private static void DepotSteeringRuntimeIssuesNoUnitOrder()
+    {
+        string src = Src("Strategic/Planner/DepotSteeringRuntime.cs");
+        foreach (var banned in new[] { "MoveUnitTo(", "SetWaypoint(", "ChangeCampaignOrders", "CheckCurrentOrderUpdate", "TryIssue(", "unitsinoffensiveoperations", "unitsindefensiveoperations", "theaterposition", "followedcampaignobjective" })
+            AssertFalse(src.Contains(banned), "DepotSteeringRuntime does not touch " + banned + ": it places a construction wish and nothing else");
+    }
+
+    private static void ConstructionRuntimeFeedsTheLedgerPlanDepotsAndSiteIndexes()
+    {
+        string src = Src("Strategic/Construction/ConstructionRuntime.cs");
+        string build = BodyOf(src, "public static ConstructionInput BuildInput(");
+        AssertTrue(HasLine(build, "AddDepotTaskCandidates(input);"), "the weekly pass wires the ledger's dead SupplyDepot kind to the plan's depot tasks");
+        string depotInput = BodyOf(src, "internal static ConstructionInput BuildDepotInput(");
+        AssertTrue(HasLine(depotInput, "AddDepotTaskCandidates(input);"), "the executor's own evaluation does too");
+        AssertFalse(depotInput.Contains("AddPrivateBuildingCandidates") || depotInput.Contains("AddRailroadCandidates") || depotInput.Contains("AddFortSiteObservationCandidates"), "and repeats no other scan");
+        string depots = BodyOf(src, "private static void AddDepotTaskCandidates(");
+        AssertTrue(HasLine(depots, "if (!CampaignPlanStore.TryGetPlan(input.AllianceId, out var plan)) return;"), "the published plan, through the store's accessor");
+        AssertTrue(depots.Contains("(x, z) => NearestOwnIip(alliance, x, z) != null"), "valid for vanilla when an own IIP exists to call");
+        string iip = BodyOf(src, "internal static IIP NearestOwnIip(");
+        AssertTrue(HasLine(iip, "if ((UnityEngine.Object)iip == null || iip.allianceowner != alliance || iip.IIPType == IIP.id_invisible) continue;"), "an own, visible IIP");
+        AssertTrue(HasLine(iip, "if ((UnityEngine.Object)iip.currentlyunderconstruction != null) continue;"), "not one with a building under construction (97481-97484)");
+        AssertTrue(HasLine(BodyOf(src, "private static void AddRailroadCandidates("), "SiteIndex = i,"), "a rail candidate carries its line index");
+        AssertTrue(HasLine(BodyOf(src, "private static void AddFortSiteObservationCandidates("), "SiteIndex = i,"), "a fort candidate carries its site index");
+    }
+
+    private static void DepotExecutorRidesTheSteeringExecutorBehindTheGates()
+    {
+        string steering = BodyOf(Src("Strategic/Planner/CampaignSteeringRuntime.cs"), "internal static void Execute(");
+        AssertTrue(HasLine(steering, "DepotSteeringRuntime.Execute(alliance, snapshot);"), "the construction executor is called from the steering executor");
+        string review = BodyOf(Src("Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewExecute(");
+        int gate = review.IndexOf("PlannerChapterRules.ExecutorsAllowed(", StringComparison.Ordinal);
+        int steer = review.IndexOf("CampaignSteeringRuntime.Execute(", StringComparison.Ordinal);
+        AssertTrue(gate >= 0 && steer > gate, "the steering executor, and with it the construction executor, runs behind the pre-war gate");
+        int todays = review.IndexOf("PlanFreshness.IsToday(todaysPlan.DaySerial)", StringComparison.Ordinal);
+        AssertTrue(todays > gate && todays < steer, "...and on today's plan only");
+        AssertFalse(review.Contains("DepotSteeringRuntime"), "ReviewExecute's own executor list is G5d's file and is not edited by G5c");
+    }
+
+    private static void RailroadPatchStatementsPinned()
+    {
+        string src = Src("Patches/RailroadLineSteeringPatch.cs");
+        AssertTrue(HasLine(src, "[HarmonyPatch(typeof(AICampaign), \"UpdateRailroadConstruction\")]"), "vanilla's UpdateRailroadConstruction (16052)");
+        AssertTrue(HasLine(src, "internal static bool Prefix(int alliance, float timediff)"), "the Prefix takes vanilla's two arguments");
+        AssertTrue(HasLine(src, "using (TelemetryPerf.Scope(\"campaign.patch.railroad-steering\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))"), "scope");
+        AssertTrue(HasLine(src, "PatchFirstFire.Mark(\"campaign.patch.railroad-steering\");"), "first-fire id");
+        string prepare = BodyOf(src, "private static bool TryPrepare(");
+        AssertTrue(HasLine(prepare, "bool enabled = Plugin.EnableRailroadSteering != null && Plugin.EnableRailroadSteering.Value && CampaignPlannerRuntime.ExecutorsEnabled();"), "the flag and the executors flag");
+        AssertTrue(HasLine(prepare, "bool cicPlayerAlliance = DLC_WL.dlc_scenarioactive && alliance == GameVars.playeralliance && DLC_WL.IsCommanderInChief();"), "the W&L commander-in-chief's alliance");
+        AssertTrue(prepare.Contains("GameVars.playeralliance, GameVars.ai_vs_ai, cicPlayerAlliance,"), "vanilla's 16054 inputs reach the rule");
+        AssertTrue(prepare.Contains("StrategicCoordinator.WlVanillaJobMachinePaused()"), "the live job-machine pause (11368)");
+        AssertTrue(HasLine(prepare, "bool fresh = ConstructionSteeringBoard.TryRead(alliance, out var board);"), "the fresh board");
+        AssertTrue(HasLine(prepare, "eligible[j] = RailLineSteering.Eligible(line.constructionprogress, line.StartConstruction(alliance, checkonly: true));"), "eligibility is vanilla's (progress, then StartConstruction checkonly 77818-77831)");
+        AssertTrue(prepare.Contains("GamePrefs.probrailroadconstructionperyear, GamePrefs.probrailroadconstructionperyearperindustr,"), "vanilla's chance (16058-16066)");
+        AssertTrue(HasLine(BodyOf(src, "private static int IndustryPoliciesHeld("), "int first = alliance != 0 ? 107 : 7;"), "policies 7..10 / 107..110 (16059)");
+        AssertTrue(BodyOf(src, "private static int IndustryPoliciesHeld(").Contains("Policy.GetStatusByPolicyID(first + i)"), "...asked of vanilla's Policy");
+        AssertTrue(src.Contains("if (!TryPrepare(alliance, timediff, out eligible, out score, out perCall, out lines)) return true;"), "any reason not to steer: vanilla runs");
+    }
+
+    private static void RailroadPatchDrawsBeforeItStartsAndNeverSkipsVanillaBeforeTheDraws()
+    {
+        string src = Src("Patches/RailroadLineSteeringPatch.cs");
+        string roll = BodyOf(src, "private static void Roll(");
+        AssertTrue(HasLine(roll, "for (int j = 0; j < lines; j++) rolls[j] = UnityEngine.Random.Range(0f, 1f);"), "one UnityEngine.Random.Range(0f, 1f) per line in line order, as 16069 (vanilla's stream is consumed as before)");
+        AssertFalse(src.Contains("System.Random") || src.Contains("new Random("), "never a private generator: it would desync vanilla's stream");
+        AssertTrue(roll.IndexOf("Random.Range(", StringComparison.Ordinal) < roll.IndexOf("StartConstruction(alliance)", StringComparison.Ordinal), "every draw before the first start");
+        AssertTrue(HasLine(roll, "BattleUnits.railroad[started[k]].StartConstruction(alliance);"), "a start is vanilla's own StartConstruction on a line the choice named");
+        AssertTrue(HasLine(roll, "var started = RailLineSteering.Choose(eligible, rolls, perCall, score);"), "the decision is the pure one");
+        string prefix = BodyOf(src, "internal static bool Prefix(");
+        int prepareFailure = prefix.IndexOf("could not prepare (vanilla's roll runs)", StringComparison.Ordinal);
+        int rollCall = prefix.IndexOf("Roll(alliance, eligible, score, perCall, lines);", StringComparison.Ordinal);
+        AssertTrue(prepareFailure >= 0 && rollCall > prepareFailure, "a failure before the draws lets vanilla run; the roll comes after");
+        AssertTrue(HasLine(prefix, "return false;"), "from the first draw on vanilla's loop is skipped, even when the roll fails");
+        string prepare = BodyOf(src, "private static bool TryPrepare(");
+        AssertFalse(prepare.Contains("Random"), "nothing is drawn while preparing");
+        AssertFalse(HasLine(prepare, "line.StartConstruction(alliance);"), "nothing is started while preparing (checkonly only)");
+    }
+
+    private static void FortPatchStatementsPinned()
+    {
+        string src = Src("Patches/FortConstructionGovernorPatch.cs");
+        string prefix = BodyOf(src, "internal static void Prefix(");
+        AssertTrue(HasLine(prefix, "bool governor = Enabled();"), "the saturation governor keeps its own flag");
+        AssertTrue(HasLine(prefix, "bool steering = SteeringEnabled();"), "fort steering has its own");
+        AssertTrue(HasLine(prefix, "if (!governor && !steering) return;"), "either runs without the other");
+        AssertTrue(HasLine(prefix, "inRange[i] = Tools.GetXZDistance(unitPosition, site) <= range;"), "vanilla's own range test (16389)");
+        AssertTrue(HasLine(prefix, "if (!inRange[i]) filtered.Add(original[i]);"), "out-of-range sites stay in vanilla's list");
+        AssertTrue(HasLine(prefix, "int preferredSite = steering ? PreferredSite(alliance, faction, unit, original, inRange, allowed) : -1;"), "the preference is asked only with steering on");
+        AssertTrue(HasLine(prefix, "else if (preferredSite >= 0 && i != preferredSite) suppressed++;"), "with a preferred site, every other in-range site is hidden for the call");
+        string pref = BodyOf(src, "private static int PreferredSite(");
+        AssertTrue(HasLine(pref, "if (!ConstructionSteeringBoard.TryRead(alliance, out var board)) return -1;"), "a fresh board only");
+        AssertTrue(HasLine(pref, "if (!inRange[i] || !allowed[i] || i >= board.FortPreferred.Length || !board.FortPreferred[i]) continue;"), "preferred, in range, allowed by the governor");
+        AssertTrue(HasLine(pref, "int chosen = FortSitePreference.Choose(preferred, eligible, board.FortRank);"), "the decision is the pure one");
+        string take = BodyOf(src, "private static bool VanillaWouldTake(");
+        AssertTrue(HasLine(take, "float factor = capitalDefender ? 0.6f : 1f;"), "16386");
+        AssertTrue(HasLine(take, "return bunits.GetClosestBuilding(site, CBuilding.id_fort, -1, 0f, GamePrefs.maxdistancetootherfort * factor) == null"), "no fort within maxdistancetootherfort (16389)");
+        AssertTrue(HasLine(take, "&& bfs.CheckIfPositionIsCloseToFrontline(site, alliance, GamePrefs.maxdistancefrontlinefortconstruction)"), "...close to the frontline (16389)");
+        AssertTrue(HasLine(take, "&& AICampaign.FortConstructionOrder.IsUnitAbleToConstructFort(unit, site);"), "...the unit able (16389)");
+        AssertTrue(src.Contains("[HarmonyFinalizer]"), "the restore still runs in a Finalizer");
+        AssertEqual(1, CountOccurrences(src, "FortSitesField()?.SetValue(null, original)"), "one restore path");
+    }
+
+    private static void ConstructionSteeringFlagsAreBoundAndRead()
+    {
+        string plugin = Src("Plugin.cs");
+        foreach (var name in new[] { "Enable Supply Depot Steering", "Enable Fort Steering", "Enable Railroad Steering" })
+            AssertTrue(plugin.Contains("\"Campaign Planner\", \"" + name + "\", true,"), name + " is bound, default on, in the planner's section");
+        AssertTrue(Src("Strategic/Planner/DepotSteeringRuntime.cs").Contains("FlagOn(Plugin.EnableSupplyDepotSteering)"), "the depot executor reads its flag");
+        AssertTrue(Src("Patches/FortConstructionGovernorPatch.cs").Contains("Plugin.EnableFortSteering.Value"), "the fort patch reads its flag");
+        AssertTrue(Src("Patches/RailroadLineSteeringPatch.cs").Contains("Plugin.EnableRailroadSteering.Value"), "the rail patch reads its flag");
     }
 
     private static void ConstructionSteeringFilesHoldNoUnityTypesOrEraReads()
