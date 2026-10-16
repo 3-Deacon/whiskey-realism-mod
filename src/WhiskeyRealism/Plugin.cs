@@ -68,6 +68,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableCommanderOpportunity;
         internal static ConfigEntry<bool> EnableDefenderCounterstroke;
         internal static ConfigEntry<bool> EnableStaggeredReserveRelease;
+        internal static ConfigEntry<bool> EnableCavalryStrikeDiscipline;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -94,6 +95,13 @@ namespace WhiskeyRealism
         internal static bool StaggeredReserveReleaseEnabled()
         {
             try { return EnableStaggeredReserveRelease != null && EnableStaggeredReserveRelease.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Cavalry Strike Discipline (#120: vanilla's cavalry charge target is kept only when the side perceives it, and it is worth charging).</summary>
+        internal static bool CavalryStrikeDisciplineEnabled()
+        {
+            try { return EnableCavalryStrikeDiscipline != null && EnableCavalryStrikeDiscipline.Value; }
             catch { return false; }
         }
 
@@ -605,6 +613,17 @@ namespace WhiskeyRealism
                 "reserves it had, more for a cautious commander, fewer for one who accepts casualties; at least one unless it only had one). " +
                 "A crisis still releases at once, one reserve per outmatched sector, the nearest, even below the floor. A reserve with a live " +
                 "local exploit is never released. Off: every reserve is released together, as before.");
+            EnableCavalryStrikeDiscipline = Config.Bind(
+                "Tactical",
+                "Enable Cavalry Strike Discipline",
+                true,
+                "Default ON. #120 (BUG-TAC-030): vanilla assigns a cavalry regiment's charge from the true state of the battle: an enemy " +
+                "it cannot see, a regiment in square or a fort, artillery with infantry standing beside it, a target its odds do not " +
+                "favour, even when the charging regiment is itself outflanked. With this on, vanilla's pick stands only when the side " +
+                "perceives the target, it is not in square or garrisoned, it is artillery with no infantry or cavalry within 250 m or a " +
+                "shaken unit the regiment's odds favour, and the charger is not outflanked; a live local exploit's cavalry target replaces " +
+                "a refused pick when it is within reach. Vanilla's own cycle does the charging; this only removes bad targets. " +
+                "Off: vanilla's pick.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",
