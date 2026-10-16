@@ -60,6 +60,7 @@ internal static class ConstructionSteeringTests
             ("MoveTrackerNamesAMarchTowardASite", MoveTrackerNamesAMarchTowardASite),
             ("DepotWishLostWhenNoOwnDepotStandsAtTheSite", DepotWishLostWhenNoOwnDepotStandsAtTheSite),
             ("DepotAdoptNeedsAnOwnUnbuiltDepotAtTheSite", DepotAdoptNeedsAnOwnUnbuiltDepotAtTheSite),
+            ("DepotIsLookedForWhereTheWishWasPlaced", DepotIsLookedForWhereTheWishWasPlaced),
             ("DepotHoldReachesTheFortJobOnlyUnderAFreshPlan", DepotHoldReachesTheFortJobOnlyUnderAFreshPlan),
             ("DepotLedgerAbandonsOnlyWithADay", DepotLedgerAbandonsOnlyWithADay),
             ("DepotFlagOffReleasesEveryActiveTask", DepotFlagOffReleasesEveryActiveTask),
@@ -451,10 +452,10 @@ internal static class ConstructionSteeringTests
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
         AssertTrue(ledger.ShouldWish(0, 250f, 0f, 5f), "before the wish");
-        ledger.RecordWished(0, s.DaySerial);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
         AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "wished");
         AssertFalse(ledger.ShouldWish(0, 250f, 0f, 5f), "a wished task is never wished again");
-        ledger.RecordWished(0, s.DaySerial + 1);
+        ledger.RecordWished(0, s.DaySerial + 1, 250f, 0f);
         AssertEqual(s.DaySerial, ledger.Tasks[0].StartedDay, "a second RecordWished changes nothing");
     }
 
@@ -467,7 +468,7 @@ internal static class ConstructionSteeringTests
         AssertFalse(ledger.HoldsBuilder(2), "the other DepotBuilder has no task yet");
         AssertFalse(ledger.HoldsBuilder(3), "nor an idle formation");
         AssertFalse(ledger.HoldsBuilder(-1), "nor a missing one");
-        ledger.RecordWished(0, s.DaySerial + 3);
+        ledger.RecordWished(0, s.DaySerial + 3, 250f, 0f);
         AssertTrue(ledger.HoldsBuilder(1), "and through the whole wished period, while the depot rises");
         ledger.RecordBuilt(0, s.DaySerial);
         AssertEqual(DepotTaskState.Built, ledger.Tasks[0].State, "built");
@@ -498,7 +499,7 @@ internal static class ConstructionSteeringTests
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
         int wishDay = s.DaySerial + 15;
-        ledger.RecordWished(0, wishDay);
+        ledger.RecordWished(0, wishDay, 250f, 0f);
         var mid = DepotWorld(out var p2, out var a2, 30);
         ledger.Sync(p2, a2, mid, null);
         AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "30 days after the start, 15 after the wish: still building");
@@ -515,7 +516,7 @@ internal static class ConstructionSteeringTests
         ledger.Sync(plan, a, s, null);
         AssertEqual(1, ActiveDepotTasks(ledger), "two tasks and two builders, one task active");
         AssertTrue(ledger.HoldsBuilder(1) && !ledger.HoldsBuilder(2), "the first (highest-priority) task's builder only");
-        ledger.RecordWished(0, s.DaySerial);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
         ledger.Sync(plan, a, s, null);
         AssertEqual(1, ActiveDepotTasks(ledger), "still one while it is wished");
         ledger.RecordBuilt(0, s.DaySerial);
@@ -602,7 +603,7 @@ internal static class ConstructionSteeringTests
         var s2 = DepotWorld(out var plan2, out var a2, 40);
         var wished = new DepotTaskLedger();
         wished.Sync(plan2, a2, s2, null);
-        wished.RecordWished(0, s2.DaySerial);
+        wished.RecordWished(0, s2.DaySerial, 250f, 0f);
         plan2.DepotTasks.Clear();
         wished.Sync(plan2, a2, s2, null);
         AssertEqual(DepotTaskState.Wished, wished.Tasks[0].State, "a wished task does not depend on the plan");
@@ -695,7 +696,7 @@ internal static class ConstructionSteeringTests
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
-        ledger.RecordWished(0, s.DaySerial);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
         ledger.RecordBuilt(0, s.DaySerial);
         var t = ledger.Transitions;
         AssertEqual(3, t.Count, "start, wish, built");
@@ -735,7 +736,7 @@ internal static class ConstructionSteeringTests
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
-        ledger.RecordWished(0, s.DaySerial);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
         AssertTrue(ledger.HoldsBuilder(1), "fixture: a held builder");
         ledger.AbandonActive("flag-off", s.DaySerial);
         AssertFalse(ledger.HoldsBuilder(1), "no builder stays held once the steering is off");
@@ -849,7 +850,7 @@ internal static class ConstructionSteeringTests
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.VanillaDepotBuilder), reach, 9f, Facts(later, depotAtSite: true)), "a builder far from the site next to some other depot is not adopted");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, float.MaxValue, Facts(later, march: true)), "no speed estimate: wait");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(1, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f, Facts(later)), "no such task");
-        ledger.RecordWished(0, s.DaySerial, "vanilla-depot-adopted");
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f, "vanilla-depot-adopted");
         AssertEqual("vanilla-depot-adopted", ledger.Transitions[ledger.Transitions.Count - 1].Reason, "the transition names how the task became Wished");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f, Facts(later)), "a wished task is not wished again, whatever the builder does");
     }
@@ -871,7 +872,7 @@ internal static class ConstructionSteeringTests
         AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.None), 10f, 0f, Facts(day)), "arrived on the start day: Here needs no move (it stands there)");
         string runtime = Src("Strategic/Planner/DepotSteeringRuntime.cs");
         string watch = BodyOf(runtime, "private static void PlaceWishesAndWatchBuilds(");
-        AssertTrue(HasLine(watch, "MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial),"), "the runtime reads the mover's tracker for a move toward the task's site");
+        AssertTrue(HasLine(watch, "MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial)"), "the runtime reads the mover's tracker for a move toward the task's site");
     }
 
     private static void MoveTrackerNamesAMarchTowardASite()
@@ -902,7 +903,7 @@ internal static class ConstructionSteeringTests
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
-        ledger.RecordWished(0, s.DaySerial);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
         ledger.WatchWish(0, s, radius);
         AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "the wish's own day: the placeholder is not yet on the ground, so nothing is judged");
         var next = DepotWorld(out _, out _, 1);
@@ -915,7 +916,7 @@ internal static class ConstructionSteeringTests
         var kept = new DepotTaskLedger();
         var s2 = DepotWorld(out var p2, out var a2);
         kept.Sync(p2, a2, s2, null);
-        kept.RecordWished(0, s2.DaySerial);
+        kept.RecordWished(0, s2.DaySerial, 250f, 0f);
         var n2 = DepotWorld(out _, out _, 1);
         n2.Supply.Add(new SupplySourceRecord { Id = 9100, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 30f, Built = false, Condition = 0.2f });
         kept.WatchWish(0, n2, radius);
@@ -936,7 +937,7 @@ internal static class ConstructionSteeringTests
             var l = new DepotTaskLedger();
             var s3 = DepotWorld(out var p3, out var a3);
             l.Sync(p3, a3, s3, null);
-            l.RecordWished(0, s3.DaySerial);
+            l.RecordWished(0, s3.DaySerial, 250f, 0f);
             var n3 = DepotWorld(out _, out _, 1);
             n3.Supply.Add(other);
             l.WatchWish(0, n3, radius);
@@ -966,6 +967,13 @@ internal static class ConstructionSteeringTests
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(world, task, builtRadius, true), "an own unbuilt depot 80 away (inside a corps' command range of 100, outside the placement radius of 50) is not at the site");
         world.Supply.Add(new SupplySourceRecord { Id = 9201, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 40f, Built = false });
         AssertTrue(DepotTaskLedger.SiteHasOwnDepot(world, task, builtRadius, true), "one 40 away is");
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out float nx, out float nz) && nx == 250f && nz == 40f, "and its position is the one adopted");
+        world.Supply.Add(new SupplySourceRecord { Id = 9204, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 20f, Built = false });
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out nx, out nz) && nx == 250f && nz == 20f, "with two, the nearer to the site");
+        world.Supply.Add(new SupplySourceRecord { Id = 9205, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 45f, Built = false });
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out nx, out nz) && nx == 250f && nz == 20f, "a farther one listed later does not displace it");
+        ledger.RecordWished(0, s.DaySerial, nx, nz, "vanilla-depot-adopted");
+        AssertTrue(ledger.Tasks[0].WishX == 250f && ledger.Tasks[0].WishZ == 20f, "an adopted task is looked for around the adopted depot");
         var builtOnly = DepotWorld(out _, out _);
         builtOnly.Supply.Add(new SupplySourceRecord { Id = 9202, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 5f, Built = true });
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(builtOnly, task, builtRadius, true), "a standing depot is not one to adopt (the unbuilt filter)");
@@ -975,7 +983,48 @@ internal static class ConstructionSteeringTests
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(ally, task, builtRadius, true), "another alliance's depot is not ours");
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(null, task, builtRadius, true) || DepotTaskLedger.SiteHasOwnDepot(world, task, 0f, true), "no snapshot / no radius: none");
         string watch = BodyOf(Src("Strategic/Planner/DepotSteeringRuntime.cs"), "private static void PlaceWishesAndWatchBuilds(");
-        AssertTrue(HasLine(watch, "OwnUnbuiltDepotAtSite = DepotTaskLedger.SiteHasOwnDepot(snapshot, task, builtRadius, true)"), "the runtime reads the snapshot for an own unbuilt depot within the placement radius of the site");
+        AssertTrue(HasLine(watch, "facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, out facts.AdoptX, out facts.AdoptZ);"), "the runtime reads the snapshot for the nearest own unbuilt depot within the placement radius of the site, and keeps its position");
+    }
+
+    // The wish is placed at the builder, which can be up to its bugle range from the site, and the depot rises within
+    // buildingsitemaxradius of the wish (97557-97585): Built and wish-lost look around the wish position, not the site.
+    private static void DepotIsLookedForWhereTheWishWasPlaced()
+    {
+        float radius = 50f;
+        // A corps builder wishing from 70 away: the depot rises 30 from the wish, 100 from the site.
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        ledger.Sync(plan, a, s, null);
+        ledger.RecordWished(0, s.DaySerial, 250f, 70f);
+        AssertEqual(70f, ledger.Tasks[0].WishZ, "the record keeps where the wish was placed");
+        var rising = DepotWorld(out _, out _, 1);
+        rising.Supply.Add(new SupplySourceRecord { Id = 9300, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 100f, Built = false });
+        ledger.WatchWish(0, rising, radius);
+        AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "a depot rising outside the radius of the site but inside it of the wish keeps the task (not wish-lost)");
+        var built = DepotWorld(out _, out _, 2);
+        built.Supply.Add(new SupplySourceRecord { Id = 9300, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 100f, Built = true });
+        ledger.WatchWish(0, built, radius);
+        AssertEqual(DepotTaskState.Built, ledger.Tasks[0].State, "...and once it stands the task reads Built");
+        AssertEqual("built", ledger.Transitions[ledger.Transitions.Count - 1].Reason, "not wish-lost");
+
+        // The depot at the wish position vanishes: lost, and a depot near the site alone does not keep a wish placed elsewhere.
+        var lost = new DepotTaskLedger();
+        var s2 = DepotWorld(out var p2, out var a2);
+        lost.Sync(p2, a2, s2, null);
+        lost.RecordWished(0, s2.DaySerial, 250f, 70f);
+        var gone = DepotWorld(out _, out _, 1);
+        lost.WatchWish(0, gone, radius);
+        AssertEqual(DepotTaskState.Abandoned, lost.Tasks[0].State, "no depot at the wish position: lost");
+        AssertEqual("wish-lost", lost.Transitions[lost.Transitions.Count - 1].Reason, "named wish-lost");
+
+        var elsewhere = new DepotTaskLedger();
+        var s3 = DepotWorld(out var p3, out var a3);
+        elsewhere.Sync(p3, a3, s3, null);
+        elsewhere.RecordWished(0, s3.DaySerial, 250f, 70f);
+        var nearSite = DepotWorld(out _, out _, 1);
+        nearSite.Supply.Add(new SupplySourceRecord { Id = 9301, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 5f, Built = true });
+        elsewhere.WatchWish(0, nearSite, radius);
+        AssertEqual(DepotTaskState.Abandoned, elsewhere.Tasks[0].State, "a standing depot 5 from the site is 65 from the wish: it is not this wish's depot, so the wish is lost");
     }
 
     // F6c: the fort job's hold is the withhold view's hold, under its plan-freshness and executors-allowed test.
@@ -1368,13 +1417,13 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(watch, "switch (ledger.WishMoment(t, builder, reach, days, facts))"), "the ledger decides when (pure, tested)");
         AssertTrue(HasLine(watch, "case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;"), "arrived: the wish at the builder's position (14770)");
         AssertTrue(HasLine(watch, "case DepotWishMoment.Ahead: Wish(alliance, snapshot, ledger, t, task, task.X, task.Z, builder.InstanceId); break;"), "arriving before the next review: the wish at the site, while the builder still marches");
-        AssertTrue(HasLine(watch, "case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, \"vanilla-depot-adopted\"); break;"), "a depot vanilla's own job is already raising for the builder is the task's depot: no second wish");
+        AssertTrue(HasLine(watch, "case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, facts.AdoptX, facts.AdoptZ, \"vanilla-depot-adopted\"); break;"), "a depot vanilla's own job is already raising for the builder is the task's depot: no second wish");
         string wish = BodyOf(src, "private static void Wish(");
         AssertTrue(HasLine(wish, "IIP iip = ConstructionRuntime.NearestOwnIip(alliance, task.X, task.Z);"), "the IIP the wish calls");
         AssertTrue(HasLine(wish, "if ((UnityEngine.Object)iip == null) return;"), "no IIP: wait, record nothing");
         AssertTrue(HasLine(wish, "CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(x, y, z), iip, alliance);"), "vanilla's own wish (97479) at the position the moment names");
         AssertTrue(HasLine(wish, "ledger.Abandon(taskIndex, \"wish-refused\", snapshot.DaySerial);"), "a null building (the IIP, the company-founding cap) abandons the task");
-        AssertTrue(HasLine(wish, "ledger.RecordWished(taskIndex, snapshot.DaySerial);"), "a real building records the wish");
+        AssertTrue(HasLine(wish, "ledger.RecordWished(taskIndex, snapshot.DaySerial, x, z);"), "a real building records the wish");
         AssertTrue(wish.IndexOf("AddConstructionWish(", StringComparison.Ordinal) < wish.IndexOf("RecordWished(", StringComparison.Ordinal), "wished only after the wish exists");
         AssertEqual(1, CountOccurrences(src, "= CBuilding.AddConstructionWish("), "one wish call in the executor");
         AssertTrue(src.Contains("TelemetryPerf.Scope(\"campaign.planner.construction\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)"), "the executor's scope");

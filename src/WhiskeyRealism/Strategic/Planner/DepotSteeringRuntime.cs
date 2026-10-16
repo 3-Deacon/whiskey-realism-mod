@@ -132,14 +132,14 @@ namespace WhiskeyRealism.Strategic.Planner
                 var facts = new DepotWishFacts
                 {
                     DaySerial = snapshot.DaySerial,
-                    MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial),
-                    OwnUnbuiltDepotAtSite = DepotTaskLedger.SiteHasOwnDepot(snapshot, task, builtRadius, true)
+                    MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial)
                 };
+                facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, out facts.AdoptX, out facts.AdoptZ);
                 switch (ledger.WishMoment(t, builder, reach, days, facts))
                 {
                     case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;
                     case DepotWishMoment.Ahead: Wish(alliance, snapshot, ledger, t, task, task.X, task.Z, builder.InstanceId); break;
-                    case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, "vanilla-depot-adopted"); break;
+                    case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, facts.AdoptX, facts.AdoptZ, "vanilla-depot-adopted"); break;
                 }
             }
         }
@@ -169,7 +169,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ledger.Abandon(taskIndex, "wish-refused", snapshot.DaySerial);
                 return;
             }
-            ledger.RecordWished(taskIndex, snapshot.DaySerial);
+            ledger.RecordWished(taskIndex, snapshot.DaySerial, x, z);
         }
 
         private static void EmitTransitions(int alliance, DepotTaskLedger ledger)

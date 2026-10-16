@@ -17,6 +17,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public string BuilderUnitKey;   // persisted identity
         public DepotTaskState State;
         public int StartedDay;          // the day the current state began: the start, then the wish
+        public float WishX, WishZ;      // where the wish was placed (the builder's position, the site for a wish ahead, the adopted depot's): the depot rises within buildingsitemaxradius of it. Meaningful once Wished
         public int EndedDay;            // the day the task became Built or Abandoned, -1 while active (the retry cooldown is a day difference)
     }
 
@@ -30,13 +31,14 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // What the runtime reads for DepotTaskLedger.WishMoment besides the builder: the review day, whether the mover's tracker has the
-    // builder marching to the task's site on a move issued at an earlier review (MoveTracker.MarchingToward), and whether an own
-    // depot still rising stands within the built radius of the site.
+    // builder marching to the task's site on a move issued at an earlier review (MoveTracker.MarchingToward), and the nearest own
+    // depot still rising within the built radius of the site, if any (the one Adopt takes as the task's).
     public struct DepotWishFacts
     {
         public int DaySerial;
         public bool MarchIssuedEarlier;
         public bool OwnUnbuiltDepotAtSite;
+        public float AdoptX, AdoptZ;    // that depot's position, read when OwnUnbuiltDepotAtSite
     }
 
     // The depot task executor's state machine (plan G5c, spec C10): Marching -> Wished -> Built | Abandoned, one active task per
@@ -132,12 +134,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return facts.MarchIssuedEarlier && startedEarlier && daysToSite <= AheadDays ? DepotWishMoment.Ahead : DepotWishMoment.Wait;
         }
 
-        // The review's watch over a Wished task: Built when a depot stands at the site (SiteBuilt); Abandoned as "wish-lost" when,
-        // on a later review than the wish, no own depot at all (built or still rising) stands within `radius` of it. The wish is a
-        // placeholder at -20000 until WorkDownConstructionWishes (once per AI update, 11201) puts the building on suitable ground or
-        // cancels it with no site found (97538-97591), so a review in the wish's own day cannot tell a pending wish from a lost one;
-        // a lost wish (cancelled, or the depot removed because no unit stood within bugle range, 96626-96648) releases the builder
-        // at once instead of holding it to the timeout.
+        // The review's watch over a Wished task: Built when a depot stands within `radius` of where the wish was placed (SiteBuilt);
+        // Abandoned as "wish-lost" when, on a later review than the wish, no own depot at all (built or still rising) stands within
+        // `radius` of that position. The depot rises on the nearest suitable ground to the wish position, up to buildingsitemaxradius
+        // away (97557-97585), and the wish is placed at the builder (up to its bugle range from the site), so the site is not the
+        // centre to look around. The wish is a placeholder at -20000 until WorkDownConstructionWishes (once per AI update, 11201)
+        // puts the building on the ground or cancels it with no site found (97538-97591), so a review in the wish's own day cannot
+        // tell a pending wish from a lost one; a lost wish (cancelled, or the depot removed because no unit stood within bugle
+        // range, 96626-96648) releases the builder at once instead of holding it to the timeout.
         public void WatchWish(int taskIndex, CampaignSnapshot s, float radius)
         {
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Wished || s == null) return;
@@ -146,12 +150,16 @@ namespace WhiskeyRealism.Strategic.Planner
             else if (s.DaySerial > task.StartedDay && !SiteHasOwnDepot(s, task, radius, false)) Finish(taskIndex, DepotTaskState.Abandoned, "wish-lost", s.DaySerial);
         }
 
-        public void RecordWished(int taskIndex, int daySerial, string reason = "wish-placed")
+        // The wish stands (or the vanilla depot was adopted): the task is Wished from `daySerial`, and the depot is looked for within
+        // the placement radius of (wishX, wishZ), where the wish was actually placed, not of the site.
+        public void RecordWished(int taskIndex, int daySerial, float wishX, float wishZ, string reason = "wish-placed")
         {
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Marching) return;
             var t = _tasks[taskIndex];
             t.State = DepotTaskState.Wished;
             t.StartedDay = daySerial;
+            t.WishX = wishX;
+            t.WishZ = wishZ;
             _tasks[taskIndex] = t;
             Note(t, reason);
         }
@@ -175,36 +183,60 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Active(_tasks[t])) Finish(t, DepotTaskState.Abandoned, reason, daySerial);
         }
 
+        // The centre a task's depot is looked for around: where the wish was placed once it is Wished, the site before.
+        private static void Centre(in DepotTaskRecord task, out float x, out float z)
+        {
+            x = task.State == DepotTaskState.Wished ? task.WishX : task.X;
+            z = task.State == DepotTaskState.Wished ? task.WishZ : task.Z;
+        }
+
         // True when a built supply depot of the alliance's (or an ally's: the snapshot lists those) stands within `radius` of the
-        // task's site. A wish is placed by WorkDownConstructionWishes at the nearest suitable ground around the wish position, up
-        // to GamePrefs.buildingsitemaxradius away (97557-97585), so the returned CBuilding (a placeholder at -20000, replaced by a
-        // new building) is not tracked: the finished depot is found among the snapshot's supply sources.
+        // task's centre (Centre). A wish is placed by WorkDownConstructionWishes at the nearest suitable ground around the wish
+        // position, up to GamePrefs.buildingsitemaxradius away (97557-97585), so the returned CBuilding (a placeholder at -20000,
+        // replaced by a new building) is not tracked: the finished depot is found among the snapshot's supply sources.
         public static bool SiteBuilt(CampaignSnapshot s, in DepotTaskRecord task, float radius)
         {
             if (s == null || radius <= 0f) return false;
+            Centre(task, out float cx, out float cz);
             for (int i = 0; i < s.Supply.Count; i++)
             {
                 var source = s.Supply[i];
                 if (source.Kind != SupplySourceKind.Depot || !source.Built) continue;
-                if (Distance(source.X, source.Z, task.X, task.Z) <= radius) return true;
+                if (Distance(source.X, source.Z, cx, cz) <= radius) return true;
             }
             return false;
         }
 
-        // True when a depot owned by the snapshot's alliance (not an ally's) stands within `radius` of the task's site; `unbuiltOnly`
-        // counts only one still rising. Lets the runtime tell a depot that is this site's (a wish placed, or a vanilla one adopted)
-        // from one that merely lies within a builder's command range.
+        // True when a depot owned by the snapshot's alliance (not an ally's) stands within `radius` of the task's centre; `unbuiltOnly`
+        // counts only one still rising.
         public static bool SiteHasOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly)
         {
+            return NearestOwnDepot(s, task, radius, unbuiltOnly, out _, out _);
+        }
+
+        // The nearest such depot's position: the one Adopt takes as the task's (a flagged builder's command range, 50-100 for a corps
+        // or army, reaches depots that are not this site's, so only one within the placement radius of the site counts).
+        public static bool NearestOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly, out float x, out float z)
+        {
+            x = 0f;
+            z = 0f;
             if (s == null || radius <= 0f) return false;
+            Centre(task, out float cx, out float cz);
+            float best = radius;
+            bool found = false;
             for (int i = 0; i < s.Supply.Count; i++)
             {
                 var source = s.Supply[i];
                 if (source.Kind != SupplySourceKind.Depot || source.Owner != s.Alliance) continue;
                 if (unbuiltOnly && source.Built) continue;
-                if (Distance(source.X, source.Z, task.X, task.Z) <= radius) return true;
+                float d = Distance(source.X, source.Z, cx, cz);
+                if (d > best) continue;
+                best = d;
+                x = source.X;
+                z = source.Z;
+                found = true;
             }
-            return false;
+            return found;
         }
 
         // The builder of a Marching or Wished task stays out of vanilla's pools.
