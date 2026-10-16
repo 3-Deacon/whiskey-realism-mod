@@ -317,6 +317,19 @@ namespace WhiskeyRealism.Strategic
             return assignment;
         }
 
+        // May the old army-area path (#15, deleted in G6) move this formation back to its area? The rule
+        // FormationDirectiveRuntime.ShouldAllowAreaMovement applies. A formation on a recon mission (directive Screen,
+        // produced only by one) stands at its post while the reconnaissance executor sends and holds it (plan G5d, P10).
+        internal static bool AllowsAreaMovement(FormationDirectiveAssignment assignment, bool reconExecutorActive)
+        {
+            if (assignment == null) return true;
+            if (!assignment.DirectMovementAllowed) return false;
+            if (assignment.Directive == FormationDirective.Delay) return false;
+            if (assignment.Directive == FormationDirective.Concede) return false;
+            if (assignment.Directive == FormationDirective.Screen && reconExecutorActive) return false;
+            return true;
+        }
+
         public static float CombatAvailability(FormationSnapshot snapshot)
         {
             return Math.Max(0f, snapshot.GroupStrengthActive) *

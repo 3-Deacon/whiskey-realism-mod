@@ -28,6 +28,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // reference for the enemy-reaction test); -1 before the first look. Probes only.
         public float ObservedEnemyStrength;
         public int ObservedObjectiveId; // the main objective ObservedEnemyStrength was seen at; -1 none
+        // The executor ordered this formation Scouting (cavalry order 121) for this mission and has not yet taken it off
+        // (G5d, verify F3). A Cleared mission with this set stays in the ledger until an executor pass has delivered the stand-down
+        // (120), however many review days the executors miss; persisted with the mission (G6's ReconMissionDto carries it).
+        public bool StandDownDue;
+        public int ClearedDay; // the first review day the mission was seen Cleared, -1 not yet; bounds a pending stand-down
     }
 
     // One alliance's recon missions (plan § G1b), written only inside the daily review: OnReview
@@ -56,6 +61,8 @@ namespace WhiskeyRealism.Strategic.Planner
     public sealed class ReconMissionLedger
     {
         public const int MaxMissionDays = 20;
+        internal const string ReasonReassigned = "reassigned";
+        internal const string ReasonReconOff = "recon-off";
         internal const float RecallSupplyBelow = 0.5f; // raw Supply01
         private const float ArrivalSightFraction = 0.25f;
 
@@ -83,17 +90,36 @@ namespace WhiskeyRealism.Strategic.Planner
                 a.Assignments[i] = assignment;
             }
             for (int m = 0; m < _missions.Count; m++)
+            {
+                if (_missions[m].State == ReconState.Cleared) continue;
+                // One owner per formation per review (G5d, verify F1): a formation G4 gave a role the mover sends belongs to the
+                // mover, whatever state its mission is in (a Recalled one included, which Sync otherwise leaves alone).
+                if (MoverRoleOf(a, _missions[m].InstanceId))
+                {
+                    SetState(m, ReconState.Cleared, ReasonReassigned);
+                    continue;
+                }
                 if (IsActive(_missions[m].State) && !kept.Contains(_missions[m].MissionId))
                     SetState(m, ReconState.Cleared, "unassigned");
+            }
+        }
+
+        // The recon flag is off (G5d, verify F2): every mission ends, a Recalled one included, so the executor only takes
+        // Scouting off the screens and moves nothing; the formations are vanilla's again where they stand.
+        internal void ReleaseAll(string reason)
+        {
+            for (int m = 0; m < _missions.Count; m++)
+                if (_missions[m].State != ReconState.Cleared) SetState(m, ReconState.Cleared, reason);
         }
 
         public void OnReview(CampaignSnapshot s, Allocation a)
         {
             if (s == null) return;
-            _missions.RemoveAll(m => m.State == ReconState.Cleared);
+            DropSettledClearedMissions(s.DaySerial);
             for (int i = 0; i < _missions.Count; i++)
             {
                 var m = _missions[i];
+                if (m.State == ReconState.Cleared) continue; // waiting for its stand-down (DropSettledClearedMissions)
                 int own = s.IndexOfOwn(m.InstanceId);
                 if (own < 0) own = s.IndexOfKey(m.UnitKey);
                 if (own < 0)
@@ -106,6 +132,52 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[own];
                 m.InstanceId = f.InstanceId;
                 _missions[i] = Review(s, a, m, f);
+            }
+        }
+
+        // A Cleared mission lives one review for the executor to see it, and longer only while a Scouting order it gave still has to
+        // be taken off (G5d, verify F3): the executors do not run on a paused day or a stale-plan day, and the screen would keep
+        // order 1 (and arrive late as a battle reinforcement, 67742-67744) until a readiness reset (113960). The wait is bounded
+        // by MaxMissionDays from the first review that saw it Cleared.
+        private void DropSettledClearedMissions(int daySerial)
+        {
+            for (int i = _missions.Count - 1; i >= 0; i--)
+            {
+                var m = _missions[i];
+                if (m.State != ReconState.Cleared) continue;
+                if (!m.StandDownDue) { _missions.RemoveAt(i); continue; }
+                if (m.ClearedDay < 0)
+                {
+                    m.ClearedDay = daySerial;
+                    _missions[i] = m;
+                }
+                else if (daySerial - m.ClearedDay >= MaxMissionDays) _missions.RemoveAt(i);
+            }
+        }
+
+        // The executor ordered this formation Scouting for its active mission: that mission owes the stand-down, and a cleared
+        // one of the same formation no longer does (the new mission carries it).
+        internal void NoteScouting(int instanceId)
+        {
+            for (int i = 0; i < _missions.Count; i++)
+            {
+                if (_missions[i].InstanceId != instanceId) continue;
+                var m = _missions[i];
+                m.StandDownDue = IsActive(m.State);
+                _missions[i] = m;
+            }
+        }
+
+        // The stand-down was delivered (or can never be: the formation is gone or its chain is no longer None, where order 120
+        // at level -1 would reach the player's units): nothing is owed any more.
+        internal void NoteStoodDown(int instanceId)
+        {
+            for (int i = 0; i < _missions.Count; i++)
+            {
+                if (_missions[i].InstanceId != instanceId || !_missions[i].StandDownDue) continue;
+                var m = _missions[i];
+                m.StandDownDue = false;
+                _missions[i] = m;
             }
         }
 
@@ -272,6 +344,13 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
+        private static bool MoverRoleOf(Allocation a, int instanceId)
+        {
+            for (int i = 0; i < a.Assignments.Count; i++)
+                if (a.Assignments[i].InstanceId == instanceId) return CampaignMover.MovesRole(a.Assignments[i].Role);
+            return false;
+        }
+
         // G4 copies the task's SectorId and hold point into the Recon assignment (SectorId, TargetX/Z).
         private static int TaskFor(IReadOnlyList<ReconTask> tasks, in Assignment a)
         {
@@ -311,7 +390,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastContactDay = -1,
                 Reason = task.Reason,
                 ObservedEnemyStrength = -1f,
-                ObservedObjectiveId = -1
+                ObservedObjectiveId = -1,
+                ClearedDay = -1
             };
             _missions.Add(mission);
             return mission.MissionId;

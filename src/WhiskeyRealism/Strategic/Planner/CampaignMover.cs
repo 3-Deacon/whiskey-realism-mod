@@ -8,24 +8,16 @@ namespace WhiskeyRealism.Strategic.Planner
     // (CampaignMoverRuntime) implements it over AICampaign.MoveUnitTo, the W&L order bridge and the faction lists; the harness
     // implements it with a recording fake. Nothing here names the defensive operation list: vanilla ends and relieves its own
     // defence (13782-13848, 14068-14078).
-    internal interface IMoverHost
+    internal interface IMoverHost : IMoveHost
     {
-        // BattlefieldSetup.IsTerrainPositionRestricted (25755): a target no final waypoint can be put on.
-        bool TargetRestricted(float x, float z);
         // The alliance owning the state at a map point (GameVars.nation[GetStateOfField(point, true)].alliance), -1 unknown.
         int StateAllianceAt(float x, float z);
         // GameVars.alliance[reviewing alliance].IsAtWarWith(other) (63127).
         bool AtWar(int otherAlliance);
-        // CoordinatedOperationRuntime.IsPackageLocked until G6 deletes #38 (P10).
-        bool PackageLocked(int instanceId);
-        // AICampaign.MoveUnitTo(unit, point, movearoundenemyunits: true): true when vanilla took the move.
-        bool Move(int instanceId, float x, float z);
         // The map-group player's order: a W&L Redeploy dispatch (WlStrategicOrderBridge.TryIssue), true when issued.
         bool IssuePlayerOrder(int instanceId, float x, float z);
         // Adds to / removes from AIFaction.unitsinoffensiveoperations.
         void ListOffensive(int instanceId, bool listed);
-        // userails = userivers = true on the group: vanilla's AI default (112862-112867).
-        void RaiseTransportModes(int instanceId);
     }
 
     // The tempo roll's public and own-side inputs, read by the runtime once per review.
@@ -113,6 +105,13 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly FormationRole[] Priority =
             { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support };
 
+        // Does the mover send a formation of this role? (The roles G4 can give a formation that G5d's recon executor must then leave
+        // to the mover: one owner per formation per review.)
+        internal static bool MovesRole(FormationRole role)
+        {
+            return Array.IndexOf(Priority, role) >= 0;
+        }
+
         public static MoverTally Review(MoverInputs inputs, IMoverHost host, MoveTracker tracker, PlannerState state)
         {
             var tally = new MoverTally();
@@ -122,7 +121,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var allocation = inputs.Allocation;
             if (s == null || plan == null || allocation == null) return tally;
 
-            JudgeLastReview(s, tracker, tally);
+            JudgeLastReview(s, allocation, tracker, tally);
             ReleaseRecoverFromOffense(s, allocation, host);
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
             bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
@@ -137,9 +136,13 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // P8: the moves issued at an earlier review, judged against today's picture. A formation whose order still waits in
-        // vanilla's queue (DefensiveMovingOrder.UpdateOrders serves one order at a time, 9966-10052) is not judged yet.
-        private static void JudgeLastReview(CampaignSnapshot s, MoveTracker tracker, MoverTally tally)
+        // vanilla's queue (DefensiveMovingOrder.UpdateOrders serves one order at a time, 9966-10052) is not judged yet. A queued
+        // record settles through MoveTracker.SettleQueued once the order ahead of it has ended or the role no longer sends the
+        // formation (the planner's records only: a recon record's owner is the recon executor, which settles its own), and
+        // after MoveTracker.QueuedExpiryDays whatever happens; the dispatch below then re-issues the move or drops it.
+        private static void JudgeLastReview(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, MoverTally tally)
         {
+            tracker.SettleExpiredQueued(s.DaySerial);
             var ids = new List<int>();
             tracker.CollectInTransit(ids);
             for (int k = 0; k < ids.Count; k++)
@@ -151,7 +154,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     continue;
                 }
                 var f = s.Own[i];
-                if ((f.Flags & FormationFlags.MoveQueued) != 0) continue;
+                bool orderRunning = (f.Flags & FormationFlags.MoveQueued) != 0;
+                tracker.SettleQueued(f.InstanceId, MoveBudget.Planner, RoleStillSends(allocation, f.InstanceId), orderRunning);
+                tracker.SettleQueued(f.InstanceId, MoveBudget.Recon, wanted: true, orderRunning);
+                if (!tracker.InTransit(f.InstanceId) || orderRunning) continue;
                 switch (tracker.Judge(f.InstanceId, f.X, f.Z, f.WaypointX, f.WaypointZ, s.DaySerial))
                 {
                     case MoveOutcome.Confirmed: tally.Confirmed++; break;
@@ -159,6 +165,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     case MoveOutcome.GaveUp: tally.GaveUp++; break;
                 }
             }
+        }
+
+        private static bool RoleStillSends(Allocation allocation, int instanceId)
+        {
+            return allocation.TryGet(instanceId, out var a) && MovesRole(a.Role);
         }
 
         // Vanilla never checks supply before or during an offensive (14080-14158 has no supply term, job 6's gate is dead,
@@ -311,32 +322,9 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
 
-            bool queued = (f.Flags & FormationFlags.MoveQueued) != 0;
-            int objective = ObjectiveOf(inputs.Plan, a);
-            bool retry = tracker.IssueOutcome(f.InstanceId, tx, tz, queued) == MoveOutcome.Retried;
-            if (host.TargetRestricted(tx, tz))
-            {
-                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey, objective);
-                Count(tally, retry);
-                return;
-            }
-            if (inputs.WlPlayerAlliance && (!f.UseRails || !f.UseRivers)) host.RaiseTransportModes(f.InstanceId);
-            if (queued)
-            {
-                tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: true, unitKey: f.UnitKey, objectiveId: objective);
-                tally.Queued++;
-                return;
-            }
-            if (!host.Move(f.InstanceId, tx, tz))
-            {
-                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey, objective);
-                Count(tally, retry);
-                return;
-            }
-            tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: false, unitKey: f.UnitKey, objectiveId: objective);
-            if (retry) tally.Retried++;
-            else tally.Issued++;
-            if (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support) host.ListOffensive(f.InstanceId, true);
+            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, out var outcome);
+            Count(tally, outcome);
+            if (moved && (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support)) host.ListOffensive(f.InstanceId, true);
         }
 
         // The objective a move is toward: a MainEffort or Support assignment goes to its sector's target, the objective of that
@@ -350,10 +338,15 @@ namespace WhiskeyRealism.Strategic.Planner
             return -1;
         }
 
-        private static void Count(MoverTally tally, bool retry)
+        private static void Count(MoverTally tally, MoveOutcome outcome)
         {
-            if (retry) tally.Retried++;
-            else tally.Failed++;
+            switch (outcome)
+            {
+                case MoveOutcome.Issued: tally.Issued++; break;
+                case MoveOutcome.Retried: tally.Retried++; break;
+                case MoveOutcome.Queued: tally.Queued++; break;
+                case MoveOutcome.Failed: tally.Failed++; break;
+            }
         }
 
         // The map-group player's Support order follows the AI Support rule: it waits into enemy-held ground until the launch
