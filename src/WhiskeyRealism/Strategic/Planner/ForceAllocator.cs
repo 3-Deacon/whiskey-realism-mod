@@ -47,6 +47,10 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 a formation whose home theater is the sector's; the shortest prefix whose
     //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
+    //   Gave up       a formation the move tracker gave up on at the target its role would send it to (P8: two misses,
+    //                 MoveTracker.GaveUp) loses that role: the depot and recon picks take the next candidate, any other
+    //                 role becomes Hold in place with ReasonGaveUp, until the role's target changes. The set is an
+    //                 input (GaveUpMove), so the pass stays pure and deterministic.
     //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (F's
     //                 MoveUnitTo Postfix dispatches its march). The map-group player's group counts
     //                 toward the hold of the sector where its last waypoint lies, at strength x morale,
@@ -84,14 +88,15 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonSupport = "support";
         internal const string ReasonGarrison = "garrison";
         internal const string ReasonPlayerMapGroup = "player-map-group";
+        internal const string ReasonGaveUp = "gave-up";
 
         public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeTheater,
-                                          IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions)
+                                          IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null)
         {
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
-            new Pass(plan, s, sectors, homeTheater, reconTasks, missions).Run(allocation);
+            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp).Run(allocation);
             return allocation;
         }
 
@@ -177,6 +182,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly ReconMissionLedger _missions;
             private readonly int _n;
             private readonly int _sectorCount;
+            private readonly IReadOnlyList<GaveUpMove> _gaveUp;
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -190,8 +196,9 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
-                          Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions)
+                          Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp)
             {
+                _gaveUp = gaveUp;
                 _plan = plan;
                 _s = s;
                 _sectors = sectors;
@@ -286,8 +293,33 @@ namespace WhiskeyRealism.Strategic.Planner
 
             // ---- roles ----
 
+            // Whether the tracker gave up on sending formation i to (tx, tz).
+            private bool GaveUpAt(int i, float tx, float tz)
+            {
+                if (_gaveUp == null) return false;
+                int id = _s.Own[i].InstanceId;
+                for (int k = 0; k < _gaveUp.Count; k++)
+                    if (_gaveUp[k].InstanceId == id && _gaveUp[k].Matches(tx, tz)) return true;
+                return false;
+            }
+
+            private static bool Marches(FormationRole role)
+            {
+                return role == FormationRole.MainEffort || role == FormationRole.Support || role == FormationRole.CapitalGuard
+                    || role == FormationRole.Recover || role == FormationRole.DepotBuilder || role == FormationRole.Recon;
+            }
+
             private void Assign(int i, FormationRole role, int roleSector, float tx, float tz, string reason, bool withheld)
             {
+                if (Marches(role) && GaveUpAt(i, tx, tz))
+                {
+                    role = FormationRole.Hold;
+                    roleSector = _sector[i];
+                    tx = _s.Own[i].X;
+                    tz = _s.Own[i].Z;
+                    reason = ReasonGaveUp;
+                    withheld = false;
+                }
                 _done[i] = true;
                 _inMass[i] = false;
                 _role[i] = role;
@@ -353,8 +385,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int t = 0; t < _plan.DepotTasks.Count; t++)
                 {
                     var task = _plan.DepotTasks[t];
-                    int pick = SmallestIn(task.SectorId, false);
-                    if (pick < 0) pick = SmallestIn(task.SectorId, true);
+                    int pick = SmallestIn(task, false);
+                    if (pick < 0) pick = SmallestIn(task, true);
                     if (pick < 0) continue;
                     Assign(pick, FormationRole.DepotBuilder, task.SectorId, task.X, task.Z, ReasonDepotTask, true);
                 }
@@ -362,12 +394,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
             // The smallest fighting formation of the sector (lower instance id on a tie); a formation
             // of the mass only when allowMass (G3 obligation: take from outside the mass while one qualifies).
-            private int SmallestIn(int sector, bool allowMass)
+            private int SmallestIn(DepotTask task, bool allowMass)
             {
+                int sector = task.SectorId;
                 int best = -1;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (!Free(i) || _sector[i] != sector || (_inMass[i] && !allowMass)) continue;
+                    if (!Free(i) || _sector[i] != sector || (_inMass[i] && !allowMass) || GaveUpAt(i, task.X, task.Z)) continue;
                     if (best < 0 || _s.Own[i].Strength < _s.Own[best].Strength
                         || (_s.Own[i].Strength == _s.Own[best].Strength && _s.Own[i].InstanceId < _s.Own[best].InstanceId))
                         best = i;
@@ -389,6 +422,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int t = 0; t < _recon.Count; t++)
                 {
                     var task = _recon[t];
+                    // A formation the tracker gave up on at this hold point is not a candidate for this task: the next one is tried.
+                    List<int> skippedTaken = null, skippedMass = null;
+                    if (_gaveUp != null && _gaveUp.Count > 0)
+                    {
+                        skippedTaken = new List<int>();
+                        skippedMass = new List<int>();
+                        for (int i = 0; i < _n; i++)
+                        {
+                            if (!GaveUpAt(i, task.HoldX, task.HoldZ)) continue;
+                            int gid = _s.Own[i].InstanceId;
+                            if (taken.Add(gid)) skippedTaken.Add(gid);
+                            if (takenAndMass.Add(gid)) skippedMass.Add(gid);
+                        }
+                    }
                     int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, taken, mainHasScreen);
                     int pick = id >= 0 ? _s.IndexOfOwn(id) : -1;
                     // G3 obligation: take the formation from outside the mass while one qualifies; the
@@ -399,6 +446,11 @@ namespace WhiskeyRealism.Strategic.Planner
                         int outside = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, takenAndMass, mainHasScreen);
                         int outsideIndex = outside >= 0 ? _s.IndexOfOwn(outside) : -1;
                         if (outsideIndex >= 0 && ReconTier(outsideIndex) <= ReconTier(pick)) pick = outsideIndex;
+                    }
+                    if (skippedTaken != null)
+                    {
+                        for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
+                        for (int k = 0; k < skippedMass.Count; k++) takenAndMass.Remove(skippedMass[k]);
                     }
                     if (pick < 0 || _done[pick]) continue;
                     int pickedId = _s.Own[pick].InstanceId;

@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Telemetry;
@@ -18,7 +19,7 @@ namespace WhiskeyRealism.Patches
     // offensive modifier in the defensive pref through a ValueSwap (the method's only read
     // of it, 14312; no callee reads it: its other reader is CheckForDefensiveOperations)
     // and the Finalizer restores it, even if vanilla throws. #38's mirror of the roll
-    // (CoordinatedOffensiveOperationsPatch.WinterModifier) reads the same helper.
+    // and the planner's tempo gate read CurrentRollModifier.
     // Rollback: Campaign Bug Fixes / Enable Winter Offensive Modifier Fix.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
     internal static class WinterOffensiveModifierPatch
@@ -64,6 +65,30 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("winter-offensive-modifier:finalizer", "[Patch:WinterOffensive] finalizer failed: " + ex.Message);
                 }
             }
+        }
+
+        private static bool _bunitsFieldResolved;
+        private static FieldInfo _bunitsField;
+
+        // The winter factor of a tempo roll now: what vanilla's num5 is (14310-14313) under this patch, i.e. the offensive
+        // modifier in the winter quarters when the fix is on, else the defensive one vanilla reads, 1 outside winter. The one
+        // reader for #38's mirror of the roll and for the planner's chapter tempo gate (CampaignMoverRuntime).
+        internal static float CurrentRollModifier()
+        {
+            if (!_bunitsFieldResolved)
+            {
+                _bunitsFieldResolved = true;
+                _bunitsField = AccessTools.Field(typeof(AICampaign), "bunits");
+            }
+            var bunits = _bunitsField?.GetValue(null) as BattleUnits;
+            var storm = bunits != null ? bunits.uniStormSystem : null;
+            if (storm == null) return 1f;
+            bool winter = WinterOperationsModifier.IsWinterMonth(storm.monthCounter, GamePrefs.winterquartersmonthuntil, GamePrefs.winterquartersmonthfrom);
+            return WinterOperationsModifier.OffensiveRollModifier(
+                winter,
+                Enabled(),
+                GamePrefs.winteroffensiveoperationsmodifier,
+                GamePrefs.winterdefensiveoperationsmodifier);
         }
 
         internal static bool Enabled()

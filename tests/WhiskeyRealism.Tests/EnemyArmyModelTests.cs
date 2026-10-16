@@ -1076,7 +1076,8 @@ internal static class EnemyArmyModelTests
         AssertContains(MethodBody(runtime, "internal static int ReviewDayFor("),
             "return alliance >= 0 && alliance < Alliances ? LastDaySerial[alliance] : -1;", "the recency clock is the alliance's last review day");
         AssertContains(detectBody, "LastDaySerial[side] = s.DaySerial;", "stamped by each detection");
-        AssertContains(planner, "CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),", "the snapshot day is the calendar day serial");
+        AssertContains(planner, "int daySerial = ReviewCadenceCatchUp.DaySerial(day, month, year);", "the review day is the calendar day serial");
+        AssertContains(planner, "CampaignSnapshotRuntime.Build(alliance, faction, daySerial,", "the snapshot day is the calendar day serial");
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         // Sliced review (perf merge): the calendar day is captured on the date-change frame and
         // stamped by the first job (Map), before any alliance's jobs, whatever the readiness.

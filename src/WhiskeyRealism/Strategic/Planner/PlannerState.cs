@@ -20,12 +20,32 @@ namespace WhiskeyRealism.Strategic.Planner
         public long CampaignSeed;
         public int BelowOddsDays;
         public bool CapitalThreatLatched;
+        // G5a (chapters decision 5): the DecisionSerial whose main-effort launch the chapter tempo roll
+        // released, -1 for none. `TempoReleasedDecision == DecisionSerial` is the one release predicate
+        // (the mover sets it on a passed, forced or debug roll and before the first MainEffort dispatch
+        // of a decision that needs no roll); DecisionSerial starts at 0 and is 1 at the first decision, so
+        // -1 never reads as released. Persisted (PlannerStateDto.tempoReleasedDecision, G6).
+        public int TempoReleasedDecision = -1;
+        // The day serial of the previous review that ran the executors (PlannerReviewMode.Full with
+        // PlannerChapterRules.ExecutorsAllowed): the tempo clock's reference (CampaignTempoGate.TimeDiffYears).
+        // -1 none. Persisted (PlannerStateDto.lastFullReviewDay, G6).
+        public int LastFullReviewDay = -1;
+        // The decision whose first [CampaignTempo] row was emitted (bounds the rows to two per decision).
+        // Telemetry only, not persisted: after a reload a decision may log its first row once more.
+        public int TempoRowDecision = -1;
+        // The decision whose undispatchable-main-effort row was emitted (one row when a kept main effort first has no formation
+        // the mover can send; cleared when it has one again). Telemetry only, not persisted.
+        public int UndispatchableRowDecision = -1;
 
         public void Restore(int mainSector, int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
-                            int belowOddsDays = 0, bool capitalThreatLatched = false)
+                            int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1)
         {
             BelowOddsDays = belowOddsDays;
             CapitalThreatLatched = capitalThreatLatched;
+            TempoReleasedDecision = tempoReleasedDecision;
+            LastFullReviewDay = lastFullReviewDay;
+            TempoRowDecision = -1;
+            UndispatchableRowDecision = -1;
             CurrentMainSector = mainSector;
             CurrentMainObjective = mainObjective;
             ChallengerObjective = challengerObjective;

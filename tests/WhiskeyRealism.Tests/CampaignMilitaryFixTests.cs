@@ -10,7 +10,7 @@ internal static class CampaignMilitaryFixTests
         ListSnapshotRestoreIsIdempotent();
         ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved();
         ImportanceRedirectHonoursVanillaCandidateGates();
-        ImportanceRedirectStaysInPlanTheater();
+        ImportanceRedirectStaysInSteeredSectors();
         ArmyGroupManagementRepeatsVanillaGuard();
         CommanderNameMatchDisambiguatesHistoricalSurnames();
         CommanderNameMatchFallsBackToExactSurname();
@@ -64,27 +64,26 @@ internal static class CampaignMilitaryFixTests
     // CalculateMostValueableAIZones (decompile 10964-10987).
     private static void ImportanceRedirectHonoursVanillaCandidateGates()
     {
-        // baseline: same theater, in range, supply ok, vanilla value clause ok
+        // baseline: the source area is in a sector the plan steers, in range, supply ok, vanilla value clause ok
         TestHarness.AssertTrue(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.East, Theater.East, 200f, 300f, 10f, 50f, true), "eligible target redirects");
+            false, true, 200f, 300f, 10f, 50f, true), "eligible target redirects");
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            true, Theater.East, Theater.East, 0f, 300f, 10f, 50f, true), "aiarea[i] != this");
+            true, true, 0f, 300f, 10f, 50f, true), "aiarea[i] != this");
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.East, Theater.East, 301f, 300f, 10f, 50f, true), "distance gate (relocation range x offensive range factor)");
+            false, true, 301f, 300f, 10f, 50f, true), "distance gate (relocation range x offensive range factor)");
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.East, Theater.East, 200f, 300f, 60f, 50f, true), "supply gate ownpoints <= supplycapacity");
+            false, true, 200f, 300f, 60f, 50f, true), "supply gate ownpoints <= supplycapacity");
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.East, Theater.East, 200f, 300f, 10f, 50f, false), "vanilla points/distance/importance clause");
+            false, true, 200f, 300f, 10f, 50f, false), "vanilla points/distance/importance clause");
         LogPass("c2a importance redirect honours vanilla candidate gates");
     }
 
-    private static void ImportanceRedirectStaysInPlanTheater()
+    // G5a re-keyed the theater clause on the plan: only a source area in a MainEffort or Support sector is steered.
+    private static void ImportanceRedirectStaysInSteeredSectors()
     {
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.West, Theater.East, 200f, 300f, 10f, 50f, true), "other front keeps vanilla's local target");
-        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
-            false, Theater.Unknown, Theater.East, 200f, 300f, 10f, 50f, true), "unclassified source keeps vanilla target");
-        LogPass("c2a importance redirect stays inside the plan theater");
+            false, false, 200f, 300f, 10f, 50f, true), "another sector keeps vanilla's local target");
+        LogPass("c2a importance redirect stays inside the steered sectors");
     }
 
     // C-ArmyGroup: vanilla CheckArmyGroupManagement (decompile 17705) returns
@@ -327,21 +326,10 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a coordinated offensive mirrors vanilla early outs");
     }
 
-    // vanilla tempo roll (14336-14350): tval = aiagressiveness[chapter] * timediff
-    // * 10 * factionAggression * usedcampaignagressiveness * winterModifier
-    // + clamp01(idleYears^3), times the W&L multiplier; go when roll <= tval.
+    // vanilla tempo roll (14336-14350): the probability arithmetic moved to CampaignTempoGate (G5a,
+    // CampaignTempoGateTests); what stays here is the target weight and the pass test of #38's mirror.
     private static void CoordinatedOffensiveTempoGateMatchesVanilla()
     {
-        float tval = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, false, 1.5f, false);
-        TestHarness.AssertTrue(Math.Abs(0.1f - tval) < 1e-5f, "chapter x timediff x 10, got " + tval);
-        float winter = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 0.2f, 0f, false, 1.5f, false);
-        TestHarness.AssertTrue(Math.Abs(0.02f - winter) < 1e-5f, "winter modifier scales the roll");
-        float idle = CoordinatedOffensiveVanillaGates.TempoProbability(0f, 0.02f, 1f, 1f, 1f, 0.5f, false, 1.5f, false);
-        TestHarness.AssertTrue(Math.Abs(0.125f - idle) < 1e-5f, "idle time adds clamp01(idle^3)");
-        float wl = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, true, 1.5f, false);
-        TestHarness.AssertTrue(Math.Abs(0.15f - wl) < 1e-5f, "W&L scenario multiplies once (14344)");
-        float wlPlayer = CoordinatedOffensiveVanillaGates.TempoProbability(0.5f, 0.02f, 1f, 1f, 1f, 0f, true, 1.5f, true);
-        TestHarness.AssertTrue(Math.Abs(0.225f - wlPlayer) < 1e-5f, "player's group in the package multiplies again (14346)");
         // num2 at the TARGET area (14230): enemy strength * avgtroopmorale * importance * weapon / national morale factor
         float num2 = CoordinatedOffensiveVanillaGates.TargetEnemyWeight(1000f, 0.8f, 2f, 0.5f, 2f);
         TestHarness.AssertTrue(Math.Abs(400f - num2) < 1e-3f, "vanilla num2 (1000*0.8*2*0.5/2), got " + num2);

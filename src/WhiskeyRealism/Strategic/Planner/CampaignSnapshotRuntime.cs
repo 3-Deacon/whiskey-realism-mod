@@ -68,6 +68,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             _weather = null;
             _bfs = null;
+            OwnById.Clear();
             Rails.Clear();
             RailSource.Clear();
             AreaShapes.Clear();
@@ -84,6 +85,9 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly HashSet<Regiment> CapitalSet = new HashSet<Regiment>();
         private static readonly List<Regiment> OwnUnits = new List<Regiment>();
         private static readonly Dictionary<Regiment, int> OwnIndex = new Dictionary<Regiment, int>();
+        // The review's own formations by instance id: the executors (G5a) act on the snapshot's formations. Rebuilt with
+        // each snapshot, so it holds the alliance whose Plan job ran last; the Execute job follows its own alliance's.
+        private static readonly Dictionary<int, Regiment> OwnById = new Dictionary<int, Regiment>();
         private static readonly List<int> ParentSize = new List<int>();
         private static readonly HashSet<int> AvailableObjectives = new HashSet<int>();
         private static readonly HashSet<Town> IndustryTowns = new HashSet<Town>();
@@ -252,6 +256,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             OwnUnits.Clear();
             OwnIndex.Clear();
+            OwnById.Clear();
             var units = BattleUnits.campaignunitlist;
             if (units == null) return;
             for (int i = 0; i < units.Count; i++)
@@ -306,8 +311,10 @@ namespace WhiskeyRealism.Strategic.Planner
                         ParentInstanceId = -1,
                         UseRails = reg.userails,
                         UseRivers = reg.userivers,
-                        GroupSpeed = reg.groupspeed
+                        GroupSpeed = reg.groupspeed,
+                        TimeOfNotMoving = reg.timeofnotmoving
                     });
+                    OwnById[reg.GetInstanceID()] = reg;
                 }
                 catch (Exception ex)
                 {
@@ -316,6 +323,12 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             ResolveParents(s);
+        }
+
+        // The live group of a snapshot formation (G5a executors), null when it left the list since the snapshot.
+        internal static Regiment OwnUnit(int instanceId)
+        {
+            return OwnById.TryGetValue(instanceId, out var reg) && (UnityEngine.Object)reg != null ? reg : null;
         }
 
         // The radius that paints the unit's fog grid (FogOfWar.UpdateViewRange 101296-101309), the
@@ -734,7 +747,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // AICampaign's own lookup (11143).
-        private static BattlefieldSetup ResolveBattlefieldSetup()
+        internal static BattlefieldSetup ResolveBattlefieldSetup()
         {
             if ((UnityEngine.Object)_bfs != null) return _bfs;
             var go = GameObject.Find("GameController");

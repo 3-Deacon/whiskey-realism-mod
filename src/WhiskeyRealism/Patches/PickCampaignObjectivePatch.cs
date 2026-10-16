@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -52,6 +53,17 @@ namespace WhiskeyRealism.Patches
             return new[] { LastWrittenByMod[0], LastWrittenByMod[1] };
         }
 
+        // The campaign objective executor (CampaignSteeringRuntime, G5a) records the value it wrote (-1 after a release).
+        internal static void NoteWrittenByMod(int alliance, int objectiveId)
+        {
+            if (alliance >= 0 && alliance < LastWrittenByMod.Length) LastWrittenByMod[alliance] = objectiveId;
+        }
+
+        internal static int WrittenByMod(int alliance)
+        {
+            return alliance >= 0 && alliance < LastWrittenByMod.Length ? LastWrittenByMod[alliance] : -1;
+        }
+
         internal static void RestoreWrittenByMod(int[] written)
         {
             for (int a = 0; a < LastWrittenByMod.Length; a++)
@@ -65,6 +77,9 @@ namespace WhiskeyRealism.Patches
             {
                 PatchFirstFire.Mark("campaign.patch.pick-campaign-objective");
                 OnceLog.Info("pickcampobj", "PickCampaignObjectivePatch wired");
+                // P10: while the planner's executors run, its objective executor is the one writer of
+                // followedcampaignobjective (CampaignSteeringRuntime); vanilla's pick runs untouched. G6 deletes the patch.
+                if (CampaignPlannerRuntime.ExecutorsEnabled()) return true;
                 try
                 {
                     var coordinator = StrategicCoordinator.Instance;

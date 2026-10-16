@@ -10,9 +10,9 @@ using WhiskeyRealism.Util;
 using static TestHarness;
 using static TestFixtures;
 
-// Perf slice F4 (#38 CoordinatedOffensiveOperationsPatch) and F9 (#2 ImportanceValuesPatch):
-// the per-call indexes, the pooled candidate assembly and the miss-caching target-area
-// cache against the code they replace.
+// Perf slice F4 (#38 CoordinatedOffensiveOperationsPatch): the per-call indexes and the pooled candidate
+// assembly against the code they replace. (F9's target-area cache for #2 went with its objective-id lookup
+// when G5a rewrote the patch on the published plan.)
 internal static class CampaignHookPerfTests
 {
     public static void Run()
@@ -26,9 +26,6 @@ internal static class CampaignHookPerfTests
             ("coord offensive cheap vanilla precheck is exact", CheapVanillaPrecheckIsExact),
             ("wl bridge ClassifyOnly context overload matches request path", ClassifyOnlyContextOverloadMatchesRequestPath),
             ("coord offensive patch binds delegates and indexes once per call", CoordinatedOffensivePatchSourcePins),
-            ("importance target cache matches old cache on call sequences", TargetAreaCacheMatchesOldCache),
-            ("importance target cache caches settled misses only", TargetAreaCacheCachesSettledMissesOnly),
-            ("importance patch resolves names once and resets the cache", ImportanceValuesPatchSourcePins),
         });
     }
 
@@ -411,125 +408,5 @@ internal static class CampaignHookPerfTests
         int mirror = isAvailable.IndexOf("return MirrorVanillaGates(", StringComparison.Ordinal);
         AssertTrue(catchAt >= 0 && mirror > catchAt, "a throwing vanilla gate still falls back to the mirror");
         AssertContains(wrapper, "Func<int, Regiment, Vector3, bool, bool, bool> _vanillaGate", "typed gate delegate");
-    }
-
-    // The cache #2 used before F9: a hit only on a non-null value.
-    private sealed class OldTargetCache
-    {
-        private int _id = int.MinValue;
-        private object _list;
-        private string _value;
-
-        internal string Get(int id, object list, Func<int, object, (string value, bool settled)> resolve)
-        {
-            if (id == _id && ReferenceEquals(list, _list) && _value != null) return _value;
-            _id = id;
-            _list = list;
-            _value = resolve(id, list).value;
-            return _value;
-        }
-
-        internal void Reset()
-        {
-            _id = int.MinValue;
-            _list = null;
-            _value = null;
-        }
-    }
-
-    private static string NewGet(KeyedResolveCache<string> cache, int id, object list, Func<int, object, (string value, bool settled)> resolve)
-    {
-        if (cache.TryGet(id, list, out var hit)) return hit;
-        var (value, settled) = resolve(id, list);
-        cache.Store(id, list, value, settled);
-        return value;
-    }
-
-    // A resolver whose settled answers never change for a key (the F9 precondition),
-    // while unsettled misses (data not built yet, exceptions) turn into hits once
-    // "built" flips.
-    private static Func<int, object, (string, bool)> Resolver(Func<bool> built, Action counter)
-    {
-        return (id, list) =>
-        {
-            counter();
-            if (list == null) return (null, false);           // aiarea not built
-            int kind = ((id * 7 + ("listA".Equals(list) ? 1 : 2)) % 4 + 4) % 4;
-            switch (kind)
-            {
-                case 0: return ("area-" + id + "-" + list, true);       // found
-                case 1: return (null, true);                             // settled miss
-                case 2: return built() ? ("late-" + id, true) : (null, false); // unbuilt data
-                default: return (null, false);                           // throws every time
-            }
-        };
-    }
-
-    private static void TargetAreaCacheMatchesOldCache()
-    {
-        var lists = new object[] { "listA", "listB", null };
-        foreach (int seed in new[] { 1, 2, 3, 42 })
-        {
-            var rng = new Random(seed);
-            bool built = false;
-            int oldCalls = 0, newCalls = 0;
-            var oldCache = new OldTargetCache();
-            var newCache = new KeyedResolveCache<string>();
-            var oldResolve = Resolver(() => built, () => oldCalls++);
-            var newResolve = Resolver(() => built, () => newCalls++);
-            for (int step = 0; step < 4000; step++)
-            {
-                if (step == 2000) built = true;
-                if (rng.Next(500) == 0) { oldCache.Reset(); newCache.Reset(); }
-                int id = rng.Next(-1, 6);
-                object list = lists[rng.Next(lists.Length)];
-                // Runs of the same key, as vanilla's per-area calls produce.
-                int repeat = 1 + rng.Next(4);
-                for (int r = 0; r < repeat; r++)
-                {
-                    string expected = oldCache.Get(id, list, oldResolve);
-                    string actual = NewGet(newCache, id, list, newResolve);
-                    AssertEqual(expected, actual, "seed " + seed + " step " + step + " id " + id);
-                }
-            }
-            AssertTrue(newCalls < oldCalls, "seed " + seed + ": settled misses stop re-resolving (" + newCalls + " < " + oldCalls + ")");
-        }
-    }
-
-    private static void TargetAreaCacheCachesSettledMissesOnly()
-    {
-        var cache = new KeyedResolveCache<string>();
-        var list = new object();
-        AssertFalse(cache.TryGet(int.MinValue, null, out _), "empty cache misses even its sentinel key");
-        cache.Store(3, list, null, settled: true);
-        AssertTrue(cache.TryGet(3, list, out var miss) && miss == null, "settled miss is cached");
-        AssertFalse(cache.TryGet(3, new object(), out _), "another area list re-resolves");
-        AssertFalse(cache.TryGet(4, list, out _), "another objective re-resolves");
-        cache.Store(3, list, null, settled: false);
-        AssertFalse(cache.TryGet(3, list, out _), "unsettled miss is retried");
-        cache.Store(3, list, "area", settled: false);
-        AssertTrue(cache.TryGet(3, list, out var hit) && hit == "area", "a found value is always kept");
-        cache.Reset();
-        AssertFalse(cache.TryGet(3, list, out _), "reset forgets");
-    }
-
-    private static void ImportanceValuesPatchSourcePins()
-    {
-        string patch = ReadRepoFile("src/WhiskeyRealism/Patches/ImportanceValuesPatch.cs");
-        AssertContains(MethodBody(patch, "internal static void ResetForNewCampaign("), "TargetAreaCache.Reset();", "campaign reset clears the target cache");
-        string lookups = MethodBody(patch, "private static void ResolveLookups(");
-        int typeByName = 0, outside = 0;
-        for (int at = patch.IndexOf("TypeByName(", StringComparison.Ordinal); at >= 0; at = patch.IndexOf("TypeByName(", at + 1, StringComparison.Ordinal))
-        {
-            typeByName++;
-            if (at < patch.IndexOf(lookups, StringComparison.Ordinal) || at > patch.IndexOf(lookups, StringComparison.Ordinal) + lookups.Length) outside++;
-        }
-        AssertEqual(3, typeByName, "three type lookups");
-        AssertEqual(0, outside, "every TypeByName is in the once-per-process resolver");
-        AssertTrue(lookups.IndexOf("_lookupsResolved = true;", StringComparison.Ordinal) > lookups.IndexOf("_getAIArea =", StringComparison.Ordinal),
-            "the resolver is marked done only after every lookup ran");
-        string resolve = MethodBody(patch, "private static object ResolveTargetAIArea(");
-        string catchBlock = resolve.Substring(resolve.IndexOf("catch (Exception", StringComparison.Ordinal));
-        AssertContains(catchBlock, "settled = false;", "an exception is never a settled miss");
     }
 }
