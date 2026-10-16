@@ -513,7 +513,7 @@ internal static partial class TerrainPictureTests
         // in the same band is still a band whose visible enemy is all on strong ground.
         BattleSnapshot mixed = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f, strength: 1000) },
             BattlePerceptionTests.Seen(21, 400f, -390f, 800f, standing: true),
-            BattlePerceptionTests.Seen(22, 430f, -330f, 800f, confidence: 0.5f, remembered: true, standing: true));
+            BattlePerceptionTests.Seen(22, 405f, -330f, 800f, confidence: 0.5f, remembered: true, standing: true));
         var mv = new List<FrontUnitSample>(); var mw = new List<FrontUnitSample>(); var mk = new List<FrontUnitSample>();
         ArmyEvidenceBuilder.CollectEnemySamples(mixed, new HashSet<int>(), mv, mw, mk, p);
         EnemyVisibleSector[] mixedSectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, mw);
