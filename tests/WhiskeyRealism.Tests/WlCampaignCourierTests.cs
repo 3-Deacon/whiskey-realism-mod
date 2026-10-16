@@ -35,6 +35,8 @@ internal static class WlCampaignCourierTests
             ("wl campaign courier capital speed restored for player-owned only", SpeedRestoredForPlayerOwnedOnly),
             ("wl campaign courier capital speed keeps the player's own forced march", SpeedRestoreKeepsPlayersOwnForcedMarch),
             ("wl campaign courier capital speed skips cic and other factions", SpeedRestoreSkipsCic),
+            ("wl campaign courier acknowledgement only after a reached clear", AcknowledgementOnlyAfterAReachedClear),
+            ("wl campaign courier pin acknowledgement is information only", AcknowledgementIsInfoOnly),
             ("wl campaign courier pin capture branch runs vanilla's gate first", CaptureBranchRunsGateFirst),
             ("wl campaign courier pin delivery runs after flush on the campaign map", DeliveryRunsAfterFlush),
             ("wl campaign courier pin delivery restores the bypass in a finally", DeliveryRestoresBypass),
@@ -322,7 +324,38 @@ internal static class WlCampaignCourierTests
         AssertFalse(CapitalDefenseSpeed.Applies(true, true, false, flagOn: false), "flag off");
     }
 
+    // ---------------------------------------------------------- acknowledgement
+
+    private static void AcknowledgementOnlyAfterAReachedClear()
+    {
+        // Vanilla clears a reached campaign order of type 5, 6, 7 or 16 (123533) after setting
+        // firstunitreached on it; the slot is then empty.
+        foreach (int type in new[] { 5, 6, 7, 16 })
+        {
+            AssertTrue(WlCampaignCourierPolicy.AcknowledgesClear(type, firstUnitReached: true, slotEmptyNow: true), "type " + type + " reached and cleared");
+            AssertFalse(WlCampaignCourierPolicy.AcknowledgesClear(type, firstUnitReached: false, slotEmptyNow: true), "type " + type + " cleared without being reached (a scene load, a new campaign)");
+            AssertFalse(WlCampaignCourierPolicy.AcknowledgesClear(type, firstUnitReached: true, slotEmptyNow: false), "type " + type + " still on the panel");
+        }
+        foreach (int type in new[] { 0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15 })
+            AssertFalse(WlCampaignCourierPolicy.AcknowledgesClear(type, true, true), "type " + type + " is not cleared on arrival");
+    }
+
     // ------------------------------------------------------------------- pins
+
+    private static void AcknowledgementIsInfoOnly()
+    {
+        string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
+        int start = runtime.IndexOf("internal static void AcknowledgeReached(", StringComparison.Ordinal);
+        AssertTrue(start >= 0, "an acknowledgement hook");
+        int end = runtime.IndexOf("\n        // ", start, StringComparison.Ordinal);
+        string body = runtime.Substring(start, (end < 0 ? runtime.Length : end) - start);
+        AssertTrue(body.Contains("ShowNewInfo("), "it is shown as information");
+        AssertFalse(body.Contains("ShowNewOrder(") || body.Contains("givenorder ="), "it is never an order");
+        AssertTrue(body.Contains("FollowUpOn()"), "behind the follow-up switch");
+        AssertTrue(body.Contains("AcknowledgesClear("), "the pure rule decides");
+        string patch = Code("src/WhiskeyRealism/Patches/WlCampaignMoveDispatchPatch.cs");
+        AssertTrue(patch.Contains("WlCampaignCourierRuntime.AcknowledgeReached();"), "driven by the campaign pass");
+    }
 
     private static string Code(string path)
     {

@@ -58,6 +58,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static bool[] _routedFlags = new bool[64];
         // D21: the order session whose first-entry prestige is suppressed (an automatic hold).
         private static int _nonPayingSession = int.MinValue;
+        // criterion-no-automatic-prestige: what each order session paid, sampled per delivery pass. The
+        // origin of the session comes from the delivery that started it (anything else is vanilla's own).
+        private static int _prestigeSession = int.MinValue;
+        private static OrderOrigin _prestigeOrigin = OrderOrigin.Vanilla;
+        private static float _prestigeLast = float.NaN;
+        private static float _prestigeSessionDelta;
+        private static int _originSession = int.MinValue;
+        private static OrderOrigin _originOfSession = OrderOrigin.Vanilla;
+        // D17 (b): the order session in which a 1-4 order was first seen reached, when (doctrine hours), and
+        // the session a follow-up was already built for.
+        private static int _reachedSession = int.MinValue;
+        private static double _reachedAt;
+        private static int _followUpSession = int.MinValue;
 
         // The player's command, parent unit and campaign group, read once per frame (vanilla
         // recomputes them per call, 8263-8265, and GetParentUnit allocates, 93883).
@@ -100,6 +113,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _lastRetreatBuildHours = double.NegativeInfinity;
             Latch.Reset();
             _nonPayingSession = int.MinValue;
+            _reachedSession = int.MinValue;
+            _reachedAt = 0.0;
+            _followUpSession = int.MinValue;
+            _prestigeSession = int.MinValue;
+            _prestigeOrigin = OrderOrigin.Vanilla;
+            _prestigeLast = float.NaN;
+            _prestigeSessionDelta = 0f;
+            _originSession = int.MinValue;
+            _originOfSession = OrderOrigin.Vanilla;
             _boundaryBattleId = 0;
             _boundaryCommandId = 0;
             _boundaryBattleKey = string.Empty;
@@ -121,6 +143,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static bool CouriersOn()
         {
             return Plugin.EnableWlOrderCouriers != null && Plugin.EnableWlOrderCouriers.Value;
+        }
+
+        private static bool FollowUpOn()
+        {
+            return Plugin.EnableWlOrderFollowUp != null && Plugin.EnableWlOrderFollowUp.Value;
         }
 
         // ----------------------------------------------------------------- capture
@@ -450,6 +477,43 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             DLC_WL.GivenOrders slot = DLC_WL.givenorder;
             if (slot == null || slot.type != 13) Latch.Reset();
             Flow.RunPass();
+            SamplePrestige();
+        }
+
+        // What the order session that just ended paid, as one row (a non-paying session always gets one: it
+        // is the control). Reads DLC_WL.prestige and writes nothing.
+        private static void SamplePrestige()
+        {
+            try
+            {
+                int session = DLC_WL.GivenOrders.givenorderssession;
+                float prestige = DLC_WL.prestige;
+                if (!float.IsNaN(_prestigeLast)) _prestigeSessionDelta += prestige - _prestigeLast;
+                _prestigeLast = prestige;
+                if (session == _prestigeSession) return;
+                if (_prestigeSession != int.MinValue && (_prestigeSessionDelta != 0f || WlOrderFlow.IsNonPaying(_prestigeOrigin)))
+                    EmitPrestigeRow(_prestigeSession, _prestigeOrigin, _prestigeSessionDelta);
+                _prestigeSession = session;
+                _prestigeSessionDelta = 0f;
+                _prestigeOrigin = _originSession == session ? _originOfSession : OrderOrigin.Vanilla;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:prestige-sample", "[W&LOrder] sampling prestige failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static void EmitPrestigeRow(int session, OrderOrigin origin, float delta)
+        {
+            string originText = origin.ToString();
+            TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalPlayerOrderFlow", TelemetrySeverity.Info,
+                ev => ev
+                    .WithDecision("prestige-delta", originText, session.ToString())
+                    .WithField("scope", "tactical")
+                    .WithField("action", "prestige-delta")
+                    .WithField("origin", originText)
+                    .WithField("session", session)
+                    .WithField("delta", (double)delta));
         }
 
         // The battle, the player's command or his CIC status changed: queued orders belong to the old one.
@@ -708,6 +772,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public void Accepted(in CourierEntry e)
             {
+                _originSession = Session;
+                _originOfSession = e.Origin;
                 Age.Accepted(Session, NowHours);
                 WlOrderTextRuntime.OnAccepted(in e);
                 OnceLog.Info("wl-order:first-delivery", "[W&LOrder] first order delivered type=" + e.Type + " origin=" + e.Origin);
@@ -755,6 +821,52 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 entry.Kind = OrderIntentKind.Release;
                 OnceLog.Info("wl-order:first-release", "[W&LOrder] engage-at-will released reason=" + (routed ? "routed" : "no-contact"));
                 return true;
+            }
+
+            // D17 (b): vanilla sets firstunitreached on a 1-4 order when a player-owned top unit enters its
+            // zone (123517). Once that has held for the hold window and nothing newer waits, the superior
+            // tells the player to hold the position: a type 12 at the zone, a non-paying automatic hold.
+            public bool TryBuildFollowUp(out CourierEntry entry)
+            {
+                entry = default(CourierEntry);
+                if (_isCic || !FollowUpOn() || !ReadmitOn() || (UnityEngine.Object)_command == null) return false;
+                DLC_WL.GivenOrders order = DLC_WL.givenorder;
+                if (order == null || order.type < 1 || order.type > 4) return false;
+                int session = Session;
+                if (!order.firstunitreached)
+                {
+                    _reachedSession = int.MinValue;
+                    return false;
+                }
+                double now = NowHours;
+                if (_reachedSession != session)
+                {
+                    _reachedSession = session;
+                    _reachedAt = now;
+                    return false;
+                }
+                if (_followUpSession == session) return false;
+                if (now - _reachedAt < PlayerOrderReadmitPolicy.MinHoldBattleHours - 1e-9) return false;
+                if (!BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) || snapshot == null) return false;
+
+                Regiment unit = (UnityEngine.Object)_parent != null ? _parent : _command;
+                Vector3 at = order.position;
+                if (!TryMakeEntry(snapshot, unit, 12, new Vector3(at.x, VanillaTerrain.SampleHeight(at, at.y), at.z),
+                        WlOrderTextRuntime.DestinationFor(at.x, at.z, null),
+                        order.arearotation - 180f, ZoneWidth, ZoneDepth, OrderOrigin.FollowUp, now, double.NaN, out entry))
+                    return false;
+                entry.Kind = OrderIntentKind.FollowUp;
+                _followUpSession = session;
+                OnceLog.Info("wl-order:first-follow-up", "[W&LOrder] reached order followed up type=" + order.type);
+                return true;
+            }
+
+            // Still the reached order the follow-up was built for.
+            public bool FollowUpStillDue(in CourierEntry e)
+            {
+                DLC_WL.GivenOrders order = DLC_WL.givenorder;
+                return !_isCic && FollowUpOn() && ReadmitOn() && order != null && order.type >= 1 && order.type <= 4
+                    && order.firstunitreached && Session == _followUpSession;
             }
 
             // D8a step 0: the army is retreating (the player-side AIBattle's macroai is 3) and the player

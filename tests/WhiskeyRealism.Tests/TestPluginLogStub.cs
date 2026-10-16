@@ -11,6 +11,7 @@ namespace WhiskeyRealism
         internal static TestConfig<bool> EnableWlOrderCouriers = new TestConfig<bool>(true);
         internal static TestConfig<bool> EnableWlOrderText = new TestConfig<bool>(true);
         internal static TestConfig<bool> FixCapitalDefensePlayerOrder = new TestConfig<bool>(true);
+        internal static TestConfig<bool> EnableWlOrderFollowUp = new TestConfig<bool>(true);
         internal static TestPluginInstance Instance = new TestPluginInstance();
         internal static bool FlankResponse = true;
         internal static bool FlankResponseEnabled() => FlankResponse;

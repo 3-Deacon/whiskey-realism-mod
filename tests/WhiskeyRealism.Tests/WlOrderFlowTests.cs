@@ -85,6 +85,15 @@ internal static partial class WlOrderFlowTests
             ("wl order pin p62 capture drop records attempt", P62CaptureDropRecordsAttempt),
             ("wl order pin p62 accept recorded on delivery callback", AcceptRecordedOnDeliveryCallback),
             ("wl order pin p62 refusal recorded on delivery callback", RefusalRecordedOnDeliveryCallback),
+            // follow-up
+            ("wl order followup over reached attack admits with clear", FollowUpOverReachedAttackAdmitsWithClear),
+            ("wl order followup only over attack types 1 to 4", FollowUpOnlyOverAttackTypes1To4),
+            ("wl order followup after arrival and hold", FollowUpAfterArrivalAndHold),
+            ("wl order followup asked only over an attack slot", FollowUpAskedOnlyOverAnAttackSlotAndOnePending),
+            ("wl order followup none when a newer order is pending", NoFollowUpWhenNewerPending),
+            ("wl order followup stale when the slot moved on", FollowUpStaleWhenTheSlotMovedOn),
+            ("wl order pin followup wired to the reached flag and the hold", FollowUpWiredToTheReachedFlagAndTheHold),
+            ("wl order pin prestige delta row is sampled per session", PrestigeDeltaRowIsSampledPerSession),
             // release
             ("wl order release needs quiet for hysteresis", ReleaseNeedsQuietForHysteresis),
             ("wl order release needs vanilla trigger false", ReleaseNeedsVanillaTriggerFalse),

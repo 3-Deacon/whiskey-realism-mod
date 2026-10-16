@@ -165,6 +165,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return ReadmitAction.Drop;
             }
 
+            // The follow-up (D17 (b)): once a 1-4 order has been reached and held, the superior's "hold
+            // what you reached" replaces it; vanilla's clause (c) would drop any other 12 over it.
+            if (t == Defend && c.Origin == OrderOrigin.FollowUp && at >= 1 && at <= 4) { reason = "follow-up"; return ReadmitAction.AdmitWithClear; }
+
             bool pastHold = !(active.AgeHours < MinHoldBattleHours - ClockEpsilonHours);
 
             if (at == t)

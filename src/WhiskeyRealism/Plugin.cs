@@ -84,6 +84,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
         internal static ConfigEntry<bool> FixCapitalDefensePlayerOrder { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderFollowUp { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -567,6 +568,15 @@ namespace WhiskeyRealism
                 "an internal key, vanilla's \"My Division\" becomes the formation's name (\"Hood's Division\"), and Whiskey's orders carry " +
                 "a short condition line and your neighbours. Also corrects the portrait of an issuer who has been replaced. Off: vanilla texts " +
                 "(Whiskey's orders name the objective or \"Objective\").");
+            EnableWlOrderFollowUp = Config.Bind(
+                "W&L",
+                "Enable W&L Order Follow-Up",
+                true,
+                "Default ON. W&L career: after you reach and hold the position of a battle order from your superiors, your superior " +
+                "tells you to hold that position (an information-style 'hold current position' order, no prestige, no compliance " +
+                "sample; needs Enable W&L Order Readmit); on the campaign map a reached Redeploy, Offensive, Offensive Operation " +
+                "or Engage order is acknowledged with a short message. Information only: nothing moves and nothing is taken away. " +
+                "Off: no follow-up and no acknowledgement.");
             FixCapitalDefensePlayerOrder = Config.Bind(
                 "W&L",
                 "Fix Capital Defense Player Order",

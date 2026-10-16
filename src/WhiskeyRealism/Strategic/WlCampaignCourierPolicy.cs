@@ -58,6 +58,17 @@ namespace WhiskeyRealism.Strategic
             return applies && RepopOfActive(in active, e.Type, e.X, e.Z) ? Repop : null;
         }
 
+        // Vanilla's CheckDLCWLTopics (123484-123533) sets firstunitreached on a campaign order of type 5,
+        // 6, 7 or 16 when the player's group enters its zone, pays the prestige and clears the slot. The
+        // acknowledgement (D17 (b)) follows exactly that: a reached order of those types whose slot is
+        // empty now.
+        public static bool AcknowledgesClear(int type, bool firstUnitReached, bool slotEmptyNow)
+        {
+            bool clears = type == WlCampaignDispatchPolicy.Redeploy || type == WlCampaignDispatchPolicy.OffensiveOperation
+                || type == WlCampaignDispatchPolicy.Engage || type == WlCampaignDispatchPolicy.Offensive;
+            return clears && firstUnitReached && slotEmptyNow;
+        }
+
         // A Whiskey order (the bridge and #69) leaves a record in the dispatch history when it is shown.
         public static bool RecordsHistory(OrderOrigin origin)
         {

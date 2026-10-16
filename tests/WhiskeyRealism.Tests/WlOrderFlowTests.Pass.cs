@@ -36,6 +36,9 @@ internal static partial class WlOrderFlowTests
         public readonly List<int> CalledTypes = new List<int>();
         public CourierEntry? Retreat;
         public CourierEntry? Release;
+        public CourierEntry? FollowUp;
+        public bool FollowUpDue = true;
+        public int FollowUpBuilds;
         public int ReleaseBuilds, NonPayingMarks, Restamps;
         public int LastNonPayingSession = -1;
         public Func<bool> OnSlotRead; // returns true to swap the slot on this read
@@ -123,6 +126,15 @@ internal static partial class WlOrderFlowTests
             entry = Release ?? default(CourierEntry);
             return Release.HasValue;
         }
+
+        public bool TryBuildFollowUp(out CourierEntry entry)
+        {
+            FollowUpBuilds++;
+            entry = FollowUp ?? default(CourierEntry);
+            return FollowUp.HasValue;
+        }
+
+        public bool FollowUpStillDue(in CourierEntry e) => FollowUpDue;
 
         public void MarkNonPayingSession(int session)
         {

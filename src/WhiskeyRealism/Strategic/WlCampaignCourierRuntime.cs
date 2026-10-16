@@ -45,6 +45,9 @@ namespace WhiskeyRealism.Strategic
         // The player's command the queued orders belong to (instance id); 0 until first seen.
         private static int _boundaryCommandId;
 
+        // D17 (b): the campaign order last seen on the panel, to notice vanilla clearing it on arrival.
+        private static DLC_WL.GivenOrders _watched;
+
         static WlCampaignCourierRuntime()
         {
             CampaignScope.Register("wl-campaign-courier", ResetCampaign);
@@ -57,6 +60,7 @@ namespace WhiskeyRealism.Strategic
             _lastDropReason = null;
             _lastDropType = _lastDropX = _lastDropZ = _lastDropSession = 0;
             _boundaryCommandId = 0;
+            _watched = null;
             Loaded.Clear();
         }
 
@@ -75,6 +79,11 @@ namespace WhiskeyRealism.Strategic
         private static bool CapitalFixOn()
         {
             return Plugin.FixCapitalDefensePlayerOrder != null && Plugin.FixCapitalDefensePlayerOrder.Value;
+        }
+
+        private static bool FollowUpOn()
+        {
+            return MasterEnabled() && Plugin.EnableWlOrderFollowUp != null && Plugin.EnableWlOrderFollowUp.Value;
         }
 
         private static bool TextOn()
@@ -234,6 +243,41 @@ namespace WhiskeyRealism.Strategic
             {
                 OnceLog.Warning("wl-campaign-courier:deliver-failed", "[W&LCourier] campaign delivery failed: " + ex.GetType().Name + " " + ex.Message);
             }
+        }
+
+        // D17 (b), information only: vanilla clears a reached campaign order of type 5, 6, 7 or 16 right
+        // after setting firstunitreached on it (123517-123533). The pass keeps the order it last saw; when
+        // the slot is empty and that order was reached, the player is told in a short message. Nothing is
+        // written to the order slot, the group or any order.
+        internal static void AcknowledgeReached()
+        {
+            try
+            {
+                if (!FollowUpOn() || !DLC_WL.dlc_scenarioactive) { _watched = null; return; }
+                DLC_WL.GivenOrders current = DLC_WL.givenorder;
+                if (_watched != null && !ReferenceEquals(current, _watched))
+                {
+                    DLC_WL.GivenOrders was = _watched;
+                    _watched = null;
+                    if (WlCampaignCourierPolicy.AcknowledgesClear(was.type, was.firstunitreached, current == null))
+                        ShowAcknowledgement(was);
+                }
+                if (current != null && !current.IsBattleOrder()) _watched = current;
+            }
+            catch (Exception ex)
+            {
+                _watched = null;
+                OnceLog.Warning("wl-campaign-courier:acknowledge", "[W&LCourier] acknowledging a reached campaign order failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static void ShowAcknowledgement(DLC_WL.GivenOrders was)
+        {
+            CareerInformationPanel panel = DLC_WL.careerinformationpanelref;
+            if ((UnityEngine.Object)panel == null) return;
+            string place = string.IsNullOrEmpty(was.destinationname) ? "the position" : was.destinationname;
+            panel.ShowNewInfo("Well done", place + " is reached. Hold it and await further orders.");
+            OnceLog.Info("wl-campaign-courier:first-acknowledgement", "[W&LCourier] reached campaign order acknowledged type=" + was.type);
         }
 
         // The player's command changed (a promotion, a new career) or he became CIC: queued orders

@@ -69,6 +69,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // The hold that releases engage-at-will (D5, D6), or false while contact lasts or the hysteresis
         // has not passed. Asked only while the slot holds a type 13.
         bool TryBuildRelease(out CourierEntry entry);
+        // The hold after an attack order has been reached and held (D17 (b)), or false while the
+        // conditions fail. Asked only while the slot holds a type 1-4 and nothing is pending.
+        bool TryBuildFollowUp(out CourierEntry entry);
+        // The follow-up is still wanted when its courier arrives: the same reached order is on the panel.
+        bool FollowUpStillDue(in CourierEntry e);
         // D21: vanilla showed an order that pays no prestige (an automatic hold). The host keeps the
         // top units' lastcombatzonecount at that session so vanilla's first-entry branch never fires.
         void MarkNonPayingSession(int session);
@@ -303,6 +308,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _host.RestampNonPayingSession();
             DeriveRetreat();
             DeriveRelease();
+            DeriveFollowUp();
 
             // 1. Everything due goes into a buffer first; deferred and requeued entries return only
             //    after the pass, so the pass never takes one twice.
@@ -348,6 +354,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             Enqueue(in entry, 0.0);
         }
 
+        // D17 (b): a reached attack order is followed by a hold at the zone; nothing newer may be pending.
+        private void DeriveFollowUp()
+        {
+            int type = _host.SlotType;
+            if (type < 1 || type > 4 || Queue.Count > 0) return;
+            if (!_host.TryBuildFollowUp(out CourierEntry entry)) return;
+            Enqueue(in entry, 0.0);
+        }
+
         // Steps 2-6 for one buffered entry. Returns false when the entry is finished (and reported);
         // true when it must be considered again (requeue).
         private bool Process(ref CourierEntry e, out bool requeue)
@@ -359,6 +374,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
             {
                 Queue.Discard(in e, "release-stale");
+                return false;
+            }
+
+            if (e.Origin == OrderOrigin.FollowUp && !_host.FollowUpStillDue(in e))
+            {
+                Queue.Discard(in e, "follow-up-stale");
                 return false;
             }
 
