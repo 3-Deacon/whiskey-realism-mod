@@ -35,6 +35,8 @@ internal static class PlannerMigrationTests
             ("ArmyGroupPatchGroupsByAllocationSectorAndSeatsNoCommander", ArmyGroupPatchGroupsByAllocationSectorAndSeatsNoCommander),
             ("RecruitmentIntentReadsThePublishedPlan", RecruitmentIntentReadsThePublishedPlan),
             ("SectorByIdFindsOnlyAPlannedSector", SectorByIdFindsOnlyAPlannedSector),
+            ("MainLabelNamesTheMainEffortsTheaterAndObjective", MainLabelNamesTheMainEffortsTheaterAndObjective),
+            ("HeartbeatReportsThePlannersMainEffort", HeartbeatReportsThePlannersMainEffort),
         });
     }
 
@@ -316,5 +318,26 @@ internal static class PlannerMigrationTests
         AssertEqual(Theater.Coast, plan.SectorById(7).Theater, "found by id, not by position");
         AssertTrue(plan.SectorById(5) == null, "an unplanned sector");
         AssertTrue(plan.SectorById(-1) == null, "-1 is none");
+    }
+
+    // The [CampaignPlan] row's main field and the monthly heartbeat's (replaces the heartbeat's cic= and plan= fields).
+    private static void MainLabelNamesTheMainEffortsTheaterAndObjective()
+    {
+        var plan = new TheaterPlan { Alliance = 0, MainObjectiveId = 29 };
+        plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold, Theater = Theater.East });
+        plan.Sectors.Add(new SectorPlan { SectorId = 2, Posture = TheaterPosture.MainEffort, Theater = Theater.West });
+        AssertEqual("West/29", TheaterPlanner.MainLabel(plan), "the main-effort sector's theater and the objective");
+        AssertEqual("none", TheaterPlanner.MainLabel(new TheaterPlan { Alliance = 0, MainObjectiveId = -1 }), "no main effort");
+        AssertEqual("none", TheaterPlanner.MainLabel(null), "no plan");
+        AssertEqual("Unknown/7", TheaterPlanner.MainLabel(new TheaterPlan { Alliance = 0, MainObjectiveId = 7 }), "an objective with no main-effort sector");
+    }
+
+    private static void HeartbeatReportsThePlannersMainEffort()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string report = BodyOf(src, "private void RunReviewJob(");
+        AssertTrue(HasLine(report, "string main = CampaignPlanStore.TryGetPlan(alliance, out var published) ? TheaterPlanner.MainLabel(published) : \"none\";"), "the heartbeat's main effort is the published plan's");
+        AssertTrue(report.Contains("$\"era={a.Era.Stage} main={main} \""), "era and main, in the heartbeat row");
+        AssertFalse(report.Contains("cic=") || report.Contains("plan="), "no cic= or plan= field survives");
     }
 }

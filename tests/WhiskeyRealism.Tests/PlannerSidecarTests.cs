@@ -33,6 +33,7 @@ internal static class PlannerSidecarTests
             ("RecordWithoutAUnitKeyIsNotPersistedOrRestored", RecordWithoutAUnitKeyIsNotPersistedOrRestored),
             ("UnknownEnumNamesDecodeToTheDefault", UnknownEnumNamesDecodeToTheDefault),
             ("PlannerIsPerAlliance", PlannerIsPerAlliance),
+            ("ModWrittenObjectiveNotesBoundsAndRestores", ModWrittenObjectiveNotesBoundsAndRestores),
             ("OnlyPlannerBudgetMovesArePersisted", OnlyPlannerBudgetMovesArePersisted),
             ("RebindResolvesByUnitKey", RebindResolvesByUnitKey),
             ("RebindFallsBackToTheUniqueName", RebindFallsBackToTheUniqueName),
@@ -358,6 +359,29 @@ internal static class PlannerSidecarTests
         AssertEqual(99L, back.Planner[1].State.CampaignSeed, "and its own seed");
         var oneSided = RoundTrip(WithPlanner(SamplePlanner(), null));
         AssertTrue(oneSided.Planner[1] == null, "an alliance with no planner state stays null (fresh)");
+    }
+
+    private static void ModWrittenObjectiveNotesBoundsAndRestores()
+    {
+        WhiskeyRealism.Util.CampaignScope.ResetAll();
+        AssertEqual(-1, ModWrittenObjective.Get(0), "nothing written yet");
+        ModWrittenObjective.Note(1, 29);
+        AssertEqual(29, ModWrittenObjective.Get(1), "the executor's write is remembered per alliance");
+        AssertEqual(-1, ModWrittenObjective.Get(0), "alliance 0 is not alliance 1");
+        ModWrittenObjective.Note(2, 5);
+        ModWrittenObjective.Note(-1, 5);
+        AssertEqual(-1, ModWrittenObjective.Get(2), "Europe (alliance 2) has no slot and is not written");
+        AssertEqual(-1, ModWrittenObjective.Get(-1), "nor a negative alliance");
+        ModWrittenObjective.Restore(new int?[] { 3, null });
+        AssertEqual(3, ModWrittenObjective.Get(0), "a persisted value is restored");
+        AssertEqual(-1, ModWrittenObjective.Get(1), "an unknown one restores to none, not to the previous session's value");
+        ModWrittenObjective.Restore(null);
+        AssertEqual(-1, ModWrittenObjective.Get(0), "a file without the field restores none");
+        ModWrittenObjective.Restore(new int?[] { 7 });
+        AssertEqual(7, ModWrittenObjective.Get(0), "a short array restores what it has");
+        AssertEqual(-1, ModWrittenObjective.Get(1), "and none for the rest");
+        WhiskeyRealism.Util.CampaignScope.ResetAll();
+        AssertEqual(-1, ModWrittenObjective.Get(0), "a new campaign forgets it");
     }
 
     private static void OnlyPlannerBudgetMovesArePersisted()
