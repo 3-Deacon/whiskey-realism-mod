@@ -40,6 +40,12 @@ internal static class ScoutFirstTests
             ("TheProbeStandsDownWhenTheObjectiveIsScouted", TheProbeStandsDownWhenTheObjectiveIsScouted),
             ("AScoutIsRecalledOnContactAndOnLowSupply", AScoutIsRecalledOnContactAndOnLowSupply),
             ("ReconRowCountsTheScoutPool", ReconRowCountsTheScoutPool),
+            ("TheSmokeShapeNoLongerMassesEverything", TheSmokeShapeNoLongerMassesEverything),
+            ("ASectorFacingEnemyGroundKeepsAHoldWithNothingBelieved", ASectorFacingEnemyGroundKeepsAHoldWithNothingBelieved),
+            ("TheMassMarginScalesWithTheCommandersAttackBias", TheMassMarginScalesWithTheCommandersAttackBias),
+            ("TheTraceNamesScoutingAndThePresumption", TheTraceNamesScoutingAndThePresumption),
+            ("AllocationRowShowsTheMassAgainstItsNeed", AllocationRowShowsTheMassAgainstItsNeed),
+            ("ABelievedEnemyStillRaisesTheHoldAbovePresumption", ABelievedEnemyStillRaisesTheHoldAbovePresumption),
         });
     }
 
@@ -634,5 +640,116 @@ internal static class ScoutFirstTests
         slow.ReadinessStep = 1;
         mixed.Own[1] = slow;
         AssertEqual(10, ReconPlanner.ScoutPool(mixed), "a busy and an unready formation are not in it");
+    }
+
+    // ---- the smoke's shape, D2 and D3 ----
+
+    // The smoke: 15 formations (3 busy), 10 massed at 67669 against nothing seen, a Hold and three EconomyOfForce sectors. Now: the
+    // presumed 9000 needs 12375, the mass is the two nearest corps, the rest keep their fronts, and the push is staged.
+    private static void TheSmokeShapeNoLongerMassesEverything()
+    {
+        var s = Union(15, readiness: 3);
+        for (int i = 0; i < 3; i++)
+        {
+            var busy = s.Own[i];
+            busy.Flags |= FormationFlags.InBattle;
+            s.Own[i] = busy;
+        }
+        var plan = Plan(s);
+        AssertEqual(31, plan.MainObjectiveId, "objective 31 as in the smoke");
+        AssertNear(12375f, plan.MainNeedStrength, 1f, "the need: 9000 x 1.1 x 1.25");
+        AssertTrue(plan.MainCapacityStrength > 60000f, "the capacity is what the old mass was: " + plan.MainCapacityStrength);
+        AssertTrue(plan.MassInstanceIds.Count <= 3, "the mass is the force it needs, not ten of fifteen: " + plan.MassInstanceIds.Count);
+        AssertTrue(plan.MassStrength >= plan.MainNeedStrength, "and covers the need");
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        int main = 0, hold = 0;
+        foreach (var a in alloc.Assignments)
+        {
+            if (a.Role == FormationRole.MainEffort) main++;
+            if (a.Role == FormationRole.Hold) hold++;
+        }
+        AssertEqual(plan.MassInstanceIds.Count, main, "MainEffort is exactly the mass");
+        AssertTrue(hold >= 12 - 3, "everything else keeps its front's role (and the three busy hold in place): " + hold);
+        string row = ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0);
+        AssertContains(row, "staged=yes", "the allocation row says the push is staged");
+    }
+
+    // D2: a sector facing enemy-held ground keeps a hold of max(HoldRatio x believed, MinGarrison, presumed) with nothing believed there.
+    private static void ASectorFacingEnemyGroundKeepsAHoldWithNothingBelieved()
+    {
+        var guard = Corps(2, 300f, 7000f);
+        var s = Fronts(Corps(1, 800f, 30000f), guard);
+        s.Beliefs.Clear();                        // nothing believed anywhere: both objectives unscouted
+        var plan = Plan(s);
+        var sectors = ExecutorFixtures.Sectors(s);
+        int west = sectors.SectorAt(300f, 0f);
+        float need = 0f;
+        foreach (var sp in plan.Sectors) if (sp.SectorId == west) need = sp.HoldNeed;
+        // 5000 x (1 + 0.2, objective 30's importance): the presumption, above the 5000 floor.
+        AssertNear(6000f, need, 0.5f, "the West sector faces objective 30: presumed 6000");
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        alloc.TryGet(2, out var g);
+        AssertEqual(FormationRole.Hold, g.Role, "the guard holds");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, g.Reason, "as the sector's hold reserve, though nothing is believed there");
+        AssertFalse(plan.MassInstanceIds.Contains(2), "and is not in any push");
+
+        // A sector that faces no enemy-held ground (no enemy objective within its reach) owes nothing.
+        var quiet = Union(0);
+        quiet.Objectives.Clear();
+        quiet.Objectives.Add(new ObjectiveRecord { ObjectiveId = 90, X = 300f, Z = 0f, HolderAlliance = 0, Available = false });
+        quiet.Own.Add(Corps(1, 300f, 9000f));
+        var quietPlan = Plan(quiet);
+        foreach (var sp in quietPlan.Sectors) AssertEqual(0f, sp.HoldNeed, "no enemy ground, no hold need (sector " + sp.SectorId + ")");
+    }
+
+    private static void ABelievedEnemyStillRaisesTheHoldAbovePresumption()
+    {
+        var guard = Corps(2, 300f, 20000f);
+        var s = Fronts(Corps(1, 800f, 30000f), guard);
+        s.Beliefs.Add(Seen(320f, 40000f));         // a fresh sighting in the West: 0.6 x 40000 = 24000
+        var plan = Plan(s);
+        float need = 0f;
+        foreach (var sp in plan.Sectors) if (sp.SectorId == ExecutorFixtures.Sectors(s).SectorAt(300f, 0f)) need = sp.HoldNeed;
+        AssertNear(24000f, need, 1f, "HoldRatio x believed beats the floor and the presumption");
+
+        // A fresh, small sighting: the floor (nothing is presumed once the sector is scouted, but a front is never held by less).
+        var small = Fronts(Corps(1, 800f, 30000f), Corps(2, 300f, 20000f));
+        small.Beliefs.Add(Seen(320f, 1000f));
+        float floor = 0f;
+        foreach (var sp in Plan(small).Sectors) if (sp.SectorId == ExecutorFixtures.Sectors(small).SectorAt(300f, 0f)) floor = sp.HoldNeed;
+        AssertNear(ForceAllocator.MinGarrisonStrength, floor, 0.5f, "0.6 x 1000 is under the 5000 floor: the floor, not the presumption (6000)");
+    }
+
+    private static void TheMassMarginScalesWithTheCommandersAttackBias()
+    {
+        AssertNear(10000f * 1.1f * 1.25f, TheaterPlanner.NeedFor(10000f, 1.1f, 0f), 1f, "a neutral commander: 25%");
+        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 1f), 1f, "a bold one: 12.5%");
+        AssertNear(10000f * 1.1f * 1.375f, TheaterPlanner.NeedFor(10000f, 1.1f, -1f), 1f, "a cautious one: 37.5%");
+        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 5f), 1f, "the bias is clamped to [-1, 1]");
+        AssertNear(ForceAllocator.MinGarrisonStrength, TheaterPlanner.NeedFor(0f, 1.1f, 0f), 0.01f, "never below the smallest force the AI moves");
+        AssertNear(ForceAllocator.MinGarrisonStrength, TheaterPlanner.NeedFor(1000f, 1.1f, 0f), 0.01f, "a small enemy still needs the floor");
+    }
+
+    private static void TheTraceNamesScoutingAndThePresumption()
+    {
+        var s = Union();
+        TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out string trace);
+        AssertContains(trace, "unscouted est=9000 pres=9000", "an unseen target: the presumption is the estimate");
+        var seen = Union();
+        seen.Beliefs.Add(Seen(850f, 3000f));
+        TheaterPlanner.Plan(seen, ExecutorFixtures.Sectors(seen), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out string traceSeen);
+        AssertContains(traceSeen, " scouted est=3000 pres=0", "a sighting: the believed enemy, nothing presumed");
+        AssertFalse(trace.Contains("odds=inf"), "no candidate reads 'inf' odds against an unseen enemy");
+    }
+
+    private static void AllocationRowShowsTheMassAgainstItsNeed()
+    {
+        var s = Union();
+        var plan = Plan(s);
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        string row = ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0);
+        AssertContains(row, " need=12375 ", "the need");
+        AssertContains(row, " cap=", "the capacity");
+        AssertContains(row, " mass=", "and the mass it sized");
     }
 }
