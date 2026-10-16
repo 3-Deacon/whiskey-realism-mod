@@ -476,7 +476,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _plan = nextPlan;
             HasPlan = true;
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
-            _reserveRelease.Clear();
+            ReserveRelease.Clear();
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
@@ -664,17 +664,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // ---- BC13 staggered reserve release ----
 
-        private readonly ReserveReleaseState _reserveRelease = new ReserveReleaseState();
-
-        /// <summary>The side's reserve-release memory: the crisis releases (the exploit lifecycle reads them) and the stagger state.</summary>
-        internal ReserveReleaseState ReserveRelease => _reserveRelease;
+        /// <summary>The alliance's reserve-release memory: the crisis releases (the exploit lifecycle reads them), the stagger state and the crossing bindings. One instance per alliance, reset with the battle.</summary>
+        internal ReserveReleaseState ReserveRelease => ReserveReleaseState.ForAlliance(AllianceId);
 
         // The allocator's release context: the flank release flag as before, and with Enable Staggered Reserve Release the state, the
         // children with a live exploit (never released) and the army commander's temperament (the interval and the floor share).
+        //
+        // BC14: with Enable Maneuver Feasibility the context carries the state, the exploit flags and the commander's temperament whether or not
+        // the stagger is on (the crossing release needs the state's bindings and the floor share), and the Defender's crossing threats from the
+        // ledger. The threat buffers are pooled here: grow-only, filled in place each allocation.
+        private readonly Plays.CrossingThreat[] _threatBuffer = new Plays.CrossingThreat[Plays.ManeuverFeasibility.MaxThreatCrossings];
+        private float[] _threatShiftBuffer = new float[Plays.ManeuverFeasibility.MaxThreatCrossings * Plays.ManeuverFeasibility.MaxChildren];
+        private readonly float[] _threatRow = new float[Plays.ManeuverFeasibility.MaxChildren];
+
         private ReserveReleaseContext BuildReserveReleaseContext()
         {
             bool flank = Plugin.FlankResponseEnabled();
-            if (!Plugin.StaggeredReserveReleaseEnabled()) return new ReserveReleaseContext(_lastGlobalOdds, flank);
+            bool staggered = Plugin.StaggeredReserveReleaseEnabled();
+            bool feasible = Plugin.ManeuverFeasibilityEnabled();
+            if (!staggered && !feasible) return new ReserveReleaseContext(_lastGlobalOdds, flank);
             var exploits = WhiskeyRealism.Tactical.Battle.ExploitTable.ForAlliance(AllianceId);
             var exploiting = new bool[_directChildSnapshots.Length];
             for (int i = 0; i < exploiting.Length; i++)
@@ -682,11 +690,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int instanceId = ChildInstanceId(_directChildSnapshots[i].ChildId);
                 exploiting[i] = instanceId != 0 && exploits.IsExploiting(instanceId);
             }
+            int threats = 0, threatChildren = 0;
+            if (feasible && _feasibility != null)
+            {
+                int count = Math.Min(_feasibility.ThreatCount, _threatBuffer.Length);
+                for (int t = 0; t < count; t++)
+                {
+                    if (!_feasibility.TryThreat(t, out _threatBuffer[threats], _threatRow, out int children)) continue;
+                    // The matrix is indexed by the allocation's child order: a ledger built for another child list says nothing here.
+                    if (children != _directChildSnapshots.Length) { threats = 0; break; }
+                    threatChildren = children;
+                    for (int c = 0; c < children; c++) _threatShiftBuffer[threats * children + c] = _threatRow[c];
+                    threats++;
+                }
+            }
             return new ReserveReleaseContext(
-                _lastGlobalOdds, flank, _reserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
+                _lastGlobalOdds, flank, ReserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
-                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance));
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
+                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren);
         }
 
         // Child ids read "child-" + the instance id.
@@ -697,8 +720,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var outcomes = _reserveRelease.Outcomes;
-                int released = _reserveRelease.ReleasedCount;
+                var outcomes = ReserveRelease.Outcomes;
+                int released = ReserveRelease.ReleasedCount;
                 for (int i = 0; i < outcomes.Count; i++)
                 {
                     ReserveReleaseState.Outcome o = outcomes[i];
@@ -741,18 +764,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int before = IndexOfChild(previous, current[i].ChildId);
                     if (before < 0 || previous[before].Role != DirectChildRole.Reserve) continue;
                     DirectChildIntent released = current[i];
+                    // A reserve sent to guard a crossing carries a guard point; BC11's wing guard does not.
+                    string reason = released.HasGuardPoint ? "crossing-threat" : "flank-threat";
                     WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
                         WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
                         WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
                         "TacticalReserveRelease",
                         WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
                         ev => ev
-                            .WithDecision("TacticalReserveRelease", "flank-threat", "side=" + AllianceId + "|child=" + released.ChildId + "|role=" + released.Role)
+                            .WithDecision("TacticalReserveRelease", reason, "side=" + AllianceId + "|child=" + released.ChildId + "|role=" + released.Role)
                             .WithField("side", AllianceId)
                             .WithField("child", released.ChildId)
                             .WithField("role", released.Role.ToString())
                             .WithField("wingSector", released.AxisSector)
-                            .WithField("reason", "flank-threat"));
+                            .WithField("reason", reason));
                 }
             }
             catch (System.Exception ex)
@@ -1267,7 +1292,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents),
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents),
                 HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;

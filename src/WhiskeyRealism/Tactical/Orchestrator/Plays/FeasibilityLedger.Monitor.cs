@@ -20,7 +20,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public string BrokenAssumption { get; private set; }
 
         /// <summary>The monitor's re-evaluation of the selected plan (created on first use).</summary>
-        internal FeasibilityLedger MonitorLedger => _monitor ?? (_monitor = new FeasibilityLedger());
+        internal FeasibilityLedger MonitorLedger => _monitor ?? (_monitor = new FeasibilityLedger { _isMonitor = true });
+
+        private bool _isMonitor;
+
+        /// <summary>The full evaluation's ledger writes the crossing threats; the monitor's re-evaluation does not.</summary>
+        internal bool CollectsThreats => !_isMonitor;
 
         internal BattlePlanId[] OneCandidate(BattlePlanId plan)
         {

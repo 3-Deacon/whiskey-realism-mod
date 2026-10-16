@@ -20,6 +20,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool InContact, DeployedReserve;
         /// <summary>BC11 has the child past its Hold: it is marching, turning or attacking, and its order delay was paid when it was released.</summary>
         public bool Moving;
+        /// <summary>The child holds player-owned strength: it is never released to a crossing and its time to one is not offered.</summary>
+        public bool HasPlayerOwned;
+        /// <summary>The child is bound to guard a crossing (requirement-defender-crossing-release): its regiments are left out of the crossing cover test.</summary>
+        public bool BoundGuard;
         /// <summary>The hours an order from the army HQ takes to reach the child and everything below it, whether or not it is engaged.</summary>
         public float CourierHours;
     }
@@ -31,6 +35,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public readonly BodyEstimate[] Bodies = new BodyEstimate[ManeuverFeasibility.MaxBodies];
         public readonly MemberEstimate[] Members = new MemberEstimate[FeasibilityLedger.MaxMembersPerCandidate];
         public int BodyCount, MemberCount;
+        /// <summary>A Defender candidate's turning exposure (requirement-defender-exposure), the worst crossing's.</summary>
+        public float Turn;
         /// <summary>The crossings on every member's march and inward legs (<see cref="MemberEstimate.CrossingStart"/> indexes it).</summary>
         public readonly RouteCrossing[] Crossings = new RouteCrossing[FeasibilityLedger.MaxCrossingsPerCandidate];
         public int CrossingCount;
@@ -42,6 +48,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Result = new CandidateResult { Plan = plan, Mirrored = mirrored };
             BodyCount = 0;
             MemberCount = 0;
+            Turn = 0f;
             CrossingCount = 0;
             NoCrossing = false;
             RiverOnLeg = false;
@@ -63,6 +70,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int NextCandidate { get; private set; }
 
         internal FeasibilityInput Input;
+        /// <summary>The ledger the running evaluation publishes into (the selected candidate's crossing threats go to its back buffer).</summary>
+        internal FeasibilityLedger Target;
+        /// <summary>A Defender's enemy bodies and counted crossings, prepared once per evaluation (requirement-defender-exposure).</summary>
+        internal readonly DefenderPicture Defender = new DefenderPicture();
+        private bool[] _ownExcluded = new bool[256];
         internal readonly CrossingGraphView Graph = new CrossingGraphView();
         internal readonly EnemyPicture Enemy = new EnemyPicture();
         private readonly LegCostCache _ownCache = new LegCostCache();
@@ -130,6 +142,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         internal void Begin(in FeasibilityInput input, FeasibilityLedger ledger)
         {
             Input = input;
+            Target = ledger;
             PlanCount = Math.Min(Math.Max(input.CandidateCount, 0), FeasibilityLedger.MaxCandidates);
             for (int i = 0; i < PlanCount; i++) Plans[i] = input.Candidates[i];
             Array.Clear(SidesEvaluated, 0, SidesEvaluated.Length);
@@ -153,6 +166,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Enemy.Build(Input.Snapshot, Input.EnemyEstimate, Input.Confidence, Input.Army.Caution01, Input.HasAssumedEnemy, Input.AssumedEnemyX,
                 Input.AssumedEnemyZ, EnemyX, EnemyZ);
             PrepareChildren();
+            ManeuverFeasibility.PrepareDefender(this);
             ledger.BeginBack();
             Running = true;
         }
@@ -240,9 +254,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
                 fact.DeployedReserve = Input.DeployedReserve != null && c < Input.DeployedReserve.Length && Input.DeployedReserve[c];
                 fact.Moving = Input.ChildMoving != null && c < Input.ChildMoving.Length && Input.ChildMoving[c];
+                fact.BoundGuard = IsBoundGuard(Input.ChildIds[c]);
                 Children[c] = fact;
             }
             ChildCount = n;
+            if (_ownExcluded.Length < s.OwnCount) _ownExcluded = new bool[Math.Max(s.OwnCount, _ownExcluded.Length * 2)];
+            Array.Clear(_ownExcluded, 0, _ownExcluded.Length);
+            Graph.OwnExcluded = _ownExcluded;
 
             // One pass over the regiments: each climbs the parent map to the direct child it belongs to.
             const UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
@@ -257,6 +275,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     cur = own[cur].ParentIndex;
                 }
                 if (slot < 0) continue;
+                if (Children[slot].BoundGuard) _ownExcluded[i] = true;
                 float strength = own[i].Strength;
                 _strengthAll[slot] += strength;
                 _fatigueSum[slot] += own[i].Fatigue;
@@ -271,6 +290,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             for (int c = 0; c < ChildCount; c++)
             {
                 ChildFact fact = Children[c];
+                fact.HasPlayerOwned = _strengthPlayer[c] > 0f;
                 float counted = _strengthAll[c] - _strengthPlayer[c];
                 fact.Strength = counted;
                 fact.Morale = counted > 0f ? _moraleSum[c] / counted : 0f;
@@ -290,6 +310,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 OfferedCount++;
                 Offered.Add(new CorpsPosition(fact.Id, fact.X, fact.Z));
             }
+        }
+
+        private bool IsBoundGuard(string childId)
+        {
+            string[] bound = Input.BoundGuardChildIds;
+            for (int i = 0; bound != null && i < Input.BoundGuardCount && i < bound.Length; i++)
+                if (string.Equals(bound[i], childId, StringComparison.Ordinal)) return true;
+            return false;
         }
 
         // GetSlowestSpeedOfGroup (requirement-march-time): a cavalry-only child marches at the mounted base; a child with foot or guns at the

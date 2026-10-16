@@ -99,7 +99,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// A body's penalty (requirement-penalty): <c>1 - (1 - daylight)(1 - detail)(1 - 0.6 contested)(1 - 0.5 approach)(1 - 0.4 exposure)</c>.
         /// </summary>
         public static float CombinePenalty(in BodyEstimate b)
-            => 1f - (1f - b.Daylight) * (1f - b.Detail) * (1f - 0.6f * b.Contested) * (1f - 0.5f * b.Approach) * (1f - 0.4f * b.Exposure);
+            => 1f - (1f - b.Daylight) * (1f - b.Detail) * (1f - 0.6f * b.Contested) * (1f - 0.5f * b.Approach) * (1f - 0.4f * b.Exposure)
+                * (1f - TurnWeight * b.Turn);
 
         // ---- one candidate -------------------------------------------------------------------------------------
 
@@ -183,6 +184,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ScreenRoutes(job, w);
             PlanTimes(job, w);
             ComputeRisk(job, template, w);
+            if (job.Input.Stance == BattleStance.Defender)
+            {
+                DefenderTurn(job, w);
+                // The selected candidate on its selected side is the one whose crossings the allocator reads.
+                FeasibilityLedger target = job.Target;
+                if (target != null && target.CollectsThreats && plan == target.SelectedPlan && mirrored == target.SelectedMirrored) CaptureThreats(job);
+            }
             Conclude(job, w);
             if (job.Graph.Searches - searches > job.MaxSearchesPerSide) job.MaxSearchesPerSide = job.Graph.Searches - searches;
         }

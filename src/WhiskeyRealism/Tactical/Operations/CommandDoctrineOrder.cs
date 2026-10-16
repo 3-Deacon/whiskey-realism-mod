@@ -313,8 +313,10 @@ namespace WhiskeyRealism.Tactical.Operations
     public readonly struct ManeuverNodeEntry
     {
         public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
-            bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f)
+            bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f,
+            bool isGuard = false)
         {
+            IsGuard = isGuard;
             HasVia = hasVia;
             ViaX = viaX;
             ViaZ = viaZ;
@@ -341,6 +343,12 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool HasVia { get; }
         public float ViaX { get; }
         public float ViaZ { get; }
+
+        /// <summary>
+        /// BC14: the entry is a reserve's crossing guard (requirement-defender-crossing-release), not a BC11 maneuver: the doctrine build applies it
+        /// to a Defender's node too (a guard holds ground; it attacks no one).
+        /// </summary>
+        public bool IsGuard { get; }
         public bool Holds => Phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Hold;
     }
 

@@ -346,6 +346,32 @@ internal static class TestFixtures
             commanderCasualtyTolerance01: casualtyTolerance ?? aggression);
     }
 
+
+    // The one way an allocation test measures a window. GC.GetAllocatedBytesForCurrentThread()
+    // reads alloc_bytes - (alloc_limit - alloc_ptr): the bytes of every allocation-context
+    // quantum the thread took, less the part it has not used yet. When a background GC ends
+    // its mark phase the runtime voids every thread's context (alloc_ptr = alloc_limit = 0,
+    // gc.cpp repair_allocation_contexts(FALSE)) without taking the unused part back off
+    // alloc_bytes, so a thread that allocated nothing reads up to one quantum (~8 KB) more
+    // than before. Any test run after a background GC thread exists (the first gen2 does it)
+    // can land in that window, and the result is a random 0.2-8 KB "allocation".
+    //
+    // The unused part is the only thing the void can add, so the window opens on an empty
+    // context: a blocking gen0 GC resets the calling thread's context to alloc_ptr = 0 (and
+    // takes its unused part off alloc_bytes properly), and nothing is allocated between that
+    // GC and the first read. A path that really allocates still takes a quantum and reads
+    // nonzero; one that allocates nothing reads exactly zero whatever the GC does.
+    // Pinned by AllocationMeasurementTests.
+    internal static long BeginAllocationWindow()
+    {
+        GC.Collect(0, GCCollectionMode.Forced, blocking: true);
+        return GC.GetAllocatedBytesForCurrentThread();
+    }
+
+    // Bytes the calling thread allocated since BeginAllocationWindow returned `begin`.
+    internal static long AllocatedSince(long begin)
+        => GC.GetAllocatedBytesForCurrentThread() - begin;
+
     // Walks up from the working directory to the first ancestor holding relativePath.
     internal static string FindRepoPath(string relativePath)
     {

@@ -421,6 +421,8 @@ internal static partial class ManeuverFeasibilityTests
         public readonly List<(BattlePlanId plan, bool mirrored)> Captured = new List<(BattlePlanId, bool)>();
         public BattlePlanId SelectedPlan { get; private set; }
         public string BrokenAssumption => null;
+        public int ThreatCount => 0;
+        public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount) { threat = default(CrossingThreat); childCount = 0; return false; }
         public bool TryGet(BattlePlanId plan, out CandidateResult result) => Results.TryGetValue(plan, out result);
         public void CaptureSelection(BattlePlanId plan, bool mirrored) { SelectedPlan = plan; Captured.Add((plan, mirrored)); }
         public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,

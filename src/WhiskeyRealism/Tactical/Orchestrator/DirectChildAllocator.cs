@@ -29,8 +29,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// personality values are the army commander's (the release interval and the floor share).
         /// </summary>
         public ReserveReleaseContext(float globalOdds, bool flankRelease, ReserveReleaseState state, bool[] exploiting,
-            double nowHours, float agg01, float caution01, float casualtyTolerance01)
+            double nowHours, float agg01, float caution01, float casualtyTolerance01, bool? staggered = null,
+            CrossingThreat[] crossingThreats = null, int threatCount = 0, float[] ownShiftByChild = null, int threatChildCount = 0)
         {
+            Staggered = staggered ?? state != null;
+            CrossingThreats = crossingThreats;
+            ThreatCount = crossingThreats == null ? 0 : Math.Min(threatCount, crossingThreats.Length);
+            OwnShiftByChild = ownShiftByChild;
+            ThreatChildCount = threatChildCount;
             GlobalOdds = float.IsNaN(globalOdds) || float.IsInfinity(globalOdds) || globalOdds < 0f ? 0f : globalOdds;
             FlankRelease = flankRelease;
             State = state;
@@ -57,7 +63,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float Caution01 { get; }
         public float CasualtyTolerance01 { get; }
 
-        public bool Staggered => State != null;
+        /// <summary>BC13's staggered release is on (BC14's flag alone gives the context a state for the crossing bindings without it).</summary>
+        public bool Staggered { get; }
+
+        /// <summary>
+        /// BC14 (requirement-defender-crossing-release): the crossings the selected candidate's Defender evaluation found, the first
+        /// <see cref="ThreatCount"/> entries, earliest enemy arrival first; <see cref="OwnShiftByChild"/> is row-major, crossing by
+        /// <see cref="ThreatChildCount"/> children (the allocation's child order); a child holding player-owned strength has NaN there, and is
+        /// never released or kept bound (requirement-player-share).
+        /// </summary>
+        public CrossingThreat[] CrossingThreats { get; }
+        public int ThreatCount { get; }
+        public float[] OwnShiftByChild { get; }
+        public int ThreatChildCount { get; }
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -314,7 +332,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             GuardPoint[] guards = GuardScratch(snapshots.Count);
-            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots);
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards);
 
             var intents = new DirectChildIntent[snapshots.Count];
             for (int i = 0; i < snapshots.Count; i++)
@@ -379,7 +397,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<DirectChildEvidence> evidence,
             DirectChildRole[] roles,
             ReserveReleaseContext release,
-            IReadOnlyList<DirectChildSnapshot> snapshots)
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            GuardPoint[] guards)
         {
             var axisOverride = new int[roles.Length];
             for (int i = 0; i < axisOverride.Length; i++) axisOverride[i] = -1;
@@ -420,6 +439,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
+            ReleaseReserveToCrossings(roles, axisOverride, guards, release, snapshots);
             return axisOverride;
         }
 
@@ -583,6 +603,103 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 roles[pick] = left ? DirectChildRole.RefuseLeft : DirectChildRole.RefuseRight;
                 axisOverride[pick] = wing.PrimarySector;
             }
+        }
+
+        // BC14 requirement-defender-crossing-release: after the crisis, stagger and flank releases, a Reserve child is sent to guard a
+        // crossing the enemy can reach before the side's reserves can (a predicted threat; an enemy already across is contact, BC13's
+        // crisis answers it). It takes the role RefuseLeft or RefuseRight by the crossing's side, the crossing's band as sector and a guard
+        // point behind the crossing, and stays bound there while the threat holds. Per allocation: first the standing bindings are kept or
+        // ended, then each counted crossing without a guard gets the eligible Reserve child that reaches it soonest, when the enemy arrives
+        // within ThreatLeadHours of that child and the floor of held reserves allows.
+        private static void ReleaseReserveToCrossings(
+            DirectChildRole[] roles,
+            int[] axisOverride,
+            GuardPoint[] guards,
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            ReserveReleaseState state = release.State;
+            if (state == null) return;
+            float floorShare = WhiskeyRealism.Tactical.Battle.OpportunityDoctrine.FloorShare(release.Caution01, release.CasualtyTolerance01);
+            // R0x: the Reserve children before this release; a bound guard still reads Reserve in the roles at this point, so the guards are in it.
+            int r0x = HeldReserves(roles, release);
+
+            for (int b = state.BoundCount - 1; b >= 0; b--)
+            {
+                CrossingBinding binding = state.BindingAt(b);
+                int child = IndexOfSnapshot(snapshots, binding.ChildId);
+                int threat = ThreatOfLink(release, binding.Link);
+                bool holds = child >= 0 && threat >= 0 && roles[child] == DirectChildRole.Reserve && !IsExploiting(release, child)
+                    && !float.IsNaN(OwnShiftOf(release, threat, child))
+                    && ThreatArrivalHours(release.CrossingThreats[threat]) <= binding.OwnShiftAtRelease
+                        + WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverFeasibility.ThreatLeadHours
+                        + WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverFeasibility.ThreatHoldMarginHours;
+                if (!holds)
+                {
+                    state.UnbindCrossing(binding.ChildId);
+                    continue;
+                }
+                GuardAt(roles, axisOverride, guards, child, in release.CrossingThreats[threat]);
+            }
+
+            for (int t = 0; t < release.ThreatCount; t++)
+            {
+                CrossingThreat threat = release.CrossingThreats[t];
+                if (threat.EnemyAcross || IsBoundTo(state, threat.Link)) continue;
+
+                int pick = -1;
+                float pickShift = float.PositiveInfinity;
+                for (int c = 0; c < roles.Length; c++)
+                {
+                    if (roles[c] != DirectChildRole.Reserve || IsExploiting(release, c)) continue;
+                    float shift = OwnShiftOf(release, t, c);
+                    if (float.IsNaN(shift) || !(shift < pickShift)) continue;
+                    pick = c;
+                    pickShift = shift;
+                }
+                if (pick < 0) continue;
+                if (!(threat.EnemyAtCrossing <= pickShift + WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverFeasibility.ThreatLeadHours)) continue;
+                if (HeldReserves(roles, release) - 1 < FloorOf(r0x, floorShare)) continue;
+
+                GuardAt(roles, axisOverride, guards, pick, in threat);
+                state.BindCrossing(new CrossingBinding { ChildId = snapshots[pick].ChildId, Link = threat.Link, OwnShiftAtRelease = pickShift, ReleasedAtHours = release.NowHours });
+            }
+        }
+
+        private static void GuardAt(DirectChildRole[] roles, int[] axisOverride, GuardPoint[] guards, int child, in CrossingThreat threat)
+        {
+            roles[child] = threat.Left ? DirectChildRole.RefuseLeft : DirectChildRole.RefuseRight;
+            axisOverride[child] = threat.Sector;
+            guards[child] = new GuardPoint(threat.GuardX, threat.GuardZ, threat.GuardHeading);
+        }
+
+        // An enemy already across stands at the crossing: the arrival test holds at 0.
+        private static float ThreatArrivalHours(in CrossingThreat threat) => threat.EnemyAcross ? 0f : threat.EnemyAtCrossing;
+
+        private static int ThreatOfLink(ReserveReleaseContext release, int link)
+        {
+            for (int t = 0; t < release.ThreatCount; t++) if (release.CrossingThreats[t].Link == link) return t;
+            return -1;
+        }
+
+        private static bool IsBoundTo(ReserveReleaseState state, int link)
+        {
+            for (int b = 0; b < state.BoundCount; b++) if (state.BindingAt(b).Link == link) return true;
+            return false;
+        }
+
+        private static int IndexOfSnapshot(IReadOnlyList<DirectChildSnapshot> snapshots, string childId)
+        {
+            for (int i = 0; i < snapshots.Count; i++)
+                if (string.Equals(snapshots[i].ChildId, childId, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
+        private static float OwnShiftOf(ReserveReleaseContext release, int threat, int child)
+        {
+            if (release.OwnShiftByChild == null || child >= release.ThreatChildCount) return float.NaN;
+            int at = threat * release.ThreatChildCount + child;
+            return at < release.OwnShiftByChild.Length ? release.OwnShiftByChild[at] : float.NaN;
         }
 
         /// <summary>

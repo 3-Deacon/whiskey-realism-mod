@@ -240,7 +240,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         // ---- writer side (the evaluation) ----------------------------------------------------------------------
 
-        internal void BeginBack() => _back.Clear();
+        internal void BeginBack()
+        {
+            _back.Clear();
+            _threatBackCount = 0;
+            _threatBackChildren = 0;
+        }
+
+        // ---- the Defender's crossing threats (the selected candidate only), published with the candidates ------------------
+
+        private CrossingThreat[] _threatFront = new CrossingThreat[ManeuverFeasibility.MaxThreatCrossings];
+        private CrossingThreat[] _threatBack = new CrossingThreat[ManeuverFeasibility.MaxThreatCrossings];
+        private float[] _shiftFront = new float[ManeuverFeasibility.MaxThreatCrossings * ManeuverFeasibility.MaxChildren];
+        private float[] _shiftBack = new float[ManeuverFeasibility.MaxThreatCrossings * ManeuverFeasibility.MaxChildren];
+        private int _threatFrontCount, _threatBackCount, _threatFrontChildren, _threatBackChildren;
+
+        internal void SetThreatsBack(CrossingThreat[] threats, int count, float[] ownShiftByChild, int childCount)
+        {
+            _threatBackCount = Math.Min(count, _threatBack.Length);
+            _threatBackChildren = Math.Min(childCount, ManeuverFeasibility.MaxChildren);
+            Array.Copy(threats, _threatBack, _threatBackCount);
+            for (int t = 0; t < _threatBackCount; t++)
+                for (int c = 0; c < _threatBackChildren; c++)
+                    _shiftBack[t * _threatBackChildren + c] = ownShiftByChild[t * childCount + c];
+        }
+
+        public int ThreatCount => _threatFrontCount;
+
+        public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount)
+        {
+            threat = default(CrossingThreat);
+            childCount = _threatFrontChildren;
+            if (index < 0 || index >= _threatFrontCount) return false;
+            threat = _threatFront[index];
+            for (int c = 0; c < childCount && c < ownShiftByChild.Length; c++) ownShiftByChild[c] = _shiftFront[index * childCount + c];
+            return true;
+        }
 
         /// <summary>Appends one candidate to the back buffer: its result, bodies, members and crossings. Returns false when the buffers are full.</summary>
         internal bool AddBack(in CandidateResult result, ReadOnlySpan<BodyEstimate> bodies, ReadOnlySpan<MemberEstimate> members,
@@ -260,6 +295,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childFront = _childBack;
             _childBack = tmp;
             _childFrontCount = BuildChildTable(_front, _childFront);
+            CrossingThreat[] swapThreats = _threatFront;
+            _threatFront = _threatBack;
+            _threatBack = swapThreats;
+            float[] swapShift = _shiftFront;
+            _shiftFront = _shiftBack;
+            _shiftBack = swapShift;
+            _threatFrontCount = _threatBackCount;
+            _threatFrontChildren = _threatBackChildren;
         }
     }
 }

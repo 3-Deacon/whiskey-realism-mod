@@ -27,21 +27,21 @@ internal static partial class CommanderOpportunityTests
         };
     }
 
-    private static TacticalBattlePlan ResPlan(BattlePhase phase = BattlePhase.Exploit)
+    internal static TacticalBattlePlan ResPlan(BattlePhase phase = BattlePhase.Exploit)
         => new TacticalBattlePlan(BattlePlanId.GenericAggressive, phase, mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
             reserveCommitTriggerOdds: 50f, ageSeconds: 0f, jitterSeed: 0);
 
     // c0 the main effort (sector 2, in contact); the rest are deployed reserves at the given sectors.
-    private static DirectChildEvidence[] ResEvidence(params int[] reserveSectors)
+    internal static DirectChildEvidence[] ResEvidence(params int[] reserveSectors)
     {
         var ev = new List<DirectChildEvidence> { new DirectChildEvidence(3, 1, true, 2, 0, 0.8f) };
         foreach (int sector in reserveSectors) ev.Add(new DirectChildEvidence(3, 0, false, sector, 0, 0.7f, deployedReserve: true));
         return ev.ToArray();
     }
 
-    private static DirectChildEvidence Crisis(int sector) => new DirectChildEvidence(1, 3, true, sector, 0, 0.8f);
+    internal static DirectChildEvidence Crisis(int sector) => new DirectChildEvidence(1, 3, true, sector, 0, 0.8f);
 
-    private static DirectChildSnapshot[] ResChildren(int n)
+    internal static DirectChildSnapshot[] ResChildren(int n)
     {
         var snaps = new DirectChildSnapshot[n];
         for (int i = 0; i < n; i++) snaps[i] = new DirectChildSnapshot("c" + i, "a", 15, 0, "Corps" + i, true);

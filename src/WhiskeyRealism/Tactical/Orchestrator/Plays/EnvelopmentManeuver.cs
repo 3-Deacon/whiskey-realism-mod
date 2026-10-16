@@ -839,10 +839,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// A Hold carries no target (the child stands where it is). Phases that do not override add nothing.
         /// </summary>
         internal static ManeuverNodeTable ExpandToNodes(System.Collections.Generic.IReadOnlyList<ChildManeuver> maneuvers,
-            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents,
+            System.Collections.Generic.IReadOnlyList<DirectChildIntent> directChildIntents = null)
         {
             var table = new ManeuverNodeTable();
-            if (maneuvers == null || nodeIntents == null) return table;
+            if (nodeIntents == null) return table;
+            AddGuards(table, directChildIntents, nodeIntents);
+            if (maneuvers == null) return table;
             for (int m = 0; m < maneuvers.Count; m++)
             {
                 ChildManeuver maneuver = maneuvers[m];
@@ -876,6 +879,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
             }
             return table;
+        }
+
+        // BC14 requirement-defender-crossing-release: a reserve released to a crossing stands at its guard point facing the crossing. Every node of
+        // the child takes the guard point as its primary target (a guard has no lanes: the groups below follow their parent's formation) and the
+        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task.
+        private static void AddGuards(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+        {
+            if (children == null) return;
+            for (int c = 0; c < children.Count; c++)
+            {
+                if (!children[c].HasGuardPoint) continue;
+                string source = NodeIdOfChild(children[c].ChildId);
+                if (source.Length == 0) continue;
+                for (int i = 0; i < nodeIntents.Count; i++)
+                {
+                    if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.GuardFlank, true,
+                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, "guard-crossing", isGuard: true));
+                }
+            }
         }
 
         // A hash of what the doctrine build reads from the maneuvers, so a phase change triggers a ledger tick.

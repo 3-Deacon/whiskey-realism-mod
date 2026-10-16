@@ -96,6 +96,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>The side's own snapshot: an own regiment covering a crossing (CoveredCrossings.Covers, the own-side form) costs the enemy's shift HeldCrossingHours there.</summary>
         public BattleSnapshot OwnSnapshot;
 
+        /// <summary>
+        /// Per own record: left out of the cover test (a child bound to guard a crossing and its subtree, requirement-defender-exposure: the
+        /// guard's own cover does not end the threat it was sent against). Null leaves every regiment in.
+        /// </summary>
+        public bool[] OwnExcluded;
+
         // Per link, read lazily: 0 not asked, 1 uncovered, 2 covered. Cleared by ResetOwnCovered when an evaluation starts.
         private readonly sbyte[] _ownCovered = new sbyte[RiverRegions.MaxCrossings];
 
@@ -110,7 +116,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             bool covered = false;
             UnitRecord[] own = OwnSnapshot.Own;
             for (int i = 0; i < OwnSnapshot.OwnCount && !covered; i++)
+            {
+                if (OwnExcluded != null && i < OwnExcluded.Length && OwnExcluded[i]) continue;
                 covered = CoveredCrossings.Covers(in own[i], x, z);
+            }
             _ownCovered[link] = (sbyte)(covered ? 2 : 1);
             return covered;
         }
@@ -138,10 +147,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             => Rules.BasicUnitSpeed * baseSpeed * ManeuverFeasibility.FatigueFactor(meanFatigue, in Rules);
 
         /// <summary>
-        /// The cheapest route from one point to another for a mover with the given base speed and fatigue. <paramref name="enemy"/>
-        /// prices crossings the way the enemy meets them (an own-covered crossing costs time); otherwise a Held one does.
-        /// </summary>
-        /// <summary>
         /// The region the last route continues in after its k-th crossing: the region that crossing shares with the next one (the end region
         /// after the last), other than <paramref name="near"/>, the region the route was in before it.
         /// </summary>
@@ -160,6 +165,79 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return -1;
         }
 
+        // Dijkstra over the routed links from a start point in region rs: the mover's hours to reach each link's crossing (_dist), a crossing
+        // that costs time included once it is passed.
+        private void Relax(float x0, float z0, int rs, float divisor, bool enemy)
+        {
+            int routed = Regions.RoutedCount;
+            for (int i = 0; i < routed; i++)
+            {
+                _dist[i] = float.PositiveInfinity;
+                _prev[i] = -1;
+                _done[i] = false;
+                if (!Regions.LinkTouches(i, rs)) continue;
+                if (!LinkLeg(x0, z0, i, out float cost, out bool est)) continue;
+                _dist[i] = cost / divisor + CrossingExtra(i, enemy);
+                _entryCost[i] = cost;
+                _entryEstimated[i] = est;
+            }
+            while (true)
+            {
+                int u = -1;
+                float best = float.PositiveInfinity;
+                for (int i = 0; i < routed; i++)
+                    if (!_done[i] && _dist[i] < best) { best = _dist[i]; u = i; }
+                if (u < 0) break;
+                _done[u] = true;
+                for (int v = 0; v < routed; v++)
+                {
+                    if (_done[v]) continue;
+                    float link = Regions.LinkLegCost(u, v);
+                    if (float.IsNaN(link)) continue;
+                    float through = _dist[u] + link / divisor + CrossingExtra(v, enemy);
+                    if (through < _dist[v])
+                    {
+                        _dist[v] = through;
+                        _prev[v] = u;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Runs the path search from a point over every routed link without a destination; <see cref="ArrivalAtLink"/> then reads the hours to
+        /// reach each crossing. False when the map is not ready or the point lies on no land within the snap reach.
+        /// </summary>
+        public bool ArrivalsFrom(float x0, float z0, float baseSpeed, float meanFatigue, bool enemy)
+        {
+            PathCount = 0;
+            _refused = false;
+            _confirmed = false;
+            if (!Ready) return false;
+            Searches++;
+            int rs = Regions.RegionAt(x0, z0);
+            if (rs < 0 && Regions.TrySnapToLand(x0, z0, -1, out float sx, out float sz)) { x0 = sx; z0 = sz; rs = Regions.RegionAt(x0, z0); }
+            float divisor = SpeedDivisor(baseSpeed, meanFatigue);
+            if (rs < 0 || !(divisor > 0f)) return false;
+            _arrivalEnemy = enemy;
+            Relax(x0, z0, rs, divisor, enemy);
+            return true;
+        }
+
+        private bool _arrivalEnemy;
+
+        /// <summary>The hours from the last <see cref="ArrivalsFrom"/> start to the link's crossing point (the crossing itself not yet carried); infinity when unreachable.</summary>
+        public float ArrivalAtLink(int link)
+        {
+            if (link < 0 || link >= Regions.RoutedCount) return float.PositiveInfinity;
+            float arrival = _dist[link];
+            return float.IsInfinity(arrival) ? arrival : arrival - CrossingExtra(link, _arrivalEnemy);
+        }
+
+        /// <summary>
+        /// The cheapest route from one point to another for a mover with the given base speed and fatigue. <paramref name="enemy"/>
+        /// prices crossings the way the enemy meets them (an own-covered crossing costs time); otherwise a Held one does.
+        /// </summary>
         public RouteResult Route(float x0, float z0, float x1, float z1, float baseSpeed, float meanFatigue, bool enemy)
         {
             var result = new RouteResult { FirstLink = -1 };
@@ -209,38 +287,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
 
             int routed = Regions.RoutedCount;
-            for (int i = 0; i < routed; i++)
-            {
-                _dist[i] = float.PositiveInfinity;
-                _prev[i] = -1;
-                _done[i] = false;
-                if (!Regions.LinkTouches(i, rs)) continue;
-                if (!LinkLeg(x0, z0, i, out float cost, out bool est)) continue;
-                _dist[i] = cost / divisor + CrossingExtra(i, enemy);
-                _entryCost[i] = cost;
-                _entryEstimated[i] = est;
-            }
-            while (true)
-            {
-                int u = -1;
-                float best = float.PositiveInfinity;
-                for (int i = 0; i < routed; i++)
-                    if (!_done[i] && _dist[i] < best) { best = _dist[i]; u = i; }
-                if (u < 0) break;
-                _done[u] = true;
-                for (int v = 0; v < routed; v++)
-                {
-                    if (_done[v]) continue;
-                    float link = Regions.LinkLegCost(u, v);
-                    if (float.IsNaN(link)) continue;
-                    float through = _dist[u] + link / divisor + CrossingExtra(v, enemy);
-                    if (through < _dist[v])
-                    {
-                        _dist[v] = through;
-                        _prev[v] = u;
-                    }
-                }
-            }
+            Relax(x0, z0, rs, divisor, enemy);
 
             int last = -1;
             float total = float.PositiveInfinity, exitCost = 0f;

@@ -185,11 +185,24 @@ namespace WhiskeyRealism.Tactical.Battle
         /// or the regions are not Ready.
         /// </summary>
         public bool TrySnapToLand(float x, float z, int preferRegion, out float snapX, out float snapZ)
+            => Snap(x, z, preferRegion, -1, out snapX, out snapZ);
+
+        /// <summary>
+        /// The nearest land block centre of one region (a guard point the projection laid on open river, a bank cell for a crossing's
+        /// own side). A point already in the region is returned as it is. False when no block of the region lies within
+        /// <see cref="SnapReachMeters"/> or the regions are not Ready.
+        /// </summary>
+        public bool TrySnapToRegion(float x, float z, int region, out float snapX, out float snapZ)
+            => Snap(x, z, region, region, out snapX, out snapZ);
+
+        // onlyRegion >= 0: only blocks of that region count (and the point is already placed only when it lies in it).
+        private bool Snap(float x, float z, int preferRegion, int onlyRegion, out float snapX, out float snapZ)
         {
             snapX = x;
             snapZ = z;
             if (_stage != StageReady) return false;
-            if (RegionAt(x, z) >= 0) return true;
+            int here = RegionAt(x, z);
+            if (onlyRegion < 0 ? here >= 0 : here == onlyRegion) return true;
             if (Frozen)
             {
                 snapX = Math.Max(0f, Math.Min(_sizeX, x));
@@ -212,7 +225,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         int ix = cx + dx, iz = cz + dz;
                         if (ix < 0 || iz < 0 || ix >= _nx || iz >= _nz) continue;
                         int region = _final[iz * _nx + ix] - 1;
-                        if (region < 0) continue;
+                        if (region < 0 || (onlyRegion >= 0 && region != onlyRegion)) continue;
                         float px = (ix + 0.5f) * BlockMeters, pz = -_sizeZ + (iz + 0.5f) * BlockMeters;
                         float d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
                         bool preferred = region == preferRegion;

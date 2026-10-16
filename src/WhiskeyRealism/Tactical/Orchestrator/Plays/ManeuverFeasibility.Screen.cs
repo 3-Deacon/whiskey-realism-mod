@@ -229,6 +229,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     reason = body.Reason;
                 }
             }
+            // A Defender candidate with no body (every rect a reserve) still carries the line's turning exposure.
+            if (defender && w.BodyCount == 0) worst = TurnWeight * w.Turn;
             w.Result.Penalty = worst;
             w.Result.Verdict = VerdictOf(worst);
             w.Result.Reason = reason;

@@ -81,6 +81,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool HeldAtEvaluation;
     }
 
+    /// <summary>
+    /// One crossing a Defender's flank can be turned at (requirement-defender-exposure), as the evaluation of the selected candidate found it:
+    /// where it is, which bank is the side's own, when the enemy gets there and onward to the flank, how soon the side's reserves can, and the
+    /// place a released reserve guards it from. The allocator compares and writes the guard point; it holds no grid and no snapshot.
+    /// </summary>
+    public struct CrossingThreat
+    {
+        public int Link;
+        public float X, Z;
+        /// <summary>The crossing is on the left (the lower-lateral side) of the own line.</summary>
+        public bool Left;
+        /// <summary>The front-axis band the crossing's lateral falls in (the released child's sector override).</summary>
+        public int Sector;
+        public int OwnBankRegion;
+        /// <summary>Where a reserve released to this crossing stands (on own-bank land behind the crossing) and the heading it faces: toward the crossing.</summary>
+        public float GuardX, GuardZ, GuardHeading;
+        /// <summary>The earliest arrival at the crossing over the enemy bodies not yet in the own bank's region (hours from the evaluation), and onward to the candidate's flank end.</summary>
+        public float EnemyAtCrossing, EnemyAtFlank;
+        /// <summary>The fastest of the candidate's reserve sources to reach the crossing.</summary>
+        public float CandidateOwnShift;
+        /// <summary>The earliest enemy body already stands in the own bank's region: contact, answered by BC13's crisis release, not a crossing threat.</summary>
+        public bool EnemyAcross;
+    }
+
     /// <summary>What the army, the allocator and BC11's runtime read of the published ledger.</summary>
     public interface IFeasibilityLookup
     {
@@ -108,6 +132,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>The assumption the monitor found broken (a static literal), or null; cleared by the next <see cref="CaptureSelection"/>.</summary>
         string BrokenAssumption { get; }
+
+        /// <summary>The crossings a Defender's flank can be turned at, for the selected candidate (earliest enemy arrival first); 0 for an Attacker or with no plan selected.</summary>
+        int ThreatCount { get; }
+
+        /// <summary>
+        /// The i-th threat, with the time each direct child (in the evaluation's child order, <paramref name="childCount"/> of them) needs to
+        /// reach it (courier plus march; NaN for a child with player-owned strength) written to <paramref name="ownShiftByChild"/>.
+        /// </summary>
+        bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount);
     }
 
     /// <summary>
@@ -138,6 +171,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public string[] ChildIds;
         public int ChildCount;
         public bool[] DeployedReserve;
+        /// <summary>The children bound to guard a crossing at the previous allocation (BoundGuardCount of them): their regiments are left out of the crossing cover test.</summary>
+        public string[] BoundGuardChildIds;
+        public int BoundGuardCount;
         /// <summary>Per child (same order): BC11 has it past its Hold, marching, turning or attacking: its time to strike carries no courier term.</summary>
         public bool[] ChildMoving;
         /// <summary>The plans the catalog's precondition and stance filters leave for the side's current effective stance.</summary>

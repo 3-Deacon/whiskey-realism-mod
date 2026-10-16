@@ -37,6 +37,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         public bool HasSamples => Count > 0;
 
+        /// <summary>The i-th sample's position and weight (Visible strength in full, Remembered times its confidence).</summary>
+        public void Sample(int i, out float x, out float z, out float weight)
+        {
+            x = _x[i];
+            z = _z[i];
+            weight = _w[i];
+        }
+
         public void Build(BattleSnapshot s, float estimate, float confidence, float caution01, bool hasAssumed, float assumedX, float assumedZ,
             float fallbackX, float fallbackZ)
         {
