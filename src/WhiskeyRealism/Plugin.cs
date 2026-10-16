@@ -1041,7 +1041,9 @@ namespace WhiskeyRealism
                 "(no forced march) and kept there, and the [Recon] and [ReconMission] rows log the missions. A cavalry-majority screen also gets the " +
                 "Scouting cavalry order (the one vanilla's AI never gives) and loses it when recalled or cleared. While it runs the old army-area " +
                 "moves (#15) leave a formation on a mission at its post and the old probe stands down. " +
-                "Never uses the W&L player's own command. OFF = no missions (Screen then means nothing); needs Enable Campaign Planner and " +
+                "Never uses the W&L player's own command. A formation the allocation gives a marching role is released from its mission. " +
+                "OFF = every mission ends at the next review (a recalled formation stays where it stands, vanilla's again), screens lose " +
+                "the Scouting order and nothing is moved; needs Enable Campaign Planner and " +
                 "Enable Campaign Planner Executors for the moves and orders.");
             EnableCampaignFogHonestBeliefs = Config.Bind(
                 "Campaign Planner", "Enable Campaign Fog-Honest Beliefs", true,

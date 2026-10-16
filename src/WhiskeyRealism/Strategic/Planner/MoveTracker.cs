@@ -71,6 +71,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int IssuedDay;
             public int Retries;
             public int ObjectiveId = -1;
+            public MoveBudget Budget;
             public State State;
         }
 
@@ -107,7 +108,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = fromX, FromZ = fromZ, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, State = queued ? State.Queued : State.Issued
+                IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, Budget = budget, State = queued ? State.Queued : State.Issued
             };
             if (!queued) Spend(budget, daySerial);
         }
@@ -123,7 +124,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Vanilla refused the move (MoveUnitTo returned false with no order running: a state neither own, allied nor at war,
         // 14493) or the target is restricted ground. A first refusal allows one retry, the second ends it for this target.
-        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null, int objectiveId = -1)
+        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null, int objectiveId = -1, MoveBudget budget = MoveBudget.Planner)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool again = previous != null && SameTarget(previous, tx, tz) && previous.State == State.Failed;
@@ -131,7 +132,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = tx, FromZ = tz, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0, ObjectiveId = objectiveId,
+                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0, ObjectiveId = objectiveId, Budget = budget,
                 State = again ? State.GaveUp : State.Failed
             };
         }
@@ -172,13 +173,16 @@ namespace WhiskeyRealism.Strategic.Planner
             into.Sort();
         }
 
-        // Every move given up on and not yet lapsed (GaveUpExpiryDays), ordered by instance id so the planner's and the
-        // allocator's input is deterministic.
+        // Every planner move given up on and not yet lapsed (GaveUpExpiryDays), ordered by instance id so the planner's and the
+        // allocator's input is deterministic. Reconnaissance give-ups are not listed (plan G5d, verify F1): G4 matches a give-up
+        // by target point, and a recall point can be the capital (a CapitalGuard's post), so a scout that could not reach it
+        // would cost the guard its role; the recon executor keeps its own give-ups apart (ShouldIssue) and a post it gave up on
+        // is not re-sent until the give-up lapses.
         public void CollectGaveUp(List<GaveUpMove> into, int daySerial)
         {
             into.Clear();
             foreach (var pair in _entries)
-                if (pair.Value.State == State.GaveUp && !Expired(pair.Value, daySerial))
+                if (pair.Value.State == State.GaveUp && pair.Value.Budget == MoveBudget.Planner && !Expired(pair.Value, daySerial))
                     into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ, ObjectiveId = pair.Value.ObjectiveId });
             into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
         }
@@ -198,12 +202,14 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
+        // The planner's records, for the sidecar (G6). Recon records are not persisted: a load restarts the scouts' moves.
         public IEnumerable<MoveRecord> Records
         {
             get
             {
                 foreach (var e in _entries.Values)
-                    yield return new MoveRecord { InstanceId = e.InstanceId, UnitKey = e.UnitKey, TargetX = e.TargetX, TargetZ = e.TargetZ, IssuedDay = e.IssuedDay, Retries = e.Retries, ObjectiveId = e.ObjectiveId };
+                    if (e.Budget == MoveBudget.Planner)
+                        yield return new MoveRecord { InstanceId = e.InstanceId, UnitKey = e.UnitKey, TargetX = e.TargetX, TargetZ = e.TargetZ, IssuedDay = e.IssuedDay, Retries = e.Retries, ObjectiveId = e.ObjectiveId };
             }
         }
 

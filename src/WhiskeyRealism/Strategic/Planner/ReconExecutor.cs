@@ -9,10 +9,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // Stage F's chain class of the formation (WlStrategicOrderBridge.ChainClassOf), read again before any act: the day's
         // snapshot is hours old and the player may have taken the group since.
         WlChainClass LiveChain(int instanceId);
-        // BattleUnits.ChangeCampaignOrders(unit, orderCode) (90720-90770), the player's own order path. True when the call was
-        // made; false when there is no such unit or the order is already set or on its way.
-        bool SendCavalryOrder(int instanceId, int orderCode);
+        // BattleUnits.ChangeCampaignOrders(unit, orderCode) (90720-90770), the player's own order path.
+        CavalrySend SendCavalryOrder(int instanceId, int orderCode);
     }
+
+    // What the host did about a cavalry order: made the call, found the wanted mode already applied or on its way, found a different
+    // mode waiting in the queue (vanilla cannot replace it; ReconOrders.CallFor), or found no such unit.
+    internal enum CavalrySend { NoUnit = 0, Sent = 1, AlreadySet = 2, QueuedOther = 3 }
 
     internal sealed class ReconTally
     {
@@ -63,8 +66,8 @@ namespace WhiskeyRealism.Strategic.Planner
             if (s == null || ledger == null || host == null || tracker == null) return tally;
             var missions = ledger.Missions;
             NoteTransitions(s, missions, tally);
-            ReadChains(s, missions, host, tally);
-            SendCavalryOrders(s, missions, host, tally);
+            ReadChains(s, ledger, host, tally);
+            SendCavalryOrders(s, ledger, host, tally);
             Move(s, missions, host, tracker, wlPlayerAlliance, tally);
             return tally;
         }
@@ -89,14 +92,19 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The live chain class of each mission's formation and whether recon may act on it. Counted once per mission.
-        private void ReadChains(CampaignSnapshot s, IReadOnlyList<ReconMission> missions, IReconHost host, ReconTally tally)
+        private void ReadChains(CampaignSnapshot s, ReconMissionLedger ledger, IReconHost host, ReconTally tally)
         {
+            var missions = ledger.Missions;
             _chains.Clear();
             _acts.Clear();
             for (int i = 0; i < missions.Count; i++)
             {
                 var chain = host.LiveChain(missions[i].InstanceId);
                 bool present = s.IndexOfOwn(missions[i].InstanceId) >= 0;
+                // A Scouting order that can no longer be taken off is let go: the formation is gone, or its chain is not None any
+                // more and order 120 at level -1 would reach the player's units (92572-92620). It stays until a readiness reset
+                // (113960).
+                if (missions[i].StandDownDue && (!present || chain != WlChainClass.None)) ledger.NoteStoodDown(missions[i].InstanceId);
                 bool acts = present && ReconOrders.MayAct(chain) && !WlChainRules.OrderOnly(chain);
                 if (present && !acts) tally.SkippedPlayer++;
                 _chains.Add(chain);
@@ -106,8 +114,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // One call per formation: the strongest order any of its missions asks for (121 beats 120 beats no call), so a re-targeted
         // screen keeps Scouting beside its own cleared mission and a re-tasked one loses it.
-        private void SendCavalryOrders(CampaignSnapshot s, IReadOnlyList<ReconMission> missions, IReconHost host, ReconTally tally)
+        private void SendCavalryOrders(CampaignSnapshot s, ReconMissionLedger ledger, IReconHost host, ReconTally tally)
         {
+            var missions = ledger.Missions;
             for (int i = 0; i < missions.Count; i++)
             {
                 if (!_acts[i] || FirstMissionOf(missions, missions[i].InstanceId) != i) continue;
@@ -118,7 +127,14 @@ namespace WhiskeyRealism.Strategic.Planner
                     var f = s.Own[s.IndexOfOwn(missions[j].InstanceId)];
                     order = Math.Max(order, ReconOrders.CavalryOrderFor(missions[j].Kind, missions[j].State, f.CavalryShare, _chains[j]));
                 }
-                if (order >= 0 && host.SendCavalryOrder(missions[i].InstanceId, order)) tally.Ordered++;
+                if (order < 0) continue;
+                int id = missions[i].InstanceId;
+                var sent = host.SendCavalryOrder(id, order);
+                if (sent == CavalrySend.Sent) tally.Ordered++;
+                bool set = sent == CavalrySend.Sent || sent == CavalrySend.AlreadySet;
+                // Scouting given: the mission owes the stand-down. Stand-down delivered (or no formation to deliver it to): it is paid.
+                if (order == ReconOrders.ScoutingOrder && set) ledger.NoteScouting(id);
+                else if (order == ReconOrders.NoCavalryOrder && (set || sent == CavalrySend.NoUnit)) ledger.NoteStoodDown(id);
             }
         }
 
@@ -145,7 +161,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static void MoveToPost(CampaignSnapshot s, in ReconMission m, in FormationRecord f, IReconHost host, MoveTracker tracker, bool wlPlayerAlliance, ReconTally tally)
         {
-            if (!TheaterPlanner.Movable(f) || host.PackageLocked(f.InstanceId))
+            // One owner per formation per review: the mover judged earlier moves before this pass, so a formation in transit now was
+            // sent by it (or by an earlier recon move not yet judged) today, and a second move would overwrite its record.
+            if (!TheaterPlanner.Movable(f) || host.PackageLocked(f.InstanceId) || tracker.InTransit(f.InstanceId))
             {
                 tally.SkippedBusy++;
                 return;

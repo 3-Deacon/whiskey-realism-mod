@@ -105,6 +105,13 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly FormationRole[] Priority =
             { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support };
 
+        // Does the mover send a formation of this role? (The roles G4 can give a formation that G5d's recon executor must then leave
+        // to the mover: one owner per formation per review.)
+        internal static bool MovesRole(FormationRole role)
+        {
+            return Array.IndexOf(Priority, role) >= 0;
+        }
+
         public static MoverTally Review(MoverInputs inputs, IMoverHost host, MoveTracker tracker, PlannerState state)
         {
             var tally = new MoverTally();

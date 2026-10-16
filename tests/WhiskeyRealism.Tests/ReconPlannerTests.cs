@@ -1402,7 +1402,7 @@ internal static class ReconPlannerTests
         string syncRecon = BodyOf(src, "private static void SyncRecon(");
         AssertContains(syncRecon, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
         AssertContains(syncRecon, "Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);", "binds the allocation's Recon assignments to missions");
-        AssertContains(syncRecon, "if (FlagOn(Plugin.EnableCampaignReconnaissance)) EmitRecon(snapshot);", "the row only while the flag is on");
+        AssertTrue(syncRecon.IndexOf("if (FlagOn(Plugin.EnableCampaignReconnaissance))", StringComparison.Ordinal) < syncRecon.IndexOf("EmitRecon(snapshot);", StringComparison.Ordinal) && syncRecon.IndexOf("EmitRecon(snapshot);", StringComparison.Ordinal) < syncRecon.IndexOf("else", StringComparison.Ordinal), "the row only while the flag is on (G5d: the else ends every mission)");
 
         string emit = BodyOf(src, "private static void EmitRecon(");
         AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a])", "the row's counts");

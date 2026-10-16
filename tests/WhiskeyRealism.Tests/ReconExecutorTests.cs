@@ -44,7 +44,21 @@ internal static class ReconExecutorTests
             ("ReconTallyCountsWhatTheExecutorDid", ReconTallyCountsWhatTheExecutorDid),
             ("OrderedCountsOnlyCallsTheHostMade", OrderedCountsOnlyCallsTheHostMade),
             ("RowMemoryIsPrunedWhenMissionsLeaveTheLedger", RowMemoryIsPrunedWhenMissionsLeaveTheLedger),
-            ("ReconGaveUpFeedsTheAllocator", ReconGaveUpFeedsTheAllocator),
+            ("ReconGiveUpsNeverFeedTheAllocatorOrG3", ReconGiveUpsNeverFeedTheAllocatorOrG3),
+            ("OnlyTheRolesTheMoverSendsAreMoverRoles", OnlyTheRolesTheMoverSendsAreMoverRoles),
+            ("FormationReassignedToTheMoverIsReleasedFromItsMission", FormationReassignedToTheMoverIsReleasedFromItsMission),
+            ("InTransitFormationIsNotMovedByRecon", InTransitFormationIsNotMovedByRecon),
+            ("LowSupplyRecallThatBecomesRecoverIsReleasedAndMovedOnlyByTheMover", LowSupplyRecallThatBecomesRecoverIsReleasedAndMovedOnlyByTheMover),
+            ("ReassignedScreenStillGetsItsStandDown", ReassignedScreenStillGetsItsStandDown),
+            ("ReconFlagOffEndsEveryMissionAndMovesNothing", ReconFlagOffEndsEveryMissionAndMovesNothing),
+            ("ClearedScreenWaitsForItsStandDownAcrossDaysTheExecutorsMiss", ClearedScreenWaitsForItsStandDownAcrossDaysTheExecutorsMiss),
+            ("PendingStandDownIsBoundedAtMaxMissionDays", PendingStandDownIsBoundedAtMaxMissionDays),
+            ("PendingStandDownIsLetGoWhenItCanNeverBeSent", PendingStandDownIsLetGoWhenItCanNeverBeSent),
+            ("QueuedStandDownIsKeptUntilItIsDelivered", QueuedStandDownIsKeptUntilItIsDelivered),
+            ("RetaskedScreenSupersedesTheDebtOfItsClearedMission", RetaskedScreenSupersedesTheDebtOfItsClearedMission),
+            ("StandDownDebtRoundTripsThroughRestore", StandDownDebtRoundTripsThroughRestore),
+            ("MoverRefusalListsNothingAndKeepsTheObjective", MoverRefusalListsNothingAndKeepsTheObjective),
+            ("ReconSyncAndFlagOffWiringPinned", ReconSyncAndFlagOffWiringPinned),
             ("CavalryModeIsTheCodeMinusOneTwenty", CavalryModeIsTheCodeMinusOneTwenty),
             ("QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals", QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals),
             ("ReconFormationStandsDownFromAreaMoves", ReconFormationStandsDownFromAreaMoves),
@@ -395,7 +409,8 @@ internal static class ReconExecutorTests
         AssertEqual(0, third.Failed + third.Retried + third.Issued, "then it is given up at this post");
         var gaveUp = new List<GaveUpMove>();
         tracker.CollectGaveUp(gaveUp, Day);
-        AssertEqual(1, gaveUp.Count, "and the allocator is told");
+        AssertEqual(0, gaveUp.Count, "the allocator is not told: it matches a give-up by point (ReconGiveUpsNeverFeedTheAllocatorOrG3)");
+        AssertFalse(tracker.ShouldIssue(1, 300f, 0f, Day, MoveBudget.Recon), "the executor's own give-up holds the post shut until it lapses");
     }
 
     private static void RefusedMoveIsAMissNotAnIssue()
@@ -534,7 +549,7 @@ internal static class ReconExecutorTests
     {
         var s = World();
         s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.9f));
-        var host = new FakeReconHost { OrderResult = false };
+        var host = new FakeReconHost { OrderResult = CavalrySend.AlreadySet };
         var tally = new ReconExecutor().Review(s, Ledger(s, (ReconKind.Screen, 1, 300f, 0f)), host, new MoveTracker(), false);
         AssertEqual(1, host.Orders.Count, "the host was asked");
         AssertEqual(0, tally.Ordered, "and said it was already so: nothing counted");
@@ -554,24 +569,371 @@ internal static class ReconExecutorTests
         AssertEqual(1, executor.Review(s, rebuilt, new FakeReconHost(), new MoveTracker(), false).Rows.Count, "the new mission 1 logs its own row");
     }
 
-    private static void ReconGaveUpFeedsTheAllocator()
+    // ---- verify F1: one owner per formation per review ----
+
+    private static void ReconGiveUpsNeverFeedTheAllocatorOrG3()
     {
-        // The allocator reads MoveTracker.CollectGaveUp for every move the tracker gave up on (G4, P8), so a recon post a
-        // formation cannot reach is not given to it again before the give-up lapses.
-        var s = World();
-        s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f));
-        var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));
+        // G4 matches a give-up by target point (ForceAllocator.GaveUpAt) and a recall point can be the capital, a CapitalGuard's
+        // post: a scout that could not reach it must not cost the guard its role. Only mover-budget records count.
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(30, 50f, 8000f));
+        var busy = ExecutorFixtures.Corps(31, 60f, 9000f);
+        busy.Flags |= FormationFlags.InBattle;
+        s.Own.Add(busy);
+        var plan = ExecutorFixtures.HandPlan(s, new int[0]);
+        plan.CapitalFloorStrength = 5000f;
+        var sectors = ExecutorFixtures.Sectors(s);
         var tracker = new MoveTracker();
-        tracker.RecordIssued(1, 0f, 0f, 300f, 0f, Day - 3, queued: false, budget: MoveBudget.Recon);
-        tracker.Judge(1, 0f, 0f, 0f, 0f, Day - 2);                      // failed
-        tracker.RecordIssued(1, 0f, 0f, 300f, 0f, Day - 2, queued: false, budget: MoveBudget.Recon);
-        AssertEqual(MoveOutcome.GaveUp, tracker.Judge(1, 0f, 0f, 0f, 0f, Day - 1), "fixture: the retry missed");
+        tracker.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 2, budget: MoveBudget.Recon);
+        tracker.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 1, budget: MoveBudget.Recon);   // the second refusal gives up
         var gaveUp = new List<GaveUpMove>();
         tracker.CollectGaveUp(gaveUp, Day);
-        AssertEqual(1, gaveUp.Count, "listed");
-        var host = new FakeReconHost();
+        AssertEqual(0, gaveUp.Count, "a recon give-up is not in the set G3 and G4 read");
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        AssertTrue(alloc.TryGet(30, out var guard) && guard.Role == FormationRole.CapitalGuard && guard.Withheld, "the capital guard keeps its role");
+        var planner = new MoveTracker();
+        planner.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 2);
+        planner.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 1);
+        planner.CollectGaveUp(gaveUp, Day);
+        AssertEqual(1, gaveUp.Count, "control: the same refusals on the planner budget are listed");
+        var records = new List<MoveRecord>(tracker.Records);
+        AssertEqual(0, records.Count, "recon records are not persisted (a load restarts the scouts)");
+        AssertEqual(1, new List<MoveRecord>(planner.Records).Count, "planner records are");
+    }
+
+    private static void OnlyTheRolesTheMoverSendsAreMoverRoles()
+    {
+        foreach (var role in new[] { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support })
+            AssertTrue(CampaignMover.MovesRole(role), role + " is sent by the mover");
+        foreach (var role in new[] { FormationRole.Hold, FormationRole.Reserve, FormationRole.Recon })
+            AssertFalse(CampaignMover.MovesRole(role), role + " is not");
+    }
+
+    // The verifier's probe 2 through the real allocator, the sync, the mover and the recon pass: a Recalled probe corps the allocator
+    // gives MainEffort. The mover sends it; the mission ends "reassigned"; recon sends nothing, and vanilla's refusal of a second
+    // MoveUnitTo (an order is running, 9933-9945, 14519-14523) is never reached.
+    private static void FormationReassignedToTheMoverIsReleasedFromItsMission()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var ledger = RecalledProbeLedger(s);
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: the allocator gives the recalled corps a role the mover sends (" + a1.Role + ")");
+        ledger.Sync(s, new List<ReconTask>(), alloc);
+        AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "its mission ended");
+        AssertEqual(ReconMissionLedger.ReasonReassigned, ledger.Missions[0].Reason, "as reassigned");
+
+        var tracker = new MoveTracker();
+        var host = new OneReviewHost { RefuseSecondMoveSameReview = true };
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        var tally = new ReconExecutor().Review(s, ledger, host, tracker, false);
+        AssertEqual(1, host.Moves.FindAll(m => m.id == 1).Count, "one MoveUnitTo for the corps in the review");
+        AssertEqual(0, tally.Issued + tally.Failed + tally.Retried + tally.Queued, "recon did nothing for it");
+        AssertTrue(tracker.InTransit(1), "the mover's record is intact, so vanilla's offense and defence keep off it");
+        MoveRecord record = default(MoveRecord);
+        foreach (var r in tracker.Records) if (r.InstanceId == 1) record = r;
+        AssertEqual(98, record.ObjectiveId, "and still carries the objective");
+        AssertEqual(100f, record.TargetX, "and the mover's target");
+    }
+
+    // Belt and braces: the same overlap without the release (the mission still Recalled): recon does not send a formation the
+    // tracker holds in transit.
+    private static void InTransitFormationIsNotMovedByRecon()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var ledger = RecalledProbeLedger(s);
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        var tracker = new MoveTracker();
+        var host = new OneReviewHost { RefuseSecondMoveSameReview = true };
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: the mission was not released");
+        var tally = new ReconExecutor().Review(s, ledger, host, tracker, false);
+        AssertEqual(1, host.Moves.FindAll(m => m.id == 1).Count, "no second MoveUnitTo");
+        AssertEqual(1, tally.SkippedBusy, "counted as busy");
+        AssertTrue(tracker.InTransit(1), "the mover's record stands");
+    }
+
+    private static void LowSupplyRecallThatBecomesRecoverIsReleasedAndMovedOnlyByTheMover()
+    {
+        var s = ExecutorFixtures.Wide();
+        var tired = ExecutorFixtures.Corps(1, 350f, 15000f);
+        tired.Supply01 = 0.3f;                                          // below the recall (0.5) and the Recover line (0.4)
+        s.Own.Add(tired);
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var ledger = new ReconMissionLedger();
+        var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 0, FromX = 300f, HoldX = 300f, Priority = 1f, Reason = "test" };
+        var first = new Allocation { Alliance = 0 };
+        first.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test", ReconMissionId = -1 });
+        ledger.Sync(s, new List<ReconTask> { task }, first);
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: recalled for low supply");
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        AssertTrue(alloc.TryGet(1, out var a1), "assigned");
+        AssertEqual(FormationRole.Recover, a1.Role, "fixture: the tired corps is a Recover formation");
+        ledger.Sync(s, new List<ReconTask>(), alloc);
+        AssertEqual(ReconMissionLedger.ReasonReassigned, ledger.Missions[0].Reason, "its mission is released");
+        var tracker = new MoveTracker();
+        var host = new OneReviewHost { RefuseSecondMoveSameReview = true };
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
         new ReconExecutor().Review(s, ledger, host, tracker, false);
-        AssertEqual(0, host.Moves.Count, "and the executor does not send it there again until the give-up lapses");
+        AssertEqual(1, host.Moves.FindAll(m => m.id == 1).Count, "the mover's one move, not a second from recon");
+    }
+
+    private static void ReassignedScreenStillGetsItsStandDown()
+    {
+        var s = ExecutorFixtures.Wide();
+        var scout = ExecutorFixtures.Corps(1, 350f, 15000f);
+        scout.CavalryShare = 0.9f;
+        s.Own.Add(scout);
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var ledger = new ReconMissionLedger();
+        var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 0, FromX = 300f, HoldX = 300f, Priority = 1f, Reason = "test" };
+        var recon = new Allocation { Alliance = 0 };
+        recon.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test", ReconMissionId = -1 });
+        ledger.Sync(s, new List<ReconTask> { task }, recon);
+        var executor = new ReconExecutor();
+        var first = new OneReviewHost();
+        executor.Review(s, ledger, first, new MoveTracker(), false);
+        AssertEqual(ReconOrders.ScoutingOrder, first.Orders[0].code, "fixture: Scouting given");
+        AssertTrue(ledger.Missions[0].StandDownDue, "and owed");
+
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: reassigned to a mover role");
+        ledger.Sync(s, new List<ReconTask>(), alloc);
+        var second = new OneReviewHost();
+        var tracker = new MoveTracker();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), second, tracker, ExecutorFixtures.State());
+        executor.Review(s, ledger, second, tracker, false);
+        AssertEqual(1, second.Orders.Count, "one cavalry call");
+        AssertEqual(ReconOrders.NoCavalryOrder, second.Orders[0].code, "taking Scouting off");
+        AssertEqual(1, second.Moves.FindAll(m => m.id == 1).Count, "and the mover's move is the only one");
+    }
+
+    // ---- verify F2: the recon flag off ----
+
+    private static void ReconFlagOffEndsEveryMissionAndMovesNothing()
+    {
+        var s = World();
+        s.HasCapital = true;
+        s.CapitalX = 10f;
+        s.CapitalZ = 0f;
+        var tired = Unit(1, 300f, 0f, cavalry: 0.8f);
+        tired.Supply01 = 0.3f;
+        s.Own.Add(tired);
+        s.Own.Add(Unit(2, 0f, 40f, cavalry: 0.1f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f), (ReconKind.Picket, 2, 300f, 40f));
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: one mission is Recalled (Sync alone leaves it)");
+        ledger.ReleaseAll(ReconMissionLedger.ReasonReconOff);
+        foreach (var m in ledger.Missions)
+        {
+            AssertEqual(ReconState.Cleared, m.State, "every mission ended, " + m.Kind);
+            AssertEqual(ReconMissionLedger.ReasonReconOff, m.Reason, "with the flag's reason");
+        }
+        var host = new FakeReconHost();
+        var tally = new ReconExecutor().Review(s, ledger, host, new MoveTracker(), false);
+        AssertEqual(0, host.Moves.Count, "nothing is moved: a recalled formation is vanilla's where it stands");
+        AssertEqual(0, tally.Issued, "nor counted");
+        foreach (var o in host.Orders) AssertEqual(ReconOrders.NoCavalryOrder, o.code, "only stand-down orders are sent");
+    }
+
+    private static void ReconSyncAndFlagOffWiringPinned()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        string sync = BodyOf(src, "private static void SyncRecon(");
+        AssertTrue(HasLine(sync, "Recon[snapshot.Alliance].ReleaseAll(ReconMissionLedger.ReasonReconOff);"), "the flag off ends every mission, Recalled ones included");
+        AssertTrue(HasLine(sync, "Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);"), "the flag on binds the allocation");
+        int flag = sync.IndexOf("FlagOn(Plugin.EnableCampaignReconnaissance)", StringComparison.Ordinal);
+        AssertTrue(flag >= 0 && flag < sync.IndexOf("ReleaseAll(", StringComparison.Ordinal) && sync.IndexOf("ReleaseAll(", StringComparison.Ordinal) > sync.IndexOf("else", StringComparison.Ordinal), "ReleaseAll is the else of the flag");
+    }
+
+    // ---- verify F3: a stand-down the executors owe survives the days they miss ----
+
+    private static void ClearedScreenWaitsForItsStandDownAcrossDaysTheExecutorsMiss()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        var executor = new ReconExecutor();
+        var first = new FakeReconHost();
+        executor.Review(s, ledger, first, new MoveTracker(), false);
+        AssertEqual(ReconOrders.ScoutingOrder, first.Orders[0].code, "Scouting given");
+        AssertTrue(ledger.Missions[0].StandDownDue, "and owed");
+
+        // The mission expires on a day the executors do not run (the W&L pause, a stale plan): OnReview alone, twice.
+        var late = World(Day + 60);
+        late.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(late, null);
+        AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "expired");
+        for (int d = 61; d <= 63; d++)
+        {
+            var day = World(Day + d);
+            day.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+            ledger.OnReview(day, null);
+        }
+        AssertEqual(1, ledger.Missions.Count, "the cleared mission is still there after several review days without an executor pass");
+        AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "still Cleared, never re-derived into a live state");
+
+        var back = World(Day + 64);
+        back.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var host = new FakeReconHost();
+        executor.Review(back, ledger, host, new MoveTracker(), false);
+        AssertEqual(1, host.Orders.Count, "the first executor pass takes the order off");
+        AssertEqual(ReconOrders.NoCavalryOrder, host.Orders[0].code, "120");
+        AssertEqual(0, host.Moves.Count, "and moves nothing");
+        AssertFalse(ledger.Missions[0].StandDownDue, "the debt is paid");
+        ledger.OnReview(back, null);
+        AssertEqual(0, ledger.Missions.Count, "so the mission is dropped at the next review");
+    }
+
+    private static void PendingStandDownIsBoundedAtMaxMissionDays()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        new ReconExecutor().Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        var late = World(Day + ReconMissionLedger.MaxMissionDays);
+        late.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(late, null);                                       // expired
+        int cleared = late.DaySerial;
+        var next = World(cleared + 1);
+        next.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(next, null);                                       // first review that sees it Cleared: stamps the day
+        AssertEqual(next.DaySerial, ledger.Missions[0].ClearedDay, "stamped");
+        var edge = World(next.DaySerial + ReconMissionLedger.MaxMissionDays - 1);
+        edge.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(edge, null);
+        AssertEqual(1, ledger.Missions.Count, "kept one day short of the bound");
+        var over = World(next.DaySerial + ReconMissionLedger.MaxMissionDays);
+        over.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(over, null);
+        AssertEqual(0, ledger.Missions.Count, "dropped at MaxMissionDays: the executors may be off for good");
+    }
+
+    private static void PendingStandDownIsLetGoWhenItCanNeverBeSent()
+    {
+        // The formation is gone.
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        var executor = new ReconExecutor();
+        executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        var gone = World(Day + 1);
+        ledger.OnReview(gone, null);                                        // unit 1 missing: Cleared "missing"
+        var host = new FakeReconHost();
+        executor.Review(gone, ledger, host, new MoveTracker(), false);
+        AssertEqual(0, host.Orders.Count, "no formation to order");
+        AssertFalse(ledger.Missions[0].StandDownDue, "nothing is owed to a formation that is not there");
+
+        // Its chain is no longer None (N2, a known limit): level -1 would reach the player's units, so it is never sent; the
+        // group keeps Scouting until a readiness reset (113960).
+        var s2 = World();
+        s2.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger2 = Ledger(s2, (ReconKind.Screen, 1, 300f, 0f));
+        var ex2 = new ReconExecutor();
+        ex2.Review(s2, ledger2, new FakeReconHost(), new MoveTracker(), false);
+        ledger2.Sync(s2, new List<ReconTask>(), new Allocation { Alliance = 0 });   // cleared "unassigned"
+        var carrying = new FakeReconHost();
+        carrying.Chain[1] = WlChainClass.CarryingGroup;
+        ex2.Review(s2, ledger2, carrying, new MoveTracker(), false);
+        AssertEqual(0, carrying.Orders.Count, "never a cavalry call on a group in the player's chain");
+        AssertFalse(ledger2.Missions[0].StandDownDue, "and the debt is let go");
+        ledger2.OnReview(s2, null);
+        AssertEqual(0, ledger2.Missions.Count, "so the mission is dropped");
+    }
+
+    private static void QueuedStandDownIsKeptUntilItIsDelivered()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        var executor = new ReconExecutor();
+        executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        ledger.Sync(s, new List<ReconTask>(), new Allocation { Alliance = 0 });
+        var queued = new FakeReconHost { OrderResult = CavalrySend.QueuedOther };
+        executor.Review(s, ledger, queued, new MoveTracker(), false);
+        AssertTrue(ledger.Missions[0].StandDownDue, "a queued 121 is still waiting: the stand-down was not delivered");
+        ledger.OnReview(s, null);
+        AssertEqual(1, ledger.Missions.Count, "the mission stays");
+        var done = new FakeReconHost { OrderResult = CavalrySend.AlreadySet };
+        executor.Review(s, ledger, done, new MoveTracker(), false);
+        AssertFalse(ledger.Missions[0].StandDownDue, "delivered (the wanted mode is set) on a later pass");
+    }
+
+    private static void RetaskedScreenSupersedesTheDebtOfItsClearedMission()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        var executor = new ReconExecutor();
+        executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        Resync(ledger, s, (ReconKind.Picket, 1, 400f, 0f));                  // old screen Cleared "re-tasked", the picket active
+        var host = new FakeReconHost();
+        executor.Review(s, ledger, host, new MoveTracker(), false);
+        AssertEqual(ReconOrders.NoCavalryOrder, host.Orders[0].code, "the picket is no scout: Scouting comes off");
+        foreach (var m in ledger.Missions) AssertFalse(m.StandDownDue, "nothing is owed once it has");
+        ledger.OnReview(s, null);
+        AssertEqual(1, ledger.Missions.Count, "only the picket remains");
+
+        // Screen again after a picket: the debt moves to the new active mission and the old cleared one stops owing.
+        var s2 = World();
+        s2.Own.Add(Unit(1, 0f, 0f, cavalry: 0.8f));
+        var l2 = Ledger(s2, (ReconKind.Screen, 1, 300f, 0f));
+        var e2 = new ReconExecutor();
+        e2.Review(s2, l2, new FakeReconHost(), new MoveTracker(), false);
+        Resync(l2, s2, (ReconKind.Screen, 1, 500f, 0f), (ReconKind.Picket, 2, 400f, 0f));
+        // (the same-kind Screen keeps its mission; a second formation's picket is unrelated)
+        int owing = 0;
+        foreach (var m in l2.Missions) if (m.InstanceId == 1 && m.StandDownDue) owing++;
+        AssertEqual(1, owing, "one mission owes the stand-down of unit 1");
+    }
+
+    private static void StandDownDebtRoundTripsThroughRestore()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+        new ReconExecutor().Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        ledger.Sync(s, new List<ReconTask>(), new Allocation { Alliance = 0 });
+        var late = World(Day + 1);
+        late.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        ledger.OnReview(late, null);                                          // stamps ClearedDay
+        var saved = new List<ReconMission>(ledger.Missions);
+        var loaded = new ReconMissionLedger();
+        loaded.Restore(saved);
+        AssertEqual(1, loaded.Missions.Count, "restored");
+        AssertTrue(loaded.Missions[0].StandDownDue, "the owed stand-down survives a save");
+        AssertEqual(late.DaySerial, loaded.Missions[0].ClearedDay, "and so does the day that bounds it");
+        var host = new FakeReconHost();
+        new ReconExecutor().Review(late, loaded, host, new MoveTracker(), false);
+        AssertEqual(ReconOrders.NoCavalryOrder, host.Orders[0].code, "and is paid after the load");
+    }
+
+    // ---- verify N4: the mover path (the refactor kept it; these were unpinned before) ----
+
+    private static void MoverRefusalListsNothingAndKeepsTheObjective()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
+        var a = new Allocation { Alliance = 0 };
+        a.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
+        var tracker = new MoveTracker();
+        var host = new FakeMoverHost { MoveResult = false };
+        var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertEqual(1, host.Moves.Count, "vanilla was asked");
+        AssertEqual(1, tally.Failed, "and refused");
+        AssertEqual(0, host.Listed.Count, "a refused move is not listed in unitsinoffensiveoperations");
+        var records = new List<MoveRecord>(tracker.Records);
+        AssertEqual(1, records.Count, "the refusal is recorded");
+        AssertEqual(98, records[0].ObjectiveId, "with the objective the move was for, so G3 can leave the formation out of that mass if it gives up");
     }
 
     private static void CavalryModeIsTheCodeMinusOneTwenty()
@@ -593,13 +955,13 @@ internal static class ReconExecutorTests
         AssertEqual(ReconOrders.CavalryCall.AlreadySet, ReconOrders.CallFor(mode: 1, current: 1, ordered: 1), "applied");
         AssertEqual(ReconOrders.CavalryCall.Send, ReconOrders.CallFor(mode: 0, current: 1, ordered: 0 + 1), "applied 1, ordered 1, wanted 0");
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
-        string send = BodyOf(src, "public bool SendCavalryOrder(");
+        string send = BodyOf(src, "public CavalrySend SendCavalryOrder(");
         AssertTrue(HasLine(send, "var call = ReconOrders.CallFor(mode, unit.cavalryorders, unit.cavalryordersordered);"), "the host asks the pure rule with vanilla's two fields");
         AssertTrue(HasLine(send, "NoteQueuedOther(unit, mode);"), "the queued-other case is logged");
         int noted = send.IndexOf("NoteQueuedOther(unit, mode);", StringComparison.Ordinal);
         int already = send.IndexOf("if (call == ReconOrders.CavalryCall.AlreadySet)", StringComparison.Ordinal);
-        AssertTrue(noted >= 0 && already > noted && send.Substring(noted, already - noted).Contains("return false;"), "and makes no call: vanilla would return at 90738 and the case would count as an order");
-        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return false;"), "and an order already set is not repeated");
+        AssertTrue(noted >= 0 && already > noted && send.Substring(noted, already - noted).Contains("return CavalrySend.QueuedOther;"), "and makes no call: vanilla would return at 90738 and the case would count as an order");
+        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return CavalrySend.AlreadySet;"), "and an order already set is not repeated");
         AssertTrue(HasLine(BodyOf(src, "private void NoteQueuedOther("), "if (!Noted.Add(unit.GetInstanceID())) return;"), "once per formation");
         AssertTrue(HasLine(BodyOf(src, "private static void Reset()"), "Noted.Clear();"), "and forgotten with the campaign");
     }
@@ -652,9 +1014,9 @@ internal static class ReconExecutorTests
     private static void ReconExecutorHostReadsLiveStateAndSendsOnlyNewOrders()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
-        string send = BodyOf(src, "public bool SendCavalryOrder(");
+        string send = BodyOf(src, "public CavalrySend SendCavalryOrder(");
         AssertTrue(HasLine(send, "int mode = ReconOrders.ModeOf(orderCode);"), "the mode comes from the pure helper");
-        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return false;"), "ChangeCampaignOrders tests cavalryorders only (90738), so a queued order would be queued again every review: the host compares what was ordered");
+        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return CavalrySend.AlreadySet;"), "ChangeCampaignOrders tests cavalryorders only (90738), so a queued order would be queued again every review: the host compares what was ordered");
         AssertTrue(HasLine(send, "battleUnits.ChangeCampaignOrders(unit, orderCode);"), "the player's own order path (90720-90770)");
         AssertTrue(HasLine(src, "if ((UnityEngine.Object)battleUnits == null || !battleUnits.IsCampaign) return null;"), "BattleUnits comes from the campaign map's GameController, never AICampaign's private bunits");
         AssertTrue(src.Contains("113960"), "the readiness reset that makes a repeat each review right is named");
@@ -741,6 +1103,20 @@ internal static class ReconExecutorTests
         };
     }
 
+    // Corps 1 on a probe mission that an overmatched contact recalled (the verifier's probe 2 setup): hold (200, 0), recall point set.
+    private static ReconMissionLedger RecalledProbeLedger(CampaignSnapshot s)
+    {
+        var ledger = new ReconMissionLedger();
+        var task = new ReconTask { Kind = ReconKind.Probe, SectorId = 0, FromX = 200f, FromZ = 0f, HoldX = 200f, HoldZ = 0f, Priority = 1f, Reason = "probe" };
+        var a0 = new Allocation { Alliance = 0 };
+        a0.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 200f, TargetZ = 0f, Reason = "probe", ReconMissionId = -1 });
+        ledger.Sync(s, new List<ReconTask> { task }, a0);
+        ledger.OnProbeContact(1, new ContactEvidenceOutput { Evidence = ContactEvidence.OvermatchedContact }, s.DaySerial);
+        ledger.OnReview(s, null);
+        AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: the probe is recalled");
+        return ledger;
+    }
+
     // Puts the formations on missions in one Sync: (kind, instance id, hold x, hold z); each mission is its own sector.
     private static ReconMissionLedger Ledger(CampaignSnapshot s, params (ReconKind kind, int id, float x, float z)[] missions)
     {
@@ -776,7 +1152,7 @@ internal sealed class FakeReconHost : IReconHost
     public Func<float, float, bool> Restricted = (x, z) => false;
     public readonly HashSet<int> Locked = new HashSet<int>();
     public bool MoveResult = true;
-    public bool OrderResult = true;
+    public CavalrySend OrderResult = CavalrySend.Sent;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
     public readonly List<(int id, int code)> Orders = new List<(int id, int code)>();
     public readonly List<int> Raised = new List<int>();
@@ -786,5 +1162,33 @@ internal sealed class FakeReconHost : IReconHost
     public bool PackageLocked(int instanceId) { return Locked.Contains(instanceId); }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
-    public bool SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return OrderResult; }
+    public CavalrySend SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return OrderResult; }
+}
+
+// One fake for the mover pass and the recon pass of one review. RefuseSecondMoveSameReview models MoveUnitTo's
+// DefensiveMovingOrder.OrderRunning(unit) (14519-14523, 9933-9945): a unit that took a move this review has an order running, so a
+// second MoveUnitTo for it returns false.
+internal sealed class OneReviewHost : IMoverHost, IReconHost
+{
+    public bool RefuseSecondMoveSameReview;
+    public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
+    public readonly List<(int id, int code)> Orders = new List<(int id, int code)>();
+    private readonly HashSet<int> _running = new HashSet<int>();
+
+    public bool TargetRestricted(float x, float z) { return false; }
+    public bool PackageLocked(int instanceId) { return false; }
+    public bool Move(int instanceId, float x, float z)
+    {
+        Moves.Add((instanceId, x, z));
+        if (RefuseSecondMoveSameReview && _running.Contains(instanceId)) return false;
+        _running.Add(instanceId);
+        return true;
+    }
+    public void RaiseTransportModes(int instanceId) { }
+    public int StateAllianceAt(float x, float z) { return x <= 150f ? 1 : 0; }
+    public bool AtWar(int otherAlliance) { return otherAlliance == 1; }
+    public bool IssuePlayerOrder(int instanceId, float x, float z) { return true; }
+    public void ListOffensive(int instanceId, bool listed) { }
+    public WlChainClass LiveChain(int instanceId) { return WlChainClass.None; }
+    public CavalrySend SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return CavalrySend.Sent; }
 }

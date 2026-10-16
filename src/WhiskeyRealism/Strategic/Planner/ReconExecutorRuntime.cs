@@ -82,22 +82,22 @@ namespace WhiskeyRealism.Strategic.Planner
             // ChangeCampaignOrders tests cavalryorders only (90738): with order delays on, an order still in the queue would be
             // queued again every review, and one that differs from the wanted mode cannot be replaced. ReconOrders.CallFor decides
             // from cavalryorders and cavalryordersordered (set by the call at 90748).
-            public bool SendCavalryOrder(int instanceId, int orderCode)
+            public CavalrySend SendCavalryOrder(int instanceId, int orderCode)
             {
                 var unit = UnitOf(instanceId);
-                if (unit == null) return false;
+                if (unit == null) return CavalrySend.NoUnit;
                 int mode = ReconOrders.ModeOf(orderCode);
                 var call = ReconOrders.CallFor(mode, unit.cavalryorders, unit.cavalryordersordered);
                 if (call == ReconOrders.CavalryCall.QueuedOther)
                 {
                     NoteQueuedOther(unit, mode);
-                    return false;
+                    return CavalrySend.QueuedOther;
                 }
-                if (call == ReconOrders.CavalryCall.AlreadySet) return false;
+                if (call == ReconOrders.CavalryCall.AlreadySet) return CavalrySend.AlreadySet;
                 var battleUnits = ResolveBattleUnits();
-                if ((UnityEngine.Object)battleUnits == null) return false;
+                if ((UnityEngine.Object)battleUnits == null) return CavalrySend.NoUnit;
                 battleUnits.ChangeCampaignOrders(unit, orderCode);
-                return true;
+                return CavalrySend.Sent;
             }
 
             // vanilla cannot replace the order that is waiting (ReconOrders.CallFor): say so once per formation. Bounded by the

@@ -29,7 +29,7 @@ namespace WhiskeyRealism.Strategic.Planner
             bool retry = tracker.IssueOutcome(f.InstanceId, tx, tz, queued) == MoveOutcome.Retried;
             if (host.TargetRestricted(tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId);
+                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget);
                 outcome = retry ? MoveOutcome.Retried : MoveOutcome.Failed;
                 return false;
             }
@@ -42,7 +42,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (!host.Move(f.InstanceId, tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId);
+                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget);
                 outcome = retry ? MoveOutcome.Retried : MoveOutcome.Failed;
                 return false;
             }
