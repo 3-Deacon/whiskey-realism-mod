@@ -59,6 +59,17 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>The perceived enemy strength within HoldRadiusMeters of a Held crossing; 0 for any other.</summary>
         public float HeldStrength(int link) => link >= 0 && link < _linkCount ? _heldStrength[link] : 0f;
 
+        /// <summary>
+        /// The most perceived strength standing at any one Held crossing. Per crossing, not summed: a regiment within <see cref="HoldRadiusMeters"/> of
+        /// two Held crossings is part of both, and a sum would count it twice.
+        /// </summary>
+        public float MaxHeldStrength()
+        {
+            float most = 0f;
+            for (int i = 0; i < _linkCount; i++) if (_heldStrength[i] > most) most = _heldStrength[i];
+            return most;
+        }
+
         /// <summary>The doctrine hour the crossing point was last perceived; negative infinity when never.</summary>
         public double LastPerceivedHours(int link) => link >= 0 && link < _linkCount ? _lastPerceived[link] : double.NegativeInfinity;
 

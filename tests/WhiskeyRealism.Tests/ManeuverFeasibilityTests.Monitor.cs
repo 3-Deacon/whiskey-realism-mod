@@ -235,12 +235,12 @@ internal static partial class ManeuverFeasibilityTests
         foreach (MemberEstimate m in ledger.Members(in maf).ToArray()) if (m.Kind == ManeuverFeasibility.MemberEnvelops) wing = m;
         var world = new FakeWorld();
         world.Phases[wing.ChildId] = ManeuverPhase.March;
-        ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix), ledger);
+        EvaluateSelectedFully(f.Build(BattlePlanId.ManeuverAndFix), ledger);
         AssertFalse(ledger.Assess(world, f.Now), "control: nothing changed");
         ChildFact child = ledger.Job.Children[ledger.Job.SlotOfChild(wing.ChildId)];
         var refusing = (FakeLegs)f.Legs;
         refusing.Answers.Insert(0, (child.X, child.Z, wing.TargetX, wing.TargetZ, -1, 0f, true));
-        ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix), ledger);
+        EvaluateSelectedFully(f.Build(BattlePlanId.ManeuverAndFix), ledger);
         AssertTrue(ledger.Assess(world, f.Now), "the leg is refused: the plan is broken");
         AssertEqual("route-missing", ledger.BrokenAssumption, "route-missing");
         // The same refusal once the wing is committed: no trigger, and the ledger names the reason it did not act on.
@@ -281,9 +281,9 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(FeasibilityVerdict.Unknown, Result(ledger, BattlePlanId.ManeuverAndFix).Verdict, "control: the first evaluation is Unknown");
         ledger.CaptureSelection(BattlePlanId.ManeuverAndFix, false);
         var world = new FakeWorld();
-        ManeuverFeasibility.EvaluateSelected(unready, ledger);
+        EvaluateSelectedFully(unready, ledger);
         AssertFalse(ledger.Assess(world, f.Now), "still Unknown: nothing to screen");
-        ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix), ledger);
+        EvaluateSelectedFully(f.Build(BattlePlanId.ManeuverAndFix), ledger);
         AssertTrue(ledger.Assess(world, f.Now), "the map is known");
         AssertEqual("map-known", ledger.BrokenAssumption, "map-known");
         AssertTrue(ledger.Assess(world, f.Now), "a cooldown that blocked the replan does not lose it");
@@ -335,7 +335,7 @@ internal static partial class ManeuverFeasibilityTests
         ledger.CaptureSelection(BattlePlanId.ManeuverAndFix, false);
         AssertNear((float)ledger.EvaluatedHours, (float)ledger.SelectedAtHours, 1e-6f, "the snapshot is the evaluation the pick read");
         AssertFalse(ledger.Assess(world, f.Now), "no re-evaluation of the selected plan yet: nothing to compare");
-        ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix, BattlePlanId.DoubleEnvelopment), ledger);
+        EvaluateSelectedFully(f.Build(BattlePlanId.ManeuverAndFix, BattlePlanId.DoubleEnvelopment), ledger);
         AssertEqual(2, ledger.CandidateCount, "the monitor's evaluation does not touch the candidate table");
         AssertFalse(ledger.Assess(world, f.Now), "an unchanged plan breaks nothing");
         // A new selection starts the monitor over: its re-evaluation must be of the new plan.
@@ -349,7 +349,7 @@ internal static partial class ManeuverFeasibilityTests
         CandidateResult maf = Result(crossing, BattlePlanId.ManeuverAndFix);
         AssertTrue(maf.Mirrored, "control: the pin-and-cross side is the mirrored one");
         crossing.CaptureSelection(BattlePlanId.ManeuverAndFix, true);
-        ManeuverFeasibility.EvaluateSelected(four.Build(BattlePlanId.ManeuverAndFix), crossing);
+        EvaluateSelectedFully(four.Build(BattlePlanId.ManeuverAndFix), crossing);
         AssertTrue(crossing.MonitorLedger.TryGet(BattlePlanId.ManeuverAndFix, out CandidateResult monitored), "the monitor has a result");
         AssertTrue(monitored.Mirrored, "on the selected side");
         AssertNear(maf.Penalty, monitored.Penalty, 1e-4f, "the same penalty as the full evaluation, whose inputs did not change");
@@ -374,7 +374,7 @@ internal static partial class ManeuverFeasibilityTests
         var world = new FakeWorld();
         world.Phases[wing.ChildId] = ManeuverPhase.March;
         world.Regions[wing.ChildId] = f.Regions.RegionAt(child.X, child.Z);
-        ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix), ledger);
+        EvaluateSelectedFully(f.Build(BattlePlanId.ManeuverAndFix), ledger);
         AssertFalse(ledger.Assess(world, f.Now), "control: nothing changed");
 
         world.Held.Add(1);

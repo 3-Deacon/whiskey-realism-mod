@@ -4,6 +4,7 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using static TestHarness;
 using static BattleMovementHonestyTests;
+using static ManeuverFeasibilityFixtures;
 
 // BC14 task 5: the crossing watch (spec § 13.1 S1 XING-*). Map: BandGrid's 400-unit square with a river band on x in [190, 210) and
 // crossings listed on the band; an enemy regiment stands east of the crossing at (200, -200) and faces west (heading 270) when it
@@ -13,6 +14,7 @@ internal static partial class ManeuverFeasibilityTests
     static (string, Action)[] CrossingTests() => new (string, Action)[]
     {
         ("bc14 XING-HELD an enemy regiment within 1.5 x fire range facing the crossing holds it; at 50 degrees it does not", XingHeld),
+        ("bc14 XING-HELD-MAX the crossing row's held strength is the largest at one Held crossing, never a sum that counts a regiment twice", XingHeldMax),
         ("bc14 XING-WATCHED an infantry regiment within its reach, not facing, watches; beyond it does not; a battery never holds", XingWatched),
         ("bc14 XING-CLEAR a probe within 0.25 h makes a crossing clear; a stale probe does not", XingClear),
         ("bc14 XING-REMEMBERED a remembered regiment at 0.4 confidence neither holds nor watches", XingRemembered),
@@ -98,10 +100,43 @@ internal static partial class ManeuverFeasibilityTests
         BattleSnapshot far = SnapshotOf(10.0, Enemy(260f, -200f, 270f, 100f, strength: 800f), Enemy(200f, 130f, 270f, 100f, strength: 5000f));
         watch.Classify(far, r, g, new FnGroundProbe(), ShippedReach, 10.0);
         AssertNear(800f, watch.HeldStrength(0), 0.01f, "a regiment 330 units off adds nothing");
+        // The held strength counts the same samples every other BC14 reader counts: a Remembered observation below the floor, a command
+        // group and a reinforcement column standing in the radius add nothing.
+        BattleSnapshot filtered = SnapshotOf(10.0,
+            Enemy(260f, -200f, 270f, 100f, strength: 800f),
+            Enemy(300f, -150f, 270f, 100f, strength: 7000f, state: ObservationState.Remembered, confidence: 0.4f),
+            Enemy(280f, -190f, 270f, 100f, strength: 7000f, unitTyp: TacticalUnitType.BattleGroupDivision),
+            Enemy(270f, -180f, 270f, 100f, strength: 7000f, reinforcement: true));
+        watch.Classify(filtered, r, g, new FnGroundProbe(), ShippedReach, 10.0);
+        AssertNear(800f, watch.HeldStrength(0), 0.01f, "only the sample rule's observations are in the held strength");
         // A map that is not ready answers Unknown for everything.
         watch.Classify(s, new RiverRegions(), g, new FnGroundProbe(), ShippedReach, 10.0);
         AssertEqual(0, watch.LinkCount, "no regions, no links");
         AssertEqual(CrossingState.Unknown, watch.StateOf(0), "unknown");
+    }
+
+    // The telemetry row reports the most strength at any one Held crossing, not the sum over them: a regiment between two Held crossings is
+    // part of the strength at both.
+    static void XingHeldMax()
+    {
+        const int size = 400;
+        BattleTerrainGrid grid = GridOf(size, size, (x, zi) => (x >= 100 && x < 120) || (x >= 300 && x < 320) ? River : Grass, false,
+            new[] { 110f, 310f }, new[] { -200f, -200f }, new[] { Ford, Ford });
+        RiverRegions regions = RegionsOf(grid, size);
+        var watch = new CrossingWatch();
+        BattleSnapshot s = SnapshotOf(10.0,
+            Enemy(170f, -200f, 270f, 100f, strength: 800f),                   // faces the west ford, 60 units east of it
+            Enemy(250f, -200f, 90f, 100f, strength: 900f),                    // faces the east ford, 60 units west of it
+            Enemy(210f, -200f, 0f, 100f, strength: 5000f));                   // between them, facing neither, inside 300 of both
+        watch.Classify(s, regions, grid, new FnGroundProbe(), ShippedReach, 10.0);
+        AssertEqual(CrossingState.Held, watch.StateOf(0), "the west ford is held");
+        AssertEqual(CrossingState.Held, watch.StateOf(1), "and the east ford");
+        float a = watch.HeldStrength(0), b = watch.HeldStrength(1);
+        AssertTrue(a > 5000f && b > 5000f, "the middle regiment is part of both: " + a + " and " + b);
+        AssertNear(Math.Max(a, b), watch.MaxHeldStrength(), 1e-3f, "the row reports the larger of the two");
+        AssertTrue(watch.MaxHeldStrength() < a + b - 4000f, "and never their sum, which would count the middle regiment twice");
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityTelemetry.cs"),
+            "float heldStrength = watch.MaxHeldStrength();", "the crossing row reads the per-crossing maximum");
     }
 
     static void XingWatched()

@@ -97,6 +97,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>How many sides each candidate of the last evaluation was evaluated on (CANDIDATE-CENTRED), by candidate index.</summary>
         internal readonly int[] SidesEvaluated = new int[FeasibilityLedger.MaxCandidates];
 
+        /// <summary>Work units of the Defender's picture done in this evaluation, and the most path searches plus courier rides one unit cost (the work-unit tests read them).</summary>
+        internal int WorkUnits, MaxUnitCost;
+
         /// <summary>The most path searches one candidate side needed in this evaluation (requirement-frame-budget's counted bound).</summary>
         internal int MaxSearchesPerSide;
 
@@ -167,7 +170,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Enemy.Build(Input.Snapshot, Input.EnemyEstimate, Input.Confidence, Input.Army.Caution01, Input.HasAssumedEnemy, Input.AssumedEnemyX,
                 Input.AssumedEnemyZ, EnemyX, EnemyZ);
             PrepareChildren();
-            ManeuverFeasibility.PrepareDefender(this);
+            ManeuverFeasibility.BeginDefender(this);
+            WorkUnits = 0;
+            MaxUnitCost = 0;
             ledger.BeginBack();
             Running = true;
         }
@@ -180,6 +185,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             if (!Running) return false;
             int doneThisCall = 0;
+            // The Defender's picture first, a work unit at a time between two deadline checks (requirement-frame-budget); the candidates read it.
+            while (!Defender.IsDone)
+            {
+                if (doneThisCall > 0 && clock != null && clock() >= deadlineTicks) return false;
+                int searchesBefore = Graph.Searches, ridesBefore = Defender.Rides;
+                ManeuverFeasibility.StepDefender(this);
+                int cost = (Graph.Searches - searchesBefore) + (Defender.Rides - ridesBefore);
+                if (cost > MaxUnitCost) MaxUnitCost = cost;
+                WorkUnits++;
+                doneThisCall++;
+            }
             while (NextCandidate < PlanCount)
             {
                 if (doneThisCall > 0 && clock != null && clock() >= deadlineTicks) return false;
@@ -327,19 +343,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return false;
         }
 
-        // GetSlowestSpeedOfGroup (requirement-march-time): a cavalry-only child marches at the mounted base; a child with foot or guns at the
-        // slowest base among them, capped at one for a mixed group.
+        // Vanilla's pace of a group (requirement-march-time): a regiment moves at its own base (133353-133358, horse artillery times the
+        // horse-artillery factor) times Min(groupspeed, 1) (133986), and groupspeed is the slowest base in the group (GetSlowestSpeedOfGroup
+        // 91708-91733). The body's pace is the slowest regiment's, s x Min(s, 1): s while every base is at least 1 (cavalry 2, horse artillery
+        // 2.5 move faster than infantry), s squared only below 1. It is not capped at 1.
         private float BaseSpeedOf(int slot, in MarchRules rules)
         {
-            if (_hasCavalry[slot] && !_hasInfantry[slot] && !_hasArtillery[slot] && !_hasHorseArtillery[slot]) return rules.CavalryMountedBase;
             float slowest = float.MaxValue;
             if (_hasInfantry[slot]) slowest = Math.Min(slowest, rules.InfantryBase);
             if (_hasArtillery[slot]) slowest = Math.Min(slowest, rules.ArtilleryLimberedBase);
-            // Horse artillery marches at the limbered base times vanilla's horse-artillery factor (GetSlowestSpeedOfGroup).
             if (_hasHorseArtillery[slot]) slowest = Math.Min(slowest, rules.ArtilleryLimberedBase * rules.HorseArtilleryFactor);
             if (_hasCavalry[slot]) slowest = Math.Min(slowest, rules.CavalryMountedBase);
             if (slowest == float.MaxValue) slowest = rules.InfantryBase;
-            return Math.Min(slowest, 1f);
+            return slowest * Math.Min(slowest, 1f);
         }
     }
 }

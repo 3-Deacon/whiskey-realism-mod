@@ -48,7 +48,7 @@ internal static partial class ManeuverFeasibilityTests
         ManeuverFeasibility.Evaluate(in input, ledger);
         ledger.CaptureSelection(BattlePlanId.ManeuverAndFix, false);
         ManeuverFeasibility.Evaluate(in input, ledger);
-        ManeuverFeasibility.EvaluateSelected(in input, ledger);
+        EvaluateSelectedFully(in input, ledger);
         ledger.Assess(null, f.Now);
         long ticks = 0;
         Func<long> clock = () => ticks++;          // one delegate for the run: the runtime passes Stopwatch.GetTimestamp
@@ -68,7 +68,7 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(0L, sliced, "an evaluation in " + slices + " slices allocated " + sliced + " bytes");
 
         mark = BeginAllocationWindow();
-        ManeuverFeasibility.EvaluateSelected(in input, ledger);
+        EvaluateSelectedFully(in input, ledger);
         ledger.Assess(null, f.Now);
         long monitor = AllocatedSince(mark);
         AssertEqual(0L, monitor, "one monitor step allocated " + monitor + " bytes");

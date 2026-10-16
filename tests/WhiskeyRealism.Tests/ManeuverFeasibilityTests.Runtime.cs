@@ -174,16 +174,21 @@ internal static partial class ManeuverFeasibilityTests
         string runtime = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityRuntime.cs");
         string order = FlankResponseTests.Flat(runtime);
         int classify = order.IndexOf("Classify(st, snapshot, regions, now); Evaluate(", StringComparison.Ordinal);
-        int monitor = order.IndexOf("Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now);", StringComparison.Ordinal);
+        int monitor = order.IndexOf("Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);", StringComparison.Ordinal);
         int confirm = order.IndexOf("st.Legs.Process(NavQuery);", StringComparison.Ordinal);
         AssertTrue(classify > 0 && monitor > classify && confirm > monitor, "probes and the evaluation, then the monitor, then the confirmation query");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.evaluate\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the evaluate scope at 2.0 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.monitor\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))", "the monitor scope at 0.5 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.navmesh\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the navmesh scope at 2.0 ms");
-        FlankResponseTests.AssertPinned(runtime, "if (!army.HasPlan || !ledger.HasSelection || !ledger.HasEvaluation) return;", "the monitor needs a standing plan and a published evaluation");
+        FlankResponseTests.AssertPinned(runtime, "if (!army.HasPlan || !ledger.HasSelection || !ledger.HasEvaluation) { st.MonitorWanted = false; return; }", "the monitor needs a standing plan and a published evaluation");
         FlankResponseTests.AssertPinned(runtime, "now - st.LastStartHours < ManeuverFeasibility.EvaluateIntervalHours", "a new evaluation waits out the interval after the last one's start");
         FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "ManeuverFeasibility.Candidates.cs"),
             "EvaluateIntervalHours = 0.05f, EvaluateSliceMs = 1.5f", "the spec's evaluation interval (0.05 h) and slice (1.5 ms)");
+        // One slice budget per tick, shared by the evaluation and the monitor; the monitor resumes a part-run on the next tick.
+        FlankResponseTests.AssertPinned(runtime, "Evaluate(st, side, army, bunits, snapshot, evidence, axis, regions, now, forced, deadline);", "the evaluation takes the tick's deadline");
+        FlankResponseTests.AssertPinned(runtime, "Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);", "and so does the monitor");
+        FlankResponseTests.AssertPinned(runtime, "if (!ManeuverFeasibility.EvaluateSelectedSlice(in input, ledger, deadline, Stopwatch.GetTimestamp)) return;", "a monitor run that ran out of budget waits for the next tick");
+        FlankResponseTests.AssertPinned(runtime, "st.MonitorWanted = true;", "a new heavy snapshot asks for a monitor run");
         FlankResponseTests.AssertPinned(runtime, "army.SetFeasibility(Plugin.ManeuverFeasibilityEnabled() ? st.Ledger : null);", "the ledger is pushed, null with the flag off");
         FlankResponseTests.AssertPinned(runtime, "OnceLog.Warning(\"tactical-battle-core:feasibility-nav-failed\"", "a failed confirmation leaves the leg an estimate and says so once");
         FlankResponseTests.AssertPinned(runtime, "OnceLog.Warning(\"tactical-battle-core:feasibility-daylight-missing\"", "a missing storm system means no daylight term and says so once");
@@ -208,7 +213,7 @@ internal static partial class ManeuverFeasibilityTests
         foreach (string field in new[] { "doctrineHours", "plan", "body", "child", "kind", "strength", "routeUnits", "routeSource", "marchVia", "attackVia", "marchViaState",
             "attackViaState", "strikeContested", "courierHours", "marchHours", "inwardSurplusHours", "strikeHours", "desiredStrikeHours", "releaseHours", "enemyShiftHours",
             "windowHours", "pin", "enemyAgainst", "isolatedOdds", "bar", "ownRatio", "daylight", "detail", "contested", "approach", "exposure", "turn", "penalty", "assumption",
-            "suppression", "mirrored", "heldStrength", "verdict", "reason", "candidates", "impossible", "risky", "selected", "slices", "forced", "queries", "legsSampled", "legOverflow", "confirmQueued" })
+            "suppression", "mirrored", "maxHeldStrength", "verdict", "reason", "candidates", "impossible", "risky", "selected", "slices", "forced", "queries", "legsSampled", "legOverflow", "confirmQueued" })
             AssertTrue(telemetry.Contains("WithField(\"" + field + "\""), "the feasibility rows carry " + field);
         foreach (string key in new[] { "feasibility-first", "feasibility-filtered", "feasibility-replan", "feasibility-via" })
             AssertTrue(telemetry.Contains("tactical-battle-core:" + key), "the once-log " + key + " exists");

@@ -13,9 +13,16 @@ internal static class ManeuverFeasibilityFixtures
 {
     // unitprefs.txt: basicunitspeed 1000, unitbasicspeed infantry 1 / cavalry mounted 2 / artillery limbered 1, courier 2.33 x 2.2 x 1000,
     // processing 0.02, route 0.02, bugle 0.02 within 75, fatiguefactorspeed 0.2.
+    /// <summary>The monitor's evaluation to completion (a forced run: any part-run is dropped first).</summary>
+    internal static void EvaluateSelectedFully(in FeasibilityInput input, FeasibilityLedger into)
+    {
+        if (into.HasSelection) into.MonitorLedger.Job.Abort();
+        ManeuverFeasibility.EvaluateSelectedSlice(in input, into, long.MaxValue, null);
+    }
+
     internal static MarchRules ShippedRules(bool orderDelays = true) => new MarchRules
     {
-        BasicUnitSpeed = 1000f, InfantryBase = 1f, CavalryMountedBase = 2f, ArtilleryLimberedBase = 1f, HorseArtilleryFactor = 1.2f,
+        BasicUnitSpeed = 1000f, InfantryBase = 1f, CavalryMountedBase = 2f, ArtilleryLimberedBase = 1f, HorseArtilleryFactor = 2.5f,
         FatigueSpeedExponent = 0.2f, ProcessingHours = 0.02f, RouteProcessingHours = 0.02f, BugleHours = 0.02f, BugleRange = 75f,
         CourierSpeedPerHour = 2.33f * 2.2f * 1000f, OrderDelays = orderDelays,
     };
@@ -249,11 +256,14 @@ internal static class ManeuverFeasibilityFixtures
         }
 
         /// <summary>A corps of artillery batteries only (<paramref name="horse"/>: horse artillery). Returns the corps' tree index; its child id is appended.</summary>
-        public int AddBatteryCorps(float lateral, float depth, float strength, bool horse, int batteries = 2)
+        public int AddBatteryCorps(float lateral, float depth, float strength, bool horse, int batteries = 2, int cavalry = 0)
         {
             float x = X(lateral), z = Z(depth);
             int corps = Tree.Add(TacticalUnitType.BattleGroupDivision, x, z, ArmyIndex);
             int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
+            for (int r = 0; r < cavalry; r++)
+                Tree.Add(TacticalUnitType.Cavalry, x, z, brigade, UnitFlags.IsCavalry | UnitFlags.Mounted, strength / (batteries + cavalry), morale: 1f, fireRange: 100f,
+                    rotationY: 0f, fatigue: 0f);
             for (int r = 0; r < batteries; r++)
                 Tree.Add(TacticalUnitType.Artillery, x, z, brigade, UnitFlags.IsArtillery | (horse ? UnitFlags.HorseArtillery : 0),
                     strength / batteries, morale: 1f, fireRange: 300f, rotationY: 0f, fatigue: 0f);

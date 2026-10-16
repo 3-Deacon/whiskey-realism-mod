@@ -170,6 +170,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// </summary>
     public struct FeasibilityInput
     {
+        /// <summary>The monitor's one-candidate run: it builds no look list (the ledger's published one is the full evaluation's).</summary>
+        public bool SkipLooks;
         public BattleSnapshot Snapshot;
         public TacticalFrontAxis Axis;
         public BattleStance Stance;

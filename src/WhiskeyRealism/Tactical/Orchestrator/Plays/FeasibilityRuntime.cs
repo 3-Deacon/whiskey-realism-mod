@@ -40,6 +40,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public int Slices;
             public bool Forced;
             public int MonitoredGeneration = -1;
+            /// <summary>A new heavy snapshot wants the monitor to re-evaluate the selected plan; cleared when a run starts on it.</summary>
+            public bool MonitorWanted;
             public string LastBroken;
             public string LastSuppression;
 
@@ -59,6 +61,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Slices = 0;
                 Forced = false;
                 MonitoredGeneration = -1;
+                MonitorWanted = false;
                 LastBroken = null;
                 LastSuppression = null;
                 ArmyCommanderIndex = -1;
@@ -142,18 +145,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 st.Legs.SetClock(now);
                 RiverRegions regions = RiverRegionsRuntime.Ready();
 
+                // One slice budget for the tick: the evaluation and the monitor share it, each resuming on the next tick where the budget ran out.
+                long deadline = Stopwatch.GetTimestamp() + (long)(ManeuverFeasibility.EvaluateSliceMs * 0.001 * Stopwatch.Frequency);
                 using (TelemetryPerf.Scope("tactical.feasibility.evaluate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
                     Classify(st, snapshot, regions, now);
-                    Evaluate(st, side, army, bunits, snapshot, evidence, axis, regions, now, forced);
+                    Evaluate(st, side, army, bunits, snapshot, evidence, axis, regions, now, forced, deadline);
                 }
 
                 if (forced) return;
                 if (snapshotGeneration < 0 || snapshotGeneration != st.MonitoredGeneration)
                 {
                     st.MonitoredGeneration = snapshotGeneration;
+                    st.MonitorWanted = true;
+                }
+                if (st.MonitorWanted || st.Ledger.MonitorRunning)
+                {
                     using (TelemetryPerf.Scope("tactical.feasibility.monitor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
-                        Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now);
+                        Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);
                 }
 
                 using (TelemetryPerf.Scope("tactical.feasibility.navmesh", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
@@ -176,7 +185,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         private static void Evaluate(SideState st, TacticalBattleOrchestrator side, ArmyOrchestrator army, BattleUnits bunits, BattleSnapshot snapshot, ArmyEvidence evidence,
-            TacticalFrontAxis axis, RiverRegions regions, double now, bool forced)
+            TacticalFrontAxis axis, RiverRegions regions, double now, bool forced, long deadline)
         {
             FeasibilityLedger ledger = st.Ledger;
             FeasibilityJob job = ledger.Job;
@@ -201,7 +210,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             FeasibilityInput input = default;
             if (!job.Running) BuildInput(st, army, bunits, snapshot, evidence, axis, regions, now, withCandidates: true, out input);
-            long deadline = Stopwatch.GetTimestamp() + (long)(ManeuverFeasibility.EvaluateSliceMs * 0.001 * Stopwatch.Frequency);
             bool done = ManeuverFeasibility.EvaluateSlice(in input, job, ledger, deadline, Stopwatch.GetTimestamp);
             st.Slices++;
             if (done) Published(st, regions, now);
@@ -219,12 +227,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // ------------------------------------------------------------------------------------------------------ the monitor
 
         private static void Monitor(SideState st, TacticalBattleOrchestrator side, ArmyOrchestrator army, BattleUnits bunits, BattleSnapshot snapshot, ArmyEvidence evidence,
-            TacticalFrontAxis axis, RiverRegions regions, double now)
+            TacticalFrontAxis axis, RiverRegions regions, double now, long deadline)
         {
             FeasibilityLedger ledger = st.Ledger;
-            if (!army.HasPlan || !ledger.HasSelection || !ledger.HasEvaluation) return;
-            BuildInput(st, army, bunits, snapshot, evidence, axis, regions, now, withCandidates: false, out FeasibilityInput input);
-            ManeuverFeasibility.EvaluateSelected(in input, ledger);
+            if (!army.HasPlan || !ledger.HasSelection || !ledger.HasEvaluation) { st.MonitorWanted = false; return; }
+            // A run in progress continues from its own copy of the input; a new one is built from this tick's snapshot and clears the want.
+            FeasibilityInput input = default;
+            if (!ledger.MonitorRunning)
+            {
+                st.MonitorWanted = false;
+                BuildInput(st, army, bunits, snapshot, evidence, axis, regions, now, withCandidates: false, out input);
+            }
+            if (!ManeuverFeasibility.EvaluateSelectedSlice(in input, ledger, deadline, Stopwatch.GetTimestamp)) return;
             st.World.Bind(snapshot, regions);
             ledger.Assess(st.World, now);
             string reason = ledger.BrokenAssumption;

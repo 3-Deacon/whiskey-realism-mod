@@ -82,21 +82,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ReasonWingAbandoned = "wing-abandoned", ReasonMapKnown = "map-known";
 
         /// <summary>
-        /// The monitor's evaluation: only the selected plan, on the side the army selected it on, into the ledger's monitor ledger (never the
-        /// candidate table the selection reads). Runs to completion; it is one candidate.
+        /// One slice of the monitor's evaluation: only the selected plan, on the side the army selected it on, into the ledger's monitor ledger
+        /// (never the candidate table the selection reads). The same work units and deadline as the full one, so the Defender's picture of a wide map
+        /// resumes on the next tick): starts it when none is running, and marks the monitor ledger fresh when it finishes. True when finished
+        /// (also when there is no selection to monitor).
         /// </summary>
-        public static void EvaluateSelected(in FeasibilityInput input, FeasibilityLedger into)
+        public static bool EvaluateSelectedSlice(in FeasibilityInput input, FeasibilityLedger into, long deadlineTicks, Func<long> clock)
         {
-            if (!into.HasSelection) return;
+            if (!into.HasSelection) return true;
             FeasibilityLedger monitor = into.MonitorLedger;
-            monitor.SetSelectedSide(into.SelectedPlan, into.SelectedMirrored);
-            FeasibilityInput one = input;
-            one.Candidates = into.OneCandidate(into.SelectedPlan);
-            one.CandidateCount = 1;
-            // The monitor job keeps its own leg cache: Begin clears the one it uses, and a shared cache would lose the legs of a full evaluation that is mid-run.
-            one.Cache = null;
-            Evaluate(in one, monitor);
+            if (!monitor.Job.Running)
+            {
+                monitor.SetSelectedSide(into.SelectedPlan, into.SelectedMirrored);
+                FeasibilityInput one = input;
+                one.Candidates = into.OneCandidate(into.SelectedPlan);
+                one.CandidateCount = 1;
+                one.SkipLooks = true;
+                // The monitor job keeps its own leg cache: Begin clears the one it uses, and a shared cache would lose the legs of a full evaluation that is mid-run.
+                one.Cache = null;
+                monitor.Job.Begin(in one, monitor);
+            }
+            if (!monitor.Job.Step(monitor, deadlineTicks, clock)) return false;
             into.MarkMonitorFresh();
+            return true;
         }
 
         // The first approach reason in the spec's order, or null: crossing-held, route-missing, late, detail, wing-abandoned.

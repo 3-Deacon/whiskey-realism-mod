@@ -22,8 +22,11 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 THREAT-KEYED-BY-ID the threat matrix is read by child id, not by position or count", ThreatKeyedById),
         ("bc14 DEF-NO-SAMPLES with no enemy perceived the assumed point counts crossings for the penalty and publishes none", DefNoSamples),
         ("bc14 ENEMY-SAMPLE-FILTER the enemy picture counts what EnemySamples.Accepts counts and nothing else", EnemySampleFilter),
-        ("bc14 MARCH-HORSE-ARTILLERY a child with horse artillery marches at the limbered base times the horse-artillery factor, capped at 1", MarchHorseArtillery),
+        ("bc14 MARCH-HORSE-ARTILLERY a child with horse artillery marches at vanilla's pace (slowest base x Min(that, 1)), horse artillery at the limbered base times 2.5", MarchHorseArtillery),
         ("bc14 LOOK-DEF-FRONTAL a Defender also asks about an Unknown front crossing the perceived enemy reaches before dark, which the threat list does not carry", LookDefenderFrontal),
+        ("bc14 LOOK-LIST-ORDER the Defender's look list is the crossings the enemy reaches before dark, earliest first, at most eight", LookListOrder),
+        ("bc14 DEF-WORK-UNITS the Defender's picture is built in work units: no slice runs more than its budget, no unit costs more than one body's rides, the result equals a forced run", DefWorkUnits),
+        ("bc14 DEF-TIME informational: a 60-crossing Defender field's whole picture and its largest work unit, in milliseconds", DefTime),
         ("bc14 XING-OWN-COVER an own regiment covers a crossing by its facing and fire range; a routed, grouped, artillery or off-line one does not", XingOwnCover),
     };
 
@@ -199,27 +202,31 @@ internal static partial class ManeuverFeasibilityTests
 
     static void MarchHorseArtillery()
     {
-        // A factor under 1 slows horse artillery below the limbered base; foot artillery and a horse battery with a foot battery are unaffected by it.
-        MarchRules slow = ShippedRules();
-        slow.HorseArtilleryFactor = 0.6f;
-        float Speed(bool horse, bool foot, MarchRules rules)
+        // Vanilla's pace of a group is the slowest regiment's base times Min(groupspeed, 1), not a cap at 1 (133353-133358, 133986, 91708-91733).
+        // The shipped data: infantry 1, limbered artillery 1, mounted cavalry 2, horse artillery the limbered base times 2.5.
+        float Speed(MarchRules rules, bool infantry, int cavalry, int horse, int foot)
         {
             FeasField f = DefenderField(g => { g.Enemies.Clear(); g.AddEnemy(0f, 556f, 5000f); });
             f.Rules = rules;
-            if (horse) f.AddBatteryCorps(-600f, 100f, 3000f, horse: true);
-            if (foot) f.AddBatteryCorps(600f, 100f, 3000f, horse: false);
+            if (infantry) f.AddCorps(-600f, 100f, 3000f);
+            else f.AddBatteryCorps(-600f, 100f, 3000f, horse: horse > 0, batteries: horse + foot, cavalry: cavalry);
             FeasibilityLedger ledger = DefenderLedger(f);
-            int slot = ledger.Job.SlotOfChild(f.ChildIds[f.ChildIds.Count - 1]);
-            if (horse && foot) slot = ledger.Job.SlotOfChild(f.ChildIds[f.ChildIds.Count - 2]);
-            return ledger.Job.Children[slot].BaseSpeed;
+            return ledger.Job.Children[ledger.Job.SlotOfChild(f.ChildIds[f.ChildIds.Count - 1])].BaseSpeed;
         }
-        AssertNear(0.6f, Speed(true, false, slow), 1e-6f, "horse artillery: limbered base 1 x factor 0.6");
-        AssertNear(1f, Speed(false, true, slow), 1e-6f, "foot artillery ignores the factor");
+        MarchRules shipped = ShippedRules();
+        AssertNear(2.5f, shipped.HorseArtilleryFactor, 1e-6f, "the fixture carries the shipped factor");
+        AssertNear(2f, Speed(shipped, false, cavalry: 2, horse: 2, foot: 0), 1e-6f, "a cavalry corps with horse batteries moves at the cavalry's 2: not capped at 1, not slowed to 2.5");
+        AssertNear(2.5f, Speed(shipped, false, cavalry: 0, horse: 2, foot: 0), 1e-6f, "horse artillery alone moves at the limbered base times 2.5");
+        AssertNear(1f, Speed(shipped, false, cavalry: 2, horse: 0, foot: 2), 1e-6f, "cavalry with foot guns moves at the guns' 1");
+        AssertNear(2f, Speed(shipped, false, cavalry: 2, horse: 0, foot: 0), 1e-6f, "cavalry alone moves at 2");
+        AssertNear(1f, Speed(shipped, true, 0, 0, 0), 1e-6f, "infantry moves at 1");
+        // Only a base under 1 squares (s x Min(s, 1)); no shipped type has one.
+        MarchRules slow = ShippedRules();
+        slow.HorseArtilleryFactor = 0.6f;
+        AssertNear(0.36f, Speed(slow, false, cavalry: 0, horse: 2, foot: 0), 1e-6f, "a base of 0.6 gives 0.6 x Min(0.6, 1)");
         // The snapshot builder sets the flag from the regiment's own ishorseartillery (a runtime file: a source pin).
         FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Battle", "BattleSnapshotBuilder.cs"),
             "if (reg.ishorseartillery) flags |= UnitFlags.HorseArtillery;", "the snapshot marks horse artillery");
-        MarchRules fast = ShippedRules();
-        AssertNear(1f, Speed(true, false, fast), 1e-6f, "a factor of 1.2 is capped at 1, as vanilla's caller caps a group");
     }
 
     static void XingOwnCover()
@@ -269,5 +276,171 @@ internal static partial class ManeuverFeasibilityTests
         FeasibilityLedger noneLedger = DefenderLedger(none);
         AssertTrue(ledger.Job.Defender.LookCount >= 2, "control: the perceived enemy reaches both crossings, " + ledger.Job.Defender.LookCount);
         AssertEqual(0, noneLedger.Job.Defender.LookCount, "no sample, no crossing in the enemy's reach for a look");
+    }
+
+    // A Defender field over 60 fords with n enemy regiments 200 apart (one cluster each), the shape the frame-budget tests use.
+    static FeasField WideDefender(int enemies, Action<FeasField> more = null, int fords = 60)
+    {
+        FeasField f = ManyFords(fords);
+        f.Stance = BattleStance.Defender;
+        f.Enemies.Clear();
+        for (int e = 0; e < enemies; e++) f.AddEnemy(-1100f + 200f * (e % 12), 420f + 200f * (e / 12), 800f);
+        more?.Invoke(f);
+        f.Legs = StraightLegs(f, DefensivePlans);
+        return f;
+    }
+
+    static void LookListOrder()
+    {
+        FeasField f = WideDefender(24, g => g.Perceived = (x, z) => false);
+        FeasibilityLedger probe = new FeasibilityLedger();
+        FeasibilityInput input = f.Build(DefensivePlans);
+        ManeuverFeasibility.Evaluate(in input, probe);
+        DefenderPicture d = probe.Job.Defender;
+        int routed = probe.Job.Input.Regions.RoutedCount;
+        // Daylight cut at the median arrival: some links are reached before dark and some are not.
+        var arrivals = new List<float>();
+        for (int l = 0; l < routed; l++) if (d.LinkBody[l] >= 0) arrivals.Add(d.LinkEarliest[l]);
+        arrivals.Sort();
+        AssertTrue(arrivals.Count > 20, "the enemy reaches many fords: " + arrivals.Count);
+        float cut = arrivals[arrivals.Count / 2];
+        f.DaylightHours = cut;
+        var ledger = new FeasibilityLedger();
+        FeasibilityInput cutInput = f.Build(DefensivePlans);
+        ManeuverFeasibility.Evaluate(in cutInput, ledger);
+        d = ledger.Job.Defender;
+        AssertEqual(ManeuverFeasibility.MaxThreatCrossings, d.LookCount, "more than eight fords are reached before dark: the list holds eight");
+        var reached = new List<float>();
+        for (int l = 0; l < routed; l++) if (d.LinkBody[l] >= 0 && d.LinkEarliest[l] < cut) reached.Add(d.LinkEarliest[l]);
+        reached.Sort();
+        AssertTrue(reached.Count > ManeuverFeasibility.MaxThreatCrossings, "and there are more than eight to choose from: " + reached.Count);
+        for (int i = 0; i < d.LookCount; i++)
+        {
+            float at = d.LinkEarliest[d.LookLinks[i]];
+            AssertTrue(at < cut, "look " + i + " is reached before dark (" + at + " < " + cut + ")");
+            AssertNear(reached[i], at, 1e-6f, "look " + i + " is the " + i + "-th earliest of the crossings reached before dark");
+        }
+
+        // Dusk falls before the eighth: only the crossings reached before it are in the list, not the eight earliest regardless.
+        int few = 4;
+        AssertTrue(arrivals[few] > arrivals[few - 1], "the fixture's arrivals separate");
+        float dusk = (arrivals[few - 1] + arrivals[few]) * 0.5f;
+        f.DaylightHours = dusk;
+        var late = new FeasibilityLedger();
+        FeasibilityInput duskInput = f.Build(DefensivePlans);
+        ManeuverFeasibility.Evaluate(in duskInput, late);
+        AssertEqual(few, late.Job.Defender.LookCount, "only the crossings reached before dusk are listed");
+        for (int i = 0; i < late.Job.Defender.LookCount; i++)
+            AssertTrue(late.Job.Defender.LinkEarliest[late.Job.Defender.LookLinks[i]] < dusk, "look " + i + " is before dusk");
+    }
+
+    static void DefWorkUnits()
+    {
+        const int budget = 4;
+        FeasField f = WideDefender(24);
+        FeasibilityInput input = f.Build(DefensivePlans);
+        var forced = new FeasibilityLedger();
+        ManeuverFeasibility.Evaluate(in input, forced);
+        int totalUnits = forced.Job.WorkUnits;
+        AssertTrue(totalUnits > 120, "the picture of 60 fords and 16 bodies is many units: " + totalUnits);
+        AssertTrue(forced.Job.Defender.Rides <= forced.Job.Input.Regions.RoutedCount * forced.Job.Defender.BodyCount,
+            "each link's earliest arrival is priced once, not again in the flank loop: " + forced.Job.Defender.Rides + " rides over "
+            + forced.Job.Input.Regions.RoutedCount + " links and " + forced.Job.Defender.BodyCount + " bodies");
+        AssertTrue(forced.Job.MaxUnitCost <= ManeuverFeasibility.MaxEnemyBodies, "no unit costs more than one body's courier rides or one path search: " + forced.Job.MaxUnitCost);
+
+        // The same evaluation under a budget of `budget` units a call (the clock advances one tick per check): resumable, every call bounded.
+        var sliced = new FeasibilityLedger();
+        long ticks = 0;
+        Func<long> clock = () => ticks++;
+        int calls = 0, mostUnits = 0, previous = 0;
+        bool done = false;
+        while (!done)
+        {
+            long deadline = ticks + budget;
+            done = ManeuverFeasibility.EvaluateSlice(in input, sliced.Job, sliced, deadline, clock);
+            calls++;
+            int units = sliced.Job.WorkUnits - previous;
+            previous = sliced.Job.WorkUnits;
+            if (units > mostUnits) mostUnits = units;
+            AssertTrue(calls < 2000, "the evaluation finishes");
+        }
+        AssertTrue(mostUnits <= budget + 1, "no call ran more than its budget of units (+1 for the guaranteed one): " + mostUnits);
+        AssertTrue(calls > totalUnits / (budget + 1), "the work was spread over many calls: " + calls);
+        AssertEqual(totalUnits, sliced.Job.WorkUnits, "the same units in the end");
+        AssertEqual(forced.ThreatCount, sliced.ThreatCount, "the same threats");
+        AssertEqual(forced.CandidateCount, sliced.CandidateCount, "the same candidates");
+        for (int c = 0; c < forced.CandidateCount; c++)
+        {
+            forced.TryGetAt(c, out CandidateResult a);
+            sliced.TryGetAt(c, out CandidateResult b);
+            AssertEqual(a.Plan, b.Plan, "candidate " + c + " plan");
+            AssertNear(a.Penalty, b.Penalty, 1e-6f, "candidate " + c + " penalty");
+        }
+
+        // An Attacker has no picture to build.
+        FeasField attacker = WideDefender(24, g => g.Stance = BattleStance.Meeting);
+        FeasibilityInput attackInput = attacker.Build(DefensivePlans);
+        var attackLedger = new FeasibilityLedger();
+        ManeuverFeasibility.Evaluate(in attackInput, attackLedger);
+        AssertEqual(0, attackLedger.Job.WorkUnits, "an Attacker's evaluation has no Defender work units");
+
+        // The monitor's run is the same work in slices, builds no look list, and finishes with the monitor ledger fresh.
+        forced.CaptureSelection(BattlePlanId.PreparedDefense, false);
+        ManeuverFeasibility.Evaluate(in input, forced);
+        ticks = 0;
+        int monitorCalls = 0;
+        while (!ManeuverFeasibility.EvaluateSelectedSlice(in input, forced, ticks + budget, clock))
+        {
+            monitorCalls++;
+            AssertTrue(forced.MonitorRunning, "the monitor run is part-way between calls");
+            AssertTrue(monitorCalls < 2000, "the monitor finishes");
+        }
+        AssertTrue(monitorCalls > 5, "the monitor's picture also took several calls: " + monitorCalls);
+        AssertEqual(0, forced.MonitorLedger.Job.Defender.LookCount, "the monitor builds no look list");
+        AssertFalse(forced.MonitorRunning, "and is done");
+        // A new selection drops a monitor run of the old one.
+        ticks = 0;
+        AssertFalse(ManeuverFeasibility.EvaluateSelectedSlice(in input, forced, ticks + 2, clock), "a tight budget leaves the monitor part-way");
+        AssertTrue(forced.MonitorRunning, "part-way");
+        forced.CaptureSelection(BattlePlanId.GenericMethodical, false);
+        AssertFalse(forced.MonitorRunning, "a new selection ends the old selection's monitor run");
+    }
+
+    static void DefTime()
+    {
+        // Informational (never asserted): the harness machine is not the game's. The binding measurement is the in-game frame budget (smoke item 6).
+        // The same field and counts the verifier timed: ManyFords(n) as a Defender with 24 samples, the minimum over 200 runs.
+        foreach (int fords in new[] { 10, 20, 60 })
+        {
+            FeasField f = WideDefender(24, null, fords);
+            FeasibilityInput input = f.Build(DefensivePlans);
+            var ledger = new FeasibilityLedger();
+            ManeuverFeasibility.Evaluate(in input, ledger);            // warm-up
+            double bestTotal = double.MaxValue, bestLargest = double.MaxValue;
+            int units = 0;
+            for (int run = 0; run < 200; run++)
+            {
+                ledger.Job.Abort();
+                ledger.Job.Begin(in input, ledger);
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp(), last = t0;
+                double largest = 0.0;
+                units = 0;
+                while (!ledger.Job.Defender.IsDone)
+                {
+                    ManeuverFeasibility.StepDefender(ledger.Job);
+                    units++;
+                    long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                    double ms = (now - last) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    if (ms > largest) largest = ms;
+                    last = now;
+                }
+                double total = (last - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                if (total < bestTotal) { bestTotal = total; bestLargest = largest; }
+            }
+            ledger.Job.Abort();
+            Console.WriteLine("INFO DEF-TIME " + fords + " fords, 24 samples: the whole picture " + bestTotal.ToString("F3") + " ms in " + units + " work units, its largest unit "
+                + bestLargest.ToString("F3") + " ms");
+            AssertTrue(ledger.Job.Defender.IsDone && units > 0, "the picture was built in units");
+        }
     }
 }

@@ -46,6 +46,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         internal void MarkMonitorFresh() => _monitorFresh = true;
 
+        /// <summary>The monitor's evaluation is part-way through (it resumes on the next tick).</summary>
+        internal bool MonitorRunning => _monitor != null && _monitor.Job.Running;
+
         // A new selection: its evaluation becomes the snapshot the monitor compares against, and nothing is broken yet.
         private void BeginMonitoring()
         {
@@ -53,6 +56,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _mapKnownFired = false;
             _abandonedCount = 0;
             _monitorFresh = false;
+            _monitor?.Job.Abort();            // a run of the old selection must not finish into the new one
             _selected.Clear();
             _hasSnapshot = false;
             SelectedAtHours = EvaluatedHours;
