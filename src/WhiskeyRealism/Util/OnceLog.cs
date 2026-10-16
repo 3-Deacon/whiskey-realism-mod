@@ -48,7 +48,7 @@ namespace WhiskeyRealism.Util
         internal const string TacticalKeyPrefix = "tactical";
 
         /// <summary>Whether a key has already fired: a caller that builds its message with a concatenation asks first, so the string exists only when it logs.</summary>
-        internal static bool HasFired(string key)
+        internal static bool AlreadyLogged(string key)
         {
             lock (Gate)
                 return _fired.Contains(key);

@@ -478,17 +478,17 @@ internal static partial class CommanderOpportunityTests
     {
         OnceLog.Reset();
         const string key = "tactical-battle-core:revise-guard";
-        AssertFalse(OnceLog.HasFired(key), "not fired yet");
+        AssertFalse(OnceLog.AlreadyLogged(key), "not fired yet");
         OnceLog.Info(key, "first");
-        AssertTrue(OnceLog.HasFired(key), "fired");
-        OnceLog.HasFired(key);
+        AssertTrue(OnceLog.AlreadyLogged(key), "fired");
+        OnceLog.AlreadyLogged(key);
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) OnceLog.HasFired(key);
+        for (int i = 0; i < 1000; i++) OnceLog.AlreadyLogged(key);
         AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "asking allocates nothing");
         string producer = ReadSrc("Tactical/Battle/Producers/OpportunityIntentProducer.cs");
-        AssertContains(producer, "!OnceLog.HasFired(\"tactical-battle-core:opportunity-first-opening\")", "the opening line is built only when it logs");
-        AssertContains(producer, "!OnceLog.HasFired(\"tactical-battle-core:opportunity-first-exploit\")", "and the exploit line");
-        AssertContains(ReadSrc("Patches/CavalryStrikeDisciplinePatch.cs"), "!OnceLog.HasFired(\"tactical-battle-core:cavalry-strike-first-refusal\")", "and the refusal line");
+        AssertContains(producer, "!OnceLog.AlreadyLogged(\"tactical-battle-core:opportunity-first-opening\")", "the opening line is built only when it logs");
+        AssertContains(producer, "!OnceLog.AlreadyLogged(\"tactical-battle-core:opportunity-first-exploit\")", "and the exploit line");
+        AssertContains(ReadSrc("Patches/CavalryStrikeDisciplinePatch.cs"), "!OnceLog.AlreadyLogged(\"tactical-battle-core:cavalry-strike-first-refusal\")", "and the refusal line");
         OnceLog.Reset();
     }
 }

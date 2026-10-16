@@ -112,7 +112,7 @@ namespace WhiskeyRealism.Patches
                     }
                     __result = null;
                     Row(__instance, snapshot, "refused", reason);
-                    if (!OnceLog.HasFired("tactical-battle-core:cavalry-strike-first-refusal"))
+                    if (!OnceLog.AlreadyLogged("tactical-battle-core:cavalry-strike-first-refusal"))
                         OnceLog.Info("tactical-battle-core:cavalry-strike-first-refusal", "[CavalryStrike] first refused: reason=" + reason);
                 }
                 catch (Exception ex)
