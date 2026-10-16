@@ -88,6 +88,9 @@ internal static class ReconPlannerTests
             ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
             ("ClearedMissionIsGoneAfterTheNextReview", ClearedMissionIsGoneAfterTheNextReview),
             ("ProbeVerdictEnemyIsThePlansMainEnemy", ProbeVerdictEnemyIsThePlansMainEnemy),
+            ("ProbeIsReleasedNotRecalledWhenTheMainMoves", ProbeIsReleasedNotRecalledWhenTheMainMoves),
+            ("ProbeOnTheNewMainSectorIsJudgedWithAFreshReference", ProbeOnTheNewMainSectorIsJudgedWithAFreshReference),
+            ("ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector", ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector),
             ("ProbeVerdictSitsOnTheOddsThresholds", ProbeVerdictSitsOnTheOddsThresholds),
             ("ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup", ReadLocalForceBalanceReadsBeliefsBeforeTheFactionLookup),
             ("ReconRowRoutesToTheRegisteredEvent", ReconRowRoutesToTheRegisteredEvent),
@@ -1208,7 +1211,7 @@ internal static class ReconPlannerTests
         ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
         AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "a screen is not a probe");
         AssertEqual("probe-escalate", MissionOf(ledger, 3).Reason, "the probe on the main sector's objective is judged");
-        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 4).State), "a probe with no objective in the plan is left alone");
+        AssertEqual("main-moved", MissionOf(ledger, 4).Reason, "a probe on a sector that is not the plan's main sector is released, never judged");
         ReconStep.ProbeVerdicts(s, null, null, 0, ledger);
         ReconStep.ProbeVerdicts(null, plan, null, 0, ledger);
         ReconStep.ProbeVerdicts(s, plan, null, 0, null);
@@ -1443,6 +1446,87 @@ internal static class ReconPlannerTests
         ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
         AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "the plan's enemy decides: 12000 / 5000");
         AssertNear(5000f, MissionOf(ledger, 2).ObservedEnemyStrength, 0.01f, "and is the strength remembered");
+    }
+
+    // A probe serves the main effort. G3 can move the main (another sector) while a probe stands; judging it
+    // against the new main's enemy and the old main's remembered enemy would recall it for a reaction that
+    // never happened and bar the formation from every recon pick for up to 20 days. It is released instead:
+    // cleared, no Recalled state, no verdict, reason main-moved.
+    private static void ProbeIsReleasedNotRecalledWhenTheMainMoves()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                   // probe on unit 2, sector 2 (main), objective 3
+        plan.MainRequiredRatio = 2f;
+        plan.MassStrength = 7000f;
+        plan.MainEnemyStrength = 5000f;
+        s.Beliefs.Add(Belief("a", 805f, 0f, 5000f, Today, 1f, 5f));
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "fixture: day 1 holds and remembers the enemy");
+        int contact = MissionOf(ledger, 2).LastContactDay;
+
+        var moved = MainPlan(5, 1200f);                                              // day 2: the main effort moves to sector 5
+        moved.MainObjectiveId = 4;
+        moved.MainRequiredRatio = 2f;
+        moved.MassStrength = 7000f;
+        moved.MainEnemyStrength = 9000f;                                             // 9000 >= 1.45 x 5000 and the ratio is under 2: a false reaction
+        moved.Sectors.Add(new SectorPlan { SectorId = 2, Posture = TheaterPosture.Hold, TargetX = 800f, TargetZ = 0f });
+        ReconStep.ProbeVerdicts(s, moved, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        var m = MissionOf(ledger, 2);
+        AssertEqual(ReconState.Cleared, m.State, "released");
+        AssertEqual(ReconStep.ReleasedReason, m.Reason, "and says why");
+        AssertEqual(contact, m.LastContactDay, "no verdict was taken");
+        AssertFalse(ledger.IsRecalling(2), "never recalled, so no recall bar");
+        AssertFalse(ledger.IsRecon(2), "and no longer on a mission");
+
+        var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 5, FromX = 700f, FromZ = 0f, HoldX = 1100f, HoldZ = 0f, Priority = 1f, Reason = "t" };
+        AssertEqual(2, ReconPlanner.PickFormation(s, null, moved, ledger, task, new List<int>(), true), "the formation is pickable at once");
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(0, ledger.Missions.Count, "and the released mission is dropped by the next review");
+    }
+
+    private static void ProbeOnTheNewMainSectorIsJudgedWithAFreshReference()
+    {
+        var s = World();
+        s.Own.Add(Unit(2, 700f, 0f, 3000f, 0.9f, 14));
+        s.Own.Add(Unit(3, 1100f, 0f, 3000f, 0.9f, 14));
+        var ledger = new ReconMissionLedger();
+        AddMissions(ledger, s, (ReconKind.Probe, 2, 700f, 2), (ReconKind.Probe, 3, 1100f, 5));
+        ledger.OnProbeContact(2, ContactEvidenceLedger.Build(Evidence(friendly: 7000f, enemy: 5000f)), Today, 5000f, 3); // the old probe remembers 5000 at objective 3
+
+        var moved = MainPlan(5, 1200f);
+        moved.MainObjectiveId = 4;
+        moved.MainRequiredRatio = 2f;
+        moved.MassStrength = 7000f;
+        moved.MainEnemyStrength = 9000f;                                             // 1.8 x what the old probe remembers
+        ReconStep.ProbeVerdicts(s, moved, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        AssertEqual("main-moved", MissionOf(ledger, 2).Reason, "the old sector's probe is released");
+        var fresh = MissionOf(ledger, 3);
+        AssertTrue(ReconMissionLedger.IsActive(fresh.State), "the probe on the new main sector is judged, and 9000 is no reaction to anything it saw");
+        AssertNear(9000f, fresh.ObservedEnemyStrength, 0.01f, "it now remembers the new main's enemy");
+        AssertEqual(4, fresh.ObservedObjectiveId, "at the new main objective");
+    }
+
+    private static void ProbeReferenceRestartsWhenTheMainObjectiveChangesInOneSector()
+    {
+        var s = World();
+        var ledger = ProbeLedger(s, out var plan);                                   // sector 2, objective 3
+        plan.MainRequiredRatio = 2f;
+        plan.MassStrength = 7000f;
+        plan.MainEnemyStrength = 5000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
+        AssertEqual(3, MissionOf(ledger, 2).ObservedObjectiveId, "fixture: remembered at objective 3");
+
+        plan.MainObjectiveId = 4;                                                    // the same sector, another objective
+        plan.MainEnemyStrength = 9000f;                                              // 1.8 x the old objective's enemy
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 7), ledger);
+        AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "an enemy at another objective is no reaction");
+        AssertEqual(4, MissionOf(ledger, 2).ObservedObjectiveId, "the reference restarted at objective 4");
+        AssertNear(9000f, MissionOf(ledger, 2).ObservedEnemyStrength, 0.01f, "with its enemy");
+
+        plan.MainEnemyStrength = 14000f;                                             // 1.56 x the same objective's last look: a reaction
+        plan.MassStrength = 7000f;
+        ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 8), ledger);
+        AssertEqual("probe-withdraw", MissionOf(ledger, 2).Reason, "the same objective's enemy still reacts");
     }
 
     // The friendly side of the verdict sits on the plan's required ratio (1.1) and vanilla-probe withdraw ratio (0.55).

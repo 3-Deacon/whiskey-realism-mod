@@ -27,6 +27,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // The confidence-weighted enemy strength near the objective at the probe's last verdict (the
         // reference for the enemy-reaction test); -1 before the first look. Probes only.
         public float ObservedEnemyStrength;
+        public int ObservedObjectiveId; // the main objective ObservedEnemyStrength was seen at; -1 none
     }
 
     // One alliance's recon missions (plan § G1b), written only inside the daily review: OnReview
@@ -109,15 +110,20 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The probe's ContactEvidenceLedger verdict (fed by beliefs and battle history).
-        // observedEnemyStrength (>= 0) is the strength this verdict was judged on; it becomes the next
-        // verdict's reference for the enemy-reaction test.
-        internal void OnProbeContact(int instanceId, ContactEvidenceOutput evidence, int daySerial, float observedEnemyStrength = -1f)
+        // observedEnemyStrength (>= 0) is the strength this verdict was judged on and observedObjectiveId the
+        // main objective it was seen at; together they become the next verdict's reference for the
+        // enemy-reaction test (ReconStep restarts the reference when the objective differs).
+        internal void OnProbeContact(int instanceId, ContactEvidenceOutput evidence, int daySerial, float observedEnemyStrength = -1f, int observedObjectiveId = -1)
         {
             if (evidence == null) return;
             int i = ActiveIndexOf(instanceId);
             if (i < 0 || _missions[i].Kind != ReconKind.Probe) return;
             var m = _missions[i];
-            if (observedEnemyStrength >= 0f) m.ObservedEnemyStrength = observedEnemyStrength;
+            if (observedEnemyStrength >= 0f)
+            {
+                m.ObservedEnemyStrength = observedEnemyStrength;
+                m.ObservedObjectiveId = observedObjectiveId;
+            }
             if (evidence.Evidence != ContactEvidence.NoContact) m.LastContactDay = daySerial;
             if (evidence.AllowsEscalation)
             {
@@ -130,6 +136,14 @@ namespace WhiskeyRealism.Strategic.Planner
                 m.Reason = "probe-withdraw";
             }
             _missions[i] = m;
+        }
+
+        // Ends an active mission without a verdict and without a recall: Cleared, so the formation is free
+        // for the next pick at once (a Recalled one is barred from every recon pick until it is back).
+        internal void Release(int instanceId, string reason)
+        {
+            int i = ActiveIndexOf(instanceId);
+            if (i >= 0) SetState(i, ReconState.Cleared, reason);
         }
 
         // On a recon mission (not recalled or cleared): the formation directive's Screen test.
@@ -296,7 +310,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 IssuedDay = s.DaySerial,
                 LastContactDay = -1,
                 Reason = task.Reason,
-                ObservedEnemyStrength = -1f
+                ObservedEnemyStrength = -1f,
+                ObservedObjectiveId = -1
             };
             _missions.Add(mission);
             return mission.MissionId;

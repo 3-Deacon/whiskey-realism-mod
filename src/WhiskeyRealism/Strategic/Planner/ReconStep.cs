@@ -39,6 +39,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // deletes that class); the escalate ratio is the plan's own required ratio for the main effort.
         internal const float ProbeWithdrawRatio = 0.55f;
         internal const float ProbeReactionMultiplier = 1.45f;
+        internal const string ReleasedReason = "main-moved"; // the mission's reason when its probe is released
 
         // `battles` are the battles this review judges (BattleInbox.Take) on the battle history's own day
         // scale, `legacyDaySerial` (BattleHistoryQuery.LegacySerial); the missions ledger's days are
@@ -66,9 +67,18 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var m = list[i];
                 if (m.Kind != ReconKind.Probe || !ReconMissionLedger.IsActive(m.State)) continue;
+                // A probe serves the main effort: one that stands on another sector than the plan's main (G3
+                // moved it) is released, not judged against the new main's numbers and not recalled.
+                if (m.SectorId != plan.MainSectorId)
+                {
+                    missions.Release(m.InstanceId, ReleasedReason);
+                    continue;
+                }
                 var objective = SectorPlanOf(plan, m.SectorId);
                 if (objective == null) continue;
                 float enemy = plan.MainEnemyStrength;
+                // The remembered enemy belongs to the objective it was seen at; another objective restarts it.
+                bool remembered = m.ObservedEnemyStrength >= 0f && m.ObservedObjectiveId == plan.MainObjectiveId;
                 var input = new ContactEvidenceInput
                 {
                     ObservingAllianceId = s.Alliance,
@@ -76,7 +86,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     TargetZ = objective.TargetZ,
                     CurrentEnemyStrength = enemy,
                     CurrentFriendlyStrength = plan.MassStrength,
-                    PreviousObservedEnemyStrength = m.ObservedEnemyStrength >= 0f ? m.ObservedEnemyStrength : enemy,
+                    PreviousObservedEnemyStrength = remembered ? m.ObservedEnemyStrength : enemy,
                     EnemyReactionMultiplier = ProbeReactionMultiplier,
                     EscalateFriendlyRatio = ReconPlanner.RequiredRatioOf(s, plan, objective),
                     WithdrawFriendlyRatio = ProbeWithdrawRatio,
@@ -85,7 +95,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     CurrentDaySerial = legacyDaySerial,
                     BeliefConfidence01 = EnemyBeliefQuery.ConfidenceWithin(s.Beliefs, objective.TargetX, objective.TargetZ, radius)
                 };
-                missions.OnProbeContact(m.InstanceId, ContactEvidenceLedger.Build(input), s.DaySerial, enemy);
+                missions.OnProbeContact(m.InstanceId, ContactEvidenceLedger.Build(input), s.DaySerial, enemy, plan.MainObjectiveId);
             }
         }
 
