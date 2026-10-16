@@ -29,11 +29,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public float TargetX, TargetZ;
         public int ObjectiveId;     // -1 when the move was not toward an objective (a depot, a recon hold point, a supply source)
-
-        public bool Matches(float tx, float tz)
-        {
-            return MoveTracker.SameTarget(TargetX, TargetZ, tx, tz);
-        }
     }
 
     // The move bookkeeping of one alliance (P8): at most MaxMovesPerDay MoveUnitTo calls per review day, a move judged at the
