@@ -1908,6 +1908,8 @@ Deviations from the plan and spec, each a finding or a decision:
 
 **Global-constraint deltas for the core:** none. No Prefix, no Transpiler, no new writer (the core's moves and stances go through the existing executor paths; BC10's via-point Move carries the crossing via). One `Tactical` bind.
 
+**Patch and producer surfaces:** no Harmony patch in any BC14 slice. No new producer: `BattleProducerRegistry.Order` and `BattleCoreTick.CreateProducer` are untouched, so smoke item 1.4's `count=13` holds. The evaluation, the monitor and the crossing probes run on the coordinator's heavy path (`DriveTacticalCommanderSide`), never in the arbiter tick. The producers that read BC14 state: `PostureIntentProducer` (the crossing via on the March and Attack orders, the `GuardFlank` guard point; BC14W the works hold, its stance and the contest; BC14O the screen target), `ReconIntentProducer` (the crossing look requests; BC14W the works-band skip of the probe), `DivisionPlayIntentProducer` and #45's `GroupStanceIntentProducer` (BC14W: they leave a works hold a hold), and BC14W's `ArtilleryIntentProducer` (the preparation and the `BombardStart` intent).
+
 **Spec amendments applied by this plan (spec § 15):** item 1 (renumbering: the level-of-detail section is now § BC15 and the formations section § BC16, with the dependency diagram, the BC10-BC12 rules, the "Later slices" line, BC13's section and the smoke labels; the BC13 spec's § 15 items 2-3 and `docs/superpowers/plans/2026-10-15-wl-order-flow.md`'s "BC14 decision 11" get the errata note in § BC13); item 2 (§ BC15 decision 13); item 3 (§ BC16 decision 14); items 4-7 (the tasks below; BC14W's reader table and works rows in § BC14W, the objective rows in § BC14O); item 8 (the core's quick-reference sentence in task 17; the write-owner and standing-rule text in § BC14W task 12; the fog sentence in § BC14O task 7); item 9 (above); item 10 (task 17, and each later slice's docs task).
 
 ### Owned files
@@ -2265,7 +2267,7 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 
 ### Task 7 — the works hold on the stored orders, states, leaves and stance
 
-**Requirements:** requirement-works-hold. **Tests:** WORKS-STANCE, WORKS-ORDER, WORKS-FALLBACK, WORKS-PROBE, WORKS-HOLD-GATE (WORKS-STANCE, WORKS-ORDER and WORKS-FALLBACK are red today: see each fail before its code, paste the lines into `evidence/bc14w/red-first.txt`). **Turns green:** WORKS-GUARD, WORKS-HOLD-BC11, WORKS-ADVANCE, FEAS-SCN-7.
+**Requirements:** requirement-works-hold. **Tests:** WORKS-STANCE, WORKS-ORDER, WORKS-FALLBACK, WORKS-PROBE, WORKS-HOLD-GATE (WORKS-STANCE, WORKS-ORDER and WORKS-FALLBACK are red today: see each fail before its code, paste the lines into `evidence/bc14w/red-first.txt`). **Turns green:** WORKS-GUARD, WORKS-HOLD-BC11.
 
 - [ ] `WorksHoldGuard` (`Holds(task, reason)`, `Reason` = `"works-hold"`, `Apply`, `ApplyState`, `ApplyLeaf`: `AttackObjective`, `SupportAttack` and `FixEnemy` → `HoldObjective`, `PreGuardTask` kept; a node in the `ManeuverNodeTable`, a `Gap` or `Penetration` exploit and a child that does not face works pass). `ArmyOrchestrator.UpdateOperationsLedger` guards the copied states, builds the orders, guards them into its own pooled array (`CurrentDoctrineOrders`); the ledger's own list stays unguarded; the guarded leaf map is cached (key: leaf signature, `WorksHoldHash`, `ManeuverHash`). `PostureLedger.GuardFallback` on the `TryBuildSingle` state. `ExploitTable.SetWorksView` per alliance each heavy tick and `Build` guarding non-breach exploits aimed on held works. The posture executor plans a guarded former `FixEnemy` with its target outside the band as a formation and waypoint, any other guarded order as a formation only.
 - [ ] The stance: `PosturePipeline.Run` submits `Map(HoldObjective)` (2) at Executor priority with `IntentFlags.WorksHold` before `Decide`, for a guarded order or state; `TacticalStanceOwnership` applies it after the `macroai` 3 retreat yield and the charge demotion, yields to vanilla's per-group stance 1, and against 3 or 4 skips `YieldsToVanilla` and the vanilla-assault refusal; `DecideStance` → `Deny` for `works-hold` and #45's ledger step on a `works-hold` state feed only the charge demotion; `TacticalOpportunityTaskOverride.Override(…, worksHold, …)`, the cavalry follow and `DivisionPlayIntentProducer` leave a guarded order a hold. `OperationStrength.CountsAsAssigned`; `intentsHash` folds `WorksHoldHash`, so a hold that turns true forces a store on the same heavy tick.
@@ -2274,7 +2276,7 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 
 ### Task 8 — the move contest
 
-**Requirements:** requirement-works-hold (the contest). **Tests:** WORKS-CONTEST (red today: see it fail first).
+**Requirements:** requirement-works-hold (the contest). **Tests:** WORKS-CONTEST (red today: see it fail first). **Turns green:** WORKS-ADVANCE (its onset clause is the contest's).
 **Produces:** `MoveContest.Decide(in ContestInput) → ContestAction` (`None`, `HoldStop` within `OrderArbiter.DedupeMeters` of the hold point, `HoldMove`, `Reissue`), `MoveContest.RecoveryAllowed(bool holds, float x, float z, IWorksQuery works)`, `ContestToleranceMeters` 50; `MoveContestState.ForAlliance(int)` (`BattleScope`; per group the last seen waypoint and path, the hold point latched at the first hold, the last contest tick); `OrderExecutor.LastIssuedMove`.
 
 - [ ] `PosturePipeline.Run` asks `MoveContest.Decide` for each works-held group and submits the hold's Stop or Move with `IntentFlags.Contest`; `OrderExecutor` issues a `Contest` Move inside the recent-order window and the courier cadence; `RecoveryAllowed` is called after `TryRecoveryPath` and plans the hold with the interrupted flag cleared. No cap: the bound is vanilla's skip-while-moving gate (spec WL-r5-2).
@@ -2282,7 +2284,7 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 
 ### Task 9 — the focal assault's execution: column, preparation, bombard start
 
-**Requirements:** requirement-focal-execution, requirement-player-share (its BC14W case). **Tests:** FOCAL-EXEC, FOCAL-PREP, FOCAL-PLAYER, BOMBARD-START. **Turns green:** FORMATION-CARRY.
+**Requirements:** requirement-focal-execution, requirement-player-share (its BC14W case). **Tests:** FOCAL-EXEC, FOCAL-PREP, FOCAL-PLAYER, BOMBARD-START. **Turns green:** FORMATION-CARRY, FEAS-SCN-7 (its aggressive run launches the column, which needs the `AssaultColumn` kind).
 
 - [ ] Failing tests.
 - [ ] The column: `ManeuverSpec` kind `AssaultColumn` (Attack on the focal point latched at the March; March, Turn and Attack orders carry `HasFormation` / `Formation` = March Column; the Turn ends at first contact, or at formation 4, or after `RoadRoutePlanner.ColumnWaitHours`, never before the preparation floor; `BuildInput`'s inward target, corridor and river checks run anchor → focal point; no `anchored-high-ground` abandon). `AssaultSupport` released at the column's strike + `EchelonDelayHours`; the demonstrations with the column; under `HoldForWorks` the support and demonstrations hold. `TargetFormationForTask(task, current, hasOrderFormation, orderFormation)` returns the order's formation when set.
@@ -2329,7 +2331,7 @@ Off: no works picture (works priced as open ground), no FocalAssault (its precon
 
 ### Task 13 — gates and mutation proof
 
-- [ ] The gate list of § BC14 task 18, with the BC14W files in the clock grep (`src/WhiskeyRealism/Tactical/Battle/Works/{WorksRules,WorksPicture,PreparationTable}.cs`, `src/WhiskeyRealism/Tactical/Battle/MoveContest.cs`); the BC7 writer grep is unchanged except `OrderExecutorRuntime.StartBombard` (named in `AGENTS.md`).
+- [ ] The gate list of § BC14 task 18, with the BC14W files in the clock grep (`src/WhiskeyRealism/Tactical/Battle/Works/{WorksRules,WorksPicture,PreparationTable}.cs`, `src/WhiskeyRealism/Tactical/Battle/MoveContest.cs`); the BC7 writer grep is unchanged except `OrderExecutorRuntime.StartBombard` (named in `AGENTS.md`), and `rg -n "\.bombardposition\s*=[^=]|\.bombardrange\s*=[^=]" src/WhiskeyRealism` lists only `OrderExecutorRuntime.cs` (BOMBARD-START pins the same through `BattleWriteGateTests`).
 - [ ] Mutation: every plant of spec § 13.2 in a scratch copy, one at a time, each killed by its named test; `evidence/bc14w/mutation.txt`.
 - [ ] Integrator: merge, deploy and hash-check, smoke items 2.63-2.66 and 3.13, and re-run item 2.60 with the flag on.
 
