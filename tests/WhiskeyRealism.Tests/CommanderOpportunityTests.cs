@@ -4,11 +4,12 @@ using static TestHarness;
 // BC13 (docs/superpowers/plans/2026-10-15-battle-core.md § BC13, spec docs/superpowers/specs/2026-10-15-battle-opportunity-design.md):
 // commander opportunity and exploitation. One test array per partial file, joined here:
 //   .Personality  PERS-*  (spec § 4)
+//   .Detection    DET-*   (spec § 5)
 internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)
