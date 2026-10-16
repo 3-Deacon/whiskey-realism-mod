@@ -73,6 +73,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableSeparatedEnemySteer;
         internal static ConfigEntry<bool> EnableVanillaReserveSupportPickFix;
         internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
+        internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -669,6 +670,14 @@ namespace WhiskeyRealism
                 "a random range that excludes the last candidate, so the last endangered regiment is never supported and, with two, always the " +
                 "first. With this on the pick includes every endangered regiment. A live rollback: turning it off restores vanilla's pick " +
                 "without a restart. Whiskey's reserve gate still denies this vanilla path for Reserve-role children.");
+            EnableVanillaMacroAssaultUpgradeFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Macro Assault Upgrade Fix",
+                true,
+                "Default ON. #122 (BUG-TAC-028): when vanilla's battle AI finds that no flanking is possible and the force balance is high " +
+                "it means to upgrade a macro attack to a full assault, but it writes the upgrade where the method's own decision never " +
+                "stores it, so the upgrade only lands when the pending value already was attack. With this on the assault upgrade reaches " +
+                "the stored decision. A live rollback: turning it off restores vanilla's behaviour without a restart.");
             EnableVanillaArtilleryChainSideFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Artillery Chain Side Fix",

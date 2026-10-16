@@ -34,6 +34,9 @@ internal static partial class CommanderOpportunityTests
             ("bc13 FIX-RESERVE-PICK a method with another site count is left as vanilla; the hook reads its flag live", FixReservePickGuards),
             ("bc13 FIX-ARTY-SIDE the real AssignReserves IL has exactly one Random.Range(1, 2) and its bound becomes the hook", FixArtyIl),
             ("bc13 FIX-ARTY-SIDE other site counts stay vanilla; the bound is 3 on and 2 off; the float roll is not matched", FixArtyGuards),
+            ("bc13 FIX-MACRO the real CheckGlobalAIStrategy IL has one assault-upgrade block and it becomes num4 = Hook(this, num4)", FixMacroIl),
+            ("bc13 FIX-MACRO the hook turns attack into assault with the flag on and performs vanilla's write with it off", FixMacroHook),
+            ("bc13 FIX-MACRO fixtures with zero or two blocks, a label inside, or no unique anchor stay vanilla", FixMacroGuards),
         };
     }
 
@@ -455,5 +458,133 @@ internal static partial class CommanderOpportunityTests
         AssertContains(patch, "tactical-il:artillery-side:transpiler", "exception key");
         AssertContains(patch, "[ArtillerySideIl] applied sites=", "the applied line");
         AssertFalse(ReadSrc("Tactical/Battle/BugFixes/ArtillerySideIl.cs").Contains(".Clone()"), "copies with new CodeInstruction(ci)");
+    }
+
+    // ------------------------------------------------------------------ #122 macro assault upgrade (BUG-TAC-028)
+
+    public static int MacroHookStub(AIBattle battle, int num4) => num4;
+
+    private static FieldInfo PendingField() => typeof(AIBattle).GetField("newmacroaitoset");
+
+    private static void FixMacroIl()
+    {
+        var field = PendingField();
+        AssertTrue(field != null, "newmacroaitoset exists");
+        var method = AccessTools.Method(typeof(AIBattle), MacroUpgradeIl.Method);
+        AssertTrue(method != null, "CheckGlobalAIStrategy exists");
+        var vanilla = PatchProcessor.GetOriginalInstructions(method);
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(MacroHookStub));
+        var edited = MacroUpgradeIl.Transpile(vanilla, field, hook, out int matches);
+        AssertEqual(1, matches, "exactly one assault-upgrade block");
+        AssertFalse(ReferenceEquals(edited, vanilla), "an edited copy");
+        AssertEqual(vanilla.Count - 3, edited.Count, "seven instructions became four");
+        int at = -1;
+        for (int i = 0; i < edited.Count; i++) if (edited[i].Calls(hook)) at = i;
+        AssertTrue(at >= 2, "the hook call is in the list");
+        AssertTrue(edited[at - 2].opcode == OpCodes.Ldarg_0, "the instance is the first argument");
+        AssertTrue(edited[at - 1].opcode.Name.StartsWith("ldloc"), "num4 is the second");
+        AssertTrue(edited[at + 1].opcode.Name.StartsWith("stloc"), "the result goes back into num4");
+        // The load and the store address num4: the same local the original "int num4 = newmacroaitoset" stored into.
+        int anchor = -1;
+        for (int i = 0; i + 1 < vanilla.Count; i++)
+            if (vanilla[i].opcode == OpCodes.Ldfld && ReferenceEquals(vanilla[i].operand, field) && vanilla[i + 1].opcode.Name.StartsWith("stloc")) anchor = i + 1;
+        AssertTrue(anchor > 0, "the num4 store is found in vanilla");
+        AssertEqual(vanilla[anchor].opcode.Name, edited[at + 1].opcode.Name, "same store opcode as num4's");
+        AssertEqual(vanilla[anchor].operand, edited[at + 1].operand, "same local as num4's");
+        AssertEqual(vanilla[anchor].opcode.Name.Replace("stloc", "ldloc"), edited[at - 1].opcode.Name, "the matching load");
+        AssertEqual(vanilla[anchor].operand, edited[at - 1].operand, "the load reads num4's local");
+        int Stores(System.Collections.Generic.List<CodeInstruction> c) => c.Count(ci => ci.opcode == OpCodes.Stfld && ReferenceEquals(ci.operand, field));
+        AssertEqual(Stores(vanilla) - 1, Stores(edited), "vanilla's write of the pending field is gone; the tail's remains");
+        AssertTrue(edited[at + 2].labels.Count > 0, "the branch target stays on the instruction after the block");
+    }
+
+    private static void FixMacroHook()
+    {
+        AssertEqual(0, MacroUpgradeIl.UpgradedDecision(1), "fix on: attack becomes assault");
+        AssertEqual(2, MacroUpgradeIl.UpgradedDecision(2), "defend stays");
+        AssertEqual(3, MacroUpgradeIl.UpgradedDecision(3), "retreat stays");
+        AssertEqual(-1, MacroUpgradeIl.UpgradedDecision(-1), "undecided stays");
+        AssertEqual(0, MacroUpgradeIl.UpgradedDecision(0), "assault stays");
+        AssertEqual(0, MacroUpgradeIl.VanillaPending(1), "fix off: a pending attack becomes assault (vanilla's own write)");
+        AssertEqual(2, MacroUpgradeIl.VanillaPending(2), "any other pending value is not written");
+        AssertEqual(-1, MacroUpgradeIl.VanillaPending(-1), "undecided is not written");
+
+        string patch = ReadSrc("Patches/MacroAssaultUpgradeFixPatch.cs");
+        AssertContains(patch, "[HarmonyPatch(typeof(AIBattle), \"CheckGlobalAIStrategy\")]", "the target");
+        AssertContains(patch, "if (Enabled()) return MacroUpgradeIl.UpgradedDecision(num4);", "a live flag read; the field is left alone");
+        AssertContains(patch, "battle.newmacroaitoset = MacroUpgradeIl.VanillaPending(battle.newmacroaitoset);", "flag off performs vanilla's write");
+        AssertContains(patch, "tactical-il:macro-upgrade:applied", "applied key");
+        AssertContains(patch, "tactical-il:macro-upgrade:pattern", "pattern key");
+        AssertContains(patch, "tactical-il:macro-upgrade:transpiler", "exception key");
+        AssertContains(patch, "[MacroUpgradeIl] applied blocks=", "the applied line");
+        AssertFalse(ReadSrc("Tactical/Battle/BugFixes/MacroUpgradeIl.cs").Contains(".Clone()"), "copies with new CodeInstruction(ci)");
+        AssertFalse(patch.Contains("TelemetryPerf.Scope("), "a Transpiler hook carries no scope");
+    }
+
+    private static System.Collections.Generic.List<CodeInstruction> MacroFixture(FieldInfo field, int blocks, bool labelInside, int anchors)
+    {
+        var il = new System.Reflection.Emit.DynamicMethod("fixture", typeof(void), Type.EmptyTypes).GetILGenerator();
+        var code = new System.Collections.Generic.List<CodeInstruction>();
+        for (int a = 0; a < anchors; a++)
+        {
+            code.Add(new CodeInstruction(OpCodes.Ldarg_0));
+            code.Add(new CodeInstruction(OpCodes.Ldfld, field));
+            code.Add(new CodeInstruction(OpCodes.Stloc_0));
+        }
+        for (int b = 0; b < blocks; b++)
+        {
+            var target = il.DefineLabel();
+            code.Add(new CodeInstruction(OpCodes.Ldarg_0));
+            code.Add(new CodeInstruction(OpCodes.Ldfld, field));
+            code.Add(new CodeInstruction(OpCodes.Ldc_I4_1));
+            code.Add(new CodeInstruction(OpCodes.Bne_Un_S, target));
+            code.Add(new CodeInstruction(OpCodes.Ldarg_0));
+            var zero = new CodeInstruction(OpCodes.Ldc_I4_0);
+            if (labelInside) zero.labels.Add(il.DefineLabel());
+            code.Add(zero);
+            code.Add(new CodeInstruction(OpCodes.Stfld, field));
+            var next = new CodeInstruction(OpCodes.Nop);
+            next.labels.Add(target);
+            code.Add(next);
+        }
+        code.Add(new CodeInstruction(OpCodes.Ret));
+        return code;
+    }
+
+    private static void FixMacroGuards()
+    {
+        var field = PendingField();
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(MacroHookStub));
+
+        var good = MacroFixture(field, 1, false, 1);
+        var edited = MacroUpgradeIl.Transpile(good, field, hook, out int matches);
+        AssertEqual(1, matches, "the fixture itself matches once");
+        AssertFalse(ReferenceEquals(edited, good), "and is rewritten");
+        AssertEqual(good.Count - 3, edited.Count, "seven became four");
+
+        foreach (var (name, fixture) in new[]
+        {
+            ("no block", MacroFixture(field, 0, false, 1)),
+            ("two blocks", MacroFixture(field, 2, false, 1)),
+            ("a label inside the block", MacroFixture(field, 1, true, 1)),
+            ("no num4 anchor", MacroFixture(field, 1, false, 0)),
+            ("two num4 anchors", MacroFixture(field, 1, false, 2)),
+        })
+        {
+            int opcodes = fixture.Count;
+            var result = MacroUpgradeIl.Transpile(fixture, field, hook, out int m);
+            AssertTrue(ReferenceEquals(result, fixture), name + ": vanilla's own list comes back");
+            AssertEqual(opcodes, fixture.Count, name + ": nothing was removed");
+            AssertFalse(result.Any(ci => ci.Calls(hook)), name + ": no hook call");
+            AssertTrue(m != 1 || name == "a label inside the block", name + ": reported count is not a clean match");
+        }
+
+        // The branch must target the very next instruction; a block whose branch leaves elsewhere is not the vanilla statement.
+        var wrongTarget = MacroFixture(field, 1, false, 1);
+        int branch = wrongTarget.FindIndex(ci => ci.opcode == OpCodes.Bne_Un_S);
+        wrongTarget[branch + 4].labels.Clear();
+        AssertEqual(0, MacroUpgradeIl.Rewrite(wrongTarget, field, hook, 1), "the branch target is not after the block");
+        AssertEqual(0, MacroUpgradeIl.Rewrite(null, field, hook, 1), "null code");
+        AssertEqual(0, MacroUpgradeIl.Rewrite(MacroFixture(field, 1, false, 1), null, hook, 1), "null field");
     }
 }
