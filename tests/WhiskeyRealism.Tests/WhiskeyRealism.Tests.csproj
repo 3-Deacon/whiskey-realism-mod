@@ -95,6 +95,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerChapterRules.cs" Link="Planner\PlannerChapterRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignTempoGate.cs" Link="Planner\CampaignTempoGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveIssue.cs" Link="Planner\MoveIssue.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignMover.cs" Link="Planner\CampaignMover.cs" />

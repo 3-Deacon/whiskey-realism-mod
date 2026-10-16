@@ -7,6 +7,10 @@ namespace WhiskeyRealism.Strategic.Planner
     // reports Issued / Retried / Queued; the mover's tally counts the rest (SkippedPlayer, SkippedBusy, Deferred).
     public enum MoveOutcome { None = 0, Issued = 1, Confirmed = 2, Failed = 3, Retried = 4, GaveUp = 5, SkippedPlayer = 6, SkippedBusy = 7, Queued = 8, Deferred = 9 }
 
+    // Which daily budget a move spends (plan G5d): the planner's roles (MaxMovesPerDay) or reconnaissance
+    // (MaxReconMovesPerDay), so scouting never starves the main effort and the main effort never starves the scouts.
+    public enum MoveBudget { Planner = 0, Recon = 1 }
+
     public struct MoveRecord
     {
         public int InstanceId;      // in-session lookup only, never persisted
@@ -44,6 +48,8 @@ namespace WhiskeyRealism.Strategic.Planner
     public sealed class MoveTracker
     {
         public const int MaxMovesPerDay = 6;
+        // The reconnaissance executor's own cap (plan G5d), counted apart from MaxMovesPerDay.
+        public const int MaxReconMovesPerDay = 3;
         // A give-up lasts this many review days, then the formation may try the same target again. A give-up costs two
         // reviews (one miss, one retry); vanilla's refusal of a target (MoveUnitTo, 14486) follows a state's war status, which
         // changes in days or weeks, not reviews. Fourteen days is a week of daily reviews on each side of that: long enough
@@ -69,12 +75,12 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         private readonly Dictionary<int, Entry> _entries = new Dictionary<int, Entry>();
-        private int _budgetDay = int.MinValue;
-        private int _budgetUsed;
+        private readonly int[] _budgetDay = { int.MinValue, int.MinValue };
+        private readonly int[] _budgetUsed = new int[2];
 
-        public bool ShouldIssue(int instanceId, float tx, float tz, int daySerial)
+        public bool ShouldIssue(int instanceId, float tx, float tz, int daySerial, MoveBudget budget = MoveBudget.Planner)
         {
-            if (BudgetUsed(daySerial) >= MaxMovesPerDay) return false;
+            if (BudgetUsed(budget, daySerial) >= CapOf(budget)) return false;
             if (!_entries.TryGetValue(instanceId, out var e) || !SameTarget(e, tx, tz)) return true;
             switch (e.State)
             {
@@ -89,7 +95,8 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        public void RecordIssued(int instanceId, float fromX, float fromZ, float tx, float tz, int daySerial, bool queued, string unitKey = null, int objectiveId = -1)
+        public void RecordIssued(int instanceId, float fromX, float fromZ, float tx, float tz, int daySerial, bool queued, string unitKey = null, int objectiveId = -1,
+                                 MoveBudget budget = MoveBudget.Planner)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool same = previous != null && SameTarget(previous, tx, tz);
@@ -102,7 +109,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 FromX = fromX, FromZ = fromZ, TargetX = tx, TargetZ = tz,
                 IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, State = queued ? State.Queued : State.Issued
             };
-            if (!queued) Spend(daySerial);
+            if (!queued) Spend(budget, daySerial);
         }
 
         // What issuing this move now would be: Queued behind a running order, Retried after a failed attempt at the same target,
@@ -184,8 +191,11 @@ namespace WhiskeyRealism.Strategic.Planner
         public void Clear()
         {
             _entries.Clear();
-            _budgetDay = int.MinValue;
-            _budgetUsed = 0;
+            for (int b = 0; b < _budgetDay.Length; b++)
+            {
+                _budgetDay[b] = int.MinValue;
+                _budgetUsed[b] = 0;
+            }
         }
 
         public IEnumerable<MoveRecord> Records
@@ -216,19 +226,25 @@ namespace WhiskeyRealism.Strategic.Planner
             return daySerial - e.IssuedDay >= GaveUpExpiryDays;
         }
 
-        private int BudgetUsed(int daySerial)
+        private static int CapOf(MoveBudget budget)
         {
-            return daySerial == _budgetDay ? _budgetUsed : 0;
+            return budget == MoveBudget.Recon ? MaxReconMovesPerDay : MaxMovesPerDay;
         }
 
-        private void Spend(int daySerial)
+        private int BudgetUsed(MoveBudget budget, int daySerial)
         {
-            if (daySerial != _budgetDay)
+            return daySerial == _budgetDay[(int)budget] ? _budgetUsed[(int)budget] : 0;
+        }
+
+        private void Spend(MoveBudget budget, int daySerial)
+        {
+            int b = (int)budget;
+            if (daySerial != _budgetDay[b])
             {
-                _budgetDay = daySerial;
-                _budgetUsed = 0;
+                _budgetDay[b] = daySerial;
+                _budgetUsed[b] = 0;
             }
-            _budgetUsed++;
+            _budgetUsed[b]++;
         }
 
         private static bool SameTarget(Entry e, float tx, float tz)
