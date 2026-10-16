@@ -24,7 +24,7 @@ namespace WhiskeyRealism.Strategic
     // Vanilla's re-issue of the same order is one sample (ComplianceOrderStream).
     internal static class PlayerComplianceRuntime
     {
-        private const double HoursPerYear = 8760.0;
+        private const double HoursPerYear = WlCampaignDispatchPolicy.HoursPerYear;
 
         private static readonly PlayerComplianceCareers _careers = new PlayerComplianceCareers();
         private static readonly ComplianceOrderStream _orders = new ComplianceOrderStream();
@@ -124,13 +124,35 @@ namespace WhiskeyRealism.Strategic
                 bool battleOrder = order.IsBattleOrder();
                 if (playerDecides && order.showzone && battleOrder == (scope == ComplianceScope.Battle))
                 {
-                    ledger.OnDispatch(scope, session, nowHours);
-                    _tracked[s] = order;
+                    // D17 (a): an order that reaches the player already inside its zone is no compliance.
+                    if (scope == ComplianceScope.Battle && !StartsBattleSample(order))
+                        SkipInsideAtIssue(order, session);
+                    else
+                    {
+                        ledger.OnDispatch(scope, session, nowHours);
+                        _tracked[s] = order;
+                    }
                 }
             }
 
             Report(scope, ledger.Tick(scope, nowHours));
             if (!ledger.HasPending(scope)) _tracked[s] = null;
+        }
+
+        // The player's command against the order's zone when the order reaches him.
+        private static bool StartsBattleSample(DLC_WL.GivenOrders order)
+        {
+            var command = CurrentCommand();
+            if ((UnityEngine.Object)command == null) return true;
+            UnityEngine.Vector3 at = command.GetPosition();
+            return ComplianceSampleGate.StartsSample(at.x, at.z, order.position.x, order.position.z, order.arearotation, order.areawidth, order.areadepth);
+        }
+
+        private static void SkipInsideAtIssue(DLC_WL.GivenOrders order, int session)
+        {
+            TelemetryRouter.LegacyInfoToMainLogIfAllowed(
+                "[PlayerCompliance] scope=battle skip reason=inside-at-issue type=" + order.type + " session=" + session,
+                TelemetryLayer.Tactical);
         }
 
         private static ComplianceOrderKey KeyOf(DLC_WL.GivenOrders order)

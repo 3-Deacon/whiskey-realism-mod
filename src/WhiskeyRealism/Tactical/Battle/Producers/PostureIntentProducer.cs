@@ -204,6 +204,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 UnitRecord[] own = s.Own;
                 int n = s.OwnCount;
                 var leafMap = army.CurrentLeafBrigadeMap;
+                // BC13: the opportunity producer (which runs just before this one) published the side's exploit table.
+                ExploitTable exploits = ExploitTable.ForAlliance(s.Alliance);
                 int start = t.Nav.StartIndex(n);
                 for (int k = 0; k < n; k++)
                 {
@@ -215,11 +217,27 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     // outside it; the pool is captured on the coordinator tick.
                     if (ArmyPostureInputsRuntime.InAiPool(s.Alliance, rec.InstanceId))
                     {
-                        if (!PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state)) continue;
-                        bool hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out CommandDoctrineOrder order);
+                        // An exploit order overrides the ledger order of the asset; a descendant follows (requirement-exploit-override).
+                        bool hasState = PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state);
+                        bool hasOrder = false;
+                        CommandDoctrineOrder order = default(CommandDoctrineOrder);
+                        ExploitOverrideKind exploitKind = ExploitOverrideKind.None;
+                        if (exploits.TryOverride(rec.InstanceId, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
+                        {
+                            exploitKind = ExploitPosture.KindOf(in exploitOrder);
+                            state = ExploitPosture.Overlay(state, hasState, exploitState, exploitKind);
+                            hasState = true;
+                            hasOrder = true;
+                            order = exploitOrder;
+                        }
+                        else if (hasState)
+                        {
+                            hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out order);
+                        }
+                        if (!hasState) continue;
                         bool submitted = PosturePipeline.Run(s, t, i, state, hasOrder, order, side, sink,
                             IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
-                            recordTick: true);
+                            recordTick: true, exploitKind);
                         t.Groups[i].Submitted = submitted;
                         continue;
                     }
@@ -227,7 +245,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) continue;
                     if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) continue;
                     if (leaf.LeafTask == CommandTaskType.None) continue;
-                    ProduceLeaf(s, t, i, leaf, army, sink);
+                    ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
                 }
             }
         }
@@ -241,11 +259,26 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // #61 TryApplyLeafBrigade + ApplyLeafBrigadePosture (B-leaf, BR-M1).
         private static void ProduceLeaf(BattleSnapshot s, PostureTick.State t, int i, TacticalLeafBrigadeMap.LeafAssignment leaf,
-            ArmyOrchestrator army, IIntentSink sink)
+            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits)
         {
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[i];
             int id = rec.InstanceId;
+
+            // BC13: a leaf brigade that is an exploit's asset runs the posture pipeline with the exploit order instead of the leaf
+            // slot path; one that follows an exploiting ancestor gets no Move or Formation (its facing pulse and fire control run).
+            if (exploits.TryOverride(id, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
+            {
+                _mainArrivalHold.Remove(id);
+                bool hasLedger = PostureLedger.TryResolveState(id, side, out CommandNodeOperationalState ledgerState);
+                ExploitOverrideKind leafKind = ExploitPosture.KindOf(in exploitOrder);
+                CommandNodeOperationalState merged = ExploitPosture.Overlay(ledgerState, hasLedger, exploitState, leafKind);
+                bool leafSubmitted = PosturePipeline.Run(s, t, i, merged, true, exploitOrder, side, sink,
+                    IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
+                    recordTick: true, leafKind);
+                t.Groups[i].Submitted = leafSubmitted;
+                return;
+            }
 
             ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
             try { opportunity = army.CurrentReinforcementOpportunity.Opportunity; }
@@ -357,6 +390,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
+        /// <summary>BC13: the Main-effort brigade is held as Screen until its SupportMain siblings arrive (an exploit never picks it).</summary>
+        internal static bool UnderArrivalHold(int groupId)
+        {
+            return _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
+        }
+
         private static void Reset()
         {
             _mainArrivalHold.Clear();
@@ -441,7 +480,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             IntentPriority priority,
             IntentSource source,
             string reason,
-            bool recordTick)
+            bool recordTick,
+            ExploitOverrideKind exploitKind = ExploitOverrideKind.None)
         {
             ArmyOrchestrator army = side.Army;
             ref UnitRecord rec = ref s.Own[i];
@@ -452,6 +492,28 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
+
+            // BC13 requirement-exploit-override: a descendant of an exploiting asset follows. vanilla's group order re-lays every
+            // child (SetGroupFormation 92076-92108), so the posture producer submits no Move and no Formation for it; its facing
+            // pulse and fire control read the posture recorded here and run as usual.
+            if (!ExploitPosture.SubmitsMoveOrFormation(exploitKind))
+            {
+                if (recordTick)
+                {
+                    ref GroupPosture followed = ref t.Groups[i];
+                    followed.Has = true;
+                    followed.State = state;
+                    followed.CloseEngaged = closeEngaged;
+                    followed.FlankRisk = flankRisk;
+                }
+                PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, ExploitLifecycle.FollowReason),
+                    0, ExploitLifecycle.FollowReason);
+                return false;
+            }
+
+            // An exploit order has already checked its target (spec D-C3): the probe nomination and hold, GT recon, the cavalry
+            // follow rewrite and the army opportunity override do not apply to it. The local flank emergency stays.
+            bool exploit = exploitKind == ExploitOverrideKind.Exploit;
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
             bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
             BattleStance stance = army != null ? army.CurrentBattleStance : BattleStance.Meeting;
@@ -460,23 +522,25 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC9 reconnaissance in force: the recon planner nominated this group as its
             // band's probe in the Probe phase (BattleRecon.ProbeTick). The role is
             // assigned here, by the rewrite: the allocator's DirectChildRole has no Probe.
-            bool probe = recordTick && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
+            bool probe = recordTick && !exploit && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
             if (probe)
             {
                 state = WithRoleAndTask(state, CommandNodeRole.Probe, CommandTaskType.Probe);
                 if (hasOrder) order = order.WithTask(CommandTaskType.Probe, ProbeReason);
             }
 
-            TacticalGrandTacticianReconDecision recon = TacticalGrandTacticianReconDoctrine.Decide(
-                new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,
-                    sideDefending: defender));
+            TacticalGrandTacticianReconDecision recon = exploit
+                ? new TacticalGrandTacticianReconDecision(state.Task, "exploit")
+                : TacticalGrandTacticianReconDoctrine.Decide(
+                    new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,
+                        sideDefending: defender));
             if (recon.Task != state.Task)
             {
                 state = WithRoleAndTask(state, state.Role, recon.Task);
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
-            if (hasCavalry && !probe && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
+            if (hasCavalry && !probe && !exploit && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
                 state = WithRoleAndTask(state, state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
@@ -485,14 +549,23 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             CommandPhysicalState physical = PostureSense.Physical(rec, t.Moving[i]);
             TacticalIdleClassification idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
             CommandTaskType emergency = CommandFormationCorrection.TaskForLocalFlankEmergency(state.Task, closeEngaged, flankRisk);
-            if (emergency != state.Task) state = WithRoleAndTask(state, state.Role, emergency);
+            if (emergency != state.Task)
+            {
+                state = WithRoleAndTask(state, state.Role, emergency);
+                // The posture pipeline's local flank emergency rewrote an exploit's task: the opportunity producer reads this on its
+                // next tick and aborts the exploit as flank-threat (one tick late by design: the table has one writer).
+                if (exploit && recordTick) ExploitFeedback.SetFlankEmergency(rec.InstanceId);
+            }
 
             // Army opportunity override at the brigade-posture layer (2026-05-21),
             // with Main as the role (brigades carry no DirectChildRole).
             ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
             try { if (army != null) opportunity = army.CurrentReinforcementOpportunity.Opportunity; }
             catch { /* NoOpportunity keeps the task */ }
-            CommandTaskType overridden = TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, out string overrideReason);
+            string overrideReason = null;
+            CommandTaskType overridden = exploit
+                ? state.Task
+                : TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, out overrideReason);
             if (overridden != state.Task && overrideReason != null)
             {
                 OnceLog.Info("tactical-brigade-posture:opportunity-override",
@@ -509,7 +582,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC9: a probe that ended short of a superior enemy holds the ground it gained
             // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).
             float holdX = 0f, holdZ = 0f, holdDirX = 0f, holdDirZ = 0f;
-            bool holding = recordTick && !probe && ReconIntentProducer.TryHold(s.Alliance, rec.InstanceId, state.Task,
+            bool holding = recordTick && !probe && !exploit && ReconIntentProducer.TryHold(s.Alliance, rec.InstanceId, state.Task,
                 out holdX, out holdZ, out holdDirX, out holdDirZ);
 
             int targetFormation = rec.UnitTyp > TacticalUnitType.MaxCombat
@@ -625,6 +698,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
                 InContactWithdrawal = closeEngaged || flankRisk,
                 AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
+                Exploit = exploit,
+                ExploitId = ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId),
                 Refuse = refuseDue ? refuse : RefuseFlank.None,
                 // #61 wheeled with the threat heading whenever it had one (not only
                 // when the facing was off): a refuse-only wheel faces the threat.

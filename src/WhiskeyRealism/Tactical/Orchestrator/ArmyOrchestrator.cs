@@ -13,16 +13,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct ArmyEvidence
     {
-        public ArmyEvidence(float currentOdds, TerrainKind terrain, int defaultMainEffortSector)
+        public ArmyEvidence(float currentOdds, TerrainKind terrain, int defaultMainEffortSector, TerrainLine crestLine = default(TerrainLine))
         {
             CurrentOdds = currentOdds;
             Terrain = terrain;
             DefaultMainEffortSector = defaultMainEffortSector;
+            CrestLine = crestLine;
         }
 
         public float CurrentOdds { get; }
         public TerrainKind Terrain { get; }
         public int DefaultMainEffortSector { get; }
+
+        /// <summary>BC12: the best crest across the front from the terrain picture (Has = false when none, or no picture).</summary>
+        public TerrainLine CrestLine { get; }
     }
 
     /// <summary>
@@ -247,7 +251,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 artilleryFraction: artilleryFraction,
                 delayingDefensePressure: delayingDefensePressure,
                 defensivePressure: defensivePressure,
-                stance: stance);
+                stance: stance,
+                hasCrestLine: evidence.CrestLine.Has);
             var pb = _catalog?.Select(ctx);
             if (pb == null)
             {
@@ -425,6 +430,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = nextPlan;
             HasPlan = true;
+            // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
+            _reserveRelease.Clear();
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
@@ -523,7 +530,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     s.ChildId, s.RawUnitTyp, s.EffectiveCommandLevel, s.DisplayName,
                     primarySector: 0, role: DirectChildRole.Unknown,
                     axis: DirectChildAxis.None, axisSector: 0,
-                    supportPriority01: 0f, aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
+                    supportPriority01: 0f,
                     enemyIntent: unknownEnemy);
             }
             _directChildIntents = initial;
@@ -600,11 +607,77 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _directChildIntents = DirectChildAllocator.StabilizeMain(
                 DirectChildAllocator.AllocateWithZones(
                     _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                    perChildEnemyIntent, zoneAssignments, new ReserveReleaseContext(_lastGlobalOdds, Plugin.FlankResponseEnabled())),
+                    perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
                 _mainHysteresis);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
+            EmitStaggeredReleaseTelemetry();
             EmitDirectChildIntentTelemetry();
+        }
+
+        // ---- BC13 staggered reserve release ----
+
+        private readonly ReserveReleaseState _reserveRelease = new ReserveReleaseState();
+
+        /// <summary>The side's reserve-release memory: the crisis releases (the exploit lifecycle reads them) and the stagger state.</summary>
+        internal ReserveReleaseState ReserveRelease => _reserveRelease;
+
+        // The allocator's release context: the flank release flag as before, and with Enable Staggered Reserve Release the state, the
+        // children with a live exploit (never released) and the army commander's temperament (the interval and the floor share).
+        private ReserveReleaseContext BuildReserveReleaseContext()
+        {
+            bool flank = Plugin.FlankResponseEnabled();
+            if (!Plugin.StaggeredReserveReleaseEnabled()) return new ReserveReleaseContext(_lastGlobalOdds, flank);
+            var exploits = WhiskeyRealism.Tactical.Battle.ExploitTable.ForAlliance(AllianceId);
+            var exploiting = new bool[_directChildSnapshots.Length];
+            for (int i = 0; i < exploiting.Length; i++)
+            {
+                int instanceId = ChildInstanceId(_directChildSnapshots[i].ChildId);
+                exploiting[i] = instanceId != 0 && exploits.IsExploiting(instanceId);
+            }
+            return new ReserveReleaseContext(
+                _lastGlobalOdds, flank, _reserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance));
+        }
+
+        // Child ids read "child-" + the instance id.
+        internal static int ChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);
+
+        // One TacticalReserveRelease row per stagger or crisis release of this allocation (bounded by the releases themselves).
+        private void EmitStaggeredReleaseTelemetry()
+        {
+            try
+            {
+                var outcomes = _reserveRelease.Outcomes;
+                int released = _reserveRelease.ReleasedCount;
+                for (int i = 0; i < outcomes.Count; i++)
+                {
+                    ReserveReleaseState.Outcome o = outcomes[i];
+                    double now = TacticalDoctrineTime.NowBattleHours;
+                    string reason = o.Crisis ? "crisis" : "stagger";
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", reason, "side=" + AllianceId + "|child=" + o.ChildId)
+                            .WithField("side", AllianceId)
+                            .WithField("child", o.ChildId)
+                            .WithField("reason", reason)
+                            .WithField("held", o.Held)
+                            .WithField("floor", o.Floor)
+                            .WithField("floorBreach", o.FloorBreach ? "crisis" : "none")
+                            .WithField("released", released)
+                            .WithField("nowHours", now));
+                }
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalReserveRelease] stagger emit failed: " + ex.Message); } catch { }
+            }
         }
 
         // BC11 decision 3: one TacticalReserveRelease row when a Reserve child becomes the guard of a threatened
@@ -1147,7 +1220,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents));
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents),
+                HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
         }

@@ -366,6 +366,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // postfix already built it this frame; this call is then a no-op.
                     EnsureBattleCoreSnapshots(battle);
 
+                    // BC13: any commander the snapshot shows without a personality entry (a reinforcement) gets one.
+                    for (int personalityAlliance = 0; personalityAlliance < 2; personalityAlliance++)
+                    {
+                        if (Battle.BattleCore.TryGetSnapshot(personalityAlliance, out Battle.BattleSnapshot personalitySnapshot))
+                            Battle.CommanderPersonalityRuntime.Extend(personalityAlliance, personalitySnapshot);
+                    }
+
                     // Drive each side; the heavy-gate publishes into
                     // _lastPublishedSnapshots[s] when it fires.
                     DriveTacticalCommanderSide(side0, battle, aiVsAi);
@@ -1124,6 +1131,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // The vanilla commander index of the side's commanding officer (GetCommandingOfficerFromSide, the commander
+        // CheckGlobalAIStrategy reads at 6316); -1 when unreadable.
+        private static int ArmyCommanderIndex(AIBattle battle, int allianceId)
+        {
+            var bunits = ResolveBattleUnits(battle);
+            for (int side = 0; side < 2; side++)
+            {
+                if (SafeAllianceForSide(bunits, side) == allianceId) return SafeCommanderId(bunits, side);
+            }
+            return -1;
+        }
+
         private static CommanderRosterEntry FindArmyEntry(TacticalBattleOrchestrator side)
         {
             try
@@ -1143,12 +1162,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (side == null) return;
             var armyEntry = FindArmyEntry(side);
             if (armyEntry == null) return;
-            var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyEntry.PersonalityVector);
-            side.AttachArmy(army);
             AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
             // Battle start runs before the first coordinator Tick: build the side's snapshot
-            // here (D1; the first Tick in the same frame reuses it).
+            // here (D1; the first Tick in the same frame reuses it), then the personality table
+            // (BC13 requirement-runtime-wiring: snapshot, then table, then the army, whose personality
+            // is a constructor argument), then the ArmyOrchestrator from the table's army entry.
             var snapshot = Battle.BattleCoreTick.EnsureSnapshot(sideBattle, side.AllianceId);
+            int armyCommander = ArmyCommanderIndex(battle, side.AllianceId);
+            Battle.CommanderPersonalityRuntime.BuildTable(side.AllianceId, snapshot, armyCommander, armyEntry.PersonalityVector, armyEntry.Source);
+            PersonalityVector armyVector = Battle.CommanderPersonalityRuntime.TableFor(side.AllianceId) is Battle.CommanderPersonalityTable table
+                && table.TryGet(armyCommander, out PersonalityVector tableVector, out _)
+                ? tableVector
+                : armyEntry.PersonalityVector;
+            var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyVector);
+            side.AttachArmy(army);
             army.PickInitialPlan(ArmyEvidenceBuilder.Build(snapshot, sideBattle).OwnEvidence);
             if (army.HasPlan)
             {
@@ -1518,7 +1545,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     flankBuckets[i] = TacticalFrontAxis.FlankExposureBucket(
                         leftWing || rightWing, overlapped,
                         enemyVisForChildren.FlankThreatForInstance(childInstanceIds[i]));
-                    perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], enemyVisForChildren, ownStrengthBucket: 1);
+                    perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], enemyVisForChildren);
                 }
 
                 var snapshots = new DirectChildSnapshot[childCount];

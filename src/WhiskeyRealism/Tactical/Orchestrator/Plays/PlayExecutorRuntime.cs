@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -146,7 +147,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
                 float frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
 
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage);
+                // BC12: ReverseSlopeDefense is anchored to the crest the terrain picture found across the front.
+                TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
+                    ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
+                    : default(TerrainLine);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.
@@ -364,6 +369,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     PlayAnchor.EnemyAnchor(snapshot, axis, axis.OriginX, axis.OriginZ, out float enemyX, out float enemyZ);
                     BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
                     side.Orders.Clear();
+                    ExploitTable exploits = ExploitTable.ForAlliance(allianceId);
                     // One route plan per side and step, served fairly (see PickRoutePlanChild).
                     side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now);
                     for (int i = 0; i < intents.Count; i++)
@@ -372,6 +378,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         if (!spec.HasValue) continue;
                         int index = snapshot.IndexOfOwn(ParseChildInstanceId(intents[i].ChildId));
                         if (index < 0) continue;
+                        // BC13: a group with a live exploit (or whose subtree has one) takes no zone maneuver; the exploit order
+                        // is the posture producer's, and the two are mutually exclusive (OVR-MANEUVER).
+                        if (exploits.IsExploiting(snapshot.Own[index].InstanceId)) continue;
                         side.States.TryGetValue(intents[i].ChildId, out ManeuverState state);
                         ManeuverPhase before = state.Phase;
                         bool wasMirrored = state.Mirrored;
@@ -393,6 +402,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     return side.Orders;
                 }
             }
+        }
+
+        /// <summary>
+        /// BC13: the instance ids of the side's children in an active maneuver phase (Hold, March, Turn or Attack), written to
+        /// <paramref name="into"/>; returns how many. An exploit never picks one of them, an ancestor or a descendant.
+        /// </summary>
+        internal static int ManeuveringChildren(int allianceId, int[] into)
+        {
+            if (allianceId < 0 || allianceId >= SideCount) return 0;
+            int n = 0;
+            foreach (KeyValuePair<string, ManeuverState> pair in _maneuvers[allianceId].States)
+            {
+                ManeuverPhase phase = pair.Value.Phase;
+                if (phase != ManeuverPhase.Hold && phase != ManeuverPhase.March && phase != ManeuverPhase.Turn && phase != ManeuverPhase.Attack) continue;
+                int id = ParseChildInstanceId(pair.Key);
+                if (id != 0 && n < into.Length) into[n++] = id;
+            }
+            return n;
         }
 
         // Children still maneuvering when their plan changed: one Abandoned row each (smoke item 2.28, reason plan-changed).
@@ -586,12 +613,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)).y;
         }
 
-        private static int ParseChildInstanceId(string childId)
-        {
-            const string prefix = "child-";
-            return !string.IsNullOrEmpty(childId) && childId.StartsWith(prefix, StringComparison.Ordinal) &&
-                int.TryParse(childId.Substring(prefix.Length), out int id) ? id : 0;
-        }
+        private static int ParseChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);
 
         // One TacticalEnvelopment row per phase change (or mirror), so the stream is bounded by the state machine.
         private static void EmitEnvelopment(int allianceId, BattlePlanId planId, string childId, in ManeuverOrder order, in ManeuverState state,

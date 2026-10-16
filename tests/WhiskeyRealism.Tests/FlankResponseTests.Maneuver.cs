@@ -200,7 +200,7 @@ internal static partial class FlankResponseTests
 
     // The child node (id == source) sits at depth 1; its sub-nodes one level deeper each.
     private static CommandNodeIntent NodeIntent(string nodeId, string source, int depth = -1) =>
-        new CommandNodeIntent(nodeId, source, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 50, 0.5f,
+        new CommandNodeIntent(nodeId, source, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 50,
             depth >= 0 ? depth : (nodeId == source ? 1 : 2));
 
     private static void MarchTargetsRectAnchorOnLanes()
@@ -592,7 +592,7 @@ internal static partial class FlankResponseTests
     // A DirectChildIntent standing for a child whose role came from the given play rect (Unknown: from evidence).
     private static DirectChildIntent ZoneIntent(string childId, PlayRectKind zoneRect)
     {
-        return new DirectChildIntent(childId, 15, 15, childId, 0, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 0.5f, 0.5f,
+        return new DirectChildIntent(childId, 15, 15, childId, 0, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 0.5f,
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), default(ManeuverSpec), zoneRect);
     }
 
@@ -701,7 +701,7 @@ internal static partial class FlankResponseTests
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents)", "the army expands the orders to nodes");
         string ledger = SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
-        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers));", "the ledger hands the table to the doctrine build");
+        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers, reverseSlope);", "the ledger hands the table to the doctrine build");
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         AssertPinned(producers, "if (kind == PostureExecutionTarget.DoctrinePrimaryTarget && order.ManeuverHold) return false;", "a hold burns no nav plan");
         AssertPinned(producers, "if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&", "a Turn faces the group");

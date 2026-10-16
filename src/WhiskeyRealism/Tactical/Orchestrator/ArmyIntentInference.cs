@@ -17,7 +17,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>Contact broken and less than this share of own strength still in sight = withdrawal.</summary>
         public const float WithdrawResidualOwnFraction = 0.25f;
 
-        public static TacticalIntentModel Build(ArmyEvidence ownEvidence, EnemyVisibleState enemy)
+        /// <summary>Share of the busiest sector's visible enemy that must stand on strong ground to read as defending it.</summary>
+        public const float StrongGroundShare = 0.6f;
+
+        public static TacticalIntentModel Build(EnemyVisibleState enemy)
         {
             if (enemy.Sectors.Length == 0)
             {
@@ -30,6 +33,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownStrengthAtMaxEnemy = 0f;
             int sectorWithMaxEnemy = -1;
             int recentFireSectorCount = 0;
+            float strongShareAtMaxEnemy = 0f;
+            bool fireAtMaxEnemy = false;
 
             for (int i = 0; i < enemy.Sectors.Length; i++)
             {
@@ -41,6 +46,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     maxEnemyStrength = sector.EnemyStrength;
                     ownStrengthAtMaxEnemy = sector.OwnStrength;
                     sectorWithMaxEnemy = sector.SectorId;
+                    strongShareAtMaxEnemy = sector.EnemyStrongGroundShare;
+                    fireAtMaxEnemy = sector.RecentFire;
                 }
 
                 if (sector.RecentFire)
@@ -94,6 +101,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 intent = InferredIntent.Attack;
             }
+            else if (strongShareAtMaxEnemy >= StrongGroundShare && !fireAtMaxEnemy)
+            {
+                // BC12: the busiest sector's enemy stands on strong ground and is quiet: it is holding it, not about to refuse a
+                // flank or probe. A marching enemy never counts (the share is of standing units).
+                intent = InferredIntent.Defend;
+                evidence.Add(EvidenceTag.EnemyOnStrongGround);
+            }
             else if (concentration > 0.55f && enemy.EnemyReserveCommitFraction < 0.3f)
             {
                 intent = InferredIntent.Refuse;
@@ -117,10 +131,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Frontage-filtered overload used by O3 to compute per-direct-child enemy
         /// intent. Filters EnemyVisibleState.Sectors to a single sector mask and
-        /// reuses the existing Build path. ownStrengthBucket is converted to a
-        /// rough OwnStrength so the existing strength heuristics still fire.
+        /// reuses the existing Build path.
         /// </summary>
-        public static TacticalIntentModel BuildForFrontage(int primarySector, EnemyVisibleState enemy, int ownStrengthBucket)
+        public static TacticalIntentModel BuildForFrontage(int primarySector, EnemyVisibleState enemy)
         {
             EnemyVisibleSector? matched = null;
             for (int i = 0; i < enemy.Sectors.Length; i++)
@@ -144,13 +157,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 anyContactBroken: enemy.AnyContactBroken,
                 intelConfidence01: enemy.IntelConfidence01);
 
-            float syntheticOwnStrength = Math.Max(matched.Value.OwnStrength, ownStrengthBucket * 1000f);
-            var ownEvidence = new ArmyEvidence(
-                currentOdds: matched.Value.EnemyStrength <= 0f ? 1f : syntheticOwnStrength / Math.Max(1f, matched.Value.EnemyStrength),
-                terrain: TerrainKind.Open,
-                defaultMainEffortSector: primarySector);
-
-            return Build(ownEvidence, filtered);
+            return Build(filtered);
         }
 
         private static float Clamp01(float value)

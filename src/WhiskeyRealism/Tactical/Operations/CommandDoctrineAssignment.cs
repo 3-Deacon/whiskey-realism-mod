@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
@@ -14,7 +15,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float nowSeconds,
             float reserveFraction = 0f,
             BattleStance stance = BattleStance.Meeting,
-            ManeuverNodeTable maneuvers = null)
+            ManeuverNodeTable maneuvers = null,
+            bool reverseSlope = false)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -37,12 +39,16 @@ namespace WhiskeyRealism.Tactical.Operations
                 enemyStrength: objective.EnemyStrength,
                 reserveFraction: reserveFraction));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
+            // BC12: the line is planned once; an anchored end keeps the line task instead of guarding a flank.
+            TacticalDefensiveLineAnchor anchor = objectiveMatched
+                ? TacticalDefensiveLineAnchorPlanner.Plan(objective, battlefront, nodes.Length, TerrainPicture.CurrentForPlanning(), reverseSlope)
+                : TacticalDefensiveLineAnchor.None("battle-line-no-objective");
 
             for (int i = 0; i < nodes.Length; i++)
             {
                 CommandNodeOperationalState node = nodes[i];
                 CommandTaskType task = ResolveTask(node.Role, operation, objective, objectiveMatched, odds);
-                task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length);
+                task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length, anchor.AnchoredLeft, anchor.AnchoredRight);
                 // BC11 decision 4: a node of a maneuvering child carries the maneuver's task (never for a Defender).
                 ManeuverNodeEntry maneuver = default(ManeuverNodeEntry);
                 bool maneuvering = stance != BattleStance.Defender && maneuvers != null && maneuvers.TryGet(node.NodeId, out maneuver);
@@ -59,7 +65,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     objectiveMatched,
                     i,
                     battlefront,
-                    nodes.Length);
+                    nodes.Length,
+                    anchor);
                 TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
                     node.Role,
                     task,
@@ -94,11 +101,15 @@ namespace WhiskeyRealism.Tactical.Operations
             return orders.ToArray();
         }
 
-        private static CommandTaskType ApplyScourgeSlotTask(
+        // anchoredLeft is the +L end (command index 0), anchoredRight the -L end (index n-1): an end resting on a river or crest keeps
+        // the line task; it is not a flank to guard.
+        internal static CommandTaskType ApplyScourgeSlotTask(
             CommandTaskType task,
             CommandNodeRole role,
             int commandIndex,
-            int nodeCount)
+            int nodeCount,
+            bool anchoredLeft = false,
+            bool anchoredRight = false)
         {
             if (role == CommandNodeRole.FlankMarch &&
                 (task == CommandTaskType.FormUp || task == CommandTaskType.AdvanceToAssembly))
@@ -114,7 +125,7 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             int safeIndex = commandIndex < 0 ? 0 : commandIndex;
-            if (safeIndex == 0 || safeIndex == nodeCount - 1)
+            if ((safeIndex == 0 && !anchoredLeft) || (safeIndex == nodeCount - 1 && !anchoredRight))
             {
                 return CommandTaskType.GuardFlank;
             }

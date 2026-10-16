@@ -451,7 +451,7 @@ internal static class TacticalPlaybookTests
         // This is a smoke test that the playbook is registerable and selectable, not
         // a behavioral guarantee for arbitrary commander vectors.
         var longstreet = new PersonalityVector(-0.2f, 0.5f, -0.5f, 0.4f, 0.3f);
-        var ctx = new PlaybookContext(longstreet, TerrainKind.Mountain, currentOdds: 0.95f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 18892);
+        var ctx = new PlaybookContext(longstreet, TerrainKind.Mountain, currentOdds: 0.95f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 18892, hasCrestLine: true);
         AssertEqual(BattlePlanId.ReverseSlopeDefense, cat.Select(ctx).Id, "Longstreet personality + mountain near-parity selects longstreet-defensive-overslope");
     }
 
@@ -520,7 +520,7 @@ internal static class TacticalPlaybookTests
         }, 0, -1);
         var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
         {
-            DirectIntent("child-100", DirectChildRole.Main, DirectChildAxis.SectorAxis, 1, 0.75f, 0.6f),
+            DirectIntent("child-100", DirectChildRole.Main, DirectChildAxis.SectorAxis, 1, 0.75f),
         });
         var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
         var objective = new ObjectiveRecord(

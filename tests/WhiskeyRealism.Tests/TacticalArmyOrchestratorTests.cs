@@ -232,10 +232,9 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()
     {
-        var ownEvidence = new ArmyEvidence(currentOdds: 1.0f, terrain: TerrainKind.Open, defaultMainEffortSector: 0);
         var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "no sectors infers Unknown");
         AssertNear(0f, model.Confidence01, 1e-5f, "no sectors confidence");
@@ -244,7 +243,6 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceConcentrationInOneSectorImpliesAttack()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[]
             {
@@ -256,7 +254,7 @@ internal static class TacticalArmyOrchestratorTests
             true,
             false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "concentration + committed reserve infers Attack");
         AssertEqual(0, model.InferredMainEffort, "sector 0 is max enemy strength");
@@ -268,14 +266,13 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceSingleSectorStrongContactStaysFinite()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 5000f, 7000f, false) },
             0.7f,
             true,
             false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "single sector strong contact infers Attack");
         AssertEqual(0, model.InferredMainEffort, "single sector is main effort");
@@ -286,7 +283,6 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[]
             {
@@ -298,7 +294,7 @@ internal static class TacticalArmyOrchestratorTests
             true,
             false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Probe, model.PrimaryIntent, "unconcentrated + uncommitted reserve infers Probe");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveUncommitted) >= 0, "probe evidence includes reserve uncommitted");
@@ -306,14 +302,13 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceContactBrokenImpliesWithdraw()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 5000f, 1000f, false) },
             0f,
             false,
             true);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Withdraw, model.PrimaryIntent, "broken contact with low visible enemy infers Withdraw");
         AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "hard withdraw signal reaches confidence floor");
@@ -322,7 +317,6 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceReceivingFireImpliesDefend()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[]
             {
@@ -333,7 +327,7 @@ internal static class TacticalArmyOrchestratorTests
             true,
             false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertEqual(InferredIntent.Defend, model.PrimaryIntent, "recent fire in multiple sectors with committed reserve infers Defend");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReceivingFire) >= 0, "defend evidence includes receiving fire");
@@ -341,14 +335,13 @@ internal static class TacticalArmyOrchestratorTests
 
     private static void ArmyIntentInferenceConfidenceFloorBelowThreshold()
     {
-        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 5000f, 100f, false) },
             0f,
             false,
             false);
 
-        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+        var model = ArmyIntentInference.Build(enemy);
 
         AssertTrue(model.Confidence01 < 0.3f, "low signal confidence remains below floor");
         AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "below confidence floor infers Unknown");
@@ -367,7 +360,7 @@ internal static class TacticalArmyOrchestratorTests
             anyContactSpotted: true,
             anyContactBroken: false);
 
-        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy, ownStrengthBucket: 1);
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy);
         AssertTrue(intent.PrimaryIntent != InferredIntent.Unknown,
             "frontage-filtered single-sector enemy should yield non-Unknown when fire and reserve evidence present");
         AssertEqual(2, intent.InferredMainEffort);
@@ -380,7 +373,7 @@ internal static class TacticalArmyOrchestratorTests
             enemyReserveCommitFraction: 0f,
             anyContactSpotted: false,
             anyContactBroken: false);
-        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy, ownStrengthBucket: 0);
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy);
         AssertEqual(InferredIntent.Unknown, intent.PrimaryIntent);
     }
 

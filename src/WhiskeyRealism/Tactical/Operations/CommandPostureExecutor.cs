@@ -1127,6 +1127,11 @@ namespace WhiskeyRealism.Tactical.Operations
         // An objective-type move over 150 m: through vanilla BlockedMovingOrder
         // (PostureIntentPlan.AvoidsCoveredCrossings).
         public bool AvoidCoveredCrossings;
+        // BC13: the request is an exploit order's. Its Move is not delayed (no courier cadence), as vanilla's own
+        // isolated-target move (CheckForSeparatedEnemy 8188).
+        public bool Exploit;
+        // BC13: the exploit's id (ExploitEntry.Id) when Exploit, else 0; carried on the Move, Stance and Formation intents.
+        public int ExploitId;
         // #61 refused flank, carried on the formation and facing intents.
         public RefuseFlank Refuse;
         // #61 threat facing (holding tasks with a visible threat): the wheel's
@@ -1263,7 +1268,7 @@ namespace WhiskeyRealism.Tactical.Operations
         /// </summary>
         public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, float heading, bool inContactWithdrawal)
         {
-            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false,
+            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
                 IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
         }
 
@@ -1340,15 +1345,16 @@ namespace WhiskeyRealism.Tactical.Operations
             sink.Submit(new BattleOrderIntent
             {
                 GroupId = r.GroupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = r.Task,
-                Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                Priority = r.Priority, Source = r.Source, Reason = r.Reason, ExploitId = r.ExploitId,
             });
             return 1;
         }
 
         private static int SubmitMove(IIntentSink sink, in PostureIntentRequest r)
         {
-            BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
+            BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings, r.Exploit,
                 r.Priority, r.Source, r.Reason);
+            move.ExploitId = r.ExploitId;
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);
@@ -1372,7 +1378,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 {
                     GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation,
                     Heading = r.HasThreatHeading ? PostureSense.NormalizeHeading(r.ThreatHeading) : -1f, Task = r.Task,
-                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason, ExploitId = r.ExploitId,
                 });
                 n++;
             }
@@ -1385,11 +1391,11 @@ namespace WhiskeyRealism.Tactical.Operations
         // that path (UpdateOrders' SetWaypoint has useorderdelay:false); the
         // courier flag stays for its plain-SetWaypoint fallback.
         private static BattleOrderIntent MoveIntent(int groupId, CommandTaskType task, float x, float z, float heading,
-            bool inContactWithdrawal, bool avoidCoveredCrossings, IntentPriority priority, IntentSource source, string reason)
+            bool inContactWithdrawal, bool avoidCoveredCrossings, bool exploit, IntentPriority priority, IntentSource source, string reason)
         {
             bool withdrawal = inContactWithdrawal && task == CommandTaskType.FallBackToLine;
             IntentFlags flags = IntentFlags.None;
-            if (Battle.CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: withdrawal))
+            if (Battle.CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true, inContactWithdrawal: withdrawal, exploit: exploit))
                 flags |= IntentFlags.UseOrderDelay;
             if (withdrawal) flags |= IntentFlags.InContactWithdrawal;
             if (avoidCoveredCrossings) flags |= IntentFlags.AvoidCoveredCrossings;

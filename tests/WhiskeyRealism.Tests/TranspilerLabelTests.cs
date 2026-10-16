@@ -24,6 +24,9 @@ internal static class TranspilerLabelTests
             ("transpiler random pick keeps every label and block", RandomPickKeepsLabels),
             ("transpiler allocation trims keep every label and block", AllocationTrimsKeepLabels),
             ("transpiler autoresolve weapon gate keeps every label and block", AutoresolveGateKeepsLabels),
+            ("transpiler reserve support pick keeps every label and block", ReserveSupportPickKeepsLabels),
+            ("transpiler artillery side keeps every label and block", ArtillerySideKeepsLabels),
+            ("transpiler macro upgrade keeps every label and block", MacroUpgradeKeepsLabels),
             ("transpiler sources never copy instructions with clone", SourcesNeverCloneInstructions),
         });
     }
@@ -50,6 +53,41 @@ internal static class TranspilerLabelTests
             AssertFalse(ReferenceEquals(edited, vanilla), site.Method + " edited copy");
             AssertMarksKept(vanilla, edited, site.Method);
         }
+    }
+
+    private static void ArtillerySideKeepsLabels()
+    {
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), WhiskeyRealism.Tactical.Battle.BugFixes.ArtillerySideIl.Method));
+        var hook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(IntHookStub));
+        var edited = WhiskeyRealism.Tactical.Battle.BugFixes.ArtillerySideIl.Transpile(vanilla, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertEqual(1, matches, "AssignReserves sites");
+        AssertFalse(ReferenceEquals(edited, vanilla), "AssignReserves edited copy");
+        AssertMarksKept(vanilla, edited, "AssignReserves");
+    }
+
+    private static void MacroUpgradeKeepsLabels()
+    {
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), WhiskeyRealism.Tactical.Battle.BugFixes.MacroUpgradeIl.Method));
+        var hook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(MacroHookStub));
+        var edited = WhiskeyRealism.Tactical.Battle.BugFixes.MacroUpgradeIl.Transpile(vanilla, AccessTools.Field(typeof(AIBattle), "newmacroaitoset"), hook, out int matches);
+        AssertEqual(1, matches, "CheckGlobalAIStrategy blocks");
+        AssertFalse(ReferenceEquals(edited, vanilla), "CheckGlobalAIStrategy edited copy");
+        AssertMarksKept(vanilla, edited, "CheckGlobalAIStrategy");
+    }
+
+    public static int MacroHookStub(AIBattle battle, int num4)
+    {
+        return num4;
+    }
+
+    private static void ReserveSupportPickKeepsLabels()
+    {
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), WhiskeyRealism.Tactical.Battle.BugFixes.ReserveSupportPickIl.Method));
+        var hook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(IntHookStub));
+        var edited = WhiskeyRealism.Tactical.Battle.BugFixes.ReserveSupportPickIl.Transpile(vanilla, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertEqual(1, matches, "CheckUseOfReserves sites");
+        AssertFalse(ReferenceEquals(edited, vanilla), "CheckUseOfReserves edited copy");
+        AssertMarksKept(vanilla, edited, "CheckUseOfReserves");
     }
 
     private static void AllocationTrimsKeepLabels()

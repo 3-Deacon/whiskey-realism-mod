@@ -58,9 +58,8 @@ internal static class PlayerOwnershipTests
             ("battle-core chain take-over parent fans out around the attached take-over", ChainTakeoverParentFansOut),
             ("battle-core dispatch mapper table", DispatchMapperTable),
             ("battle-core dispatch mapper never emits 13 14 15", DispatchMapperNeverEmits13_14_15),
-            ("battle-core dispatch dedupe same type within 110m", DispatchDedupeSameTypeWithin110m),
-            ("battle-core dispatch dedupe re-arms when the given order is cleared or differs", DispatchDedupeRearmsWhenGivenOrderClearedOrDiffers),
-            ("battle-core dispatch dedupe never suppresses a type-11 refresh", DispatchDedupeNeverSuppressesReserveRefresh),
+            ("battle-core dispatch mapper maps #62 intents through the task table", DispatchMapperMapsPlayerOrderIntents),
+            ("battle-core #62 and the executor share one mapper", P62AndExecutorShareMapper),
         });
     }
 
@@ -440,13 +439,18 @@ internal static class PlayerOwnershipTests
         AssertEqual(12, TacticalDispatchTypeMapper.Map(CommandTaskType.HoldChoke, false, false), "defend choke");
         AssertEqual(12, TacticalDispatchTypeMapper.Map(CommandTaskType.FallBackToLine, false, false), "fall back to line");
         AssertEqual(11, TacticalDispatchTypeMapper.Map(CommandTaskType.ReserveWait, false, false), "reserve wait");
-        AssertEqual(11, TacticalDispatchTypeMapper.Map(CommandTaskType.ReleaseReserve, false, false), "release reserve");
+        // A released reserve attacks an enemy-held target and supports otherwise; never an 11, which vanilla's
+        // UpdateReserveOrder would drag to its linked group (6765-6775).
+        AssertEqual(0, TacticalDispatchTypeMapper.Map(CommandTaskType.ReleaseReserve, true, false), "release reserve onto an enemy-held target");
+        AssertEqual(2, TacticalDispatchTypeMapper.Map(CommandTaskType.ReleaseReserve, false, false), "release reserve elsewhere");
         AssertEqual(1, TacticalDispatchTypeMapper.Map(CommandTaskType.Screen, false, false), "screen");
         AssertEqual(1, TacticalDispatchTypeMapper.Map(CommandTaskType.Probe, false, false), "probe");
         AssertEqual(1, TacticalDispatchTypeMapper.Map(CommandTaskType.GuardFlank, false, false), "guard flank");
         AssertEqual(3, TacticalDispatchTypeMapper.Map(CommandTaskType.FixEnemy, true, false), "fix enemy");
-        foreach (var task in new[] { CommandTaskType.None, CommandTaskType.Scout, CommandTaskType.FormUp,
-                     CommandTaskType.AdvanceToAssembly, CommandTaskType.Delay, CommandTaskType.Consolidate,
+        // Deploy to engage (1081/1199): the movement lanes all read as a 1, not the campaign "Redeploy" a 5 was.
+        foreach (var task in new[] { CommandTaskType.Scout, CommandTaskType.FormUp, CommandTaskType.AdvanceToAssembly })
+            AssertEqual(1, TacticalDispatchTypeMapper.Map(task, false, false), "deploy to engage for " + task);
+        foreach (var task in new[] { CommandTaskType.None, CommandTaskType.Delay, CommandTaskType.Consolidate,
                      CommandTaskType.RecoverStuckOrder })
             AssertEqual(None, TacticalDispatchTypeMapper.Map(task, true, false), "no dispatch for " + task);
     }
@@ -464,44 +468,33 @@ internal static class PlayerOwnershipTests
         }
     }
 
-    private static GivenOrderView Given(int type, float x, float z, int session) => new GivenOrderView(true, type, x, z, session);
-
-    private static void DispatchDedupeSameTypeWithin110m()
+    private static void DispatchMapperMapsPlayerOrderIntents()
     {
-        var state = new PlayerOrderDedupeState();
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(0, 0f, 0f, 5), meters: 110f), "nothing recorded");
-
-        state.RecordDispatch(0, 0f, 0f, givenOrderSession: 5);
-        var current = Given(0, 0f, 0f, 5);
-        AssertTrue(state.IsDuplicateDispatch(0, 100f, 0f, current, 110f), "same type within 110 m");
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 120f, current, 110f), "same type beyond 110 m");
-        AssertFalse(state.IsDuplicateDispatch(12, 10f, 0f, current, 110f), "different type");
-        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, Given(0, 0f, 0f, 6), 110f), "a newer given order (session moved) re-arms the dispatch");
-
-        state.ClearForBattleBoundary("next");
-        AssertFalse(state.IsDuplicateDispatch(0, 10f, 0f, current, 110f), "battle boundary clears the record");
+        // #62's intents ride the same table as the executor's tasks (D15); retreat is #62's own and the
+        // only 15 Whiskey sends.
+        AssertEqual(15, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.RetreatToExit, true), "retreat");
+        AssertEqual(12, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.FallBackToLine, true), "fall back");
+        AssertEqual(12, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.HoldObjective, true), "hold");
+        AssertEqual(2, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.SupportMainEffort, true), "support is a 2, not the 11 it was");
+        AssertEqual(0, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.AttackObjective, true), "attack an enemy-held objective");
+        AssertEqual(12, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.AttackObjective, false), "an objective already held is held");
+        AssertEqual(1, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.ProbeObjective, true), "a probe is deploy-to-engage, not the campaign Redeploy 5");
+        AssertEqual(1, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.AdvanceToAssemblyArea, true), "advance");
+        AssertEqual(TacticalDispatchTypeMapper.None, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.None, true), "none");
+        foreach (PlayerOrderIntent intent in Enum.GetValues(typeof(PlayerOrderIntent)))
+        {
+            int type = TacticalDispatchTypeMapper.Map(intent, true);
+            AssertFalse(type == 13 || type == 14, "no vanilla-owned transition for " + intent);
+            AssertTrue(type != 15 || intent == PlayerOrderIntent.RetreatToExit, "only the retreat intent maps to 15: " + intent);
+        }
     }
 
-    private static void DispatchDedupeRearmsWhenGivenOrderClearedOrDiffers()
+    private static void P62AndExecutorShareMapper()
     {
-        var state = new PlayerOrderDedupeState();
-        state.RecordDispatch(0, 0f, 0f, givenOrderSession: 5);
-
-        // Vanilla nulls givenorder without moving the session: end of day
-        // (CheckClearingBattleOrdersEOD 47989) and zone completion (123533).
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, default(GivenOrderView), 110f), "cleared given order re-arms");
-
-        // Our attempt was refused and an older order is still active.
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(2, 500f, 500f, 5), 110f), "different active type re-arms");
-        AssertFalse(state.IsDuplicateDispatch(0, 0f, 0f, Given(0, 400f, 0f, 5), 110f), "active target elsewhere re-arms");
-    }
-
-    private static void DispatchDedupeNeverSuppressesReserveRefresh()
-    {
-        // A type-11 order onto an active type 11 is vanilla's in-place refresh
-        // (flag4, no session bump); vanilla's own 8643 test keeps it from repeating.
-        var state = new PlayerOrderDedupeState();
-        state.RecordDispatch(11, 0f, 0f, givenOrderSession: 5);
-        AssertFalse(state.IsDuplicateDispatch(11, 0f, 0f, Given(11, 0f, 0f, 5), 110f), "type 11 always reaches vanilla");
+        // One intent -> type map: #62's composer and the executor both go through TacticalDispatchTypeMapper.
+        AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/PlayerOrderComposer.cs").Contains("TacticalDispatchTypeMapper.Map("), "the composer");
+        AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/OrderExecutor.cs").Contains("TacticalDispatchTypeMapper.Map("), "the executor");
+        AssertFalse(System.IO.File.Exists(TestFixtures.FindRepoPath("src/WhiskeyRealism") + "/Tactical/PlayerOrders/PlayerOrderVanillaMapper.cs"), "the second mapper is gone");
+        AssertFalse(TestFixtures.ReadRepoFile("tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj").Contains("PlayerOrderVanillaMapper"), "and out of the test project");
     }
 }

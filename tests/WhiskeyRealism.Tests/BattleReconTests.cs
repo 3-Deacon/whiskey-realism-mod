@@ -1269,10 +1269,10 @@ internal static class BattleReconTests
 
     private static readonly CommandNodeIntent[] DefenderIntents =
     {
-        new CommandNodeIntent("main", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.5f, 3),
-        new CommandNodeIntent("support", "army", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 0.4f, 3),
-        new CommandNodeIntent("fix", "army", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 3),
-        new CommandNodeIntent("screen", "army", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 0.2f, 3),
+        new CommandNodeIntent("main", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 3),
+        new CommandNodeIntent("support", "army", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 3),
+        new CommandNodeIntent("fix", "army", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 3),
+        new CommandNodeIntent("screen", "army", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 3),
     };
 
     private static System.Collections.Generic.IReadOnlyList<CommandNodeOperationalState> NodeStates(TacticalOperationShape shape, BattleStance stance) =>

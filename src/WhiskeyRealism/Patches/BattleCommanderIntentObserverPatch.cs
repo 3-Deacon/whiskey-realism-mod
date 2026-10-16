@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -75,7 +76,8 @@ namespace WhiskeyRealism.Patches
                 hasReserveAvailable: HasReserveAvailable(battle),
                 anchoredFlankLeft: AnchoredFlank(battle, 0),
                 anchoredFlankRight: AnchoredFlank(battle, 1),
-                stalenessPressure: 0f);
+                stalenessPressure: 0f,
+                ownOnHighGroundShare: OwnOnHighGroundShare(battle));
             var playbook = TacticalPlaybookLedger.Decide(playbookInput);
 
             EmitIntent(side, macro, intentInput, intent);
@@ -123,6 +125,26 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // BC12: the share of the side's command groups standing on a terrain-picture crest cell; HighGroundDefense is
+        // claimed only at TacticalPlaybookLedger.HighGroundShare (0 without a ready picture or with the flag off).
+        private static float OwnOnHighGroundShare(AIBattle battle)
+        {
+            TerrainPicture picture = TerrainPicture.CurrentForPlanning();
+            if (picture == null) return 0f;
+            IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+            if (units == null) return 0f;
+            int groups = 0, high = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var group = units[i] as Regiment;
+                if (group == null || group.unittyp <= 13) continue;
+                Vector3 p = group.transform.position;
+                groups++;
+                if (picture.CrestProminenceAt(p.x, p.z) > 0f) high++;
+            }
+            return groups == 0 ? 0f : (float)high / groups;
+        }
+
         private static TacticalIntentInput BuildIntentInput(int macro, int side, AIBattle battle)
         {
             // Live commander initiative from the side's commanding officer.
@@ -132,18 +154,7 @@ namespace WhiskeyRealism.Patches
             // mid-band only when the lookup fails.
             float commanderInitiative01 = ResolveLiveCommanderInitiative(side, battle);
 
-            // OperationPosture lookup is wired in a future strategic-tactical bridge
-            // slice (CIC plan → tactical posture mapping). Inherit triggers
-            // ResolveFromMacro which now consults commanderInitiative01 directly
-            // for tempo modulation. oddsConfidence stays at 0.5f mid-band — the
-            // macro layer owns the live odds doctrine.
-            return new TacticalIntentInput(
-                operationPosture: OperationPosture.Inherit,
-                hasPlan: false,
-                vanillaMacro: macro,
-                commanderInitiative01: commanderInitiative01,
-                oddsConfidence: 0.5f,
-                weakPointConfirmed: false);
+            return new TacticalIntentInput(macro, commanderInitiative01);
         }
 
         private static FieldInfo _bunitsFieldCache;
@@ -510,11 +521,9 @@ namespace WhiskeyRealism.Patches
 
             TelemetryRouter.LegacyInfo("[TacticalIntent] side=" + side +
                 " intent=" + intent.Intent +
-                " posture=" + input.OperationPosture +
                 " commanderInit=" + input.CommanderInitiative01.ToString("0.00") +
                 " macro=" + macro +
-                " reason=" + intent.Reason +
-                " confidence=" + input.OddsConfidence.ToString("0.00"), TelemetryLayer.Tactical);
+                " reason=" + intent.Reason, TelemetryLayer.Tactical);
         }
 
         private static void EmitPlaybook(int side, TacticalPlaybookDecision decision)

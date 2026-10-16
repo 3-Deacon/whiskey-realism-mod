@@ -33,7 +33,13 @@ namespace WhiskeyRealism.Tactical.Operations
         FallBackToLine,
         Delay,
         Consolidate,
-        RecoverStuckOrder
+        RecoverStuckOrder,
+        /// <summary>
+        /// BC13: a Defender's bounded local counterstroke against a penetration (requirement-defender-counterstroke). Created
+        /// only by an exploit order whose opening is a Penetration; the Defender stance guard passes it, the stance mapper
+        /// gives attack (3), and the #45 scorer has no opinion on it.
+        /// </summary>
+        Counterstroke
     }
 
     public enum CommandTaskState

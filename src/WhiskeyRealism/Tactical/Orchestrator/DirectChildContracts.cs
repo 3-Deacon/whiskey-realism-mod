@@ -133,7 +133,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildAxis axis,
             int axisSector,
             float supportPriority01,
-            float aggressionBias01,
             TacticalIntentModel enemyIntent,
             WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
             WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown)
@@ -149,7 +148,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Axis = axis;
             AxisSector = axisSector;
             SupportPriority01 = Clamp01(supportPriority01);
-            AggressionBias01 = ClampOrHalf(aggressionBias01);
             EnemyIntent = enemyIntent;
         }
 
@@ -162,7 +160,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public DirectChildAxis Axis { get; }
         public int AxisSector { get; }
         public float SupportPriority01 { get; }
-        public float AggressionBias01 { get; }
         public TacticalIntentModel EnemyIntent { get; }
 
         /// <summary>
@@ -180,14 +177,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static float Clamp01(float v)
         {
             if (float.IsNaN(v) || float.IsInfinity(v)) return 0f;
-            if (v < 0f) return 0f;
-            if (v > 1f) return 1f;
-            return v;
-        }
-
-        private static float ClampOrHalf(float v)
-        {
-            if (float.IsNaN(v) || float.IsInfinity(v)) return 0.5f;
             if (v < 0f) return 0f;
             if (v > 1f) return 1f;
             return v;

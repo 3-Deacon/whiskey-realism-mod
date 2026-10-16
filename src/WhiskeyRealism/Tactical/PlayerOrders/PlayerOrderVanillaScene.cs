@@ -14,9 +14,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return IsBattleOrderType(type) ? PlayerOrderScope.Tactical : PlayerOrderScope.Campaign;
         }
 
+        // Whiskey's battle set: vanilla's IsBattleOrder (41772) leaves out 13, 14 and 15, which makes
+        // IsActive read an engage-at-will or a retreat as stale in battle; the re-admit logic must see
+        // them as the live orders they are. Vanilla's own IsActive is untouched.
         private static bool IsBattleOrderType(int type)
         {
-            return type == 0 || type == 1 || type == 2 || type == 3 || type == 4 || type == 11 || type == 12;
+            return (type >= 0 && type <= 4) || (type >= 11 && type <= 15);
         }
     }
 }

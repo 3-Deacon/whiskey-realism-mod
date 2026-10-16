@@ -64,6 +64,80 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableBattleHqConditionFix;
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
+        internal static ConfigEntry<bool> EnableBattleTerrainPicture;
+        internal static ConfigEntry<bool> EnablePerCommanderPersonality;
+        internal static ConfigEntry<bool> EnableCommanderOpportunity;
+        internal static ConfigEntry<bool> EnableDefenderCounterstroke;
+        internal static ConfigEntry<bool> EnableStaggeredReserveRelease;
+        internal static ConfigEntry<bool> EnableCavalryStrikeDiscipline;
+        internal static ConfigEntry<bool> EnableVanillaStanceCooldownFix;
+        internal static ConfigEntry<bool> EnableSeparatedEnemySteer;
+        internal static ConfigEntry<bool> EnableVanillaReserveSupportPickFix;
+        internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
+        internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
+
+        /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
+        internal static bool TerrainPictureEnabled()
+        {
+            try { return EnableBattleTerrainPicture != null && EnableBattleTerrainPicture.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Per-Commander Personality (BC13 section 4: the commander table, the derived army vector, the attack-threshold band, the casualty threshold's basis).</summary>
+        internal static bool PerCommanderPersonalityEnabled()
+        {
+            try { return EnablePerCommanderPersonality != null && EnablePerCommanderPersonality.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>The plugin's master switch (Enabled), false before the plugin loaded.</summary>
+        internal static bool MasterEnabled()
+        {
+            try { return Instance != null && Instance.Enabled.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Commander Opportunity (BC13 sections 5-6: the opening detector, the per-commander decision and the exploit override).</summary>
+        internal static bool CommanderOpportunityEnabled()
+        {
+            try { return EnableCommanderOpportunity != null && EnableCommanderOpportunity.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Staggered Reserve Release (BC13: one reserve per release interval above a floor; one per crisis sector).</summary>
+        internal static bool StaggeredReserveReleaseEnabled()
+        {
+            try { return EnableStaggeredReserveRelease != null && EnableStaggeredReserveRelease.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Cavalry Strike Discipline (#120: vanilla's cavalry charge target is kept only when the side perceives it, and it is worth charging).</summary>
+        internal static bool CavalryStrikeDisciplineEnabled()
+        {
+            try { return EnableCavalryStrikeDiscipline != null && EnableCavalryStrikeDiscipline.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Vanilla Stance Cooldown Fix (#119: vanilla's own stance change holds its group for the game-hour the battle prefs promise).</summary>
+        internal static bool VanillaStanceCooldownFixEnabled()
+        {
+            try { return EnableVanillaStanceCooldownFix != null && EnableVanillaStanceCooldownFix.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Separated Enemy Steer (#121: vanilla's omniscient isolated-target move does not also send Whiskey-commanded groups).</summary>
+        internal static bool SeparatedEnemySteerEnabled()
+        {
+            try { return EnableSeparatedEnemySteer != null && EnableSeparatedEnemySteer.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Defender Counterstroke (BC13: the Penetration opening and the Defender's bounded local counterstroke).</summary>
+        internal static bool DefenderCounterstrokeEnabled()
+        {
+            try { return EnableDefenderCounterstroke != null && EnableDefenderCounterstroke.Value; }
+            catch { return false; }
+        }
 
         /// <summary>Tactical / Enable Flank Response And Envelopment (BC11 decisions 1, 3, 4).</summary>
         internal static bool FlankResponseEnabled()
@@ -81,6 +155,13 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderReadmit { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
+        internal static ConfigEntry<bool> FixCapitalDefensePlayerOrder { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderFollowUp { get; private set; }
+        internal static ConfigEntry<bool> EnableWlEnemyRetreatGuard { get; private set; }
+        internal static ConfigEntry<bool> FixLostOrdersFogGrid { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -241,6 +322,8 @@ namespace WhiskeyRealism
             Instance = this;
             Log = Logger;
             Tactical.Battle.BattleTerrainGrid.Provider = Tactical.Battle.BattleTerrainGridRuntime.Get;
+            Tactical.Battle.TerrainPicture.Provider = Tactical.Battle.TerrainPictureRuntime.Get;
+            Tactical.Battle.TerrainPicture.PlanningEnabled = TerrainPictureEnabled;
 
             Enabled = Config.Bind(
                 "General", "Enabled", true,
@@ -522,6 +605,111 @@ namespace WhiskeyRealism
                 "end, face it and attack it as orders to the child, instead of only relabelling roles. Never for a Defender side. " +
                 "The refused flank that reaches vanilla (the wheel and the in-combat rotation) is a bug fix and is not behind this. Off: " +
                 "the closest visible enemy decides facing, reserves release as before, plays only relabel roles.");
+            EnableBattleTerrainPicture = Config.Bind(
+                "Tactical",
+                "Enable Battle Terrain Picture",
+                true,
+                "Default ON. BC12: the AI picks ground. A map picture built once per battle from public terrain data (crests, walls, " +
+                "fences, sunken roads and embankments, river lines, fords, bridges, road junctions, towns) classifies the objectives " +
+                "(Bridge, Ford, Town, RoadJunction, Ridge), scores terrain strength and approach difficulty, lets a defending side form " +
+                "on the best crest, wall or river line near its objective and skip a flank guard on a river- or crest-anchored flank, " +
+                "reads an enemy standing on strong ground as defending, and makes ReverseSlopeDefense need a crest across the front. " +
+                "The picture itself builds either way (the playbook terrain reads it). Off: objectives keep their types and zero " +
+                "terrain strength, the defensive anchor keeps its terrain-anchor-preserved behaviour, no strong-ground evidence, and " +
+                "ReverseSlopeDefense is never chosen (it needs a crest line).");
+            EnablePerCommanderPersonality = Config.Bind(
+                "Tactical",
+                "Enable Per-Commander Personality",
+                true,
+                "Default ON. BC13: each corps and division commander has his own temperament. A historical commander keeps the list's " +
+                "values; every other commander's aggression, caution, audacity and casualty tolerance are derived from his game stats " +
+                "(initiative, cunning, leadership, administration, veteran, political), so an unlisted army commander is no longer the " +
+                "faction default. The army's attack threshold for a Meeting or Attacker side becomes a band (1.20 at aggression 0 to 0.80 at " +
+                "1.0, 1.00 at 0.5) instead of the parity cap, and the casualty level that ends a delaying defence follows the commander's " +
+                "casualty tolerance instead of his aggression. Off: the army vector is the roster's as before, every node uses it, the " +
+                "threshold cap at 1.0 and the aggression-based casualty threshold return.");
+            EnableCommanderOpportunity = Config.Bind(
+                "Tactical",
+                "Enable Commander Opportunity",
+                true,
+                "Default ON. BC13: each AI corps and division commander looks for local openings the side perceives (a gap in the enemy line, a " +
+                "shaken sector, a flank in the air, an unsupported battery, an isolated cluster) and, by his own temperament, sends one of his " +
+                "brigades or divisions at one as a bounded exploit: advance, strike, consolidate, then back to its post. The detection reads " +
+                "only what the side perceives (the fog grid), never the enemy's true positions. At most three exploits at a time, one per " +
+                "commander, with a reserve floor and a line-integrity check. Off: no detection and no exploits; the posture is the " +
+                "operations ledger's alone.");
+            EnableDefenderCounterstroke = Config.Bind(
+                "Tactical",
+                "Enable Defender Counterstroke",
+                true,
+                "Default ON. BC13: a Defender side may answer an enemy that broke through its line (a visible unit 100 to 400 m behind the " +
+                "own front line, clear of it) with a bounded local counterstroke by a reserve or second-line brigade, never beyond the own " +
+                "line and never by cavalry. Other attack tasks on a Defender are still held. Needs Enable Commander Opportunity. Off: no " +
+                "penetration is detected and a Defender never launches an exploit.");
+            EnableStaggeredReserveRelease = Config.Bind(
+                "Tactical",
+                "Enable Staggered Reserve Release",
+                true,
+                "Default ON. BC13: the army releases its reserves one at a time. When the plan reaches its Exploit phase or the odds reach the " +
+                "reserve-commit trigger, at most one Reserve division or corps is released per interval (0.05 to 0.15 game-hours, shorter for " +
+                "an aggressive army commander), the one nearest the main effort, and the army keeps a floor of reserves held (30 % of the " +
+                "reserves it had, more for a cautious commander, fewer for one who accepts casualties; at least one unless it only had one). " +
+                "A crisis still releases at once, one reserve per outmatched sector, the nearest, even below the floor. A reserve with a live " +
+                "local exploit is never released. Off: every reserve is released together, as before.");
+            EnableCavalryStrikeDiscipline = Config.Bind(
+                "Tactical",
+                "Enable Cavalry Strike Discipline",
+                true,
+                "Default ON. #120 (BUG-TAC-030): vanilla assigns a cavalry regiment's charge from the true state of the battle: an enemy " +
+                "it cannot see, a regiment in square or a fort, artillery with infantry standing beside it, a target its odds do not " +
+                "favour, even when the charging regiment is itself outflanked. With this on, vanilla's pick stands only when the side " +
+                "perceives the target, it is not in square or garrisoned, it is artillery with no infantry or cavalry within 250 m or a " +
+                "shaken unit the regiment's odds favour, and the charger is not outflanked; a live local exploit's cavalry target replaces " +
+                "a refused pick when it is within reach. Vanilla's own cycle does the charging; this only removes bad targets. " +
+                "Off: vanilla's pick.");
+            EnableVanillaStanceCooldownFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Stance Cooldown Fix",
+                true,
+                "Default ON. #119 (BUG-TAC-027): vanilla's battle AI is meant to wait one game-hour (battleprefs: time to wait for resetting of " +
+                "new ai stances once set) after it changes a group's stance, but its comparison is inverted and re-decides every cycle. With " +
+                "this on, a group whose stance vanilla itself just changed is held for that hour, so vanilla's weak-group defend and screen " +
+                "changes wait up to an hour after the group's previous change instead of flipping every cycle. An army retreat releases the " +
+                "holds at once. Whiskey's own stance holds and the W&L feud instance are untouched. Off: vanilla's re-decision every cycle.");
+            EnableSeparatedEnemySteer = Config.Bind(
+                "Tactical",
+                "Enable Separated Enemy Steer",
+                true,
+                "Default ON. #121 (a steer): vanilla sends an AI group straight at an isolated enemy cluster it finds from the true " +
+                "state of the battlefield, whatever the group's orders, and Whiskey's posture then re-issues the ledger order: two movers " +
+                "on one group. With this on, a group Whiskey commands (in the AI pool with a doctrine state) is left out of that vanilla " +
+                "behaviour; Whiskey's own isolated-cluster opening, which only sees what the side perceives, takes over. Groups vanilla " +
+                "commands, the player's groups and the W&L feud instance are unchanged. Needs Tactical Commander Mode Active. Off: vanilla " +
+                "also sends Whiskey-commanded groups.");
+            EnableVanillaReserveSupportPickFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Reserve Support Pick Fix",
+                true,
+                "Default ON. #124 (BUG-TAC-008): when vanilla's battle AI sends a reserve to support an endangered regiment it picks one with " +
+                "a random range that excludes the last candidate, so the last endangered regiment is never supported and, with two, always the " +
+                "first. With this on the pick includes every endangered regiment. A live rollback: turning it off restores vanilla's pick " +
+                "without a restart. Whiskey's reserve gate still denies this vanilla path for Reserve-role children.");
+            EnableVanillaMacroAssaultUpgradeFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Macro Assault Upgrade Fix",
+                true,
+                "Default ON. #122 (BUG-TAC-028): when vanilla's battle AI finds that no flanking is possible and the force balance is high " +
+                "it means to upgrade a macro attack to a full assault, but it writes the upgrade where the method's own decision never " +
+                "stores it, so the upgrade only lands when the pending value already was attack. With this on the assault upgrade reaches " +
+                "the stored decision. A live rollback: turning it off restores vanilla's behaviour without a restart.");
+            EnableVanillaArtilleryChainSideFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Artillery Chain Side Fix",
+                true,
+                "Default ON. #123 (BUG-TAC-029): vanilla's battle AI decides which end of the line an artillery group joins with a random range " +
+                "that can only give one answer, so every artillery group joins the left end of the chain and none the right. With this on " +
+                "artillery groups split between the left and right ends at random. A live rollback: turning it off restores vanilla's " +
+                "value without a restart.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",
@@ -551,6 +739,65 @@ namespace WhiskeyRealism
                 "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
                 "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
                 "player's regiments count fully and nothing is recorded.");
+            EnableWlOrderReadmit = Config.Bind(
+                "W&L",
+                "Enable W&L Order Readmit",
+                true,
+                "Default ON. W&L subordinate career: a new order from your superiors reaches you when the situation changes " +
+                "(the same kind of order at a new place after 15 game minutes, a retreat over 'Engage at will', a defend once the " +
+                "objective is held or the army turns defensive), instead of being dropped by vanilla's one-order-per-type rule; " +
+                "'Engage at will' is released to 'hold current position' when contact ends. Writes the W&L order slot " +
+                "(DLC_WL.givenorder) and restores it if vanilla refuses the new order. Needs Tactical Commander Mode = Active. " +
+                "Off: vanilla's order dedupe.");
+            EnableWlOrderCouriers = Config.Bind(
+                "W&L",
+                "Enable W&L Order Couriers",
+                true,
+                "Default ON. W&L career: orders from your superiors (vanilla's and Whiskey's) arrive after the courier delay from the " +
+                "issuing headquarters instead of appearing the instant they are given. In battle that is vanilla's own order-delay " +
+                "settings (bugle within range, a mounted courier beyond it, relays down the chain; needs Tactical Commander Mode = " +
+                "Active). On the campaign map it is vanilla's campaign order delay from your senior commander (distance, telegraph, " +
+                "winter quarters, entrenchment, readiness and perks of the sender); a campaign order still on its way is saved with " +
+                "the game. Off: orders are delivered at the next order pass.");
+            EnableWlOrderText = Config.Bind(
+                "W&L",
+                "Enable W&L Order Text",
+                true,
+                "Default ON. W&L career: order texts name real places and formations. Whiskey's orders name the nearest named objective " +
+                "or say where the point lies from your command (\"about 1,200 yards ahead and to the right of your position\") instead of " +
+                "an internal key, vanilla's \"My Division\" becomes the formation's name (\"Hood's Division\"), and Whiskey's orders carry " +
+                "a short condition line and your neighbours. Also corrects the portrait of an issuer who has been replaced. Off: vanilla texts " +
+                "(Whiskey's orders name the objective or \"Objective\").");
+            EnableWlOrderFollowUp = Config.Bind(
+                "W&L",
+                "Enable W&L Order Follow-Up",
+                true,
+                "Default ON. W&L career: after you reach and hold the position of a battle order from your superiors, your superior " +
+                "tells you to hold that position (an information-style 'hold current position' order, no prestige, no compliance " +
+                "sample; needs Enable W&L Order Readmit); on the campaign map a reached Redeploy, Offensive, Offensive Operation " +
+                "or Engage order is acknowledged with a short message. Information only: nothing moves and nothing is taken away. " +
+                "Off: no follow-up and no acknowledgement.");
+            EnableWlEnemyRetreatGuard = Config.Bind(
+                "W&L",
+                "Enable W&L Enemy Retreat Order Guard",
+                true,
+                "Default ON. Vanilla checks the enemy army's order list with the same code as yours, so when the ENEMY army retreats a " +
+                "top-level W&L player is told 'our army retreats'. With this on that order is not sent to you (BUG-WL-019). Your own " +
+                "army's retreat order is unchanged. Off: vanilla.");
+            FixLostOrdersFogGrid = Config.Bind(
+                "W&L",
+                "Fix Lost Orders Fog Grid",
+                true,
+                "Default ON. Vanilla hides the paper-map fog-of-war grid when the Lost Orders incident is rolled and then, when the " +
+                "incident does not apply (no Expert Spy companion), leaves it hidden until the paper map is closed and opened again. " +
+                "With this on the grid is shown again at once (BUG-WL-020). Off: vanilla.");
+            FixCapitalDefensePlayerOrder = Config.Bind(
+                "W&L",
+                "Fix Capital Defense Player Order",
+                true,
+                "Default ON. Vanilla re-sends the defend-capital order to a top-level W&L player on every pass and sets forced march " +
+                "(running and double quick, which costs condition on the campaign map) on the player's own group each time. With this " +
+                "on the order is shown once per capital and your group keeps the march mode you set (BUG-WL-018). Off: vanilla.");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",
                 "Enable CIC Faction AI Bug Guard",
@@ -1229,12 +1476,17 @@ namespace WhiskeyRealism
                 return;
             }
 
-            // Heuristic Community Hotfix detection — best-effort sentinel check.
+            // Heuristic Community Hotfix detection — best-effort sentinel check. A direct
+            // per-assembly lookup: AccessTools.TypeByName logs a HarmonyX warning on every
+            // launch when the type is absent, which is the normal case.
             try
             {
-                var hotfixType = AccessTools.TypeByName("CommunityHotfix");
-                if (hotfixType != null)
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (assembly.GetType("CommunityHotfix", false) == null) continue;
                     Log.LogWarning("Community Hotfix detected — Whiskey Realism is INCOMPATIBLE. Strategic patches may not behave as expected.");
+                    break;
+                }
             }
             catch { /* ignore — best-effort only */ }
 

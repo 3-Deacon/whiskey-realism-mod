@@ -102,6 +102,10 @@ All five recommendations are implemented on `feat/battle-core` (plan `docs/super
 - **Leaf target via `transform.parent` (:2946 above).** Replaced: `LeafSlotTarget` takes the parent from the snapshot's D5 parent map.
 - **Campaign `MoveUnitTo(…, true)` returns queued, not moved** (last table row): unchanged, campaign scope.
 
+## Terrain reads for planning (BC12, 2026-10-15)
+
+The terrain picture reads, once per battle, what vanilla tests per query: heights from `Terrain.activeTerrain.terrainData.GetHeights` (not `GetTerrainHeight` 27002-27031, which probes the NavMesh); the crest rule of `CheckTerrainPeak` (27068-27108: a peak must stand `maxsteepnessofterrainforshape` = 3 m above both ends and the line's relief must reach `maxterrainshapeheightdifference` = 3 m) on four axes at 40 m and 80 m; cover from the tagged colliders `StoneWall`, `Fence`, `SunkenRoad`, `Railroad`, `UnfinishedRailroad`, `SmallRiver` (`GetCoverCollider` 138392-138430, tag on the collider or its parent; ids by `GetCoverIDFromName` 138482-138502: Fence 1, StoneWall 2, Railroad 4, SmallRiver 5, SunkenRoad 15, UnfinishedRailroad 16; values by `coverobjectvalues`); and the flank-anchor rule `CheckIfFlanksAreAnchored` (6599-6640: river id 4 within 80 m, crest within 50 m). Trenches and log walls are built during the battle and are not in the picture. Map data only; no unit is read.
+
 ## Deployment and movement (BC10, 2026-10-15)
 
 Findings behind the slice (build 14703111; plan `docs/superpowers/plans/2026-10-15-battle-core.md` § BC10):

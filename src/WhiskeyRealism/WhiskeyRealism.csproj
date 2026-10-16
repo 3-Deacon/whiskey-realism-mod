@@ -68,6 +68,10 @@
       <HintPath>$(RefsDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.TerrainModule">
+      <HintPath>$(RefsDir)\UnityEngine.TerrainModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>$(RefsDir)\Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>

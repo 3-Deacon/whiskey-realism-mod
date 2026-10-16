@@ -646,7 +646,8 @@ internal static partial class FlankResponseTests
         var unset = Allocate(WingEvidence(true, 3, false, 0), default(ReserveReleaseContext));
         AssertEqual(DirectChildRole.Reserve, unset[1].Role, "a default context releases none");
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
-        AssertPinned(army, "new ReserveReleaseContext(_lastGlobalOdds, Plugin.FlankResponseEnabled())", "the flag reaches the allocator");
+        AssertPinned(army, "bool flank = Plugin.FlankResponseEnabled();", "the flag reaches the allocator");
+        AssertPinned(army, "return new ReserveReleaseContext(_lastGlobalOdds, flank);", "with the stagger flag off the context is the BC11 one");
     }
 
     private static void FlankReleaseIsPerWingAndNearestReserve()
@@ -705,7 +706,7 @@ internal static partial class FlankResponseTests
 
     private static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
 
-    private static void AssertPinned(string body, string expected, string label)
+    internal static void AssertPinned(string body, string expected, string label)
     {
         AssertTrue(Flat(body).Contains(Flat(expected)), label + ": " + expected);
     }

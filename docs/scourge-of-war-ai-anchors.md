@@ -387,6 +387,10 @@ Per-corps internal slots (`offai.cpp:1030`): `PSTATL*` (left side) and `PSTATR*`
 
 Until BC11 a rect only relabelled the corps assigned to it (`PlayCorpsAssignment.RoleForRectKind`); `FlankMarch`, `LeftWing`, `RightWing` and `DeepRaid` all mapped to `Main`, and `StartTimeOffsetSeconds` was carried and dropped. Now six rects execute (`PlayRect.Envelops`): the assigned child holds until the rect's offset after the Center child's first contact (the later of that and the play's activation), marches to the rect anchor (a `DeepRaid` first to an outflank point 300 m beyond the less pressured end of the perceived enemy line), turns to face the perceived line end and attacks it (`EnvelopmentManeuver`), with vanilla's `FlankMove` checks (river id 4 on a leg, an enemy 5 m above the turn point) deciding whether the move is made. The other wing rects keep the offset as a start delay only. Scourge's `PLAYFTime` is the same idea (a rect's corps waits for its time); Scourge does not check rivers or ground heights on the way, Whiskey reuses vanilla's.
 
+### ReverseSlopeDefense is crest-based (BC12, 2026-10-15)
+
+The Scourge reverse-slope idea needs a slope to be behind. Until BC12 the GTCW `ReverseSlopeDefense` template was fixed proportions of the engagement distance. Now the play is selectable only when the terrain picture finds a crest run across the front (`ArmyEvidence.CrestLine`, `TacticalTerrainLinePlanner.BestCrest`), and `PlayProjection.Project(..., in TerrainLine crest)` puts the ForwardScreen on the crest centre and the CenterHold / flank rects 80 m behind it along the forward axis (lateral layout unchanged); the doctrine line anchor holds the crest 80 m behind it as well. Scourge's `PSTAT*` slots are not crest-aware; this is Whiskey's reading of the same idea.
+
 ### Battle-type stance gate (`offai.cpp:1151-1159`)
 
 The "am I attacking or defending" decision is set ONCE by the scenario, then STAYS STABLE. Force balance does NOT flip a side from defend to attack mid-battle. Personality + force balance influence the SECONDARY pick (which OF several defend or attack plays) but never cross the attack/defend boundary.
@@ -428,6 +432,10 @@ The Whiskey play-template ↔ Scourge play translation:
 | `RunArmyPlay(corps, rect)` | `DirectChildAllocator.AllocateWithZones` |
 
 The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetypes (after the 2026-05-23 generic rename — `LeeEnvelopment → DoubleEnvelopment` etc.). Offensive templates only fire when stance allows attack; defensive templates only on Defender stance.
+
+### Division think loop: local opportunities now exist (BC13, 2026-10-15)
+
+Scourge of War's division AI re-thinks locally every cycle and takes an opening (a gap, a shaken unit, an unanchored flank) when the commander's temperament allows it. Whiskey's tactical stack had only the army-level plan until BC13: nothing at division level reacted to what the line saw. `OpportunityTick` adds that think loop, fog-honest (Visible/Remembered rows and a perceived-ground lattice only), per deciding commander, with a personality-weighted odds/reach/risk decision, a bounded exploit and an abort chain. See [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core (Commander opportunity).
 
 ### Whiskey ↔ vanilla macroai
 
