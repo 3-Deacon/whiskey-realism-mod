@@ -730,7 +730,7 @@ internal static class PlannerSidecarTests
             new CampaignCourierDto
             {
                 Unit = "1st Corps", UnitCommander = 7, Type = 5, X = 10.5f, Y = 1f, Z = -20.25f, Name = "Order", Rotation = 0.5f, Width = 3f, Depth = 4f,
-                Origin = "campaign-planner", Issuer = 17, ShowZone = true, PlayerCommand = "1st Corps#7", IssuedAt = 2.5, DueAt = 2.75
+                Origin = "campaign-planner", Issuer = 17, PlayerCommand = "1st Corps#7", IssuedAt = 2.5, DueAt = 2.75
             },
             new CampaignCourierDto { Unit = "2nd Corps", UnitCommander = 8, Type = 1, PlayerCommand = null, IssuedAt = 3.0, DueAt = 3.1 }
         };
@@ -745,7 +745,6 @@ internal static class PlannerSidecarTests
         AssertEqual("Order", c.Name, "name");
         AssertEqual("campaign-planner", c.Origin, "origin");
         AssertEqual(17, c.Issuer, "issuer");
-        AssertTrue(c.ShowZone, "show zone");
         AssertEqual("1st Corps#7", c.PlayerCommand, "the player's command");
         AssertNear(2.5f, (float)c.IssuedAt, 1e-6f, "issued at");
         AssertNear(2.75f, (float)c.DueAt, 1e-6f, "due at");

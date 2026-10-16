@@ -672,7 +672,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(carrying);
         var plan = PlanOf(s);
         AssertTrue(plan.MassInstanceIds.Contains(2), "the planner counts the carrying group");
-        AssertEqual(FormationRole.MainEffort, Of(Alloc(plan, s), 2).Role, "an ordinary movable formation: F's MoveUnitTo Postfix dispatches its march");
+        AssertEqual(FormationRole.MainEffort, Of(Alloc(plan, s), 2).Role, "an ordinary movable formation: the player it carries is sent no order");
     }
 
     private static void MapGroupPlayerNeverSoleMustHold()

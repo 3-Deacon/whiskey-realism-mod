@@ -740,13 +740,12 @@ namespace WhiskeyRealism
                 "W&L",
                 "Enable Campaign Chain Dispatches",
                 true,
-                "Default ON. #69: when vanilla moves the campaign-map group that carries a subordinate W&L player (a brigade or division " +
-                "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
-                "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
-                "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
-                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
-                "are remembered). Whiskey never " +
-                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+                "Default ON. Whiskey's own strategic orders to a W&L player whose command is itself a campaign-map group (a corps or a " +
+                "top-level division) reach his career panel as the order vanilla would give him (Redeploy, Offensive, Offensive Operation, " +
+                "Engage Enemy, Defend Capital), with vanilla's order zone and arrival prestige and at most one order per target per game " +
+                "day. A player who is not his own map group (a brigade or division carried by an AI corps) never receives a campaign " +
+                "order, as in the base game: the corps that carries him marches without a word. Whiskey never moves the player's " +
+                "command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
             EnablePlayerComplianceLedger = Config.Bind(
                 "W&L",
                 "Enable Player Compliance Ledger",

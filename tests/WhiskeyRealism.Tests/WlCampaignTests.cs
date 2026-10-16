@@ -861,7 +861,7 @@ internal static class WlCampaignTests
             WlStrategicIntent.Offensive,
             new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true));
         AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
-        AssertTrue(decision.MayDirectMove, "vanilla-style move; #69 dispatches it");
+        AssertTrue(decision.MayDirectMove, "vanilla-style move; the carried player is sent no order");
         AssertTrue(decision.MayMutateOperationList, "listed like any AI group");
         AssertEqual("carrying-group", decision.Reason);
     }
