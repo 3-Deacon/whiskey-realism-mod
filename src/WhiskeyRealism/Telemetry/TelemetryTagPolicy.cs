@@ -102,6 +102,8 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCommanderPersonality", TelemetryCategory.State);
             AddTactical("TacticalOpening", TelemetryCategory.State);
             AddTactical("TacticalExploit", TelemetryCategory.Decision);
+            AddTactical("TacticalCavalryStrike", TelemetryCategory.Decision);
+            AddTactical("TacticalStanceCooldown", TelemetryCategory.State);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can

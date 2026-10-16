@@ -172,7 +172,7 @@ namespace WhiskeyRealism.Util
 
         // Vanilla's per-group stance for the group (AdjustGroupAIStance
         // 4236-4252 inputs), or VanillaStanceUnknown when it cannot be read.
-        private static int VanillaGroupStance(AIBattle battle, BattleUnits bunits, Regiment group, int macro)
+        internal static int VanillaGroupStance(AIBattle battle, BattleUnits bunits, Regiment group, int macro)
         {
             try
             {

@@ -69,6 +69,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableDefenderCounterstroke;
         internal static ConfigEntry<bool> EnableStaggeredReserveRelease;
         internal static ConfigEntry<bool> EnableCavalryStrikeDiscipline;
+        internal static ConfigEntry<bool> EnableVanillaStanceCooldownFix;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -102,6 +103,13 @@ namespace WhiskeyRealism
         internal static bool CavalryStrikeDisciplineEnabled()
         {
             try { return EnableCavalryStrikeDiscipline != null && EnableCavalryStrikeDiscipline.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Vanilla Stance Cooldown Fix (#119: vanilla's own stance change holds its group for the game-hour the battle prefs promise).</summary>
+        internal static bool VanillaStanceCooldownFixEnabled()
+        {
+            try { return EnableVanillaStanceCooldownFix != null && EnableVanillaStanceCooldownFix.Value; }
             catch { return false; }
         }
 
@@ -624,6 +632,15 @@ namespace WhiskeyRealism
                 "shaken unit the regiment's odds favour, and the charger is not outflanked; a live local exploit's cavalry target replaces " +
                 "a refused pick when it is within reach. Vanilla's own cycle does the charging; this only removes bad targets. " +
                 "Off: vanilla's pick.");
+            EnableVanillaStanceCooldownFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Stance Cooldown Fix",
+                true,
+                "Default ON. #119 (BUG-TAC-027): vanilla's battle AI is meant to wait one game-hour (battleprefs: time to wait for resetting of " +
+                "new ai stances once set) after it changes a group's stance, but its comparison is inverted and re-decides every cycle. With " +
+                "this on, a group whose stance vanilla itself just changed is held for that hour, so vanilla's weak-group defend and screen " +
+                "changes wait up to an hour after the group's previous change instead of flipping every cycle. An army retreat releases the " +
+                "holds at once. Whiskey's own stance holds and the W&L feud instance are untouched. Off: vanilla's re-decision every cycle.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",
