@@ -292,10 +292,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public readonly Dictionary<string, EnvelopmentManeuver.MarchRouteCheck> MarchChecks =
                 new Dictionary<string, EnvelopmentManeuver.MarchRouteCheck>(StringComparer.Ordinal);
             public string PlanChildId;
+            // BC14 requirement-wing-abandon-replan: the enveloping children BC11 abandoned under this plan, in the order it did. The ledger
+            // keeps one writer (the coordinator's heavy path), so BC11 only queues them here and the heavy path drains the queue into the
+            // monitor's facts on its next run.
+            public readonly List<string> Abandoned = new List<string>(4);
 
             public void Clear()
             {
                 Plan = BattlePlanId.Unknown;
+                Abandoned.Clear();
                 ActivatedHours = -1.0;
                 CenterContactHours = -1.0;
                 States.Clear();
@@ -400,6 +405,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;
                         side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
+                        if (state.Phase == ManeuverPhase.Abandoned && before != ManeuverPhase.Abandoned && spec.Envelops) side.Abandoned.Add(intents[i].ChildId);
                         if (state.Phase != before || state.Mirrored != wasMirrored) EmitEnvelopment(allianceId, planId, intents[i].ChildId, order, state, input);
                     }
                     return side.Orders;

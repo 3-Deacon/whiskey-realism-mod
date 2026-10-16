@@ -121,7 +121,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             job.SidesEvaluated[planIndex] = sides;
             ledger.AddBack(in best.Result, new ReadOnlySpan<BodyEstimate>(best.Bodies, 0, best.BodyCount),
-                new ReadOnlySpan<MemberEstimate>(best.Members, 0, best.MemberCount));
+                new ReadOnlySpan<MemberEstimate>(best.Members, 0, best.MemberCount),
+                new ReadOnlySpan<RouteCrossing>(best.Crossings, 0, best.CrossingCount));
         }
 
         // requirement-candidate-set: sides rank by verdict first (Feasible and Risky, then Unknown, then Impossible), then the lower

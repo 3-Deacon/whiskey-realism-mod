@@ -71,6 +71,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             TacticalPlaybook best = null;
             float bestScore = float.NegativeInfinity;
+            // BC14 hysteresis: the plan being kept, scored in this pass.
+            TacticalPlaybook current = null;
+            float currentScore = float.NegativeInfinity;
             // Deterministic per-seed jitter (xorshift32). Seed must be non-zero for the
             // generator to produce useful state, so OR with 1.
             // Precondition filter (2026-05-21). Excludes plays the force can't
@@ -182,7 +185,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bestScore = score;
                     best = pb;
                 }
+                if (pb.Id == ctx.HysteresisPlan && ctx.HysteresisPlan != BattlePlanId.Unknown)
+                {
+                    current = pb;
+                    currentScore = score;
+                }
             }
+            // The current plan stays unless it is absent or Impossible (then it was never scored) or the best beats it by the margin.
+            if (current != null && best != current && bestScore - currentScore < ctx.HysteresisMargin) best = current;
             if (report != null)
             {
                 report.PreconditionFiltered = preconditionFiltered;

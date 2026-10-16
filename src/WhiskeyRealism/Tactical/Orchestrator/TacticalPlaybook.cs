@@ -127,8 +127,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool defensivePressure = false,
             BattleStance stance = BattleStance.Meeting,
             bool hasCrestLine = false,
-            Plays.IFeasibilityLookup feasibility = null)
+            Plays.IFeasibilityLookup feasibility = null,
+            BattlePlanId hysteresisPlan = BattlePlanId.Unknown,
+            float hysteresisMargin = 0f)
         {
+            HysteresisPlan = hysteresisPlan;
+            HysteresisMargin = hysteresisMargin;
             HasCrestLine = hasCrestLine;
             Feasibility = feasibility;
             CommanderPersonality = commanderPersonality;
@@ -204,6 +208,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// skips an Impossible candidate and subtracts <see cref="Plays.ManeuverFeasibility.FeasibilityWeight"/> times the penalty of the rest.
         /// </summary>
         public Plays.IFeasibilityLookup Feasibility { get; }
+
+        /// <summary>
+        /// BC14: the plan a broken maneuver assumption is re-picking (Unknown for an ordinary pick). <c>Select</c> scores it in the same pass and
+        /// keeps it unless it is absent or Impossible, or the best candidate beats it by <see cref="HysteresisMargin"/>.
+        /// </summary>
+        public BattlePlanId HysteresisPlan { get; }
+        public float HysteresisMargin { get; }
 
         /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry

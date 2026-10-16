@@ -620,7 +620,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 // Plan age, phase age and the replan cooldown run on doctrine
                 // time; the wall-clock delta is unused when it is supplied.
-                var trigger = ArmyTickCycle.MaybeReplan(
+                ReplanOutcome outcome = ArmyTickCycle.MaybeReplan(
                     side.Army,
                     deltaSeconds: 0f,
                     ownEvidence: bundleForReplan.OwnEvidence,
@@ -634,7 +634,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownAvgAmmo01: bundleForReplan.OwnAvgAmmo01,
                     nearestReinforcementHours: bundleForReplan.NearestReinforcementHours,
                     nearestReinforcementStrength: bundleForReplan.NearestReinforcementStrength,
-                    doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds);
+                    battleDeltaSeconds: -1f,
+                    doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds,
+                    assumptionReason: side.Army.Feasibility?.BrokenAssumption);
+                ReplanTrigger trigger = outcome.Replanned || outcome.Kept ? outcome.Trigger : ReplanTrigger.None;
 
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
@@ -654,6 +657,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
                         + " trigger=" + trigger
                         + " newPlan=" + side.Army.CurrentPlan.PlanId
+                        + (trigger == ReplanTrigger.ManeuverAssumptionBroken ? " assumption=" + side.Army.Feasibility?.BrokenAssumption + " kept=" + outcome.Kept : string.Empty)
                         + " phase=" + side.Army.CurrentPlan.Phase, TelemetryLayer.Tactical);
                 }
             }

@@ -704,7 +704,7 @@ internal static partial class FlankResponseTests
         return System.IO.File.ReadAllText(System.IO.Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), System.IO.Path.Combine(parts)));
     }
 
-    private static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+    internal static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
 
     internal static void AssertPinned(string body, string expected, string label)
     {

@@ -32,7 +32,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             CrossingGraphView graph = job.Graph;
             RouteResult leg = graph.Route(x0, z0, x1, z1, child.BaseSpeed, child.MeanFatigue, false);
-            if (leg.Found) { Fold(ref total, in leg); return; }
+            if (leg.Found) { Fold(ref total, in leg); RecordCrossings(job, w); return; }
             if (leg.NoRoute)
             {
                 if (leg.Refused) w.NoRoute = true;
@@ -46,6 +46,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Fold(ref total, in straight);
         }
 
+        // The crossings of the last routed leg, in the order the route meets them (requirement-assumption-monitor watches every one).
+        private static void RecordCrossings(FeasibilityJob job, CandidateScratch w)
+        {
+            CrossingGraphView graph = job.Graph;
+            int near = graph.RouteSourceRegion;
+            for (int k = 0; k < graph.PathCount && w.CrossingCount < w.Crossings.Length; k++)
+            {
+                int link = graph.PathLinks[k];
+                int far = graph.FarRegionOf(k, near, graph.RouteTargetRegion);
+                w.Crossings[w.CrossingCount++] = new RouteCrossing { Link = link, FarRegion = far, HeldAtEvaluation = StateAt(job, link) == CrossingState.Held };
+                near = far;
+            }
+        }
+
         private static void ScreenRoutes(FeasibilityJob job, CandidateScratch w)
         {
             TacticalFrontAxis axis = job.Input.Axis;
@@ -57,6 +71,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ref BodyEstimate body = ref w.Bodies[member.Body];
                 ChildFact child = job.Children[job.SlotOfChild(member.ChildId)];
                 float ax = member.TargetX, az = member.TargetZ;
+                member.CrossingStart = w.CrossingCount;
 
                 // The march leg: the child's position to its rect anchor, a DeepRaid by its outflank point first.
                 var march = new RouteResult { FirstLink = -1 };
@@ -94,6 +109,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     body.StrikeX = sx;
                     body.StrikeZ = sz;
                     inwardSurplus = InwardSurplusHours(job.Graph, ax, az, sx, sz, child.BaseSpeed, child.MeanFatigue, out RouteResult inward);
+                    if (inward.Found) RecordCrossings(job, w);
                     if (inward.NoRoute)
                     {
                         if (inward.Refused) w.NoRoute = true;
@@ -119,8 +135,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     if (strikeContested > contested) contested = strikeContested;
                 }
 
-                float courierForTime = member.InContact ? 0f : child.CourierHours;
+                // A fix in contact has no order to wait for, and a child already marching had its order delay charged when it was released.
+                float courierForTime = member.InContact || child.Moving ? 0f : child.CourierHours;
                 member.StrikeHours = StrikeHours(courierForTime, in march, inwardSurplus, in rules);
+                member.CrossingCount = w.CrossingCount - member.CrossingStart;
                 // The main body's terms are its fixing members' worst: a reserve member's route only has to exist.
                 if (member.Kind != MemberOther && contested > body.Contested) body.Contested = contested;
                 if (march.CostUnits > body.RouteCost) body.RouteCost = march.CostUnits;

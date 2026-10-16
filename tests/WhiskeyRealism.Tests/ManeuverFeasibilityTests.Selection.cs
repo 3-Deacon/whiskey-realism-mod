@@ -37,6 +37,10 @@ internal static partial class ManeuverFeasibilityTests
 
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
 
+        public string BrokenAssumption => null;
+
+        public void CaptureSelection(BattlePlanId plan, bool mirrored) { }
+
         public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
             out float attackViaX, out float attackViaZ)
         {

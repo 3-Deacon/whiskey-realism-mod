@@ -66,6 +66,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int BodyStart, BodyCount;
         /// <summary>Into the ledger's pooled <see cref="MemberEstimate"/> array: one entry per assigned child.</summary>
         public int MemberStart, MemberCount;
+        /// <summary>Into the ledger's pooled <see cref="RouteCrossing"/> array: the crossings of all the members' legs (a member's own are <see cref="MemberEstimate.CrossingStart"/> into this range).</summary>
+        public int CrossingStart, CrossingCount;
+    }
+
+    /// <summary>
+    /// One crossing on a member's route, recorded with the evaluation (requirement-assumption-monitor): the link, the region the route
+    /// continues in after it (a child standing there has passed the crossing) and whether the crossing was Held when the route was priced
+    /// (a crossing carried knowingly is no broken assumption).
+    /// </summary>
+    public struct RouteCrossing
+    {
+        public int Link, FarRegion;
+        public bool HeldAtEvaluation;
     }
 
     /// <summary>What the army, the allocator and BC11's runtime read of the published ledger.</summary>
@@ -86,6 +99,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>The regions a child's vias lead into (-1: no via): once the child stands in one, the via is behind it.</summary>
         bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion);
+
+        /// <summary>
+        /// The army selected (or kept) a plan on a side: the ledger keeps its identity, snapshots the selected candidate's evaluation for the
+        /// assumption monitor, and builds the per-child table BC11 reads. Called after every pick and every kept plan.
+        /// </summary>
+        void CaptureSelection(BattlePlanId plan, bool mirrored);
+
+        /// <summary>The assumption the monitor found broken (a static literal), or null; cleared by the next <see cref="CaptureSelection"/>.</summary>
+        string BrokenAssumption { get; }
     }
 
     /// <summary>
@@ -116,6 +138,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public string[] ChildIds;
         public int ChildCount;
         public bool[] DeployedReserve;
+        /// <summary>Per child (same order): BC11 has it past its Hold, marching, turning or attacking: its time to strike carries no courier term.</summary>
+        public bool[] ChildMoving;
         /// <summary>The plans the catalog's precondition and stance filters leave for the side's current effective stance.</summary>
         public BattlePlanId[] Candidates;
         public int CandidateCount;

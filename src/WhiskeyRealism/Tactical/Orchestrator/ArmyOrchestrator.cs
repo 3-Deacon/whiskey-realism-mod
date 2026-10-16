@@ -124,10 +124,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public void PickInitialPlan(ArmyEvidence evidence)
         {
-            if (TryPickPlan(evidence, opposingCommanderHint: 0f, out var nextPlan))
+            if (TryPickPlan(evidence, opposingCommanderHint: 0f, hysteresis: false, out var nextPlan))
             {
                 _plan = nextPlan;
                 HasPlan = true;
+                _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
             }
             else
             {
@@ -156,11 +157,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// the candidates BC14's feasibility evaluation times before a pick. Returns how many were written.
         /// </summary>
         public int EligiblePlans(ArmyEvidence evidence, BattlePlanId[] into)
-            => _catalog == null ? 0 : _catalog.EligiblePlans(BuildPickContext(evidence, 0f), into);
+            => _catalog == null ? 0 : _catalog.EligiblePlans(BuildPickContext(evidence, 0f, false), into);
 
-        private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
+        private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, bool hysteresis, out TacticalBattlePlan nextPlan)
         {
-            PlaybookContext ctx = BuildPickContext(evidence, opposingCommanderHint);
+            PlaybookContext ctx = BuildPickContext(evidence, opposingCommanderHint, hysteresis);
             bool envelopmentPressure = ctx.EnvelopmentPressure;
             var pb = _catalog?.Select(ctx, _selection);
             if (pb == null)
@@ -185,7 +186,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return true;
         }
 
-        private PlaybookContext BuildPickContext(ArmyEvidence evidence, float opposingCommanderHint)
+        private PlaybookContext BuildPickContext(ArmyEvidence evidence, float opposingCommanderHint, bool hysteresis)
         {
             // Envelopment pressure: replan-time read of the latest reinforcement
             // opportunity decision. AttackNow + personality-aware ratio threshold
@@ -296,7 +297,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 defensivePressure: defensivePressure,
                 stance: stance,
                 hasCrestLine: evidence.CrestLine.Has,
-                feasibility: _feasibility);
+                feasibility: _feasibility,
+                hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,
+                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin);
             return ctx;
         }
 
@@ -437,11 +440,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Replan(evidence, UnknownIntentModel());
         }
 
-        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent)
+        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent) => Replan(evidence, enemyIntent, hysteresis: false);
+
+        /// <summary>
+        /// Re-picks the plan. With <paramref name="hysteresis"/> (BC14's broken maneuver assumption) the catalog keeps the current plan unless
+        /// it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>; a kept plan keeps its side, phase and
+        /// age and only refreshes the baselines the edge triggers compare with. Returns true when the plan was kept.
+        /// </summary>
+        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis)
         {
-            if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), out var nextPlan))
+            if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), hysteresis, out var nextPlan))
             {
-                return;
+                return false;
+            }
+
+            if (hysteresis && HasPlan && nextPlan.PlanId == _plan.PlanId)
+            {
+                _currentIntentModel = enemyIntent;
+                _historyGlobalOdds = evidence.CurrentOdds;
+                _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+                _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
+                return true;
             }
 
             // A replan re-picks the playbook; it does not throw away where the
@@ -470,6 +489,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // fires and ArmyTickCycle invokes Replan again (this snapshot is
             // updated, breaking the loop).
             _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+            _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
+            return false;
         }
 
         // Opportunity-change trigger state (2026-05-21). Snapshotted in Replan()

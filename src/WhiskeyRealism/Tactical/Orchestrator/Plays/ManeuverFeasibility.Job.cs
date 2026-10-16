@@ -18,6 +18,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>The child is offered to the hypothetical layout.</summary>
         public bool Offered;
         public bool InContact, DeployedReserve;
+        /// <summary>BC11 has the child past its Hold: it is marching, turning or attacking, and its order delay was paid when it was released.</summary>
+        public bool Moving;
         /// <summary>The hours an order from the army HQ takes to reach the child and everything below it, whether or not it is engaged.</summary>
         public float CourierHours;
     }
@@ -29,6 +31,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public readonly BodyEstimate[] Bodies = new BodyEstimate[ManeuverFeasibility.MaxBodies];
         public readonly MemberEstimate[] Members = new MemberEstimate[FeasibilityLedger.MaxMembersPerCandidate];
         public int BodyCount, MemberCount;
+        /// <summary>The crossings on every member's march and inward legs (<see cref="MemberEstimate.CrossingStart"/> indexes it).</summary>
+        public readonly RouteCrossing[] Crossings = new RouteCrossing[FeasibilityLedger.MaxCrossingsPerCandidate];
+        public int CrossingCount;
         /// <summary>The route screen's outcomes for the verdict (requirement-route-screen).</summary>
         public bool NoCrossing, RiverOnLeg, NoRoute, WingUnfilled, RouteUnknown;
 
@@ -37,6 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Result = new CandidateResult { Plan = plan, Mirrored = mirrored };
             BodyCount = 0;
             MemberCount = 0;
+            CrossingCount = 0;
             NoCrossing = false;
             RiverOnLeg = false;
             NoRoute = false;
@@ -233,6 +239,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     fact.Z = own[index].Z;
                 }
                 fact.DeployedReserve = Input.DeployedReserve != null && c < Input.DeployedReserve.Length && Input.DeployedReserve[c];
+                fact.Moving = Input.ChildMoving != null && c < Input.ChildMoving.Length && Input.ChildMoving[c];
                 Children[c] = fact;
             }
             ChildCount = n;

@@ -129,6 +129,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>The links of the last successful route, first crossing first; valid until the next <see cref="Route"/> call.</summary>
         public readonly int[] PathLinks = new int[MaxNodes];
         public int PathCount;
+        /// <summary>The regions the last <see cref="Route"/> started and ended in (after snapping an end point to land); -1 when it did not place them.</summary>
+        public int RouteSourceRegion, RouteTargetRegion;
 
         public bool Ready => Grid != null && Regions != null && Regions.Ready;
 
@@ -139,10 +141,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// The cheapest route from one point to another for a mover with the given base speed and fatigue. <paramref name="enemy"/>
         /// prices crossings the way the enemy meets them (an own-covered crossing costs time); otherwise a Held one does.
         /// </summary>
+        /// <summary>
+        /// The region the last route continues in after its k-th crossing: the region that crossing shares with the next one (the end region
+        /// after the last), other than <paramref name="near"/>, the region the route was in before it.
+        /// </summary>
+        public int FarRegionOf(int k, int near, int endRegion)
+        {
+            if (k < 0 || k >= PathCount) return -1;
+            if (k == PathCount - 1) return endRegion;
+            Span<int> here = stackalloc int[RiverRegions.MaxRegionsPerLink];
+            Span<int> next = stackalloc int[RiverRegions.MaxRegionsPerLink];
+            int nh = Regions.RegionsOfLink(PathLinks[k], here), nn = Regions.RegionsOfLink(PathLinks[k + 1], next);
+            for (int i = 0; i < nh; i++)
+            {
+                if (here[i] == near) continue;
+                for (int j = 0; j < nn; j++) if (here[i] == next[j]) return here[i];
+            }
+            return -1;
+        }
+
         public RouteResult Route(float x0, float z0, float x1, float z1, float baseSpeed, float meanFatigue, bool enemy)
         {
             var result = new RouteResult { FirstLink = -1 };
             PathCount = 0;
+            RouteSourceRegion = -1;
+            RouteTargetRegion = -1;
             _refused = false;
             _confirmed = false;
             if (!Ready)
@@ -159,6 +182,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 result.Unknown = true;
                 return result;
             }
+            RouteSourceRegion = rs;
+            RouteTargetRegion = rt;
             float divisor = SpeedDivisor(baseSpeed, meanFatigue);
             if (!(divisor > 0f))
             {

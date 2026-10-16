@@ -20,6 +20,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool HasRelease;
         /// <summary>Link index of the first crossing of the march leg and of the inward leg, -1 none.</summary>
         public int MarchVia, AttackVia;
+        /// <summary>The crossings on the member's march and inward legs, <c>CrossingStart..CrossingStart+CrossingCount</c> in the ledger's crossing array.</summary>
+        public int CrossingStart, CrossingCount;
     }
 
     /// <summary>
@@ -42,28 +44,60 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// coordinator's heavy path only; a running evaluation fills the back buffers and <see cref="Publish"/> swaps them in whole, so a
     /// reader never sees a half-evaluated ledger.
     /// </summary>
-    public sealed class FeasibilityLedger : IFeasibilityLookup
+    public sealed partial class FeasibilityLedger : IFeasibilityLookup
     {
         public const int MaxCandidates = 24;
         public const int MaxMembersPerCandidate = 8;
+        public const int MaxCrossingsPerCandidate = 96;
 
         private sealed class Buffer
         {
-            public readonly CandidateResult[] Results = new CandidateResult[MaxCandidates];
-            public readonly BodyEstimate[] Bodies = new BodyEstimate[MaxCandidates * ManeuverFeasibility.MaxBodies];
-            public readonly MemberEstimate[] Members = new MemberEstimate[MaxCandidates * MaxMembersPerCandidate];
-            public int ResultCount, BodyCount, MemberCount;
+            public readonly CandidateResult[] Results;
+            public readonly BodyEstimate[] Bodies;
+            public readonly MemberEstimate[] Members;
+            public readonly RouteCrossing[] Crossings;
+            public int ResultCount, BodyCount, MemberCount, CrossingCount;
+
+            public Buffer(int candidates)
+            {
+                Results = new CandidateResult[candidates];
+                Bodies = new BodyEstimate[candidates * ManeuverFeasibility.MaxBodies];
+                Members = new MemberEstimate[candidates * MaxMembersPerCandidate];
+                Crossings = new RouteCrossing[candidates * MaxCrossingsPerCandidate];
+            }
 
             public void Clear()
             {
                 ResultCount = 0;
                 BodyCount = 0;
                 MemberCount = 0;
+                CrossingCount = 0;
+            }
+
+            /// <summary>Appends one candidate: its result with its bodies, members and crossings re-based into this buffer. False when full.</summary>
+            public bool Append(in CandidateResult result, ReadOnlySpan<BodyEstimate> bodies, ReadOnlySpan<MemberEstimate> members,
+                ReadOnlySpan<RouteCrossing> crossings)
+            {
+                if (ResultCount >= Results.Length) return false;
+                CandidateResult r = result;
+                r.BodyStart = BodyCount;
+                r.BodyCount = Math.Min(bodies.Length, ManeuverFeasibility.MaxBodies);
+                r.MemberStart = MemberCount;
+                r.MemberCount = Math.Min(members.Length, MaxMembersPerCandidate);
+                r.CrossingStart = CrossingCount;
+                r.CrossingCount = Math.Min(crossings.Length, MaxCrossingsPerCandidate);
+                for (int i = 0; i < r.BodyCount; i++) Bodies[BodyCount++] = bodies[i];
+                for (int i = 0; i < r.MemberCount; i++) Members[MemberCount++] = members[i];
+                for (int i = 0; i < r.CrossingCount; i++) Crossings[CrossingCount++] = crossings[i];
+                Results[ResultCount++] = r;
+                return true;
             }
         }
 
-        private Buffer _front = new Buffer();
-        private Buffer _back = new Buffer();
+        private Buffer _front = new Buffer(MaxCandidates);
+        private Buffer _back = new Buffer(MaxCandidates);
+        // The selected candidate as it was evaluated when the army selected it (requirement-assumption-monitor compares against it).
+        private readonly Buffer _selected = new Buffer(1);
         private readonly FeasibilityJob _job = new FeasibilityJob();
 
         // The selected plan's per-child table, rebuilt at each evaluation and at each capture (double-buffered with the candidates).
@@ -88,7 +122,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>
         /// The army selected a plan (after every pick and every kept plan): the ledger keeps its identity, scores it on this side from now on,
-        /// and builds the per-child table BC11 reads from its latest result.
+        /// snapshots its evaluation for the assumption monitor and builds the per-child table BC11 reads from its latest result.
         /// </summary>
         public void CaptureSelection(BattlePlanId plan, bool mirrored)
         {
@@ -96,6 +130,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             SelectedMirrored = mirrored;
             HasSelection = plan != BattlePlanId.Unknown;
             _childFrontCount = HasSelection ? BuildChildTable(_front, _childFront) : 0;
+            BeginMonitoring();
         }
 
         /// <summary>The ledger's own resumable job (one per side; the evaluation entry points drive it).</summary>
@@ -119,6 +154,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         public ReadOnlySpan<MemberEstimate> Members(in CandidateResult r)
             => new ReadOnlySpan<MemberEstimate>(_front.Members, r.MemberStart, r.MemberCount);
+
+        /// <summary>The crossings on a member's march and inward legs, in the order the route meets them.</summary>
+        public ReadOnlySpan<RouteCrossing> Crossings(in CandidateResult r, in MemberEstimate m)
+            => new ReadOnlySpan<RouteCrossing>(_front.Crossings, r.CrossingStart + m.CrossingStart, m.CrossingCount);
 
         public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
             out float attackViaX, out float attackViaZ)
@@ -203,21 +242,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         internal void BeginBack() => _back.Clear();
 
-        /// <summary>Appends one candidate to the back buffer: its result, bodies and members. Returns false when the buffers are full.</summary>
-        internal bool AddBack(in CandidateResult result, ReadOnlySpan<BodyEstimate> bodies, ReadOnlySpan<MemberEstimate> members)
-        {
-            Buffer b = _back;
-            if (b.ResultCount >= MaxCandidates) return false;
-            CandidateResult r = result;
-            r.BodyStart = b.BodyCount;
-            r.BodyCount = Math.Min(bodies.Length, ManeuverFeasibility.MaxBodies);
-            r.MemberStart = b.MemberCount;
-            r.MemberCount = Math.Min(members.Length, MaxMembersPerCandidate);
-            for (int i = 0; i < r.BodyCount; i++) b.Bodies[b.BodyCount++] = bodies[i];
-            for (int i = 0; i < r.MemberCount; i++) b.Members[b.MemberCount++] = members[i];
-            b.Results[b.ResultCount++] = r;
-            return true;
-        }
+        /// <summary>Appends one candidate to the back buffer: its result, bodies, members and crossings. Returns false when the buffers are full.</summary>
+        internal bool AddBack(in CandidateResult result, ReadOnlySpan<BodyEstimate> bodies, ReadOnlySpan<MemberEstimate> members,
+            ReadOnlySpan<RouteCrossing> crossings)
+            => _back.Append(in result, bodies, members, crossings);
 
         /// <summary>Swaps the finished back buffers in whole.</summary>
         internal void Publish(double evaluatedHours)
