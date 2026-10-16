@@ -638,7 +638,7 @@ None of these is a branch in the code. Each is what requirement-strike-time, req
 - **requirement-crossing-look** — The ledger publishes up to `MaxLookRequests` = 2 crossing look points per side. These are Unknown link crossings that are, in priority order:
   1. on the selected plan's chosen routes;
   2. on the top confirm candidates' routes;
-  3. for a Defender, within the perceived enemy's reach, earliest enemy arrival first.
+  3. for a Defender, within the perceived enemy's reach, earliest enemy arrival first. This is a look list of its own (links, at most `MaxThreatCrossings`, published with the candidates): the threat list carries flank crossings only, because those are the ones a reserve can answer, and a frontal Unknown crossing the enemy reaches before dark is still worth a look. With no sample the assumed point reaches nothing.
 
   BC9's recon producer gains a target kind `Crossing`, after its stale-entry-point and stale-band targets and inside its existing cap of 4 starts per side per doctrine hour. One cavalry regiment rides to the crossing's stand point, 150 units short of it on the own side, observes and returns. BC9 applies that stand-off only to its EntryPoint and RememberedEnemy targets today; the `Crossing` kind adopts it (§ 15). A crossing look never sends a regiment toward a visible enemy at least as strong (BC9's rule). A request expires when the crossing becomes Clear, Watched or Held.
 - **requirement-defender-exposure** — For a Defender, each Defensive or Neutral candidate gets a turning-exposure term from the same graph, run from the enemy's side:

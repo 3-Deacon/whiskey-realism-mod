@@ -154,6 +154,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount);
 
+        /// <summary>The direct child id of column <paramref name="column"/> of the matrix <see cref="TryThreat"/> writes; null outside it. The consumer maps the columns to its own children by id.</summary>
+        string ThreatChildId(int column);
+
         /// <summary>
         /// Up to <see cref="ManeuverFeasibility.MaxLookRequests"/> look points (world x and z) at link crossings the side does not know
         /// (requirement-crossing-look), most pressing first; the count written. A request ends when the crossing turns Clear, Watched or Held.

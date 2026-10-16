@@ -96,6 +96,24 @@ internal static partial class ManeuverFeasibilityTests
         long defended = AllocatedSince(mark);
         AssertEqual(0L, defended, "a Defender's evaluation allocated " + defended + " bytes");
 
+        // More than MaxEnemyBodies (16) clusters are perceived: the per-cluster sums are pooled too, so the merge down allocates nothing at any count.
+        foreach (int enemies in new[] { 24, 60 })
+        {
+            FeasField crowd = ManyFords(60);
+            crowd.Stance = BattleStance.Defender;
+            for (int e = 0; e < enemies; e++) crowd.AddEnemy(-1100f + 200f * (e % 12), 420f + 200f * (e / 12), 800f);   // 200 apart: one cluster each
+            crowd.Legs = StraightLegs(crowd, DefensivePlans);
+            var crowded = new FeasibilityLedger();
+            FeasibilityInput crowdInput = crowd.Build(DefensivePlans);
+            ManeuverFeasibility.Evaluate(in crowdInput, crowded);
+            ManeuverFeasibility.Evaluate(in crowdInput, crowded);
+            AssertTrue(crowded.Job.Defender.BodyCount == ManeuverFeasibility.MaxEnemyBodies, enemies + " samples fill all " + ManeuverFeasibility.MaxEnemyBodies + " bodies after the merge, got " + crowded.Job.Defender.BodyCount);
+            mark = BeginAllocationWindow();
+            ManeuverFeasibility.Evaluate(in crowdInput, crowded);
+            long merged = AllocatedSince(mark);
+            AssertEqual(0L, merged, "a Defender's evaluation of " + enemies + " perceived samples allocated " + merged + " bytes");
+        }
+
         // A crossing release on pooled arrays: the soonest eligible reserve guards the crossing the enemy reaches first.
         CrossingThreat threat = new CrossingThreat { Link = 3, X = 100f, Z = 200f, Left = true, Sector = 0, GuardX = 10f, GuardZ = 20f, GuardHeading = 90f, EnemyAtCrossing = 0.4f, EnemyAtFlank = 0.7f, CandidateOwnShift = 9f };
         var threats = new[] { threat };

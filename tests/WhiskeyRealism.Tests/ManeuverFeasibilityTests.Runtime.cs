@@ -208,7 +208,7 @@ internal static partial class ManeuverFeasibilityTests
         foreach (string field in new[] { "doctrineHours", "plan", "body", "child", "kind", "strength", "routeUnits", "routeSource", "marchVia", "attackVia", "marchViaState",
             "attackViaState", "strikeContested", "courierHours", "marchHours", "inwardSurplusHours", "strikeHours", "desiredStrikeHours", "releaseHours", "enemyShiftHours",
             "windowHours", "pin", "enemyAgainst", "isolatedOdds", "bar", "ownRatio", "daylight", "detail", "contested", "approach", "exposure", "turn", "penalty", "assumption",
-            "suppression", "mirrored", "verdict", "reason", "candidates", "impossible", "risky", "selected", "slices", "forced", "queries", "legsSampled", "legOverflow", "confirmQueued" })
+            "suppression", "mirrored", "heldStrength", "verdict", "reason", "candidates", "impossible", "risky", "selected", "slices", "forced", "queries", "legsSampled", "legOverflow", "confirmQueued" })
             AssertTrue(telemetry.Contains("WithField(\"" + field + "\""), "the feasibility rows carry " + field);
         foreach (string key in new[] { "feasibility-first", "feasibility-filtered", "feasibility-replan", "feasibility-via" })
             AssertTrue(telemetry.Contains("tactical-battle-core:" + key), "the once-log " + key + " exists");

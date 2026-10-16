@@ -715,18 +715,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int threats = 0, threatChildren = 0;
             _lastThreatCount = 0;
             if (feasible && _feasibility != null)
-            {
-                int count = Math.Min(_feasibility.ThreatCount, _threatBuffer.Length);
-                for (int t = 0; t < count; t++)
-                {
-                    if (!_feasibility.TryThreat(t, out _threatBuffer[threats], _threatRow, out int children)) continue;
-                    // The matrix is indexed by the allocation's child order: a ledger built for another child list says nothing here.
-                    if (children != _directChildSnapshots.Length) { threats = 0; break; }
-                    threatChildren = children;
-                    for (int c = 0; c < children; c++) _threatShiftBuffer[threats * children + c] = _threatRow[c];
-                    threats++;
-                }
-            }
+                threats = FillThreatMatrix(_feasibility, _directChildSnapshots, _threatBuffer, _threatShiftBuffer, _threatRow, out threatChildren);
             _lastThreatCount = threats;
             return new ReserveReleaseContext(
                 _lastGlobalOdds, flank, ReserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
@@ -734,6 +723,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
                 staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren);
+        }
+
+        /// <summary>
+        /// The Defender's threats and the time matrix (threat-major, one column per allocation child) from the ledger into the pooled buffers.
+        /// The ledger's matrix is keyed by child id: each of the allocation's children takes the column of its own id, and a child the ledger did
+        /// not time (another child list, a child that arrived since) gets NaN, which the allocator reads as never releasable or bound. Returns the
+        /// threat count (0 when the allocation has more children than the ledger's cap).
+        /// </summary>
+        internal static int FillThreatMatrix(Plays.IFeasibilityLookup ledger, IReadOnlyList<DirectChildSnapshot> snapshots, Plays.CrossingThreat[] threatBuffer,
+            float[] shiftBuffer, float[] row, out int allocationChildren)
+        {
+            allocationChildren = snapshots.Count;
+            if (allocationChildren > Plays.ManeuverFeasibility.MaxChildren) { allocationChildren = 0; return 0; }
+            int threats = 0;
+            int count = Math.Min(ledger.ThreatCount, threatBuffer.Length);
+            for (int t = 0; t < count; t++)
+            {
+                if (!ledger.TryThreat(t, out threatBuffer[threats], row, out int children)) continue;
+                for (int c = 0; c < allocationChildren; c++)
+                {
+                    int column = -1;
+                    for (int k = 0; k < children; k++)
+                        if (string.Equals(ledger.ThreatChildId(k), snapshots[c].ChildId, StringComparison.Ordinal)) { column = k; break; }
+                    shiftBuffer[threats * allocationChildren + c] = column >= 0 ? row[column] : float.NaN;
+                }
+                threats++;
+            }
+            return threats;
         }
 
         // Child ids read "child-" + the instance id.

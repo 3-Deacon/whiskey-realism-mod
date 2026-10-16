@@ -248,6 +248,20 @@ internal static class ManeuverFeasibilityFixtures
             return corps;
         }
 
+        /// <summary>A corps of artillery batteries only (<paramref name="horse"/>: horse artillery). Returns the corps' tree index; its child id is appended.</summary>
+        public int AddBatteryCorps(float lateral, float depth, float strength, bool horse, int batteries = 2)
+        {
+            float x = X(lateral), z = Z(depth);
+            int corps = Tree.Add(TacticalUnitType.BattleGroupDivision, x, z, ArmyIndex);
+            int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
+            for (int r = 0; r < batteries; r++)
+                Tree.Add(TacticalUnitType.Artillery, x, z, brigade, UnitFlags.IsArtillery | (horse ? UnitFlags.HorseArtillery : 0),
+                    strength / batteries, morale: 1f, fireRange: 300f, rotationY: 0f, fatigue: 0f);
+            ChildIds.Add("child-" + Tree.InstanceId(corps));
+            DeployedReserve.Add(false);
+            return corps;
+        }
+
         public EnemyObservation AddEnemy(float lateral, float depth, float strength, float heading = 180f, float fireRange = 100f,
             int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f)
         {

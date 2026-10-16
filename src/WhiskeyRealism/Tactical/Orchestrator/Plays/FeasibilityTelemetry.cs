@@ -311,8 +311,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // How stale the picture is: the age of the oldest perceived crossing, and how many were never perceived.
                 double oldestAge = 0.0;
                 int neverPerceived = 0;
+                float heldStrength = 0f;     // the perceived strength standing at the Held crossings (the watch keeps it with each state)
                 for (int link = 0; link < links; link++)
                 {
+                    heldStrength += watch.HeldStrength(link);
                     double at = watch.LastPerceivedHours(link);
                     if (double.IsNegativeInfinity(at)) neverPerceived++;
                     else if (nowHours - at > oldestAge) oldestAge = nowHours - at;
@@ -321,6 +323,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     ev => ev
                         .WithSide(alliance)
                         .WithField("held", held)
+                        .WithField("heldStrength", heldStrength)
                         .WithField("watched", watched)
                         .WithField("clear", clear)
                         .WithField("unknown", unknown)

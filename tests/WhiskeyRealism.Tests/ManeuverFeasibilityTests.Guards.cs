@@ -1,0 +1,273 @@
+using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
+using static TestHarness;
+using static TestFixtures;
+using static BattleMovementHonestyTests;
+using static ManeuverFeasibilityFixtures;
+using static CommanderOpportunityTests;
+
+// BC14 verify round 1: the guards of the crossing release and the Defender's fog rules that had no test failing without them (F2 to F4, F6, F5).
+internal static partial class ManeuverFeasibilityTests
+{
+    static (string, Action)[] GuardTests() => new (string, Action)[]
+    {
+        ("bc14 RELEASE-HOLD-PLAYER a bound guard whose subtree gains player-owned strength is released from its crossing", ReleaseHoldPlayer),
+        ("bc14 RELEASE-HOLD-EXPLOIT a bound guard that becomes an exploit asset is released from its crossing", ReleaseHoldExploit),
+        ("bc14 RELEASE-ONE-PER-CROSSING a crossing already guarded is not given a second guard", ReleaseOnePerCrossing),
+        ("bc14 THREAT-KEYED-BY-ID the threat matrix is read by child id, not by position or count", ThreatKeyedById),
+        ("bc14 DEF-NO-SAMPLES with no enemy perceived the assumed point counts crossings for the penalty and publishes none", DefNoSamples),
+        ("bc14 ENEMY-SAMPLE-FILTER the enemy picture counts what EnemySamples.Accepts counts and nothing else", EnemySampleFilter),
+        ("bc14 MARCH-HORSE-ARTILLERY a child with horse artillery marches at the limbered base times the horse-artillery factor, capped at 1", MarchHorseArtillery),
+        ("bc14 LOOK-DEF-FRONTAL a Defender also asks about an Unknown front crossing the perceived enemy reaches before dark, which the threat list does not carry", LookDefenderFrontal),
+        ("bc14 XING-OWN-COVER an own regiment covers a crossing by its facing and fire range; a routed, grouped, artillery or off-line one does not", XingOwnCover),
+    };
+
+    // c0 main, c1 and c2 reserves; c1 is bound to link 5 at its own shift 0.2 (the hold bound is 0.2 + 0.25 + 0.25 = 0.7) and the enemy is due at 0.6.
+    static ReserveReleaseState BoundC1()
+    {
+        var state = new ReserveReleaseState();
+        state.BindCrossing(new CrossingBinding { ChildId = "c1", Link = 5, OwnShiftAtRelease = 0.2, ReleasedAtHours = 9.9 });
+        return state;
+    }
+
+    static void ReleaseHoldPlayer()
+    {
+        ReserveReleaseState.ResetAll();
+        DirectChildEvidence[] ev = ResEvidence(1, 3);
+        var threats = new[] { Crossing(5, true, 0.6f) };
+        // Control: the guard stays while nothing changed.
+        ReserveReleaseState held = BoundC1();
+        IReadOnlyList<DirectChildIntent> intents = CrossAllocate(ev, held, 10.0, threats, Row(9f, 0.2f, 0.5f));
+        AssertEqual(DirectChildRole.RefuseLeft, intents[1].Role, "control: the guard stays on its crossing");
+        AssertTrue(held.TryCrossingOf("c1", out _), "control: and stays bound");
+        // c1's subtree gained player-owned strength (its time is NaN): the binding ends and it is a reserve again.
+        ReserveReleaseState player = BoundC1();
+        intents = CrossAllocate(ev, player, 10.0, threats, Row(9f, float.NaN, 0.5f));
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role, "a child holding player-owned strength stops guarding");
+        AssertFalse(player.TryCrossingOf("c1", out _), "and its binding ends");
+    }
+
+    static void ReleaseHoldExploit()
+    {
+        ReserveReleaseState.ResetAll();
+        DirectChildEvidence[] ev = ResEvidence(1, 3);
+        var threats = new[] { Crossing(5, true, 0.6f) };
+        ReserveReleaseState exploit = BoundC1();
+        IReadOnlyList<DirectChildIntent> intents = CrossAllocate(ev, exploit, 10.0, threats, Row(9f, 0.2f, 0.5f), exploiting: new[] { false, true, false });
+        AssertTrue(intents[1].Role != DirectChildRole.RefuseLeft, "a guard that became an exploit asset leaves its crossing");
+        AssertFalse(exploit.TryCrossingOf("c1", out _), "and its binding ends");
+    }
+
+    static void ReleaseOnePerCrossing()
+    {
+        ReserveReleaseState.ResetAll();
+        DirectChildEvidence[] ev = ResEvidence(1, 3, 4);
+        float[] shifts = Row(9f, 0.2f, 0.3f, 0.4f);
+        var threats = new[] { Crossing(5, true, 0.4f) };
+        var state = new ReserveReleaseState();
+        IReadOnlyList<DirectChildIntent> intents = CrossAllocate(ev, state, 10.0, threats, shifts);
+        AssertEqual(DirectChildRole.RefuseLeft, intents[1].Role, "the soonest reserve guards the crossing");
+        AssertEqual(1, state.BoundCount, "one binding");
+        // Allocations after it, with the guard holding: nobody else is sent to the same crossing.
+        for (int run = 1; run <= 3; run++)
+        {
+            intents = CrossAllocate(ev, state, 10.0 + run * 0.05, threats, shifts);
+            AssertEqual(DirectChildRole.RefuseLeft, intents[1].Role, "run " + run + ": the guard holds");
+            AssertEqual(DirectChildRole.Reserve, intents[2].Role, "run " + run + ": the second reserve is not sent to the guarded crossing");
+            AssertEqual(DirectChildRole.Reserve, intents[3].Role, "run " + run + ": nor the third");
+        }
+        AssertEqual(1, state.BoundCount, "still one binding");
+    }
+
+    sealed class MatrixLookup : IFeasibilityLookup
+    {
+        public string[] Columns;
+        public float[] Times;
+        public CrossingThreat Threat = Crossing(5, true, 0.4f);
+
+        public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
+        public string BrokenAssumption => null;
+        public int ThreatCount => 1;
+        public int LookRequests(Span<float> xs, Span<float> zs) => 0;
+        public double EvaluatedHours => 0.0;
+        public bool HasEvaluation => false;
+        public bool TryPredictedArrival(string childId, out double arrivalHours, out double marchHours) { arrivalHours = marchHours = 0.0; return false; }
+        public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount)
+        {
+            threat = Threat;
+            childCount = Columns.Length;
+            for (int c = 0; c < Columns.Length; c++) ownShiftByChild[c] = Times[c];
+            return index == 0;
+        }
+        public string ThreatChildId(int column) => column >= 0 && column < Columns.Length ? Columns[column] : null;
+        public void CaptureSelection(BattlePlanId plan, bool mirrored) { }
+        public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ, out float attackViaX, out float attackViaZ)
+        {
+            releaseHours = timeBudgetHours = 0.0;
+            viaX = viaZ = attackViaX = attackViaZ = float.NaN;
+            return false;
+        }
+        public bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion) { viaFarRegion = attackViaFarRegion = -1; return false; }
+        public bool TryGet(BattlePlanId plan, out CandidateResult result) { result = default(CandidateResult); return false; }
+    }
+
+    static void ThreatKeyedById()
+    {
+        // The ledger timed c1, c2 and c3 (c2 is the one the player holds: NaN). The allocation's children now are c3, c1, c4, c2: the same
+        // number of columns, a different set and order.
+        var lookup = new MatrixLookup { Columns = new[] { "c1", "c2", "c3" }, Times = new[] { 0.2f, float.NaN, 0.7f } };
+        DirectChildSnapshot[] snapshots = ResChildren(4);                 // c0..c3
+        var renamed = new DirectChildSnapshot[4];
+        string[] ids = { "c3", "c1", "c4", "c2" };
+        for (int i = 0; i < 4; i++) renamed[i] = WithId(snapshots[i], ids[i]);
+        var buffer = new CrossingThreat[ManeuverFeasibility.MaxThreatCrossings];
+        var shifts = new float[ManeuverFeasibility.MaxThreatCrossings * ManeuverFeasibility.MaxChildren];
+        var row = new float[ManeuverFeasibility.MaxChildren];
+        int threats = ArmyOrchestrator.FillThreatMatrix(lookup, renamed, buffer, shifts, row, out int children);
+        AssertEqual(1, threats, "one threat");
+        AssertEqual(4, children, "a column per allocation child");
+        AssertNear(0.7f, shifts[0], 1e-6f, "c3 takes the ledger's c3 time");
+        AssertNear(0.2f, shifts[1], 1e-6f, "c1 takes the ledger's c1 time");
+        AssertTrue(float.IsNaN(shifts[2]), "c4 is new to the ledger: no time, never released or bound");
+        AssertTrue(float.IsNaN(shifts[3]), "c2 keeps the NaN of the player-owned strength the ledger saw");
+        // The same children in the ledger's order read straight across.
+        for (int i = 0; i < 4; i++) renamed[i] = WithId(snapshots[i], new[] { "c1", "c2", "c3", "cx" }[i]);
+        threats = ArmyOrchestrator.FillThreatMatrix(lookup, renamed, buffer, shifts, row, out children);
+        AssertNear(0.2f, shifts[0], 1e-6f, "c1");
+        AssertTrue(float.IsNaN(shifts[1]), "c2");
+        AssertNear(0.7f, shifts[2], 1e-6f, "c3");
+        AssertTrue(float.IsNaN(shifts[3]), "cx is not in the ledger");
+        // The real ledger publishes the id of each column, in the evaluation's child order.
+        FeasField field = DefenderField();
+        FeasibilityLedger ledger = DefenderLedger(field);
+        AssertTrue(ledger.ThreatCount > 0, "the Defender ledger has a threat");
+        for (int k = 0; k < field.ChildIds.Count; k++)
+            AssertEqual(field.ChildIds[k], ledger.ThreatChildId(k), "column " + k + " is child " + field.ChildIds[k]);
+        AssertTrue(ledger.ThreatChildId(field.ChildIds.Count) == null, "and no column past the last child");
+        // More children than the ledger's cap: no matrix at all.
+        var many = new DirectChildSnapshot[ManeuverFeasibility.MaxChildren + 1];
+        for (int i = 0; i < many.Length; i++) many[i] = WithId(snapshots[0], "m" + i);
+        AssertEqual(0, ArmyOrchestrator.FillThreatMatrix(lookup, many, buffer, shifts, row, out children), "over the cap: no threats");
+    }
+
+    static DirectChildSnapshot WithId(DirectChildSnapshot s, string id) => new DirectChildSnapshot(id, s.ParentArmyId, s.RawUnitTyp, s.CommandHierarchyShift, s.DisplayName, s.Active);
+
+    static void DefNoSamples()
+    {
+        // Control: with the enemy perceived at the flank ford the Defender counts and publishes a threat there.
+        FeasField seen = DefenderField(f => { f.Enemies.Clear(); f.AddEnemy(-900f, 556f, 11000f); });
+        FeasibilityLedger seenLedger = DefenderLedger(seen);
+        AssertTrue(seenLedger.Job.Defender.Perceived, "control: perceived");
+        AssertTrue(seenLedger.ThreatCount > 0, "control: the ford is a published threat, " + seenLedger.ThreatCount);
+
+        // No sample, only BC10's assumed point at the same place: the crossings are counted (the penalty reads the body) but none is published.
+        FeasField none = DefenderField(f => { f.Enemies.Clear(); f.HasAssumedEnemy = true; f.AssumedEnemyLateral = -900f; f.AssumedEnemyDepth = 556f; });
+        FeasibilityLedger noneLedger = DefenderLedger(none);
+        AssertFalse(noneLedger.Job.Defender.Perceived, "not perceived");
+        AssertTrue(noneLedger.Job.Defender.ThreatCount > 0, "the assumed point still counts the ford, " + noneLedger.Job.Defender.ThreatCount);
+        AssertEqual(0, noneLedger.ThreatCount, "but the assumed point never drives a guard: nothing is published");
+        // A binding that stood on the last tick's threat ends when the enemy is no longer perceived.
+        ReserveReleaseState.ResetAll();
+        var state = BoundC1();
+        IReadOnlyList<DirectChildIntent> intents = CrossAllocate(ResEvidence(1, 3), state, 10.0, new CrossingThreat[0], Row(9f, 0.2f, 0.5f));
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role, "an empty threat list reverts the guard");
+        AssertFalse(state.TryCrossingOf("c1", out _), "and ends its binding");
+    }
+
+    static void EnemySampleFilter()
+    {
+        FeasField f = DefenderField(g => g.Enemies.Clear());
+        f.AddEnemy(-400f, 556f, 1000f);                                                                       // counted in full
+        f.AddEnemy(0f, 556f, 1000f, state: ObservationState.Remembered, confidence: 0.6f);                    // counted at 0.6
+        f.AddEnemy(400f, 556f, 1000f, state: ObservationState.Remembered, confidence: 0.4f);                  // below the Remembered floor
+        f.AddEnemy(800f, 556f, 1000f, unitTyp: TacticalUnitType.BattleGroupDivision);                          // a command group, not a combat unit
+        f.AddEnemy(1200f, 556f, 1000f);
+        EnemyObservation reinforcement = f.Enemies[f.Enemies.Count - 1];
+        reinforcement.IsReinforcement = true;                                                                 // a column that has not arrived
+        f.Enemies[f.Enemies.Count - 1] = reinforcement;
+        FeasibilityLedger ledger = DefenderLedger(f);
+        EnemyPicture enemy = ledger.Job.Enemy;
+        AssertEqual(2, enemy.Count, "two samples: the visible one and the confident Remembered one");
+        AssertNear(1000f + 600f, enemy.P, 1e-3f, "perceived strength 1,000 + 0.6 x 1,000");
+        AssertNear(FeasField.X(-250f), enemy.MassX, 1f, "the mass is the weighted centre of the two counted samples (lateral -250), not pulled by the excluded ones");
+    }
+
+    static void MarchHorseArtillery()
+    {
+        // A factor under 1 slows horse artillery below the limbered base; foot artillery and a horse battery with a foot battery are unaffected by it.
+        MarchRules slow = ShippedRules();
+        slow.HorseArtilleryFactor = 0.6f;
+        float Speed(bool horse, bool foot, MarchRules rules)
+        {
+            FeasField f = DefenderField(g => { g.Enemies.Clear(); g.AddEnemy(0f, 556f, 5000f); });
+            f.Rules = rules;
+            if (horse) f.AddBatteryCorps(-600f, 100f, 3000f, horse: true);
+            if (foot) f.AddBatteryCorps(600f, 100f, 3000f, horse: false);
+            FeasibilityLedger ledger = DefenderLedger(f);
+            int slot = ledger.Job.SlotOfChild(f.ChildIds[f.ChildIds.Count - 1]);
+            if (horse && foot) slot = ledger.Job.SlotOfChild(f.ChildIds[f.ChildIds.Count - 2]);
+            return ledger.Job.Children[slot].BaseSpeed;
+        }
+        AssertNear(0.6f, Speed(true, false, slow), 1e-6f, "horse artillery: limbered base 1 x factor 0.6");
+        AssertNear(1f, Speed(false, true, slow), 1e-6f, "foot artillery ignores the factor");
+        // The snapshot builder sets the flag from the regiment's own ishorseartillery (a runtime file: a source pin).
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Battle", "BattleSnapshotBuilder.cs"),
+            "if (reg.ishorseartillery) flags |= UnitFlags.HorseArtillery;", "the snapshot marks horse artillery");
+        MarchRules fast = ShippedRules();
+        AssertNear(1f, Speed(true, false, fast), 1e-6f, "a factor of 1.2 is capped at 1, as vanilla's caller caps a group");
+    }
+
+    static void XingOwnCover()
+    {
+        UnitRecord Reg(UnitFlags flags, int unitTyp = TacticalUnitType.Infantry, float rotation = 90f)
+            => new UnitRecord { UnitTyp = unitTyp, X = 0f, Z = 0f, RotationY = rotation, FireRange = 100f, Flags = flags };
+        const UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
+        // A crossing 100 units east (bearing 90): inside 1.5 x 100 and on the facing line.
+        AssertTrue(CoveredCrossings.Covers(Reg(live), 100f, 0f), "control: a live infantry regiment facing the crossing covers it");
+        AssertFalse(CoveredCrossings.Covers(Reg(live | UnitFlags.Routed), 100f, 0f), "a routed regiment does not");
+        AssertFalse(CoveredCrossings.Covers(Reg(live | UnitFlags.IsGroup), 100f, 0f), "a command group does not");
+        AssertFalse(CoveredCrossings.Covers(Reg(UnitFlags.Alive), 100f, 0f), "an inactive one does not");
+        AssertFalse(CoveredCrossings.Covers(Reg(live, TacticalUnitType.Artillery), 100f, 0f), "artillery does not");
+        AssertFalse(CoveredCrossings.Covers(Reg(live, rotation: 150f), 100f, 0f), "facing 60 degrees off does not");
+        AssertFalse(CoveredCrossings.Covers(Reg(live), 200f, 0f), "beyond 1.5 x its fire range does not");
+    }
+
+    static void LookDefenderFrontal()
+    {
+        // The bridge at lateral 0 is in front of the line's middle half (not a flank crossing: no threat); the ford at -900 is the flank's.
+        FeasField f = DefenderField(g => g.Perceived = (x, z) => false);       // nothing of the ground is perceived: every crossing is Unknown
+        // Two defensive plans whose routes cross nothing, so no plan route asks about a crossing: only the enemy's reach can.
+        BattlePlanId[] holding = { BattlePlanId.PreparedDefense, BattlePlanId.GenericMethodical };
+        f.Legs = StraightLegs(f, holding);
+        var ledger = new FeasibilityLedger();
+        ManeuverFeasibility.Evaluate(f.Build(holding), ledger);
+        ledger.CaptureSelection(BattlePlanId.PreparedDefense, false);
+        ManeuverFeasibility.Evaluate(f.Build(holding), ledger);
+        Span<float> xs = stackalloc float[ManeuverFeasibility.MaxLookRequests], zs = stackalloc float[ManeuverFeasibility.MaxLookRequests];
+        int n = ledger.LookRequests(xs, zs);
+        AssertEqual(2, n, "both Unknown crossings are asked about");
+        bool bridge = false, ford = false;
+        for (int i = 0; i < n; i++)
+        {
+            if (Math.Abs(xs[i] - FeasField.X(0f)) < 5f && Math.Abs(zs[i] - FeasField.Z(250f)) < 5f) bridge = true;
+            if (Math.Abs(xs[i] - FeasField.X(-900f)) < 5f && Math.Abs(zs[i] - FeasField.Z(250f)) < 5f) ford = true;
+        }
+        AssertTrue(ford, "the flank ford is asked about");
+        AssertTrue(bridge, "and the frontal bridge, which the threat list leaves out");
+        for (int t = 0; t < ledger.ThreatCount; t++)
+        {
+            ledger.TryThreat(t, out CrossingThreat threat, new float[ManeuverFeasibility.MaxChildren], out _);
+            AssertTrue(Math.Abs(threat.X - FeasField.X(0f)) > 5f, "the threat list does not carry the bridge");
+        }
+        // With no enemy perceived (the assumed point only) there is no reach to speak of: nothing is asked about for the enemy's sake.
+        FeasField none = DefenderField(g => { g.Enemies.Clear(); g.HasAssumedEnemy = true; g.AssumedEnemyLateral = 0f; g.AssumedEnemyDepth = 556f; g.Perceived = (x, z) => false; });
+        FeasibilityLedger noneLedger = DefenderLedger(none);
+        AssertTrue(ledger.Job.Defender.LookCount >= 2, "control: the perceived enemy reaches both crossings, " + ledger.Job.Defender.LookCount);
+        AssertEqual(0, noneLedger.Job.Defender.LookCount, "no sample, no crossing in the enemy's reach for a look");
+    }
+}

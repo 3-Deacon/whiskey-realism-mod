@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 {
@@ -289,6 +290,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _back.Clear();
             _threatBackCount = 0;
             _threatBackChildren = 0;
+            _lookBackCount = 0;
         }
 
         // ---- the Defender's crossing threats (the selected candidate only), published with the candidates ------------------
@@ -298,9 +300,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private float[] _shiftFront = new float[ManeuverFeasibility.MaxThreatCrossings * ManeuverFeasibility.MaxChildren];
         private float[] _shiftBack = new float[ManeuverFeasibility.MaxThreatCrossings * ManeuverFeasibility.MaxChildren];
         private int _threatFrontCount, _threatBackCount, _threatFrontChildren, _threatBackChildren;
+        // The child id of each column of the time matrix: the matrix is read by id, never by position or count.
+        private string[] _threatIdsFront = new string[ManeuverFeasibility.MaxChildren];
+        private string[] _threatIdsBack = new string[ManeuverFeasibility.MaxChildren];
 
-        internal void SetThreatsBack(CrossingThreat[] threats, int count, float[] ownShiftByChild, int childCount)
+        internal void SetThreatsBack(CrossingThreat[] threats, int count, float[] ownShiftByChild, int childCount, IReadOnlyList<string> childIds)
         {
+            for (int c = 0; c < _threatIdsBack.Length; c++) _threatIdsBack[c] = c < childCount && c < childIds.Count ? childIds[c] : null;
             _threatBackCount = Math.Min(count, _threatBack.Length);
             _threatBackChildren = Math.Min(childCount, ManeuverFeasibility.MaxChildren);
             Array.Copy(threats, _threatBack, _threatBackCount);
@@ -310,6 +316,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         public int ThreatCount => _threatFrontCount;
+
+        // The link crossings a Defender's perceived enemy reaches before dark (look source 3), published with the threats.
+        private int[] _lookFront = new int[ManeuverFeasibility.MaxThreatCrossings];
+        private int[] _lookBack = new int[ManeuverFeasibility.MaxThreatCrossings];
+        private int _lookFrontCount, _lookBackCount;
+
+        internal void SetLooksBack(int[] links, int count)
+        {
+            _lookBackCount = Math.Min(count, _lookBack.Length);
+            Array.Copy(links, _lookBack, _lookBackCount);
+        }
+
+        /// <inheritdoc />
+        public string ThreatChildId(int column) => column >= 0 && column < _threatFrontChildren ? _threatIdsFront[column] : null;
 
         public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount)
         {
@@ -347,6 +367,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _shiftBack = swapShift;
             _threatFrontCount = _threatBackCount;
             _threatFrontChildren = _threatBackChildren;
+            int[] swapLooks = _lookFront;
+            _lookFront = _lookBack;
+            _lookBack = swapLooks;
+            _lookFrontCount = _lookBackCount;
+            string[] swapIds = _threatIdsFront;
+            _threatIdsFront = _threatIdsBack;
+            _threatIdsBack = swapIds;
         }
     }
 }

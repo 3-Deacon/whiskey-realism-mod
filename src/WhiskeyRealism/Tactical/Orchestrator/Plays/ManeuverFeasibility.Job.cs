@@ -117,6 +117,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private bool[] _hasInfantry = new bool[ManeuverFeasibility.MaxChildren];
         private bool[] _hasCavalry = new bool[ManeuverFeasibility.MaxChildren];
         private bool[] _hasArtillery = new bool[ManeuverFeasibility.MaxChildren];
+        private bool[] _hasHorseArtillery = new bool[ManeuverFeasibility.MaxChildren];
 
         internal WorldPlayRect[] RectsFor(BattlePlanId plan, int rectCount)
         {
@@ -186,6 +187,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 NextCandidate++;
                 doneThisCall++;
             }
+            ledger.SetLooksBack(Defender.LookLinks, Defender.LookCount);     // the picture is candidate-independent: published with every evaluation
             ledger.Publish(Input.NowHours);
             Running = false;
             return true;
@@ -245,6 +247,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _hasInfantry[c] = false;
                 _hasCavalry[c] = false;
                 _hasArtillery[c] = false;
+                _hasHorseArtillery[c] = false;
                 if (index >= 0)
                 {
                     _slotOfOwn[index] = c;
@@ -281,7 +284,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _fatigueSum[slot] += own[i].Fatigue;
                 _regimentCount[slot]++;
                 if ((own[i].Flags & UnitFlags.IsCavalry) != 0) _hasCavalry[slot] = true;
-                else if ((own[i].Flags & UnitFlags.IsArtillery) != 0) _hasArtillery[slot] = true;
+                else if ((own[i].Flags & UnitFlags.IsArtillery) != 0)
+                {
+                    if ((own[i].Flags & UnitFlags.HorseArtillery) != 0) _hasHorseArtillery[slot] = true;
+                    else _hasArtillery[slot] = true;
+                }
                 else _hasInfantry[slot] = true;
                 if ((own[i].Flags & UnitFlags.PlayerOwned) != 0) _strengthPlayer[slot] += strength;
                 else _moraleSum[slot] += own[i].Morale * strength;
@@ -324,10 +331,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // slowest base among them, capped at one for a mixed group.
         private float BaseSpeedOf(int slot, in MarchRules rules)
         {
-            if (_hasCavalry[slot] && !_hasInfantry[slot] && !_hasArtillery[slot]) return rules.CavalryMountedBase;
+            if (_hasCavalry[slot] && !_hasInfantry[slot] && !_hasArtillery[slot] && !_hasHorseArtillery[slot]) return rules.CavalryMountedBase;
             float slowest = float.MaxValue;
             if (_hasInfantry[slot]) slowest = Math.Min(slowest, rules.InfantryBase);
             if (_hasArtillery[slot]) slowest = Math.Min(slowest, rules.ArtilleryLimberedBase);
+            // Horse artillery marches at the limbered base times vanilla's horse-artillery factor (GetSlowestSpeedOfGroup).
+            if (_hasHorseArtillery[slot]) slowest = Math.Min(slowest, rules.ArtilleryLimberedBase * rules.HorseArtilleryFactor);
             if (_hasCavalry[slot]) slowest = Math.Min(slowest, rules.CavalryMountedBase);
             if (slowest == float.MaxValue) slowest = rules.InfantryBase;
             return Math.Min(slowest, 1f);

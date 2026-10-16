@@ -45,6 +45,7 @@ internal static partial class ManeuverFeasibilityTests
         all.AddRange(LookTests());           // ManeuverFeasibilityTests.Look.cs
         all.AddRange(RuntimeTests());        // ManeuverFeasibilityTests.Runtime.cs
         all.AddRange(AllocTests());          // ManeuverFeasibilityTests.Alloc.cs
+        all.AddRange(GuardTests());          // ManeuverFeasibilityTests.Guards.cs (verify round 1)
         return all.ToArray();
     }
 

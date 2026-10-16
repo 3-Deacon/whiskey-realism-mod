@@ -447,6 +447,7 @@ internal static partial class ManeuverFeasibilityTests
         public bool HasEvaluation => false;
         public bool TryPredictedArrival(string childId, out double arrivalHours, out double marchHours) { arrivalHours = marchHours = 0.0; return false; }
         public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount) { threat = default(CrossingThreat); childCount = 0; return false; }
+        public string ThreatChildId(int column) => null;
         public bool TryGet(BattlePlanId plan, out CandidateResult result) => Results.TryGetValue(plan, out result);
         public void CaptureSelection(BattlePlanId plan, bool mirrored) { SelectedPlan = plan; Captured.Add((plan, mirrored)); }
         public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,

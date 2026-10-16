@@ -28,9 +28,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 n = AddRouteLooks(in candidate, watch, regions, xs, zs, n, cap);
             }
 
-            // 3. for a Defender, the crossings the enemy reaches first (the threat list is earliest arrival first).
-            for (int t = 0; t < _threatFrontCount && n < cap; t++)
-                n = AddLook(_threatFront[t].Link, watch, regions, xs, zs, n, cap);
+            // 3. for a Defender, the crossings the perceived enemy reaches before dark, earliest arrival first: the front's as well as the flank's
+            // (the threat list carries the flank's only, because those are the ones a reserve can answer).
+            for (int t = 0; t < _lookFrontCount && n < cap; t++)
+                n = AddLook(_lookFront[t], watch, regions, xs, zs, n, cap);
             return n;
         }
 

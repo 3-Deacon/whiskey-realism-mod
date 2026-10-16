@@ -22,6 +22,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>Hours from each body to each routed link's crossing (infinity: unreachable), body-major.</summary>
         public readonly float[] BodyArrival = new float[ManeuverFeasibility.MaxEnemyBodies * Links];
 
+        /// <summary>The link crossings the perceived enemy reaches before dark, earliest first, flank or frontal alike (requirement-crossing-look source 3); empty with no sample.</summary>
+        public readonly int[] LookLinks = new int[ManeuverFeasibility.MaxThreatCrossings];
+        public int LookCount;
+
+        public readonly float[] LookHoursScratch = new float[ManeuverFeasibility.MaxThreatCrossings];
+
         public int ThreatCount;
         public readonly CrossingThreat[] Threats = new CrossingThreat[ManeuverFeasibility.MaxThreatCrossings];
         /// <summary>The fastest deployed reserve's time to each threat (courier plus march); infinity with none. Candidate-independent: the layout never claims a deployed reserve.</summary>
@@ -41,12 +47,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public readonly SingleLinkClusters Clusters = new SingleLinkClusters();
         public float[] SampleX = new float[64], SampleZ = new float[64], SampleW = new float[64];
         public int[] Labels = new int[64];
+        /// <summary>The per-cluster sums while more than <see cref="ManeuverFeasibility.MaxEnemyBodies"/> clusters are merged down; grows with the samples (a cluster holds a sample), never per evaluation.</summary>
+        public float[] ClusterX = new float[64], ClusterZ = new float[64], ClusterW = new float[64];
         /// <summary>Every counted crossing before the earliest <see cref="ManeuverFeasibility.MaxThreatCrossings"/> are kept.</summary>
         public readonly CrossingThreat[] Staged = new CrossingThreat[Links];
 
         public void Reset()
         {
             BodyCount = 0;
+            LookCount = 0;
             ThreatCount = 0;
             OwnShiftChildCount = 0;
             PassiveFactor = 1f;
@@ -77,6 +86,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return rules.ProcessingHours + rules.RouteProcessingHours + (rules.CourierSpeedPerHour > 0f ? ride / rules.CourierSpeedPerHour : 0f);
         }
 
+        // The earliest hour any enemy body stands at the link's crossing, each by the shift-time model with its courier ride priced from the body;
+        // infinity and body -1 when none can reach it.
+        private static float EarliestEnemyArrival(FeasibilityJob job, DefenderPicture d, int link, float lx, float lz, out int body)
+        {
+            float all = float.PositiveInfinity;
+            body = -1;
+            for (int b = 0; b < d.BodyCount; b++)
+            {
+                float arrival = d.BodyArrival[b * DefenderPicture.Links + link];
+                if (float.IsInfinity(arrival)) continue;
+                float hours = (EnemyCourierHours(job, d.BodyX[b], d.BodyZ[b], lx, lz) + arrival) * d.PassiveFactor;
+                if (hours < all) { all = hours; body = b; }
+            }
+            return all;
+        }
+
         // ---- the Defender's picture, once per evaluation ---------------------------------------------------------
 
         internal static void PrepareDefender(FeasibilityJob job)
@@ -102,6 +127,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     d.BodyArrival[b * DefenderPicture.Links + l] = ok && l < routed ? graph.ArrivalAtLink(l) : float.PositiveInfinity;
             }
 
+            // requirement-crossing-look source 3: every crossing the perceived enemy reaches before dark, the flank's or the front's.
+            if (d.Perceived)
+            {
+                var lookHours = new System.Span<float>(d.LookHoursScratch, 0, MaxThreatCrossings);
+                for (int link = 0; link < routed; link++)
+                {
+                    regions.LinkCrossing(link, out float lx, out float lz, out _, out _);
+                    float hours = EarliestEnemyArrival(job, d, link, lx, lz, out int body);
+                    if (body < 0 || hours >= job.Input.DaylightHours) continue;
+                    int at = d.LookCount < MaxThreatCrossings ? d.LookCount++ : MaxThreatCrossings;
+                    if (at == MaxThreatCrossings)
+                    {
+                        if (!(hours < lookHours[MaxThreatCrossings - 1])) continue;
+                        at = MaxThreatCrossings - 1;
+                    }
+                    while (at > 0 && lookHours[at - 1] > hours) { lookHours[at] = lookHours[at - 1]; d.LookLinks[at] = d.LookLinks[at - 1]; at--; }
+                    lookHours[at] = hours;
+                    d.LookLinks[at] = link;
+                }
+            }
+
             int ownRegion = regions.RegionAt(job.ArmyX, job.ArmyZ);
             float centre = (axis.LateralMin + axis.LateralMax) * 0.5f;
             float enemyDepth = DepthOf(in axis, job.EnemyX, job.EnemyZ);
@@ -116,15 +162,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (graph.IsOwnCovered(link)) continue;
 
                 int bank = OwnBankOf(regions, link, ownRegion, lx, lz);
-                float all = float.PositiveInfinity;
-                int allBody = -1;
-                for (int b = 0; b < d.BodyCount; b++)
-                {
-                    float arrival = d.BodyArrival[b * DefenderPicture.Links + link];
-                    if (float.IsInfinity(arrival)) continue;
-                    float hours = (EnemyCourierHours(job, d.BodyX[b], d.BodyZ[b], lx, lz) + arrival) * d.PassiveFactor;
-                    if (hours < all) { all = hours; allBody = b; }
-                }
+                float all = EarliestEnemyArrival(job, d, link, lx, lz, out int allBody);
                 if (allBody < 0 || all >= job.Input.DaylightHours) continue;
 
                 // The guard stands behind the crossing along the front axis, on own-bank land.
@@ -215,14 +253,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 d.SampleZ = new float[size];
                 d.SampleW = new float[size];
                 d.Labels = new int[size];
+                d.ClusterX = new float[size];
+                d.ClusterZ = new float[size];
+                d.ClusterW = new float[size];
             }
             for (int i = 0; i < count; i++) enemy.Sample(i, out d.SampleX[i], out d.SampleZ[i], out d.SampleW[i]);
             int clusters = d.Clusters.Label(d.SampleX, d.SampleZ, count, OpeningDetector.ClusterLinkMeters, d.Labels);
 
-            // Accumulate per cluster into the body arrays when they fit, else into a temporary larger set and merge down.
-            float[] bx = clusters <= MaxEnemyBodies ? d.BodyX : new float[clusters];
-            float[] bz = clusters <= MaxEnemyBodies ? d.BodyZ : new float[clusters];
-            float[] bw = clusters <= MaxEnemyBodies ? d.BodyWeight : new float[clusters];
+            // Accumulate per cluster into the body arrays when they fit, else into the pooled larger set and merge down.
+            float[] bx = clusters <= MaxEnemyBodies ? d.BodyX : d.ClusterX;
+            float[] bz = clusters <= MaxEnemyBodies ? d.BodyZ : d.ClusterZ;
+            float[] bw = clusters <= MaxEnemyBodies ? d.BodyWeight : d.ClusterW;
             for (int k = 0; k < clusters; k++) { bx[k] = 0f; bz[k] = 0f; bw[k] = 0f; }
             for (int i = 0; i < count; i++)
             {
@@ -371,7 +412,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         : (ok ? child.CourierHours + graph.ArrivalAtLink(d.Threats[t].Link) : float.PositiveInfinity);
             }
             // With no enemy body perceived there is nothing to guard against: an empty list ends any binding.
-            job.Target.SetThreatsBack(d.Threats, d.Perceived ? d.ThreatCount : 0, d.OwnShiftByChild, children);
+            job.Target.SetThreatsBack(d.Threats, d.Perceived ? d.ThreatCount : 0, d.OwnShiftByChild, children, job.Input.ChildIds);
         }
     }
 }
