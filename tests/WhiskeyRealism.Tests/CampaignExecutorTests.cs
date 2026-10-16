@@ -27,6 +27,11 @@ internal static class CampaignExecutorTests
             ("PlayerCommandChainNeverMoved", PlayerCommandChainNeverMoved),
             ("MapGroupPlayerGetsOrderNotMove", MapGroupPlayerGetsOrderNotMove),
             ("CarryingGroupMovedNormally", CarryingGroupMovedNormally),
+            ("GaveUpMainEffortLosesTheRoleAtThatTarget", GaveUpMainEffortLosesTheRoleAtThatTarget),
+            ("GaveUpDepotBuilderIsReplacedByTheNextFormation", GaveUpDepotBuilderIsReplacedByTheNextFormation),
+            ("GaveUpReconIsReplacedByTheNextFormation", GaveUpReconIsReplacedByTheNextFormation),
+            ("GaveUpSetIsCollectedFromTheTrackerOnly", GaveUpSetIsCollectedFromTheTrackerOnly),
+            ("ReviewPlanPassesTheTrackersGaveUpSet", ReviewPlanPassesTheTrackersGaveUpSet),
             ("MoverDispatchesTheRolesInPriorityOrder", MoverDispatchesTheRolesInPriorityOrder),
             ("MoverListsMainEffortAndSupportInTheOffensiveList", MoverListsMainEffortAndSupportInTheOffensiveList),
             ("MoverSkipsBusyLockedAndArrivedFormations", MoverSkipsBusyLockedAndArrivedFormations),
@@ -251,6 +256,139 @@ internal static class CampaignExecutorTests
             AssertEqual(0, other.Moves.Count + other.Orders.Count, role + " is neither moved nor ordered for him");
             AssertEqual(1, t2.SkippedPlayer, role + " skipped");
         }
+    }
+
+    // P8 (plan G5a): drives the real tracker to GaveUp through two misses, collects the set the way the review does and
+    // runs the real allocator and the real mover on it.
+    private static MoveTracker TrackerThatGaveUp(int id, float fromX, float tx, float tz)
+    {
+        int day = 100;
+        var t = new MoveTracker();
+        t.RecordIssued(id, fromX, 0f, tx, tz, day, queued: false);
+        AssertEqual(MoveOutcome.Failed, t.Judge(id, fromX, 0f, fromX, 0f, day + 1), "the first miss");
+        t.RecordIssued(id, fromX, 0f, tx, tz, day + 1, queued: false);
+        AssertEqual(MoveOutcome.GaveUp, t.Judge(id, fromX, 0f, fromX, 0f, day + 2), "the retry missed too");
+        return t;
+    }
+
+    private static List<GaveUpMove> GaveUpOf(MoveTracker t)
+    {
+        var list = new List<GaveUpMove>();
+        t.CollectGaveUp(list);
+        return list;
+    }
+
+    private static void GaveUpMainEffortLosesTheRoleAtThatTarget()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 15000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var sectors = ExecutorFixtures.Sectors(s);
+
+        var before = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        AssertEqual(FormationRole.MainEffort, before.TryGet(1, out var b1) ? b1.Role : FormationRole.Hold, "without a gave-up set both march to the main target");
+        AssertEqual(FormationRole.MainEffort, before.TryGet(2, out var b2) ? b2.Role : FormationRole.Hold, "the second too");
+
+        var tracker = TrackerThatGaveUp(1, 350f, 100f, 0f);
+        var gaveUp = GaveUpOf(tracker);
+        AssertEqual(1, gaveUp.Count, "the tracker reports the one move it gave up on");
+        var after = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        AssertTrue(after.TryGet(1, out var a1), "formation 1 still has an assignment");
+        AssertEqual(FormationRole.Hold, a1.Role, "it lost the main effort role at the target it gave up on");
+        AssertEqual("gave-up", a1.Reason, "named");
+        AssertNear(350f, a1.TargetX, 0.01f, "held where it stands, not sent again");
+        AssertEqual(FormationRole.MainEffort, after.TryGet(2, out var a2) ? a2.Role : FormationRole.Hold, "the other formation keeps the role");
+
+        var host = new FakeMoverHost();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, after, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertFalse(host.Moves.Exists(m => m.id == 1), "the mover does not send it");
+        AssertTrue(host.Moves.Exists(m => m.id == 2), "it sends the other");
+
+        // A new target starts afresh: the same formation gave up at (200, 0) keeps its role toward (100, 0).
+        var elsewhere = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(1, 350f, 200f, 0f)));
+        AssertEqual(FormationRole.MainEffort, elsewhere.TryGet(1, out var e1) ? e1.Role : FormationRole.Hold, "a give-up at another target does not cost the role");
+        // Another formation's give-up at the same target is not formation 1's.
+        var other = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(7, 350f, 100f, 0f)));
+        AssertEqual(FormationRole.MainEffort, other.TryGet(1, out var o1) ? o1.Role : FormationRole.Hold, "keyed by instance id");
+
+        // Deterministic and pure: the same inputs, the same allocation.
+        var again = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        AssertEqual(after.Assignments.Count, again.Assignments.Count, "same count");
+        for (int i = 0; i < after.Assignments.Count; i++)
+            AssertTrue(after.Assignments[i].InstanceId == again.Assignments[i].InstanceId && after.Assignments[i].Role == again.Assignments[i].Role
+                && after.Assignments[i].Reason == again.Assignments[i].Reason, "same assignment " + i);
+    }
+
+    private static void GaveUpDepotBuilderIsReplacedByTheNextFormation()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(10, 330f, 9000f));
+        s.Own.Add(ExecutorFixtures.Corps(11, 380f, 4000f));  // the smallest: the builder
+        s.Own.Add(ExecutorFixtures.Corps(12, 350f, 6000f));
+        var plan = ExecutorFixtures.HandPlan(s, new int[0]);
+        var sectors = ExecutorFixtures.Sectors(s);
+        plan.DepotTasks.Add(new DepotTask { X = 300f, Z = 0f, SectorId = sectors.SectorAt(350f, 0f), Priority = 1f });
+
+        var first = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        AssertEqual(FormationRole.DepotBuilder, first.TryGet(11, out var f11) ? f11.Role : FormationRole.Hold, "the smallest builds the depot");
+
+        var gaveUp = GaveUpOf(TrackerThatGaveUp(11, 380f, 300f, 0f));
+        var next = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        AssertEqual(FormationRole.DepotBuilder, next.TryGet(12, out var n12) ? n12.Role : FormationRole.Hold, "the next smallest is tried");
+        AssertTrue(next.TryGet(11, out var n11) && n11.Role != FormationRole.DepotBuilder, "the one that gave up is not the builder");
+        AssertEqual("depot-task", n12.Reason, "with the depot reason");
+    }
+
+    private static void GaveUpReconIsReplacedByTheNextFormation()
+    {
+        var s = ExecutorFixtures.Wide();
+        var near = ExecutorFixtures.Corps(20, 140f, 9000f);
+        near.CavalryShare = 1f;
+        var far = ExecutorFixtures.Corps(21, 160f, 9000f);
+        far.CavalryShare = 1f;
+        s.Own.Add(near);
+        s.Own.Add(far);
+        var plan = ExecutorFixtures.HandPlan(s, new int[0]);
+        var sectors = ExecutorFixtures.Sectors(s);
+        var tasks = new List<ReconTask> { new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 150f, FromZ = 0f, HoldX = 130f, HoldZ = 0f, Priority = 1f, Reason = "t" } };
+
+        var first = ForceAllocator.Allocate(plan, s, sectors, null, tasks, null, null);
+        int picked = first.Assignments.Find(x => x.Role == FormationRole.Recon).InstanceId;
+        AssertTrue(picked == 20 || picked == 21, "a cavalry formation screens");
+        int other = picked == 20 ? 21 : 20;
+
+        var gaveUp = GaveUpOf(TrackerThatGaveUp(picked, picked == 20 ? 140f : 160f, 130f, 0f));
+        var next = ForceAllocator.Allocate(plan, s, sectors, null, tasks, null, gaveUp);
+        AssertEqual(FormationRole.Recon, next.TryGet(other, out var o) ? o.Role : FormationRole.Hold, "the other cavalry formation screens instead");
+        AssertTrue(next.TryGet(picked, out var p) && p.Role != FormationRole.Recon, "the one that gave up does not");
+    }
+
+    private static void GaveUpSetIsCollectedFromTheTrackerOnly()
+    {
+        var t = new MoveTracker();
+        t.RecordIssued(5, 350f, 0f, 100f, 0f, 100, queued: false);   // in transit
+        t.RecordIssued(3, 350f, 0f, 100f, 0f, 100, queued: false);
+        t.Judge(3, 350f, 0f, 350f, 0f, 101);                          // failed once
+        var none = GaveUpOf(t);
+        AssertEqual(0, none.Count, "in transit and failed-once moves are not given up");
+        var g = TrackerThatGaveUp(9, 350f, 100f, 0f);
+        g.RecordRefused(4, 100f, 0f, 100);
+        g.RecordRefused(4, 100f, 0f, 101);                            // a second refusal ends it
+        var set = GaveUpOf(g);
+        AssertEqual(2, set.Count, "a given-up judge and a twice refused move");
+        AssertEqual(4, set[0].InstanceId, "ordered by instance id");
+        AssertEqual(9, set[1].InstanceId, "ordered by instance id");
+    }
+
+    // The review passes the tracker's set to the allocator (the whole call, pinned) before it publishes the allocation.
+    private static void ReviewPlanPassesTheTrackersGaveUpSet()
+    {
+        string review = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
+        int collect = review.IndexOf("MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp);", StringComparison.Ordinal);
+        int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
+        AssertTrue(collect > 0 && allocate > collect, "the set is collected before the allocation that reads it");
+        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);"), "and passed in");
     }
 
     private static void CarryingGroupMovedNormally()

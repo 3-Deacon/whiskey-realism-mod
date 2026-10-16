@@ -16,6 +16,19 @@ namespace WhiskeyRealism.Strategic.Planner
         public int Retries;
     }
 
+    // A move the tracker gave up on (P8): this formation, at this target. The allocator reads the set so the next review does not
+    // send the same formation to the same place again (plan G5a, "the allocator reassigns the role").
+    public struct GaveUpMove
+    {
+        public int InstanceId;
+        public float TargetX, TargetZ;
+
+        public bool Matches(float tx, float tz)
+        {
+            return MoveTracker.SameTarget(TargetX, TargetZ, tx, tz);
+        }
+    }
+
     // The move bookkeeping of one alliance (P8): at most MaxMovesPerDay MoveUnitTo calls per review day, a move judged at the
     // next review (confirmed when the formation's last waypoint moved toward the target or it covered ConfirmFraction of the
     // way, else failed), one retry, then given up for that target (a new target starts afresh). A move queued behind a running
@@ -140,6 +153,16 @@ namespace WhiskeyRealism.Strategic.Planner
             into.Sort();
         }
 
+        // Every move given up on, ordered by instance id so the allocator's input is deterministic.
+        public void CollectGaveUp(List<GaveUpMove> into)
+        {
+            into.Clear();
+            foreach (var pair in _entries)
+                if (pair.Value.State == State.GaveUp)
+                    into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ });
+            into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
+        }
+
         public void Forget(int instanceId)
         {
             _entries.Remove(instanceId);
@@ -192,7 +215,12 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static bool SameTarget(Entry e, float tx, float tz)
         {
-            return Math.Abs(e.TargetX - tx) <= TargetEpsilon && Math.Abs(e.TargetZ - tz) <= TargetEpsilon;
+            return SameTarget(e.TargetX, e.TargetZ, tx, tz);
+        }
+
+        internal static bool SameTarget(float ax, float az, float bx, float bz)
+        {
+            return Math.Abs(ax - bx) <= TargetEpsilon && Math.Abs(az - bz) <= TargetEpsilon;
         }
 
         private static float Distance(float ax, float az, float bx, float bz)

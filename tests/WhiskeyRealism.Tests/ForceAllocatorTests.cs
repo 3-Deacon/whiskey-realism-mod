@@ -1767,7 +1767,7 @@ internal static class ForceAllocatorTests
         AssertTrue(bookkeeping >= 0 && plan > bookkeeping && scope > plan && allocate > scope && publish > allocate && emit > publish,
             "bookkeeping return, plan, allocate scope, allocate, publish of that allocation, row");
         AssertEqual(1, review.Split(new[] { "ForceAllocator.Allocate(" }, StringSplitOptions.None).Length - 1, "one allocation per review");
-        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
+        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
         AssertContains(review, "float reliability = PlayerComplianceRuntime.Reliability;", "stage F's live reliability (1 outside a career)");
         AssertContains(review, "NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);", "one count per review day, only with a map-group player");
         AssertFalse(review.Contains("new Allocation"), "no empty allocation stands in for the real one");
