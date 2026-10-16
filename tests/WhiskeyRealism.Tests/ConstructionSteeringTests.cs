@@ -308,7 +308,7 @@ internal static class ConstructionSteeringTests
 
     private static RailLineRecord Line(int index, float ax, float az, int aId, float bx, float bz, int bId)
     {
-        return new RailLineRecord { Index = index, Startable = true, AX = ax, AZ = az, AIipId = aId, BX = bx, BZ = bz, BIipId = bId };
+        return new RailLineRecord { Index = index, AX = ax, AZ = az, AIipId = aId, BX = bx, BZ = bz, BIipId = bId };
     }
 
     private static void RailScorePrefersMainAxis()
@@ -569,10 +569,12 @@ internal static class ConstructionSteeringTests
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
         AssertEqual("corps1:1", ledger.Tasks[0].BuilderUnitKey, "the persisted identity is the unit key (name:commander)");
-        var saved = new List<DepotTaskRecord>(ledger.Tasks);
+        var written = new WhiskeyRealism.Strategic.Planner.PlannerSnapshot();
+        written.DepotTasks.AddRange(ledger.Tasks);
+        var saved = new List<DepotTaskRecord>(SidecarDtoCodec.PlannerFromDto(SidecarDtoCodec.PlannerToDto(written)).DepotTasks);
         var reloaded = new DepotTaskLedger();
         reloaded.Restore(saved);
-        AssertEqual(-1, reloaded.Tasks[0].BuilderInstanceId, "an instance id is session-local: not restored");
+        AssertEqual(-1, reloaded.Tasks[0].BuilderInstanceId, "an instance id is session-local: the file never carries it");
         AssertFalse(reloaded.HoldsBuilder(1), "nothing is held until the builder is found again");
         // A new session: the same formation has a new instance id.
         var s2 = ExecutorFixtures.Wide();
@@ -1526,7 +1528,7 @@ internal static class ConstructionSteeringTests
         AssertEqual(ConstructionCandidateKind.SupplyDepot, output.TopSupplyDepot.Kind, "the ledger's TopSupplyDepot is no longer dead");
         AssertEqual(DepotTaskLedger.CandidateName(0), output.TopSupplyDepot.Name, "it is the highest-priority task");
         AssertEqual(0, DepotInputCount(null, FiscalPosture.BalancedWar), "no plan, no candidate");
-        s.Reset(0, 0, s.DaySerial, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(0, 0, s.DaySerial, PlayerCommandClass.NotCareer, -1, null);
     }
 
     private static int DepotInputCount(TheaterPlan plan, FiscalPosture posture)

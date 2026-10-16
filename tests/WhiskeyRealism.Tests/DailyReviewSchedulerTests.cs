@@ -429,7 +429,10 @@ internal static class DailyReviewSchedulerTests
         AssertContains(runtime, "StrategicCoordinator.RunReviewJob", "it names the jobs");
         string beliefs = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyArmyModel.cs");
         AssertFalse(System.Text.RegularExpressions.Regex.IsMatch(beliefs, @"sidecar-\s*//\s*restored after a load"), "no claim that beliefs are restored after a load");
-        AssertContains(beliefs, "EnemyArmyModel.Restore has no caller yet", "the comment says what is true until G6");
+        AssertFalse(beliefs.Contains("has no caller yet"), "Restore has a caller since G6 (CampaignPlannerRuntime.Restore)");
+        AssertContains(beliefs, "restored by CampaignPlannerRuntime.Restore", "the comment names the caller that restores the beliefs");
+        AssertContains(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "EnemyDetectionRuntime.ModelFor(alliance).Restore(saved.Beliefs);", "and the caller exists");
+        AssertFalse(runtime.Contains("G6 persists the state") || runtime.Contains("G6 adds it to the sidecar"), "no future tense about the sidecar (G6 shipped)");
     }
 
     private static void AssertDaysEqual(ModelReview expected, ModelReview actual, string label)
@@ -484,7 +487,7 @@ internal static class DailyReviewSchedulerTests
         private CampaignSnapshot ModelSnapshot(int a, Random rng)
         {
             var s = new CampaignSnapshot();
-            s.Reset(a, a, 1000 + _day, PlayerCommandClass.NotCareer, -1, true, null);
+            s.Reset(a, a, 1000 + _day, PlayerCommandClass.NotCareer, -1, null);
             s.RelocationRange = 150f;
             s.OffensiveDominance = 1.1f;
             s.MinStrengthForMovement = 1000f;
@@ -492,7 +495,7 @@ internal static class DailyReviewSchedulerTests
             s.HasCapital = true;
             for (int i = 0; i < 7; i++)
                 s.Areas.Add(new AreaRecord { Index = i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f }, Importance = 1f, SupplyCapacity = 100f });
-            s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = a, X = 100f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
+            s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = a, X = 100f, Z = 0f, Condition = 1f, Built = true });
             foreach (float x in new[] { 100f, 300f, 500f })
                 s.Objectives.Add(new ObjectiveRecord { ObjectiveId = (int)x, X = x, Z = 0f, HolderAlliance = 1 - a, Available = true, Importance01 = 0.5f });
             s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 550, X = 550f, Z = 0f, HolderAlliance = a, Available = true, Importance01 = 0.8f }); // an own town for a picket
@@ -703,7 +706,6 @@ internal static class DailyReviewSchedulerTests
                     // Today's front, yesterday's formations (formation runs later).
                     Work.DefenseIntents[a] = new DefenseIntentLedgerOutput
                     {
-                        AllianceId = a,
                         Signature = View.Fronts[a].Signature() + "|" + (View.FormationDirectives[a]?.Summary() ?? "-")
                     };
                     break;
@@ -973,15 +975,13 @@ internal static class DailyReviewSchedulerTests
             "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.LegacySerial;",
             "a.FrontChanged = frontChanged;",
             "UpdateDefenseIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year)",
-            "a.FormationChanged = false;",
             "StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) || StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) || a.FrontChanged;",
-            "a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Era)",
+            "d.FormationMs += Measure(() => UpdateFormationDirectiveLedger(alliance, a.Era));",
             "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, constructionSource, _constructionSourceSignatures[alliance], d.WeeklyCatchUp)",
             "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat, paused)",
         };
         foreach (string pin in pins)
             AssertContains(job, pin, "hand-off: " + pin);
-        AssertBefore(job, "a.FormationChanged = false;", "a.FormationChanged = UpdateFormationDirectiveLedger(", "formation flag reset before the ledger runs");
         AssertBefore(job, "EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);", "if (d.OperationalRuntimeReady)", "the belief day is stamped by the first job, before any reader");
         string head = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunHeadReviewJob("), @"\s+", " ");
         foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.LegacySerial = legacySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;",

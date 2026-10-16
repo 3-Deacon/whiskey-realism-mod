@@ -60,6 +60,7 @@ internal static class TelemetryPipelineTests
             ("telemetry tag policy does not promote missing parents count", TelemetryTagPolicyDoesNotPromoteMissingParentsCount),
             ("telemetry tag policy routes campaign plan and succession sidecar only", TelemetryTagPolicyRoutesCampaignPlanAndSuccessionSidecarOnly),
             ("task7 explicit campaign groups use typed telemetry", Task7ExplicitCampaignGroupsUseTypedTelemetry),
+            ("retired campaign tags have no emitter", RetiredCampaignTagsHaveNoEmitter),
             ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
             ("telemetry typed off suppression warns once", TelemetryTypedOffSuppressionWarnsOnce),
             ("telemetry legacy unavailable runtime keeps protected failures visible", TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible),
@@ -363,6 +364,27 @@ internal static class TelemetryPipelineTests
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "DefenseIntent");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/ImportanceValuesPatch.cs", "Plan");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/TransferOfUnitsPatch.cs", "Plan");
+    }
+
+    // G6 deleted the layers behind these row tags. The planner's own rows ([CampaignPlan], [CampaignMover], ...) are not Task-7
+    // tags, so AssertNoLegacyTask7Tag has nothing to say about the planner runtimes; this is the check that fits: no source
+    // file anywhere writes a row under a retired tag.
+    private static void RetiredCampaignTagsHaveNoEmitter()
+    {
+        string root = FindRepoPath("src/WhiskeyRealism");
+        string[] retired = { "HistoricalOperation", "ArmyArea", "OperationalProbe", "CoordinatedOps" };
+        int files = 0;
+        foreach (string file in System.IO.Directory.EnumerateFiles(root, "*.cs", System.IO.SearchOption.AllDirectories))
+        {
+            string text = System.IO.File.ReadAllText(file);
+            files++;
+            foreach (string tag in retired)
+            {
+                AssertFalse(text.Contains("\"[" + tag + "]") || text.Contains("\"[" + tag + ":") || text.Contains("$\"[" + tag + "]") || text.Contains("$\"[" + tag + ":"),
+                    file + " writes a [" + tag + "] row");
+            }
+        }
+        AssertTrue(files > 100, "the scan reached the source tree");
     }
 
     private static void AssertNoLegacyTask7Tag(string relativePath, string tag)

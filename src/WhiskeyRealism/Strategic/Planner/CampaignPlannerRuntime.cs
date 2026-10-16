@@ -31,14 +31,14 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         private static readonly CampaignSnapshot[] Snapshots = { new CampaignSnapshot(), new CampaignSnapshot() };
         // G3: each alliance's hysteresis/seed state, the battles each review still has to judge
-        // (P4) and the last [CampaignPlan] row (rows on change). Per campaign; G6 persists the state.
+        // (P4) and the last [CampaignPlan] row (rows on change). Per campaign; the sidecar carries the state (Export/Restore).
         private static readonly PlannerState[] States = { new PlannerState(), new PlannerState() };
         private static readonly BattleInbox Battles = new BattleInbox();
         private static readonly List<BattleHistoryRecord> PendingBattles = new List<BattleHistoryRecord>();
         private static readonly string[] LastPlanRow = new string[2];
         // G4: the allocation's [Allocation] row (rows on change) and the map-group player's run of
         // unreliable days (telemetry: the row reports it; the allocator never counts the player, C4).
-        // Per campaign, in memory (G6 adds it to the sidecar's planner state).
+        // Per campaign; the sidecar carries the run (Export/Restore).
         private static readonly string[] LastAllocationRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
@@ -265,7 +265,7 @@ namespace WhiskeyRealism.Strategic.Planner
             TelemetryRouter.LegacyInfo("[CampaignPlanner] saved state rebound alliance=" + alliance
                 + " moves=" + result.MovesKept + "/" + (result.MovesKept + result.MovesDropped)
                 + " missions=" + result.MissionsKept + "/" + (result.MissionsKept + result.MissionsDropped)
-                + " depotTasks=" + ReboundDepotTasks.Count, TelemetryLayer.Campaign);
+                + " depotTasks=" + result.DepotTasksRebound + "/" + ReboundDepotTasks.Count, TelemetryLayer.Campaign);
         }
 
         // The alliance's snapshot of today's review (the directive ledger reads the command hierarchy from it,

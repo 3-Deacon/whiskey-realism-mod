@@ -21,6 +21,8 @@ internal static class PlannerSidecarTests
         {
             ("V1FileLoadsWithNoPlannerState", V1FileLoadsWithNoPlannerState),
             ("V2FileLoadsWithNoPlannerState", V2FileLoadsWithNoPlannerState),
+            ("MigrationCountsPlansPerFaction", MigrationCountsPlansPerFaction),
+            ("CommanderIdZeroAppointmentRoundTrips", CommanderIdZeroAppointmentRoundTrips),
             ("V3FileDropsNoPlans", V3FileDropsNoPlans),
             ("V3RoundTripsThePlannerState", V3RoundTripsThePlannerState),
             ("V3RoundTripsBeliefsAndAppointments", V3RoundTripsBeliefsAndAppointments),
@@ -40,6 +42,7 @@ internal static class PlannerSidecarTests
             ("RebindDropsAMoveWhoseFormationIsGone", RebindDropsAMoveWhoseFormationIsGone),
             ("RebindKeepsADepotTaskWhoseBuilderIsGone", RebindKeepsADepotTaskWhoseBuilderIsGone),
             ("RebindDropsAMissionWithItsStandDownDebt", RebindDropsAMissionWithItsStandDownDebt),
+            ("FirstReviewAfterALoadPinsTheDepotBuilder", FirstReviewAfterALoadPinsTheDepotBuilder),
             ("RebindClearsWhatItFills", RebindClearsWhatItFills),
             ("RebindOfNothingIsEmpty", RebindOfNothingIsEmpty),
             ("IndexOfKeyOrNameRefusesAnAmbiguousName", IndexOfKeyOrNameRefusesAnAmbiguousName),
@@ -151,6 +154,33 @@ internal static class PlannerSidecarTests
         AssertTrue(snap.FiredEvents.Contains(1), "and the succession record");
         AssertEqual(5, snap.LastSeenMonth, "and the last seen month");
         AssertEqual(9L, snap.SaveSequence, "and the save sequence");
+    }
+
+    // A faction whose "cic" is null (or missing, or has a null activePlan) holds no plan and must not zero the count of
+    // the factions after it.
+    private static void MigrationCountsPlansPerFaction()
+    {
+        const string json = "{\"version\":2,\"factions\":["
+            + "{\"factionId\":0,\"currentEra\":\"Operational1862\",\"cic\":null},"
+            + "{\"factionId\":1,\"currentEra\":\"Operational1862\",\"cic\":{\"officerName\":\"Davis\",\"activePlan\":{\"operationId\":\"b\"}}}]}";
+        AssertEqual(1, Decode(json).PlansDropped, "the second faction's plan is counted past a null cic");
+
+        const string mixed = "{\"version\":1,\"factions\":["
+            + "{\"factionId\":0,\"currentEra\":\"Operational1862\"},"
+            + "{\"factionId\":1,\"currentEra\":\"Operational1862\",\"cic\":{\"activePlan\":null}},"
+            + "{\"factionId\":2,\"currentEra\":\"Operational1862\",\"cic\":{\"activePlan\":{\"operationId\":\"c\"}}}]}";
+        AssertEqual(1, Decode(mixed).PlansDropped, "a missing cic and a JSON-null activePlan are not plans");
+    }
+
+    // PlannerFromDto refuses only a negative commander id; commander 0 is a real commander.
+    private static void CommanderIdZeroAppointmentRoundTrips()
+    {
+        var p = new PlannerSnapshot();
+        p.Appointments.Add(new KeyValuePair<int, int>(0, 812));
+        var back = Decoded(p);
+        AssertEqual(1, back.Appointments.Count, "the commander-0 protection survives");
+        AssertEqual(0, back.Appointments[0].Key, "commander id 0");
+        AssertEqual(812, back.Appointments[0].Value, "protected until");
     }
 
     private static void V3FileDropsNoPlans()
@@ -500,6 +530,79 @@ internal static class PlannerSidecarTests
         AssertEqual(0, result.MissionsKept, "none kept");
     }
 
+    // The chain the first review after a load runs, with the real pure steps: the file, the rebind against this session's
+    // formations, the depot ledger's restore, the held-builder collection and the allocation. A Wished task's builder must be
+    // the DepotBuilder and must not be moved, on a cold load and on a return from battle (new instance ids and, there, a
+    // commander lost in the fight, so the key's name part is all that still matches).
+    private static void FirstReviewAfterALoadPinsTheDepotBuilder()
+    {
+        foreach (bool battleReturn in new[] { false, true })
+        {
+            string label = battleReturn ? "return from battle: " : "cold load: ";
+            int builderId = battleReturn ? 901 : 77;
+            var session = ExecutorFixtures.Wide(1);
+            var builder = ExecutorFixtures.Corps(builderId, 250f, 9000f);
+            builder.Z = 70f;
+            builder.WaypointX = 250f;
+            builder.WaypointZ = 70f;
+            builder.Name = "Pioneers";
+            builder.UnitKey = battleReturn ? "Pioneers:42" : "Pioneers:41";
+            session.Own.Add(builder);
+            session.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+            var sectors = ExecutorFixtures.Sectors(session);
+            int sector = sectors.SectorAt(250f, 70f);
+
+            // the last session's ledger, written to the file
+            var before = new DepotTaskLedger();
+            before.Restore(new[]
+            {
+                new DepotTaskRecord { X = 250f, Z = 0f, SectorId = sector, BuilderInstanceId = 5, BuilderUnitKey = "Pioneers:41", State = DepotTaskState.Wished, StartedDay = 10, EndedDay = -1, WishX = 250f, WishZ = 70f }
+            });
+            var written = new PlannerSnapshot();
+            written.DepotTasks.AddRange(before.Tasks);
+            var saved = RoundTrip(WithPlanner(written)).Planner[0];
+            AssertEqual(-1, saved.DepotTasks[0].BuilderInstanceId, label + "the file carries no instance id");
+
+            // the first review: rebind, ledger restore, held builders, allocation
+            var moves = new List<MoveRecord>();
+            var depots = new List<DepotTaskRecord>();
+            var missions = new List<ReconMission>();
+            PlannerRebind.Resolve(saved, session, moves, depots, missions);
+            var ledger = new DepotTaskLedger();
+            ledger.Restore(depots);
+            var held = new List<HeldBuilder>();
+            ledger.CollectHeldBuilders(held);
+            AssertEqual(1, held.Count, label + "the builder is held on the first review, before the ledger's Sync has run");
+            AssertEqual(builderId, held[0].InstanceId, label + "this session's formation");
+            AssertTrue(held[0].Wished && held[0].TargetX == 250f && held[0].TargetZ == 70f, label + "at its wish position");
+
+            var plan = ExecutorFixtures.HandPlan(session, new[] { 2 }); // the plan lists no task: only the pin keeps the builder
+            var allocation = ForceAllocator.Allocate(plan, session, sectors, null, null, null, null, held);
+            AssertTrue(allocation.TryGet(builderId, out var assigned), label + "the builder is allocated");
+            AssertEqual(FormationRole.DepotBuilder, assigned.Role, label + "it is the DepotBuilder");
+            AssertTrue(assigned.Withheld && assigned.TargetX == 250f && assigned.TargetZ == 70f, label + "withheld at the wish position");
+            var host = new FakeMoverHost();
+            CampaignMover.Review(ExecutorFixtures.Inputs(session, plan, allocation, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
+            AssertFalse(host.Moves.Exists(m => m.id == builderId), label + "the mover does not move it");
+
+            // control: a ledger restored without the binding (the reset this replaced) pins nothing and loses the role
+            var unbound = new List<DepotTaskRecord>();
+            foreach (var d in depots)
+            {
+                var r = d;
+                r.BuilderInstanceId = -1;
+                unbound.Add(r);
+            }
+            var loose = new DepotTaskLedger();
+            loose.Restore(unbound);
+            var none = new List<HeldBuilder>();
+            loose.CollectHeldBuilders(none);
+            AssertEqual(0, none.Count, label + "control: unbound, nothing is held");
+            var free = ForceAllocator.Allocate(plan, session, sectors, null, null, null, null, none);
+            AssertTrue(free.TryGet(builderId, out var freed) && freed.Role != FormationRole.DepotBuilder, label + "control: and the allocation re-tasks the builder (" + freed.Role + ")");
+        }
+    }
+
     private static void RebindClearsWhatItFills()
     {
         var session = Session((11, "1st Corps:7", "1st Corps"));
@@ -703,11 +806,15 @@ internal static class PlannerSidecarTests
         int rebind = review.IndexOf("RebindSaved(alliance, snapshot);", StringComparison.Ordinal);
         int detect = review.IndexOf("EnemyDetectionRuntime.Detect(", StringComparison.Ordinal);
         AssertTrue(build >= 0 && rebind > build && detect > rebind, "the saved records are bound right after the snapshot is built, before any ledger reads them");
+        int collect = review.IndexOf("CollectHeldBuilders(heldBuilders);", StringComparison.Ordinal);
+        AssertTrue(collect > rebind, "and before the held builders are collected: one order, rebind then collect");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(src, @"CollectHeldBuilders\(").Count, "the runtime collects them once, in the review");
         string bind = BodyOf(src, "private static void RebindSaved(");
         AssertTrue(HasLine(bind, "if (saved == null || snapshot.Own.Count == 0) return;"), "a snapshot with no formation waits for the next review rather than dropping every record");
         int cleared = bind.IndexOf("PendingRebind[alliance] = null;", StringComparison.Ordinal);
         int resolve = bind.IndexOf("PlannerRebind.Resolve(saved, snapshot, ReboundMoves, ReboundDepotTasks, ReboundMissions);", StringComparison.Ordinal);
         AssertTrue(cleared >= 0 && resolve > cleared, "once, then resolved");
+        AssertTrue(bind.Contains("\" depotTasks=\" + result.DepotTasksRebound + \"/\" + ReboundDepotTasks.Count"), "the rebind row reports how many depot builders were found (the result's only production reader)");
         AssertTrue(HasLine(bind, "MoveTrackers.For(alliance)?.Restore(ReboundMoves);"), "the mover's tracker");
         AssertTrue(HasLine(bind, "DepotTaskLedgers.For(alliance)?.Restore(ReboundDepotTasks);"), "the depot ledger");
         AssertTrue(HasLine(bind, "Recon[alliance].Restore(ReboundMissions);"), "the recon mission ledger");

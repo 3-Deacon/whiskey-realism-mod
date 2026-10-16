@@ -260,7 +260,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // After a load every record is settled: one that had already used its retry stays given up, the rest may be reissued
-        // at the next review if the formation is still unfinished (the in-session ids are rebound by unit key in G6).
+        // at the next review if the formation is still unfinished (the in-session ids are rebound by unit key on the first review, PlannerRebind.Resolve).
         public void Restore(IEnumerable<MoveRecord> records)
         {
             Clear();

@@ -415,7 +415,9 @@ namespace WhiskeyRealism.Strategic
                 if (factions == null) return 0;
                 foreach (var faction in factions)
                 {
-                    var plan = faction["cic"]?["activePlan"];
+                    // A faction whose "cic" is null (or not an object) holds no plan; it must not end the count.
+                    var cic = (faction as Newtonsoft.Json.Linq.JObject)?["cic"] as Newtonsoft.Json.Linq.JObject;
+                    var plan = cic?["activePlan"];
                     if (plan != null && plan.Type != Newtonsoft.Json.Linq.JTokenType.Null) plans++;
                 }
                 return plans;
