@@ -159,12 +159,7 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                var assignment = GetAssignment(allianceId, unitKey);
-                if (assignment == null) return true;
-                if (!assignment.DirectMovementAllowed) return false;
-                if (assignment.Directive == FormationDirective.Delay) return false;
-                if (assignment.Directive == FormationDirective.Concede) return false;
-                return true;
+                return FormationDirectiveLedger.AllowsAreaMovement(GetAssignment(allianceId, unitKey), CampaignPlannerRuntime.ReconExecutorActive());
             }
             catch (Exception ex)
             {

@@ -184,6 +184,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);
                     // The mover may have released the decision's launch: the patches read it with the plan.
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));
+                    // G5d: the recon missions the Plan job bound this review. Not gated on the recon flag: with it off the ledger holds
+                    // only the missions Sync just cleared, and the pass takes the Scouting order off their screens (a rollback must not
+                    // leave one scouting for good); it moves nothing then.
+                    ReconExecutorRuntime.Execute(alliance, Snapshots[alliance], Recon[alliance]);
                 }
                 catch (Exception ex)
                 {
@@ -346,6 +350,13 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool ExecutorsEnabled()
         {
             return FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors);
+        }
+
+        // The reconnaissance executor sends and holds the formations on a mission (G5d): both flags above plus the recon flag.
+        // The old probe's runner stands down and #15 leaves a Screen formation at its post only while this holds.
+        internal static bool ReconExecutorActive()
+        {
+            return ExecutorsEnabled() && FlagOn(Plugin.EnableCampaignReconnaissance);
         }
 
         // What the executors' patches read with the plan (G5a): the decision and its release, the pre-war gate and the map-group

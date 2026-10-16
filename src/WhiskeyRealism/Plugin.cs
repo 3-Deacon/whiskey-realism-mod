@@ -1037,10 +1037,12 @@ namespace WhiskeyRealism
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +
                 "screens toward the oldest or most uncertain believed armies and along approaches no viewer covers, pickets on threatened towns, an " +
                 "advance guard ahead of a main effort with strength to spare, and a belief-driven probe short of a main objective whose picture is stale. " +
-                "A formation on a mission gets the Screen formation directive and the Scouting perk role, and the [Recon] row logs the missions. " +
-                "No formation is sent to its post until the reconnaissance executor ships: until then this plans, marks (Screen directive, Scouting " +
-                "perks) and logs, and keeps the marked formations out of the old probe and package layers; the old army-area moves (#15) can still move them. " +
-                "Never uses the W&L player's own command. OFF = no missions (Screen then means nothing); needs Enable Campaign Planner.");
+                "A formation on a mission gets the Screen formation directive and the Scouting perk role, is sent to its post by a plain move " +
+                "(no forced march) and kept there, and the [Recon] and [ReconMission] rows log the missions. A cavalry-majority screen also gets the " +
+                "Scouting cavalry order (the one vanilla's AI never gives) and loses it when recalled or cleared. While it runs the old army-area " +
+                "moves (#15) leave a formation on a mission at its post and the old probe stands down. " +
+                "Never uses the W&L player's own command. OFF = no missions (Screen then means nothing); needs Enable Campaign Planner and " +
+                "Enable Campaign Planner Executors for the moves and orders.");
             EnableCampaignFogHonestBeliefs = Config.Bind(
                 "Campaign Planner", "Enable Campaign Fog-Honest Beliefs", true,
                 "Default ON. Enemy armies are known only when vanilla's campaign fog shows them to the side (FogOfWar.UnitIsHidden, 127225 arguments; " +

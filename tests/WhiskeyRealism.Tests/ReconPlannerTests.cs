@@ -1637,7 +1637,7 @@ internal static class ReconPlannerTests
         AssertContains(plugin, "\"Campaign Planner\", \"Enable Campaign Reconnaissance\", true,", "bound, default on");
         AssertContains(plugin, "internal static ConfigEntry<bool> EnableCampaignReconnaissance;", "declared");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
-        AssertEqual(3, System.Text.RegularExpressions.Regex.Matches(runtime, @"FlagOn\(Plugin\.EnableCampaignReconnaissance\)").Count, "read where tasks are planned, the row is emitted and the directive filter answers");
+        AssertEqual(4, System.Text.RegularExpressions.Regex.Matches(runtime, @"FlagOn\(Plugin\.EnableCampaignReconnaissance\)").Count, "read where tasks are planned, the row is emitted, the directive filter answers and the executor is declared active (G5d)");
     }
 
     // ---- fixtures ----

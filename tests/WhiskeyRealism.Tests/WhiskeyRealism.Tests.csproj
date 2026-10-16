@@ -81,6 +81,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconPlanner.cs" Link="Planner\ReconPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconMissionLedger.cs" Link="Planner\ReconMissionLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconOrders.cs" Link="Planner\ReconOrders.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconExecutor.cs" Link="Planner\ReconExecutor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconStep.cs" Link="Planner\ReconStep.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.DepotTasks.cs" Link="Planner\LogisticsGate.DepotTasks.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RiverLines.cs" Link="Planner\RiverLines.cs" />

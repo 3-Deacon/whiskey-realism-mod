@@ -30,6 +30,13 @@ namespace WhiskeyRealism.Strategic.Planner
             return cavalryShare >= ReconPlanner.MinCavalryShare ? ScoutingOrder : -1;
         }
 
+        // The cavalry mode n of a code CavalryOrderFor returned (ChangeCampaignOrders: 120 + n, 90720-90770): 0 none, 1 Scouting.
+        // What the executor compares with Regiment.cavalryordersordered.
+        internal static int ModeOf(int orderCode)
+        {
+            return orderCode - NoCavalryOrder;
+        }
+
         internal static bool MayAct(WlChainClass chain)
         {
             return chain != WlChainClass.PlayerCommand && chain != WlChainClass.CicSide;
