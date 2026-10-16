@@ -181,23 +181,23 @@ internal static class PlayerPositionTests
     private static void RuntimeWiring()
     {
         string pledge = ReadRepoFile("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs");
-        AssertTrue(pledge.Contains("if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;"),
+        AssertTrue(HasLine(pledge, "if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;"),
             "#4 pre-pledge asks may-commit");
         AssertFalse(pledge.Contains("CountsTowardCoverage"), "#4 pre-pledge never asks the coverage question");
         AssertFalse(pledge.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
 
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs");
         AssertFalse(runtime.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
-        AssertTrue(runtime.Contains("bool playerControlled = regiment != null && !WlChainRules.MayMove(chainClass);"),
+        AssertTrue(HasLine(runtime, "bool playerControlled = regiment != null && !WlChainRules.MayMove(chainClass);"),
             "candidates the AI may not commit are marked player-controlled");
-        AssertTrue(runtime.Contains("bool holdsPosition = regiment != null && playerControlled && WlChainRules.CountsTowardCoverage(chainClass);"),
+        AssertTrue(HasLine(runtime, "bool holdsPosition = regiment != null && playerControlled && WlChainRules.CountsTowardCoverage(chainClass);"),
             "coverage-only candidates hold their position");
-        AssertTrue(runtime.Contains("Vector3 holdPos = holdsPosition ? regiment.GetLastWaypointPos() : unitPos;"),
+        AssertTrue(HasLine(runtime, "Vector3 holdPos = holdsPosition ? regiment.GetLastWaypointPos() : unitPos;"),
             "the position held is the last waypoint, vanilla's basis");
-        AssertTrue(runtime.Contains("input.HoldCoverRadius = defOpsRadius;"), "cover radius is the defensive-operation radius");
-        AssertTrue(runtime.Contains("if (regiment.inbattle && !holdsPosition) continue;"),
+        AssertTrue(HasLine(runtime, "input.HoldCoverRadius = defOpsRadius;"), "cover radius is the defensive-operation radius");
+        AssertTrue(HasLine(runtime, "if (regiment.inbattle && !holdsPosition) continue;"),
             "an in-battle holder still counts, an in-battle AI group is skipped");
-        AssertTrue(runtime.Contains("if (ReadBool(unit, \"inbattle\", false)) continue;"), "non-regiment units in battle are skipped");
+        AssertTrue(HasLine(runtime, "if (ReadBool(unit, \"inbattle\", false)) continue;"), "non-regiment units in battle are skipped");
 
         string ledger = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseIntentLedger.cs");
         AssertFalse(ledger.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
