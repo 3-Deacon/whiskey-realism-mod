@@ -36,6 +36,7 @@ internal static class ReconPlannerTests
             ("BelowMovementMinimaNeverChosen", BelowMovementMinimaNeverChosen),
             ("ScreenStaysWithIncumbent", ScreenStaysWithIncumbent),
             ("RecalledFormationNotRepicked", RecalledFormationNotRepicked),
+            ("IncumbentWhoseCommandPassesToThePlayerIsRefused", IncumbentWhoseCommandPassesToThePlayerIsRefused),
             ("PicketHoldsUnwatchedMajorTown", PicketHoldsUnwatchedMajorTown),
             ("PicketNeverTakesFinalReserve", PicketNeverTakesFinalReserve),
             ("AdvanceGuardOnlyWithSpareStrengthAndNoCloseContact", AdvanceGuardOnlyWithSpareStrengthAndNoCloseContact),
@@ -366,6 +367,29 @@ internal static class ReconPlannerTests
         var task = ScreenTask(0f, 0f, 265f, 0f, -1);
         AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "the formation already on that post keeps it");
         AssertEqual(1, ReconPlanner.PickFormation(s, null, null, null, task, new List<int>(), true), "without the ledger the nearest to the axis start");
+    }
+
+    // A mission outlives the day it was issued: if the player takes command of the group on it (stage F's chain
+    // class turns PlayerMapGroup or PlayerCommand), the incumbent rule must not keep a recon task on his group.
+    private static void IncumbentWhoseCommandPassesToThePlayerIsRefused()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand })
+        {
+            var s = World();
+            s.Own.Add(Unit(1, 0f, 0f, 3000f, 0.9f, 14));
+            s.Own.Add(Unit(2, 260f, 0f, 3000f, 0.9f, 14));
+            var ledger = new ReconMissionLedger();
+            AddMission(ledger, s, ReconKind.Screen, 2, 260f, 0f, -1);
+            var task = ScreenTask(0f, 0f, 265f, 0f, -1);
+            AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "fixture: while the AI holds it the incumbent keeps the post");
+
+            var taken = s.Own[1];
+            taken.Chain = chain;                                                     // the player takes command of group 2
+            s.Own[1] = taken;
+            AssertEqual(1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": the incumbent is refused and another formation is picked");
+            s.Own.RemoveAt(0);
+            AssertEqual(-1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": with no other formation, none");
+        }
     }
 
     private static void RecalledFormationNotRepicked()
