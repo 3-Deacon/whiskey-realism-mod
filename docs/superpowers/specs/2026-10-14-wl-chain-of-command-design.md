@@ -2,6 +2,12 @@
 
 **Status:** §A-§C (battle ownership, chain target resolution, battle dispatches) are implemented by the battle core (`2026-10-15-battle-core-design.md`, OrderArbiter); this spec's own slice covers §D-§F (stage F, implemented on `feat/wl-chain-campaign`; plan `docs/superpowers/plans/2026-10-15-wl-chain-campaign.md`). Approved direction (user, 2026-10-14: "implement your improvements"; disobedience → AI adapts, no penalty). Vanilla reference: `docs/wl-player-model.md`.
 
+## Amendment 2026-10-16: no campaign order for a player below map-group level
+
+User report: "I am getting battle order on the campaign map. I should not be getting orders when I part of an army or division or corps when I am unable to move myself on the campaign map." Smoke session 20261016-205617: every campaign order the player saw was a `trigger=vanilla-move` dispatch (`CampaignPlayerOrderFlow` origin `C69`, types 5, 6 and 16, issuer the carrying army's commander) while his command was `BelowMapLevel`.
+
+Decision (integrator): restore vanilla. Vanilla sends a player whose command is not its own campaign-map group no campaign order (`AIBattle.CheckCurrentOrderUpdate` gate 8366, `!flag2` returns; he is carried by the AI group that moves like any other), and Whiskey now sends him none. **§D trigger 1 is removed**: the `MoveUnitTo` / `CheckFinalPositions` / `RollUpEnemyObjectivesInZone` patches, the pending-move recorder, the type classifier, the correction memory, the `OrderOrigin.C69` courier origin, `SubordinateDispatchesShowZone` and the `trigger=vanilla-move` telemetry. Trigger 2 (Whiskey's own order to a map-group player, through the bridge) and vanilla's own orders to that player are unchanged, as are the courier queue, the acknowledgement and the compliance observation (§E: a campaign order is a sample only where the player decides the movement, which is now the only case in which one exists). The AI group carrying a below-map-group player is still a movable AI asset (`WlChainClass.CarryingGroup`, `carrying-group`); its march is no longer told to the player. Leftovers of the removed path are dropped: a saved `C69` courier entry does not load (`WlCampaignCourierSidecar.TryOrigin`), and a campaign order a carried player still holds is emptied by the first `UpdateUnitAI` pass (`WlCampaignCourierRuntime.ClearStaleCarriedOrder`, vanilla's own `givenorder = null`, 123533). The patch is now `WlCampaignOrderPassPatch` (#69, the `UpdateUnitAI` Postfix only). The text of §D trigger 1 and the components table below describe the removed design and stay for the record.
+
 ## Problem
 
 In a W&L career the player is usually a subordinate and their own side is AI-run. The mod currently:
@@ -90,7 +96,7 @@ Decompile `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, build 14703111. Data:
 | `Tactical/TacticalPlayerDispatchRuntime.cs` | runtime | §C call into vanilla, once per (ancestor, type, target) change |
 | `Strategic/WlCampaignDispatchPolicy.cs` | pure | §D trigger/type/dedupe decisions |
 | `Strategic/WlCampaignDispatchRuntime.cs` | runtime | §D pending moves, classification inputs, GivenOrders emission |
-| `Patches/WlCampaignMoveDispatchPatch.cs` | patch #69 | §D trigger 1 (Postfix on `MoveUnitTo`; Postfix on `UpdateUnitAI` flushes) |
+| `Patches/WlCampaignMoveDispatchPatch.cs` (now `WlCampaignOrderPassPatch.cs`, `UpdateUnitAI` Postfix only) | patch #69 | §D trigger 1 (removed 2026-10-16); the order pass: courier delivery, acknowledgement, compliance, leftover clear |
 | `Strategic/PlayerComplianceLedger.cs` | pure | §E |
 | `Strategic/PlayerComplianceRuntime.cs` | runtime | §E observation, career key, sidecar restore, `Reliability` |
 | `Strategic/CicFactionAiGuard.cs` | pure | §F arm decision |
