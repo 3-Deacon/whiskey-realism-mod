@@ -181,7 +181,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly bool[] _done;
             private readonly bool[] _inMass;
             private readonly FormationRole[] _role;
-            private readonly int[] _sector;    // the sector the formation stands in
+            private readonly int[] _sector;    // the sector the formation stands in; the map-group player's is the sector his last waypoint lies in (HoldSectorOf)
             private readonly int[] _roleSector;
             private readonly float[] _tx, _tz;
             private readonly string[] _reason;
@@ -409,11 +409,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
 
-            // ReconPlanner.PickFormation's own ranking: cavalry-majority, other combat groups, a map-group player.
+            // ReconPlanner.PickFormation's own ranking: cavalry-majority, then other combat groups.
             private int ReconTier(int i)
             {
-                var f = _s.Own[i];
-                return f.Chain == WlChainClass.PlayerMapGroup ? 2 : f.CavalryShare >= ReconPlanner.MinCavalryShare ? 0 : 1;
+                return _s.Own[i].CavalryShare >= ReconPlanner.MinCavalryShare ? 0 : 1;
             }
 
             // The force above ReserveSurplusMargin x the required force becomes Reserve, farthest from

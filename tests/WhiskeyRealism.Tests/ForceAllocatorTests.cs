@@ -50,6 +50,11 @@ internal static class ForceAllocatorTests
             ("PlayerStandingInASectorReleasesItsAIHolderIntoTheMass", PlayerStandingInASectorReleasesItsAIHolderIntoTheMass),
             ("PlayerMarchingAwayLeavesTheSectorToAnAIHolder", PlayerMarchingAwayLeavesTheSectorToAnAIHolder),
             ("PlayerIsNeverInTheMassOrAMustHold", PlayerIsNeverInTheMassOrAMustHold),
+            ("MapGroupPlayerIsNeverPickedAsAPicket", MapGroupPlayerIsNeverPickedAsAPicket),
+            ("PlayerBoundForAnEmptyThreatenedSectorMakesItHold", PlayerBoundForAnEmptyThreatenedSectorMakesItHold),
+            ("HoldSectorOfCreditsTheWaypointWhateverThePosition", HoldSectorOfCreditsTheWaypointWhateverThePosition),
+            ("SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck", SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck),
+            ("CicStandDownPrecedesEveryHoldSum", CicStandDownPrecedesEveryHoldSum),
             ("RecoveringFormationsDoNotHoldTheirSector", RecoveringFormationsDoNotHoldTheirSector),
             ("ReserveRulesHoldIgnoresRecoveringFormations", ReserveRulesHoldIgnoresRecoveringFormations),
             ("StarvedMapGroupPlayerIsNeverRecover", StarvedMapGroupPlayerIsNeverRecover),
@@ -910,6 +915,136 @@ internal static class ForceAllocatorTests
         holdReserved = new int[s.Own.Count];
         ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
         AssertEqual(-1, holdReserved[0], "a busy formation stays, starved or not, and does count: nothing more is reserved");
+    }
+
+    // G4 verify r3 F1, through the real ReconPlanner.PlanTasks: an own town at x 400 in a sector the map-group
+    // player alone stands in (x 450), the enemy at x 250 or elsewhere. A picket is a pre-pledge, so the player is
+    // never picked: the town gets an AI picket or none, and no Recon role, no Withheld, ever lands on him.
+    private static void MapGroupPlayerIsNeverPickedAsAPicket()
+    {
+        foreach (float bx in new[] { 250f, 300f, 620f, 650f })
+            foreach (float strength in new[] { 2000f, 20000f })
+            {
+                var s = Wide();
+                var guard = Corps(1, 100f, 30000f);
+                guard.SightRadius = 30f;
+                s.Own.Add(guard);
+                var player = Corps(9, 450f, strength);
+                player.SightRadius = 30f;
+                player.Chain = WlChainClass.PlayerMapGroup;
+                s.Own.Add(player);
+                s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 400f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 1f });
+                s.Beliefs.Add(Belief(bx, 0f, 10000f));
+                var sectors = Sectors(s);
+                var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+                var missions = new ReconMissionLedger();
+                var tasks = new List<ReconTask>();
+                ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
+                var a = ForceAllocator.Allocate(plan, s, sectors, null, tasks, missions);
+                var x = Of(a, 9);
+                string label = "bx " + bx + " strength " + strength + ": ";
+                AssertTrue(x.Role != FormationRole.Recon, label + "the player is never a picket or any recon post");
+                AssertFalse(x.Withheld, label + "and never withheld");
+                foreach (var task in tasks)
+                    AssertTrue(ReconPlanner.PickFormation(s, sectors, plan, missions, task, null, false) != 9, label + "no task " + task.Kind + "@" + task.HoldX + " picks him");
+            }
+    }
+
+    // G4 verify r3 F2, through the real planner and ReconPlanner.PlanTasks: the player stands at x 310 (sector 1)
+    // with his last waypoint at x 500, an empty threatened sector (need 6000, nothing of ours physically there).
+    // He counts there at 20000, so the planner calls it Hold and plans no screen for it; with the waypoint at x 310
+    // nothing holds it and it is Screen.
+    private static void PlayerBoundForAnEmptyThreatenedSectorMakesItHold()
+    {
+        foreach (float waypointX in new[] { 310f, 500f })
+        {
+            var s = Wide();
+            var guard = Corps(1, 100f, 30000f);
+            guard.SightRadius = 30f;
+            s.Own.Add(guard);
+            s.Own.Add(Corps(3, 290f, 3000f));
+            var player = Corps(9, 310f, 20000f);
+            player.Chain = WlChainClass.PlayerMapGroup;
+            player.WaypointX = waypointX;
+            s.Own.Add(player);
+            s.Beliefs.Add(Belief(300f, 0f, 10000f));
+            s.Beliefs.Add(Belief(500f, 0f, 10000f));
+            var sectors = Sectors(s);
+            int empty = sectors.SectorAt(500f, 0f);
+            var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+            var tasks = new List<ReconTask>();
+            ReconPlanner.PlanTasks(s, sectors, plan, new ReconMissionLedger(), tasks);
+            bool screen = false;
+            foreach (var task in tasks)
+                if (task.SectorId == empty && task.Reason == "screen-posture") screen = true;
+            if (waypointX > 400f)
+            {
+                AssertEqual(TheaterPosture.Hold, PostureOfSector(plan, empty), "bound for x 500 he holds the empty threatened sector");
+                AssertFalse(screen, "so the planner plans no screen for it");
+                AssertEqual("3", string.Join(",", Alloc(plan, s).Shortfalls), "and the allocator reports only the sector he left (corps 3), none for the one he holds");
+            }
+            else
+            {
+                AssertEqual(TheaterPosture.Screen, PostureOfSector(plan, empty), "with the waypoint at his position nothing holds the sector");
+                AssertTrue(screen, "and it gets a screen");
+            }
+        }
+    }
+
+    // G4 verify r3 F6: the hold sector is the waypoint's whatever the physical position says (even a position the
+    // sector map cannot place), and the position only when the waypoint is unusable.
+    private static void HoldSectorOfCreditsTheWaypointWhateverThePosition()
+    {
+        var s = Wide();
+        var sectors = Sectors(s);
+        int at500 = sectors.SectorAt(500f, 0f);
+        int at300 = sectors.SectorAt(300f, 0f);
+        var player = Corps(9, 300f, 20000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        player.WaypointX = 500f;
+        AssertEqual(at500, ReserveRules.HoldSectorOf(sectors, player), "the waypoint's sector");
+        player.X = float.NaN;
+        AssertEqual(at500, ReserveRules.HoldSectorOf(sectors, player), "even with no usable position");
+        player.WaypointX = float.NaN;
+        player.X = 300f;
+        AssertEqual(at300, ReserveRules.HoldSectorOf(sectors, player), "no usable waypoint: the position");
+        var ai = Corps(2, 300f, 20000f);
+        ai.WaypointX = 500f;
+        AssertEqual(at300, ReserveRules.HoldSectorOf(sectors, ai), "an AI formation holds where it stands, whatever its order");
+    }
+
+    // F6 and F2 in the planner's sector facts: the loop must key every fact on HoldSectorOf and never skip a
+    // formation on its physical sector first (a player off the sector map would never be credited).
+    private static void SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck()
+    {
+        string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "private static SectorFacts BuildSectorFacts(");
+        int hold = body.IndexOf("int sector = ReserveRules.HoldSectorOf(c.Sectors, f);", StringComparison.Ordinal);
+        int own = body.IndexOf("x.Own[sector] += ReserveRules.HoldStrength(f);", StringComparison.Ordinal);
+        int count = body.IndexOf("x.Count[sector]++;", StringComparison.Ordinal);
+        AssertTrue(hold >= 0 && own > hold && count > own, "one sector per formation, from HoldSectorOf: Own, then Count");
+        AssertFalse(body.Contains("= SectorOf(c.Sectors, f)") || body.Contains("ReserveRules.SectorOf("), "no second, physical lookup in the facts loop");
+    }
+
+    // G4 verify r3 F4: a CIC alliance's side stands down before any hold sum is computed. The player's CicSide
+    // chain is classified only on the player's own alliance, which the planner never plans, so the predicate is
+    // pinned as well: CountsTowardHold is false for it.
+    private static void CicStandDownPrecedesEveryHoldSum()
+    {
+        AssertFalse(WlChainRules.CountsTowardHold(WlChainClass.CicSide), "a CIC side holds nothing");
+        AssertFalse(WlChainRules.CountsTowardHold(WlChainClass.PlayerCommand), "nor his own command");
+        AssertTrue(WlChainRules.CountsTowardHold(WlChainClass.PlayerMapGroup), "the map-group player does");
+        string review = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
+        int standDown = review.IndexOf("if (mode == PlannerReviewMode.StandDown) return;", StringComparison.Ordinal);
+        int sectorBuild = review.IndexOf("SectorModel.Build(snapshot)", StringComparison.Ordinal);
+        int plan = review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal);
+        int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
+        AssertTrue(standDown >= 0 && sectorBuild > standDown && plan > standDown && allocate > standDown,
+            "the CIC stand-down return precedes the sector model, the plan and the allocation");
+        string allocator = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ForceAllocator.cs");
+        string allocate2 = BodyOf(allocator, "public static Allocation Allocate(");
+        AssertTrue(allocate2.IndexOf("if (StandsDown(s)) return allocation;", StringComparison.Ordinal) >= 0
+            && allocate2.IndexOf("if (StandsDown(s)) return allocation;", StringComparison.Ordinal) < allocate2.IndexOf("new Pass(", StringComparison.Ordinal),
+            "and the allocator's own stand-down precedes its pass");
     }
 
     // A threatened sector only the player stands in is Hold for the planner when he covers the need (20000

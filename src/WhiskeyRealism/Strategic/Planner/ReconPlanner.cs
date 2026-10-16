@@ -42,8 +42,9 @@ namespace WhiskeyRealism.Strategic.Planner
     // operation, capital-defense and depot lists), never below vanilla's movement minima
     // (IsUnitAvailableForOffensiveOperations 14091-14106: readiness step >= 2, strength and morale
     // strictly above aiminimumstrength/moraleformovement; Strength here is groupstrengthdirect where
-    // vanilla tests groupstrengthactive), never the W&L player's own command or CIC side, a map-group
-    // player only as a town picket (order-only, never the sole screen), a carrying group freely (F's
+    // vanilla tests groupstrengthactive), never a formation in the W&L player's chain that fails
+    // WlChainRules.MayMove (his own command, a CIC side, the map-group player: a picket is a pre-pledge,
+    // and his own vision already reaches the side through vanilla), a carrying group freely (F's
     // MoveUnitTo Postfix dispatches its march), never the main body's last cavalry-majority group
     // unless the task is the main effort's own screen or the main effort already has one, a picket
     // only from its own sector and never its final reserve, an advance guard or probe at most
@@ -131,17 +132,16 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 if (taken != null && taken.Contains(f.InstanceId)) continue;
                 if (!CanMove(s, f) || IsRecalling(missions, f.InstanceId)) continue;
-                bool playerMapGroup = f.Chain == WlChainClass.PlayerMapGroup;
-                if (!WlChainRules.MayMove(f.Chain) && !(playerMapGroup && task.Kind == ReconKind.Picket)) continue;
+                if (!WlChainRules.MayMove(f.Chain)) continue;
                 bool cavalry = f.CavalryShare >= MinCavalryShare;
 
                 switch (task.Kind)
                 {
                     case ReconKind.Picket:
                         if (SectorOf(sectors, f) != task.SectorId) continue;
-                        // The player's own command and a map-group player never hold a sector (C4):
-                        // only committed defenders count, before and after the picket leaves.
-                        if (sectorOwn - (WlChainRules.CountsAsCommittedDefender(f.Chain) ? f.Strength : 0f) < holdNeed) continue;
+                        // Only committed defenders count (SectorStrengths), and only one can be picked
+                        // (MayMove), so the sector keeps its hold need after the picket leaves.
+                        if (sectorOwn - f.Strength < holdNeed) continue;
                         break;
                     case ReconKind.AdvanceGuard:
                     case ReconKind.Probe:
@@ -150,7 +150,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (guardMainCavalry && cavalry && InMainBody(s, main, f)) continue;
 
-                int tier = playerMapGroup ? 2 : (cavalry ? 0 : 1);
+                int tier = cavalry ? 0 : 1;
                 float distance = Distance(f.X, f.Z, task.FromX, task.FromZ);
                 if (!Better(tier, f.Strength, distance, f.InstanceId, best, bestTier, bestStrength, bestDistance)) continue;
                 best = f.InstanceId;
