@@ -18,6 +18,10 @@ namespace WhiskeyRealism
         // BC13: Tactical / Enable Per-Commander Personality (the attack-threshold band and the casualty threshold's basis).
         internal static bool PerCommanderPersonality = true;
         internal static bool PerCommanderPersonalityEnabled() => PerCommanderPersonality;
+
+        // BC13: Tactical / Enable Staggered Reserve Release (ArmyOrchestrator builds the allocator's release context from it).
+        internal static bool StaggeredReserveRelease = true;
+        internal static bool StaggeredReserveReleaseEnabled() => StaggeredReserveRelease;
     }
 
     // Stands in for the BepInEx plugin instance's master switch.

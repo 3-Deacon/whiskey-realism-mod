@@ -67,6 +67,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnablePerCommanderPersonality;
         internal static ConfigEntry<bool> EnableCommanderOpportunity;
         internal static ConfigEntry<bool> EnableDefenderCounterstroke;
+        internal static ConfigEntry<bool> EnableStaggeredReserveRelease;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -86,6 +87,13 @@ namespace WhiskeyRealism
         internal static bool CommanderOpportunityEnabled()
         {
             try { return EnableCommanderOpportunity != null && EnableCommanderOpportunity.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Staggered Reserve Release (BC13: one reserve per release interval above a floor; one per crisis sector).</summary>
+        internal static bool StaggeredReserveReleaseEnabled()
+        {
+            try { return EnableStaggeredReserveRelease != null && EnableStaggeredReserveRelease.Value; }
             catch { return false; }
         }
 
@@ -587,6 +595,16 @@ namespace WhiskeyRealism
                 "own front line, clear of it) with a bounded local counterstroke by a reserve or second-line brigade, never beyond the own " +
                 "line and never by cavalry. Other attack tasks on a Defender are still held. Needs Enable Commander Opportunity. Off: no " +
                 "penetration is detected and a Defender never launches an exploit.");
+            EnableStaggeredReserveRelease = Config.Bind(
+                "Tactical",
+                "Enable Staggered Reserve Release",
+                true,
+                "Default ON. BC13: the army releases its reserves one at a time. When the plan reaches its Exploit phase or the odds reach the " +
+                "reserve-commit trigger, at most one Reserve division or corps is released per interval (0.05 to 0.15 game-hours, shorter for " +
+                "an aggressive army commander), the one nearest the main effort, and the army keeps a floor of reserves held (30 % of the " +
+                "reserves it had, more for a cautious commander, fewer for one who accepts casualties; at least one unless it only had one). " +
+                "A crisis still releases at once, one reserve per outmatched sector, the nearest, even below the floor. A reserve with a live " +
+                "local exploit is never released. Off: every reserve is released together, as before.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

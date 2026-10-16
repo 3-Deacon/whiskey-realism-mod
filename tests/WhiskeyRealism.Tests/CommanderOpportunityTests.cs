@@ -8,13 +8,14 @@ using static TestHarness;
 //   .Probe        the perceived-ground lattice, penetration, Counterstroke (spec § 5)
 //   .Decision     OPP-*   (spec § 6)
 //   .Tick         OpportunityTick over a fixture: launch, step, collect, stand-down (spec § 6)
+//   .Reserve      RES-*   (the staggered reserve release, spec § 6)
 //   .Override     OVR-* (the posture pipeline's exploit override: pure halves and source pins)
 //   .Lifecycle    LIFE-*, COUNTER-BOUNDS, OPP-CLAIM-RELEASE (spec § 6: exploit lifecycle, table, feedback)
 internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests(), LifeTests(), TickTests(), OverrideTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests(), LifeTests(), TickTests(), OverrideTests(), ReserveTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

@@ -18,9 +18,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     public readonly struct ReserveReleaseContext
     {
         public ReserveReleaseContext(float globalOdds, bool flankRelease = true)
+            : this(globalOdds, flankRelease, null, null, 0.0, 0.5f, 0.5f, 0.5f)
+        {
+        }
+
+        /// <summary>
+        /// BC13 (Enable Staggered Reserve Release): with a <paramref name="state"/> the Exploit-phase and odds releases are staggered
+        /// above a floor and a crisis releases one reserve per crisis sector; <paramref name="exploiting"/> flags (per child, aligned
+        /// with the snapshots) the children with a live exploit; <paramref name="nowHours"/> is the doctrine clock and the three
+        /// personality values are the army commander's (the release interval and the floor share).
+        /// </summary>
+        public ReserveReleaseContext(float globalOdds, bool flankRelease, ReserveReleaseState state, bool[] exploiting,
+            double nowHours, float agg01, float caution01, float casualtyTolerance01)
         {
             GlobalOdds = float.IsNaN(globalOdds) || float.IsInfinity(globalOdds) || globalOdds < 0f ? 0f : globalOdds;
             FlankRelease = flankRelease;
+            State = state;
+            Exploiting = exploiting;
+            NowHours = nowHours;
+            Agg01 = agg01;
+            Caution01 = caution01;
+            CasualtyTolerance01 = casualtyTolerance01;
         }
 
         public float GlobalOdds { get; }
@@ -30,6 +48,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Reserve child to guard its flank. A default-constructed context releases none.
         /// </summary>
         public bool FlankRelease { get; }
+
+        /// <summary>The side's release memory; null releases as before (every adjacent reserve in a crisis, every reserve on a trigger).</summary>
+        public ReserveReleaseState State { get; }
+        public bool[] Exploiting { get; }
+        public double NowHours { get; }
+        public float Agg01 { get; }
+        public float Caution01 { get; }
+        public float CasualtyTolerance01 { get; }
+
+        public bool Staggered => State != null;
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -285,7 +313,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 roles[i] = DirectChildRole.Reserve;
             }
 
-            var axisOverride = ReleaseReserves(plan, evidence, roles, release);
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots);
 
             var intents = new DirectChildIntent[snapshots.Count];
             for (int i = 0; i < snapshots.Count; i++)
@@ -337,7 +365,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalBattlePlan plan,
             IReadOnlyList<DirectChildEvidence> evidence,
             DirectChildRole[] roles,
-            ReserveReleaseContext release)
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots)
         {
             var axisOverride = new int[roles.Length];
             for (int i = 0; i < axisOverride.Length; i++) axisOverride[i] = -1;
@@ -345,34 +374,159 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool exploit = plan.Phase == BattlePhase.Exploit;
             bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
 
-            for (int i = 0; i < roles.Length; i++)
+            if (release.Staggered)
             {
-                if (roles[i] != DirectChildRole.Reserve) continue;
+                StaggeredRelease(plan, evidence, roles, axisOverride, release, snapshots, exploit || oddsReached);
+            }
+            else
+            {
+                for (int i = 0; i < roles.Length; i++)
+                {
+                    if (roles[i] != DirectChildRole.Reserve) continue;
 
-                int crisisSector = -1;
-                for (int j = 0; j < roles.Length; j++)
-                {
-                    if (j == i) continue;
-                    var other = evidence[j];
-                    if (!other.ContactFlag || other.EnemyStrengthBucket <= other.OwnStrengthBucket + 1) continue;
-                    if (!IsAdjacentSector(other.PrimarySector, evidence[i].PrimarySector)) continue;
-                    crisisSector = other.PrimarySector;
-                    break;
-                }
+                    int crisisSector = -1;
+                    for (int j = 0; j < roles.Length; j++)
+                    {
+                        if (j == i) continue;
+                        if (!InCrisis(evidence[j])) continue;
+                        if (!IsAdjacentSector(evidence[j].PrimarySector, evidence[i].PrimarySector)) continue;
+                        crisisSector = evidence[j].PrimarySector;
+                        break;
+                    }
 
-                if (crisisSector >= 0)
-                {
-                    roles[i] = DirectChildRole.Fix;
-                    axisOverride[i] = crisisSector;
-                }
-                else if (exploit || oddsReached)
-                {
-                    roles[i] = DirectChildRole.SupportMain;
+                    if (crisisSector >= 0)
+                    {
+                        roles[i] = DirectChildRole.Fix;
+                        axisOverride[i] = crisisSector;
+                    }
+                    else if (exploit || oddsReached)
+                    {
+                        roles[i] = DirectChildRole.SupportMain;
+                    }
                 }
             }
 
             if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
             return axisOverride;
+        }
+
+        // A child in contact and outmatched by two buckets or more: a crisis sector.
+        private static bool InCrisis(DirectChildEvidence other)
+        {
+            return other.ContactFlag && other.EnemyStrengthBucket > other.OwnStrengthBucket + 1;
+        }
+
+        /// <summary>
+        /// BC13 requirement-staggered-reserve-release. Crisis: one Reserve child per crisis sector, the nearest by sector within
+        /// the ±1 adjacency, then the lower index; it may go below the floor (defence first) and does not move the release
+        /// interval. Exploit phase or odds: one Reserve child per release interval (0.15 - 0.1 x agg01 doctrine hours), the
+        /// nearest by sector to the main effort among those with no live exploit, then the lower index, never below
+        /// max(1, ceil(R0 x floorShare)) held (R0 = 1: the single reserve may go); a released child stays released while the
+        /// trigger holds, and the state clears when it stops.
+        /// </summary>
+        private static void StaggeredRelease(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildEvidence> evidence,
+            DirectChildRole[] roles,
+            int[] axisOverride,
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            bool trigger)
+        {
+            ReserveReleaseState state = release.State;
+            state.BeginAllocation();
+            float floorShare = WhiskeyRealism.Tactical.Battle.OpportunityDoctrine.FloorShare(release.Caution01, release.CasualtyTolerance01);
+
+            int reservesBefore = 0;
+            for (int i = 0; i < roles.Length; i++) if (roles[i] == DirectChildRole.Reserve) reservesBefore++;
+
+            // ---- crisis: one reserve per crisis sector, in ascending sector order
+            int lastSector = int.MinValue;
+            for (int pass = 0; pass < roles.Length; pass++)
+            {
+                int sector = int.MaxValue;
+                for (int j = 0; j < roles.Length; j++)
+                    if (InCrisis(evidence[j]) && evidence[j].PrimarySector > lastSector && evidence[j].PrimarySector < sector) sector = evidence[j].PrimarySector;
+                if (sector == int.MaxValue) break;
+                lastSector = sector;
+
+                int pick = -1, pickDistance = int.MaxValue;
+                for (int r = 0; r < roles.Length; r++)
+                {
+                    if (roles[r] != DirectChildRole.Reserve || !IsAdjacentSector(sector, evidence[r].PrimarySector)) continue;
+                    int distance = Math.Abs(evidence[r].PrimarySector - sector);
+                    if (distance < pickDistance)
+                    {
+                        pick = r;
+                        pickDistance = distance;
+                    }
+                }
+                if (pick < 0) continue;
+                roles[pick] = DirectChildRole.Fix;
+                axisOverride[pick] = sector;
+                string childId = snapshots[pick].ChildId;
+                state.NoteCrisis(childId);
+                int held = HeldReserves(roles, release);
+                int floor = FloorOf(trigger && state.InitialReserves > 0 ? state.InitialReserves : reservesBefore, floorShare);
+                state.NoteOutcome(new ReserveReleaseState.Outcome { ChildId = childId, Crisis = true, Held = held, Floor = floor, FloorBreach = held < floor });
+            }
+
+            // ---- exploit phase / odds: staggered
+            if (!trigger)
+            {
+                state.ClearTrigger();
+                return;
+            }
+            if (state.InitialReserves == 0) state.InitialReserves = reservesBefore;
+
+            // A child released earlier under this trigger stays released.
+            for (int i = 0; i < roles.Length; i++)
+                if (roles[i] == DirectChildRole.Reserve && state.IsReleased(snapshots[i].ChildId)) roles[i] = DirectChildRole.SupportMain;
+
+            int floorNow = FloorOf(state.InitialReserves, floorShare);
+            double interval = 0.15 - 0.1 * release.Agg01;
+            int heldNow = HeldReserves(roles, release);
+            if (release.NowHours - state.LastReleaseHours < interval || heldNow - 1 < floorNow) return;
+
+            int candidate = -1;
+            int bestDistance = int.MaxValue;
+            for (int r = 0; r < roles.Length; r++)
+            {
+                if (roles[r] != DirectChildRole.Reserve || IsExploiting(release, r)) continue;
+                int distance = Math.Abs(evidence[r].PrimarySector - plan.MainEffortSector);
+                if (distance < bestDistance)
+                {
+                    candidate = r;
+                    bestDistance = distance;
+                }
+            }
+            if (candidate < 0) return;
+            roles[candidate] = DirectChildRole.SupportMain;
+            state.Record(snapshots[candidate].ChildId, release.NowHours);
+            state.NoteOutcome(new ReserveReleaseState.Outcome
+            {
+                ChildId = snapshots[candidate].ChildId, Crisis = false, Held = heldNow - 1, Floor = floorNow, FloorBreach = false,
+            });
+        }
+
+        private static int HeldReserves(DirectChildRole[] roles, ReserveReleaseContext release)
+        {
+            int held = 0;
+            for (int i = 0; i < roles.Length; i++)
+                if (roles[i] == DirectChildRole.Reserve && !IsExploiting(release, i)) held++;
+            return held;
+        }
+
+        private static bool IsExploiting(ReserveReleaseContext release, int index)
+        {
+            return release.Exploiting != null && index < release.Exploiting.Length && release.Exploiting[index];
+        }
+
+        // max(1, ceil(R0 x share)); the single reserve of R0 = 1 may go (floor 0).
+        private static int FloorOf(int initialReserves, float floorShare)
+        {
+            if (initialReserves <= 1) return 0;
+            return Math.Max(1, (int)Math.Ceiling(initialReserves * (double)floorShare - 1e-4));
         }
 
         // BC11 decision 3. Wings are the extreme sectors of the children (the coordinator's leftWing / rightWing

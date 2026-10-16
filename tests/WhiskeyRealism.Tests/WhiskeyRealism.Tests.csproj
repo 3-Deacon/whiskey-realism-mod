@@ -239,6 +239,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedGroundLattice.cs" Link="Battle\PerceivedGroundLattice.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ExploitLifecycle.cs" Link="Battle\ExploitLifecycle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpportunityTick.cs" Link="Battle\OpportunityTick.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReserveReleaseState.cs" Link="Orchestrator\ReserveReleaseState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpportunityDoctrine.cs" Link="Battle\OpportunityDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ChargeDoctrine.cs" Link="Battle\ChargeDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshot.cs" Link="Battle\BattleSnapshot.cs" />

@@ -293,8 +293,24 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 return false;
             }
 
-            // The allocator's crisis release of the asset's parent line is published with the staggered reserve release (BC13 task 8).
-            public bool ParentCrisisRelease(int groupId) => false;
+            // The allocator's crisis release (a Reserve army child sent to a crisis band) of the army-level ancestor of the asset.
+            public bool ParentCrisisRelease(int groupId)
+            {
+                int index = _s.IndexOfOwn(groupId);
+                if (index < 0) return false;
+                int a = index;
+                for (int steps = 0; steps < _s.OwnCount; steps++)
+                {
+                    int parent = _s.Own[a].ParentIndex;
+                    if (parent < 0 || _s.Own[parent].ParentIndex < 0) break;
+                    a = parent;
+                }
+                int armyChild = _s.Own[a].InstanceId;
+                var crisis = _army.ReserveRelease.CrisisReleased;
+                for (int i = 0; i < crisis.Count; i++)
+                    if (ArmyOrchestrator.ChildInstanceId(crisis[i]) == armyChild) return true;
+                return false;
+            }
 
             // The group, one of its ancestors or one of its descendants (own indices).
             private bool Related(int a, int b) => a == b || _s.IsAncestorOf(a, b) || _s.IsAncestorOf(b, a);

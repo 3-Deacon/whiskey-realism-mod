@@ -20,6 +20,7 @@ internal static partial class CommanderOpportunityTests
             ("bc13 OPP-TICK the launched exploit runs Advance, Strike, Consolidate to Success and is collected", TickRunsToSuccess),
             ("bc13 OPP-TICK a Safety claim aborts the exploit and the commander is hesitant for that opening", TickSafetyAbort),
             ("bc13 OVR-FEEDBACK the flank emergency set by the posture pipeline aborts on the next tick", TickFlankFeedback),
+            ("bc13 LIFE-ABORTS a crisis release of the asset's parent line ends the exploit as line-crisis", TickCrisisAbort),
             ("bc13 OVR-STANDDOWN a stand-down ends every live exploit and empties the table", TickStandDown),
             ("bc13 OVR-NEWDAY a new battle day ends every live exploit and forgets the decision state", TickNewDay),
             ("bc13 OPP-PLAYER a player-owned descendant excludes the asset; the next reserve is chosen", TickPlayerAsset),
@@ -279,6 +280,24 @@ internal static partial class CommanderOpportunityTests
         t.Run();
         AssertEqual(0, t.Table.Count, "collected");
         AssertEqual(ExploitEnd.FlankThreat, t.Sink.Ends[0].End, "the flank emergency aborts as flank-threat");
+        BattleScope.ResetAll();
+    }
+
+    private static void TickCrisisAbort()
+    {
+        BattleScope.ResetAll();
+        TickFx t = TickFx.Attacker();
+        AssertTrue(t.RunToLaunch(), "launched");
+        t.World.Crisis.Add(t.Table.At(0).AssetId);
+        t.Run();
+        AssertEqual(ExploitEnd.LineCrisis, t.Sink.Ends[0].End, "the allocator's crisis release of the parent line aborts as line-crisis");
+        AssertFalse(t.Sink.Ends[0].LeftSector, "it is the allocator's, not the asset's departure opening a gap");
+
+        string src = ReadSrc("Tactical/Battle/Producers/OpportunityIntentProducer.cs");
+        AssertContains(src, "_army.ReserveRelease.CrisisReleased", "the runtime world reads the allocator's published crisis releases");
+        string army = ReadSrc("Tactical/Orchestrator/ArmyOrchestrator.cs");
+        AssertContains(army, "exploiting[i] = instanceId != 0 && exploits.IsExploiting(instanceId);", "the allocator is told which children have a live exploit");
+        AssertContains(army, "_reserveRelease.Clear();", "a plan change clears the release state");
         BattleScope.ResetAll();
     }
 
