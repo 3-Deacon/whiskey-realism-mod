@@ -30,6 +30,11 @@ namespace WhiskeyRealism.Patches
     // the unit's range is hidden for the call, the one the construction ledger ranks highest first (FortSitePreference). Out-of-range
     // sites stay (vanilla rejects them itself); when no such site is eligible nothing extra is hidden. The one-order-per-alliance
     // rule, the range and the builder logic are vanilla's. The same snapshot-restore carries both filters.
+    //
+    // Depot builder hold (plan G5c, verify F6): a unit the campaign planner holds as the builder of a depot task
+    // (DepotTaskLedger.HoldsBuilder) is not sent to build a fort for the call: every in-range site is hidden, so vanilla's job 21
+    // (which does not read the availability Postfixes and excludes a unit only once its depot stands, 16376-16381) cannot walk the
+    // builder off its site between its arrival and the wish. Out-of-range sites stay, vanilla rejects them itself.
     [HarmonyPatch(typeof(AICampaign), "CheckFortConstruction")]
     internal static class FortConstructionGovernorPatch
     {
@@ -55,7 +60,8 @@ namespace WhiskeyRealism.Patches
             {
                 bool governor = Enabled();
                 bool steering = SteeringEnabled();
-                if (!governor && !steering) return;
+                bool holdBuilders = DepotHoldEnabled();
+                if (!governor && !steering && !holdBuilders) return;
 
                 var field = FortSitesField();
                 var original = field?.GetValue(null) as List<Vector3>;
@@ -85,6 +91,7 @@ namespace WhiskeyRealism.Patches
 
                 Vector3 unitPosition = ((Component)unit).transform.position;
                 float range = GamePrefs.rangefortconstructionsite;
+                bool heldBuilder = holdBuilders && DepotTaskLedgers.For(alliance).HoldsBuilder(unit.GetInstanceID());
                 var inRange = new bool[original.Count];
                 var allowed = new bool[original.Count];
                 for (int i = 0; i < original.Count; i++)
@@ -92,7 +99,7 @@ namespace WhiskeyRealism.Patches
                     var site = original[i];
                     // Out of this unit's range vanilla rejects the site itself (16389).
                     inRange[i] = Tools.GetXZDistance(unitPosition, site) <= range;
-                    allowed[i] = true;
+                    allowed[i] = !heldBuilder;
                     if (!inRange[i] || !governor) continue;
 
                     if (!cache.TryGet(i, out var decision))
@@ -101,7 +108,7 @@ namespace WhiskeyRealism.Patches
                         cache.Store(i, decision);
                     }
 
-                    allowed[i] = decision.Allow;
+                    allowed[i] = !heldBuilder && decision.Allow;
                     if (!decision.Allow) LogSuppression(alliance, site, decision);
                 }
 
@@ -206,6 +213,20 @@ namespace WhiskeyRealism.Patches
         {
             if (cached == null) cached = AccessTools.Field(typeof(AICampaign), name);
             return cached?.GetValue(null) as T;
+        }
+
+        private static bool DepotHoldEnabled()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    Plugin.Instance.Enabled != null &&
+                    Plugin.Instance.Enabled.Value &&
+                    Plugin.EnableSupplyDepotSteering != null &&
+                    Plugin.EnableSupplyDepotSteering.Value &&
+                    CampaignPlannerRuntime.ExecutorsEnabled();
+            }
+            catch { return false; }
         }
 
         private static bool SteeringEnabled()

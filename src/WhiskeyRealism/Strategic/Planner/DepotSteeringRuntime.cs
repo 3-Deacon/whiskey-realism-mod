@@ -44,24 +44,38 @@ namespace WhiskeyRealism.Strategic.Planner
             _fortZ = new float[0];
         }
 
+        // Its own try/catch: this runs ahead of G5a's steering and the mover inside ReviewExecute's single try, so a fault here
+        // (a ledger bug, a vanilla read) would otherwise idle the mover for the review. The next review starts afresh.
         internal static void Execute(int alliance, CampaignSnapshot snapshot)
         {
             using (TelemetryPerf.Scope("campaign.planner.construction", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (snapshot == null || alliance < 0 || alliance > 1) return;
-                if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetAllocation(alliance, out var allocation)) return;
-                PublishBoard(alliance, snapshot, plan);
-                var ledger = DepotTaskLedgers.For(alliance);
-                if (!FlagOn(Plugin.EnableSupplyDepotSteering))
+                try
                 {
-                    ledger.AbandonActive("flag-off", snapshot.DaySerial);
-                    EmitTransitions(alliance, ledger);
-                    return;
+                    Run(alliance, snapshot);
                 }
-                ledger.Sync(plan, allocation, snapshot, EvaluateDepots(alliance));
-                PlaceWishesAndWatchBuilds(alliance, snapshot, ledger);
-                EmitTransitions(alliance, ledger);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("campaign-planner:construction-executor", "[CampaignPlanner] the construction steering executor failed for this review (the mover and the other executors still run): " + ex.Message);
+                }
             }
+        }
+
+        private static void Run(int alliance, CampaignSnapshot snapshot)
+        {
+            if (snapshot == null || alliance < 0 || alliance > 1) return;
+            if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetAllocation(alliance, out var allocation)) return;
+            PublishBoard(alliance, snapshot, plan);
+            var ledger = DepotTaskLedgers.For(alliance);
+            if (!FlagOn(Plugin.EnableSupplyDepotSteering))
+            {
+                ledger.AbandonActive("flag-off", snapshot.DaySerial);
+                EmitTransitions(alliance, ledger);
+                return;
+            }
+            ledger.Sync(plan, allocation, snapshot, EvaluateDepots(alliance));
+            PlaceWishesAndWatchBuilds(alliance, snapshot, ledger);
+            EmitTransitions(alliance, ledger);
         }
 
         // The construction ledger's verdict on today's depot tasks (null when it cannot be taken: nothing is suppressed).
@@ -92,12 +106,14 @@ namespace WhiskeyRealism.Strategic.Planner
             // The wish is placed on the nearest suitable ground to the builder, up to buildingsitemaxradius away (97557-97585), and the
             // builder may stand up to the mover's arrival radius from the site.
             float builtRadius = GamePrefs.buildingsitemaxradius + CampaignMover.ArrivalRadius;
+            bool haveSpeed = false;
+            MarchSpeedInputs speed = default(MarchSpeedInputs);
             for (int t = 0; t < ledger.Tasks.Count; t++)
             {
                 var task = ledger.Tasks[t];
                 if (task.State == DepotTaskState.Wished)
                 {
-                    if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t);
+                    if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t, snapshot.DaySerial);
                     continue;
                 }
                 if (task.State != DepotTaskState.Marching) continue;
@@ -106,24 +122,42 @@ namespace WhiskeyRealism.Strategic.Planner
                 var builder = snapshot.Own[i];
                 // Arrived: within the builder's bugle range of the site, or where the mover considers a formation there
                 // (CampaignMover.ArrivalRadius: a site that moved a little with the frontier is not re-marched to).
-                if (!ledger.ShouldWish(t, builder.X, builder.Z, Math.Max(builder.BugleRange, CampaignMover.ArrivalRadius), snapshot.DaySerial)) continue;
-                Wish(alliance, snapshot, ledger, t, task, builder);
+                float reach = Math.Max(builder.BugleRange, CampaignMover.ArrivalRadius);
+                if (!haveSpeed)
+                {
+                    speed = TerrainLineRuntime.ReadMarchSpeed(alliance);
+                    haveSpeed = true;
+                }
+                float days = MarchTime.EstimateDays(speed, builder, task.X, task.Z, Distance(builder.X, builder.Z, task.X, task.Z), snapshot, null);
+                switch (ledger.WishMoment(t, builder, reach, days))
+                {
+                    case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;
+                    case DepotWishMoment.Ahead: Wish(alliance, snapshot, ledger, t, task, task.X, task.Z, builder.InstanceId); break;
+                    case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, "vanilla-depot-adopted"); break;
+                }
             }
+        }
+
+        private static float Distance(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx, dz = az - bz;
+            return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
         // One wish per task (P8). The IIP is the nearest own one without a building under construction: a wish at an IIP that has
         // one would return that building (97481-97484) and place nothing, so the wish waits for the next review; AddConstructionWish
         // returns null when the IIP is null or companyfoundings has reached debug_maxcompanyfoundings (97489-97497), which abandons
         // the task rather than recording a wish that does not exist.
-        private static void Wish(int alliance, CampaignSnapshot snapshot, DepotTaskLedger ledger, int taskIndex, DepotTaskRecord task, FormationRecord builder)
+        private static void Wish(int alliance, CampaignSnapshot snapshot, DepotTaskLedger ledger, int taskIndex, DepotTaskRecord task, float x, float z, int builderInstanceId)
         {
             IIP iip = ConstructionRuntime.NearestOwnIip(alliance, task.X, task.Z);
             if ((UnityEngine.Object)iip == null) return;
-            var unit = CampaignSnapshotRuntime.OwnUnit(builder.InstanceId);
+            var unit = CampaignSnapshotRuntime.OwnUnit(builderInstanceId);
             float y = unit != null ? unit.GetPosition().y : 0f;
-            // The wish position is the builder's, as vanilla's own depot wish passes the unit's position (14766-14770): the depot rises
-            // on the nearest suitable ground to the formation that has to stay within its bugle range of it.
-            CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(builder.X, y, builder.Z), iip, alliance);
+            // The wish position is the builder's when it is there, as vanilla's own depot wish passes the unit's (14766-14770): the depot
+            // rises on the nearest suitable ground to the formation that has to stay within its bugle range of it. A builder still on
+            // the march (WishMoment.Ahead) wishes at the site it is marching to.
+            CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(x, y, z), iip, alliance);
             if ((UnityEngine.Object)building == null)
             {
                 ledger.Abandon(taskIndex, "wish-refused", snapshot.DaySerial);

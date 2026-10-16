@@ -52,6 +52,11 @@ internal static class ConstructionSteeringTests
             ("DepotLedgersArePerAllianceAndPerCampaign", DepotLedgersArePerAllianceAndPerCampaign),
             ("DepotTransitionsNameTheirReasons", DepotTransitionsNameTheirReasons),
             ("DepotBuiltWhenABuiltDepotStandsNearTheSite", DepotBuiltWhenABuiltDepotStandsNearTheSite),
+            ("DepotRebindNeverSeatsAPlayerFormation", DepotRebindNeverSeatsAPlayerFormation),
+            ("DepotBuilderHeldButNotAllocatedIsWithheld", DepotBuilderHeldButNotAllocatedIsWithheld),
+            ("DepotCooldownIsADayDifferenceThatSurvivesARestore", DepotCooldownIsADayDifferenceThatSurvivesARestore),
+            ("DepotWishMomentIsHereAdoptAheadOrWait", DepotWishMomentIsHereAdoptAheadOrWait),
+            ("DepotLedgerAbandonsOnlyWithADay", DepotLedgerAbandonsOnlyWithADay),
             ("DepotFlagOffReleasesEveryActiveTask", DepotFlagOffReleasesEveryActiveTask),
             ("DepotCandidateCreatedFromPlanDepotTask", DepotCandidateCreatedFromPlanDepotTask),
             ("DepotTaskStartFollowsTheLedgersVerdict", DepotTaskStartFollowsTheLedgersVerdict),
@@ -74,6 +79,8 @@ internal static class ConstructionSteeringTests
             ("RailroadPatchDrawsBeforeItStartsAndNeverSkipsVanillaBeforeTheDraws", RailroadPatchDrawsBeforeItStartsAndNeverSkipsVanillaBeforeTheDraws),
             ("FortPatchStatementsPinned", FortPatchStatementsPinned),
             ("ConstructionSteeringFlagsAreBoundAndRead", ConstructionSteeringFlagsAreBoundAndRead),
+            ("DepotExecutorFaultCannotIdleTheMover", DepotExecutorFaultCannotIdleTheMover),
+            ("HeldDepotBuilderIsNotSentToBuildAFort", HeldDepotBuilderIsNotSentToBuildAFort),
             ("ConstructionSteeringFilesHoldNoUnityTypesOrEraReads", ConstructionSteeringFilesHoldNoUnityTypesOrEraReads),
         });
     }
@@ -425,12 +432,12 @@ internal static class ConstructionSteeringTests
         ledger.Sync(plan, a, s, null);
         AssertEqual(1, ledger.Tasks.Count, "the first plan task starts");
         AssertEqual(DepotTaskState.Marching, ledger.Tasks[0].State, "marching");
-        AssertFalse(ledger.ShouldWish(0, 300f, 0f, 5f, s.DaySerial), "50 from the site, bugle range 5: still marching");
-        AssertFalse(ledger.ShouldWish(0, 256f, 0f, 5f, s.DaySerial), "6 from the site: just outside the bugle range");
-        AssertTrue(ledger.ShouldWish(0, 255f, 0f, 5f, s.DaySerial), "5 from the site: on arrival within the bugle range");
-        AssertTrue(ledger.ShouldWish(0, 250f, 3f, 5f, s.DaySerial), "and from any side of it");
-        AssertFalse(ledger.ShouldWish(1, 250f, 0f, 5f, s.DaySerial), "no such task");
-        AssertFalse(ledger.ShouldWish(-1, 250f, 0f, 5f, s.DaySerial), "no such task (negative)");
+        AssertFalse(ledger.ShouldWish(0, 300f, 0f, 5f), "50 from the site, bugle range 5: still marching");
+        AssertFalse(ledger.ShouldWish(0, 256f, 0f, 5f), "6 from the site: just outside the bugle range");
+        AssertTrue(ledger.ShouldWish(0, 255f, 0f, 5f), "5 from the site: on arrival within the bugle range");
+        AssertTrue(ledger.ShouldWish(0, 250f, 3f, 5f), "and from any side of it");
+        AssertFalse(ledger.ShouldWish(1, 250f, 0f, 5f), "no such task");
+        AssertFalse(ledger.ShouldWish(-1, 250f, 0f, 5f), "no such task (negative)");
     }
 
     private static void DepotWishOncePerTask()
@@ -438,10 +445,10 @@ internal static class ConstructionSteeringTests
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
-        AssertTrue(ledger.ShouldWish(0, 250f, 0f, 5f, s.DaySerial), "before the wish");
+        AssertTrue(ledger.ShouldWish(0, 250f, 0f, 5f), "before the wish");
         ledger.RecordWished(0, s.DaySerial);
         AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "wished");
-        AssertFalse(ledger.ShouldWish(0, 250f, 0f, 5f, s.DaySerial), "a wished task is never wished again");
+        AssertFalse(ledger.ShouldWish(0, 250f, 0f, 5f), "a wished task is never wished again");
         ledger.RecordWished(0, s.DaySerial + 1);
         AssertEqual(s.DaySerial, ledger.Tasks[0].StartedDay, "a second RecordWished changes nothing");
     }
@@ -457,7 +464,7 @@ internal static class ConstructionSteeringTests
         AssertFalse(ledger.HoldsBuilder(-1), "nor a missing one");
         ledger.RecordWished(0, s.DaySerial + 3);
         AssertTrue(ledger.HoldsBuilder(1), "and through the whole wished period, while the depot rises");
-        ledger.RecordBuilt(0);
+        ledger.RecordBuilt(0, s.DaySerial);
         AssertEqual(DepotTaskState.Built, ledger.Tasks[0].State, "built");
         AssertFalse(ledger.HoldsBuilder(1), "the builder is released when the depot stands");
     }
@@ -506,7 +513,7 @@ internal static class ConstructionSteeringTests
         ledger.RecordWished(0, s.DaySerial);
         ledger.Sync(plan, a, s, null);
         AssertEqual(1, ActiveDepotTasks(ledger), "still one while it is wished");
-        ledger.RecordBuilt(0);
+        ledger.RecordBuilt(0, s.DaySerial);
         var next = DepotWorld(out var plan2, out var a2, 5);
         ledger.Sync(plan2, a2, next, null);
         AssertEqual(1, ActiveDepotTasks(ledger), "when the first is built the second may start");
@@ -533,7 +540,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(ledger.HoldsBuilder(w.FreeHold), "fixture: the ledger holds the formation");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a builder held by an active depot task is out of vanilla's offensive pool");
         AssertTrue(CampaignWithholdView.WithheldFromDefense(0, w.FreeHold, 100f, 0f), "and out of its defensive pool, whatever the allocation says");
-        ledger.RecordBuilt(0);
+        ledger.RecordBuilt(0, s.DaySerial);
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "released when the depot stands");
         AssertFalse(CampaignWithholdView.WithheldFromDefense(0, w.FreeHold, 100f, 0f), "...in defence too");
         CampaignScope.ResetAll();
@@ -654,7 +661,7 @@ internal static class ConstructionSteeringTests
             a.Assignments.RemoveAt(1);
             a.Assignments[0] = ExecutorFixtures.Assign(1, FormationRole.DepotBuilder, 3, 250f + i * 100f, 0f);
             ledger.Sync(plan, a, s, null);
-            ledger.RecordBuilt(ledger.Tasks.Count - 1);
+            ledger.RecordBuilt(ledger.Tasks.Count - 1, s.DaySerial);
         }
         var last = DepotWorld(out var p, out var al, 5000);
         ledger.Sync(p, al, last, null);
@@ -684,7 +691,7 @@ internal static class ConstructionSteeringTests
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
         ledger.RecordWished(0, s.DaySerial);
-        ledger.RecordBuilt(0);
+        ledger.RecordBuilt(0, s.DaySerial);
         var t = ledger.Transitions;
         AssertEqual(3, t.Count, "start, wish, built");
         AssertEqual("task-started", t[0].Reason, "the start");
@@ -697,7 +704,7 @@ internal static class ConstructionSteeringTests
         AssertEqual(0, ledger.Transitions.Count, "drained");
         var again = new DepotTaskLedger();
         again.Sync(plan, a, s, null);
-        again.Abandon(0, "builder-refused");
+        again.Abandon(0, "builder-refused", s.DaySerial);
         AssertEqual("builder-refused", again.Transitions[again.Transitions.Count - 1].Reason, "a caller's reason is kept");
     }
 
@@ -731,6 +738,118 @@ internal static class ConstructionSteeringTests
         AssertEqual("flag-off", ledger.Transitions[ledger.Transitions.Count - 1].Reason, "with the reason");
         ledger.AbandonActive("flag-off", s.DaySerial);
         AssertEqual(1, ledger.Tasks.Count, "idempotent");
+    }
+
+    // FollowPlan's rebind: the allocation may name another formation for the task, but never one the planner may not move.
+    private static void DepotRebindNeverSeatsAPlayerFormation()
+    {
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        ledger.Sync(plan, a, s, null);
+        AssertEqual(1, ledger.Tasks[0].BuilderInstanceId, "fixture: builder 1");
+        var player = s.Own[s.IndexOfOwn(3)];
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own[s.IndexOfOwn(3)] = player;
+        a.Assignments[0] = ExecutorFixtures.Assign(3, FormationRole.DepotBuilder, 3, 250f, 0f);
+        ledger.Sync(plan, a, s, null);
+        AssertEqual(1, ledger.Tasks[0].BuilderInstanceId, "the allocation now names the map-group player's formation: the task keeps its builder");
+        a.Assignments[0] = ExecutorFixtures.Assign(2, FormationRole.DepotBuilder, 3, 250f, 0f);
+        ledger.Sync(plan, a, s, null);
+        AssertEqual(2, ledger.Tasks[0].BuilderInstanceId, "a movable formation the allocation names does take the task over");
+    }
+
+    // The hold is checked before the allocation lookup: a builder the allocation no longer knows (it is Busy, not a role) is still held.
+    private static void DepotBuilderHeldButNotAllocatedIsWithheld()
+    {
+        var w = ExecutorFixtures.PublishedWorld(out _);
+        var s = ExecutorFixtures.Wide();
+        var stranger = ExecutorFixtures.Corps(4242, 300f, 9000f);
+        stranger.UnitKey = "stranger:1";
+        s.Own.Add(stranger);
+        var ledger = DepotTaskLedgers.For(0);
+        ledger.Restore(new[]
+        {
+            new DepotTaskRecord { X = 300f, Z = 0f, SectorId = 1, BuilderInstanceId = -1, BuilderUnitKey = "stranger:1", State = DepotTaskState.Wished, StartedDay = ExecutorFixtures.Day, EndedDay = -1 }
+        });
+        ledger.Sync(new TheaterPlan { Alliance = 0, DaySerial = s.DaySerial }, new Allocation { Alliance = 0 }, s, null);
+        AssertTrue(ledger.HoldsBuilder(4242), "fixture: held");
+        Assignment none;
+        AssertFalse(CampaignPlanStore.TryGetAllocation(0, out var published) && published.TryGet(4242, out none), "fixture: the published allocation does not know the formation");
+        AssertTrue(CampaignWithholdView.WithheldFromOffense(0, 4242), "held and unallocated: withheld from vanilla's offensive pool");
+        AssertTrue(CampaignWithholdView.WithheldFromDefense(0, 4242, 100f, 0f), "...and its defensive pool");
+        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 4243), "a formation nobody holds or allocates is vanilla's");
+        CampaignScope.ResetAll();
+    }
+
+    // F2: the abandon day rides in the record, so the cooldown is a day difference that a save and a reload keep.
+    private static void DepotCooldownIsADayDifferenceThatSurvivesARestore()
+    {
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        ledger.Sync(plan, a, s, null);
+        AssertEqual(-1, ledger.Tasks[0].EndedDay, "an active task has no end day");
+        ledger.Abandon(0, "wish-failed", s.DaySerial);
+        AssertEqual(s.DaySerial, ledger.Tasks[0].EndedDay, "an abandoned task carries the day it ended");
+        var saved = new List<DepotTaskRecord>(ledger.Tasks);
+        var reloaded = new DepotTaskLedger();
+        reloaded.Restore(saved);
+        AssertEqual(s.DaySerial, reloaded.Tasks[0].EndedDay, "...through Restore");
+        var soon = DepotWorld(out var p2, out var a2, DepotTaskLedger.RetryAfterAbandonDays - 1);
+        p2.DepotTasks.RemoveAt(1); // only the abandoned site is in the plan, so no other task takes the slot
+        a2.Assignments.RemoveAt(1);
+        reloaded.Sync(p2, a2, soon, null);
+        bool restarted = false;
+        for (int i = 0; i < reloaded.Tasks.Count; i++)
+            if (reloaded.Tasks[i].State == DepotTaskState.Marching && Math.Abs(reloaded.Tasks[i].X - 250f) < 1f) restarted = true;
+        AssertFalse(restarted, "after a reload the site still cools down");
+        var after = DepotWorld(out var p3, out var a3, DepotTaskLedger.RetryAfterAbandonDays);
+        p3.DepotTasks.RemoveAt(1);
+        a3.Assignments.RemoveAt(1);
+        reloaded.Sync(p3, a3, after, null);
+        for (int i = 0; i < reloaded.Tasks.Count; i++)
+            if (reloaded.Tasks[i].State == DepotTaskState.Marching && Math.Abs(reloaded.Tasks[i].X - 250f) < 1f) restarted = true;
+        AssertTrue(restarted, "and may start again once the window has passed");
+        var built = new DepotTaskLedger();
+        var s4 = DepotWorld(out var p4, out var a4);
+        built.Sync(p4, a4, s4, null);
+        built.RecordBuilt(0, s4.DaySerial + 4);
+        AssertEqual(s4.DaySerial + 4, built.Tasks[0].EndedDay, "a built task carries its day too");
+    }
+
+    private static FormationRecord DepotBuilderAt(float x, float z, FormationFlags flags)
+    {
+        var f = ExecutorFixtures.Corps(1, x, 9000f);
+        f.Z = z;
+        f.Flags |= flags;
+        return f;
+    }
+
+    // F6: when the wish is placed.
+    private static void DepotWishMomentIsHereAdoptAheadOrWait()
+    {
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        ledger.Sync(plan, a, s, null);
+        float reach = 10f;
+        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.None), reach, 9f), "within reach of the site: wish at its position");
+        AssertEqual(DepotWishMoment.Adopt, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.VanillaDepotBuilder), reach, 9f), "...and vanilla's job already raises a depot for it: adopt that one");
+        AssertEqual(DepotWishMoment.Ahead, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, DepotTaskLedger.AheadDays), "arriving within a review day: wish now, at the site");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, DepotTaskLedger.AheadDays + 0.01f), "arriving later: wait");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.VanillaDepotBuilder), reach, 9f), "a builder far from the site next to some other depot is not adopted");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, float.MaxValue), "no speed estimate: wait");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(1, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f), "no such task");
+        ledger.RecordWished(0, s.DaySerial, "vanilla-depot-adopted");
+        AssertEqual("vanilla-depot-adopted", ledger.Transitions[ledger.Transitions.Count - 1].Reason, "the transition names how the task became Wished");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f), "a wished task is not wished again, whatever the builder does");
+    }
+
+    // F3: every abandon carries its day.
+    private static void DepotLedgerAbandonsOnlyWithADay()
+    {
+        string src = Src("Strategic/Planner/DepotTaskLedger.cs");
+        AssertFalse(src.Contains("public void Abandon(int taskIndex, string reason)"), "no abandon without a day: the cooldown is a day difference");
+        AssertFalse(src.Contains("_endedDay"), "the end day is the record's, not a parallel list");
+        AssertFalse(src.Contains("public bool ShouldWish(int taskIndex, float builderX, float builderZ, float bugleRange, int daySerial)"), "ShouldWish reads no day");
     }
 
     // ---- The construction ledger's depot wiring ------------------------------------------------------------------------------
@@ -1062,19 +1181,24 @@ internal static class ConstructionSteeringTests
     private static void DepotSteeringRuntimeStatementsPinned()
     {
         string src = Src("Strategic/Planner/DepotSteeringRuntime.cs");
-        string execute = BodyOf(src, "internal static void Execute(");
+        string execute = BodyOf(src, "private static void Run(");
         AssertTrue(HasLine(execute, "PublishBoard(alliance, snapshot, plan);"), "the rail and fort board is built every review");
         AssertTrue(HasLine(execute, "ledger.AbandonActive(\"flag-off\", snapshot.DaySerial);"), "flag off releases every held builder");
         AssertTrue(HasLine(execute, "ledger.Sync(plan, allocation, snapshot, EvaluateDepots(alliance));"), "the ledger syncs with today's plan, allocation, snapshot and the construction ledger's verdict");
         AssertTrue(execute.IndexOf("ledger.AbandonActive(", StringComparison.Ordinal) < execute.IndexOf("ledger.Sync(", StringComparison.Ordinal), "the flag decides before any task starts");
         string watch = BodyOf(src, "private static void PlaceWishesAndWatchBuilds(");
         AssertTrue(HasLine(watch, "float builtRadius = GamePrefs.buildingsitemaxradius + CampaignMover.ArrivalRadius;"), "the finished depot is looked for within the wish's placement radius (97557-97585) of a builder that may stand an arrival radius off the site");
-        AssertTrue(HasLine(watch, "if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t);"), "built is read from the snapshot's depots, never from the placeholder");
-        AssertTrue(HasLine(watch, "if (!ledger.ShouldWish(t, builder.X, builder.Z, Math.Max(builder.BugleRange, CampaignMover.ArrivalRadius), snapshot.DaySerial)) continue;"), "the wish waits for the builder's arrival (its bugle range, or the mover's arrival radius), once per task");
+        AssertTrue(HasLine(watch, "if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t, snapshot.DaySerial);"), "built is read from the snapshot's depots, never from the placeholder");
+        AssertTrue(HasLine(watch, "float reach = Math.Max(builder.BugleRange, CampaignMover.ArrivalRadius);"), "arrived: within the builder's bugle range, or the mover's arrival radius, of the site");
+        AssertTrue(HasLine(watch, "float days = MarchTime.EstimateDays(speed, builder, task.X, task.Z, Distance(builder.X, builder.Z, task.X, task.Z), snapshot, null);"), "the builder's march time to the site, the planner's own estimate");
+        AssertTrue(HasLine(watch, "switch (ledger.WishMoment(t, builder, reach, days))"), "the ledger decides when (pure, tested)");
+        AssertTrue(HasLine(watch, "case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;"), "arrived: the wish at the builder's position (14770)");
+        AssertTrue(HasLine(watch, "case DepotWishMoment.Ahead: Wish(alliance, snapshot, ledger, t, task, task.X, task.Z, builder.InstanceId); break;"), "arriving before the next review: the wish at the site, while the builder still marches");
+        AssertTrue(HasLine(watch, "case DepotWishMoment.Adopt: ledger.RecordWished(t, snapshot.DaySerial, \"vanilla-depot-adopted\"); break;"), "a depot vanilla's own job is already raising for the builder is the task's depot: no second wish");
         string wish = BodyOf(src, "private static void Wish(");
         AssertTrue(HasLine(wish, "IIP iip = ConstructionRuntime.NearestOwnIip(alliance, task.X, task.Z);"), "the IIP the wish calls");
         AssertTrue(HasLine(wish, "if ((UnityEngine.Object)iip == null) return;"), "no IIP: wait, record nothing");
-        AssertTrue(HasLine(wish, "CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(builder.X, y, builder.Z), iip, alliance);"), "vanilla's own wish at the builder's position, as vanilla's depot job passes the unit's (14766-14770; 97479)");
+        AssertTrue(HasLine(wish, "CBuilding building = CBuilding.AddConstructionWish(CBuilding.id_supplydepot, new Vector3(x, y, z), iip, alliance);"), "vanilla's own wish (97479) at the position the moment names");
         AssertTrue(HasLine(wish, "ledger.Abandon(taskIndex, \"wish-refused\", snapshot.DaySerial);"), "a null building (the IIP, the company-founding cap) abandons the task");
         AssertTrue(HasLine(wish, "ledger.RecordWished(taskIndex, snapshot.DaySerial);"), "a real building records the wish");
         AssertTrue(wish.IndexOf("AddConstructionWish(", StringComparison.Ordinal) < wish.IndexOf("RecordWished(", StringComparison.Ordinal), "wished only after the wish exists");
@@ -1146,6 +1270,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(prepare.Contains("StrategicCoordinator.WlVanillaJobMachinePaused()"), "the live job-machine pause (11368)");
         AssertTrue(HasLine(prepare, "bool fresh = ConstructionSteeringBoard.TryRead(alliance, out var board);"), "the fresh board");
         AssertTrue(HasLine(prepare, "eligible[j] = RailLineSteering.Eligible(line.constructionprogress, line.StartConstruction(alliance, checkonly: true));"), "eligibility is vanilla's (progress, then StartConstruction checkonly 77818-77831)");
+        AssertTrue(HasLine(prepare, "score[j] = j < board.RailScore.Length ? board.RailScore[j] : 0f;"), "the line's steering score is the board's (a line past the board scores 0, which ties and leaves vanilla's rolled line)");
         AssertTrue(prepare.Contains("GamePrefs.probrailroadconstructionperyear, GamePrefs.probrailroadconstructionperyearperindustr,"), "vanilla's chance (16058-16066)");
         AssertTrue(HasLine(prepare, "IndustryPoliciesHeld(alliance), timediff);"), "...with the alliance's industry policies and the elapsed time");
         AssertTrue(HasLine(BodyOf(src, "private static int IndustryPoliciesHeld("), "int first = alliance != 0 ? 107 : 7;"), "policies 7..10 / 107..110 (16059)");
@@ -1178,7 +1303,7 @@ internal static class ConstructionSteeringTests
         string prefix = BodyOf(src, "internal static void Prefix(");
         AssertTrue(HasLine(prefix, "bool governor = Enabled();"), "the saturation governor keeps its own flag");
         AssertTrue(HasLine(prefix, "bool steering = SteeringEnabled();"), "fort steering has its own");
-        AssertTrue(HasLine(prefix, "if (!governor && !steering) return;"), "either runs without the other");
+        AssertTrue(HasLine(prefix, "if (!governor && !steering && !holdBuilders) return;"), "each of the three runs without the others");
         AssertTrue(HasLine(prefix, "inRange[i] = Tools.GetXZDistance(unitPosition, site) <= range;"), "vanilla's own range test (16389)");
         AssertTrue(HasLine(prefix, "if (!inRange[i]) filtered.Add(original[i]);"), "out-of-range sites stay in vanilla's list");
         AssertTrue(HasLine(prefix, "int preferredSite = steering ? PreferredSite(alliance, faction, unit, original, inRange, allowed) : -1;"), "the preference is asked only with steering on");
@@ -1189,6 +1314,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(pref, "int chosen = FortSitePreference.Choose(preferred, eligible, board.FortRank);"), "the decision is the pure one");
         string take = BodyOf(src, "private static bool VanillaWouldTake(");
         AssertTrue(HasLine(take, "float factor = capitalDefender ? 0.6f : 1f;"), "16386");
+        AssertTrue(HasLine(take, "if (capitalDefender && Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition) > Tools.GetXZDistance(site, capitalPosition))"), "a capital defender takes only a site no nearer the capital than itself (16385: num <= xZDistance || !flag)");
         AssertTrue(HasLine(take, "return bunits.GetClosestBuilding(site, CBuilding.id_fort, -1, 0f, GamePrefs.maxdistancetootherfort * factor) == null"), "no fort within maxdistancetootherfort (16389)");
         AssertTrue(HasLine(take, "&& bfs.CheckIfPositionIsCloseToFrontline(site, alliance, GamePrefs.maxdistancefrontlinefortconstruction)"), "...close to the frontline (16389)");
         AssertTrue(HasLine(take, "&& AICampaign.FortConstructionOrder.IsUnitAbleToConstructFort(unit, site);"), "...the unit able (16389)");
@@ -1214,5 +1340,32 @@ internal static class ConstructionSteeringTests
             AssertFalse(src.Contains("using UnityEngine") || src.Contains("UnityEngine."), file + ".cs is pure: no Unity type");
             AssertFalse(src.Contains("EraStage"), file + ".cs reads no era stage (plan decision 7)");
         }
+    }
+
+    // F4: a fault in the construction executor is its own; the mover and G5a's steering still run in the same review.
+    private static void DepotExecutorFaultCannotIdleTheMover()
+    {
+        string src = Src("Strategic/Planner/DepotSteeringRuntime.cs");
+        string execute = BodyOf(src, "internal static void Execute(");
+        AssertTrue(HasLine(execute, "Run(alliance, snapshot);"), "the work is in Run");
+        AssertTrue(execute.Contains("catch (Exception ex)"), "...inside its own try/catch");
+        AssertTrue(execute.Contains("OnceLog.Warning(\"campaign-planner:construction-executor\""), "...with a bounded (static-key) warning");
+        AssertTrue(execute.IndexOf("try", StringComparison.Ordinal) < execute.IndexOf("Run(alliance, snapshot);", StringComparison.Ordinal), "the call is inside the try");
+        string steering = BodyOf(Src("Strategic/Planner/CampaignSteeringRuntime.cs"), "internal static void Execute(");
+        AssertTrue(HasLine(steering, "DepotSteeringRuntime.Execute(alliance, snapshot);"), "and the caller stays a plain call");
+    }
+
+    // F6: vanilla's fort job (21) does not read the availability Postfixes; a held depot builder is not sent to build a fort.
+    private static void HeldDepotBuilderIsNotSentToBuildAFort()
+    {
+        string src = Src("Patches/FortConstructionGovernorPatch.cs");
+        string prefix = BodyOf(src, "internal static void Prefix(");
+        AssertTrue(HasLine(prefix, "bool holdBuilders = DepotHoldEnabled();"), "the hold has its own gate (the depot flag and the planner executors)");
+        AssertTrue(HasLine(prefix, "bool heldBuilder = holdBuilders && DepotTaskLedgers.For(alliance).HoldsBuilder(unit.GetInstanceID());"), "the visiting unit is asked of the depot ledger");
+        AssertTrue(HasLine(prefix, "allowed[i] = !heldBuilder;"), "a held builder is offered no in-range site");
+        AssertTrue(HasLine(prefix, "allowed[i] = !heldBuilder && decision.Allow;"), "...whatever the governor says");
+        AssertTrue(HasLine(prefix, "if (!inRange[i]) filtered.Add(original[i]);"), "out-of-range sites stay: vanilla rejects them itself");
+        string gate = BodyOf(src, "private static bool DepotHoldEnabled(");
+        AssertTrue(gate.Contains("Plugin.EnableSupplyDepotSteering.Value") && gate.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "the hold is part of depot steering and of the executors");
     }
 }

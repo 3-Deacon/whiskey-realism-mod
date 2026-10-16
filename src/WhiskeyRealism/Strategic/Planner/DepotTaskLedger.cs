@@ -7,6 +7,8 @@ namespace WhiskeyRealism.Strategic.Planner
 {
     public enum DepotTaskState { Marching = 0, Wished = 1, Built = 2, Abandoned = 3 }
 
+    public enum DepotWishMoment { Wait = 0, Here = 1, Adopt = 2, Ahead = 3 }
+
     public struct DepotTaskRecord
     {
         public float X, Z;
@@ -15,6 +17,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public string BuilderUnitKey;   // persisted identity
         public DepotTaskState State;
         public int StartedDay;          // the day the current state began: the start, then the wish
+        public int EndedDay;            // the day the task became Built or Abandoned, -1 while active (the retry cooldown is a day difference)
     }
 
     // A state change the runtime logs as `[DepotTask] alliance=<a> site=<x>,<z> builder=<unit> state=<...> reason=<...>`.
@@ -51,11 +54,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // A site that timed out is not tried again at once: a wish that cannot be placed costs treasury each time (Place pays, 96211).
         public const int RetryAfterAbandonDays = 20;
         public const int MaxFinishedRecords = 8;
+        // A builder that will reach its site before the next review (one review day, CampaignTempoGate.ReviewGapDays) gets its wish
+        // now: see WishMoment.
+        public const float AheadDays = 1f;
 
         private readonly List<DepotTaskRecord> _tasks = new List<DepotTaskRecord>();
         private readonly List<DepotTaskTransition> _transitions = new List<DepotTaskTransition>();
-        // The day each finished record ended, parallel to _tasks (the retry cooldown); -1 while active.
-        private readonly List<int> _endedDay = new List<int>();
 
         public IReadOnlyList<DepotTaskRecord> Tasks => _tasks;
         internal IReadOnlyList<DepotTaskTransition> Transitions => _transitions;
@@ -86,33 +90,45 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // True when the marching builder is within its bugle range of the site and the wish has not been placed (97479 wishes once
         // per task; the runtime also skips an IIP that already has a building under construction).
-        public bool ShouldWish(int taskIndex, float builderX, float builderZ, float bugleRange, int daySerial)
+        public bool ShouldWish(int taskIndex, float builderX, float builderZ, float bugleRange)
         {
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Marching) return false;
             float dx = builderX - _tasks[taskIndex].X, dz = builderZ - _tasks[taskIndex].Z;
             return dx * dx + dz * dz <= bugleRange * bugleRange;
         }
 
-        public void RecordWished(int taskIndex, int daySerial)
+        // When the executor places the wish (plan G5c, verify F6). Vanilla's depot job (19, CheckSupplyDepotConstruction) walks an idle,
+        // low-supply formation to the nearest own town or depot beyond its bugle range (14762-14767) and does not read the availability
+        // Postfixes, so a builder that has arrived and stands idle until the next review can be marched away before its wish. The fix
+        // is to leave no such window: once a depot started by the alliance stands within the builder's command range, job 19 skips the
+        // unit (that sets its `flag`, 14695-14712; the test at 14715 also skips a unit with a path), so:
+        //   Here    the builder is within arrivalReach of the site: wish at its position (vanilla's own wish position, 14770);
+        //   Adopt   ...and vanilla's job already flagged it VanillaDepotBuilder (an own-started depot is rising within its command
+        //           range, listed at 14778): that is the depot, the task becomes Wished with no second wish;
+        //   Ahead   it will be there before the next review (daysToSite <= AheadDays): wish at the site now, while it still marches;
+        //   Wait    otherwise.
+        public DepotWishMoment WishMoment(int taskIndex, in FormationRecord builder, float arrivalReach, float daysToSite)
+        {
+            if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Marching) return DepotWishMoment.Wait;
+            if (ShouldWish(taskIndex, builder.X, builder.Z, arrivalReach))
+                return (builder.Flags & FormationFlags.VanillaDepotBuilder) != 0 ? DepotWishMoment.Adopt : DepotWishMoment.Here;
+            return daysToSite <= AheadDays ? DepotWishMoment.Ahead : DepotWishMoment.Wait;
+        }
+
+        public void RecordWished(int taskIndex, int daySerial, string reason = "wish-placed")
         {
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Marching) return;
             var t = _tasks[taskIndex];
             t.State = DepotTaskState.Wished;
             t.StartedDay = daySerial;
             _tasks[taskIndex] = t;
-            Note(t, "wish-placed");
+            Note(t, reason);
         }
 
-        public void RecordBuilt(int taskIndex)
+        public void RecordBuilt(int taskIndex, int daySerial)
         {
             if (!InRange(taskIndex) || !Active(_tasks[taskIndex])) return;
-            Finish(taskIndex, DepotTaskState.Built, "built", -1);
-        }
-
-        // The day matters to the retry cooldown (RetryAfterAbandonDays); the two-argument form is for a caller with no day.
-        public void Abandon(int taskIndex, string reason)
-        {
-            Abandon(taskIndex, reason, -1);
+            Finish(taskIndex, DepotTaskState.Built, "built", daySerial);
         }
 
         public void Abandon(int taskIndex, string reason, int daySerial)
@@ -157,7 +173,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public void Restore(IEnumerable<DepotTaskRecord> tasks)
         {
             _tasks.Clear();
-            _endedDay.Clear();
             _transitions.Clear();
             if (tasks == null) return;
             foreach (var t in tasks)
@@ -165,7 +180,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 var r = t;
                 r.BuilderInstanceId = -1;
                 _tasks.Add(r);
-                _endedDay.Add(-1);
             }
         }
 
@@ -179,8 +193,8 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             for (int t = 0; t < _tasks.Count; t++)
             {
-                if (_tasks[t].State != DepotTaskState.Abandoned || _endedDay[t] < 0) continue;
-                if (day - _endedDay[t] >= RetryAfterAbandonDays) continue;
+                if (_tasks[t].State != DepotTaskState.Abandoned || _tasks[t].EndedDay < 0) continue;
+                if (day - _tasks[t].EndedDay >= RetryAfterAbandonDays) continue;
                 if (Distance(_tasks[t].X, _tasks[t].Z, x, z) <= SiteMatchRadius) return true;
             }
             return false;
@@ -263,10 +277,9 @@ namespace WhiskeyRealism.Strategic.Planner
             var task = new DepotTaskRecord
             {
                 X = site.X, Z = site.Z, SectorId = site.SectorId, BuilderInstanceId = builder, BuilderUnitKey = s.Own[i].UnitKey,
-                State = DepotTaskState.Marching, StartedDay = day
+                State = DepotTaskState.Marching, StartedDay = day, EndedDay = -1
             };
             _tasks.Add(task);
-            _endedDay.Add(-1);
             Note(task, "task-started");
         }
 
@@ -322,8 +335,8 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             var task = _tasks[t];
             task.State = state;
+            task.EndedDay = day;
             _tasks[t] = task;
-            _endedDay[t] = day >= 0 ? day : _endedDay[t] >= 0 ? _endedDay[t] : task.StartedDay;
             Note(task, reason);
         }
 
@@ -341,7 +354,6 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 if (Active(_tasks[t])) { t++; continue; }
                 _tasks.RemoveAt(t);
-                _endedDay.RemoveAt(t);
                 finished--;
             }
         }
