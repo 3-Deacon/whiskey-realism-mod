@@ -65,7 +65,17 @@ namespace WhiskeyRealism.Strategic.Planner
         // is dropped when it is not the planner's to move (!MayMove), is the deficit itself, or is held
         // as MainEffort or CapitalGuard (the allocator never lists those; the check keeps a stale list
         // from draining the front).
-        internal static bool TryTransferPair(TheaterPlan plan, Allocation allocation, IReadOnlyList<FormationRecord> own, out TransferPair pair)
+        //
+        // The source POINT is what vanilla reads, and vanilla picks its donor from the point, not from our
+        // formation: GrabOwnTopUnitsNearPosition (12824, called with no range at 17284) takes every ownunits
+        // top group within GamePrefs.aimaximumdistancetosearchforunitrelocations (XZ, transform.position,
+        // raid forces excluded) of it, and 17297-17301 then takes the first of them that is out of battle and
+        // in no operation list, with no role or player filter. So a surplus is used only where no protected
+        // formation stands inside that donor radius (donorRadius): one the planner holds as MainEffort, one
+        // withheld from vanilla (CapitalGuard, Recon, Recover, hold at need; a withheld Reserve is itself a
+        // surplus and a legitimate donor), one in transit, or one that fails WlChainRules.MayMove. Otherwise
+        // the next surplus is tried, and with none that qualifies there is no pair: vanilla's records stay.
+        internal static bool TryTransferPair(TheaterPlan plan, Allocation allocation, IReadOnlyList<FormationRecord> own, float donorRadius, out TransferPair pair)
         {
             pair = default(TransferPair);
             if (plan == null || allocation == null || own == null) return false;
@@ -92,6 +102,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (!WlChainRules.MayMove(f.Chain) || !(f.Strength > 0f)) continue;
                 if (!allocation.TryGet(f.InstanceId, out var assignment)) continue;
                 if (assignment.Role == FormationRole.MainEffort || assignment.Role == FormationRole.CapitalGuard) continue;
+                if (ProtectedFormationWithinDonorReach(allocation, own, index, donorRadius)) continue;
                 source = index;
             }
             if (source < 0) return false;
@@ -106,6 +117,25 @@ namespace WhiskeyRealism.Strategic.Planner
             pair.SurplusZ = own[source].Z;
             pair.SurplusStrength = own[source].Strength;
             return true;
+        }
+
+        // True when a formation vanilla's donor pick must not reach stands within donorRadius (XZ) of the
+        // source formation's point (the formation itself excluded).
+        private static bool ProtectedFormationWithinDonorReach(Allocation allocation, IReadOnlyList<FormationRecord> own, int sourceIndex, float donorRadius)
+        {
+            float radiusSq = donorRadius * donorRadius;
+            var source = own[sourceIndex];
+            for (int i = 0; i < own.Count; i++)
+            {
+                if (i == sourceIndex) continue;
+                var f = own[i];
+                if (ReserveRules.DistanceSq(f.X, f.Z, source.X, source.Z) > radiusSq) continue;
+                if (!WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.InTransfer) != 0) return true;
+                if (!allocation.TryGet(f.InstanceId, out var assignment)) continue;
+                if (assignment.Role == FormationRole.MainEffort) return true;
+                if (assignment.Withheld && !allocation.Surpluses.Contains(f.InstanceId)) return true;
+            }
+            return false;
         }
 
         // The strength a Shortfall carrier is short of, by the need the allocator reported it for

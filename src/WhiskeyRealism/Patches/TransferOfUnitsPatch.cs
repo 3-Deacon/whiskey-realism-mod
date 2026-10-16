@@ -26,6 +26,10 @@ namespace WhiskeyRealism.Patches
     //      the need its role reported it for, the surplus is the surplus formation's position and strength.
     //      A player formation can be a shortfall's position marker (spec C4): it contributes its hold
     //      point only, and a source the planner may not move (WlChainRules.MayMove) is never drawn from.
+    //      Vanilla picks its donor from the source POINT, the first top group within
+    //      aimaximumdistancetosearchforunitrelocations of it (GrabOwnTopUnitsNearPosition 12824, 17284), so a
+    //      surplus is used only where no MainEffort, withheld, in-transit or unmovable formation stands inside
+    //      that radius (ReinforcementRouting.TryTransferPair); with none, vanilla's records stay.
     //   2. Otherwise, when the main target is under-supplied against the army believed there
     //      (ReplacementFlowPolicy), only the deficit is swapped for the main target; vanilla's own
     //      surplus stays.
@@ -135,7 +139,7 @@ namespace WhiskeyRealism.Patches
                 string fromName;
 
                 if (CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)
-                    && ReinforcementRouting.TryTransferPair(plan, allocation, Own, out var pair))
+                    && ReinforcementRouting.TryTransferPair(plan, allocation, Own, GamePrefs.aimaximumdistancetosearchforunitrelocations, out var pair))
                 {
                     deficitX = pair.DeficitX;
                     deficitZ = pair.DeficitZ;

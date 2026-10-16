@@ -20,6 +20,7 @@ internal static class CapitalAndReplacementTests
         {
             ("VanillaNeedMatchesFormulaFixture", VanillaNeedMatchesFormulaFixture),
             ("VanillaNeedReadsWaypointsAndLiveBeliefsOnly", VanillaNeedReadsWaypointsAndLiveBeliefsOnly),
+            ("VanillaNeedCountsEveryChainClassAtItsWaypoint", VanillaNeedCountsEveryChainClassAtItsWaypoint),
             ("PledgeOnlyWhileVanillaNeedPositive", PledgeOnlyWhileVanillaNeedPositive),
             ("PledgeNeverPlayerOrCustomOrdered", PledgeNeverPlayerOrCustomOrdered),
             ("PledgeKeepsChainGuard", PledgeKeepsChainGuard),
@@ -38,16 +39,21 @@ internal static class CapitalAndReplacementTests
             ("TransferDeficitIsShortFormationSurplusIsReserveExcess", TransferDeficitIsShortFormationSurplusIsReserveExcess),
             ("TransferSurplusNeverFromMainEffort", TransferSurplusNeverFromMainEffort),
             ("TransferNeedsAPositiveShortfallAndASource", TransferNeedsAPositiveShortfallAndASource),
+            ("TransferSourceKeepsVanillasDonorPickOffTheFront", TransferSourceKeepsVanillasDonorPickOffTheFront),
             ("ReinforcementRoutingNeverTargetsAPlayerFormation", ReinforcementRoutingNeverTargetsAPlayerFormation),
             ("ShortfallStrengthIsTheCarriersNeedByRole", ShortfallStrengthIsTheCarriersNeedByRole),
             ("ShortfallAmountsAgreeWithTheAllocatorsCarriers", ShortfallAmountsAgreeWithTheAllocatorsCarriers),
             ("PatchesWireTheLivePlanAndBothFlags", PatchesWireTheLivePlanAndBothFlags),
+            ("LiveReadsBehindThePatchesArePinned", LiveReadsBehindThePatchesArePinned),
             ("TransferFinalizerRestoresBothRecords", TransferFinalizerRestoresBothRecords),
             ("CareerFixIsArgumentOnlyInsideTheTransferScope", CareerFixIsArgumentOnlyInsideTheTransferScope),
             ("PolicyFilesArePureAndFogHonestBySource", PolicyFilesArePureAndFogHonestBySource),
             ("SupersededHelpersAreGone", SupersededHelpersAreGone),
         });
     }
+
+    // vanilla's donor-pick radius (GamePrefs.aimaximumdistancetosearchforunitrelocations, 12824-12846), as the fixtures use it
+    private const float DonorRadius = 150f;
 
     private static readonly int Day = ReviewCadenceCatchUp.DaySerial(15, 6, 1861);
 
@@ -95,6 +101,35 @@ internal static class CapitalAndReplacementTests
         float full = CapitalFloorPolicy.VanillaNeed(500f, new List<EnemyBelief> { Belief(100f, 0f, 10000f) }, 1f, 0f, 0f, 650f, null);
         float halved = CapitalFloorPolicy.VanillaNeed(500f, new List<EnemyBelief> { half, expired }, 1f, 0f, 0f, 650f, null);
         AssertNear(500f + (full - 500f) / 2f, halved, 0.01f, "confidence weighs the pressure and the expired belief is ignored");
+    }
+
+    // 11733-11740: vanilla subtracts str x morale of EVERY own group whose last waypoint is nearer the capital than
+    // the nearest enemy, with no player exclusion. The need (and so #4's pledge) must see the map-group player's
+    // group, the player's own command and the carrying group alike; only the pick is limited by MayMove.
+    private static void VanillaNeedCountsEveryChainClassAtItsWaypoint()
+    {
+        var beliefs = new List<EnemyBelief> { Belief(100f, 0f, 10000f) };
+        float baseline = CapitalFloorPolicy.VanillaNeed(500f, beliefs, 1f, 0f, 0f, 650f, new List<FormationRecord>());
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand, WlChainClass.CarryingGroup })
+        {
+            var group = WithChain(Active(1, 900f, 4000f, 0.5f), chain); // stands far away, last waypoint inside the 100 ring
+            group.WaypointX = 20f;
+            float need = CapitalFloorPolicy.VanillaNeed(500f, beliefs, 1f, 0f, 0f, 650f, new List<FormationRecord> { group });
+            AssertNear(baseline - 2000f, need, 0.01f, chain + ": strength x morale is subtracted at its waypoint");
+            var outside = group;
+            outside.WaypointX = 300f; // nearer than no enemy... but beyond the nearest enemy (100): not subtracted
+            AssertNear(baseline, CapitalFloorPolicy.VanillaNeed(500f, beliefs, 1f, 0f, 0f, 650f, new List<FormationRecord> { outside }), 0.01f,
+                chain + ": a waypoint beyond the closest enemy does not count");
+        }
+
+        // A map-group player standing at the capital covers it: the AI guard is not pledged through VanillaNeed.
+        var player = WithChain(Active(2, 5f, 20000f, 1f), WlChainClass.PlayerMapGroup);
+        var guards = Guards(7);
+        var pool = new[] { Pledgeable(7, 10f) };
+        float uncovered = CapitalFloorPolicy.VanillaNeed(500f, beliefs, 1f, 0f, 0f, 650f, new List<FormationRecord> { Active(3, 900f, 100f, 1f) });
+        float covered = CapitalFloorPolicy.VanillaNeed(500f, beliefs, 1f, 0f, 0f, 650f, new List<FormationRecord> { player });
+        AssertEqual(7, CapitalFloorPolicy.PickPledge(guards, uncovered, pool), "short without him: the guard is pledged");
+        AssertEqual(-1, CapitalFloorPolicy.PickPledge(guards, covered, pool), "he covers the capital: nothing is pledged");
     }
 
     // ---- the pledge ----
@@ -364,7 +399,7 @@ internal static class CapitalAndReplacementTests
         a.Shortfalls.Add(5);
         a.Surpluses.Add(8);
         a.Surpluses.Add(7);
-        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, out var pair), "a shortfall and a surplus make a transfer");
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out var pair), "a shortfall and a surplus make a transfer");
         AssertEqual(5, pair.DeficitInstanceId, "the deficit is the short formation");
         AssertNear(560f, pair.DeficitX, 0.001f, "...at its hold point");
         AssertNear(3000f, pair.DeficitStrength, 0.01f, "...short of max(6000, garrison) by 3000");
@@ -375,7 +410,7 @@ internal static class CapitalAndReplacementTests
         // A Reserve formation is a surplus the same way.
         a.Surpluses.Clear();
         a.Surpluses.Add(7);
-        ReinforcementRouting.TryTransferPair(plan, a, own, out pair);
+        ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out pair);
         AssertEqual(7, pair.SurplusInstanceId, "the reserve excess");
     }
 
@@ -394,10 +429,10 @@ internal static class CapitalAndReplacementTests
         a.Surpluses.Add(1);
         a.Surpluses.Add(2);
         a.Surpluses.Add(3);
-        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, out var pair), "the reserve is still available");
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out var pair), "the reserve is still available");
         AssertEqual(3, pair.SurplusInstanceId, "never the main effort or a capital guard");
         a.Surpluses.RemoveAt(2);
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "with only the main effort and the guard as sources nothing is taken from them");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "with only the main effort and the guard as sources nothing is taken from them");
     }
 
     private static void TransferNeedsAPositiveShortfallAndASource()
@@ -410,19 +445,89 @@ internal static class CapitalAndReplacementTests
         a.Assignments.Add(new Assignment { InstanceId = 7, Role = FormationRole.Reserve, SectorId = 1 });
         a.Shortfalls.Add(5);
         a.Surpluses.Add(7);
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "a carrier that already holds 9000 of a 5000 garrison is not short");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "a carrier that already holds 9000 of a 5000 garrison is not short");
         plan.Sectors[0].HoldNeed = 20000f;
-        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, out var pair), "...but short of 20000 it is");
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out var pair), "...but short of 20000 it is");
         AssertNear(11000f, pair.DeficitStrength, 0.01f, "the need is the target less what holds");
         a.Surpluses.Clear();
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "no surplus formation, no transfer");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "no surplus formation, no transfer");
         a.Surpluses.Add(5);
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "the deficit is never its own source");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "the deficit is never its own source");
         a.Surpluses.Clear();
         a.Surpluses.Add(99);
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "a surplus id with no live formation is skipped");
-        AssertFalse(ReinforcementRouting.TryTransferPair(null, a, own, out _), "no plan");
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, null, own, out _), "no allocation");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "a surplus id with no live formation is skipped");
+        AssertFalse(ReinforcementRouting.TryTransferPair(null, a, own, DonorRadius, out _), "no plan");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, null, own, DonorRadius, out _), "no allocation");
+    }
+
+    // Vanilla's donor is the first top group within the relocation range of the source POINT (GrabOwnTopUnitsNearPosition
+    // 12824, no role or player filter at 17284), so a surplus is used only where no protected formation stands in reach.
+    private static void TransferSourceKeepsVanillasDonorPickOffTheFront()
+    {
+        TheaterPlan Plan()
+        {
+            var plan = new TheaterPlan { Alliance = 0, DaySerial = Day };
+            plan.Sectors.Add(new SectorPlan { SectorId = 4, Posture = TheaterPosture.Hold, HoldNeed = 6000f });
+            return plan;
+        }
+        Allocation Alloc(params (int id, FormationRole role, bool withheld)[] roles)
+        {
+            var a = new Allocation();
+            a.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold, SectorId = 4 });
+            foreach (var r in roles) a.Assignments.Add(new Assignment { InstanceId = r.id, Role = r.role, SectorId = 1, Withheld = r.withheld });
+            a.Shortfalls.Add(5);
+            a.Surpluses.Add(7);
+            a.Surpluses.Add(8);
+            foreach (var r in roles)
+                if (r.role == FormationRole.Reserve && r.id != 7 && r.id != 8) a.Surpluses.Add(r.id); // the allocator lists every Reserve
+            return a;
+        }
+        // deficit 5 at 560; surplus 7 (largest) at 250 and surplus 8 at 20, 230 apart (beyond the 150 donor radius)
+        List<FormationRecord> Own(params FormationRecord[] extra)
+        {
+            var own = new List<FormationRecord> { Corps(5, 560f, 3000f), Corps(7, 250f, 9000f), Corps(8, 20f, 6000f) };
+            own.AddRange(extra);
+            return own;
+        }
+        var plan0 = Plan();
+
+        // A MainEffort corps within reach of the largest surplus: the swap uses the next surplus.
+        var front = Corps(1, 300f, 20000f);
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false)), Own(front), DonorRadius, out var pair), "the second surplus qualifies");
+        AssertEqual(8, pair.SurplusInstanceId, "a MainEffort corps near the largest surplus: the next surplus");
+
+        // ...and none when both surpluses have a protected neighbour.
+        var frontNearSecond = Corps(2, 60f, 20000f);
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false), (2, FormationRole.MainEffort, false)),
+            Own(front, frontNearSecond), DonorRadius, out _), "no qualifying surplus: no swap, vanilla's records stay");
+
+        // The radius is vanilla's: a protected formation just beyond it does not block, just inside does.
+        var edge = Corps(1, 250f + DonorRadius + 1f, 20000f);
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false)), Own(edge), DonorRadius, out pair), "beyond the radius");
+        AssertEqual(7, pair.SurplusInstanceId, "the largest surplus is used when nothing protected is within reach");
+        edge.X = 250f + DonorRadius;
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false)), Own(edge), DonorRadius, out pair), "at the radius");
+        AssertEqual(8, pair.SurplusInstanceId, "vanilla's range test is <=: a corps exactly at the radius blocks");
+
+        // Withheld non-surplus formations (a capital guard), formations in transit, and formations the planner may not move block too.
+        var guard = Corps(3, 300f, 5000f);
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.CapitalGuard, true)), Own(guard)), "a withheld capital guard in reach blocks");
+        var transit = Corps(3, 300f, 5000f);
+        transit.Flags |= FormationFlags.InTransfer;
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Support, false)), Own(transit)), "a formation in transit in reach blocks");
+        var playerGroup = WithChain(Corps(3, 300f, 5000f), WlChainClass.PlayerMapGroup);
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Hold, false)), Own(playerGroup)), "the map-group player's group in reach blocks");
+
+        // A withheld Reserve is itself a surplus, and a plain Support corps is no front: neither blocks.
+        var otherReserve = Corps(3, 300f, 5000f);
+        AssertEqual(7, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Reserve, true)), Own(otherReserve)), "a neighbouring Reserve is a legitimate donor");
+        var support = Corps(3, 300f, 5000f);
+        AssertEqual(7, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Support, false)), Own(support)), "a neighbouring Support corps is not protected");
+    }
+
+    private static int PairSource(TheaterPlan plan, Allocation a, List<FormationRecord> own)
+    {
+        return ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out var pair) ? pair.SurplusInstanceId : -1;
     }
 
     // G4 verify r2 N1: a map-group player's formation may carry a Shortfall as a position marker only.
@@ -435,8 +540,8 @@ internal static class CapitalAndReplacementTests
         player.WaypointX = 480f; // where his group counts (ReserveRules.HoldPoint)
         player.Morale = 0.5f;    // counted at strength x morale, vanilla's measure
         var ai = Corps(8, 250f, 9000f);
-        var secondGroup = WithChain(Corps(6, 400f, 30000f), WlChainClass.PlayerMapGroup); // a larger player group, named as a surplus
-        var command = WithChain(Corps(9, 410f, 30000f), WlChainClass.PlayerCommand);
+        var secondGroup = WithChain(Corps(6, 900f, 30000f), WlChainClass.PlayerMapGroup); // a larger player group, named as a surplus
+        var command = WithChain(Corps(9, 910f, 30000f), WlChainClass.PlayerCommand);
         var own = new List<FormationRecord> { player, ai, secondGroup, command };
         var a = new Allocation();
         a.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold, SectorId = 4 });
@@ -453,7 +558,7 @@ internal static class CapitalAndReplacementTests
         AssertNear(480f, rx, 0.001f, "...his last waypoint");
         AssertEqual(-1, routedTo, "...and never names his formation");
 
-        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, out var pair), "a pair built from a marker");
+        AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out var pair), "a pair built from a marker");
         AssertEqual(-1, pair.DeficitInstanceId, "his instance id is never a destination");
         AssertNear(480f, pair.DeficitX, 0.001f, "the deficit is his hold point");
         AssertNear(4500f, pair.DeficitStrength, 0.01f, "...sized by the hold target less what counts there (his group at strength x morale: 1500)");
@@ -465,7 +570,7 @@ internal static class CapitalAndReplacementTests
         a.Surpluses.Add(6);
         a.Surpluses.Add(9);
         a.Surpluses.Add(5);
-        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "a candidate that fails MayMove is dropped from the source side");
+        AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, DonorRadius, out _), "a candidate that fails MayMove is dropped from the source side");
     }
 
     private static void ShortfallStrengthIsTheCarriersNeedByRole()
@@ -528,7 +633,7 @@ internal static class CapitalAndReplacementTests
         AssertEqual("6", string.Join(",", ca.Shortfalls), "the lone guard is short of the floor");
         AssertNear(6000f, ReinforcementRouting.ShortfallStrength(capital, ca, c.Own, 6), 0.01f, "capital: 10000 less 4000");
 
-        // A shortfall pair built over the real allocator: the carrier's need is the deficit and the first surplus is the source.
+        // A shortfall pair built over the real allocator (donor radius 1: the geometry guard is tested on its own): the carrier's need is the deficit and the first surplus is the source.
         var wide = Wide();
         wide.Own.Add(Corps(1, 110f, 8000f));
         wide.Own.Add(Corps(2, 200f, 8000f));
@@ -546,7 +651,7 @@ internal static class CapitalAndReplacementTests
             AssertTrue(ReinforcementRouting.ShortfallStrength(widePlan, wa, wide.Own, id) > 0f, "allocator carrier " + id + " has a positive need");
         if (wa.Shortfalls.Count > 0 && wa.Surpluses.Count > 0)
         {
-            AssertTrue(ReinforcementRouting.TryTransferPair(widePlan, wa, wide.Own, out var pair), "a real pair when the allocator names both sides");
+            AssertTrue(ReinforcementRouting.TryTransferPair(widePlan, wa, wide.Own, 1f, out var pair), "a real pair when the allocator names both sides");
             AssertEqual(wa.Shortfalls[0], pair.DeficitInstanceId, "the worst carrier is the deficit");
             AssertFalse(wa.TryGet(pair.SurplusInstanceId, out var source) && (source.Role == FormationRole.MainEffort || source.Role == FormationRole.CapitalGuard), "the source is not the front");
         }
@@ -578,7 +683,7 @@ internal static class CapitalAndReplacementTests
         string transferPrefix = BodyOf(transfer, "internal static void Prefix(int _aifaction)");
         AssertTrue(transferPrefix.Contains("if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;"), "#3 gated by both planner flags");
         AssertTrue(transferPrefix.Contains("allianceId < 0 || allianceId > 1"), "#3 alliance bound");
-        AssertTrue(transferPrefix.Contains("ReinforcementRouting.TryTransferPair(plan, allocation, Own, out var pair)"), "#3 swaps in the allocation's pair first");
+        AssertTrue(transferPrefix.Contains("ReinforcementRouting.TryTransferPair(plan, allocation, Own, GamePrefs.aimaximumdistancetosearchforunitrelocations, out var pair)"), "#3 swaps in the allocation's pair first");
         AssertTrue(transferPrefix.Contains("ReplacementFlowPolicy.ShouldSteer("), "#3 falls back to the main-target steer");
         AssertTrue(transferPrefix.Contains("ReplacementFlowRow.Emit(allianceId, ReplacementFlowRow.KindTransfer, toName, fromName);"), "#3 reports the flow");
         AssertTrue(transferPrefix.Contains("PatchFirstFire.Mark(\"campaign.patch.transfer-of-units.prefix\");"), "first-fire id kept");
@@ -606,6 +711,28 @@ internal static class CapitalAndReplacementTests
             < transfer.IndexOf("deficitField.SetValue(faction, deficitData);", StringComparison.Ordinal), "state before write");
         // The Postfix outcome block (BUG-WL-010) is unchanged.
         AssertTrue(transfer.Contains("WlEconomyFixes.ClassifyTransfer(transit, career)"), "the outcome classification stays");
+    }
+
+    // The live reads the pure policies cannot see: each is one whole line, so a commented-out or altered copy fails.
+    private static void LiveReadsBehindThePatchesArePinned()
+    {
+        string defensive = ReadRepoFile("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs");
+        AssertTrue(HasLine(defensive, "CustomOrdered = CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, instanceId)"), "#4 reads the coastal runner's custom orders");
+        AssertTrue(HasLine(defensive, "if (DLC_WL.IsMovedByPlayer(unit)) return false;"), "#4 keeps vanilla's own player-unit filter (11791)");
+        AssertTrue(HasLine(defensive, "LiveFormationReader.Read(ownUnits, allianceId, true, OwnPool);"), "#4's need reads groupstrengthactive, vanilla's measure (11733-11740)");
+        AssertTrue(HasLine(defensive, "if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;"), "#4 leaves the W&L CIC player's side alone");
+
+        string transfer = ReadRepoFile("src/WhiskeyRealism/Patches/TransferOfUnitsPatch.cs");
+        AssertTrue(HasLine(transfer, "if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;"), "#3 leaves the W&L CIC player's side alone");
+        AssertTrue(HasLine(transfer, "LiveFormationReader.Read(ownUnits, allianceId, false, Own);"), "#3 reads groupstrengthdirect, the allocation's measure");
+
+        string reader = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/LiveFormationReader.cs");
+        AssertTrue(HasLine(reader, "Strength = activeStrength ? unit.groupstrengthactive : unit.groupstrengthdirect,"), "the reader honours the strength contract");
+        AssertTrue(HasLine(reader, "Flags = unit.transfertime > 0f ? FormationFlags.InTransfer : FormationFlags.None,"), "a unit in transit is flagged, as the snapshot flags it");
+        AssertTrue(HasLine(reader, "Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit)"), "every record carries its chain class");
+
+        string recruit = ReadRepoFile("src/WhiskeyRealism/Patches/RecruitRoutingPatch.cs");
+        AssertTrue(HasLine(recruit, "LiveFormationReader.Read(ownUnits, alliance, false, Own);"), "recruit routing reads groupstrengthdirect");
     }
 
     private static void CareerFixIsArgumentOnlyInsideTheTransferScope()
