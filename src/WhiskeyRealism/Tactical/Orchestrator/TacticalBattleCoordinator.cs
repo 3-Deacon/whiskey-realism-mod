@@ -166,6 +166,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// The side's first plan pick, with its order written in one place (BC14 requirement-stance-before-pick). The pick inputs
+        /// (the battle stance, the live commander initiative, the reinforcement opportunity) are refreshed first so the stance filter
+        /// applies to the first pick; the feasibility evaluation then runs, forced to completion, so the pick reads a ledger.
+        /// </summary>
+        internal static void PickInitialPlanInOrder(ArmyOrchestrator army, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)
+        {
+            refreshPickInputs();
+            evaluate();
+            army.PickInitialPlan(evidence);
+        }
+
+        /// <summary>
         /// Counts new battle days (each side's night replan bumps it): the opportunity tick ends every live exploit when it changes
         /// (OVR-NEWDAY). The night's end-of-day stand-down has usually cleared the table by then.
         /// </summary>

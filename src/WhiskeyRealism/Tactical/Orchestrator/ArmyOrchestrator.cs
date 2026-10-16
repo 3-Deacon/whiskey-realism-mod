@@ -1106,7 +1106,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public BattleStance CurrentBattleStance => _currentForceBalanceStance;
 
         /// <summary>
-        /// BC9: refreshed on every coordinator tick by ArmyPostureInputsRuntime.Refresh,
+        /// BC9: refreshed on every coordinator tick by ArmyPostureInputsRuntime.RefreshPickInputs (BC14: before every plan pick),
         /// independent of the reinforcement-opportunity doctrine flag, so the director,
         /// the doctrine assignment and the posture guard see a Defender as one.
         /// </summary>

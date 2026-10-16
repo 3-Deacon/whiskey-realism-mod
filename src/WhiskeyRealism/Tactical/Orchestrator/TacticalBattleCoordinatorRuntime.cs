@@ -524,6 +524,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // groups (aibattle[] assignment 85203-85212, SetSide 3408).
             AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
 
+            // BC14: the pick inputs (stance, live initiative, reinforcement opportunity) first, so a replan this tick
+            // reads this tick's stance and not the previous tick's.
+            RefreshPickInputs(side, sideBattle);
+
             if (Plugin.EnableTacticalOrchestratorIntentInference != null
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
@@ -533,26 +537,44 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 DriveDirectChildCycle(side, sideBattle);
             }
 
-            RefreshPostureInputs(side, sideBattle);
+            RefreshPostureCaches(side, sideBattle);
             DriveOperationsLedger(side, sideBattle);
         }
 
         /// <summary>
-        /// #61's orchestrator inputs (leaf brigade map, live commander initiative,
-        /// reinforcement opportunity), once per side per tick, ahead of that side's
-        /// next AIBattle.UpdateAITasks.
+        /// The plan-pick inputs (battle stance, live commander initiative, reinforcement opportunity), once per side per tick
+        /// before any pick (BC14 requirement-stance-before-pick), and before the initial pick in AttachArmyIfActive.
         /// </summary>
-        private static void RefreshPostureInputs(TacticalBattleOrchestrator side, AIBattle sideBattle)
+        private static void RefreshPickInputs(TacticalBattleOrchestrator side, AIBattle sideBattle)
         {
             if (side.Army == null) return;
-            var bunits = ResolveBattleUnits(sideBattle);
-            if (bunits == null || bunits.alliance == null) return;
+            if (!TryResolveSideUnits(side, sideBattle, out BattleUnits bunits, out int sideIndex)) return;
+            ArmyPostureInputsRuntime.RefreshPickInputs(sideBattle, bunits, sideIndex, side.Army);
+        }
+
+        /// <summary>
+        /// #61's posture caches (leaf brigade map, AI pool), once per side per tick, ahead of that side's next
+        /// AIBattle.UpdateAITasks.
+        /// </summary>
+        private static void RefreshPostureCaches(TacticalBattleOrchestrator side, AIBattle sideBattle)
+        {
+            if (side.Army == null) return;
+            if (!TryResolveSideUnits(side, sideBattle, out BattleUnits bunits, out int sideIndex)) return;
+            ArmyPostureInputsRuntime.RefreshPostureCaches(sideBattle, bunits, sideIndex, side.Army);
+        }
+
+        private static bool TryResolveSideUnits(TacticalBattleOrchestrator side, AIBattle sideBattle, out BattleUnits bunits, out int sideIndex)
+        {
+            bunits = ResolveBattleUnits(sideBattle);
+            sideIndex = -1;
+            if (bunits == null || bunits.alliance == null) return false;
             for (int s = 0; s < 2 && s < bunits.alliance.Length; s++)
             {
                 if (bunits.alliance[s] != side.AllianceId) continue;
-                ArmyPostureInputsRuntime.Refresh(sideBattle, bunits, s, side.Army);
-                return;
+                sideIndex = s;
+                return true;
             }
+            return false;
         }
 
         private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle)
@@ -1176,7 +1198,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 : armyEntry.PersonalityVector;
             var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyVector);
             side.AttachArmy(army);
-            army.PickInitialPlan(ArmyEvidenceBuilder.Build(snapshot, sideBattle).OwnEvidence);
+            // BC14: the stance and opportunity inputs are refreshed before the first pick (a Defender never opens offensive).
+            // The forced feasibility evaluation joins this seam in task 15.
+            PickInitialPlanInOrder(army, () => RefreshPickInputs(side, sideBattle), () => { },
+                ArmyEvidenceBuilder.Build(snapshot, sideBattle).OwnEvidence);
             if (army.HasPlan)
             {
                 TelemetryRouter.LegacyInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
