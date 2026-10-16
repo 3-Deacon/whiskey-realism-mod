@@ -7,11 +7,12 @@ using static TestHarness;
 //   .Detection    DET-*   (spec § 5)
 //   .Probe        the perceived-ground lattice, penetration, Counterstroke (spec § 5)
 //   .Decision     OPP-*   (spec § 6)
+//   .Lifecycle    LIFE-*, COUNTER-BOUNDS, OPP-CLAIM-RELEASE (spec § 6: exploit lifecycle, table, feedback)
 internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests(), LifeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

@@ -31,8 +31,10 @@ namespace WhiskeyRealism.Tactical.Operations
             float courierIntervalSeconds,
             string reason,
             float maneuverHeading = -1f,
-            bool maneuverHold = false)
+            bool maneuverHold = false,
+            int exploitId = -1)
         {
+            ExploitId = exploitId;
             ManeuverHeading = maneuverHeading >= 0f && IsFinite(maneuverHeading) ? maneuverHeading % 360f : -1f;
             ManeuverHold = maneuverHold;
             NodeId = SanitizeText(nodeId, "node-unknown");
@@ -77,6 +79,12 @@ namespace WhiskeyRealism.Tactical.Operations
         /// -1 for no maneuver heading. The posture producer submits a group Facing with it.
         /// </summary>
         public float ManeuverHeading { get; }
+
+        /// <summary>
+        /// BC13, additive: the id of the exploit this order belongs to (ExploitTable's exploit order and its descendants'
+        /// follow orders); -1 for every ordinary doctrine order.
+        /// </summary>
+        public int ExploitId { get; }
 
         /// <summary>BC11: the order is an EnvelopmentManeuver hold (stand where you are, no target to plan a route to).</summary>
         public bool ManeuverHold { get; }
@@ -137,7 +145,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 CourierIntervalSeconds,
                 Reason,
                 ManeuverHeading,
-                ManeuverHold);
+                ManeuverHold,
+                ExploitId);
         }
 
         public CommandDoctrineOrder WithTask(CommandTaskType task, string reason)
@@ -160,7 +169,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 CourierIntervalSeconds,
                 reason,
                 ManeuverHeading,
-                ManeuverHold);
+                ManeuverHold,
+                ExploitId);
         }
 
         /// <summary>
@@ -188,7 +198,33 @@ namespace WhiskeyRealism.Tactical.Operations
                 CourierIntervalSeconds,
                 reason,
                 maneuverHeading,
-                maneuverHold);
+                maneuverHold,
+                ExploitId);
+        }
+
+        /// <summary>BC13: the same order marked as exploit <paramref name="exploitId"/>'s (see <see cref="ExploitId"/>).</summary>
+        public CommandDoctrineOrder WithExploit(int exploitId)
+        {
+            return new CommandDoctrineOrder(
+                NodeId,
+                Role,
+                Task,
+                ObjectiveId,
+                PrimaryTarget,
+                SupportTarget,
+                FallbackTarget,
+                AllowedIdle,
+                MinCommitUntilSeconds,
+                IssuedAtSeconds,
+                Confidence01,
+                Sop,
+                Delivery,
+                ParentNodeId,
+                CourierIntervalSeconds,
+                Reason,
+                ManeuverHeading,
+                ManeuverHold,
+                exploitId);
         }
 
         private static string SanitizeText(string value, string fallback)
