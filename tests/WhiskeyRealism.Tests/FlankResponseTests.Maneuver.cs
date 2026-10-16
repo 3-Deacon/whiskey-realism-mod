@@ -701,7 +701,7 @@ internal static partial class FlankResponseTests
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents)", "the army expands the orders to nodes");
         string ledger = SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
-        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers));", "the ledger hands the table to the doctrine build");
+        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers, reverseSlope);", "the ledger hands the table to the doctrine build");
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         AssertPinned(producers, "if (kind == PostureExecutionTarget.DoctrinePrimaryTarget && order.ManeuverHold) return false;", "a hold burns no nav plan");
         AssertPinned(producers, "if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&", "a Turn faces the group");

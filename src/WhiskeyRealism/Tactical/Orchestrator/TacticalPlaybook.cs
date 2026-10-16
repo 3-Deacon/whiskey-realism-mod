@@ -125,8 +125,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float artilleryFraction = 1f,
             bool delayingDefensePressure = false,
             bool defensivePressure = false,
-            BattleStance stance = BattleStance.Meeting)
+            BattleStance stance = BattleStance.Meeting,
+            bool hasCrestLine = false)
         {
+            HasCrestLine = hasCrestLine;
             CommanderPersonality = commanderPersonality;
             Terrain = terrain;
             CurrentOdds = currentOdds;
@@ -190,6 +192,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public BattleStance Stance { get; }
 
         /// <summary>
+        /// BC12: the terrain picture offers a crest line across the front (ArmyEvidence.CrestLine). A playbook that
+        /// <see cref="TacticalPlaybook.RequiresCrest"/> is only eligible when this is set.
+        /// </summary>
+        public bool HasCrestLine { get; }
+
+        /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry
         /// convention). Used by the catalog's FactionMismatchPenalty to
         /// prefer historically-matching playbooks. Default -1 = unknown,
@@ -242,6 +250,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float ReserveCommitTriggerOdds { get; }
 
         public abstract TacticalBattlePlan Instantiate(PlaybookContext ctx);
+
+        /// <summary>BC12: the play only means something with a crest line to hold (ReverseSlopeDefense). Default false.</summary>
+        public virtual bool RequiresCrest => false;
 
         /// <summary>
         /// Precondition gate for playbook eligibility (2026-05-21). Returns

@@ -74,6 +74,7 @@ for f in Assembly-CSharp.dll Assembly-CSharp-firstpass.dll \
          UnityEngine.ParticleSystemModule.dll UnityEngine.PhysicsModule.dll \
          UnityEngine.JSONSerializeModule.dll UnityEngine.AudioModule.dll \
          UnityEngine.TextRenderingModule.dll UnityEngine.IMGUIModule.dll \
+         UnityEngine.TerrainModule.dll \
          Newtonsoft.Json.dll Unity.TextMeshPro.dll; do
     ln -sf "$GT/$f" "refs/$f"
 done

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -230,14 +231,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// plus remembered weighted by confidence, the band strengths.
         /// <paramref name="known"/>: every visible or remembered position (coverage bands).
         /// Reinforcement columns are off the map and feed none of them. Lists are cleared first.
+        /// BC12: with a <paramref name="picture"/> a Visible enemy that stands still (no waypoint) on ground at
+        /// or above <see cref="TerrainPicture.StrongGroundStrength"/>, read facing the own centroid, is flagged
+        /// OnStrongGround. A remembered enemy is never flagged: its position is a memory, not a sighting.
         /// </summary>
         internal static void CollectEnemySamples(IObservationSource source, HashSet<int> engagedIds,
-            List<FrontUnitSample> visible, List<FrontUnitSample> sectorWeighted, List<FrontUnitSample> known)
+            List<FrontUnitSample> visible, List<FrontUnitSample> sectorWeighted, List<FrontUnitSample> known,
+            TerrainPicture picture = null)
         {
             visible.Clear();
             sectorWeighted.Clear();
             known.Clear();
             if (source == null) return;
+            bool strongGround = picture != null && picture.Ready;
+            float ownX = 0f, ownZ = 0f;
+            if (strongGround) strongGround = OwnCentroid(source, out ownX, out ownZ);
             EnemyObservation[] observations = source.Observations;
             for (int i = 0; i < source.ObservationCount; i++)
             {
@@ -247,14 +255,99 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (o.State == ObservationState.Visible)
                 {
                     bool engaged = engagedIds != null && engagedIds.Contains(o.InstanceId);
-                    visible.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged));
-                    sectorWeighted.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged));
+                    bool strong = strongGround && o.Standing && StandsOnStrongGround(picture, o.X, o.Z, ownX, ownZ);
+                    visible.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged, visible: true, onStrongGround: strong));
+                    sectorWeighted.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength, engaged, visible: true, onStrongGround: strong));
                 }
                 else
                 {
                     sectorWeighted.Add(new FrontUnitSample(o.InstanceId, o.X, o.Z, o.Strength * o.Confidence01, false));
                 }
             }
+        }
+
+        // The mean position of the alive combat units; false with none.
+        private static bool OwnCentroid(IObservationSource source, out float x, out float z)
+        {
+            double sx = 0, sz = 0;
+            int n = 0;
+            UnitRecord[] own = source.Own;
+            for (int i = 0; i < source.OwnCount; i++)
+            {
+                ref UnitRecord u = ref own[i];
+                if (u.UnitTyp > TacticalUnitType.MaxCombat || u.Strength <= 0 || (u.Flags & UnitFlags.Routed) != 0) continue;
+                sx += u.X;
+                sz += u.Z;
+                n++;
+            }
+            x = n > 0 ? (float)(sx / n) : 0f;
+            z = n > 0 ? (float)(sz / n) : 0f;
+            return n > 0;
+        }
+
+        private static bool StandsOnStrongGround(TerrainPicture picture, float x, float z, float towardX, float towardZ)
+        {
+            float ax = towardX - x, az = towardZ - z;
+            float len = (float)Math.Sqrt(ax * ax + az * az);
+            if (!(len > 1f)) return false;
+            return picture.TerrainStrength(x, z, ax / len, az / len) >= TerrainPicture.StrongGroundStrength - StrongGroundSlack;
+        }
+
+        /// <summary>Float slack for a wall's exact 0.35 (1 - (1 - 0.35) rounds a hair under 0.35).</summary>
+        private const float StrongGroundSlack = 1e-4f;
+
+        // ---------- terrain from the picture (BC12 decision 7) ----------
+
+        private const int PictureSamplesLateral = 7;
+        private const int PictureSamplesDepth = 5;
+        private static readonly int[] _pictureIds = new int[PictureSamplesLateral * PictureSamplesDepth];
+
+        /// <summary>
+        /// Battlefield terrain for playbook selection: the same 7 x 5 grid over the side's front (its lateral extent, from
+        /// its line out to the target) the vanilla sampler read, now read from the picture's id and height layers.
+        /// <see cref="TerrainKind.Open"/> without a ready picture or a valid axis.
+        /// </summary>
+        internal static TerrainKind ClassifyFromPicture(TerrainPicture picture, TacticalFrontAxis axis)
+        {
+            if (picture == null || !picture.Ready || !axis.IsValid || axis.BandCount <= 0) return TerrainKind.Open;
+            float depth = axis.TargetDistance >= 1f ? axis.TargetDistance : 800f;
+            float minH = float.MaxValue, maxH = float.MinValue;
+            int k = 0;
+            for (int a = 0; a < PictureSamplesLateral; a++)
+            {
+                float lat = axis.LateralMin + (axis.LateralMax - axis.LateralMin) * a / (PictureSamplesLateral - 1);
+                for (int b = 0; b < PictureSamplesDepth; b++)
+                {
+                    float d = depth * b / (PictureSamplesDepth - 1);
+                    float x = axis.OriginX + axis.RightX * lat + axis.ForwardX * d;
+                    float z = axis.OriginZ + axis.RightZ * lat + axis.ForwardZ * d;
+                    _pictureIds[k++] = picture.IdAt(x, z);
+                    float h = picture.HeightAt(x, z);
+                    if (h < minH) minH = h;
+                    if (h > maxH) maxH = h;
+                }
+            }
+            return ClassifyTerrain(_pictureIds, maxH > minH ? maxH - minH : 0f);
+        }
+
+        /// <summary>Metres from the side's line toward the enemy at which the crest search is centred, as a share of the target distance.</summary>
+        private const float CrestSearchTargetShare = 0.4f;
+        private const float CrestSearchMinMeters = 100f;
+        private const float CrestSearchMaxMeters = 300f;
+
+        /// <summary>
+        /// The best crest run across the front (TacticalTerrainLinePlanner.BestCrest) around a point 40% of the way to the
+        /// target (clamped 100-300 m) from the side's line; Has = false without a picture or a valid axis.
+        /// </summary>
+        internal static TerrainLine CrestLineAcrossFront(TerrainPicture picture, TacticalFrontAxis axis)
+        {
+            if (picture == null || !picture.Ready || !axis.IsValid) return default(TerrainLine);
+            float target = axis.TargetDistance >= 1f ? axis.TargetDistance : 800f;
+            float ahead = Math.Max(CrestSearchMinMeters, Math.Min(CrestSearchMaxMeters, target * CrestSearchTargetShare));
+            float cx = axis.OriginX + axis.ForwardX * ahead;
+            float cz = axis.OriginZ + axis.ForwardZ * ahead;
+            float frontage = Math.Max(TacticalTerrainLinePlanner.MinLineMeters, axis.LateralMax - axis.LateralMin);
+            return TacticalTerrainLinePlanner.BestCrest(picture, cx, cz, axis.ForwardX, axis.ForwardZ, frontage);
         }
 
         /// <summary>

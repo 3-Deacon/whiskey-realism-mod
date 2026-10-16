@@ -18,7 +18,9 @@ namespace WhiskeyRealism.Tactical.Operations
                 input.SourceConfidence,
                 cappedValue,
                 input.TypeAnchorVerified,
-                input.ApproachAvenue);
+                input.ApproachAvenue,
+                input.TerrainStrength,
+                input.ApproachDifficulty);
         }
 
         private static bool IsSpecificPointOfInterest(TacticalObjectiveType type)

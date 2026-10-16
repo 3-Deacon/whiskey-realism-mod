@@ -1,0 +1,1008 @@
+using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
+using static TestFixtures;
+using static TestHarness;
+
+// BC12 consumers: classification (decision 3), strength (4), director (5), lines and anchors (6), inference (7), crest playbooks (8).
+// Fixtures: an 800 m map (40 x 40 cells); the threat axis is usually +z (the enemy to the north), the objective at (400, -360).
+internal static partial class TerrainPictureTests
+{
+    private static (string, Action)[] PlanningTests()
+    {
+        return new (string, Action)[]
+        {
+            // classification
+            ("bc12 ObjectiveOnBridgeIsBridgeAndVerified", ObjectiveOnBridgeIsBridgeAndVerified),
+            ("bc12 FordBeatsTownBeatsJunctionBeatsRidge", FordBeatsTownBeatsJunctionBeatsRidge),
+            ("bc12 UnverifiedTypeStillDemoted", UnverifiedTypeStillDemoted),
+            ("bc12 NoLiteralZeroTerrainFieldsRemain", NoLiteralZeroTerrainFieldsRemain),
+            // strength
+            ("bc12 TerrainStrengthWallOnCrestIsAnchor", TerrainStrengthWallOnCrestIsAnchor),
+            ("bc12 WallOnThreeMetreCrestIsNotAnchor", WallOnThreeMetreCrestIsNotAnchor),
+            ("bc12 WallAloneIsNotAnchor", WallAloneIsNotAnchor),
+            ("bc12 RiverInFrontAddsPoint4", RiverInFrontAddsPoint4),
+            ("bc12 ApproachDifficultyUsesSpeedCosts", ApproachDifficultyUsesSpeedCosts),
+            // director
+            ("bc12 AttackerAvoidsStrongEnemyHeldGround", AttackerAvoidsStrongEnemyHeldGround),
+            ("bc12 DefenderPrefersStrongOwnGround", DefenderPrefersStrongOwnGround),
+            // lines
+            ("bc12 BestLinePicksCrestAcrossAxis", BestLinePicksCrestAcrossAxis),
+            ("bc12 LineRejectedOver30DegreesOff", LineRejectedOver30DegreesOff),
+            ("bc12 CrestRunsDoNotJoinAcrossAxes", CrestRunsDoNotJoinAcrossAxes),
+            ("bc12 ReverseSlopeLineSetBack80m", ReverseSlopeLineSetBack80m),
+            ("bc12 TerrainAnchorReplacesPreservedNone", TerrainAnchorReplacesPreservedNone),
+            ("bc12 FlankAnchoredByRiverWithin80m", FlankAnchoredByRiverWithin80m),
+            ("bc12 AnchoredSideGetsNoGuardFlankSlot", AnchoredSideGetsNoGuardFlankSlot),
+            ("bc12 DefenderLineSlotsStandOnTheTerrainLine", DefenderLineSlotsStandOnTheTerrainLine),
+            ("bc12 TiltedWallSlotsStayOnTheWall", TiltedWallSlotsStayOnTheWall),
+            ("bc12 ShortWallEndsFallBackToThePerpendicular", ShortWallEndsFallBackToThePerpendicular),
+            ("bc12 LineDirectionIsClampedToTheAngleLimit", LineDirectionIsClampedToTheAngleLimit),
+            ("bc12 InterceptSlotsStandOnTheOwnSide", InterceptSlotsStandOnTheOwnSide),
+            ("bc12 OnlyARiverAnchorsAFlank", OnlyARiverAnchorsAFlank),
+            ("bc12 EnemyHeldObjectiveWaterIsOnOurSide", EnemyHeldObjectiveWaterIsOnOurSide),
+            ("bc12 EnemyHeldObjectiveApproachIsOnOurSide", EnemyHeldObjectiveApproachIsOnOurSide),
+            ("bc12 EnemyHeldObjectiveAxisUsesBothCoordinates", EnemyHeldObjectiveAxisUsesBothCoordinates),
+            ("bc12 ClassificationFollowsThePlanningFlag", ClassificationFollowsThePlanningFlag),
+            ("bc12 PlumbingFromTheArmyAndEvidenceIsPinned", PlumbingFromTheArmyAndEvidenceIsPinned),
+            ("bc12 BuildingIndexIsIncremental", BuildingIndexIsIncremental),
+            // inference
+            ("bc12 EnemyStandingOnStrongGroundReadsDefend", EnemyStandingOnStrongGroundReadsDefend),
+            ("bc12 MovingEnemyOnStrongGroundNotDefend", MovingEnemyOnStrongGroundNotDefend),
+            ("bc12 BuildHasNoOwnEvidenceParameter", BuildHasNoOwnEvidenceParameter),
+            // playbooks
+            ("bc12 ReverseSlopeNeedsCrest", ReverseSlopeNeedsCrest),
+            ("bc12 ReverseSlopeRectsBehindCrest", ReverseSlopeRectsBehindCrest),
+            ("bc12 HighGroundLabelNeedsCrestShare", HighGroundLabelNeedsCrestShare),
+            ("bc12 PlaybookTerrainFromPicture", PlaybookTerrainFromPicture),
+            ("bc12 EveryObjectiveTypeAPlannerReadsHasAProducer", EveryObjectiveTypeAPlannerReadsHasAProducer),
+        };
+    }
+
+    private const int Map = 800;
+    private const float ObjX = 400f, ObjZ = -360f;
+
+    private static ObjectiveObservationInput Observation(float x, float z, TacticalObjectiveType type = TacticalObjectiveType.UnknownVanillaObjective, bool verified = false)
+    {
+        return new ObjectiveObservationInput("objective-1", type, TacticalObjectiveSource.ObjectiveChain, new TacticalMapPoint(x, z), 0.75f, 0.65f, verified);
+    }
+
+    // A wall along x at world z = zWorld from x0 to x1.
+    private static CoverSegment Wall(float x0, float x1, float zWorld, int cover = CoverWall) =>
+        new CoverSegment { X0 = x0, Z0 = zWorld, X1 = x1, Z1 = zWorld, CoverId = cover };
+
+    private static TerrainPicture Variant(bool ford, bool town, bool junction, bool crest)
+    {
+        // Everything piled on (300, -380): a listed ford, three buildings, a crossroads, a 10 m crest at z -390.
+        var crossingX = ford ? new[] { 310f } : new float[0];
+        var crossingZ = ford ? new[] { -375f } : new float[0];
+        var crossingId = ford ? new[] { Ford } : new int[0];
+        BattleTerrainGrid grid = GridWithCrossings(Map, (x, z) => junction && OnRoad(x, z - Map, 300, -380, true, true, 200) ? Road : Grass, crossingX, crossingZ, crossingId);
+        Func<float, float, float> height = crest ? RidgeAlongX(30f, 5f, Map) : Flat();
+        float[] bx = town ? new[] { 300f, 330f, 310f } : null;
+        float[] bz = town ? new[] { -380f, -385f, -420f } : null;
+        return Build(grid, Map, height, bx: bx, bz: bz);
+    }
+
+    // ------------------------------------------------------------------ decision 3: classification
+
+    private static void ObjectiveOnBridgeIsBridgeAndVerified()
+    {
+        BattleTerrainGrid grid = GridWithCrossings(Map, (x, z) => Grass, new[] { 300f }, new[] { -300f }, new[] { Bridge });
+        TerrainPicture p = Build(grid, Map, Flat());
+        ObjectiveObservationInput o = TacticalTerrainObjectiveClassifier.Classify(Observation(330f, -320f), p, 0f, 1f);
+        AssertEqual(TacticalObjectiveType.Bridge, o.Type, "an objective within 60 m of a bridge crossing");
+        AssertTrue(o.TypeAnchorVerified, "verified by the picture");
+        AssertEqual(TacticalObjectiveType.Bridge, TacticalObjectiveSourceModel.Normalize(o).Type, "Normalize keeps a verified specific type");
+        ObjectiveObservationInput far = TacticalTerrainObjectiveClassifier.Classify(Observation(380f, -320f), p, 0f, 1f);
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, far.Type, "90 m away: unchanged");
+        AssertFalse(far.TypeAnchorVerified, "...and unverified");
+        // A scene victory point is classified too (and keeps its value and source).
+        ObjectiveObservationInput vp = TacticalTerrainObjectiveClassifier.Classify(Observation(320f, -310f, TacticalObjectiveType.VictoryPoint, true), p, 0f, 1f);
+        AssertEqual(TacticalObjectiveType.Bridge, vp.Type, "a victory point on a bridge reads as the bridge");
+        AssertNear(0.65f, vp.Value, 0.0001f, "value kept");
+        // Types the picture does not classify are never touched.
+        ObjectiveObservationInput line = TacticalTerrainObjectiveClassifier.Classify(Observation(300f, -300f, TacticalObjectiveType.EnemyLine, true), p, 0f, 1f);
+        AssertEqual(TacticalObjectiveType.EnemyLine, line.Type, "an enemy line stays an enemy line");
+        AssertTrue(ReferenceEquals(null, null) && TacticalTerrainObjectiveClassifier.Classify(Observation(330f, -320f), null, 0f, 1f).Type == TacticalObjectiveType.UnknownVanillaObjective,
+            "no picture: unchanged");
+    }
+
+    private static void FordBeatsTownBeatsJunctionBeatsRidge()
+    {
+        var obs = Observation(300f, -380f);
+        AssertEqual(TacticalObjectiveType.Ford, TacticalTerrainObjectiveClassifier.Classify(obs, Variant(true, true, true, true), 0f, 1f).Type, "ford first");
+        AssertEqual(TacticalObjectiveType.Town, TacticalTerrainObjectiveClassifier.Classify(obs, Variant(false, true, true, true), 0f, 1f).Type, "then town");
+        AssertEqual(TacticalObjectiveType.RoadJunction, TacticalTerrainObjectiveClassifier.Classify(obs, Variant(false, false, true, true), 0f, 1f).Type, "then junction");
+        AssertEqual(TacticalObjectiveType.Ridge, TacticalTerrainObjectiveClassifier.Classify(obs, Variant(false, false, false, true), 0f, 1f).Type, "then ridge");
+        ObjectiveObservationInput none = TacticalTerrainObjectiveClassifier.Classify(obs, Variant(false, false, false, false), 0f, 1f);
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, none.Type, "nothing around: unchanged");
+        AssertFalse(none.TypeAnchorVerified, "unchanged stays unverified");
+        // A bridge outranks a nearer ford.
+        BattleTerrainGrid both = GridWithCrossings(Map, (x, z) => Grass, new[] { 310f, 340f }, new[] { -300f, -300f }, new[] { Ford, Bridge });
+        AssertEqual(TacticalObjectiveType.Bridge, TacticalTerrainObjectiveClassifier.Classify(Observation(315f, -300f), Build(both, Map, Flat()), 0f, 1f).Type,
+            "a bridge within 60 m beats a nearer ford");
+    }
+
+    private static void UnverifiedTypeStillDemoted()
+    {
+        ObjectiveObservationInput guess = new ObjectiveObservationInput("o", TacticalObjectiveType.Bridge, TacticalObjectiveSource.ObjectiveChain,
+            new TacticalMapPoint(1f, 2f), 0.9f, 0.9f, typeAnchorVerified: false, approachAvenue: TacticalApproachAvenueEstimate.None,
+            terrainStrength: 0.4f, approachDifficulty: 0.3f);
+        ObjectiveObservationInput normalised = TacticalObjectiveSourceModel.Normalize(guess);
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, normalised.Type, "a specific type nobody verified is demoted");
+        AssertNear(0.35f, normalised.Value, 0.0001f, "and its value capped");
+        AssertNear(0.4f, normalised.TerrainStrength, 0.0001f, "the terrain strength survives Normalize");
+        AssertNear(0.3f, normalised.ApproachDifficulty, 0.0001f, "the approach difficulty survives Normalize");
+    }
+
+    // The acceptance greps: the ledger no longer hard-codes zero terrain numbers; the inference no longer assumes Open.
+    private static void NoLiteralZeroTerrainFieldsRemain()
+    {
+        string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        AssertFalse(ledger.Contains("terrainStrength: 0f"), "the ledger passes the observation's terrain strength");
+        AssertFalse(ledger.Contains("approachDifficulty: 0f"), "the ledger passes the observation's approach difficulty");
+        AssertTrue(ledger.Contains("terrainStrength: observation.TerrainStrength"), "...it does");
+        string inference = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyIntentInference.cs");
+        AssertFalse(inference.Contains("TerrainKind.Open"), "no assumed terrain in the intent inference");
+    }
+
+    // ------------------------------------------------------------------ decision 4: strength and approach difficulty
+
+    private static TerrainPicture CrestWithWall(float peak, float slope, bool wall)
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        // RidgeAlongX peaks at world z = -390; the wall runs along it.
+        return Build(grid, Map, RidgeAlongX(peak, slope, Map), cover: wall ? new[] { Wall(100f, 700f, -390f) } : null);
+    }
+
+    private static void TerrainStrengthWallOnCrestIsAnchor()
+    {
+        TerrainPicture p = CrestWithWall(30f, 5f, wall: true);
+        float s = p.TerrainStrength(400f, -390f, 0f, 1f);
+        AssertNear(0.5667f, s, 0.005f, "wall 0.35 on a 10 m crest (h 0.333): 1 - 0.65 x 0.667");
+        AssertTrue(s >= TerrainPicture.AnchorStrength, "a wall on a 10 m crest clears the planners' anchor strength 0.55");
+    }
+
+    private static void WallOnThreeMetreCrestIsNotAnchor()
+    {
+        TerrainPicture p = CrestWithWall(20f, 1.5f, wall: true);
+        float s = p.TerrainStrength(400f, -390f, 0f, 1f);
+        AssertNear(0.415f, s, 0.005f, "wall 0.35 on a 3 m crest (h 0.10): 1 - 0.65 x 0.9");
+        AssertTrue(s < TerrainPicture.AnchorStrength, "not an anchor");
+        TerrainPicture crestOnly = CrestWithWall(30f, 5f, wall: false);
+        AssertNear(0.3333f, crestOnly.TerrainStrength(400f, -390f, 0f, 1f), 0.005f, "a 10 m crest alone is 0.33 (a crest alone is at most 0.5)");
+        TerrainPicture tall = CrestWithWall(120f, 30f, wall: false);
+        AssertNear(0.5f, tall.TerrainStrength(400f, -390f, 0f, 1f), 0.005f, "prominence is capped at 15 m: h = 0.5");
+    }
+
+    private static void WallAloneIsNotAnchor()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) });
+        AssertNear(0.35f, p.TerrainStrength(400f, -390f, 0f, 1f), 0.0001f, "a wall on flat ground");
+        AssertNear(0.35f, p.TerrainStrength(400f, -350f, 0f, 1f), 0.0001f, "the wall counts within 60 m");
+        AssertEqual(0f, p.TerrainStrength(400f, -200f, 0f, 1f), "and not 190 m away");
+        TerrainPicture sunken = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f, CoverSunken) });
+        AssertNear(0.30f, sunken.TerrainStrength(400f, -390f, 0f, 1f), 0.0001f, "a sunken road 0.30");
+    }
+
+    private static void RiverInFrontAddsPoint4()
+    {
+        // A river band across the front: world z -440..-380 for the whole width; the point stands at z -600 facing +z, so the
+        // band lies 160-220 m in front, on every transect between 100 and 300 m.
+        BattleTerrainGrid river = Grid(Map, (x, z) => (z - Map >= -440 && z - Map < -380) ? River : Grass);
+        TerrainPicture p = Build(river, Map, Flat());
+        AssertNear(0.4f, p.TerrainStrength(400f, -600f, 0f, 1f), 0.0001f, "water across the front: 0.4");
+        AssertEqual(0f, p.TerrainStrength(400f, -600f, 0f, -1f), "facing the other way there is no water in front");
+        // A 10 m crest behind a river: 1 - (1 - 0.333)(1 - 0.4) = 0.60.
+        TerrainPicture both = Build(Grid(Map, (x, z) => (z - Map >= -560 && z - Map < -500) ? River : Grass), Map, RidgeAlongX(30f, 5f, Map));
+        // crest at z -390; the river 110-170 m in front of a point on the crest at -690... the point is the crest cell itself
+        // when the river lies 100-300 m ahead of it, so move the river to 100-300 m ahead of z -390 along +z:
+        TerrainPicture ahead = Build(Grid(Map, (x, z) => (z - Map >= -300 && z - Map < -230) ? River : Grass), Map, RidgeAlongX(30f, 5f, Map));
+        AssertNear(0.6f, ahead.TerrainStrength(400f, -390f, 0f, 1f), 0.005f, "a 10 m crest behind a river: 0.60");
+        // Narrow water is not a river line across the front: a creek column 20 m wide covers 1 of 11 lateral points.
+        BattleTerrainGrid thin = Grid(Map, (x, z) => (x >= 395 && x < 415) ? River : Grass);
+        AssertEqual(0f, Build(thin, Map, Flat()).TerrainStrength(400f, -600f, 0f, 1f), "water along the axis is not across it");
+        // A town is 0.7.
+        TerrainPicture town = Build(Grid(Map, (x, z) => Grass), Map, Flat(), bx: new[] { 300f, 320f, 340f }, bz: new[] { -300f, -310f, -320f });
+        AssertNear(0.7f, town.TerrainStrength(320f, -310f, 0f, 1f), 0.0001f, "building cover 0.70");
+        AssertTrue(both.Ready, "fixture built");
+    }
+
+    private static void ApproachDifficultyUsesSpeedCosts()
+    {
+        // The 300 m in front of (400, -600) along +z.
+        BattleTerrainGrid grassland = Grid(Map, (x, z) => Grass);
+        AssertEqual(0f, Build(grassland, Map, Flat()).ApproachDifficulty(400f, -600f, 0f, 1f), "grass cost 2: no difficulty");
+        BattleTerrainGrid swamp = Grid(Map, (x, z) => 15);
+        AssertNear(1f, Build(swamp, Map, Flat()).ApproachDifficulty(400f, -600f, 0f, 1f), 0.0001f, "swamp cost 6: full difficulty");
+        BattleTerrainGrid forest = Grid(Map, (x, z) => 14);
+        AssertNear(0.5f, Build(forest, Map, Flat()).ApproachDifficulty(400f, -600f, 0f, 1f), 0.0001f, "forest cost 4: (4 - 2) / (6 - 2)");
+        BattleTerrainGrid half = Grid(Map, (x, z) => (z - Map >= -600 + 150) ? 15 : Grass);
+        float mixed = Build(half, Map, Flat()).ApproachDifficulty(400f, -600f, 0f, 1f);
+        AssertNear(0.5f, mixed, 0.07f, "half swamp half grass along the approach: about 0.5, got " + mixed);
+        AssertEqual(0f, Build(swamp, Map, Flat()).ApproachDifficulty(400f, -600f, 0f, 0f), "no axis, no approach");
+    }
+
+    // ------------------------------------------------------------------ decision 5: the director's sign
+
+    private static BattlefieldObjectiveEstimate Estimate(string id, float enemy, float terrain, float approach) =>
+        new BattlefieldObjectiveEstimate(id, TacticalObjectiveType.Ridge, enemy, 0.8f, false, 0.5f, 100f, 100f, terrain, approach);
+
+    private static void AttackerAvoidsStrongEnemyHeldGround()
+    {
+        BattlefieldObjectiveEstimate strongHeld = Estimate("held-strong", 3000f, 0.7f, 0.5f);
+        BattlefieldObjectiveEstimate weakHeld = Estimate("held-weak", 3000f, 0.1f, 0.0f);
+        foreach (BattleStance stance in new[] { BattleStance.Attacker, BattleStance.Meeting })
+        {
+            AssertTrue(TacticalOperationDirector.ObjectiveSelectionScore(strongHeld, stance) < TacticalOperationDirector.ObjectiveSelectionScore(weakHeld, stance),
+                stance + ": strong enemy-held ground scores lower than weak enemy-held ground");
+        }
+        // The pick follows the score.
+        var current = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Planning, "objective-unknown", 0f);
+        var input = TacticalOperationDirectorInput.ForTest(current, 100f, 8000f, 0.2f, 0.6f, 0.4f, new[] { strongHeld, weakHeld }).WithStance(BattleStance.Attacker);
+        AssertEqual("held-weak", TacticalOperationDirector.Decide(input).Operation.PrimaryObjectiveId, "the attacker goes for the weaker ground");
+    }
+
+    private static void DefenderPrefersStrongOwnGround()
+    {
+        BattlefieldObjectiveEstimate strongOwn = Estimate("own-strong", 0f, 0.7f, 0.6f);
+        BattlefieldObjectiveEstimate weakOwn = Estimate("own-weak", 0f, 0.1f, 0.0f);
+        AssertTrue(TacticalOperationDirector.ObjectiveSelectionScore(strongOwn, BattleStance.Defender) > TacticalOperationDirector.ObjectiveSelectionScore(weakOwn, BattleStance.Defender),
+            "a Defender values strong own ground");
+        AssertTrue(TacticalOperationDirector.ObjectiveSelectionScore(strongOwn, BattleStance.Meeting) > TacticalOperationDirector.ObjectiveSelectionScore(weakOwn, BattleStance.Meeting),
+            "so does any side: seize strong ground");
+        // The Defender also counts half the enemy's approach difficulty; the others do not.
+        float defender = TacticalOperationDirector.ObjectiveSelectionScore(strongOwn, BattleStance.Defender);
+        float meeting = TacticalOperationDirector.ObjectiveSelectionScore(strongOwn, BattleStance.Meeting);
+        AssertNear(0.5f * 0.6f, defender - meeting, 0.0001f, "0.5 x approach difficulty for a Defender");
+        // An enemy-held objective keeps today's sign for a Defender too.
+        BattlefieldObjectiveEstimate heldStrong = Estimate("held", 2000f, 0.7f, 0.6f);
+        BattlefieldObjectiveEstimate heldWeak = Estimate("held2", 2000f, 0.0f, 0.0f);
+        AssertTrue(TacticalOperationDirector.ObjectiveSelectionScore(heldStrong, BattleStance.Defender) < TacticalOperationDirector.ObjectiveSelectionScore(heldWeak, BattleStance.Defender),
+            "enemy-held strong ground is still avoided");
+    }
+
+    // ------------------------------------------------------------------ decision 6: lines
+
+    private static void BestLinePicksCrestAcrossAxis()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        // A 10 m crest along x at z -390 (30 m behind the objective), a fence 60 m further back at z -300... on the own side.
+        TerrainPicture p = Build(grid, Map, RidgeAlongX(30f, 5f, Map), cover: new[] { Wall(100f, 700f, -300f, CoverFence) });
+        TerrainLine line = TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, 0f, 1f, 600f);
+        AssertTrue(line.Has, "a line is found");
+        AssertEqual(TerrainLineKind.Crest, line.Kind, "the crest (0.33) beats the fence (0.10) at nearly the same distance");
+        AssertTrue(Math.Abs(line.CenterZ - (-390f)) < 11f, "the line runs along the crest, z " + line.CenterZ);
+        AssertTrue(Math.Abs(line.CenterX - 400f) < 60f, "centred on the objective's lateral, x " + line.CenterX);
+        AssertTrue(line.Length >= 600f, "most of the window is crest, length " + line.Length);
+        AssertTrue(line.Strength > 0.3f && line.Strength < 0.4f, "strength of a 10 m crest, " + line.Strength);
+        // A wall along the same line outranks the bare crest.
+        TerrainPicture walled = Build(grid, Map, RidgeAlongX(30f, 5f, Map), cover: new[] { Wall(100f, 700f, -390f) });
+        TerrainLine strong = TacticalTerrainLinePlanner.BestLine(walled, ObjX, ObjZ, 0f, 1f, 600f);
+        AssertTrue(strong.Has && strong.Strength > 0.5f, "wall on crest: strength " + strong.Strength);
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(null, ObjX, ObjZ, 0f, 1f, 600f).Has, "no picture, no line");
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, 0f, 0f, 600f).Has, "no axis, no line");
+        // The crest line alone.
+        AssertEqual(TerrainLineKind.Crest, TacticalTerrainLinePlanner.BestCrest(p, ObjX, ObjZ, 0f, 1f, 600f).Kind, "BestCrest returns crest runs only");
+        AssertFalse(TacticalTerrainLinePlanner.BestCrest(Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) }), ObjX, ObjZ, 0f, 1f, 600f).Has, "a wall is no crest");
+    }
+
+    private static void LineRejectedOver30DegreesOff()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) });
+        float rad20 = 20f * (float)Math.PI / 180f, rad40 = 40f * (float)Math.PI / 180f;
+        AssertTrue(TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, (float)Math.Sin(rad20), (float)Math.Cos(rad20), 600f).Has,
+            "a wall 20 degrees off perpendicular is across the threat axis");
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, (float)Math.Sin(rad40), (float)Math.Cos(rad40), 600f).Has,
+            "40 degrees off perpendicular is not");
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, 1f, 0f, 600f).Has, "a wall along the axis is no defensive line");
+        // Length: 100 m of wall is too short, 220 m is enough.
+        TerrainPicture shortWall = Build(grid, Map, Flat(), cover: new[] { Wall(350f, 450f, -390f) });
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(shortWall, ObjX, ObjZ, 0f, 1f, 600f).Has, "under MinLineMeters 200");
+        TerrainPicture longWall = Build(grid, Map, Flat(), cover: new[] { Wall(290f, 510f, -390f) });
+        AssertTrue(TacticalTerrainLinePlanner.BestLine(longWall, ObjX, ObjZ, 0f, 1f, 600f).Has, "220 m of wall");
+        // 100 m in front is allowed, 200 m in front is not.
+        TerrainPicture ahead100 = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -270f) });
+        AssertTrue(TacticalTerrainLinePlanner.BestLine(ahead100, ObjX, ObjZ, 0f, 1f, 600f).Has, "a wall 90 m in front of the objective");
+        TerrainPicture ahead200 = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -160f) });
+        AssertFalse(TacticalTerrainLinePlanner.BestLine(ahead200, ObjX, ObjZ, 0f, 1f, 600f).Has, "a wall 200 m in front is the enemy's side");
+    }
+
+    private static void CrestRunsDoNotJoinAcrossAxes()
+    {
+        // A long ridge along z (x 410) met by a shorter ridge along x (world z -390, x 100-400): a T. Joined into one blob the
+        // principal axis is the long one (along the +z threat axis) and the blob is rejected; by profile axis the short ridge is its
+        // own run and is the line across the front.
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        Func<float, float, float> alongX = RidgeAlongX(30f, 5f, Map), alongZ = RidgeAlongZ(30f, 5f);
+        TerrainPicture p = Build(grid, Map, (x, z) => Math.Max(x >= 100f && x <= 400f ? alongX(x, z) : 0f, alongZ(x, z)));
+        TerrainLine line = TacticalTerrainLinePlanner.BestCrest(p, ObjX, ObjZ, 0f, 1f, 600f);
+        AssertTrue(line.Has, "the ridge across the axis is found among the crossing ridges");
+        AssertTrue(line.Length >= 250f, "a long run, not a fragment: " + line.Length);
+        AssertTrue(Math.Abs(line.CenterZ - (-390f)) < 15f, "it is the ridge along x, z " + line.CenterZ);
+        // Along-z only: no line across a +z axis.
+        TerrainPicture alongOnly = Build(grid, Map, alongZ);
+        AssertFalse(TacticalTerrainLinePlanner.BestCrest(alongOnly, ObjX, ObjZ, 0f, 1f, 600f).Has, "a ridge along the threat axis is no line");
+    }
+
+    private static void ReverseSlopeLineSetBack80m()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        TerrainPicture p = Build(grid, Map, RidgeAlongX(30f, 5f, Map));
+        TerrainLine crest = TacticalTerrainLinePlanner.BestLine(p, ObjX, ObjZ, 0f, 1f, 600f);
+        TacticalTerrainLinePlanner.AnchorPoint(in crest, 0f, 1f, false, out float fx, out float fz);
+        TacticalTerrainLinePlanner.AnchorPoint(in crest, 0f, 1f, true, out float rx, out float rz);
+        AssertNear(crest.CenterZ + TacticalTerrainLinePlanner.ForwardEdgeMeters, fz, 0.01f, "a crest is held at its forward edge");
+        AssertNear(crest.CenterZ - 80f, rz, 0.01f, "under ReverseSlopeDefense 80 m behind the crest");
+        AssertEqual(80f, TacticalTerrainLinePlanner.ReverseSlopeSetbackMeters, "ReverseSlopeSetbackMeters");
+        AssertNear(crest.CenterX, rx, 0.01f, "laterally unchanged");
+        // A wall is held on its centre, a river from 150 m behind it.
+        var wall = new TerrainLine { Has = true, Kind = TerrainLineKind.Wall, CenterX = 400f, CenterZ = -390f };
+        TacticalTerrainLinePlanner.AnchorPoint(in wall, 0f, 1f, true, out float wx, out float wz);
+        AssertNear(-390f, wz, 0.01f, "a wall has no reverse slope");
+        var riverLine = new TerrainLine { Has = true, Kind = TerrainLineKind.River, CenterX = 400f, CenterZ = -390f };
+        TacticalTerrainLinePlanner.AnchorPoint(in riverLine, 0f, 1f, false, out float qx, out float qz);
+        AssertNear(-390f - 150f, qz, 0.01f, "a river line is held from 150 m behind it");
+        TacticalTerrainLinePlanner.AnchorPoint(in riverLine, 1f, 0f, false, out float sideX, out float sideZ);
+        AssertNear(400f - 150f, sideX, 0.01f, "behind it along x when the threat axis is +x");
+        AssertNear(-390f, sideZ, 0.01f, "...and unchanged in z");
+        AssertEqual(150f, TacticalTerrainLinePlanner.RiverStandOffMeters, "RiverStandOffMeters");
+    }
+
+    private static TacticalBattlefrontSnapshot NoFront => default(TacticalBattlefrontSnapshot);
+
+    // An objective on a ridge with an approach from the south (the enemy coming north: avenue axis +z means the enemy travels +z,
+    // so the threat axis toward the enemy is -z): the crest line must lie across z.
+    private static BattlefieldObjectiveEstimate RidgeObjective(float x, float z, float enemyOriginZ)
+    {
+        return new BattlefieldObjectiveEstimate("ridge-1", TacticalObjectiveType.Ridge, 0f, 0.8f, false, 0.6f, x, z, 0.6f, 0.2f,
+            TacticalApproachAvenueEstimate.Create(new TacticalMapPoint(x, enemyOriginZ), new TacticalMapPoint(x, z),
+                TacticalApproachAvenueSource.ScheduledArrival, 0.9f, roadAnchored: false, crossingAnchored: false, "test-avenue"));
+    }
+
+    private static void TerrainAnchorReplacesPreservedNone()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        // The enemy comes from z -760 toward the objective at z -360 (avenue axis +z; the threat axis is -z): the crest at z -390 lies
+        // 30 m in front of the objective.
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        TacticalDefensiveLineAnchor preserved = TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6, (TerrainPicture)null);
+        AssertFalse(preserved.HasAnchor, "without a picture the terrain anchor is preserved as today");
+        AssertEqual("defensive-line-terrain-anchor-preserved", preserved.Reason, "today's reason");
+
+        TerrainPicture p = Build(grid, Map, RidgeAlongX(30f, 5f, Map));
+        TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6, p);
+        AssertTrue(anchor.HasAnchor, "with a picture the best terrain line becomes the anchor: " + anchor.Reason);
+        AssertTrue(anchor.Reason.StartsWith("terrain-line:crest", StringComparison.Ordinal), "reason names the line kind: " + anchor.Reason);
+        AssertFalse(anchor.CorridorAnchor, "a terrain line is not a corridor");
+        AssertFalse(anchor.AnchoredLeft || anchor.AnchoredRight, "a crest line's own ends are not 'anchored by a crest': only a river (or another crest) rests them");
+        AssertTrue(anchor.FrontageWidth >= 350f && anchor.FrontageWidth <= 760f, "frontage clamped to 350-760, " + anchor.FrontageWidth);
+        AssertNear(-400f, anchor.Center.Z, 12f, "centre at the crest's forward edge (the threat axis is -z: forward is lower z)");
+        // Under ReverseSlopeDefense the centre sits 80 m behind the crest, on the own side.
+        TacticalDefensiveLineAnchor reverse = TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6, p, reverseSlope: true);
+        AssertTrue(reverse.HasAnchor, "reverse slope anchor");
+        AssertNear(anchor.Center.Z + 90f, reverse.Center.Z, 12f, "80 m behind the crest instead of at its forward edge");
+        // A corridor objective still takes the corridor path; a weak non-terrain objective is not touched.
+        BattlefieldObjectiveEstimate weak = new BattlefieldObjectiveEstimate("o", TacticalObjectiveType.UnknownVanillaObjective, 0f, 0.8f, false, 0.6f,
+            ObjX, ObjZ, 0.1f, 0.1f, objective.ApproachAvenue);
+        AssertTrue(TacticalDefensiveLineAnchorPlanner.Plan(weak, NoFront, 6, p).Reason.StartsWith("approach-intercept", StringComparison.Ordinal),
+            "a non-terrain objective keeps the approach intercept");
+        // No line near the objective: preserved.
+        TerrainPicture flat = Build(grid, Map, Flat());
+        AssertEqual("defensive-line-terrain-anchor-preserved", TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6, flat).Reason, "no line, no change");
+        // The three-argument call reads the planning picture through the provider and the flag.
+        Func<TerrainPicture> saved = TerrainPicture.Provider;
+        try
+        {
+            TerrainPicture.Provider = () => p;
+            TerrainPicture.PlanningEnabled = () => true;
+            AssertTrue(TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6).HasAnchor, "the provider's picture");
+            TerrainPicture.PlanningEnabled = () => false;
+            AssertFalse(TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6).HasAnchor, "Enable Battle Terrain Picture off: preserved");
+        }
+        finally
+        {
+            TerrainPicture.Provider = saved;
+            TerrainPicture.PlanningEnabled = null;
+        }
+    }
+
+    private static void FlankAnchoredByRiverWithin80m()
+    {
+        // A vertical river at x 600-640 (all z).
+        BattleTerrainGrid grid = Grid(Map, (x, z) => (x >= 600 && x < 640) ? River : Grass);
+        TerrainPicture p = Build(grid, Map, Flat());
+        AssertTrue(TacticalTerrainLinePlanner.FlankAnchored(p, 560f, -400f, 1f, 0f), "river 40 m sideways of the flank end");
+        AssertTrue(TacticalTerrainLinePlanner.FlankAnchored(p, 530f, -400f, 1f, 0f), "70 m is inside the 80 m reach");
+        AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(p, 500f, -400f, 1f, 0f), "100 m is outside it");
+        AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(p, 560f, -400f, -1f, 0f), "the other way is open ground");
+        // A crest within 50 m of the end.
+        TerrainPicture crest = Build(Grid(Map, (x, z) => Grass), Map, RidgeAlongX(30f, 5f, Map));
+        AssertTrue(TacticalTerrainLinePlanner.FlankAnchored(crest, 400f, -420f, 1f, 0f), "a crest 30 m from the end");
+        AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(crest, 400f, -500f, 1f, 0f), "110 m from the crest");
+        AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(null, 560f, -400f, 1f, 0f), "no picture");
+        AssertEqual(80f, TerrainShapeRules.Shipped.AnchorRiverMeters, "distancetocheckforanchoredflanksriver");
+    }
+
+    private static void AnchoredSideGetsNoGuardFlankSlot()
+    {
+        // The slot rule itself (CommandDoctrineAssignment.ApplyScourgeSlotTask): with six or more nodes the end slots of a
+        // forming-up line become flank guards; an anchored side keeps the line task.
+        AssertEqual(CommandTaskType.GuardFlank, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.FormUp, CommandNodeRole.MainEffort, 0, 6, false, false),
+            "the left end slot guards the flank");
+        AssertEqual(CommandTaskType.FormUp, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.FormUp, CommandNodeRole.MainEffort, 0, 6, true, false),
+            "...unless the left side is anchored");
+        AssertEqual(CommandTaskType.GuardFlank, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.FormUp, CommandNodeRole.MainEffort, 5, 6, true, false),
+            "the right end still guards when only the left is anchored");
+        AssertEqual(CommandTaskType.FormUp, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.FormUp, CommandNodeRole.MainEffort, 5, 6, false, true),
+            "an anchored right side keeps the line task");
+        AssertEqual(CommandTaskType.AdvanceToAssembly, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.AdvanceToAssembly, CommandNodeRole.MainEffort, 5, 6, false, true),
+            "the assembly task too");
+        AssertEqual(CommandTaskType.GuardFlank, CommandDoctrineAssignment.ApplyScourgeSlotTask(CommandTaskType.FormUp, CommandNodeRole.FlankMarch, 3, 6, true, true),
+            "a flank-march role guards whatever the anchors say");
+
+        // The anchor planner marks the ends: a wall with a river off its left end.
+        BattleTerrainGrid grid = Grid(Map, (x, z) => (x >= 40 && x < 70) ? River : Grass);
+        TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) });
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, NoFront, 6, p);
+        AssertTrue(anchor.HasAnchor, "a wall line anchor: " + anchor.Reason);
+        AssertTrue(anchor.AnchoredLeft, "the river off the left end anchors the left");
+        AssertFalse(anchor.AnchoredRight, "the right end is open");
+        AssertTrue(anchor.Reason.EndsWith(":anchored-left", StringComparison.Ordinal), "reason suffix: " + anchor.Reason);
+        // The assembly builds the slot task from the anchor.
+        string doctrine = FlankResponseTests.SourceText("Tactical", "Operations", "CommandDoctrineAssignment.cs");
+        AssertTrue(doctrine.Contains("ApplyScourgeSlotTask(task, node.Role, i, nodes.Length, anchor.AnchoredLeft, anchor.AnchoredRight)"), "Build passes the anchored sides");
+    }
+
+    // ------------------------------------------------------------------ decision 7: inference
+
+    private static EnemyVisibleState OneSector(float own, float enemy, bool recentFire, float strongShare, float reserveCommit = 0.5f)
+    {
+        return new EnemyVisibleState(new[] { new EnemyVisibleSector(0, own, enemy, recentFire, strongShare) },
+            enemyReserveCommitFraction: reserveCommit, anyContactSpotted: true, anyContactBroken: false);
+    }
+
+    private static void EnemyStandingOnStrongGroundReadsDefend()
+    {
+        // Control: the same sector without strong ground is a Probe (a single sector, no fire, the enemy not much bigger).
+        TacticalIntentModel plain = ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0f));
+        AssertEqual(InferredIntent.Probe, plain.PrimaryIntent, "control: a single quiet sector reads Probe");
+        TacticalIntentModel strong = ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.8f));
+        AssertEqual(InferredIntent.Defend, strong.PrimaryIntent, "an enemy standing on strong ground reads Defend");
+        AssertTrue(Array.IndexOf(strong.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) >= 0, "with the EnemyOnStrongGround tag");
+        // Receiving fire from the sector: the existing rules decide.
+        TacticalIntentModel firing = ArmyIntentInference.Build(OneSector(5000f, 4000f, true, 0.8f));
+        AssertTrue(Array.IndexOf(firing.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) < 0 || firing.PrimaryIntent == InferredIntent.Defend,
+            "recent fire does not turn the strong-ground rule on");
+        AssertFalse(firing.PrimaryIntent == InferredIntent.Defend && Array.IndexOf(firing.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) >= 0,
+            "no strong-ground Defend with recent fire from the sector");
+        // The fire exemption is decided where the rule is reached: an uncommitted reserve (0.1) would read Refuse; strong ground without
+        // fire turns that into Defend, strong ground under fire leaves it Refuse.
+        TacticalIntentModel refuse = ArmyIntentInference.Build(OneSector(5000f, 4000f, true, 0.8f, reserveCommit: 0.1f));
+        AssertEqual(InferredIntent.Refuse, refuse.PrimaryIntent, "an enemy firing from strong ground keeps the shipped reading");
+        AssertTrue(Array.IndexOf(refuse.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) < 0, "...with no strong-ground tag");
+        TacticalIntentModel quiet = ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.8f, reserveCommit: 0.1f));
+        AssertEqual(InferredIntent.Defend, quiet.PrimaryIntent, "the same quiet enemy on strong ground reads Defend");
+        AssertTrue(Array.IndexOf(quiet.SupportingEvidence, EvidenceTag.EnemyOnStrongGround) >= 0, "...with the tag");
+        // Under the 0.6 share nothing changes.
+        AssertEqual(InferredIntent.Probe, ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.59f)).PrimaryIntent, "0.59 is under the 0.6 share");
+        AssertEqual(InferredIntent.Defend, ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0.6f)).PrimaryIntent, "exactly 0.6 counts");
+    }
+
+    private static void MovingEnemyOnStrongGroundNotDefend()
+    {
+        // CollectEnemySamples: the share counts only enemies that stand (no paths) on cells with strength >= 0.35.
+        const int size = 800;
+        BattleTerrainGrid grid = Grid(size, (x, z) => Grass);
+        TerrainPicture p = Build(grid, size, Flat(), cover: new[] { Wall(100f, 700f, -390f), Wall(100f, 700f, -391f) });
+        BattleSnapshot s = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f, strength: 1000) },
+            BattlePerceptionTests.Seen(11, 400f, -390f, 800f, standing: true),
+            BattlePerceptionTests.Seen(12, 450f, -390f, 800f, standing: false),
+            BattlePerceptionTests.Seen(13, 500f, -200f, 800f, standing: true));
+        var visible = new List<FrontUnitSample>();
+        var weighted = new List<FrontUnitSample>();
+        var known = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int>(), visible, weighted, known, p);
+        AssertEqual(3, weighted.Count, "three samples");
+        AssertTrue(weighted[0].OnStrongGround && weighted[0].Visible, "the standing enemy on the wall");
+        AssertFalse(weighted[1].OnStrongGround, "a marching enemy on the wall is not on strong ground (it has paths)");
+        AssertFalse(weighted[2].OnStrongGround, "a standing enemy on open ground neither");
+        // The sector's share is strong-ground strength over visible strength.
+        var own = new List<FrontUnitSample>();
+        TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(400f, -700f, 400f, -300f).WithOwnExtent(-100f, 100f);
+        EnemyVisibleSector[] sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, weighted);
+        float share = 0f;
+        float strongTotal = 0f, all = 0f;
+        foreach (EnemyVisibleSector sec in sectors) { strongTotal += sec.EnemyStrongGroundShare * sec.EnemyStrength; all += sec.EnemyStrength; }
+        share = all > 0f ? strongTotal / all : 0f;
+        AssertNear(800f / 2400f, share, 0.01f, "one of three equal enemies stands on strong ground");
+        // A remembered enemy adds band strength but not visible strength: 800 visible on the wall + 800 x 0.5 remembered elsewhere
+        // in the same band is still a band whose visible enemy is all on strong ground.
+        BattleSnapshot mixed = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f, strength: 1000) },
+            BattlePerceptionTests.Seen(21, 400f, -390f, 800f, standing: true),
+            BattlePerceptionTests.Seen(22, 405f, -330f, 800f, confidence: 0.5f, remembered: true, standing: true));
+        var mv = new List<FrontUnitSample>(); var mw = new List<FrontUnitSample>(); var mk = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(mixed, new HashSet<int>(), mv, mw, mk, p);
+        EnemyVisibleSector[] mixedSectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, mw);
+        float mixedStrength = 0f, mixedShare = 0f;
+        foreach (EnemyVisibleSector sec in mixedSectors) { mixedStrength += sec.EnemyStrength; if (sec.EnemyStrongGroundShare > mixedShare) mixedShare = sec.EnemyStrongGroundShare; }
+        AssertNear(1200f, mixedStrength, 0.01f, "band strength counts the remembered enemy at its confidence");
+        AssertNear(1f, mixedShare, 0.0001f, "the share is over visible strength only");
+        // No picture: no flag.
+        var plainVisible = new List<FrontUnitSample>(); var plainWeighted = new List<FrontUnitSample>(); var plainKnown = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(s, new HashSet<int>(), plainVisible, plainWeighted, plainKnown);
+        AssertFalse(plainWeighted[0].OnStrongGround, "without a picture nothing is strong ground");
+        // A Remembered enemy is not counted: only what is Visible stands on known ground.
+        BattleSnapshot remembered = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f, strength: 1000) },
+            BattlePerceptionTests.Seen(11, 400f, -390f, 800f, confidence: 0.8f, remembered: true, standing: true));
+        var rv = new List<FrontUnitSample>(); var rw = new List<FrontUnitSample>(); var rk = new List<FrontUnitSample>();
+        ArmyEvidenceBuilder.CollectEnemySamples(remembered, new HashSet<int>(), rv, rw, rk, p);
+        AssertFalse(rw[0].OnStrongGround || rw[0].Visible, "a remembered enemy is not read as standing on strong ground");
+    }
+
+    private static void BuildHasNoOwnEvidenceParameter()
+    {
+        // Compile pin: Build takes the enemy state only; BuildForFrontage still filters by sector.
+        TacticalIntentModel m = ArmyIntentInference.Build(OneSector(5000f, 4000f, false, 0f));
+        AssertTrue(m.Confidence01 > 0f, "built from the enemy state alone");
+        TacticalIntentModel f = ArmyIntentInference.BuildForFrontage(0, OneSector(5000f, 4000f, false, 0.9f));
+        AssertEqual(InferredIntent.Defend, f.PrimaryIntent, "the per-child filter carries the strong-ground share");
+        string inference = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyIntentInference.cs");
+        AssertFalse(inference.Contains("ArmyEvidence ownEvidence"), "the dead parameter is gone");
+    }
+
+    // ------------------------------------------------------------------ decision 8: crest playbooks
+
+    private static PlaybookContext Longstreet(bool crest)
+    {
+        var longstreet = new PersonalityVector(-0.2f, 0.5f, -0.5f, 0.4f, 0.3f);
+        return new PlaybookContext(longstreet, TerrainKind.Mountain, currentOdds: 0.95f, opposingCommanderHint: 0f, defaultMainEffortSector: 0,
+            jitterSeed: 18892, hasCrestLine: crest);
+    }
+
+    private static void ReverseSlopeNeedsCrest()
+    {
+        TacticalPlaybookCatalog catalog = SeedCatalog.AllHistoricalAndGeneric();
+        AssertEqual(BattlePlanId.ReverseSlopeDefense, catalog.Select(Longstreet(true)).Id, "with a crest line Longstreet's play is the reverse slope");
+        AssertTrue(catalog.Select(Longstreet(false)).Id != BattlePlanId.ReverseSlopeDefense, "without one it is never selected");
+        AssertTrue(new ReverseSlopeDefensePlaybook().RequiresCrest, "the play says it needs a crest");
+        AssertFalse(new PreparedDefensePlaybook().RequiresCrest, "other plays do not");
+        // The crest line of the evidence: the best crest run across the front.
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        TerrainPicture withCrest = Build(grid, Map, RidgeAlongX(30f, 5f, Map));
+        TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(400f, -700f, 400f, -100f).WithOwnExtent(-200f, 200f);
+        AssertTrue(ArmyEvidenceBuilder.CrestLineAcrossFront(withCrest, axis).Has, "a crest across the front");
+        AssertFalse(ArmyEvidenceBuilder.CrestLineAcrossFront(Build(grid, Map, Flat()), axis).Has, "flat ground: none");
+        AssertFalse(ArmyEvidenceBuilder.CrestLineAcrossFront(null, axis).Has, "no picture: none");
+        var evidence = new ArmyEvidence(1f, TerrainKind.Open, 0, ArmyEvidenceBuilder.CrestLineAcrossFront(withCrest, axis));
+        AssertTrue(evidence.CrestLine.Has, "ArmyEvidence carries the crest line");
+    }
+
+    private static void ReverseSlopeRectsBehindCrest()
+    {
+        PlayTemplate template = PlayTemplateCatalog.Lookup(BattlePlanId.ReverseSlopeDefense);
+        var crest = new TerrainLine { Has = true, Kind = TerrainLineKind.Crest, CenterX = 400f, CenterZ = -350f, X0 = 100f, X1 = 700f, Z0 = -350f, Z1 = -350f, Strength = 0.4f };
+        IReadOnlyList<WorldPlayRect> plain = PlayProjection.Project(template, 400f, -700f, 400f, -100f, 600f);
+        IReadOnlyList<WorldPlayRect> shaped = PlayProjection.Project(template, 400f, -700f, 400f, -100f, 600f, in crest);
+        WorldPlayRect Find(IReadOnlyList<WorldPlayRect> rects, PlayRectKind kind)
+        {
+            foreach (WorldPlayRect r in rects) if (r.Kind == kind) return r;
+            throw new Exception("no rect " + kind);
+        }
+        AssertNear(-350f, Find(shaped, PlayRectKind.ForwardScreen).AnchorZ, 0.01f, "the screen stands on the crest");
+        AssertNear(-350f - 80f, Find(shaped, PlayRectKind.CenterHold).AnchorZ, 0.01f, "the centre holds 80 m behind the crest");
+        AssertNear(-350f - 80f, Find(shaped, PlayRectKind.LeftFlank).AnchorZ, 0.01f, "so do the flanks");
+        AssertNear(-350f - 80f, Find(shaped, PlayRectKind.RightFlank).AnchorZ, 0.01f, "...");
+        AssertNear(Find(plain, PlayRectKind.LeftFlank).AnchorX, Find(shaped, PlayRectKind.LeftFlank).AnchorX, 0.01f, "laterally the template's layout");
+        AssertNear(Find(plain, PlayRectKind.ReserveLine).AnchorZ, Find(shaped, PlayRectKind.ReserveLine).AnchorZ, 0.01f, "the reserve line is the template's");
+        AssertTrue(Math.Abs(Find(plain, PlayRectKind.ForwardScreen).AnchorZ - (-350f)) > 5f, "control: the template alone puts the screen elsewhere");
+        // Other templates ignore a crest.
+        PlayTemplate prepared = PlayTemplateCatalog.Lookup(BattlePlanId.PreparedDefense);
+        AssertNear(Find(PlayProjection.Project(prepared, 400f, -700f, 400f, -100f, 600f), PlayRectKind.CenterHold).AnchorZ,
+            Find(PlayProjection.Project(prepared, 400f, -700f, 400f, -100f, 600f, in crest), PlayRectKind.CenterHold).AnchorZ, 0.01f, "other plays do not move");
+    }
+
+    private static TacticalPlaybookInput LineHoldInput(float highGroundShare)
+    {
+        var sectors = new[]
+        {
+            new TacticalPlaybookSectorView(0, TacticalSectorMission.Hold, TacticalSectorPosition.Left, 1000f, 800f, 0.7f, false, false, 0f),
+            new TacticalPlaybookSectorView(1, TacticalSectorMission.Hold, TacticalSectorPosition.Center, 1500f, 1200f, 0.7f, false, false, 0f),
+        };
+        return new TacticalPlaybookInput(CommanderIntent.HoldToLast, -1, sectors, false, false, false, 0f, highGroundShare);
+    }
+
+    private static void HighGroundLabelNeedsCrestShare()
+    {
+        AssertEqual(TacticalPlaybookKind.HighGroundDefense, TacticalPlaybookLedger.Decide(LineHoldInput(0.5f)).Playbook, "half the held groups on crests: HighGroundDefense");
+        AssertEqual(TacticalPlaybookKind.HighGroundDefense, TacticalPlaybookLedger.Decide(LineHoldInput(1f)).Playbook, "all of them");
+        AssertEqual(TacticalPlaybookKind.LineHold, TacticalPlaybookLedger.Decide(LineHoldInput(0.49f)).Playbook, "under half: LineHold");
+        AssertEqual(TacticalPlaybookKind.LineHold, TacticalPlaybookLedger.Decide(LineHoldInput(0f)).Playbook, "no crest: LineHold");
+        string patch = FlankResponseTests.SourceText("Patches", "BattleCommanderIntentObserverPatch.cs");
+        AssertTrue(patch.Contains("ownOnHighGroundShare"), "the observer patch computes the share from the picture");
+    }
+
+    private static void PlaybookTerrainFromPicture()
+    {
+        TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(400f, -700f, 400f, -100f).WithOwnExtent(-300f, 300f);
+        AssertEqual(TerrainKind.Open, ArmyEvidenceBuilder.ClassifyFromPicture(null, axis), "no picture: Open (today's constant)");
+        BattleTerrainGrid grass = Grid(Map, (x, z) => Grass);
+        AssertEqual(TerrainKind.Open, ArmyEvidenceBuilder.ClassifyFromPicture(Build(grass, Map, Flat()), axis), "open ground");
+        BattleTerrainGrid river = Grid(Map, (x, z) => (z - Map >= -560 && z - Map < -440) ? River : Grass);
+        AssertEqual(TerrainKind.River, ArmyEvidenceBuilder.ClassifyFromPicture(Build(river, Map, Flat()), axis), "a river across the front");
+        BattleTerrainGrid forest = Grid(Map, (x, z) => 14);
+        AssertEqual(TerrainKind.Wooded, ArmyEvidenceBuilder.ClassifyFromPicture(Build(forest, Map, Flat()), axis), "woods");
+        AssertEqual(TerrainKind.Mountain, ArmyEvidenceBuilder.ClassifyFromPicture(Build(grass, Map, (x, z) => (z + Map) * 0.2f), axis), "relief over the front");
+        string builder = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyEvidenceBuilder.cs");
+        AssertFalse(builder.Contains("TerrainSamplesLateral"), "the 7 x 5 sampler is gone");
+        AssertFalse(builder.Contains("GetCurrentTerrainOnPos(point)"), "no per-sample vanilla terrain read");
+    }
+
+    // The acceptance pin: every TacticalObjectiveType a planner branch reads has a producer.
+    private static void EveryObjectiveTypeAPlannerReadsHasAProducer()
+    {
+        string classifier = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalTerrainObjectiveClassifier.cs");
+        foreach (string type in new[] { "Bridge", "Ford", "Town", "RoadJunction", "Ridge" })
+            AssertTrue(classifier.Contains("TacticalObjectiveType." + type), type + " is produced by the picture's classifier");
+        string anchors = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalDefensiveLineAnchorPlanner.cs");
+        AssertTrue(anchors.Contains("TacticalObjectiveType.ChokePoint"), "ChokePoint keeps its corridor-anchor producer");
+        string adapter = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalVisionRuntimeAdapter.cs");
+        foreach (string type in new[] { "VictoryPoint", "UnknownVanillaObjective", "EnemyLine", "StagingArea" })
+            AssertTrue(adapter.Contains("TacticalObjectiveType." + type), type + " is produced by the vision adapter");
+        string contracts = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalObjectiveContracts.cs");
+        foreach (TacticalObjectiveType t in Enum.GetValues(typeof(TacticalObjectiveType)))
+        {
+            if (t == TacticalObjectiveType.FallbackLine) continue;       // read by no planner branch
+            AssertTrue(contracts.Contains(t.ToString()), t + " exists");
+        }
+    }
+
+    // ------------------------------------------------------------------ verify r1: a terrain line is stood on
+
+    private static CommandNodeOperationalState[] SixDefenderNodes(int count = 6)
+    {
+        var nodes = new CommandNodeOperationalState[count];
+        for (int i = 0; i < nodes.Length; i++)
+            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp,
+                150f + 60f * i, -150f, 0f);
+        return nodes;
+    }
+
+    private static CommandDoctrineOrder[] DefenderOrders(TerrainPicture picture, bool reverseSlope, out TacticalDefensiveLineAnchor anchor, int nodeCount = 6)
+    {
+        CommandNodeOperationalState[] nodes = SixDefenderNodes(nodeCount);
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        var operation = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, objective.ObjectiveId, 900f);
+        var snapshot = new BattlefieldPictureSnapshot(new[] { objective });
+        Func<TerrainPicture> savedProvider = TerrainPicture.Provider;
+        Func<bool> savedEnabled = TerrainPicture.PlanningEnabled;
+        try
+        {
+            TerrainPicture.Provider = () => picture;
+            TerrainPicture.PlanningEnabled = () => true;
+            anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, TacticalBattlefrontGeometry.Build(nodes, objective), nodes.Length, picture, reverseSlope);
+            return CommandDoctrineAssignment.Build(nodes, operation, snapshot, 5000f, 100f, 0.2f, BattleStance.Defender, null, reverseSlope);
+        }
+        finally
+        {
+            TerrainPicture.Provider = savedProvider;
+            TerrainPicture.PlanningEnabled = savedEnabled;
+        }
+    }
+
+    private static void DefenderLineSlotsStandOnTheTerrainLine()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+
+        // A crest at world z -390, the enemy to -z: the anchor is the crest's forward edge (z -400) and the line slots stand on it,
+        // not AssemblyDistance (210 m) behind it.
+        TerrainPicture crest = Build(grid, Map, RidgeAlongX(30f, 5f, Map));
+        CommandDoctrineOrder[] orders = DefenderOrders(crest, reverseSlope: false, out TacticalDefensiveLineAnchor crestAnchor);
+        AssertTrue(crestAnchor.HasAnchor && crestAnchor.OnTerrainLine, "a crest anchor: " + crestAnchor.Reason);
+        int lineSlots = 0;
+        for (int i = 0; i < orders.Length; i++)
+        {
+            AssertTrue(orders[i].Task == CommandTaskType.FormUp || orders[i].Task == CommandTaskType.GuardFlank, "task " + orders[i].Task);
+            if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            lineSlots++;
+            AssertTrue(Math.Abs(orders[i].PrimaryTarget.Z - crestAnchor.Center.Z) <= TerrainPicture.CellMeters,
+                "crest line slot " + i + " at z " + orders[i].PrimaryTarget.Z + " stands within a cell of the anchor " + crestAnchor.Center.Z);
+        }
+        AssertEqual(2, lineSlots, "six nodes: two line slots between the flank guards and the depth slots");
+        for (int i = 0; i < orders.Length; i++)
+            if (orders[i].Reason.IndexOf("scourge-slot-depth", StringComparison.Ordinal) >= 0)
+                AssertTrue(orders[i].PrimaryTarget.Z > crestAnchor.Center.Z + 200f, "depth slots stay well behind the line");
+
+        // A wall line: the slots land inside the cover radius, where vanilla's cover snap takes them.
+        TerrainPicture wall = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) });
+        CommandDoctrineOrder[] wallOrders = DefenderOrders(wall, reverseSlope: false, out TacticalDefensiveLineAnchor wallAnchor);
+        AssertTrue(wallAnchor.OnTerrainLine && wallAnchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), "a wall anchor: " + wallAnchor.Reason);
+        int wallSlots = 0;
+        for (int i = 0; i < wallOrders.Length; i++)
+        {
+            if (wallOrders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            wallSlots++;
+            DoctrineTargetPoint t = wallOrders[i].PrimaryTarget;
+            AssertTrue(wall.TerrainStrength(t.X, t.Z, 0f, -1f) >= 0.34f,
+                "wall line slot " + i + " at (" + t.X + ", " + t.Z + ") has the wall's cover within " + TerrainPicture.CoverRadiusMeters + " m");
+        }
+        AssertEqual(2, wallSlots, "two wall line slots");
+
+        // Reverse slope: the slots stand at the plan's setback behind the crest, the value the play rect uses.
+        CommandDoctrineOrder[] reverse = DefenderOrders(crest, reverseSlope: true, out TacticalDefensiveLineAnchor reverseAnchor);
+        float crestZ = -390f;
+        int reverseSlots = 0;
+        for (int i = 0; i < reverse.Length; i++)
+        {
+            if (reverse[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            reverseSlots++;
+            AssertTrue(Math.Abs(reverse[i].PrimaryTarget.Z - (crestZ + TacticalTerrainLinePlanner.ReverseSlopeSetbackMeters)) <= TerrainPicture.CellMeters,
+                "reverse-slope line slot " + i + " at z " + reverse[i].PrimaryTarget.Z + " stands ReverseSlopeSetbackMeters behind the crest");
+        }
+        AssertEqual(2, reverseSlots, "two reverse-slope line slots");
+        AssertTrue(reverseAnchor.Center.Z > crestAnchor.Center.Z + 60f, "the reverse-slope anchor is behind the forward-edge anchor");
+
+        // A corridor intercept is still a line to form up behind: its line slots keep the assembly distance.
+        string planner = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalBattleLinePlanner.cs");
+        FlankResponseTests.AssertPinned(planner, "double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;", "only a terrain line has a zero line stand-off");
+    }
+
+    // Distance from a point to the segment (ax, az)-(bx, bz).
+    private static float DistanceToSegment(float px, float pz, float ax, float az, float bx, float bz)
+    {
+        float dx = bx - ax, dz = bz - az;
+        float t = Math.Max(0f, Math.Min(1f, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz)));
+        float ex = ax + dx * t - px, ez = az + dz * t - pz;
+        return (float)Math.Sqrt(ex * ex + ez * ez);
+    }
+
+    private static CoverSegment TiltedWall(float cx, float cz, float halfLength, float degrees)
+    {
+        float r = degrees * (float)Math.PI / 180f;
+        float dx = (float)Math.Cos(r) * halfLength, dz = (float)Math.Sin(r) * halfLength;
+        return new CoverSegment { X0 = cx - dx, Z0 = cz - dz, X1 = cx + dx, Z1 = cz + dz, CoverId = CoverWall };
+    }
+
+    // A wall 28 degrees off the perpendicular to the approach: the line slots follow the wall, not the perpendicular through its centre.
+    private static void TiltedWallSlotsStayOnTheWall()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        foreach (float tilt in new[] { 28f, -28f })
+        {
+            CoverSegment w = TiltedWall(400f, -390f, 300f, tilt);
+            TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { w });
+            CommandDoctrineOrder[] orders = DefenderOrders(p, reverseSlope: false, out TacticalDefensiveLineAnchor anchor, nodeCount: 10);
+            AssertTrue(anchor.OnTerrainLine && anchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), tilt + ": a wall anchor, " + anchor.Reason);
+            AssertTrue(anchor.LineHalfLength >= 250f, "the anchor carries the wall's own half length, " + anchor.LineHalfLength);
+            int slots = 0;
+            float zSpread = 0f, zMin = float.MaxValue, zMax = float.MinValue;
+            for (int i = 0; i < orders.Length; i++)
+            {
+                if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+                slots++;
+                DoctrineTargetPoint t = orders[i].PrimaryTarget;
+                float d = DistanceToSegment(t.X, t.Z, w.X0, w.Z0, w.X1, w.Z1);
+                AssertTrue(d <= 20f, tilt + ": line slot " + i + " at (" + t.X + ", " + t.Z + ") is " + d + " m from the wall");
+                AssertTrue(p.TerrainStrength(t.X, t.Z, 0f, -1f) >= 0.34f, tilt + ": line slot " + i + " has the wall's cover within the cover radius");
+                zMin = Math.Min(zMin, t.Z);
+                zMax = Math.Max(zMax, t.Z);
+            }
+            zSpread = zMax - zMin;
+            AssertEqual(6, slots, "ten nodes: six line slots");
+            AssertTrue(zSpread > 60f, tilt + ": the slots climb the wall (z spread " + zSpread + "), they are not on one perpendicular");
+        }
+    }
+
+    // A wall shorter than the frontage: slots past its ends fall back to the perpendicular through the nearest end.
+    private static void ShortWallEndsFallBackToThePerpendicular()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        CoverSegment w = TiltedWall(400f, -390f, 120f, 25f);
+        TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { w });
+        CommandDoctrineOrder[] orders = DefenderOrders(p, reverseSlope: false, out TacticalDefensiveLineAnchor anchor, nodeCount: 10);
+        AssertTrue(anchor.OnTerrainLine && anchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), "a wall anchor, " + anchor.Reason);
+        AssertTrue(anchor.FrontageWidth > 2f * anchor.LineHalfLength + 50f, "the wall is shorter than the frontage: " + anchor.FrontageWidth + " vs " + 2f * anchor.LineHalfLength);
+        float endAZ = w.Z0, endAX = w.X0, endBZ = w.Z1, endBX = w.X1;
+        int slots = 0, guards = 0;
+        for (int i = 0; i < orders.Length; i++)
+        {
+            DoctrineTargetPoint t = orders[i].PrimaryTarget;
+            if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) >= 0)
+            {
+                slots++;
+                AssertTrue(DistanceToSegment(t.X, t.Z, w.X0, w.Z0, w.X1, w.Z1) <= 40f, "line slot " + i + " stays on the short wall (" + t.X + ", " + t.Z + ")");
+            }
+            else if (orders[i].Reason.IndexOf("scourge-slot-flank-guard", StringComparison.Ordinal) >= 0)
+            {
+                guards++;
+                // The guard stands FlankGuardDistance (155 m) behind the line, along the approach axis (+z): taking that off, it must sit
+                // on the perpendicular through the nearest wall end (same z as that end), not on the wall extended toward the enemy.
+                float lineZ = t.Z - 155f;
+                float nearEndX = Math.Abs(t.X - endAX) < Math.Abs(t.X - endBX) ? endAX : endBX;
+                float nearEndZ = nearEndX == endAX ? endAZ : endBZ;
+                AssertTrue(Math.Abs(lineZ - nearEndZ) <= 25f, "guard slot " + i + " at z " + t.Z + " falls back to the perpendicular through the nearest wall end (z " + nearEndZ + ")");
+            }
+        }
+        AssertEqual(6, slots, "six line slots");
+        AssertEqual(2, guards, "two flank guards");
+    }
+
+    // An anchor whose line direction lies 50 degrees off perpendicular (the planner never makes one) is laid at the 30 degree limit.
+    private static void LineDirectionIsClampedToTheAngleLimit()
+    {
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        foreach (float sign in new[] { 1f, -1f })
+        {
+            float r = 50f * (float)Math.PI / 180f;
+            var anchor = new TacticalDefensiveLineAnchor(true, DoctrineTargetPoint.From(400f, -400f), objective.ApproachAvenue, 600f, 260f, false,
+                "terrain-line:wall", terrainLine: true, lineDirX: -(float)Math.Cos(r), lineDirZ: sign * (float)Math.Sin(r), lineHalfLength: 400f);
+            CommandNodeOperationalState[] nodes = SixDefenderNodes(10);
+            // Command index 7 of 10 on the assembly line stands at lane 0.8 x 600 x (7 / 9 - 0.5) = 133 m.
+            TacticalBattleLinePlan plan = TacticalBattleLinePlanner.PlanNode(nodes[7], CommandTaskType.FormUp, objective, true, 7, default(TacticalBattlefrontSnapshot), 10, anchor);
+            float lane = 0.8f * 600f * (7f / 9f - 0.5f);
+            float along = plan.PrimaryTarget.Z - (-400f);
+            AssertNear(Math.Abs(lane) * (float)Math.Tan(30.0 * Math.PI / 180.0), Math.Abs(along), 4f, "sign " + sign + ": the lane climbs at the 30 degree limit, not 50");
+        }
+    }
+
+    // Scope register (verify r2): a generic approach intercept (no road, no crossing) formed its line slots 210 m in FRONT of its own
+    // intercept point (z -790, past the enemy's entry at -760). Every approach intercept, corridor or generic, is a line to hold:
+    // every order of a Defender stands on the own side of it (no nearer the enemy than the intercept) and not past the objective.
+    private static void InterceptSlotsStandOnTheOwnSide()
+    {
+        foreach (string kind in new[] { "crossing", "road", "generic" })
+        foreach (float originZ in new[] { -760f, -1400f })
+        {
+            var avenue = TacticalApproachAvenueEstimate.Create(new TacticalMapPoint(400f, originZ), new TacticalMapPoint(400f, -360f),
+                TacticalApproachAvenueSource.ScheduledArrival, 0.9f, roadAnchored: kind == "road", crossingAnchored: kind == "crossing", "t");
+            var objective = new BattlefieldObjectiveEstimate("o", TacticalObjectiveType.VictoryPoint, 0f, 0.8f, false, 0.6f, 400f, -360f, 0.2f, 0.2f, avenue);
+            CommandNodeOperationalState[] nodes = SixDefenderNodes(6);
+            var operation = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, "o", 900f);
+            TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, TacticalBattlefrontGeometry.Build(nodes, objective), nodes.Length);
+            string label = kind + "/" + originZ;
+            AssertTrue(anchor.HasAnchor && anchor.Reason.StartsWith("approach-intercept", StringComparison.Ordinal), label + ": an intercept anchor, " + anchor.Reason);
+            AssertTrue(anchor.Center.Z < -360f - 150f, label + ": the intercept lies in front of the objective, z " + anchor.Center.Z);
+            CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, new BattlefieldPictureSnapshot(new[] { objective }), 5000f, 100f, 0.2f, BattleStance.Defender);
+            for (int i = 0; i < orders.Length; i++)
+            {
+                float z = orders[i].PrimaryTarget.Z;
+                // The axis is +z (the enemy comes from lower z): own side = higher z.
+                AssertTrue(z >= anchor.Center.Z, label + ": order " + i + " (" + orders[i].Task + ") at z " + z + " is not in front of the intercept at " + anchor.Center.Z);
+                AssertTrue(z <= -360f + 400f, label + ": order " + i + " stays near the defended objective, z " + z);
+                if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) >= 0)
+                    AssertTrue(z > originZ + 200f, label + ": the line slot " + i + " stands well inside the enemy's entry at " + originZ + ", z " + z);
+            }
+            AssertContains(orders[2].Reason, kind == "generic" ? "defensive-side-intercept" : "defensive-side-corridor", label + " reason");
+        }
+    }
+
+    private static void OnlyARiverAnchorsAFlank()
+    {
+        // A creek (3), a forest (14), a road (7) and a swamp (15) beside the end are not vanilla's river id 4.
+        foreach (int id in new[] { 3, 14, 7, 15 })
+        {
+            int captured = id;
+            TerrainPicture p = Build(Grid(Map, (x, z) => (x >= 600 && x < 640) ? captured : Grass), Map, Flat());
+            AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(p, 560f, -400f, 1f, 0f), "terrain id " + id + " 40 m from the end does not anchor it");
+        }
+        TerrainPicture river = Build(Grid(Map, (x, z) => (x >= 600 && x < 640) ? River : Grass), Map, Flat());
+        AssertTrue(TacticalTerrainLinePlanner.FlankAnchored(river, 560f, -400f, 1f, 0f), "control: the river does");
+    }
+
+    // ------------------------------------------------------------------ verify r1: the ground the own side has to cross
+
+    private static List<ObjectiveObservationInput> ReadObjectiveAt(TerrainPicture picture, Func<bool> enabled, float x, float z)
+    {
+        BattleSnapshot source = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f) });
+        var observations = new List<ObjectiveObservationInput> { Observation(x, z) };
+        Func<TerrainPicture> savedProvider = TerrainPicture.Provider;
+        Func<bool> savedEnabled = TerrainPicture.PlanningEnabled;
+        try
+        {
+            TerrainPicture.Provider = () => picture;
+            TerrainPicture.PlanningEnabled = enabled;
+            TacticalVisionRuntimeAdapter.ApplyTerrainPicture(observations, source);
+        }
+        finally
+        {
+            TerrainPicture.Provider = savedProvider;
+            TerrainPicture.PlanningEnabled = savedEnabled;
+        }
+        return observations;
+    }
+
+    private static void EnemyHeldObjectiveWaterIsOnOurSide()
+    {
+        // We stand at z -700; the objective is at z -400 (toward +z from us). A river band beyond it (z -300..-240) is the enemy's
+        // side; a band between us and it (z -560..-500) is ours to cross.
+        TerrainPicture beyond = Build(Grid(Map, (x, z) => (z - Map >= -300 && z - Map < -240) ? River : Grass), Map, Flat());
+        TerrainPicture between = Build(Grid(Map, (x, z) => (z - Map >= -560 && z - Map < -500) ? River : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(beyond, () => true, 400f, -400f)[0].TerrainStrength, "a river beyond the objective is no obstacle to us");
+        AssertNear(0.4f, ReadObjectiveAt(between, () => true, 400f, -400f)[0].TerrainStrength, 0.0001f, "a river between us and the objective is");
+    }
+
+    private static void EnemyHeldObjectiveApproachIsOnOurSide()
+    {
+        // Swamp (15) across everything beyond the objective, or across everything between us and it.
+        TerrainPicture beyond = Build(Grid(Map, (x, z) => (z - Map >= -400) ? 15 : Grass), Map, Flat());
+        TerrainPicture between = Build(Grid(Map, (x, z) => (z - Map < -400) ? 15 : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(beyond, () => true, 400f, -400f)[0].ApproachDifficulty, "a swamp behind the objective does not slow our approach");
+        AssertNear(1f, ReadObjectiveAt(between, () => true, 400f, -400f)[0].ApproachDifficulty, 0.0001f, "a swamp between us and it does");
+    }
+
+    private static void EnemyHeldObjectiveAxisUsesBothCoordinates()
+    {
+        // The objective is off to the side (700, -400) of our centroid (400, -700): the way to it runs along the diagonal, and a river
+        // band across that diagonal (x + z in -60..20) lies between us and it; the same kind of band beyond it (x + z in 600..700) does not.
+        TerrainPicture column = Build(Grid(Map, (x, z) => (x + (z - Map) >= -60 && x + (z - Map) < 20) ? River : Grass), Map, Flat());
+        AssertNear(0.4f, ReadObjectiveAt(column, () => true, 700f, -400f)[0].TerrainStrength, 0.0001f, "a river band between us and an objective off to the side");
+        TerrainPicture far = Build(Grid(Map, (x, z) => (x + (z - Map) >= 600 && x + (z - Map) < 700) ? River : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(far, () => true, 700f, -400f)[0].TerrainStrength, "a river beyond it, off to the side, is not ours to cross");
+    }
+
+    private static void ClassificationFollowsThePlanningFlag()
+    {
+        BattleTerrainGrid grid = GridWithCrossings(Map, (x, z) => Grass, new[] { 400f }, new[] { -400f }, new[] { Bridge });
+        TerrainPicture p = Build(grid, Map, Flat());
+        AssertEqual(TacticalObjectiveType.Bridge, ReadObjectiveAt(p, () => true, 410f, -400f)[0].Type, "flag on: the bridge is read");
+        ObjectiveObservationInput off = ReadObjectiveAt(p, () => false, 410f, -400f)[0];
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, off.Type, "flag off: the vanilla objective keeps its type");
+        AssertFalse(off.TypeAnchorVerified, "...unverified");
+        AssertEqual(0f, off.TerrainStrength, "...with no terrain strength");
+    }
+
+    // The two Current()/CurrentForPlanning() splits and the reverse-slope flag live in runtime files the harness does not build.
+    private static void PlumbingFromTheArmyAndEvidenceIsPinned()
+    {
+        string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
+        FlankResponseTests.AssertPinned(army, "HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);", "the army passes the reverse-slope plan to the doctrine build");
+        string evidence = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyEvidenceBuilder.cs");
+        FlankResponseTests.AssertPinned(evidence, "ClassifyFromPicture(TerrainPicture.Current(), enemyVisible.FrontAxis)", "playbook terrain reads the picture whatever the planning flag says");
+        FlankResponseTests.AssertPinned(evidence, "crestLine: CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), enemyVisible.FrontAxis)", "the crest line follows the planning flag");
+        FlankResponseTests.AssertPinned(evidence, "_knownEnemyBuffer, TerrainPicture.CurrentForPlanning());", "strong-ground evidence follows the planning flag");
+        string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        FlankResponseTests.AssertPinned(ledger, "terrainStrength: observation.TerrainStrength", "the ledger passes the observation's terrain strength");
+    }
+
+    private static void BuildingIndexIsIncremental()
+    {
+        // 640 single buildings spread out plus one cluster of three: the index stages are chunked (no unit grows with the building
+        // count), and the town is still found.
+        const int size = 4000;
+        BattleTerrainGrid grid = Grid(size, (x, z) => Grass);
+        var bx = new List<float>(); var bz = new List<float>();
+        for (int i = 0; i < 640; i++) { bx.Add(100f + (i % 32) * 120f); bz.Add(-100f - (i / 32) * 190f); }
+        bx.AddRange(new[] { 3500f, 3520f, 3540f }); bz.AddRange(new[] { -3500f, -3510f, -3520f });
+        long Units(float[] x, float[] z)
+        {
+            var builder = new TerrainPictureBuilder(grid, size, size, TerrainShapeRules.Shipped);
+            var heights = new FnHeights(size, size, Flat());
+            var covers = new ListCover(null);
+            var buildings = new ListBuildings(x, z);
+            long t = 0;
+            int guard = 0;
+            while (!builder.Step(heights, covers, buildings, 0L, () => ++t))
+                if (builder.Failed || ++guard > 1000000) break;
+            AssertTrue(builder.Picture.Ready, "ready");
+            return builder.TotalUnits;
+        }
+        float[] allX = bx.ToArray(), allZ = bz.ToArray();
+        long without = Units(new float[0], new float[0]);
+        long with = Units(allX, allZ);
+        // 643 buildings = 11 chunks of 64: collect, count, place and towns are a unit per chunk (about 42 units over the empty build's); one
+        // unbucketed index unit would give about 23.
+        AssertTrue(with - without >= 40, "the building stages are chunked, " + (with - without) + " units for 643 buildings");
+        TerrainPicture p = Build(grid, size, Flat(), bx: allX, bz: allZ);
+        AssertTrue(p.TownNear(3520f, -3510f, 40f), "the cluster is a town after the chunked index");
+        AssertFalse(p.TownNear(100f, -100f, 40f), "a lone building is not");
+    }
+}

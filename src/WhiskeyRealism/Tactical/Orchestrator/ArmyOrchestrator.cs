@@ -13,16 +13,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct ArmyEvidence
     {
-        public ArmyEvidence(float currentOdds, TerrainKind terrain, int defaultMainEffortSector)
+        public ArmyEvidence(float currentOdds, TerrainKind terrain, int defaultMainEffortSector, TerrainLine crestLine = default(TerrainLine))
         {
             CurrentOdds = currentOdds;
             Terrain = terrain;
             DefaultMainEffortSector = defaultMainEffortSector;
+            CrestLine = crestLine;
         }
 
         public float CurrentOdds { get; }
         public TerrainKind Terrain { get; }
         public int DefaultMainEffortSector { get; }
+
+        /// <summary>BC12: the best crest across the front from the terrain picture (Has = false when none, or no picture).</summary>
+        public TerrainLine CrestLine { get; }
     }
 
     /// <summary>
@@ -247,7 +251,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 artilleryFraction: artilleryFraction,
                 delayingDefensePressure: delayingDefensePressure,
                 defensivePressure: defensivePressure,
-                stance: stance);
+                stance: stance,
+                hasCrestLine: evidence.CrestLine.Has);
             var pb = _catalog?.Select(ctx);
             if (pb == null)
             {
@@ -1147,7 +1152,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents));
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents),
+                HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
         }

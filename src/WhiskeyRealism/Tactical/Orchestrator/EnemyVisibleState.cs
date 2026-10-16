@@ -18,18 +18,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public const float MaxKnowableOdds = 10f;
 
-        public EnemyVisibleSector(int sectorId, float ownStrength, float enemyStrength, bool recentFire)
+        public EnemyVisibleSector(int sectorId, float ownStrength, float enemyStrength, bool recentFire, float enemyStrongGroundShare = 0f)
         {
             SectorId = sectorId;
             OwnStrength = SanitizeStrength(ownStrength);
             EnemyStrength = SanitizeStrength(enemyStrength);
             RecentFire = recentFire;
+            EnemyStrongGroundShare = float.IsNaN(enemyStrongGroundShare) ? 0f : Math.Max(0f, Math.Min(1f, enemyStrongGroundShare));
         }
 
         public int SectorId { get; }
         public float OwnStrength { get; }
         public float EnemyStrength { get; }
         public bool RecentFire { get; }
+
+        /// <summary>
+        /// BC12: the share (0-1) of the band's visible enemy strength standing (no waypoint) on ground whose terrain strength is at
+        /// least TerrainPicture.StrongGroundStrength. Visible enemies only: a remembered position is not read as standing anywhere.
+        /// </summary>
+        public float EnemyStrongGroundShare { get; }
 
         public bool HasEnemy => EnemyStrength > 0f;
 
@@ -53,8 +60,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct FrontUnitSample
     {
-        public FrontUnitSample(int instanceId, float x, float z, float strength, bool recentFire)
+        public FrontUnitSample(int instanceId, float x, float z, float strength, bool recentFire, bool visible = false, bool onStrongGround = false)
         {
+            Visible = visible;
+            OnStrongGround = visible && onStrongGround;
             InstanceId = instanceId;
             X = x;
             Z = z;
@@ -67,6 +76,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float Z { get; }
         public float Strength { get; }
         public bool RecentFire { get; }
+
+        /// <summary>BC12: an enemy currently Visible (not remembered); own samples leave it false.</summary>
+        public bool Visible { get; }
+
+        /// <summary>BC12: a Visible, standing enemy on ground at or above the strong-ground strength.</summary>
+        public bool OnStrongGround { get; }
     }
 
     /// <summary>
@@ -108,6 +123,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bands = axis.IsValid && axis.BandCount > 0 ? axis.BandCount : 1;
             var own = new float[bands];
             var enemy = new float[bands];
+            var enemyVisible = new float[bands];
+            var enemyStrong = new float[bands];
             var fire = new bool[bands];
             var populated = new bool[bands];
 
@@ -132,6 +149,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (u.InstanceId != 0 && !seen.Add(u.InstanceId)) continue;
                     int b = axis.SectorOf(u.X, u.Z);
                     enemy[b] += u.Strength;
+                    if (u.Visible) enemyVisible[b] += u.Strength;
+                    if (u.OnStrongGround) enemyStrong[b] += u.Strength;
                     populated[b] = true;
                 }
             }
@@ -140,7 +159,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int b = 0; b < bands; b++)
             {
                 if (!populated[b]) continue;
-                result.Add(new EnemyVisibleSector(b, own[b], enemy[b], fire[b]));
+                result.Add(new EnemyVisibleSector(b, own[b], enemy[b], fire[b], enemyVisible[b] > 0f ? enemyStrong[b] / enemyVisible[b] : 0f));
             }
             return result.ToArray();
         }
