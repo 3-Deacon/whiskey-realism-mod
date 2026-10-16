@@ -31,7 +31,7 @@ Latest release: [v0.2.2](https://github.com/3-Deacon/whiskey-realism-mod/release
 
 ## Goals
 
-- **Strategic awareness.** AI commits to phased operational plans and reviews them daily instead of randomly picking objectives turn by turn.
+- **Strategic awareness.** Each AI side picks one main effort a day from what its own units can see, allocates its armies around it, scouts before it commits, and keeps vanilla's chapter pacing, instead of randomly picking objectives turn by turn.
 - **Historical character without scripting.** Era-based doctrine progression (1861 amateur → 1864-65 total war), faction profiles (CSA defensive-aggressive, Union slow-coordinated-pressure), and ~25 hand-coded historical commander personalities (Lee, McClellan, Grant, Sherman, Hood, Johnston, etc.) — composed additively so the same engine produces both Lee's army and Hood's army with the right feel.
 - **Recognizable but not deterministic succession.** ~12 canonical historical events (Lee taking ANV command, Grant rising to General-in-Chief, McClellan's removal, Hood replacing Johnston, etc.) gated on date AND war-state. They fire when conditions reasonably hold; if your campaign has gone unusually, alternate histories emerge.
 - **W&L-aware.** Player-commanded units are not steamrolled by the AI's strategic decisions — the existing `DLC_WL.dlc_scenarioactive` gate is respected and extended.

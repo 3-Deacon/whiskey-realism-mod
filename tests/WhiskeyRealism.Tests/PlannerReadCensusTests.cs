@@ -459,7 +459,7 @@ internal static class CensusRows
         "FormationFlags.HasPath | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview (Moving); MoveQueued also G5a MoveTracker.ShouldIssue via CampaignMover",
         "FormationFlags.MoveQueued | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview (Moving); MoveQueued also G5a MoveTracker.ShouldIssue via CampaignMover",
         "FormationRecord.InstanceId | P/ForceAllocator.cs, P/CampaignMover.cs, P/ReconExecutor.cs | every executor (live lookup)",
-        "FormationRecord.UnitKey | P/PlannerSnapshot.cs | G6 sidecar rebinding (PlannerRebind, IndexOfKey); G5a MoveTracker records",
+        "FormationRecord.UnitKey | P/PlannerSnapshot.cs | G6 sidecar rebinding (PlannerRebind, IndexOfKey)",
         "FormationRecord.UnitTyp | P/CommanderAppointmentPlanner.cs, P/MarchTime.cs | G2 TryPlan target commands; G3 MarchTime.EstimateDays",
         "FormationRecord.X | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs | G3 TheaterPlanner.Plan, G4 ForceAllocator.Allocate, G1b ReconPlanner, G5b, G8",
         "FormationRecord.Z | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs | G3 TheaterPlanner.Plan, G4 ForceAllocator.Allocate, G1b ReconPlanner, G5b, G8",

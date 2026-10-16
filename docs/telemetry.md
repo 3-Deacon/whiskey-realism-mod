@@ -204,6 +204,8 @@ Registered together in `TelemetryTagPolicy` (plan G0). Everything is campaign la
 | `Appointment` | Write | commander appointments and succession reseats (one a day at most) |
 | `DepotTask`, `RailroadSteer`, `CapitalFloor`, `ReplacementFlow` | Write | depot construction wishes, the rail line steer, the capital floor and the replacement-flow routing |
 
+`[DefenseIntent]` (Decision, the existing capital/asset defense ledger, unchanged by the planner) carries two fields the smoke reads: `scale` is the threat's `ThreatScale` (`None`, `Raid`, `Landing`, `MajorLanding`, `DecisiveLanding`; `-` with no threat) and `assetRole` is the threatened asset's `AssetStrategicRole` flags (`-` with no threat), next to `posture`, `sourceKind`, `threat`, `enemy`, `desired`, `selected`, `adequate`, `understrength`, `held` and `responseSignature`.
+
 Retired with the phased-plan CIC (G6): the tags `HistoricalOperation`, `ArmyArea`, `OperationalProbe` and `CoordinatedOps` (and the `campaign.coordinated-operations` scope); `ArmyGroup` (Write) replaces `ArmyArea` for the historical army-group steering that remains. A smoke log must show none of the retired tags.
 
 ## W&L order flow rows
