@@ -50,6 +50,11 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly int[] _builtBattleKey = { 0, 0 };
         private static long _tickId;
 
+        // BC11 decision 6: per-side watch of vanilla's own flank moves (lastaiorder 0 -> 4 / 5).
+        private static readonly VanillaFlankMoveWatch[] _flankMoves = { new VanillaFlankMoveWatch(), new VanillaFlankMoveWatch() };
+        private static readonly int[] _flankMoveIds = new int[16];
+        private static readonly int[] _flankMoveDirections = new int[16];
+
         private static BattleOrderIntent[] _winners = new BattleOrderIntent[256];
         private static readonly BattleOrderIntent[] _retries = new BattleOrderIntent[32];
         private static readonly OrderOutcome[] _outcomes = new OrderOutcome[256];
@@ -144,6 +149,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 return;
             }
 
+            WatchVanillaFlankMoves(battle, alliance, snapshot);
+
             if (!_producersLogged)
             {
                 _producersLogged = true;
@@ -222,6 +229,44 @@ namespace WhiskeyRealism.Tactical.Battle
             stats.EmitIfDue(alliance);
         }
 
+        // BC11 decision 6: one TacticalVanillaFlankMove Observation row per vanilla FlankMove (117089-117107) a group
+        // starts; with Enable Tactical Observer. Smoke item 2.33 compares the rate with the tally fix on and off.
+        private static void WatchVanillaFlankMoves(AIBattle battle, int alliance, BattleSnapshot snapshot)
+        {
+            try
+            {
+                if (alliance < 0 || alliance >= _flankMoves.Length) return;
+                int count = _flankMoves[alliance].Observe(snapshot, _flankMoveIds, _flankMoveDirections);
+                if (count == 0 || Plugin.Instance == null || !Plugin.Instance.EnableTacticalObserver.Value) return;
+                int macroAi = battle.macroai;
+                string stance = (TacticalBattleCoordinator.GetSideOrchestrator(alliance)?.Army?.CurrentBattleStance ?? BattleStance.Meeting).ToString();
+                bool tallyFix = Plugin.EnableVanillaFlankThreatTallyFix != null && Plugin.EnableVanillaFlankThreatTallyFix.Value;
+                for (int i = 0; i < count; i++)
+                {
+                    int groupId = _flankMoveIds[i];
+                    int direction = _flankMoveDirections[i];
+                    int index = snapshot.IndexOfOwn(groupId);
+                    bool playerOwned = index >= 0 && (snapshot.Own[index].Flags & UnitFlags.PlayerOwned) != 0;
+                    string group = index >= 0 ? PostureTelemetry.NameOf(snapshot, index) : "#" + groupId;
+                    TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.State, "TacticalVanillaFlankMove", TelemetrySeverity.Info,
+                        ev => ev
+                            .WithSide(alliance)
+                            .WithUnit(group)
+                            .WithDecision("TacticalVanillaFlankMove", direction == 0 ? "left" : "right", "side=" + alliance + "|group=" + groupId + "|direction=" + direction)
+                            .WithField("direction", direction)
+                            .WithField("macroai", macroAi)
+                            .WithField("stance", stance)
+                            .WithField("playerOwned", playerOwned)
+                            .WithField("tallyFix", tallyFix));
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:flank-move-watch-failed",
+                    "[BattleCore] vanilla flank-move watch threw: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
         // AIBattle.bunits is a private static field (3306) holding the battle's
         // BattleUnits.
         internal static BattleUnits ResolveBattleUnits()
@@ -252,6 +297,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 _builtFrame[a] = -1;
                 _builtBattleKey[a] = 0;
                 _stats[a].Clear();
+                _flankMoves[a].Clear();
             }
         }
 

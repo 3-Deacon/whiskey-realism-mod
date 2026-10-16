@@ -297,6 +297,9 @@ namespace WhiskeyRealism.Tactical.Battle
             record.CoverObject = reg.coverobject;
             record.FriendlyRoutedNear = reg.friendlyroutednear;
             record.FireRange = reg.firerange;
+            record.ReceivedFire = reg.receivedfire != null && reg.receivedfire.Count > 0;
+            record.LastAiOrder = group ? reg.lastaiorder : 0;
+            record.UnitWidth = group ? 0f : reg.GetWidth();
             record.LastAiChargeTime = reg.lastaichargetime;
             record.FireFromFlank = reg.firefromflank;
             var aiGroup = reg.groupaiobject;

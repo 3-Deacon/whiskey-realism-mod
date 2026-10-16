@@ -44,8 +44,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// </summary>
     public readonly struct CorpsAssignment
     {
-        public CorpsAssignment(string childId, PlayRectKind rectKind, int rectIndex, float rectAnchorX, float rectAnchorZ, float startTimeOffsetSeconds)
+        public CorpsAssignment(string childId, PlayRectKind rectKind, int rectIndex, float rectAnchorX, float rectAnchorZ, float startTimeOffsetSeconds,
+            bool envelops = false)
         {
+            Envelops = envelops;
             ChildId = childId ?? string.Empty;
             RectKind = rectKind;
             RectIndex = rectIndex;
@@ -60,6 +62,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float RectAnchorX { get; }
         public float RectAnchorZ { get; }
         public float StartTimeOffsetSeconds { get; }
+        /// <summary>BC11: the rect this corps was assigned has PlayRect.Envelops.</summary>
+        public bool Envelops { get; }
     }
 
     /// <summary>
@@ -148,7 +152,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     rectIndex: rectIdx,
                     rectAnchorX: rect.AnchorX,
                     rectAnchorZ: rect.AnchorZ,
-                    startTimeOffsetSeconds: rect.StartTimeOffsetSeconds));
+                    startTimeOffsetSeconds: rect.StartTimeOffsetSeconds,
+                    envelops: rect.Envelops));
             }
 
             return result;

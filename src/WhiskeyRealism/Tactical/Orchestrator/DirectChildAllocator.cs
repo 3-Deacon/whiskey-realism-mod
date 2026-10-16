@@ -17,12 +17,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct ReserveReleaseContext
     {
-        public ReserveReleaseContext(float globalOdds)
+        public ReserveReleaseContext(float globalOdds, bool flankRelease = true)
         {
             GlobalOdds = float.IsNaN(globalOdds) || float.IsInfinity(globalOdds) || globalOdds < 0f ? 0f : globalOdds;
+            FlankRelease = flankRelease;
         }
 
         public float GlobalOdds { get; }
+
+        /// <summary>
+        /// BC11 decision 3 (Enable Flank Response And Envelopment): a threatened wing in contact draws the nearest
+        /// Reserve child to guard its flank. A default-constructed context releases none.
+        /// </summary>
+        public bool FlankRelease { get; }
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -107,6 +114,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             var roles = new DirectChildRole[snapshots.Count];
             for (int i = 0; i < roles.Length; i++) roles[i] = DirectChildRole.Unknown;
+            // BC11 decision 4: the zone assignment of each child whose role came from its rect (a maneuver rides with it).
+            var zoneOf = new CorpsAssignment[snapshots.Count];
+            var fromZone = new bool[snapshots.Count];
 
             // Zone-based assignment FIRST — geometric play overrides evidence.
             // Build childId → assignment lookup.
@@ -131,6 +141,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (zoneByChildId.TryGetValue(snapshots[i].ChildId, out var za))
                     {
                         roles[i] = PlayCorpsAssignment.RoleForRectKind(za.RectKind);
+                        zoneOf[i] = za;
+                        fromZone[i] = true;
                     }
                 }
             }
@@ -300,7 +312,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     axisSector,
                     supportPriority,
                     aggressionBias01,
-                    perChildEnemyIntent[i]);
+                    perChildEnemyIntent[i],
+                    fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
+                    fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown);
             }
             return intents;
         }
@@ -315,6 +329,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ///   2. the plan is in Exploit -> SupportMain behind the main effort;
         ///   3. global odds reach the plan's ReserveCommitTriggerOdds ->
         ///      SupportMain.
+        ///   4. (BC11) a wing child (the leftmost or rightmost band) in contact with high flank exposure
+        ///      (bucket 3 and over) releases the nearest Reserve child by sector to guard that flank
+        ///      (RefuseLeft / RefuseRight, task GuardFlank for a Defender node), with the wing's sector as the
+        ///      axis override. A role change, not a mover: the posture producer executes it.
         /// Returns per-child axis-sector overrides (-1 = none).
         /// </summary>
         private static int[] ReleaseReserves(
@@ -354,7 +372,52 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     roles[i] = DirectChildRole.SupportMain;
                 }
             }
+
+            if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
             return axisOverride;
+        }
+
+        // BC11 decision 3. Wings are the extreme sectors of the children (the coordinator's leftWing / rightWing
+        // convention: minSector, maxSector); one reserve per threatened wing, nearest by sector, lowest index on a tie.
+        private static void ReleaseReserveToThreatenedWing(
+            IReadOnlyList<DirectChildEvidence> evidence,
+            DirectChildRole[] roles,
+            int[] axisOverride)
+        {
+            int minSector = int.MaxValue, maxSector = int.MinValue;
+            for (int j = 0; j < roles.Length; j++)
+            {
+                int sector = evidence[j].PrimarySector;
+                if (sector < minSector) minSector = sector;
+                if (sector > maxSector) maxSector = sector;
+            }
+            if (roles.Length < 2 || minSector == maxSector) return;
+
+            for (int w = 0; w < roles.Length; w++)
+            {
+                var wing = evidence[w];
+                bool left = wing.PrimarySector == minSector;
+                bool right = wing.PrimarySector == maxSector;
+                if (!left && !right) continue;
+                if (roles[w] == DirectChildRole.Reserve) continue;
+                if (!wing.ContactFlag || wing.FlankExposureBucket < FlankExposureRefuseThreshold) continue;
+
+                int pick = -1;
+                int pickDistance = int.MaxValue;
+                for (int r = 0; r < roles.Length; r++)
+                {
+                    if (r == w || roles[r] != DirectChildRole.Reserve) continue;
+                    int distance = Math.Abs(evidence[r].PrimarySector - wing.PrimarySector);
+                    if (distance < pickDistance)
+                    {
+                        pick = r;
+                        pickDistance = distance;
+                    }
+                }
+                if (pick < 0) continue;
+                roles[pick] = left ? DirectChildRole.RefuseLeft : DirectChildRole.RefuseRight;
+                axisOverride[pick] = wing.PrimarySector;
+            }
         }
 
         /// <summary>
@@ -421,7 +484,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.AggressionBias01, x.EnemyIntent);
+                role, axis, axisSector, support, x.AggressionBias01, x.EnemyIntent, x.Maneuver, x.ZoneRectKind);
+
+        /// <summary>
+        /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)
+        /// with a start offset carries only the start delay (the child holds, then takes its allocator role); every other rect
+        /// carries none. The Hold-until-offset reads StartOffsetSeconds, the march reads the anchor.
+        /// </summary>
+        internal static ManeuverSpec ManeuverOf(in CorpsAssignment zone)
+        {
+            if (zone.Envelops)
+                return new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: true);
+            bool wing = zone.RectKind == PlayRectKind.LeftWing || zone.RectKind == PlayRectKind.RightWing;
+            return wing && zone.StartTimeOffsetSeconds > 0f
+                ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false)
+                : default(ManeuverSpec);
+        }
 
         /// <summary>
         /// Aggression threshold above which the local-odds gate is bypassed.

@@ -13,7 +13,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float ownStrength,
             float nowSeconds,
             float reserveFraction = 0f,
-            BattleStance stance = BattleStance.Meeting)
+            BattleStance stance = BattleStance.Meeting,
+            ManeuverNodeTable maneuvers = null)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -42,10 +43,15 @@ namespace WhiskeyRealism.Tactical.Operations
                 CommandNodeOperationalState node = nodes[i];
                 CommandTaskType task = ResolveTask(node.Role, operation, objective, objectiveMatched, odds);
                 task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length);
+                // BC11 decision 4: a node of a maneuvering child carries the maneuver's task (never for a Defender).
+                ManeuverNodeEntry maneuver = default(ManeuverNodeEntry);
+                bool maneuvering = stance != BattleStance.Defender && maneuvers != null && maneuvers.TryGet(node.NodeId, out maneuver);
+                if (maneuvering) task = maneuver.Task;
                 // BC9 stance guard, whatever the shape or phase: a Defender gets no
                 // Probe and no attack-stance task.
                 task = TacticalDecisionDoctrine.TaskForStance(task, stance);
                 DoctrineAllowedIdleReason idle = ResolveIdle(node.Role, task, operation);
+                if (maneuvering && maneuver.Holds) idle = DoctrineAllowedIdleReason.FormingUp;
                 TacticalBattleLinePlan linePlan = TacticalBattleLinePlanner.PlanNode(
                     node,
                     task,
@@ -63,7 +69,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     reserveFraction);
                 sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
-                orders.Add(CommandDoctrineOrder.Create(
+                CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
@@ -75,7 +81,14 @@ namespace WhiskeyRealism.Tactical.Operations
                     operation.MinimumCommitSeconds,
                     nowSeconds,
                     objective.Confidence01,
-                    linePlan.Reason).WithSop(sop));
+                    linePlan.Reason).WithSop(sop);
+                if (maneuvering)
+                {
+                    order = order.WithManeuver(
+                        maneuver.HasTarget ? DoctrineTargetPoint.From(maneuver.TargetX, maneuver.TargetZ) : DoctrineTargetPoint.None,
+                        idle, maneuver.Heading, maneuver.Holds, "maneuver-" + maneuver.Reason);
+                }
+                orders.Add(order);
             }
 
             return orders.ToArray();
