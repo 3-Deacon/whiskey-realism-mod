@@ -366,6 +366,7 @@ internal static partial class TerrainPictureTests
         AssertTrue(anchor.HasAnchor, "with a picture the best terrain line becomes the anchor: " + anchor.Reason);
         AssertTrue(anchor.Reason.StartsWith("terrain-line:crest", StringComparison.Ordinal), "reason names the line kind: " + anchor.Reason);
         AssertFalse(anchor.CorridorAnchor, "a terrain line is not a corridor");
+        AssertFalse(anchor.AnchoredLeft || anchor.AnchoredRight, "a crest line's own ends are not 'anchored by a crest': only a river (or another crest) rests them");
         AssertTrue(anchor.FrontageWidth >= 350f && anchor.FrontageWidth <= 760f, "frontage clamped to 350-760, " + anchor.FrontageWidth);
         AssertNear(-400f, anchor.Center.Z, 12f, "centre at the crest's forward edge (the threat axis is -z: forward is lower z)");
         // Under ReverseSlopeDefense the centre sits 80 m behind the crest, on the own side.
