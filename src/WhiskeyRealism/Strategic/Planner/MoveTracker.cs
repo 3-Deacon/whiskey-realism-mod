@@ -227,6 +227,17 @@ namespace WhiskeyRealism.Strategic.Planner
             _entries.Remove(instanceId);
         }
 
+        // True when the formation is on a move toward (tx, tz) within `radius` that was issued at an earlier review than daySerial and
+        // not judged a failure: Issued (judged at this review's mover pass, which runs after the executors) or Confirmed (underway).
+        // A queued move has not started and a failed or given-up one is not going there. The depot executor reads it before it wishes
+        // ahead of a builder's arrival (plan G5c, verify r2 F6a).
+        public bool MarchingToward(int instanceId, float tx, float tz, float radius, int daySerial)
+        {
+            if (!_entries.TryGetValue(instanceId, out var e) || (e.State != State.Issued && e.State != State.Confirmed)) return false;
+            if (e.IssuedDay >= daySerial) return false;
+            return Distance(e.TargetX, e.TargetZ, tx, tz) <= radius;
+        }
+
         public void Clear()
         {
             _entries.Clear();

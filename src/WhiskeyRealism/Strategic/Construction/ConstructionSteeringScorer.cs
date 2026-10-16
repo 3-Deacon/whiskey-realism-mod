@@ -42,6 +42,9 @@ namespace WhiskeyRealism.Strategic.Construction
             return Decision(Clamp(fiscalMultiplier, 0.1f, 3f), "fiscal-ledger-neutral");
         }
 
+        // Private buildings only: this is #20's scaling of a private-building start. The other kinds' suppressions have their own
+        // readers (campaign planner construction steering, G5c): a SupplyDepot candidate's through DepotTaskLedger.Sync, a Railroad
+        // candidate's (the CSA rail cap) through ConstructionSteeringBoard, which excludes the line from the railroad Prefix's choice.
         private static ConstructionSuppressionReason? SuppressionFor(ConstructionOutput output, int buildingTypeId, string buildingName)
         {
             if (output.Suppressions == null) return null;

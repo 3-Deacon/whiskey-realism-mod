@@ -194,6 +194,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionProbabilitySanitizer.cs" Link="ConstructionProbabilitySanitizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\FortConstructionGovernor.cs" Link="FortConstructionGovernor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ConstructionSteeringBoard.cs" Link="Planner\ConstructionSteeringBoard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\DepotTaskLedger.cs" Link="Planner\DepotTaskLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineScorer.cs" Link="Planner\RailLineScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineSteering.cs" Link="Planner\RailLineSteering.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphIntent.cs" Link="TelegraphIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphWishCharge.cs" Link="TelegraphWishCharge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FinancialAiLogGate.cs" Link="FinancialAiLogGate.cs" />

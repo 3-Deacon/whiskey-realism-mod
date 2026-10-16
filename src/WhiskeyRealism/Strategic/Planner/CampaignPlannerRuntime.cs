@@ -117,12 +117,16 @@ namespace WhiskeyRealism.Strategic.Planner
                     // each move was issued for, G4 takes the role from a formation that gave up on the target it would send it to.
                     var gaveUp = new List<GaveUpMove>();
                     MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);
+                    // G5c: the builders the depot ledger holds (it was written at the last review). G3 counts none of them in a mass, G4 pins
+                    // a Wished one: one published set, read once.
+                    var heldBuilders = new List<HeldBuilder>();
+                    DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
                     TheaterPlan plan;
                     string trace;
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);
                     }
                     // G1b: the recon tasks for this plan (probe verdicts on the battles it judged, then the tasks);
                     // G4's allocation below picks their formations and the sync binds the missions.
@@ -133,7 +137,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);

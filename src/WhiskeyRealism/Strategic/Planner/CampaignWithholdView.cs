@@ -109,27 +109,31 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Vanilla's offensive pool (IsUnitAvailableForOffensiveOperations 14080-14158): the formation is withheld when the
         // allocation withholds it (Reserve, CapitalGuard, DepotBuilder, Recon, Recover, Hold at the sector's need), when it is in
-        // transit, when it is a MainEffort member of the plan's mass (decision 5: only the mover launches the mass, so vanilla's
-        // own roll cannot also send it) or a Support formation (not the map-group player's) of a decision whose launch the tempo
-        // roll has not released (no Support goes ahead of the main effort). The mass and the deferred Support are offense-only
-        // clauses: WithheldFromDefense never applies them.
+        // transit, when it builds an active depot task (DepotTaskLedger.HoldsBuilder: a depot rises only while its builder stays
+        // within bugle range, so the hold outlasts the allocation's role, G5c), when it is a MainEffort member of the plan's mass
+        // (decision 5: only the mover launches the mass, so vanilla's own roll cannot also send it) or a Support formation (not the
+        // map-group player's) of a decision whose launch the tempo roll has not released (no Support goes ahead of the main
+        // effort). The mass and the deferred Support are offense-only clauses: WithheldFromDefense never applies them.
         public static bool WithheldFromOffense(int alliance, int instanceId)
         {
             if (!Read(alliance, out var allocation, out _, out var ctx)) return false;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
+            if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a)) return false;
             if (a.Withheld) return true;
             if (a.Role == FormationRole.MainEffort) return true;
             return a.Role == FormationRole.Support && !ctx.Released && instanceId != ctx.MapGroupInstanceId;
         }
 
-        // Vanilla's defence (IsUnitAvailableForDefensiveOperation 13460): withheld when the allocation withholds it or it is in
-        // transit; never the mass or the deferred-Support clause, and a Hold formation withheld at its sector's need stays
-        // available when the enemy vanilla asks about stands in that sector (vanilla passes enemyunits[j]'s position, 13610).
+        // Vanilla's defence (IsUnitAvailableForDefensiveOperation 13460): withheld when the allocation withholds it, it is in
+        // transit or it builds an active depot task; never the mass or the deferred-Support clause, and a Hold formation withheld
+        // at its sector's need stays available when the enemy vanilla asks about stands in that sector (vanilla passes
+        // enemyunits[j]'s position, 13610).
         public static bool WithheldFromDefense(int alliance, int instanceId, float enemyX, float enemyZ)
         {
             if (!Read(alliance, out var allocation, out var sectors, out _)) return false;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
+            if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a) || !a.Withheld) return false;
             if (a.Role == FormationRole.Hold && a.SectorId >= 0 && sectors != null && sectors.SectorAt(enemyX, enemyZ) == a.SectorId) return false;
             return true;
@@ -148,6 +152,19 @@ namespace WhiskeyRealism.Strategic.Planner
             plan = published;
             sectors = model;
             return true;
+        }
+
+        // The depot-builder hold for a reader outside the availability Postfixes (the fort job, FortConstructionGovernorPatch): the
+        // same picture test as every other clause here, Read (a published plan and allocation, executors allowed, the plan fresh),
+        // so a stale plan or a paused review never holds a builder (plan G5c, verify r2 F6c).
+        internal static bool HoldsDepotBuilder(int alliance, int instanceId)
+        {
+            return Read(alliance, out _, out _, out _) && HeldBuilder(alliance, instanceId);
+        }
+
+        private static bool HeldBuilder(int alliance, int instanceId)
+        {
+            return DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId);
         }
 
         private static bool Read(int alliance, out Allocation allocation, out SectorModel sectors, out ExecutorContext context)

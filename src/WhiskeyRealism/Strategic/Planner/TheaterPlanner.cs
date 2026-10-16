@@ -128,6 +128,9 @@ namespace WhiskeyRealism.Strategic.Planner
             internal readonly List<int> Scratch = new List<int>();
             // P8: moves the tracker gave up on, each with the objective it was issued for; MassFor leaves them out of that objective's mass.
             internal IReadOnlyList<GaveUpMove> GaveUp;
+            // G5c: the builders the depot ledger holds (Marching and Wished tasks): MassFor counts none of them, and the capital reserve
+            // skips a Wished one exactly as ForceAllocator does. Null: none.
+            internal IReadOnlyList<HeldBuilder> Held;
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
@@ -140,7 +143,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
-                                         IReadOnlyList<GaveUpMove> gaveUp = null)
+                                         IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)
         {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
@@ -148,7 +151,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (state == null) state = new PlannerState();
 
             var review = new ReviewTerrain(terrain, s.Areas);
-            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp };
+            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders };
             var candidates = new List<Candidate>();
             Evaluate(inputs, candidates);
             int unknown = review.Unknown, probed = 0;
@@ -572,7 +575,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId)) continue;
+                if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
                 int holds = c.HoldReserved[i];
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 if (!WithinHorizon(c, i, tx, tz)) continue;
@@ -580,6 +583,16 @@ namespace WhiskeyRealism.Strategic.Planner
                 total += Math.Max(0f, f.Strength);
             }
             return total;
+        }
+
+        // A formation the depot ledger holds as a builder is the depot's, not the mass's (G5c): the published held set, one source.
+        private static bool IsHeldBuilder(Inputs c, int instanceId)
+        {
+            var list = c.Held;
+            if (list == null) return false;
+            for (int k = 0; k < list.Count; k++)
+                if (list[k].InstanceId == instanceId) return true;
+            return false;
         }
 
         private static bool GaveUpOn(Inputs c, int instanceId, int objectiveId)
@@ -704,7 +717,7 @@ namespace WhiskeyRealism.Strategic.Planner
             int n = c.S.Own.Count;
             c.CapitalReserved = new bool[n];
             c.HoldReserved = new int[n];
-            ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved);
+            ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));
             ReserveRules.Hold(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalReserved, c.HoldReserved);
         }
 

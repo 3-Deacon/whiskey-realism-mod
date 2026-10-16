@@ -156,6 +156,9 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
+        internal static ConfigEntry<bool> EnableSupplyDepotSteering;
+        internal static ConfigEntry<bool> EnableFortSteering;
+        internal static ConfigEntry<bool> EnableRailroadSteering;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
         internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
         internal static ConfigEntry<bool> FixEngineerBranchBonus;
@@ -1056,6 +1059,27 @@ namespace WhiskeyRealism
                 "appointment pool and rank rules) on its main-effort commands, at most one appointment a day; the historical succession events add a " +
                 "bonus when their conditions hold; appointees are shielded from vanilla's job-24 swap for 60 days. Never appoints or displaces the W&L " +
                 "player or his officers, and never changes a command that holds the player's. OFF = vanilla job 24 only and no succession swaps.");
+            EnableSupplyDepotSteering = Config.Bind(
+                "Campaign Planner", "Enable Supply Depot Steering", true,
+                "Default ON. When the planner's main effort would advance past its supply reach, a formation it picks marches to a site along the " +
+                "axis and, once there, places a vanilla supply depot construction wish (the same wish vanilla's depot job places), then stays " +
+                "out of vanilla's offensive and defensive pools until the depot stands or 20 days pass. The treasury is charged as for any " +
+                "depot. Never uses the W&L player's own command. Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = " +
+                "vanilla's depot job only.");
+            EnableFortSteering = Config.Bind(
+                "Campaign Planner", "Enable Fort Steering", true,
+                "Default ON. Vanilla's fort job orders the visiting unit onto the first fortification site in its list that fits. When a site on " +
+                "the planner's main axis or in a threatened sector fits the unit, the others are hidden for that call, so vanilla orders the " +
+                "fort there (the site the construction ledger ranks highest first). Vanilla's one-order-per-side rule, its range and builder " +
+                "tests are unchanged. Works with or without Fort Construction Governor Enabled. Needs Enable Campaign Planner and Enable " +
+                "Campaign Planner Executors; OFF = vanilla's list order.");
+            EnableRailroadSteering = Config.Bind(
+                "Campaign Planner", "Enable Railroad Steering", true,
+                "Default ON. Vanilla rolls every predefined railroad line independently each tick. With this on the roll keeps vanilla's exact " +
+                "chance and number of starts (including a success on a line it cannot start, which starts nothing) and only chooses which " +
+                "startable line begins: the one that connects own supply to the main axis or a threatened sector. Not used for the player's " +
+                "alliance, the W&L commander-in-chief's side, Europe, or while vanilla's job machine is paused (vanilla's own roll runs then). " +
+                "Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's roll.");
             FixAiPerkPickRange = Config.Bind(
                 "Campaign", "Fix AI Perk Pick Range", true,
                 "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +

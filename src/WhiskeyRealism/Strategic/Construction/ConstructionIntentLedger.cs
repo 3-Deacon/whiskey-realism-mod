@@ -13,6 +13,7 @@ namespace WhiskeyRealism.Strategic.Construction
 
             var output = new ConstructionOutput();
             var suppressions = new List<ConstructionSuppression>();
+            var siteCandidates = new List<ConstructionCandidate>();
 
             output.Posture = ResolvePosture(input, options);
 
@@ -26,6 +27,7 @@ namespace WhiskeyRealism.Strategic.Construction
                         BuildingTypeId = candidate.Kind == ConstructionCandidateKind.PrivateBuilding
                             ? candidate.BuildingTypeId
                             : ConstructionSuppression.MissingBuildingTypeId,
+                        SiteIndex = candidate.SiteIndex,
                         Name = CandidateName(candidate),
                         Reason = suppressionReason
                     });
@@ -36,10 +38,13 @@ namespace WhiskeyRealism.Strategic.Construction
                 scored.Score = Score(input, options, output.Posture, scored);
                 scored.Reason = output.Posture.ToString();
                 AssignTop(output, scored);
+                if (scored.Kind == ConstructionCandidateKind.Railroad || scored.Kind == ConstructionCandidateKind.Fort)
+                    siteCandidates.Add(scored);
             }
 
             output.TopConstructionTheater = ResolveTopTheater(output);
             output.Suppressions = suppressions.ToArray();
+            output.SiteCandidates = siteCandidates.ToArray();
             output.Signature = BuildSignature(input, output);
             return output;
         }

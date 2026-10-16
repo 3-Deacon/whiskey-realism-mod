@@ -98,15 +98,32 @@ namespace WhiskeyRealism.Strategic.Planner
                 && (f.Supply01 < TheaterPlanner.RecoverSupplyBelow || f.Morale < minMorale);
         }
 
+        // The mask of the formations (indexes into s.Own) whose Wished depot task the ledger holds: the capital reserve takes no guard
+        // from them, in G3's plan and in the allocator alike (one rule). Null when there are none.
+        internal static bool[] WishedBuilders(CampaignSnapshot s, IReadOnlyList<HeldBuilder> held)
+        {
+            if (held == null || held.Count == 0) return null;
+            bool[] mask = null;
+            for (int k = 0; k < held.Count; k++)
+            {
+                if (!held[k].Wished) continue;
+                int i = s.IndexOfOwn(held[k].InstanceId);
+                if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;
+                if (mask == null) mask = new bool[s.Own.Count];
+                mask[i] = true;
+            }
+            return mask;
+        }
+
         // The capital reserve: the massable formations nearest the own capital until their
         // strength reaches the capital floor (P7).
-        internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved)
+        internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved, bool[] excluded = null)
         {
             for (int i = 0; i < reserved.Length; i++) reserved[i] = false;
             if (!s.HasCapital || capitalFloor <= 0f) return;
             var order = new List<int>();
             for (int i = 0; i < s.Own.Count; i++)
-                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement)) order.Add(i);
+                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement) && (excluded == null || !excluded[i])) order.Add(i);
             SortByDistance(s, order, s.CapitalX, s.CapitalZ);
             float held = 0f;
             for (int k = 0; k < order.Count && held < capitalFloor; k++)
