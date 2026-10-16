@@ -298,6 +298,7 @@ internal static class CapitalAndReplacementTests
         var a = new Allocation();
         a.Shortfalls.Add(1);
         a.Shortfalls.Add(2);
+        AssertNear(1.5f, ReinforcementRouting.MaxRouteFactor, 0.0001f, "plan: 1.5 x the relocation range from the recruiting cell");
         float limit = ReinforcementRouting.MaxRouteFactor * 150f; // 225
         AssertTrue(ReinforcementRouting.TryRouteRecruit(a, own, 150f, 300f + limit, 0f, out _, out _, out int to), "exactly at the limit still routes");
         AssertEqual(2, to, "...to formation 2");
@@ -432,13 +433,20 @@ internal static class CapitalAndReplacementTests
         var player = Corps(5, 550f, 3000f);
         player.Chain = WlChainClass.PlayerMapGroup;
         player.WaypointX = 480f; // where his group counts (ReserveRules.HoldPoint)
+        player.Morale = 0.5f;    // counted at strength x morale, vanilla's measure
         var ai = Corps(8, 250f, 9000f);
-        var own = new List<FormationRecord> { player, ai };
+        var secondGroup = WithChain(Corps(6, 400f, 30000f), WlChainClass.PlayerMapGroup); // a larger player group, named as a surplus
+        var command = WithChain(Corps(9, 410f, 30000f), WlChainClass.PlayerCommand);
+        var own = new List<FormationRecord> { player, ai, secondGroup, command };
         var a = new Allocation();
         a.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold, SectorId = 4 });
         a.Assignments.Add(new Assignment { InstanceId = 8, Role = FormationRole.Reserve, SectorId = 1 });
+        a.Assignments.Add(new Assignment { InstanceId = 6, Role = FormationRole.Reserve, SectorId = 1 });
+        a.Assignments.Add(new Assignment { InstanceId = 9, Role = FormationRole.Reserve, SectorId = 1 });
         a.Shortfalls.Add(5);
-        a.Surpluses.Add(5); // a stale entry: even named as a surplus he is not a source
+        a.Surpluses.Add(6); // stale entries: even named as surpluses, a player formation is never a source
+        a.Surpluses.Add(9);
+        a.Surpluses.Add(5);
         a.Surpluses.Add(8);
 
         AssertTrue(ReinforcementRouting.TryRouteRecruit(a, own, 150f, 500f, 0f, out float rx, out _, out int routedTo), "a shortfall list whose only carrier is the player routes to his hold point");
@@ -448,12 +456,14 @@ internal static class CapitalAndReplacementTests
         AssertTrue(ReinforcementRouting.TryTransferPair(plan, a, own, out var pair), "a pair built from a marker");
         AssertEqual(-1, pair.DeficitInstanceId, "his instance id is never a destination");
         AssertNear(480f, pair.DeficitX, 0.001f, "the deficit is his hold point");
-        AssertNear(3000f, pair.DeficitStrength, 0.01f, "...sized by the hold target less what counts there (his group at strength x morale)");
+        AssertNear(4500f, pair.DeficitStrength, 0.01f, "...sized by the hold target less what counts there (his group at strength x morale: 1500)");
         AssertEqual(8, pair.SurplusInstanceId, "the source is the AI reserve");
         AssertFalse(pair.SurplusInstanceId == 5 || pair.DeficitInstanceId == 5, "his id is neither source nor destination");
 
-        // With nothing but him to draw on there is no pair at all.
+        // With nothing but player formations to draw on there is no pair at all.
         a.Surpluses.Clear();
+        a.Surpluses.Add(6);
+        a.Surpluses.Add(9);
         a.Surpluses.Add(5);
         AssertFalse(ReinforcementRouting.TryTransferPair(plan, a, own, out _), "a candidate that fails MayMove is dropped from the source side");
     }
@@ -468,8 +478,10 @@ internal static class CapitalAndReplacementTests
         plan.Sectors.Add(new SectorPlan { SectorId = 3, Posture = TheaterPosture.EconomyOfForce, HoldNeed = 0f });
         var own = new List<FormationRecord>
         {
-            Corps(1, 110f, 15000f), Corps(2, 300f, 10000f), Corps(3, 20f, 4000f), Corps(4, 560f, 3000f), Corps(5, 580f, 1000f), Corps(6, 600f, 2000f)
+            Corps(1, 110f, 15000f), Corps(2, 300f, 10000f), Corps(3, 20f, 4000f), Corps(4, 560f, 3000f), Corps(5, 580f, 1000f), Corps(6, 600f, 2000f),
+            Corps(8, 570f, 9999f)
         };
+        own[6] = WithChain(own[6], WlChainClass.PlayerCommand); // inside the player's own group: counts nothing anywhere
         var a = new Allocation();
         a.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.MainEffort, SectorId = 1 });
         a.Assignments.Add(new Assignment { InstanceId = 2, Role = FormationRole.MainEffort, SectorId = 1 });
@@ -477,6 +489,7 @@ internal static class CapitalAndReplacementTests
         a.Assignments.Add(new Assignment { InstanceId = 4, Role = FormationRole.Hold, SectorId = 2 });
         a.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold, SectorId = 2 });
         a.Assignments.Add(new Assignment { InstanceId = 6, Role = FormationRole.Hold, SectorId = 3 });
+        a.Assignments.Add(new Assignment { InstanceId = 8, Role = FormationRole.Hold, SectorId = 2 });
         AssertNear(5000f, ReinforcementRouting.ShortfallStrength(plan, a, own, 1), 0.01f, "main effort: 1.5 x 20000 less 25000");
         AssertNear(5000f, ReinforcementRouting.ShortfallStrength(plan, a, own, 2), 0.01f, "...whichever main-effort formation carries it");
         AssertNear(6000f, ReinforcementRouting.ShortfallStrength(plan, a, own, 3), 0.01f, "capital: the floor less the guards");
@@ -546,6 +559,7 @@ internal static class CapitalAndReplacementTests
         string defensive = ReadRepoFile("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs");
         string defensivePrefix = BodyOf(defensive, "internal static void Prefix(int _aifaction)");
         AssertTrue(defensivePrefix.Contains("if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;"), "#4 gated by both planner flags");
+        AssertTrue(defensivePrefix.Contains("allianceId < 0 || allianceId >= LastRowSignature.Length"), "#4 alliance bound");
         AssertTrue(defensivePrefix.Contains("CampaignPlanStore.TryGetPlan(allianceId, out var plan)"), "#4 reads the published plan");
         AssertTrue(defensivePrefix.Contains("CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)"), "#4 reads the published allocation");
         AssertTrue(defensivePrefix.Contains("CapitalFloorPolicy.VanillaNeed("), "#4's need is the belief-based formula");
@@ -653,6 +667,12 @@ internal static class CapitalAndReplacementTests
     {
         var f = Corps(id, waypointX, strength);
         f.Morale = morale;
+        return f;
+    }
+
+    private static FormationRecord WithChain(FormationRecord f, WlChainClass chain)
+    {
+        f.Chain = chain;
         return f;
     }
 
