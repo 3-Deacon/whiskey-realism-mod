@@ -50,6 +50,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public int SectorId;
         public float TargetX, TargetZ;
+        public float SiteX, SiteZ;      // the task's depot site (the target is the wish position once Wished)
         public bool Wished;
     }
 
@@ -109,7 +110,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (!Active(_tasks[t])) continue;
                 if (!BindBuilder(t, s)) continue;
                 if (day - _tasks[t].StartedDay >= TimeoutDays) Abandon(t, "timeout", day);
-                else if (_tasks[t].State == DepotTaskState.Marching) FollowPlan(t, plan, allocation, s);
+                else if (_tasks[t].State == DepotTaskState.Marching && FollowPlan(t, plan, allocation, s)) t--;
             }
             if (ActiveCount() < MaxActivePerAlliance) StartNext(plan, allocation, s, construction, day);
             Prune();
@@ -298,7 +299,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 bool wished = task.State == DepotTaskState.Wished;
                 into.Add(new HeldBuilder
                 {
-                    InstanceId = task.BuilderInstanceId, SectorId = task.SectorId, Wished = wished,
+                    InstanceId = task.BuilderInstanceId, SectorId = task.SectorId, Wished = wished, SiteX = task.X, SiteZ = task.Z,
                     TargetX = wished ? task.WishX : task.X, TargetZ = wished ? task.WishZ : task.Z
                 });
             }
@@ -360,7 +361,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // A marching task follows the plan: the site moves with the frontier (within SiteMatchRadius) and the builder is whoever the
         // allocation assigns to it now; with no plan task near, the task is dropped.
-        private void FollowPlan(int t, TheaterPlan plan, Allocation allocation, CampaignSnapshot s)
+        // True when the task was released and its record removed (the caller steps back one).
+        private bool FollowPlan(int t, TheaterPlan plan, Allocation allocation, CampaignSnapshot s)
         {
             var task = _tasks[t];
             int match = -1;
@@ -375,13 +377,23 @@ namespace WhiskeyRealism.Strategic.Planner
             if (match < 0)
             {
                 Abandon(t, "plan-dropped", s.DaySerial);
-                return;
+                return false;
             }
             task.X = plan.DepotTasks[match].X;
             task.Z = plan.DepotTasks[match].Z;
             task.SectorId = plan.DepotTasks[match].SectorId;
             int builder = BuilderAssignedAt(allocation, task.X, task.Z);
-            if (builder >= 0 && builder != task.BuilderInstanceId)
+            if (builder < 0)
+            {
+                // The allocation names no builder at the site: it re-tasked ours (the capital reserve, a Recover) and no other free
+                // formation of the sector can take the job. The task ends at once and its record goes: nothing was paid before the wish,
+                // so no cooldown applies and the formation is no longer held (verify r4 F10).
+                task.State = DepotTaskState.Abandoned;
+                Note(task, "builder-retasked");
+                _tasks.RemoveAt(t);
+                return true;
+            }
+            if (builder != task.BuilderInstanceId)
             {
                 int i = s.IndexOfOwn(builder);
                 if (i >= 0 && WlChainRules.MayMove(s.Own[i].Chain))
@@ -391,6 +403,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             _tasks[t] = task;
+            return false;
         }
 
         // Starts the next task: the construction ledger's TopSupplyDepot when its task can start, else the first plan task

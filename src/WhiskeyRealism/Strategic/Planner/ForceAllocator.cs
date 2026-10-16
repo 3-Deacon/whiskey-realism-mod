@@ -188,6 +188,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly int _sectorCount;
             private readonly IReadOnlyList<GaveUpMove> _gaveUp;
             private readonly IReadOnlyList<HeldBuilder> _pinned;
+            private bool[] _pinnedMask;   // the formations AssignPinnedBuilders pinned
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -240,6 +241,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var capitalReserved = new bool[_n];
 
                 var pinnedBuilder = AssignPinnedBuilders();
+                _pinnedMask = pinnedBuilder;
                 AssignImmobile();
                 ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);
                 ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved);
@@ -414,11 +416,28 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int t = 0; t < _plan.DepotTasks.Count; t++)
                 {
                     var task = _plan.DepotTasks[t];
+                    if (HasPinnedBuilder(task)) continue;   // one task, one builder
                     int pick = SmallestIn(task, false);
                     if (pick < 0) pick = SmallestIn(task, true);
                     if (pick < 0) continue;
                     Assign(pick, FormationRole.DepotBuilder, task.SectorId, task.X, task.Z, ReasonDepotTask, true);
                 }
+            }
+
+            // Whether a Wished task's pinned builder already serves this plan task (its site within the ledger's site match radius): the
+            // plan keeps listing the depot until it stands, and a second formation sent to it would idle at the site (verify r4 F11).
+            private bool HasPinnedBuilder(DepotTask task)
+            {
+                if (_pinnedMask == null) return false;
+                for (int k = 0; k < _pinned.Count; k++)
+                {
+                    if (!_pinned[k].Wished) continue;
+                    int i = _s.IndexOfOwn(_pinned[k].InstanceId);
+                    if (i < 0 || !_pinnedMask[i]) continue;
+                    float dx = _pinned[k].SiteX - task.X, dz = _pinned[k].SiteZ - task.Z;
+                    if (dx * dx + dz * dz <= DepotTaskLedger.SiteMatchRadius * DepotTaskLedger.SiteMatchRadius) return true;
+                }
+                return false;
             }
 
             // The smallest fighting formation of the sector (lower instance id on a tie); a formation

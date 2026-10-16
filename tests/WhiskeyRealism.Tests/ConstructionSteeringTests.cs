@@ -68,6 +68,8 @@ internal static class ConstructionSteeringTests
             ("AllocatorAndPlannerWiringPinsTheWishedBuilders", AllocatorAndPlannerWiringPinsTheWishedBuilders),
             ("HeldBuilderIsNotInTheMassG3Judges", HeldBuilderIsNotInTheMassG3Judges),
             ("WishedBuilderIsNoCapitalGuardInG3sPlan", WishedBuilderIsNoCapitalGuardInG3sPlan),
+            ("CapitalReserveRetaskingAMarchingBuilderReleasesTheTask", CapitalReserveRetaskingAMarchingBuilderReleasesTheTask),
+            ("PlanTaskDrawsNoSecondBuilderWhileOneIsPinned", PlanTaskDrawsNoSecondBuilderWhileOneIsPinned),
             ("AdoptNeedsTheDepotWithinTheBuildersBugleRange", AdoptNeedsTheDepotWithinTheBuildersBugleRange),
             ("APendingPlacementIsNotALostWish", APendingPlacementIsNotALostWish),
             ("DepotHoldReachesTheFortJobOnlyUnderAFreshPlan", DepotHoldReachesTheFortJobOnlyUnderAFreshPlan),
@@ -1057,6 +1059,7 @@ internal static class ConstructionSteeringTests
         ledger.RecordWished(0, s.DaySerial, 250f, 70f);
         ledger.CollectHeldBuilders(pinned);
         AssertEqual(1, pinned.Count, "a Wished task's builder is held");
+        AssertTrue(pinned[0].SiteX == 250f && pinned[0].SiteZ == 0f, "...and carries the task's site for the allocator's one-builder-per-task rule");
         AssertTrue(pinned[0].Wished && pinned[0].InstanceId == 1 && pinned[0].TargetX == 250f && pinned[0].TargetZ == 70f && pinned[0].SectorId == 3, "...at the wish position, in the task's sector");
         ledger.Abandon(0, "timeout", s.DaySerial + 1);
         ledger.CollectHeldBuilders(pinned);
@@ -1116,10 +1119,10 @@ internal static class ConstructionSteeringTests
         var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
         int sector2 = ExecutorFixtures.Sectors(s2).SectorAt(230f, 70f);
         plan2.DepotTasks.Add(new DepotTask { X = 235f, Z = 70f, SectorId = sector2, Priority = 1f });
-        var pin2 = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector2, TargetX = 230f, TargetZ = 70f } };
+        var pin2 = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector2, TargetX = 230f, TargetZ = 70f, SiteX = 235f, SiteZ = 70f } };
         var a2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, null, null, null, pin2);
         AssertTrue(a2.TryGet(1, out var still) && still.Role == FormationRole.DepotBuilder && still.TargetX == 230f && still.TargetZ == 70f, "a smaller formation in the sector does not take its role or move its target");
-        AssertTrue(a2.TryGet(3, out var other) && other.Role == FormationRole.DepotBuilder, "the plan's own task gets the smaller formation (" + other.Role + ")");
+        AssertTrue(a2.TryGet(3, out var other) && other.Role != FormationRole.DepotBuilder, "the plan's task, still listed until the depot stands, draws no second builder (" + other.Role + ")");
     }
 
     private static void AheadBuilderStaysOnItsMarchToTheSite()
@@ -1297,6 +1300,96 @@ internal static class ConstructionSteeringTests
     private static bool Contains(List<int> ids, int id)
     {
         return ids.Contains(id);
+    }
+
+    // F10: the capital reserve re-tasks a Marching builder and no other free formation of the sector can take the job: the task is
+    // released at once as builder-retasked, with no cooldown (nothing was paid) and the formation no longer held. Real Plan, Allocate, Sync.
+    private static void CapitalReserveRetaskingAMarchingBuilderReleasesTheTask()
+    {
+        CampaignSnapshot W(int dayOffset, bool threat, out SectorModel sectors, out TheaterPlan plan, out Allocation allocation)
+        {
+            var w = ExecutorFixtures.Wide(dayOffset);
+            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, alone in its sector
+            w.Own.Add(ExecutorFixtures.Corps(2, 300f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(3, 320f, 25000f));
+            if (threat) w.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 40000f));
+            sectors = ExecutorFixtures.Sectors(w);
+            plan = TheaterPlanner.Plan(w, sectors, null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _);
+            plan.DepotTasks.Add(new DepotTask { X = 20f, Z = 0f, SectorId = sectors.SectorAt(10f, 0f), Priority = 1f });
+            allocation = ForceAllocator.Allocate(plan, w, sectors, null, null, null);
+            return w;
+        }
+        var ledger = new DepotTaskLedger();
+        var w1 = W(0, false, out _, out var p1, out var a1);
+        AssertEqual(0f, p1.CapitalFloorStrength, "fixture: no capital reserve on the first review");
+        AssertTrue(a1.TryGet(1, out var first) && first.Role == FormationRole.DepotBuilder, "fixture: the formation alone in its sector is the depot builder");
+        ledger.Sync(p1, a1, w1, null);
+        AssertTrue(ledger.Tasks.Count == 1 && ledger.Tasks[0].State == DepotTaskState.Marching && ledger.HoldsBuilder(1), "the task starts Marching and holds it");
+
+        var w2 = W(1, true, out _, out var p2, out var a2);
+        AssertTrue(p2.CapitalFloorStrength > 0f, "the next review has a capital reserve to raise (" + p2.CapitalFloorStrength + ")");
+        AssertTrue(a2.TryGet(1, out var second) && second.Role == FormationRole.CapitalGuard, "which takes the formation nearest the capital");
+        bool anyBuilder = false;
+        for (int i = 0; i < a2.Assignments.Count; i++) anyBuilder |= a2.Assignments[i].Role == FormationRole.DepotBuilder;
+        AssertFalse(anyBuilder, "and no other free formation in the sector takes the depot job");
+        ledger.ClearTransitions();
+        ledger.Sync(p2, a2, w2, null);
+        AssertFalse(ledger.HoldsBuilder(1), "the formation is no longer held");
+        AssertEqual(0, ledger.Tasks.Count, "the task is released, not kept as an abandoned record: nothing was paid, so no cooldown");
+        bool released = false;
+        for (int k = 0; k < ledger.Transitions.Count; k++) released |= ledger.Transitions[k].Reason == "builder-retasked";
+        AssertTrue(released, "named builder-retasked");
+
+        var w3 = W(2, false, out _, out var p3, out var a3);
+        ledger.Sync(p3, a3, w3, null);
+        AssertTrue(ledger.Tasks.Count == 1 && ledger.Tasks[0].State == DepotTaskState.Marching && ledger.HoldsBuilder(1), "the site is tried again at the next review that offers a builder: no cooldown");
+    }
+
+    // F11: the plan keeps listing a depot task until the depot stands, but one task has one builder.
+    private static void PlanTaskDrawsNoSecondBuilderWhileOneIsPinned()
+    {
+        var s = ExecutorFixtures.Wide(1);
+        s.Own.Add(BuilderAtWish(1, 230f, 70f, 230f, 70f));
+        var small = ExecutorFixtures.Corps(3, 235f, 2000f);
+        small.Z = 70f;
+        s.Own.Add(small);
+        s.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(4, 520f, 3000f));
+        var sectors = ExecutorFixtures.Sectors(s);
+        int near = sectors.SectorAt(230f, 70f), far = sectors.SectorAt(520f, 0f);
+        AssertTrue(near >= 0 && far >= 0 && near != far, "fixture: two sectors");
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
+        plan.DepotTasks.Add(new DepotTask { X = 235f, Z = 70f, SectorId = near, Priority = 1f });
+        plan.DepotTasks.Add(new DepotTask { X = 520f, Z = 0f, SectorId = far, Priority = 0.5f });
+        var pin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = near, TargetX = 230f, TargetZ = 70f, SiteX = 235f, SiteZ = 70f } };
+
+        var control = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        AssertTrue(control.TryGet(3, out var drawn) && drawn.Role == FormationRole.DepotBuilder, "control: with no pin the plan's task draws the smaller formation");
+        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
+        AssertTrue(a.TryGet(1, out var builder) && builder.Role == FormationRole.DepotBuilder, "the pinned builder is the task's builder");
+        AssertTrue(a.TryGet(3, out var other) && other.Role != FormationRole.DepotBuilder, "and no second formation is sent to it (" + other.Role + ")");
+        AssertTrue(a.TryGet(4, out var elsewhere) && elsewhere.Role == FormationRole.DepotBuilder, "a task elsewhere still draws its builder");
+        int builders = 0;
+        for (int i = 0; i < a.Assignments.Count; i++) if (a.Assignments[i].Role == FormationRole.DepotBuilder) builders++;
+        AssertEqual(2, builders, "one builder per task");
+
+        // A pin the allocator ignores (the map-group player) does not stand in for the task's builder.
+        var s2 = ExecutorFixtures.Wide(1);
+        var player = BuilderAtWish(1, 230f, 70f, 230f, 70f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s2.Own.Add(player);
+        var small2 = ExecutorFixtures.Corps(3, 235f, 2000f);
+        small2.Z = 70f;
+        s2.Own.Add(small2);
+        s2.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+        s2.Own.Add(ExecutorFixtures.Corps(4, 520f, 3000f));
+        var sectors2 = ExecutorFixtures.Sectors(s2);
+        var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
+        plan2.DepotTasks.Add(new DepotTask { X = 235f, Z = 70f, SectorId = sectors2.SectorAt(230f, 70f), Priority = 1f });
+        var pins2 = new[] { pin[0], new HeldBuilder { Wished = true, InstanceId = 4, SectorId = sectors2.SectorAt(520f, 0f), TargetX = 520f, TargetZ = 0f, SiteX = 520f, SiteZ = 0f } };
+        var a2 = ForceAllocator.Allocate(plan2, s2, sectors2, null, null, null, null, pins2);
+        AssertTrue(a2.TryGet(4, out var kept) && kept.Role == FormationRole.DepotBuilder, "fixture: the valid pin is applied");
+        AssertTrue(a2.TryGet(3, out var drawn2) && drawn2.Role == FormationRole.DepotBuilder, "a pin the allocator ignores (the map-group player) leaves the task its own builder");
     }
 
     // F8: a depot rises only while an own unit stands within that unit's bugle range of it (96626-96655).
