@@ -21,6 +21,7 @@ namespace WhiskeyRealism.Strategic.Policies
         public bool ResearchInProgress; // anything below progress 1 (211061)
         public bool SelectionEnabled;   // Enable Need-Driven Policy Selection
         public bool HasNeed;            // the daily review has a need vector for the alliance
+        public bool WarStartHeld;       // the chapter is pre-war: Militia Act I stays vanilla's script (PolicyEligibility)
     }
 
     // Temporary edits PolicySelectionPatch makes to the personality list vanilla walks, for
@@ -36,7 +37,9 @@ namespace WhiskeyRealism.Strategic.Policies
     //    members), so the only effect is that the removal spares them.
     //  - Non-emergency fallback: when Whiskey started nothing, vanilla walks the list from the
     //    head (211076-211090), where irreversible acts sit (Union Historical 33/39/40, CSA
-    //    139/140). HeldIdsToRemove takes the ones held below their need gate out of the walk.
+    //    139/140). HeldIdsToRemove takes the ones held below their need gate out of the walk,
+    //    and Militia Act I (36) while the chapter is pre-war, which the pick filter refuses too.
+    //    That hold needs no need vector and runs under the same selection flag as the pick.
     public static class PolicyListOverride
     {
         // Vanilla's personality list and its contents before this call's edit.
@@ -56,7 +59,7 @@ namespace WhiskeyRealism.Strategic.Policies
         // filtered there, and for an AI alliance it stays vanilla's), then the one-at-a-time
         // return while anything is in research (211061), then the flag. findPick is asked only
         // past those gates; startPick reports whether vanilla's AddResearch took the pick. With
-        // no started pick, the fallback walk is held only once the review has a need vector.
+        // no started pick, the fallback walk is held once the review has a need vector or the chapter holds the war start.
         // Missing delegates: vanilla.
         public static PolicyCallAction Decide(PolicyCallFacts facts, Func<int> findPick, Func<int, bool> startPick)
         {
@@ -66,7 +69,7 @@ namespace WhiskeyRealism.Strategic.Policies
             if (findPick == null || startPick == null) return PolicyCallAction.Vanilla;
             int pick = findPick();
             if (pick >= 0 && startPick(pick)) return PolicyCallAction.Pick;
-            return facts.HasNeed ? PolicyCallAction.HoldFallback : PolicyCallAction.Vanilla;
+            return facts.HasNeed || facts.WarStartHeld ? PolicyCallAction.HoldFallback : PolicyCallAction.Vanilla;
         }
 
         // Ids still in research (progress < 1), not already on the list, each once.
@@ -86,17 +89,18 @@ namespace WhiskeyRealism.Strategic.Policies
             return result;
         }
 
-        // Held irreversible acts (PolicyNeedScorer.IsHeld under the review's need vector) on
-        // the list vanilla's fallback would walk, in list order, each once. Decide gates the
-        // call (never on an emergency, never with selection off or no need vector).
-        public static List<int> HeldIdsToRemove(NeedVector need, IList<int> personalityPolicies)
+        // Held irreversible acts (PolicyNeedScorer.IsHeld under the review's need vector) and the
+        // pre-war Militia Act I on the list vanilla's fallback would walk, in list order, each
+        // once. Decide gates the call (never on an emergency, never with selection off).
+        public static List<int> HeldIdsToRemove(NeedVector need, IList<int> personalityPolicies, int chapter)
         {
             var result = new List<int>();
-            if (need == null || personalityPolicies == null) return result;
+            if (personalityPolicies == null) return result;
             for (int i = 0; i < personalityPolicies.Count; i++)
             {
                 int id = personalityPolicies[i];
-                if (PolicyNeedScorer.IsHeld(id, need) && !result.Contains(id)) result.Add(id);
+                bool held = PolicyEligibility.IsScriptedWarStart(id, chapter) || (need != null && PolicyNeedScorer.IsHeld(id, need));
+                if (held && !result.Contains(id)) result.Add(id);
             }
             return result;
         }

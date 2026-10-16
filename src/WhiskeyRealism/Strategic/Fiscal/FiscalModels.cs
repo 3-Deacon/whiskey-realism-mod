@@ -51,7 +51,6 @@ namespace WhiskeyRealism.Strategic.Fiscal
     {
         public int AllianceId;
         public EraStage EraStage;
-        public int CurrentChapter;
         public FiscalStateMemory Memory = new FiscalStateMemory();
         public int CurrentRating;
         public int RatingNotches;

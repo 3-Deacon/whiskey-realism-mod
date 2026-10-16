@@ -9,7 +9,6 @@ namespace WhiskeyRealism.Strategic
         public int Month;
         public int PolicyChapter;
         public float OwnNationalMorale;
-        public float EnemyNationalMorale;
         public float BreakMoraleTrigger;
         public float MinNationalMoraleSurrender;
         public int BattlesIn14Days;
@@ -62,13 +61,12 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            // Rule 2 — LateWarPressure: chapter 3 OR (year >= 1864 + Union when CSA still has runway).
-            bool unionLateRunway = input.AllianceId == 0 && input.Year >= 1864 &&
-                                   input.EnemyNationalMorale > input.BreakMoraleTrigger * 1.5f;
-            if (input.PolicyChapter >= 3 || unionLateRunway)
+            // Rule 2 — LateWarPressure: vanilla's chapter 3 (Lincoln re-elected), the same stage
+            // as EraStage.TotalWar1864. The calendar no longer escalates the Union ahead of it.
+            if (EraStageManager.IsLateWar(input.PolicyChapter))
             {
                 output.Pace = CampaignPace.LateWarPressure;
-                output.Reason = "chapter3-or-late-union-runway";
+                output.Reason = "chapter3";
                 return output;
             }
 

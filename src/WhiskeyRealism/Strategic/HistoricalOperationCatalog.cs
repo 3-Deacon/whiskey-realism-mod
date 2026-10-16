@@ -96,6 +96,12 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
 
+            if (profile.MaxEra < profile.Era)
+            {
+                reason = "invalid-era-span";
+                return false;
+            }
+
             if (profile.PrimaryObjectiveId < 0)
             {
                 reason = "invalid-primary-objective";
@@ -207,7 +213,7 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
 
-            if (profile.Era != era)
+            if (era < profile.Era || era > profile.MaxEra)
             {
                 reason = "era";
                 return false;
@@ -482,16 +488,28 @@ namespace WhiskeyRealism.Strategic
                         Phase("recover-combat-power", "Recover Combat Power", 30, PhaseTransition.DeadlineExpired, 0.45f, OperationPosture.Recover, false, true, true, 105)
                     }),
 
-                Profile("union-late-pressure", "Union Late Pressure", 0, EraStage.TotalWar1864, Theater.East, 3, new[] { 3 },
+                // A calendar prior: Grant and Sherman opened their 1864 campaigns in May, six months
+                // before the election that makes vanilla's chapter 3. The era stage follows the chapter
+                // (EraStageManager), so this profile matches Decisive1863 through TotalWar1864 and is
+                // bounded by its date window; a lost election leaves the chapter at 2 and the era at
+                // Decisive1863 but the operation still runs to the end of the campaign.
+                WithMaxEra(Profile("union-late-pressure", "Union Late Pressure", 0, EraStage.Decisive1863, Theater.East, 3, new[] { 3 },
                     OperationChapterPolicy.AllowDateDrift, 10, new[] { StrategyTag.ArmyDestruction, StrategyTag.RailHub, StrategyTag.Logistics },
-                    OperationTempoPreset.Exploit, OperationPosture.ExploitBreakthrough, 3, 4, 1, 1864, 12, 1865,
+                    OperationTempoPreset.Exploit, OperationPosture.ExploitBreakthrough, 3, 4, 5, 1864, 12, 1865,
                     new[]
                     {
                         Phase("develop-contact", "Develop Contact", 3, PhaseTransition.TargetEngaged, 0.45f, OperationPosture.ProbeAndDevelop, true, false, true, 21),
                         Phase("concentrate-for-attack", "Concentrate For Attack", 3, PhaseTransition.TargetEngaged, 0.70f, OperationPosture.ConcentratedAttack, true, true, false, 45),
                         Phase("attack-objective", "Attack Objective", 3, PhaseTransition.TargetTaken, 0.80f, OperationPosture.ExploitBreakthrough, true, true, false, 75)
-                    })
+                    }), EraStage.TotalWar1864)
             };
+        }
+
+        // A profile that matches a span of eras instead of one (an unset MaxEra is Era).
+        private static HistoricalOperationProfile WithMaxEra(HistoricalOperationProfile profile, EraStage maxEra)
+        {
+            profile.MaxEra = maxEra;
+            return profile;
         }
 
         private static HistoricalOperationProfile Profile(

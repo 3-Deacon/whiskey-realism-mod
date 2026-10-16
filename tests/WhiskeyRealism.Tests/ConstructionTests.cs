@@ -133,7 +133,6 @@ internal static class ConstructionTests
         {
             AllianceId = alliance,
             EraStage = EraStage.Amateur1861,
-            CurrentChapter = 1,
             FiscalPosture = FiscalPosture.BalancedWar,
             FiscalDefendedGate = FiscalGate.Construction,
             CurrentRating = 3,
