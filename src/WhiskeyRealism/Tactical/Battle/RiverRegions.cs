@@ -169,6 +169,71 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>Whether the link takes part in the link table and the path search (the first MaxRoutedLinks links).</summary>
         public bool IsRouted(int link) => link >= 0 && link < _routed;
 
+        /// <summary>Whether the link joins the region.</summary>
+        public bool LinkTouches(int link, int region)
+        {
+            if (link < 0 || link >= _linkCount) return false;
+            int n = _linkRegionCount[link];
+            for (int i = 0; i < n; i++) if (_linkRegions[link * MaxRegionsPerLink + i] == region) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// The nearest land block centre to a point that is not on land itself (a rect anchor the projection laid on open river, a unit
+        /// standing on a ford or bridge deck). A point already on land is returned as it is. At equal distance a block in
+        /// <paramref name="preferRegion"/> wins (the body's own bank). False when no land lies within <see cref="SnapReachMeters"/>
+        /// or the regions are not Ready.
+        /// </summary>
+        public bool TrySnapToLand(float x, float z, int preferRegion, out float snapX, out float snapZ)
+        {
+            snapX = x;
+            snapZ = z;
+            if (_stage != StageReady) return false;
+            if (RegionAt(x, z) >= 0) return true;
+            if (Frozen)
+            {
+                snapX = Math.Max(0f, Math.Min(_sizeX, x));
+                snapZ = Math.Max(-_sizeZ, Math.Min(0f, z));
+                return true;
+            }
+            int cx = (int)Math.Floor(x / BlockMeters), cz = (int)Math.Floor((z + _sizeZ) / BlockMeters);
+            int maxRing = (int)Math.Ceiling(SnapReachMeters / BlockMeters);
+            float best2 = float.MaxValue;
+            bool bestPreferred = false;
+            int foundRing = -1;
+            for (int ring = 1; ring <= maxRing + 1; ring++)
+            {
+                if (foundRing >= 0 && ring > foundRing + 1) break;     // the ring after the first hit can hold a nearer corner
+                for (int dz = -ring; dz <= ring; dz++)
+                {
+                    for (int dx = -ring; dx <= ring; dx++)
+                    {
+                        if (Math.Abs(dx) != ring && Math.Abs(dz) != ring) continue;
+                        int ix = cx + dx, iz = cz + dz;
+                        if (ix < 0 || iz < 0 || ix >= _nx || iz >= _nz) continue;
+                        int region = _final[iz * _nx + ix] - 1;
+                        if (region < 0) continue;
+                        float px = (ix + 0.5f) * BlockMeters, pz = -_sizeZ + (iz + 0.5f) * BlockMeters;
+                        float d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
+                        bool preferred = region == preferRegion;
+                        bool tie = Math.Abs(d2 - best2) < 1e-3f;
+                        if (d2 < best2 - 1e-3f || (tie && preferred && !bestPreferred))
+                        {
+                            best2 = d2;
+                            bestPreferred = preferred;
+                            snapX = px;
+                            snapZ = pz;
+                            if (foundRing < 0) foundRing = ring;
+                        }
+                    }
+                }
+            }
+            return foundRing >= 0 && best2 <= SnapReachMeters * SnapReachMeters;
+        }
+
+        /// <summary>How far <see cref="TrySnapToLand"/> looks for land.</summary>
+        public const float SnapReachMeters = 300f;
+
         /// <summary>The number of links in the link table.</summary>
         public int RoutedCount => _routed;
 
