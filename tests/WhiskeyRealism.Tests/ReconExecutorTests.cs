@@ -65,6 +65,7 @@ internal static class ReconExecutorTests
             ("QueuedMoverMoveSettlesWhenItsRoleNoLongerSends", QueuedMoverMoveSettlesWhenItsRoleNoLongerSends),
             ("QueuedMoverMoveIsResentWhenItsOrderEndedAndTheRoleStillSends", QueuedMoverMoveIsResentWhenItsOrderEndedAndTheRoleStillSends),
             ("QueuedRecordsSettleByOneRuleAndExpire", QueuedRecordsSettleByOneRuleAndExpire),
+            ("QueuedRetryKeepsItsCountWhenItSettles", QueuedRetryKeepsItsCountWhenItSettles),
             ("QueuedSettleCallSitesPinned", QueuedSettleCallSitesPinned),
             ("GoneUnitReleasesTheDebtButMissingBattleUnitsKeepsIt", GoneUnitReleasesTheDebtButMissingBattleUnitsKeepsIt),
             ("ReconSyncAndFlagOffWiringPinned", ReconSyncAndFlagOffWiringPinned),
@@ -1110,6 +1111,41 @@ internal static class ReconExecutorTests
         e.SettleExpiredQueued(Day + MoveTracker.QueuedExpiryDays);
         AssertTrue(e.InTransit(6), "a record its owner re-records every review does not age out");
         AssertEqual(14, MoveTracker.QueuedExpiryDays, "the bound");
+    }
+
+    // Verify r3 N1 (the verifier's R3-G): Failed, a retry queued behind an order, the order ends and the record settles, the re-issue is
+    // still the retry, and its miss gives up (it did before SettleQueued existed). A first attempt that never failed settles to nothing.
+    private static void QueuedRetryKeepsItsCountWhenItSettles()
+    {
+        var t = new MoveTracker();
+        t.RecordIssued(1, 500f, 0f, 100f, 0f, Day, queued: false);
+        AssertEqual(MoveOutcome.Failed, t.Judge(1, 500f, 0f, 500f, 0f, Day + 1), "fixture: the first attempt missed");
+        t.RecordIssued(1, 500f, 0f, 100f, 0f, Day + 1, queued: true);                     // the retry queued behind an order
+        AssertTrue(t.SettleQueued(1, MoveBudget.Planner, wanted: true, orderRunning: false), "the order ended: settled");
+        AssertFalse(t.InTransit(1), "no longer in transit");
+        AssertEqual(MoveOutcome.Retried, t.IssueOutcome(1, 100f, 0f, queued: false), "and the re-issue is still the retry");
+        t.RecordIssued(1, 500f, 0f, 100f, 0f, Day + 2, queued: false);
+        AssertEqual(MoveOutcome.GaveUp, t.Judge(1, 500f, 0f, 500f, 0f, Day + 3), "its miss gives up, as the unsettled sequence does");
+
+        var fresh = new MoveTracker();
+        fresh.RecordIssued(2, 500f, 0f, 100f, 0f, Day, queued: true);                     // a first attempt that queued
+        AssertTrue(fresh.SettleQueued(2, MoveBudget.Planner, wanted: true, orderRunning: false), "settled");
+        AssertEqual(MoveOutcome.Issued, fresh.IssueOutcome(2, 100f, 0f, queued: false), "a first attempt that never failed re-issues as a fresh move");
+
+        var unwanted = new MoveTracker();
+        unwanted.RecordIssued(3, 500f, 0f, 100f, 0f, Day, queued: false);
+        unwanted.Judge(3, 500f, 0f, 500f, 0f, Day + 1);
+        unwanted.RecordIssued(3, 500f, 0f, 100f, 0f, Day + 1, queued: true);
+        AssertTrue(unwanted.SettleQueued(3, MoveBudget.Planner, wanted: false, orderRunning: true), "nobody wants the move any more");
+        AssertEqual(MoveOutcome.Issued, unwanted.IssueOutcome(3, 100f, 0f, queued: false), "the record is gone, not kept as a failure");
+        AssertEqual(0, new List<GaveUpMove>(GaveUpFrom(unwanted)).Count, "and nothing is given up on");
+    }
+
+    private static List<GaveUpMove> GaveUpFrom(MoveTracker t)
+    {
+        var list = new List<GaveUpMove>();
+        t.CollectGaveUp(list, Day + 5);
+        return list;
     }
 
     private static void QueuedSettleCallSitesPinned()

@@ -169,10 +169,18 @@ namespace WhiskeyRealism.Strategic.Planner
         // FormationFlags.MoveQueued) has ended; it settles, and the formation is no longer in transit or withheld from vanilla, when
         // the order ahead has ended (the owner then re-issues the move if it still wants it) or when no owner wants the move any more
         // (the role changed, the mission ended). `budget` names the owner: a record of the other budget is untouched.
+        // A queued RETRY that is still wanted settles to Failed with its retry count kept, so the owner's re-issue is still the retry
+        // and the next miss gives up as it did before the settle existed (verify r3 N1); a first attempt that never failed, and any
+        // record nobody wants, is removed.
         public bool SettleQueued(int instanceId, MoveBudget budget, bool wanted, bool orderRunning)
         {
             if (!_entries.TryGetValue(instanceId, out var e) || e.State != State.Queued || e.Budget != budget) return false;
             if (wanted && orderRunning) return false;
+            if (wanted && e.Retries >= 1)
+            {
+                e.State = State.Failed;
+                return true;
+            }
             _entries.Remove(instanceId);
             return true;
         }
