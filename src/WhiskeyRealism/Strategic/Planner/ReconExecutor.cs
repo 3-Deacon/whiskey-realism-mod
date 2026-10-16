@@ -14,8 +14,10 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // What the host did about a cavalry order: made the call, found the wanted mode already applied or on its way, found a different
-    // mode waiting in the queue (vanilla cannot replace it; ReconOrders.CallFor), or found no such unit.
-    internal enum CavalrySend { NoUnit = 0, Sent = 1, AlreadySet = 2, QueuedOther = 3 }
+    // mode waiting in the queue (vanilla cannot replace it; ReconOrders.CallFor), found no such unit, or could not reach BattleUnits.
+    // NoBattleUnits: the campaign map's BattleUnits could not be found (a transient state), so nothing is known about the unit: the
+    // stand-down it owes is kept. NoUnit: the group is gone, so nothing is owed to it.
+    internal enum CavalrySend { NoUnit = 0, Sent = 1, AlreadySet = 2, QueuedOther = 3, NoBattleUnits = 4 }
 
     internal sealed class ReconTally
     {
@@ -59,17 +61,35 @@ namespace WhiskeyRealism.Strategic.Planner
         private readonly List<int> _gone = new List<int>();
         private readonly List<WlChainClass> _chains = new List<WlChainClass>();
         private readonly List<bool> _acts = new List<bool>();
+        private readonly List<int> _transit = new List<int>();
 
         public ReconTally Review(CampaignSnapshot s, ReconMissionLedger ledger, IReconHost host, MoveTracker tracker, bool wlPlayerAlliance)
         {
             var tally = new ReconTally();
             if (s == null || ledger == null || host == null || tracker == null) return tally;
             var missions = ledger.Missions;
+            SettleQueuedMoves(s, ledger, tracker);
             NoteTransitions(s, missions, tally);
             ReadChains(s, ledger, host, tally);
             SendCavalryOrders(s, ledger, host, tally);
             Move(s, missions, host, tracker, wlPlayerAlliance, tally);
             return tally;
+        }
+
+        // A recon move queued behind a running order settles through MoveTracker.SettleQueued when that order has ended (the mover's
+        // pass settles it first when it runs; this pass does not rely on it) or when no mission wants the formation any more, so it
+        // is neither in transit nor withheld from vanilla for good (verify r2 R1). A live mission re-sends it below.
+        private void SettleQueuedMoves(CampaignSnapshot s, ReconMissionLedger ledger, MoveTracker tracker)
+        {
+            tracker.SettleExpiredQueued(s.DaySerial);
+            tracker.CollectInTransit(_transit);
+            for (int k = 0; k < _transit.Count; k++)
+            {
+                int id = _transit[k];
+                int i = s.IndexOfOwn(id);
+                bool orderRunning = i >= 0 && (s.Own[i].Flags & FormationFlags.MoveQueued) != 0;
+                tracker.SettleQueued(id, MoveBudget.Recon, ledger.IsRecon(id) || ledger.IsRecalling(id), orderRunning);
+            }
         }
 
         private void NoteTransitions(CampaignSnapshot s, IReadOnlyList<ReconMission> missions, ReconTally tally)
@@ -161,8 +181,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static void MoveToPost(CampaignSnapshot s, in ReconMission m, in FormationRecord f, IReconHost host, MoveTracker tracker, bool wlPlayerAlliance, ReconTally tally)
         {
-            // One owner per formation per review: the mover judged earlier moves before this pass, so a formation in transit now was
-            // sent by it (or by an earlier recon move not yet judged) today, and a second move would overwrite its record.
+            // One owner per formation per review: a formation in transit now was sent today by the mover (or is a recon move still
+            // waiting on its order, or one not yet judged), and a second move would overwrite its record. A queued record whose order
+            // has ended or whose mission is over was settled above (and by the mover's pass), so it does not stand here for good.
             if (!TheaterPlanner.Movable(f) || host.PackageLocked(f.InstanceId) || tracker.InTransit(f.InstanceId))
             {
                 tally.SkippedBusy++;

@@ -95,7 +95,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (call == ReconOrders.CavalryCall.AlreadySet) return CavalrySend.AlreadySet;
                 var battleUnits = ResolveBattleUnits();
-                if ((UnityEngine.Object)battleUnits == null) return CavalrySend.NoUnit;
+                if ((UnityEngine.Object)battleUnits == null) return CavalrySend.NoBattleUnits;
                 battleUnits.ChangeCampaignOrders(unit, orderCode);
                 return CavalrySend.Sent;
             }

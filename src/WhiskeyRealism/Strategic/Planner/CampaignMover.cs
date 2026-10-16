@@ -121,7 +121,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var allocation = inputs.Allocation;
             if (s == null || plan == null || allocation == null) return tally;
 
-            JudgeLastReview(s, tracker, tally);
+            JudgeLastReview(s, allocation, tracker, tally);
             ReleaseRecoverFromOffense(s, allocation, host);
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
             bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
@@ -136,9 +136,13 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // P8: the moves issued at an earlier review, judged against today's picture. A formation whose order still waits in
-        // vanilla's queue (DefensiveMovingOrder.UpdateOrders serves one order at a time, 9966-10052) is not judged yet.
-        private static void JudgeLastReview(CampaignSnapshot s, MoveTracker tracker, MoverTally tally)
+        // vanilla's queue (DefensiveMovingOrder.UpdateOrders serves one order at a time, 9966-10052) is not judged yet. A queued
+        // record settles through MoveTracker.SettleQueued once the order ahead of it has ended or the role no longer sends the
+        // formation (the planner's records only: a recon record's owner is the recon executor, which settles its own), and
+        // after MoveTracker.QueuedExpiryDays whatever happens; the dispatch below then re-issues the move or drops it.
+        private static void JudgeLastReview(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, MoverTally tally)
         {
+            tracker.SettleExpiredQueued(s.DaySerial);
             var ids = new List<int>();
             tracker.CollectInTransit(ids);
             for (int k = 0; k < ids.Count; k++)
@@ -150,7 +154,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     continue;
                 }
                 var f = s.Own[i];
-                if ((f.Flags & FormationFlags.MoveQueued) != 0) continue;
+                bool orderRunning = (f.Flags & FormationFlags.MoveQueued) != 0;
+                tracker.SettleQueued(f.InstanceId, MoveBudget.Planner, RoleStillSends(allocation, f.InstanceId), orderRunning);
+                tracker.SettleQueued(f.InstanceId, MoveBudget.Recon, wanted: true, orderRunning);
+                if (!tracker.InTransit(f.InstanceId) || orderRunning) continue;
                 switch (tracker.Judge(f.InstanceId, f.X, f.Z, f.WaypointX, f.WaypointZ, s.DaySerial))
                 {
                     case MoveOutcome.Confirmed: tally.Confirmed++; break;
@@ -158,6 +165,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     case MoveOutcome.GaveUp: tally.GaveUp++; break;
                 }
             }
+        }
+
+        private static bool RoleStillSends(Allocation allocation, int instanceId)
+        {
+            return allocation.TryGet(instanceId, out var a) && MovesRole(a.Role);
         }
 
         // Vanilla never checks supply before or during an offensive (14080-14158 has no supply term, job 6's gate is dead,

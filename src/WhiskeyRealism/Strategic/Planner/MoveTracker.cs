@@ -56,6 +56,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // that the retry (2 of the daily budget of 6 per formation) does not repeat every cycle, short enough that a
         // formation is not shut out of an objective for a season (plan G5a, as built item 3).
         public const int GaveUpExpiryDays = 14;
+        // A queued record nobody has touched for this many review days is dropped whatever the order ahead of it is doing: the
+        // mover re-records a wanted queued move at every review, so only a record nobody wants any more (or that no pass can reach)
+        // gets this old. A bound on top of SettleQueued, so no record stays queued, and the formation withheld, forever.
+        public const int QueuedExpiryDays = 14;
         public const float ConfirmFraction = 0.25f;
         // A waypoint within this of the target's distance does not count as having moved toward it.
         private const float WaypointEpsilon = 1f;
@@ -76,6 +80,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         private readonly Dictionary<int, Entry> _entries = new Dictionary<int, Entry>();
+        private readonly List<int> _expired = new List<int>();
         private readonly int[] _budgetDay = { int.MinValue, int.MinValue };
         private readonly int[] _budgetUsed = new int[2];
 
@@ -157,6 +162,28 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             e.State = State.GaveUp;
             return MoveOutcome.GaveUp;
+        }
+
+        // The one rule that settles a Queued record (plan G5d, verify r2 R1/R2; Judge leaves it Queued by design, 9966-10052: one order
+        // is served at a time). A queued move is a promise to send the formation once the order ahead of it (a DefensiveMovingOrder,
+        // FormationFlags.MoveQueued) has ended; it settles, and the formation is no longer in transit or withheld from vanilla, when
+        // the order ahead has ended (the owner then re-issues the move if it still wants it) or when no owner wants the move any more
+        // (the role changed, the mission ended). `budget` names the owner: a record of the other budget is untouched.
+        public bool SettleQueued(int instanceId, MoveBudget budget, bool wanted, bool orderRunning)
+        {
+            if (!_entries.TryGetValue(instanceId, out var e) || e.State != State.Queued || e.Budget != budget) return false;
+            if (wanted && orderRunning) return false;
+            _entries.Remove(instanceId);
+            return true;
+        }
+
+        // The bound: queued records untouched for QueuedExpiryDays review days are dropped (either budget).
+        public void SettleExpiredQueued(int daySerial)
+        {
+            _expired.Clear();
+            foreach (var pair in _entries)
+                if (pair.Value.State == State.Queued && daySerial - pair.Value.IssuedDay >= QueuedExpiryDays) _expired.Add(pair.Key);
+            for (int i = 0; i < _expired.Count; i++) _entries.Remove(_expired[i]);
         }
 
         // Issued or queued and not yet judged: the formation is the mover's, vanilla's offense and defence keep off it.

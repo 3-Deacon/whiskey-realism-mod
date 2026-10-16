@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Planner;
+using WhiskeyRealism.Util;
 
 using static TestHarness;
 using static TestFixtures;
@@ -59,6 +60,13 @@ internal static class ReconExecutorTests
             ("RetaskedScreenSupersedesTheDebtOfItsClearedMission", RetaskedScreenSupersedesTheDebtOfItsClearedMission),
             ("StandDownDebtRoundTripsThroughRestore", StandDownDebtRoundTripsThroughRestore),
             ("MoverRefusalListsNothingAndKeepsTheObjective", MoverRefusalListsNothingAndKeepsTheObjective),
+            ("QueuedReconMoveIsResentOnceItsOrderHasEnded", QueuedReconMoveIsResentOnceItsOrderHasEnded),
+            ("QueuedReconMoveIsReleasedWhenItsMissionEnds", QueuedReconMoveIsReleasedWhenItsMissionEnds),
+            ("QueuedMoverMoveSettlesWhenItsRoleNoLongerSends", QueuedMoverMoveSettlesWhenItsRoleNoLongerSends),
+            ("QueuedMoverMoveIsResentWhenItsOrderEndedAndTheRoleStillSends", QueuedMoverMoveIsResentWhenItsOrderEndedAndTheRoleStillSends),
+            ("QueuedRecordsSettleByOneRuleAndExpire", QueuedRecordsSettleByOneRuleAndExpire),
+            ("QueuedSettleCallSitesPinned", QueuedSettleCallSitesPinned),
+            ("GoneUnitReleasesTheDebtButMissingBattleUnitsKeepsIt", GoneUnitReleasesTheDebtButMissingBattleUnitsKeepsIt),
             ("ReconSyncAndFlagOffWiringPinned", ReconSyncAndFlagOffWiringPinned),
             ("CavalryModeIsTheCodeMinusOneTwenty", CavalryModeIsTheCodeMinusOneTwenty),
             ("QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals", QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals),
@@ -961,6 +969,184 @@ internal static class ReconExecutorTests
         var records = new List<MoveRecord>(tracker.Records);
         AssertEqual(1, records.Count, "the refusal is recorded");
         AssertEqual(98, records[0].ObjectiveId, "with the objective the move was for, so G3 can leave the formation out of that mass if it gives up");
+    }
+
+    // ---- verify r2 R1/R2: a queued record settles ----
+
+    // R2-Q: day 1 the screen is picked while vanilla runs a DefensiveMovingOrder on it (MoveQueued): a queued record. Day 2 the order has
+    // ended. The mover's pass (JudgeLastReview) settles it first when it runs; the recon pass settles it itself when it does not.
+    private static void QueuedReconMoveIsResentOnceItsOrderHasEnded()
+    {
+        var s1 = World();
+        s1.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued));
+        var ledger = Ledger(s1, (ReconKind.Picket, 1, 300f, 0f));
+        var tracker = new MoveTracker();
+        var executor = new ReconExecutor();
+        var day1 = executor.Review(s1, ledger, new FakeReconHost(), tracker, false);
+        AssertEqual(1, day1.Queued, "fixture: queued behind the running order");
+        AssertTrue(tracker.InTransit(1), "and in transit");
+
+        var running = World(Day + 1);
+        running.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued));
+        var stillRunning = new FakeReconHost();
+        executor.Review(running, ledger, stillRunning, tracker, false);
+        AssertEqual(0, stillRunning.Moves.Count, "the order is still running: no second move");
+        AssertTrue(tracker.InTransit(1), "and the record stands");
+
+        var ended = World(Day + 2);
+        ended.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f));
+        var host = new FakeReconHost();
+        var tally = executor.Review(ended, ledger, host, tracker, false);
+        AssertEqual(1, host.Moves.Count, "the order ended: the move is sent");
+        AssertEqual(1, tally.Issued, "as an issue");
+        AssertEqual(300f, host.Moves[0].x, "to the post");
+    }
+
+    // The same through the real mover pass, which runs first in a review and settles the ended order before recon's pass.
+    private static void QueuedMoverMoveIsResentWhenItsOrderEndedAndTheRoleStillSends()
+    {
+        var s = ExecutorFixtures.Wide();
+        var pending = ExecutorFixtures.Corps(1, 350f, 15000f);
+        pending.Flags |= FormationFlags.MoveQueued;
+        s.Own.Add(pending);
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
+        AssertTrue(alloc.TryGet(1, out var a1) && a1.Role == FormationRole.MainEffort, "fixture: a main effort");
+        var tracker = new MoveTracker();
+        var queuedHost = new FakeMoverHost();
+        var first = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), queuedHost, tracker, ExecutorFixtures.State());
+        AssertEqual(1, first.Queued, "fixture: queued");
+        AssertEqual(0, queuedHost.Moves.Count, "no move while the order runs");
+
+        var s2 = ExecutorFixtures.Wide(1);
+        s2.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));         // the order ended
+        var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 1 });
+        var alloc2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
+        var host = new FakeMoverHost();
+        var second = CampaignMover.Review(ExecutorFixtures.Inputs(s2, plan2, alloc2, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertEqual(1, host.Moves.Count, "the order ended and the role still sends it: the mover sends it now");
+        AssertEqual(1, second.Issued, "as an issue");
+        AssertTrue(tracker.InTransit(1), "recorded as issued");
+    }
+
+    // R2-Q2: the mission ends while its move waits behind a running order. The record is released (not in transit, not withheld from
+    // vanilla's pools), though the order is still running.
+    private static void QueuedReconMoveIsReleasedWhenItsMissionEnds()
+    {
+        var w = ExecutorFixtures.PublishedWorld(out var tracker);              // the withhold view reads this tracker
+        var s = World();
+        s.Own.Add(Unit(w.FreeHold, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued));
+        var ledger = Ledger(s, (ReconKind.Picket, w.FreeHold, 300f, 0f));
+        var executor = new ReconExecutor();
+        executor.Review(s, ledger, new FakeReconHost(), tracker, false);
+        AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "fixture: the queued formation is withheld from vanilla's offence");
+        AssertTrue(CampaignWithholdView.WithheldFromDefense(0, w.FreeHold, 0f, 0f), "and from its defence");
+
+        var later = World(Day + 25);
+        later.Own.Add(Unit(w.FreeHold, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued));  // the vanilla order is still running
+        ledger.Sync(later, new List<ReconTask>(), new Allocation { Alliance = 0 });                // the mission is over
+        executor.Review(later, ledger, new FakeReconHost(), tracker, false);
+        AssertFalse(tracker.InTransit(w.FreeHold), "the record is released with the mission");
+        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "so vanilla's offence has the formation back");
+        AssertFalse(CampaignWithholdView.WithheldFromDefense(0, w.FreeHold, 0f, 0f), "and its defence");
+        CampaignScope.ResetAll();
+    }
+
+    // R2: a MainEffort move queued behind a vanilla order whose role then becomes one the mover does not send (through the real
+    // allocator): the record settles at once, though the order is still running, and the formation is vanilla's again.
+    private static void QueuedMoverMoveSettlesWhenItsRoleNoLongerSends()
+    {
+        var s = ExecutorFixtures.Wide();
+        var pending = ExecutorFixtures.Corps(1, 350f, 15000f);
+        pending.Flags |= FormationFlags.MoveQueued;
+        s.Own.Add(pending);
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
+        AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: a mover role on day 1 (" + a1.Role + ")");
+        var tracker = new MoveTracker();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), tracker, ExecutorFixtures.State());
+        AssertTrue(tracker.InTransit(1), "fixture: queued");
+
+        var s2 = ExecutorFixtures.Wide(1);
+        var still = ExecutorFixtures.Corps(1, 350f, 15000f);
+        still.Flags |= FormationFlags.MoveQueued;                       // vanilla's order is still running
+        s2.Own.Add(still);
+        s2.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
+        var alloc2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
+        AssertTrue(alloc2.TryGet(1, out var b1) && !CampaignMover.MovesRole(b1.Role), "fixture: a role the mover does not send on day 2 (" + b1.Role + ")");
+        CampaignMover.Review(ExecutorFixtures.Inputs(s2, plan2, alloc2, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), tracker, ExecutorFixtures.State());
+        AssertFalse(tracker.InTransit(1), "the queued record settled: not in transit, not withheld from vanilla's pools");
+    }
+
+    // The one rule in the tracker: ended order or unwanted settles; wanted with the order running does not; the other budget's record is
+    // untouched; the bound drops what nobody touched.
+    private static void QueuedRecordsSettleByOneRuleAndExpire()
+    {
+        var t = new MoveTracker();
+        t.RecordIssued(1, 500f, 0f, 100f, 0f, Day, queued: true);
+        AssertFalse(t.SettleQueued(1, MoveBudget.Planner, wanted: true, orderRunning: true), "wanted and the order running: stays");
+        AssertFalse(t.SettleQueued(1, MoveBudget.Recon, wanted: false, orderRunning: false), "the other budget's record is not its business");
+        AssertTrue(t.InTransit(1), "still queued");
+        AssertTrue(t.SettleQueued(1, MoveBudget.Planner, wanted: false, orderRunning: true), "not wanted: settles though the order runs");
+        AssertFalse(t.InTransit(1), "released");
+        t.RecordIssued(2, 500f, 0f, 100f, 0f, Day, queued: true, budget: MoveBudget.Recon);
+        AssertTrue(t.SettleQueued(2, MoveBudget.Recon, wanted: true, orderRunning: false), "the order ahead ended: settles");
+        t.RecordIssued(3, 500f, 0f, 100f, 0f, Day, queued: false);
+        AssertFalse(t.SettleQueued(3, MoveBudget.Planner, wanted: false, orderRunning: false), "only a Queued record: an issued move is judged, not settled");
+        AssertTrue(t.InTransit(3), "still issued");
+
+        var e = new MoveTracker();
+        e.RecordIssued(4, 500f, 0f, 100f, 0f, Day, queued: true);
+        e.RecordIssued(5, 500f, 0f, 100f, 0f, Day, queued: false);
+        e.SettleExpiredQueued(Day + MoveTracker.QueuedExpiryDays - 1);
+        AssertTrue(e.InTransit(4), "one day short of the bound");
+        e.SettleExpiredQueued(Day + MoveTracker.QueuedExpiryDays);
+        AssertFalse(e.InTransit(4), "a queued record nobody touched is dropped at the bound");
+        AssertTrue(e.InTransit(5), "an issued move is not (the judgement owns it)");
+        e.RecordIssued(6, 500f, 0f, 100f, 0f, Day, queued: true);
+        e.RecordIssued(6, 500f, 0f, 100f, 0f, Day + 10, queued: true);   // re-recorded by its owner: the clock restarts
+        e.SettleExpiredQueued(Day + MoveTracker.QueuedExpiryDays);
+        AssertTrue(e.InTransit(6), "a record its owner re-records every review does not age out");
+        AssertEqual(14, MoveTracker.QueuedExpiryDays, "the bound");
+    }
+
+    private static void QueuedSettleCallSitesPinned()
+    {
+        string mover = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMover.cs"), "private static void JudgeLastReview(");
+        AssertTrue(HasLine(mover, "tracker.SettleExpiredQueued(s.DaySerial);"), "the mover applies the bound");
+        AssertTrue(HasLine(mover, "tracker.SettleQueued(f.InstanceId, MoveBudget.Planner, RoleStillSends(allocation, f.InstanceId), orderRunning);"), "and the rule for its own records");
+        AssertTrue(HasLine(mover, "tracker.SettleQueued(f.InstanceId, MoveBudget.Recon, wanted: true, orderRunning);"), "and the ended order for recon's, whose mission only the recon pass knows");
+        AssertTrue(HasLine(mover, "if (!tracker.InTransit(f.InstanceId) || orderRunning) continue;"), "judging only what is still in transit and has no order ahead");
+        string recon = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutor.cs"), "private void SettleQueuedMoves(");
+        AssertTrue(HasLine(recon, "tracker.SettleExpiredQueued(s.DaySerial);"), "recon applies the bound too");
+        AssertTrue(HasLine(recon, "tracker.SettleQueued(id, MoveBudget.Recon, ledger.IsRecon(id) || ledger.IsRecalling(id), orderRunning);"), "recon settles its own records by its missions");
+        AssertTrue(HasLine(recon, "bool orderRunning = i >= 0 && (s.Own[i].Flags & FormationFlags.MoveQueued) != 0;"), "from the snapshot's running-order flag");
+        string review = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutor.cs"), "public ReconTally Review(");
+        AssertTrue(review.IndexOf("SettleQueuedMoves(s, ledger, tracker);", StringComparison.Ordinal) >= 0
+            && review.IndexOf("SettleQueuedMoves(s, ledger, tracker);", StringComparison.Ordinal) < review.IndexOf("Move(s, missions", StringComparison.Ordinal), "before any move");
+    }
+
+    // ---- verify r2 N3 ----
+
+    private static void GoneUnitReleasesTheDebtButMissingBattleUnitsKeepsIt()
+    {
+        foreach (var answer in new[] { CavalrySend.NoUnit, CavalrySend.NoBattleUnits })
+        {
+            var s = World();
+            s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+            var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
+            var executor = new ReconExecutor();
+            executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+            ledger.Sync(s, new List<ReconTask>(), new Allocation { Alliance = 0 });        // cleared, 120 owed
+            AssertTrue(ledger.Missions[0].StandDownDue, "fixture: owed");
+            executor.Review(s, ledger, new FakeReconHost { OrderResult = answer }, new MoveTracker(), false);
+            if (answer == CavalrySend.NoUnit) AssertFalse(ledger.Missions[0].StandDownDue, "the group is gone since the snapshot: nothing is owed to it");
+            else AssertTrue(ledger.Missions[0].StandDownDue, "BattleUnits could not be reached (transient): the debt is kept for the next pass");
+        }
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
+        AssertTrue(HasLine(src, "if ((UnityEngine.Object)battleUnits == null) return CavalrySend.NoBattleUnits;"), "the host tells a missing BattleUnits from a missing unit");
     }
 
     private static void CavalryModeIsTheCodeMinusOneTwenty()
