@@ -77,7 +77,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return sector >= 0 ? sector : SectorOf(sectors, f);
         }
 
-        // What a formation adds to a hold sum (WlChainRules.CountsTowardHold decides who counts): its
+        // What a formation adds to a hold sum (WlChainRules.CountsTowardCoverage decides who counts): its
         // strength, and for the map-group player strength x morale, vanilla's own measure (11733-11740).
         internal static float HoldStrength(in FormationRecord f)
         {
@@ -119,7 +119,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // Each threatened sector's hold reserve: what holds there anyway (formations that cannot
         // be massed, and the capital reserve) counts first, then the massable formations nearest the
         // sector's believed army until the hold need is met. What holds counts the way vanilla counts
-        // it (WlChainRules.CountsTowardHold, integrator decision 2026-10-15): a committed defender at
+        // it (WlChainRules.CountsTowardCoverage, integrator decision 2026-10-15): a committed defender at
         // its strength and the map-group player's group at strength x morale, in the sector where its
         // last waypoint lies (HoldSectorOf), so a player standing in a sector releases the AI corps
         // that would hold it and a player marching away stops covering it. The player's own command and
@@ -144,7 +144,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (HoldSectorOf(sectors, f) != sector) continue;
                     if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
                     {
-                        if (WlChainRules.CountsTowardHold(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
+                        if (WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
                             held += HoldStrength(f);
                     }
                     else order.Add(i);

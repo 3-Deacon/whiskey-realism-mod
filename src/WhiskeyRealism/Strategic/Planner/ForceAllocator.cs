@@ -50,7 +50,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (F's
     //                 MoveUnitTo Postfix dispatches its march). The map-group player's group counts
     //                 toward the hold of the sector where its last waypoint lies, at strength x morale,
-    //                 as vanilla counts it (WlChainRules.CountsTowardHold; integrator decision
+    //                 as vanilla counts it (WlChainRules.CountsTowardCoverage; integrator decision
     //                 2026-10-15): the AI formations that would hold that sector are released while he
     //                 stands in it, and the sector reports its shortfall (and keeps or gets an AI
     //                 holder) the day he marches away. Counting is not committing: he is never mass,
@@ -511,11 +511,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 return sum;
             }
 
-            // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardHold (the player's own
+            // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own
             // command and a CIC side hold nothing), else ReserveRules.HoldStrength.
             private float Counts(int i)
             {
-                return WlChainRules.CountsTowardHold(_s.Own[i].Chain) ? ReserveRules.HoldStrength(_s.Own[i]) : 0f;
+                return WlChainRules.CountsTowardCoverage(_s.Own[i].Chain) ? ReserveRules.HoldStrength(_s.Own[i]) : 0f;
             }
 
             // Distance to the sector's nearest believed land enemy (centroid when none), the home
@@ -556,7 +556,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     for (int i = 0; i < _n; i++)
                     {
                         if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k
-                            || !WlChainRules.CountsTowardHold(_s.Own[i].Chain)) continue;
+                            || !WlChainRules.CountsTowardCoverage(_s.Own[i].Chain)) continue;
                         if (IsImmobileReason(_reason[i]) || WlChainRules.OrderOnly(_s.Own[i].Chain)) sum += Counts(i);
                         else holds.Add(i);
                     }

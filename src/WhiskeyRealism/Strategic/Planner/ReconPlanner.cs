@@ -412,7 +412,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!OwnMean(s, sectors, m.Sector, out m.FrontX, out m.FrontZ) && !NearestOwn(s, m.TargetX, m.TargetZ, out m.FrontX, out m.FrontZ))
                 return false;
             for (int i = 0; i < s.Own.Count; i++)
-                if (InMainBody(s, m, s.Own[i]) && WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain))
+                if (InMainBody(s, m, s.Own[i]) && WlChainRules.MayMove(s.Own[i].Chain))
                     m.BodyStrength += Math.Max(0f, s.Own[i].Strength);
             return true;
         }
@@ -621,7 +621,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             own = enemy = 0f;
             for (int i = 0; i < s.Own.Count; i++)
-                if (SectorOf(sectors, s.Own[i]) == sector && WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain))
+                if (SectorOf(sectors, s.Own[i]) == sector && WlChainRules.MayMove(s.Own[i].Chain))
                     own += Math.Max(0f, s.Own[i].Strength);
             for (int i = 0; i < s.Beliefs.Count; i++)
             {

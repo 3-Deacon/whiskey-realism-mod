@@ -816,14 +816,12 @@ internal static class WlCampaignTests
         var own = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isUnderCommander: true, isPartOfPlayerUnit: true);
         AssertEqual(WlChainClass.PlayerCommand, WlChainRules.Classify(in own));
         AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerCommand), "own command never moved");
-        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.PlayerCommand), "own command not a defender");
         AssertFalse(WlChainRules.OrderOnly(WlChainClass.PlayerCommand), "vanilla gives it no campaign order (8366)");
 
         // The AI corps carrying him (IsPlayerPartOfUnit: the campaign group of his command).
         var carrying = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
         AssertEqual(WlChainClass.CarryingGroup, WlChainRules.Classify(in carrying));
         AssertTrue(WlChainRules.MayMove(WlChainClass.CarryingGroup), "movable AI asset, as vanilla moves it");
-        AssertTrue(WlChainRules.CountsAsCommittedDefender(WlChainClass.CarryingGroup), "an AI corps counts");
 
         // A hidden sub-unit inside that corps is still part of the player's chain.
         var inside = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true);
@@ -841,7 +839,6 @@ internal static class WlCampaignTests
         AssertEqual(WlChainClass.PlayerMapGroup, WlChainRules.Classify(in mapGroup));
         AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerMapGroup), "never moved");
         AssertTrue(WlChainRules.OrderOnly(WlChainClass.PlayerMapGroup), "addressed by dispatch");
-        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.PlayerMapGroup), "unreliable executor");
         AssertEqual(WlStrategicOrderResult.IssuedWlCurrentOrder, WlStrategicOrderBridge.Classify(WlStrategicIntent.DefendCapital, mapGroup).Result);
 
         // Not his own map group: nothing carries him, so no unit is a carrying group.
@@ -855,7 +852,6 @@ internal static class WlCampaignTests
         var cic = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPlayerCic: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
         AssertEqual(WlChainClass.CicSide, WlChainRules.Classify(in cic));
         AssertFalse(WlChainRules.MayMove(WlChainClass.CicSide), "stand down");
-        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.CicSide), "stand down");
         AssertFalse(WlChainRules.OrderOnly(WlChainClass.CicSide), "no orders either");
     }
 
@@ -865,7 +861,6 @@ internal static class WlCampaignTests
         AssertEqual(WlChainClass.None, WlChainRules.Classify(new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: false, isPlayerCic: true)));
         AssertEqual(WlChainClass.None, WlChainRules.Classify(new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true)));
         AssertTrue(WlChainRules.MayMove(WlChainClass.None), "AI unit movable");
-        AssertTrue(WlChainRules.CountsAsCommittedDefender(WlChainClass.None), "AI unit counts");
     }
 
     private static void WlBridgeMovesCarryingGroup()
@@ -880,9 +875,10 @@ internal static class WlCampaignTests
     }
 
     // F-extra-4: DefenseIntentRuntime marks the player's command and map group
-    // PlayerControlled (WlChainRules.CountsAsCommittedDefender); the ledger keeps
-    // them out of both pools (DefenseIntentLedger threat pre-suppression and
-    // FilterGuardCandidates), so no must-hold coverage rests on the player.
+    // PlayerControlled (not WlChainRules.MayMove); the ledger keeps them out of
+    // both pools (DefenseIntentLedger threat pre-suppression and
+    // FilterGuardCandidates), so no package ever commits the player. What the map
+    // group holds by position is PlayerPositionTests.
     private static void WlDefenseLedgerSkipsPlayerControlled()
     {
         var threat = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };

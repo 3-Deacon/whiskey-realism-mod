@@ -856,7 +856,7 @@ internal static class ReconPlannerTests
     }
 
     // C4: the W&L player's own command and a map-group player are never a sector's hold
-    // (WlChainRules.CountsAsCommittedDefender), so the sector's only AI corps is its final reserve.
+    // (WlChainRules.MayMove), so the sector's only AI corps is its final reserve.
     private static void PicketReserveIgnoresPlayerCommand()
     {
         var (s, sectors, plan, picket) = ReserveFixture(WlChainClass.PlayerCommand);

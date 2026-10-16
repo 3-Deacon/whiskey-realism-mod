@@ -18,7 +18,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   balance  massable own strength M / (M + believed land enemy near the target), scaled by the
     //            force commander's AttackBias (x (1 + 0.5 x bias)). M (MassFor, G3 verify F4) is the
     //            strength G4 can concentrate: own formations that are movable (not busy), committed
-    //            (WlChainRules.CountsAsCommittedDefender: never the W&L player's command or map
+    //            (WlChainRules.MayMove: never the W&L player's command or map
     //            group), not Recover (raw Supply01 >= 0.4, morale >= aiminimummoraleformovement) and
     //            within MarchHorizonDays of the target, less the capital reserve (the formations
     //            nearest the capital up to CapitalFloorStrength: G4's CapitalGuard rule) and less every
@@ -547,7 +547,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // A formation G4 may concentrate (see the header).
         internal static bool MassEligible(in FormationRecord f, float minMorale)
         {
-            return Movable(f) && WlChainRules.CountsAsCommittedDefender(f.Chain)
+            return Movable(f) && WlChainRules.MayMove(f.Chain)
                 && f.Supply01 >= RecoverSupplyBelow && f.Morale >= minMorale;
         }
 
@@ -639,7 +639,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 // planner can order only.
                 int sector = ReserveRules.HoldSectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
-                if (WlChainRules.CountsTowardHold(f.Chain)) x.Own[sector] += ReserveRules.HoldStrength(f);
+                if (WlChainRules.CountsTowardCoverage(f.Chain)) x.Own[sector] += ReserveRules.HoldStrength(f);
                 x.Count[sector]++;
                 if (WlChainRules.MayMove(f.Chain))
                 {
@@ -755,7 +755,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!WlChainRules.CountsTowardHold(f.Chain)) continue;
+                if (!WlChainRules.CountsTowardCoverage(f.Chain)) continue;
                 ReserveRules.HoldPoint(f, out float hx, out float hz); // vanilla reads GetLastWaypointPos (11733-11740)
                 if (RiverLines.Distance(hx, hz, s.CapitalX, s.CapitalZ) >= range) continue;
                 own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));

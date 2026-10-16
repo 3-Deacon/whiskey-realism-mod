@@ -1161,12 +1161,12 @@ internal static class ForceAllocatorTests
 
     // G4 verify r3 F4: a CIC alliance's side stands down before any hold sum is computed. The player's CicSide
     // chain is classified only on the player's own alliance, which the planner never plans, so the predicate is
-    // pinned as well: CountsTowardHold is false for it.
+    // pinned as well: CountsTowardCoverage is false for it.
     private static void CicStandDownPrecedesEveryHoldSum()
     {
-        AssertFalse(WlChainRules.CountsTowardHold(WlChainClass.CicSide), "a CIC side holds nothing");
-        AssertFalse(WlChainRules.CountsTowardHold(WlChainClass.PlayerCommand), "nor his own command");
-        AssertTrue(WlChainRules.CountsTowardHold(WlChainClass.PlayerMapGroup), "the map-group player does");
+        AssertFalse(WlChainRules.CountsTowardCoverage(WlChainClass.CicSide), "a CIC side holds nothing");
+        AssertFalse(WlChainRules.CountsTowardCoverage(WlChainClass.PlayerCommand), "nor his own command");
+        AssertTrue(WlChainRules.CountsTowardCoverage(WlChainClass.PlayerMapGroup), "the map-group player does");
         string review = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
         int standDown = review.IndexOf("if (mode == PlannerReviewMode.StandDown) return;", StringComparison.Ordinal);
         int sectorBuild = review.IndexOf("SectorModel.Build(snapshot)", StringComparison.Ordinal);

@@ -117,6 +117,7 @@ namespace WhiskeyRealism.Strategic
             // Cache GamePrefs values once per call to avoid repeated reflection overhead
             // in the per-unit inner loops.
             float defOpsRadius = ReadGamePrefsFloat("maxdistancedefensiveoperations", 250f);
+            input.HoldCoverRadius = defOpsRadius;
 
             // Find our capital position once for AssetRoleScorer.capitalDistance computations.
             // Scan owned towns with IsCapital; fall back to 9999f if none found (CapitalApproach
@@ -436,11 +437,25 @@ namespace WhiskeyRealism.Strategic
                 if (unit == null) continue;
                 var regiment = unit as Regiment;
 
-                // Skip retreating or in-battle units.
+                // W&L chain (WlChainRules, stage F / C4): the player's own command, his map
+                // group and a CIC side may not be committed (the ledger pre-suppresses them
+                // "player-controlled", so no package rests on the player). His map group
+                // is still counted where its last waypoint lies, at strength x morale as
+                // vanilla counts every own group, so an asset it stands at is covered and an
+                // asset it marches from shows as a gap at the next review. The AI group
+                // carrying a player below map-group level is an ordinary candidate.
+                WlChainClass chainClass = regiment != null
+                    ? WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, regiment)
+                    : WlChainClass.None;
+                bool playerControlled = regiment != null && !WlChainRules.MayMove(chainClass);
+                bool holdsPosition = regiment != null && playerControlled && WlChainRules.CountsTowardCoverage(chainClass);
+
+                // Skip retreating or in-battle units. A group holding a position stands
+                // there while it fights; it is not sendable either way.
                 if (regiment != null)
                 {
                     if (regiment.onretreat) continue;
-                    if (regiment.inbattle) continue;
+                    if (regiment.inbattle && !holdsPosition) continue;
                 }
                 else
                 {
@@ -491,13 +506,7 @@ namespace WhiskeyRealism.Strategic
                     catch { readinessStep = 2f; }
                 }
 
-                // W&L chain (WlChainRules, stage F / C4): the player's own command, his map
-                // group (an unreliable executor) and a CIC side are no committed defenders;
-                // the ledger pre-suppresses them ("player-controlled") so must-hold
-                // coverage never rests on the player. The AI group carrying a player
-                // below map-group level counts like any AI unit.
-                bool playerControlled = regiment != null &&
-                    !WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, regiment));
+                Vector3 holdPos = holdsPosition ? regiment.GetLastWaypointPos() : unitPos;
 
                 // Single-pass tier + closest-threat classification.
                 // Tracks (minDist, closestIndex) to eliminate the float-equality fragility of a
@@ -600,6 +609,9 @@ namespace WhiskeyRealism.Strategic
                     Tier = tier,
                     InOffensiveOperation = inOffensive,
                     PlayerControlled = playerControlled,
+                    HoldsPosition = holdsPosition,
+                    HoldX = holdPos.x,
+                    HoldZ = holdPos.z,
                     CriticalFront = criticalFront,
                     HasFormationDirective = directive != null,
                     DefensiveAllowed = directive == null || directive.DefensiveAllowed,
