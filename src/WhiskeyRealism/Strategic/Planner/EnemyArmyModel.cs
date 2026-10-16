@@ -534,7 +534,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         internal static EnemyTraits Traits(bool embarked, float cavalryShare, bool onOwnSoil, bool nearOwnCoast)
         {
-            var traits = EnemyTraits.None;
+            var traits = default(EnemyTraits);
             if (embarked) traits |= EnemyTraits.Embarked;
             if (cavalryShare > CavalryMajorityShare) traits |= EnemyTraits.CavalryMajority;
             if (onOwnSoil) traits |= EnemyTraits.OnOwnSoil;

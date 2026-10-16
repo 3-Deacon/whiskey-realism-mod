@@ -83,7 +83,6 @@ namespace WhiskeyRealism.Strategic
     // (name:commander) and is rebound to this session's formation on the first review after a load (PlannerRebind).
     internal class PlannerStateDto
     {
-        [JsonProperty("currentMainSector")] public int CurrentMainSector = -1;
         [JsonProperty("currentMainObjective")] public int CurrentMainObjective = -1;
         [JsonProperty("challengerObjective")] public int ChallengerObjective = -1;
         [JsonProperty("challengerDays")] public int ChallengerDays;
@@ -159,7 +158,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("sectorId")] public int SectorId;
         [JsonProperty("state")] public string State;
         [JsonProperty("issuedDay")] public int IssuedDay;
-        [JsonProperty("lastContactDay")] public int LastContactDay = -1;
         [JsonProperty("reason")] public string Reason;
         // A probe's remembered enemy reaction (-1 before its first look) and the objective it was seen at.
         [JsonProperty("observedEnemyStrength")] public float ObservedEnemyStrength = -1f;

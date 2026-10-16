@@ -75,7 +75,6 @@ namespace WhiskeyRealism.Strategic
 
             var input = new DefenseIntentInput
             {
-                AllianceId = allianceId,
                 PlayerIsCIC = !plannerRuns,
                 CICPersonality = PersonalityVector.ForAlliance(allianceId, era),
                 Cooldown = cooldown,

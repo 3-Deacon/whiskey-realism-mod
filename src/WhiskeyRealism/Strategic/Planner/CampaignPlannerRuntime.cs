@@ -302,8 +302,8 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // G1b: binds the allocation's Recon assignments to missions (writing each mission id back into its
-        // assignment) before the allocation is published, then the [Recon] row.
+        // G1b: binds the allocation's Recon assignments to missions before the allocation is published, then the
+        // [Recon] row.
         private static void SyncRecon(CampaignSnapshot snapshot, Allocation allocation)
         {
             using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))

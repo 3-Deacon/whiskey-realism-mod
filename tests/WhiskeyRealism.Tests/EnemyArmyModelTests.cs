@@ -151,7 +151,7 @@ internal static class EnemyArmyModelTests
 
     private static EnemyDetection Seen(string key, int instanceId, float x, float z, float strength,
                                        int unitTyp = 15, DetectionSource source = DetectionSource.FogGrid,
-                                       EnemyTraits traits = EnemyTraits.None)
+                                       EnemyTraits traits = default(EnemyTraits))
     {
         return new EnemyDetection
         {
@@ -629,7 +629,7 @@ internal static class EnemyArmyModelTests
     {
         var t = DetectionRules.Traits(embarked: true, cavalryShare: 0.6f, onOwnSoil: true, nearOwnCoast: true);
         AssertEqual(EnemyTraits.Embarked | EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil | EnemyTraits.NearOwnCoast, t, "all traits");
-        AssertEqual(EnemyTraits.None, DetectionRules.Traits(false, 0.5f, false, false), "half cavalry is no majority");
+        AssertEqual(default(EnemyTraits), DetectionRules.Traits(false, 0.5f, false, false), "half cavalry is no majority");
     }
 
     // ---- Migrated readers (C25) ----
@@ -770,7 +770,7 @@ internal static class EnemyArmyModelTests
         for (int day = 0; day <= 5; day++)
         {
             if (day > 0) m.Update(List(), day, Drift(5f), March(5f));
-            var input = new DefenseIntentInput { AllianceId = 1, Cooldown = cooldown, CooldownDays = 4 };
+            var input = new DefenseIntentInput { Cooldown = cooldown, CooldownDays = 4 };
             foreach (var b in m.Beliefs)
             {
                 var copy = b;
@@ -815,7 +815,7 @@ internal static class EnemyArmyModelTests
         tracker.Close(second, sig);
         AssertEqual(1, second.Count, "only the sea invasion is tracked");
         AssertTrue(second[0].SightingLapsed && second[0].EnemyUnitKey == "Expedition:9", "lapsed copy");
-        var input = new DefenseIntentInput { AllianceId = 1 };
+        var input = new DefenseIntentInput();
         input.Threats.AddRange(second);
         var output = DefenseIntentLedger.Build(input);
         AssertEqual(DefensePosture.Recovered, output.Responses[0].Threat.Posture, "Recovered");

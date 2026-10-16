@@ -856,16 +856,16 @@ internal static class ConstructionSteeringTests
         ledger.Sync(plan, a, s, null);
         float reach = 10f;
         int later = s.DaySerial + 1;
-        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.None), reach, 9f, Facts(later)), "within reach of the site: wish at its position");
+        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, default(FormationFlags)), reach, 9f, Facts(later)), "within reach of the site: wish at its position");
         AssertEqual(DepotWishMoment.Adopt, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.VanillaDepotBuilder), reach, 9f, Facts(later, depotAtSite: true)), "...and vanilla's job already raises a depot for it at the site: adopt that one");
-        AssertEqual(DepotWishMoment.Ahead, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, DepotTaskLedger.AheadDays, Facts(later, march: true)), "marching there on an earlier review's move and arriving within a review day: wish now, at the site");
-        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, DepotTaskLedger.AheadDays + 0.01f, Facts(later, march: true)), "arriving later: wait");
+        AssertEqual(DepotWishMoment.Ahead, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, default(FormationFlags)), reach, DepotTaskLedger.AheadDays, Facts(later, march: true)), "marching there on an earlier review's move and arriving within a review day: wish now, at the site");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, default(FormationFlags)), reach, DepotTaskLedger.AheadDays + 0.01f, Facts(later, march: true)), "arriving later: wait");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.VanillaDepotBuilder), reach, 9f, Facts(later, depotAtSite: true)), "a builder far from the site next to some other depot is not adopted");
-        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, FormationFlags.None), reach, float.MaxValue, Facts(later, march: true)), "no speed estimate: wait");
-        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(1, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f, Facts(later)), "no such task");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(300f, 0f, default(FormationFlags)), reach, float.MaxValue, Facts(later, march: true)), "no speed estimate: wait");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(1, DepotBuilderAt(250f, 0f, default(FormationFlags)), reach, 0f, Facts(later)), "no such task");
         ledger.RecordWished(0, s.DaySerial, 250f, 0f, "vanilla-depot-adopted");
         AssertEqual("vanilla-depot-adopted", ledger.Transitions[ledger.Transitions.Count - 1].Reason, "the transition names how the task became Wished");
-        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, FormationFlags.None), reach, 0f, Facts(later)), "a wished task is not wished again, whatever the builder does");
+        AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, default(FormationFlags)), reach, 0f, Facts(later)), "a wished task is not wished again, whatever the builder does");
     }
 
     // F6a: an arrival estimate is a lower bound, and the wish is paid at once (97506, 96211-96257), so Ahead needs a builder that is
@@ -875,14 +875,14 @@ internal static class ConstructionSteeringTests
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
         ledger.Sync(plan, a, s, null);
-        var far = DepotBuilderAt(300f, 0f, FormationFlags.None);
+        var far = DepotBuilderAt(300f, 0f, default(FormationFlags));
         int day = s.DaySerial;
         AssertEqual(day, ledger.Tasks[0].StartedDay, "fixture: the task started today");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, far, 10f, 0.5f, Facts(day, march: true)), "the review the task starts: no Ahead, whatever the tracker says");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, far, 10f, 0.5f, Facts(day + 1, march: false)), "a later review but no move toward the site on the tracker: no Ahead on the estimate alone");
         AssertEqual(DepotWishMoment.Ahead, ledger.WishMoment(0, far, 10f, 0.5f, Facts(day + 1, march: true)), "a later review, a move on its way, arriving within a day: Ahead");
         AssertEqual(DepotWishMoment.Wait, ledger.WishMoment(0, far, 10f, DepotTaskLedger.AheadDays + 0.5f, Facts(day + 1, march: true)), "...but not when it arrives later than a review day");
-        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, FormationFlags.None), 10f, 0f, Facts(day)), "arrived on the start day: Here needs no move (it stands there)");
+        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(255f, 0f, default(FormationFlags)), 10f, 0f, Facts(day)), "arrived on the start day: Here needs no move (it stands there)");
         string runtime = Src("Strategic/Planner/DepotSteeringRuntime.cs");
         string watch = BodyOf(runtime, "private static void PlaceWishesAndWatchBuilds(");
         AssertTrue(HasLine(watch, "MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial)"), "the runtime reads the mover's tracker for a move toward the task's site");
@@ -970,7 +970,7 @@ internal static class ConstructionSteeringTests
         var flagged = DepotBuilderAt(250f, 0f, FormationFlags.VanillaDepotBuilder);
         AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, flagged, 10f, 0f, Facts(s.DaySerial, depotAtSite: false)), "flagged, but the depot it is raising is not at the site: its own wish");
         AssertEqual(DepotWishMoment.Adopt, ledger.WishMoment(0, flagged, 10f, 0f, Facts(s.DaySerial, depotAtSite: true)), "flagged and a depot rising at the site: adopted");
-        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, FormationFlags.None), 10f, 0f, Facts(s.DaySerial, depotAtSite: true)), "not flagged: vanilla's job does not own that depot, wish");
+        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, default(FormationFlags)), 10f, 0f, Facts(s.DaySerial, depotAtSite: true)), "not flagged: vanilla's job does not own that depot, wish");
 
         float builtRadius = 50f;
         var task = ledger.Tasks[0];

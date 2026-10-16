@@ -970,21 +970,21 @@ internal static class CampaignExecutorTests
             var a = new Allocation { Alliance = 0 };
             a.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
             CampaignPlanStore.Publish(0, plan, a, sectors);
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 1, ReleasedDecision = -1, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
             CampaignPlanStore.PreparePublish();
             CampaignPlanStore.SwapPublished();
 
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 2, ReleasedDecision = 2, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
             inJob = false;
             AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var published), "published context");
-            AssertEqual(1, published.DecisionSerial, "between slices the reader sees the last commit's decision, not today's working one");
+            AssertFalse(published.Released, "between slices the reader sees the last commit's release, not today's working one");
             inJob = true;
             AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var working), "working context");
-            AssertEqual(2, working.DecisionSerial, "inside a job: the working one");
+            AssertTrue(working.Released, "inside a job: the working one");
             CampaignPlanStore.PreparePublish();
             CampaignPlanStore.SwapPublished();
             inJob = false;
-            AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var after) && after.ReleasedDecision == 2, "after the commit: today's");
+            AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var after) && after.Released, "after the commit: today's");
             AssertFalse(CampaignPlanStore.TryGetExecutorContext(1, out _), "none for an alliance with no plan");
             AssertFalse(CampaignPlanStore.TryGetExecutorContext(2, out _), "alliances 0 and 1 only");
         }
@@ -1442,7 +1442,7 @@ internal static class ExecutorFixtures
 
     internal static Assignment Assign(int id, FormationRole role, int sector, float tx, float tz)
     {
-        return new Assignment { InstanceId = id, Role = role, SectorId = sector, TargetX = tx, TargetZ = tz, Reason = "t", ReconMissionId = -1 };
+        return new Assignment { InstanceId = id, Role = role, SectorId = sector, TargetX = tx, TargetZ = tz, Reason = "t" };
     }
 
     internal static PlannerState State()
@@ -1512,7 +1512,7 @@ internal static class ExecutorFixtures
         a.Assignments.Add(atNeed);
         PlanFreshness.NoteToday(Day);
         CampaignPlanStore.Publish(0, plan, a, sectors);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 1, ReleasedDecision = -1, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
         tracker = MoveTrackers.For(0);
         return new World { Main = 1, Support = 2, MapGroupSupport = 3, Reserve = 4, CapitalGuard = 5, FreeHold = 6, HoldAtNeed = 7, HoldAtNeedWithheld = true, HoldSectorX = 560f };
     }
@@ -1520,7 +1520,7 @@ internal static class ExecutorFixtures
     internal static void Release(int alliance)
     {
         CampaignPlanStore.TryGetExecutorContext(alliance, out var ctx);
-        ctx.ReleasedDecision = ctx.DecisionSerial;
+        ctx.Released = true;
         CampaignPlanStore.PublishExecutorContext(alliance, ctx);
     }
 }

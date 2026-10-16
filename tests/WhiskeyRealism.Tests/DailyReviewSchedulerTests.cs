@@ -504,7 +504,7 @@ internal static class DailyReviewSchedulerTests
                 {
                     InstanceId = i, UnitKey = "m" + i + ":" + i, UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 3000f + rng.Next(9000),
                     Morale = 0.8f, Supply01 = rng.Next(5) == 0 ? 0.2f : 0.9f, ReadinessStep = 3, CommandRange = 40f, BugleRange = 5f, CommanderId = i,
-                    AreaIndex = -1, Flags = FormationFlags.FightingForce | (rng.Next(6) == 0 ? FormationFlags.InBattle : FormationFlags.None),
+                    AreaIndex = -1, Flags = FormationFlags.FightingForce | (rng.Next(6) == 0 ? FormationFlags.InBattle : default(FormationFlags)),
                     CavalryShare = rng.Next(3) == 0 ? 0.9f : 0f, SightRadius = 50f, Name = "m" + i, ParentInstanceId = -1
                 });
             // A third of the beliefs are decayed, so the probe trigger (no belief of confidence >= 0.5 near the
@@ -563,7 +563,7 @@ internal static class DailyReviewSchedulerTests
             var sb = new System.Text.StringBuilder();
             foreach (var m in ledger.Missions)
                 sb.Append(m.MissionId).Append(':').Append(m.Kind).Append(':').Append(m.State).Append(':').Append(m.Reason).Append('@')
-                  .Append(m.InstanceId).Append('/').Append(m.IssuedDay).Append('/').Append(m.LastContactDay).Append('/').Append(m.ObservedEnemyStrength.ToString("0.#")).Append(';');
+                  .Append(m.InstanceId).Append('/').Append(m.IssuedDay).Append('/').Append(m.ObservedEnemyStrength.ToString("0.#")).Append(';');
             return sb.ToString();
         }
 

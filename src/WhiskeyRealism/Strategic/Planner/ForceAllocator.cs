@@ -276,7 +276,6 @@ namespace WhiskeyRealism.Strategic.Planner
                         TargetX = _tx[i],
                         TargetZ = _tz[i],
                         Reason = _reason[i],
-                        ReconMissionId = -1,
                         Withheld = _withheld[i]
                     });
                 }

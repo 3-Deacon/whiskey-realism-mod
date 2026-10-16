@@ -276,7 +276,7 @@ internal static class CampaignTempoGateTests
     private static void NoStoredDayUsesOneReviewGap()
     {
         var state = new PlannerState();
-        state.Restore(2, 7, -1, 0, 3, 1861L);   // a v1/v2 sidecar: no stored day, no stored release
+        state.Restore(7, -1, 0, 3, 1861L);   // a v1/v2 sidecar: no stored day, no stored release
         AssertEqual(-1, state.LastFullReviewDay, "no stored day");
         AssertEqual(-1, state.TempoReleasedDecision, "no stored release: -1 never equals a DecisionSerial");
         AssertNear(1f / 365.25f, CampaignTempoGate.TimeDiffYears(ExecutorFixtures.Day, state.LastFullReviewDay), 1e-9f, "a reload from it rolls with one review's worth");
@@ -539,7 +539,7 @@ internal static class CampaignTempoGateTests
         CampaignScope.ResetAll();
         PlanFreshness.NoteToday(day2.DaySerial);
         CampaignPlanStore.Publish(0, plan2, alloc2, ExecutorFixtures.Sectors(day2));
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = decision, ReleasedDecision = -1, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 1), "so no Support stays withheld for it, and vanilla's own pool is vanilla's");
         CampaignScope.ResetAll();
     }
@@ -589,7 +589,7 @@ internal static class CampaignTempoGateTests
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Main), "and after the release (an undispatched member is launched only by the mover)");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a Hold formation above its sector's need is not");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "nor Support once the decision is released");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 1, ReleasedDecision = -1, ExecutorsAllowed = false, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = 3 });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Main), "with the pre-war gate nothing is");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Reserve), "not even a Reserve formation");
         CampaignScope.ResetAll();
@@ -660,7 +660,7 @@ internal static class CampaignTempoGateTests
     private static void ReleasedDecisionSurvivesRestore()
     {
         var state = new PlannerState();
-        state.Restore(2, 98, -1, 0, 3, 1861L, belowOddsDays: 0, capitalThreatLatched: false, tempoReleasedDecision: 3, lastFullReviewDay: 4321);
+        state.Restore(98, -1, 0, 3, 1861L, belowOddsDays: 0, capitalThreatLatched: false, tempoReleasedDecision: 3, lastFullReviewDay: 4321);
         AssertEqual(3, state.TempoReleasedDecision, "the release is restored");
         AssertEqual(4321, state.LastFullReviewDay, "and the tempo clock's reference");
         var g = GateWith(believedEnemy: true);
@@ -669,7 +669,7 @@ internal static class CampaignTempoGateTests
         AssertFalse(tally.Tempo.NeedsRoll, "a restored, released decision is not rolled again");
         AssertEqual(3, g.Host.Moves.Count, "and everything goes out");
         var fresh = new PlannerState();
-        fresh.Restore(2, 98, -1, 0, 3, 1861L, tempoReleasedDecision: 2);
+        fresh.Restore(98, -1, 0, 3, 1861L, tempoReleasedDecision: 2);
         AssertTrue(fresh.TempoReleasedDecision != fresh.DecisionSerial, "an older decision's release does not release the current one");
     }
 
@@ -690,9 +690,9 @@ internal static class CampaignTempoGateTests
     private static void AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne()
     {
         var w = ExecutorFixtures.PublishedWorld(out _);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 3, ReleasedDecision = 2, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "decision 3 is deferred though decision 2 was released: Support stays withheld");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 3, ReleasedDecision = 3, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "released: vanilla's again");
         CampaignScope.ResetAll();
 
@@ -794,7 +794,7 @@ internal static class CampaignTempoGateTests
     {
         var w = ExecutorFixtures.PublishedWorld(out var tracker);
         tracker.RecordIssued(w.FreeHold, 300f, 0f, 100f, 0f, ExecutorFixtures.Day, queued: false);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 1, ReleasedDecision = -1, ExecutorsAllowed = false, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = -1 });
         foreach (int id in new[] { w.Main, w.Support, w.Reserve, w.CapitalGuard, w.FreeHold, w.HoldAtNeed })
         {
             AssertFalse(CampaignWithholdView.WithheldFromOffense(0, id), "pre-war: formation " + id + " is vanilla's");

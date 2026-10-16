@@ -35,7 +35,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     WaypointZ = waypoint.z,
                     Strength = activeStrength ? unit.groupstrengthactive : unit.groupstrengthdirect,
                     Morale = unit.groupmorale,
-                    Flags = unit.transfertime > 0f ? FormationFlags.InTransfer : FormationFlags.None,
+                    Flags = unit.transfertime > 0f ? FormationFlags.InTransfer : default(FormationFlags),
                     Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit)
                 });
             }

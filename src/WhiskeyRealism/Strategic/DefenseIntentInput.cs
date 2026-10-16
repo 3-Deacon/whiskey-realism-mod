@@ -29,7 +29,6 @@ namespace WhiskeyRealism.Strategic
 
     public sealed class DefenseIntentInput
     {
-        public int AllianceId;
         public bool PlayerIsCIC;
         public PersonalityVector CICPersonality;
         public List<DefenseThreatSource> Threats = new List<DefenseThreatSource>();

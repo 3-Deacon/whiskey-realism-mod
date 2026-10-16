@@ -479,7 +479,7 @@ internal static class ReconPlannerTests
         var ledger = new ReconMissionLedger();
         AddMission(ledger, s, ReconKind.AdvanceGuard, 2, 460f, 0f, 2);
         var allocation = new Allocation { Alliance = 0 };
-        allocation.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.MainEffort, ReconMissionId = -1 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.MainEffort });
 
         ledger.OnReview(s, allocation);
         AssertEqual(ReconState.Holding, ledger.Missions[0].State, "at its hold point");
@@ -555,23 +555,22 @@ internal static class ReconPlannerTests
         var a = new Allocation { Alliance = 0 };
         a.Assignments.Add(Recon(2, tasks[0]));
         a.Assignments.Add(Recon(3, tasks[1]));
-        a.Assignments.Add(new Assignment { InstanceId = 9, Role = FormationRole.Hold, ReconMissionId = -1 });
+        a.Assignments.Add(new Assignment { InstanceId = 9, Role = FormationRole.Hold });
         ledger.Sync(s, tasks, a);
 
         AssertEqual(2, ledger.Missions.Count, "one mission per recon assignment");
-        AssertTrue(a.Assignments[0].ReconMissionId >= 0 && a.Assignments[1].ReconMissionId >= 0, "ids written back into the allocation");
-        AssertTrue(a.Assignments[0].ReconMissionId != a.Assignments[1].ReconMissionId, "distinct ids");
-        AssertEqual(-1, a.Assignments[2].ReconMissionId, "non-recon roles untouched");
+        AssertTrue(MissionOf(ledger, 2).MissionId != MissionOf(ledger, 3).MissionId, "distinct mission ids");
+        AssertFalse(ledger.IsRecon(9), "a non-recon role starts no mission");
         AssertEqual("u2:2", ledger.Missions[0].UnitKey, "persisted identity");
         AssertEqual(200f, ledger.Missions[0].HoldX, "hold point from the task");
         AssertEqual(ReconState.Assigned, ledger.Missions[0].State, "new");
         AssertTrue(ledger.IsRecon(2), "on a mission");
-        int first = a.Assignments[0].ReconMissionId;
+        int first = MissionOf(ledger, 2).MissionId;
 
         var b = new Allocation { Alliance = 0 };
         b.Assignments.Add(Recon(2, tasks[0]));
         ledger.Sync(s, tasks, b);
-        AssertEqual(first, b.Assignments[0].ReconMissionId, "kept mission keeps its id");
+        AssertEqual(first, MissionOf(ledger, 2).MissionId, "kept mission keeps its id");
         AssertEqual(ReconState.Cleared, MissionOf(ledger, 3).State, "a mission whose group lost its recon role is cleared");
         AssertFalse(ledger.IsRecon(3), "not on a mission any more");
     }
@@ -591,7 +590,6 @@ internal static class ReconPlannerTests
         s.Beliefs[0] = Belief("contact", 305f, 0f, 9000f, Today, 1f, 5f);
         ledger.OnReview(s, hold);
         AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "an enemy seen today inside bugle range recalls the screen");
-        AssertEqual(Today, ledger.Missions[0].LastContactDay, "contact day stamped");
         AssertEqual(0f, ledger.Missions[0].HoldX, "toward the nearest own Hold/MainEffort group");
 
         var s2 = World();
@@ -692,11 +690,10 @@ internal static class ReconPlannerTests
         AddMission(ledger, s, ReconKind.Probe, 2, 300f, 0f, -1);
         AddMission(ledger, s, ReconKind.Probe, 3, 0f, 300f, -1, keep: 2);
 
-        // A probe's own contact is its job: stamped, not recalled; the verdict decides.
+        // A probe's own contact is its job: it is not recalled for it; the verdict decides.
         s.Beliefs.Add(Belief("met", 305f, 0f, 3000f, Today, 1f, 5f));
         ledger.OnReview(s, HoldAlloc());
         AssertEqual(ReconState.Holding, MissionOf(ledger, 2).State, "contact alone does not recall a probe");
-        AssertEqual(Today, MissionOf(ledger, 2).LastContactDay, "contact stamped");
 
         var favorable = ContactEvidenceLedger.Build(Evidence(friendly: 9000f, enemy: 3000f));
         AssertTrue(favorable.AllowsEscalation, "fixture: favorable contact allows escalation");
@@ -734,8 +731,8 @@ internal static class ReconPlannerTests
         a.Assignments.Add(Recon(99, next[0]));
         a.Assignments.Add(Recon(5, next[1]));
         reloaded.Sync(after, next, a);
-        AssertEqual(ledger.Missions[0].MissionId, a.Assignments[0].ReconMissionId, "the restored mission keeps its id");
-        AssertTrue(a.Assignments[1].ReconMissionId > ledger.Missions[0].MissionId, "new ids continue after the restored ones");
+        AssertEqual(ledger.Missions[0].MissionId, MissionOf(reloaded, 99).MissionId, "the restored mission keeps its id");
+        AssertTrue(MissionOf(reloaded, 5).MissionId > ledger.Missions[0].MissionId, "new ids continue after the restored ones");
     }
 
     private static void AlliancesTwoToFourIgnored()
@@ -1032,7 +1029,7 @@ internal static class ReconPlannerTests
     {
         var a = new Allocation { Alliance = 0 };
         foreach (var (id, role) in roles)
-            a.Assignments.Add(new Assignment { InstanceId = id, Role = role, ReconMissionId = -1 });
+            a.Assignments.Add(new Assignment { InstanceId = id, Role = role });
         return a;
     }
 
@@ -1166,7 +1163,6 @@ internal static class ReconPlannerTests
         ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
         AssertEqual(ReconState.Cleared, MissionOf(ledger, 2).State, "a fresh sighting the main effort outguns clears the probe");
         AssertEqual("probe-escalate", MissionOf(ledger, 2).Reason, "as an escalation");
-        AssertEqual(Today, MissionOf(ledger, 2).LastContactDay, "the contact day is on the calendar scale of the mission ledger");
     }
 
     private static void ProbeVerdictWithdrawsWhenOvermatched()
@@ -1320,7 +1316,7 @@ internal static class ReconPlannerTests
         var ledger = new ReconMissionLedger();
         var tasks = new List<ReconTask>();
         var alloc = new Allocation { Alliance = 0 };
-        alloc.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Hold, ReconMissionId = -1 });
+        alloc.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Hold });
         for (int i = 2; i <= 3; i++)
         {
             var t = ScreenTask(i * 100f, 0f, i * 100f + 20f, 0f, -1);
@@ -1491,7 +1487,7 @@ internal static class ReconPlannerTests
         s.Beliefs.Add(Belief("a", 805f, 0f, 5000f, Today, 1f, 5f));
         ReconStep.ProbeVerdicts(s, plan, null, BattleHistoryQuery.LegacySerial(1862, 6, 6), ledger);
         AssertTrue(ReconMissionLedger.IsActive(MissionOf(ledger, 2).State), "fixture: day 1 holds and remembers the enemy");
-        int contact = MissionOf(ledger, 2).LastContactDay;
+        float observed = MissionOf(ledger, 2).ObservedEnemyStrength;
 
         var moved = MainPlan(5, 1200f);                                              // day 2: the main effort moves to sector 5
         moved.MainObjectiveId = 4;
@@ -1503,7 +1499,7 @@ internal static class ReconPlannerTests
         var m = MissionOf(ledger, 2);
         AssertEqual(ReconState.Cleared, m.State, "released");
         AssertEqual(ReconStep.ReleasedReason, m.Reason, "and says why");
-        AssertEqual(contact, m.LastContactDay, "no verdict was taken");
+        AssertEqual(observed, m.ObservedEnemyStrength, "no verdict was taken: the remembered enemy is the day-1 one");
         AssertFalse(ledger.IsRecalling(2), "never recalled, so no recall bar");
         AssertFalse(ledger.IsRecon(2), "and no longer on a mission");
 
@@ -1653,7 +1649,7 @@ internal static class ReconPlannerTests
             ReadinessStep = 3, CommandRange = 5000f, BugleRange = 10f, SightRadius = Sight,
             CavalryShare = cavalryShare, CommanderId = id, ParentInstanceId = -1,
             AreaIndex = (int)Math.Round(Math.Max(0f, Math.Min(800f, x)) / 100f),
-            Flags = unitTyp >= 15 ? FormationFlags.FightingForce : FormationFlags.None
+            Flags = unitTyp >= 15 ? FormationFlags.FightingForce : default(FormationFlags)
         };
     }
 
@@ -1680,14 +1676,14 @@ internal static class ReconPlannerTests
 
     private static Assignment Recon(int instanceId, in ReconTask task)
     {
-        return new Assignment { InstanceId = instanceId, Role = FormationRole.Recon, SectorId = task.SectorId, TargetX = task.HoldX, TargetZ = task.HoldZ, Reason = task.Reason, ReconMissionId = -1 };
+        return new Assignment { InstanceId = instanceId, Role = FormationRole.Recon, SectorId = task.SectorId, TargetX = task.HoldX, TargetZ = task.HoldZ, Reason = task.Reason };
     }
 
     // Unit 1 (when present) holds; the recall point of a recalled mission.
     private static Allocation HoldAlloc()
     {
         var a = new Allocation { Alliance = 0 };
-        a.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Hold, ReconMissionId = -1 });
+        a.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Hold });
         return a;
     }
 

@@ -873,7 +873,7 @@ internal static class WlCampaignTests
     // group holds by position is PlayerPositionTests.
     private static void WlDefenseLedgerSkipsPlayerControlled()
     {
-        var threat = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        var threat = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f };
         threat.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion, EnemyUnitKey = "spot:30",
@@ -884,7 +884,7 @@ internal static class WlCampaignTests
         threat.Candidates.Add(AiCandidate());
         AssertPlayerNeverSelected(DefenseIntentLedger.Build(threat), "threat pool");
 
-        var guard = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        var guard = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f };
         guard.GuardCandidateAssets.Add(new CampaignMapAsset
         {
             Kind = CampaignMapAssetKind.SeaHarbor, Name = "harbor", Owner = 1, StrategicRole = AssetStrategicRole.BlockadeRunnerPort

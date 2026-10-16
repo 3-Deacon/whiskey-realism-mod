@@ -88,7 +88,7 @@ internal static class PlannerSidecarTests
     private static PlannerSnapshot SamplePlanner()
     {
         var p = new PlannerSnapshot { UnreliableDays = 4, UnreliableLastDay = 812 };
-        p.State.Restore(mainSector: 3, mainObjective: 29, challengerObjective: 30, challengerDays: 2, decisionSerial: 7,
+        p.State.Restore(mainObjective: 29, challengerObjective: 30, challengerDays: 2, decisionSerial: 7,
             campaignSeed: 0x1234567890ABCDEFL, belowOddsDays: 5, capitalThreatLatched: true, tempoReleasedDecision: 6, lastFullReviewDay: 811);
         p.Beliefs.Add(new EnemyBelief
         {
@@ -106,7 +106,7 @@ internal static class PlannerSidecarTests
         p.ReconMissions.Add(new ReconMission
         {
             MissionId = 9, Kind = ReconKind.Probe, InstanceId = -1, UnitKey = "Cavalry Corps:3", HoldX = 150f, HoldZ = 12f, SectorId = 4, State = ReconState.Cleared,
-            IssuedDay = 790, LastContactDay = 801, Reason = "probe-main", ObservedEnemyStrength = 22000f, ObservedObjectiveId = 29, StandDownDue = true, ClearedDay = 806
+            IssuedDay = 790, Reason = "probe-main", ObservedEnemyStrength = 22000f, ObservedObjectiveId = 29, StandDownDue = true, ClearedDay = 806
         });
         return p;
     }
@@ -196,7 +196,6 @@ internal static class PlannerSidecarTests
         var back = Decoded(SamplePlanner());
         AssertTrue(back != null, "the planner state is present");
         var s = back.State;
-        AssertEqual(3, s.CurrentMainSector, "current main sector");
         AssertEqual(29, s.CurrentMainObjective, "current main objective");
         AssertEqual(30, s.ChallengerObjective, "challenger objective");
         AssertEqual(2, s.ChallengerDays, "challenger days");
@@ -259,7 +258,6 @@ internal static class PlannerSidecarTests
         var fresh = Decoded(new PlannerSnapshot());
         AssertEqual(-1, fresh.State.TempoReleasedDecision, "unset stays -1 (never reads as released)");
         AssertEqual(-1, fresh.State.LastFullReviewDay, "unset stays -1");
-        AssertEqual(-1, fresh.State.CurrentMainSector, "an empty state keeps its sentinels");
         AssertEqual(-1, fresh.State.CurrentMainObjective, "objective");
         AssertEqual(-1, fresh.State.ChallengerObjective, "challenger");
     }
@@ -268,7 +266,6 @@ internal static class PlannerSidecarTests
     {
         var back = Decode(V3Json("{\"currentMainObjective\":29}")).Planner[0];
         AssertEqual(29, back.State.CurrentMainObjective, "the field that is there");
-        AssertEqual(-1, back.State.CurrentMainSector, "main sector defaults to none");
         AssertEqual(-1, back.State.TempoReleasedDecision, "tempo release defaults to none");
         AssertEqual(-1, back.State.LastFullReviewDay, "the tempo clock defaults to none");
         AssertEqual(int.MinValue, back.UnreliableLastDay, "no unreliable day counted");
@@ -312,7 +309,6 @@ internal static class PlannerSidecarTests
         AssertEqual(4, m.SectorId, "sector");
         AssertEqual(ReconState.Cleared, m.State, "state");
         AssertEqual(790, m.IssuedDay, "issued day");
-        AssertEqual(801, m.LastContactDay, "last contact day");
         AssertEqual("probe-main", m.Reason, "reason");
         AssertNear(22000f, m.ObservedEnemyStrength, 1e-2f, "the probe's reference enemy strength");
         AssertEqual(29, m.ObservedObjectiveId, "the objective it was seen at");
@@ -323,7 +319,6 @@ internal static class PlannerSidecarTests
         var old = Decode(V3Json(oldMission)).Planner[0].ReconMissions[0];
         AssertFalse(old.StandDownDue, "a mission saved without the debt owes none");
         AssertEqual(-1, old.ClearedDay, "and was not cleared");
-        AssertEqual(-1, old.LastContactDay, "no contact");
         AssertNear(-1f, old.ObservedEnemyStrength, 1e-6f, "no look yet");
         AssertEqual(-1, old.ObservedObjectiveId, "no objective seen");
     }
@@ -381,7 +376,7 @@ internal static class PlannerSidecarTests
     private static void PlannerIsPerAlliance()
     {
         var csa = new PlannerSnapshot();
-        csa.State.Restore(1, 31, -1, 0, 3, 99L);
+        csa.State.Restore(31, -1, 0, 3, 99L);
         var back = RoundTrip(WithPlanner(SamplePlanner(), csa));
         AssertEqual(29, back.Planner[0].State.CurrentMainObjective, "alliance 0 keeps its own");
         AssertEqual(31, back.Planner[1].State.CurrentMainObjective, "alliance 1 keeps its own");

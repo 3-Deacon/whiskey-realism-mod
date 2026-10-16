@@ -29,7 +29,6 @@ namespace WhiskeyRealism.Strategic.Planner
     [System.Flags]
     public enum FormationFlags : uint
     {
-        None = 0,
         InBattle = 1,
         OnRetreat = 2,
         InOffensiveOps = 4,
@@ -170,7 +169,6 @@ namespace WhiskeyRealism.Strategic.Planner
     [System.Flags]
     public enum EnemyTraits
     {
-        None = 0,
         Embarked = 1,
         CavalryMajority = 2,
         OnOwnSoil = 4,
@@ -352,7 +350,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public int SectorId;
         public float TargetX, TargetZ;
         public string Reason;
-        public int ReconMissionId; // -1 none
         // Kept out of vanilla's offensive pool: Reserve, CapitalGuard, DepotBuilder, Recon,
         // Recover, and Hold at sector need (G4).
         public bool Withheld;

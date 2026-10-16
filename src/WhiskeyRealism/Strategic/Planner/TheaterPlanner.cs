@@ -292,7 +292,6 @@ namespace WhiskeyRealism.Strategic.Planner
             if (best < 0)
             {
                 state.CurrentMainObjective = -1;
-                state.CurrentMainSector = -1;
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
                 reason = current >= 0 ? "no-candidate" : "none";
@@ -346,7 +345,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
             }
-            state.CurrentMainSector = cands[chosen].SectorId;
             return chosen;
         }
 

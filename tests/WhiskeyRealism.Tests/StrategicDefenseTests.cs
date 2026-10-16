@@ -60,7 +60,6 @@ internal static class StrategicDefenseTests
             ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
             ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated),
             ("defense telemetry summary compresses response burst", DefenseTelemetrySummaryCompressesResponseBurst),
-            ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex),
             ("defense ledger asset proximity stays local and cannot custom order", DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder),
             ("defense ledger donor theater budget blocks critical front export", DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport),
             ("defense ledger formation directive blocks defense movement", DefenseLedgerFormationDirectiveBlocksDefenseMovement),
@@ -341,7 +340,7 @@ internal static class StrategicDefenseTests
     // Test #1: coastal guard response suppresses cross-map candidate.
     private static void DefenseLedgerCoastalGuardForbidsCrossMap()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.GuardCandidateAssets.Add(new CampaignMapAsset
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
@@ -374,7 +373,7 @@ internal static class StrategicDefenseTests
     // Test #2: minor raid response suppresses cross-map candidate.
     private static void DefenseLedgerMinorRaidForbidsCrossMap()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
@@ -406,7 +405,7 @@ internal static class StrategicDefenseTests
     // Test #3: decisive landing allows cross-theater candidates.
     private static void DefenseLedgerDecisiveLandingAllowsCrossTheater()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -457,7 +456,7 @@ internal static class StrategicDefenseTests
     // Test #4: same-theater adequate package beats remote oversized cross-map.
     private static void DefenseLedgerSameTheaterAdequateBeatsRemoteOversized()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -525,7 +524,7 @@ internal static class StrategicDefenseTests
     // floor(6000/2250)=2 units can be assigned before the budget is exhausted.
     private static void DefenseLedgerGuardBudgetCapsLowValuePorts()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.TotalAllianceEffectiveStrength = 60000f;
         input.GuardBudgetFraction = 0.10f; // budget = 6000
 
@@ -575,7 +574,7 @@ internal static class StrategicDefenseTests
     // Test #6: active invasion persists through a favorable tick (strength drop doesn't flip to Recovered).
     private static void DefenseLedgerActiveInvasionPersistsThroughFavorableTick()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         var src = new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -619,7 +618,7 @@ internal static class StrategicDefenseTests
     // pairs and asserts the counter ticks down once per Tick, not once per call.
     private static void DefenseLedgerRecoveredThreatReleasesAfterCooldown()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.CooldownDays = 2;
 
         var src = new DefenseThreatSource
@@ -681,7 +680,7 @@ internal static class StrategicDefenseTests
     // Test #8: player CIC short-circuits the entire ledger.
     private static void DefenseLedgerPlayerCicShortCircuitsAlliance()
     {
-        var input = MakeDefenseInput(0);
+        var input = MakeDefenseInput();
         input.PlayerIsCIC = true;
         input.Threats.Add(new DefenseThreatSource
         {
@@ -708,7 +707,7 @@ internal static class StrategicDefenseTests
     // Test #9: player-controlled candidate is suppressed; AI candidate is selected.
     private static void DefenseLedgerWlSubordinateProtectsOnlyMarkedUnit()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -760,7 +759,7 @@ internal static class StrategicDefenseTests
     {
         // Sub-fixture A: Landing scale (not decisive) — critical-front suppressed, package empty.
         {
-            var input = MakeDefenseInput(1);
+            var input = MakeDefenseInput();
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -793,7 +792,7 @@ internal static class StrategicDefenseTests
 
         // Sub-fixture B: DecisiveLanding scale, critical-front is the only candidate — should be selected.
         {
-            var input = MakeDefenseInput(1);
+            var input = MakeDefenseInput();
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -828,7 +827,7 @@ internal static class StrategicDefenseTests
     // Test #11: river harbor detected via AssetProximity (no SeaInvasionForce).
     private static void DefenseLedgerRiverHarborDetectsWithoutSif()
     {
-        var input = MakeDefenseInput(0);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.AssetProximity,
@@ -850,7 +849,7 @@ internal static class StrategicDefenseTests
     // Test #12: RaidForce source produces Raid scale and correct signature prefix.
     private static void DefenseLedgerRaidforceCoverage()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
@@ -871,7 +870,7 @@ internal static class StrategicDefenseTests
     // Test #13: when SeaInvasion gate is off, AssetProximity fallback works without throw.
     private static void DefenseLedgerDebugSeainvasionsactiveOffFallsBack()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         // No SeaInvasion source — runtime fell back to AssetProximity.
         input.Threats.Add(new DefenseThreatSource
         {
@@ -905,7 +904,7 @@ internal static class StrategicDefenseTests
     // that starts with the posture name, so Task 14 telemetry has a stable key.
     private static void DefenseLedgerTelemetrySignaturePopulated()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -960,29 +959,9 @@ internal static class StrategicDefenseTests
         AssertEqual("responses=2 active=1 guard=1 selected=1 suppressed=1 signature=sig-a", summary);
     }
 
-    // Test: pure builder must accept allianceId=2 (Europe) without throwing.
-    // Vanilla AICampaign.aifaction includes alliance 2 for some CSA-side
-    // scenarios (decompile lines 9226/9249/9271/9367). The runtime arrays on
-    // StrategicCoordinator are length 2 — the bound-check that short-circuits
-    // alliance 2+ lives at the coordinator / patch layer. The builder itself
-    // is alliance-agnostic and must not throw on any non-negative ID.
-    private static void DefenseLedgerDoesNotCrashOnEuropeAllianceIndex()
-    {
-        var input = MakeDefenseInput(allianceId: 2);
-        DefenseIntentLedgerOutput output = null;
-        Exception caught = null;
-        try { output = DefenseIntentLedger.Build(input); }
-        catch (Exception ex) { caught = ex; }
-
-        AssertTrue(caught == null, $"expected no exception for allianceId=2, got: {caught}");
-        AssertTrue(output != null, "Build must return a non-null output for allianceId=2");
-        AssertTrue(output.Responses != null,
-            "Responses list must not be null even for europe alliance");
-    }
-
     private static void DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.AssetProximity,
@@ -1033,7 +1012,7 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.FrontLedger = FrontSectorLedger.Build(new[]
         {
             new FrontSectorInput
@@ -1095,7 +1074,7 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerFormationDirectiveBlocksDefenseMovement()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -1129,7 +1108,7 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerCapitalDefensePackageIsCapped()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.TotalAllianceEffectiveStrength = 60000f;
         input.CapitalDefenseBudgetFraction = 0.18f;
         input.Threats.Add(new DefenseThreatSource
@@ -1172,11 +1151,10 @@ internal static class StrategicDefenseTests
     // Helper: build a minimal DefenseIntentInput.
     // -----------------------------------------------------------------------
 
-    private static DefenseIntentInput MakeDefenseInput(int allianceId)
+    private static DefenseIntentInput MakeDefenseInput()
     {
         return new DefenseIntentInput
         {
-            AllianceId = allianceId,
             PlayerIsCIC = false,
             CICPersonality = default(PersonalityVector),
             TotalAllianceEffectiveStrength = 60000f

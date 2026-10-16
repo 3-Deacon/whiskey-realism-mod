@@ -433,7 +433,6 @@ namespace WhiskeyRealism.Strategic
             var s = p.State ?? new PlannerState();
             var dto = new PlannerStateDto
             {
-                CurrentMainSector = s.CurrentMainSector,
                 CurrentMainObjective = s.CurrentMainObjective,
                 ChallengerObjective = s.ChallengerObjective,
                 ChallengerDays = s.ChallengerDays,
@@ -475,7 +474,7 @@ namespace WhiskeyRealism.Strategic
                 dto.ReconMissions.Add(new ReconMissionDto
                 {
                     MissionId = m.MissionId, Kind = m.Kind.ToString(), UnitKey = m.UnitKey, HoldX = m.HoldX, HoldZ = m.HoldZ, SectorId = m.SectorId,
-                    State = m.State.ToString(), IssuedDay = m.IssuedDay, LastContactDay = m.LastContactDay, Reason = m.Reason,
+                    State = m.State.ToString(), IssuedDay = m.IssuedDay, Reason = m.Reason,
                     ObservedEnemyStrength = m.ObservedEnemyStrength, ObservedObjectiveId = m.ObservedObjectiveId,
                     StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                 });
@@ -489,7 +488,7 @@ namespace WhiskeyRealism.Strategic
         {
             if (dto == null) return null;
             var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
-            p.State.Restore(dto.CurrentMainSector, dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
+            p.State.Restore(dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
                 dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay);
             if (dto.Beliefs != null)
                 foreach (var b in dto.Beliefs)
@@ -531,7 +530,7 @@ namespace WhiskeyRealism.Strategic
                     p.ReconMissions.Add(new ReconMission
                     {
                         MissionId = m.MissionId, Kind = kind, InstanceId = -1, UnitKey = m.UnitKey, HoldX = m.HoldX, HoldZ = m.HoldZ, SectorId = m.SectorId,
-                        State = state, IssuedDay = m.IssuedDay, LastContactDay = m.LastContactDay, Reason = m.Reason,
+                        State = state, IssuedDay = m.IssuedDay, Reason = m.Reason,
                         ObservedEnemyStrength = m.ObservedEnemyStrength, ObservedObjectiveId = m.ObservedObjectiveId,
                         StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                     });
