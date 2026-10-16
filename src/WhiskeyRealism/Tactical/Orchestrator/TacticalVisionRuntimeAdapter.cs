@@ -320,6 +320,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ? visibleEnemyPoint
                     : (TacticalMapPoint?)null;
 
+                ApplyTerrainPicture(observations, source, haveVisibleEnemy ? visibleEnemyPoint : (TacticalMapPoint?)null);
+
                 bool haveMovementAnchor = TryMovementAnchorLineFromAggregate(
                     source,
                     allianceId,
@@ -589,15 +591,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     avenueObservations);
                 if (!avenue.HasAvenue) continue;
 
-                observations[i] = new ObjectiveObservationInput(
-                    observation.ObjectiveId,
-                    observation.Type,
-                    observation.Source,
-                    observation.Location,
-                    Math.Max(observation.SourceConfidence, avenue.Confidence01 * 0.85f),
-                    observation.Value,
-                    observation.TypeAnchorVerified,
-                    avenue);
+                observations[i] = observation.WithAvenue(Math.Max(observation.SourceConfidence, avenue.Confidence01 * 0.85f), avenue);
+            }
+        }
+
+        // BC12 decisions 3-4: the objectives are read against the terrain picture (type, terrain strength, approach difficulty)
+        // with the threat axis from the side's own centroid toward the visible enemy line. Nothing without a Ready picture, or
+        // with Enable Battle Terrain Picture off (TerrainPicture.CurrentForPlanning).
+        private static void ApplyTerrainPicture(List<ObjectiveObservationInput> observations, IObservationSource source, TacticalMapPoint? enemyLine)
+        {
+            TerrainPicture picture = TerrainPicture.CurrentForPlanning();
+            if (picture == null || observations == null || observations.Count == 0 || source == null) return;
+
+            float axisX = 0f, axisZ = 0f;
+            if (enemyLine.HasValue && source.OwnCount > 0)
+            {
+                float sx = 0f, sz = 0f;
+                int n = 0;
+                for (int i = 0; i < source.OwnCount; i++)
+                {
+                    if (!IsUsableOwnUnit(in source.Own[i])) continue;
+                    sx += source.Own[i].X;
+                    sz += source.Own[i].Z;
+                    n++;
+                }
+                if (n > 0)
+                {
+                    axisX = enemyLine.Value.X - sx / n;
+                    axisZ = enemyLine.Value.Z - sz / n;
+                }
+            }
+            for (int i = 0; i < observations.Count; i++)
+            {
+                ObjectiveObservationInput observation = observations[i];
+                observations[i] = TacticalTerrainObjectiveClassifier.Classify(in observation, picture, axisX, axisZ);
             }
         }
 

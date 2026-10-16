@@ -91,7 +91,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             _grid = grid;
             _rules = rules;
-            _picture = new TerrainPicture(grid, sizeX, sizeZ);
+            _picture = new TerrainPicture(grid, sizeX, sizeZ) { Rules = rules };
         }
 
         public TerrainPicture Picture => _picture;

@@ -57,6 +57,8 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         public bool Ready { get; internal set; }
+        /// <summary>The crest and anchored-flank rules this picture was built with (vanilla's prefs at runtime).</summary>
+        public TerrainShapeRules Rules { get; internal set; } = TerrainShapeRules.Shipped;
         public float SizeX { get; }
         public float SizeZ { get; }
         public int Columns { get; }
@@ -162,6 +164,43 @@ namespace WhiskeyRealism.Tactical.Battle
                 found = true;
             }
             return found;
+        }
+
+        /// <summary>Whether a listed crossing of exactly this id (ford 5, bridge 6) lies within the radius.</summary>
+        public bool CrossingNear(float x, float z, float radius, int wantedId)
+        {
+            if (!Ready || _grid == null) return false;
+            float r2 = radius * radius;
+            for (int k = 0; k < _grid.CrossingCount; k++)
+            {
+                _grid.Crossing(k, out float kx, out float kz, out int kid);
+                if (kid != wantedId) continue;
+                float dx = kx - x, dz = kz - z;
+                if (dx * dx + dz * dz <= r2) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Whether a crest cell of at least <paramref name="minProminence"/> meters lies within the radius.</summary>
+        public bool CrestNear(float x, float z, float radius, float minProminence)
+        {
+            if (!Ready) return false;
+            int reach = (int)Math.Ceiling(radius / CellMeters);
+            int cx0 = CellX(x), cz0 = CellZ(z);
+            float r2 = (radius + CellMeters * 0.5f) * (radius + CellMeters * 0.5f);
+            for (int dz = -reach; dz <= reach; dz++)
+            {
+                int cz = cz0 + dz;
+                if (cz < 0 || cz >= Rows) continue;
+                for (int dx = -reach; dx <= reach; dx++)
+                {
+                    int cx = cx0 + dx;
+                    if (cx < 0 || cx >= Columns || ProminenceLayer[Index(cx, cz)] < minProminence || ProminenceLayer[Index(cx, cz)] <= 0f) continue;
+                    float ex = CenterX(cx) - x, ez = CenterZ(cz) - z;
+                    if (ex * ex + ez * ez <= r2) return true;
+                }
+            }
+            return false;
         }
 
         public bool RoadJunctionNear(float x, float z, float radius) => Near(JunctionLayer, x, z, radius);

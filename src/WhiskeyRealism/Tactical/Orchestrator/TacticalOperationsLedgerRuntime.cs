@@ -197,8 +197,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     observation.Value,
                     observation.Location.X,
                     observation.Location.Z,
-                    terrainStrength: 0f,
-                    approachDifficulty: 0f,
+                    terrainStrength: observation.TerrainStrength,
+                    approachDifficulty: observation.ApproachDifficulty,
                     observation.ApproachAvenue);
             }
 

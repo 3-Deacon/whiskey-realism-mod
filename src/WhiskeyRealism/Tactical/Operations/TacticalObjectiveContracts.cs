@@ -52,6 +52,10 @@ namespace WhiskeyRealism.Tactical.Operations
         public float Value { get; }
         public bool TypeAnchorVerified { get; }
         public TacticalApproachAvenueEstimate ApproachAvenue { get; }
+        /// <summary>BC12 decision 4: the terrain picture's strength of the ground at the objective against the threat axis (0 without a picture).</summary>
+        public float TerrainStrength { get; }
+        /// <summary>BC12 decision 4: the speed-cost difficulty of the 300 m approach from the enemy side (0 without a picture).</summary>
+        public float ApproachDifficulty { get; }
 
         public ObjectiveObservationInput(
             string objectiveId,
@@ -82,7 +86,24 @@ namespace WhiskeyRealism.Tactical.Operations
             float value,
             bool typeAnchorVerified,
             TacticalApproachAvenueEstimate approachAvenue)
+            : this(objectiveId, type, source, location, sourceConfidence, value, typeAnchorVerified, approachAvenue, 0f, 0f)
         {
+        }
+
+        public ObjectiveObservationInput(
+            string objectiveId,
+            TacticalObjectiveType type,
+            TacticalObjectiveSource source,
+            TacticalMapPoint location,
+            float sourceConfidence,
+            float value,
+            bool typeAnchorVerified,
+            TacticalApproachAvenueEstimate approachAvenue,
+            float terrainStrength,
+            float approachDifficulty)
+        {
+            TerrainStrength = Clamp01(terrainStrength);
+            ApproachDifficulty = Clamp01(approachDifficulty);
             ObjectiveId = string.IsNullOrWhiteSpace(objectiveId) ? "objective-unknown" : objectiveId;
             Type = type;
             Source = source;
@@ -91,6 +112,23 @@ namespace WhiskeyRealism.Tactical.Operations
             Value = SanitizeValue(value);
             TypeAnchorVerified = typeAnchorVerified;
             ApproachAvenue = approachAvenue.HasAvenue ? approachAvenue : TacticalApproachAvenueEstimate.None;
+        }
+
+        /// <summary>The observation with an approach avenue matched (confidence raised by the caller).</summary>
+        public ObjectiveObservationInput WithAvenue(float sourceConfidence, TacticalApproachAvenueEstimate avenue)
+        {
+            return new ObjectiveObservationInput(ObjectiveId, Type, Source, Location, sourceConfidence, Value, TypeAnchorVerified,
+                avenue, TerrainStrength, ApproachDifficulty);
+        }
+
+        /// <summary>
+        /// The terrain picture's reading of the objective (BC12 decision 3): its classified type, verified by the picture
+        /// (<see cref="TacticalObjectiveSourceModel.Normalize"/> then keeps it), and the terrain numbers of decision 4.
+        /// </summary>
+        public ObjectiveObservationInput WithTerrain(TacticalObjectiveType type, bool typeAnchorVerified, float terrainStrength, float approachDifficulty)
+        {
+            return new ObjectiveObservationInput(ObjectiveId, type, Source, Location, SourceConfidence, Value, typeAnchorVerified,
+                ApproachAvenue, terrainStrength, approachDifficulty);
         }
 
         private static float Clamp01(float input)

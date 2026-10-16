@@ -201,7 +201,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new TacticalOperationDirectorDecision(input.Current, "objective-picture-missing");
             }
 
-            if (!TryPickBestObjective(input.Objectives, out BattlefieldObjectiveEstimate primary))
+            if (!TryPickBestObjective(input.Objectives, input.Stance, out BattlefieldObjectiveEstimate primary))
             {
                 return activeOperation
                     ? new TacticalOperationDirectorDecision(input.Current, "objective-picture-missing")
@@ -420,6 +420,7 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static bool TryPickBestObjective(
             BattlefieldObjectiveEstimate[] objectives,
+            BattleStance stance,
             out BattlefieldObjectiveEstimate best)
         {
             best = default(BattlefieldObjectiveEstimate);
@@ -434,7 +435,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     continue;
                 }
 
-                float score = ObjectiveSelectionScore(objective);
+                float score = ObjectiveSelectionScore(objective, stance);
                 if (!found || score > bestScore)
                 {
                     best = objective;
@@ -446,12 +447,21 @@ namespace WhiskeyRealism.Tactical.Operations
             return found;
         }
 
-        private static float ObjectiveSelectionScore(BattlefieldObjectiveEstimate objective)
+        // BC12 decision 5. An enemy-held objective is harder the stronger its ground and the harder its approach (the shipped
+        // sign); an own or neutral one is worth more the stronger its ground (seize strong ground), and for a Defender the
+        // harder the enemy's approach to it, at half weight.
+        internal static float ObjectiveSelectionScore(BattlefieldObjectiveEstimate objective, BattleStance stance)
         {
-            float score = objective.Value +
-                objective.Confidence01 -
-                objective.TerrainStrength -
-                objective.ApproachDifficulty;
+            float score = objective.Value + objective.Confidence01;
+            if (objective.EnemyStrength > 0f)
+            {
+                score -= objective.TerrainStrength + objective.ApproachDifficulty;
+            }
+            else
+            {
+                score += objective.TerrainStrength;
+                if (stance == BattleStance.Defender) score += 0.5f * objective.ApproachDifficulty;
+            }
 
             if (objective.MainLineExposed)
             {
