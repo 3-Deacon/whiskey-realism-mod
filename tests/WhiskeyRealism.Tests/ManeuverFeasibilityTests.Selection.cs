@@ -39,6 +39,7 @@ internal static partial class ManeuverFeasibilityTests
 
         public string BrokenAssumption => null;
         public int ThreatCount => 0;
+        public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount) { threat = default(CrossingThreat); childCount = 0; return false; }
 
         public void CaptureSelection(BattlePlanId plan, bool mirrored) { }

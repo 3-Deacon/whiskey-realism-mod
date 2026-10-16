@@ -141,6 +141,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// reach it (courier plus march; NaN for a child with player-owned strength) written to <paramref name="ownShiftByChild"/>.
         /// </summary>
         bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount);
+
+        /// <summary>
+        /// Up to <see cref="ManeuverFeasibility.MaxLookRequests"/> look points (world x and z) at link crossings the side does not know
+        /// (requirement-crossing-look), most pressing first; the count written. A request ends when the crossing turns Clear, Watched or Held.
+        /// </summary>
+        int LookRequests(Span<float> xs, Span<float> zs);
     }
 
     /// <summary>
@@ -176,7 +182,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int BoundGuardCount;
         /// <summary>Per child (same order): BC11 has it past its Hold, marching, turning or attacking: its time to strike carries no courier term.</summary>
         public bool[] ChildMoving;
-        /// <summary>The plans the catalog's precondition and stance filters leave for the side's current effective stance.</summary>
+        /// <summary>
+        /// The plans the catalog's precondition and stance filters leave for the side's current effective stance, best catalog score (without the
+        /// feasibility term) first: the first <see cref="ManeuverFeasibility.ConfirmCandidates"/> are the ones whose routes are confirmed and looked at.
+        /// </summary>
         public BattlePlanId[] Candidates;
         public int CandidateCount;
         /// <summary>The crest line across the front (ReverseSlopeDefense's anchor); <c>Has</c> false when there is none.</summary>

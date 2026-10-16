@@ -109,6 +109,16 @@ internal static class ManeuverFeasibilityFixtures
 
         public int InstanceId(int index) => _own[index].InstanceId;
 
+        /// <summary>Moves a unit already added (a regiment standing apart from its corps), optionally giving it a fire range.</summary>
+        public void Place(int index, float x, float z, float fireRange = -1f)
+        {
+            UnitRecord r = _own[index];
+            r.X = x;
+            r.Z = z;
+            if (fireRange >= 0f) r.FireRange = fireRange;
+            _own[index] = r;
+        }
+
         public int Count => _own.Count;
 
         public UnitRecord this[int index] => _own[index];

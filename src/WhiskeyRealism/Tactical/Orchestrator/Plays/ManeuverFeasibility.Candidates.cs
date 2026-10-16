@@ -53,6 +53,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     public static partial class ManeuverFeasibility
     {
         public const int MaxBodies = 6, MaxChildren = 64;
+        /// <summary>Crossing look points published per side (requirement-crossing-look), and the candidates (the selected plan and the best-scored others) whose routes they come from.</summary>
+        public const int MaxLookRequests = 2, ConfirmCandidates = 3;
         public const float RiskyPenalty = 0.35f, StrikeLegWeight = 0.5f, FeasibilityWeight = 0.4f;
         internal const int MaxRects = 8;
         /// <summary>Slots of the per-plan tables: BattlePlanId values are 0 to 18, with room for the later slices' plans.</summary>

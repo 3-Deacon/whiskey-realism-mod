@@ -53,6 +53,8 @@ namespace WhiskeyRealism.Tactical.Battle
         StaleBand = 2,
         Forward = 3,
         RememberedEnemy = 4,
+        /// <summary>BC14: a link crossing the plan depends on that the side does not know (the feasibility ledger's look request).</summary>
+        Crossing = 5,
     }
 
     [Flags]
@@ -144,11 +146,16 @@ namespace WhiskeyRealism.Tactical.Battle
         // under, and the test for "the ledger reassigned it" that ends a hold.
         public CommandTaskType[] PostureTask = new CommandTaskType[BattleSnapshot.InitialCapacity];
 
+        private float[] _lookX = new float[2];
+        private float[] _lookZ = new float[2];
         private float[] _entryX = new float[8];
         private float[] _entryZ = new float[8];
         private double[] _entryWatched = new double[8];
 
         public int EntryCount { get; private set; }
+
+        /// <summary>BC14: the crossings the plan wants looked at (the ledger's look requests), most pressing first.</summary>
+        public int LookCount { get; private set; }
 
         public void BeginTick(int ownCount)
         {
@@ -163,6 +170,7 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Clear(PostureMoved, 0, ownCount);
             Array.Clear(PostureTask, 0, ownCount);
             EntryCount = 0;
+            LookCount = 0;
             HasStaleBand = false;
             StaleBandRecency = 1f;
         }
@@ -181,6 +189,22 @@ namespace WhiskeyRealism.Tactical.Battle
             _entryWatched[EntryCount] = lastWatchedHours;
             EntryCount++;
         }
+
+        /// <summary>A crossing look point (world x and z).</summary>
+        public void AddLook(float x, float z)
+        {
+            if (LookCount == _lookX.Length)
+            {
+                Array.Resize(ref _lookX, _lookX.Length * 2);
+                Array.Resize(ref _lookZ, _lookX.Length);
+            }
+            _lookX[LookCount] = x;
+            _lookZ[LookCount] = z;
+            LookCount++;
+        }
+
+        public float LookX(int k) => _lookX[k];
+        public float LookZ(int k) => _lookZ[k];
 
         public float EntryX(int k) => _entryX[k];
         public float EntryZ(int k) => _entryZ[k];
@@ -645,7 +669,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (m.RecentTarget(ex, ez, now)) continue;
                 AddTarget(m, ref n, k, Distance(centroidX, centroidZ, ex, ez));
             }
-            int best = BestStandOffTarget(s, st, m, n, ref m.EntryCursor, entries: p, out int c, out float sx, out float sz);
+            int best = BestStandOffTarget(s, st, m, n, ref m.EntryCursor, ReconTargetKind.EntryPoint, p, out int c, out float sx, out float sz);
             if (best >= 0)
             {
                 scout = c; kind = ReconTargetKind.EntryPoint;
@@ -659,7 +683,25 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!m.RecentTarget(bx, bz, now)) TryTarget(s, st, m, bx, bz, ReconTargetKind.StaleBand, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
             }
 
-            // 3. Before any contact, below the action gate: straight ahead (along the
+            // 3. BC14: an unknown link crossing the plan depends on, from the stand-off on the own side (the scout's side of it).
+            if (scout < 0 && p.LookCount > 0)
+            {
+                n = 0;
+                for (int k = 0; k < p.LookCount; k++)
+                {
+                    if (m.RecentTarget(p.LookX(k), p.LookZ(k), now)) continue;
+                    AddTarget(m, ref n, k, Distance(centroidX, centroidZ, p.LookX(k), p.LookZ(k)));
+                }
+                int lookCursor = 0;
+                best = BestStandOffTarget(s, st, m, n, ref lookCursor, ReconTargetKind.Crossing, p, out c, out sx, out sz);
+                if (best >= 0)
+                {
+                    scout = c; kind = ReconTargetKind.Crossing;
+                    lookX = p.LookX(best); lookZ = p.LookZ(best); standX = sx; standZ = sz;
+                }
+            }
+
+            // 4. Before any contact, below the action gate: straight ahead (along the
             // front axis, or toward the objective while the axis has no target).
             if (scout < 0 && !p.HadContact && p.IntelConfidence < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction)
             {
@@ -680,7 +722,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!m.RecentTarget(fx, fz, now)) TryTarget(s, st, m, fx, fz, ReconTargetKind.Forward, ref scout, ref kind, ref lookX, ref lookZ, ref standX, ref standZ);
             }
 
-            // 4. After contact, below the action gate: look again at the nearest enemy
+            // 5. After contact, below the action gate: look again at the nearest enemy
             // last seen (a Remembered observation), from the stand-off.
             if (scout < 0 && p.HadContact && p.IntelConfidence < TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction)
             {
@@ -692,7 +734,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (m.RecentTarget(obs[k].X, obs[k].Z, now)) continue;
                     AddTarget(m, ref n, k, Distance(centroidX, centroidZ, obs[k].X, obs[k].Z));
                 }
-                best = BestStandOffTarget(s, st, m, n, ref m.RememberedCursor, entries: null, out c, out sx, out sz);
+                best = BestStandOffTarget(s, st, m, n, ref m.RememberedCursor, ReconTargetKind.RememberedEnemy, p, out c, out sx, out sz);
                 if (best >= 0)
                 {
                     scout = c; kind = ReconTargetKind.RememberedEnemy;
@@ -743,11 +785,11 @@ namespace WhiskeyRealism.Tactical.Battle
             n++;
         }
 
-        // The nearest target of the list (entry points when entries is set, else remembered
-        // observations) that has a scout and a safe stand-off point; -1 when none of this
+        // The nearest target of the list (entry points, crossing looks or remembered observations,
+        // by source) that has a scout and a safe stand-off point; -1 when none of this
         // tick's window does. Ranks are by (distance, source index), the shipped loops' order.
-        private static int BestStandOffTarget(BattleSnapshot s, in ReconSettings st, ReconMemory m, int n, ref int cursor, ReconPicture entries,
-            out int scout, out float standX, out float standZ)
+        private static int BestStandOffTarget(BattleSnapshot s, in ReconSettings st, ReconMemory m, int n, ref int cursor, ReconTargetKind source,
+            ReconPicture picture, out int scout, out float standX, out float standZ)
         {
             scout = -1;
             standX = standZ = 0f;
@@ -764,8 +806,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 int k = m.TargetOrder[j];
                 float d = m.TargetDistance[j];
                 if (best >= 0 && (d > bestDistance || (d == bestDistance && k > best))) continue;
-                float tx = entries != null ? entries.EntryX(k) : obs[k].X;
-                float tz = entries != null ? entries.EntryZ(k) : obs[k].Z;
+                float tx = source == ReconTargetKind.EntryPoint ? picture.EntryX(k) : source == ReconTargetKind.Crossing ? picture.LookX(k) : obs[k].X;
+                float tz = source == ReconTargetKind.EntryPoint ? picture.EntryZ(k) : source == ReconTargetKind.Crossing ? picture.LookZ(k) : obs[k].Z;
                 int c = NearestScout(s, m, tx, tz);
                 if (c < 0 || !TryStandOff(s, st, m, c, tx, tz, out float sx, out float sz)) continue;
                 best = k;
