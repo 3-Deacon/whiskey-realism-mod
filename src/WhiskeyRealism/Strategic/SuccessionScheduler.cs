@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Strategic
@@ -46,30 +47,28 @@ namespace WhiskeyRealism.Strategic
         // their game-state effect applied yet. Persisted across save/reload.
         internal HashSet<int> FiredEventIds = new HashSet<int>();
 
-        // Events whose game-state swap has been applied via
-        // CommanderReplacementPatch. Persisted so we don't re-apply on reload.
+        // Events whose appointment the campaign planner made (CommanderAppointmentRuntime marks
+        // them after a verified appointment). Persisted so they give no further prior on reload.
         internal HashSet<int> AppliedEventIds = new HashSet<int>();
 
-        // The fired set as of the last completed daily review. CommanderReplacementPatch applies
-        // only published events, so a swap never lands while that day's review is still
-        // running across frames (StrategicCoordinator publishes at the end of each review).
-        private readonly HashSet<int> _publishedFiredEventIds = new HashSet<int>();
-
-        internal void PublishFired()
+        // The appointment planner's historical prior (spec component 7, C16): an event that has
+        // fired (its date and war-state gates held, CheckEvents) and is not yet applied gives the
+        // named historical figure SuccessionPriorBonus on a command of its role. History is a
+        // weight, not a script: the planner still needs the competence gain and vanilla's own
+        // pickability and rank rules. GeneralInChief events never match a command role (C18).
+        internal float PriorFor(int allianceId, string combinedName, string role, out int eventId)
         {
-            _publishedFiredEventIds.Clear();
-            _publishedFiredEventIds.UnionWith(FiredEventIds);
-        }
-
-        internal IEnumerable<Event> GetPendingApplications(int allianceId)
-        {
+            eventId = -1;
+            if (string.IsNullOrEmpty(combinedName) || string.IsNullOrEmpty(role)) return 0f;
             foreach (var e in _events)
             {
-                if (e.AllianceId != allianceId) continue;
-                if (!_publishedFiredEventIds.Contains(e.Id)) continue;
-                if (AppliedEventIds.Contains(e.Id)) continue;
-                yield return e;
+                if (e.AllianceId != allianceId || !string.Equals(e.ReplacedRole, role, StringComparison.Ordinal)) continue;
+                if (!FiredEventIds.Contains(e.Id) || AppliedEventIds.Contains(e.Id)) continue;
+                if (!ArmyGroupDoctrine.CommanderNameMatches(allianceId, e.ReplacementName, combinedName)) continue;
+                eventId = e.Id;
+                return CommanderAppointmentPlanner.SuccessionPriorBonus;
             }
+            return 0f;
         }
 
         internal void MarkApplied(int eventId)

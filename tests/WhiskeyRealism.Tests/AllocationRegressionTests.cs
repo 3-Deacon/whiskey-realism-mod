@@ -9,8 +9,8 @@ using WhiskeyRealism.Util;
 using static TestHarness;
 
 // Perf slice B4: zero-GC hot paths, enforced. Each test warms the path up, then asserts
-// GC.GetAllocatedBytesForCurrentThread() does not move across many calls. Paths pinned
-// elsewhere: snapshot assembly (BattleSnapshotTests), arbiter resolve (OrderArbiterTests),
+// the thread's allocated bytes (TestFixtures.BeginAllocationWindow) do not move across
+// many calls. Paths pinned elsewhere: snapshot assembly (BattleSnapshotTests), arbiter resolve (OrderArbiterTests),
 // perception update (BattlePerceptionTests), slice pressure (SlicePressureBuilderTests),
 // the recon planner (BattleReconTests, BattleReconSearchTests).
 internal static class AllocationRegressionTests
@@ -49,9 +49,9 @@ internal static class AllocationRegressionTests
     private static long Measure(Action body, int calls)
     {
         for (int i = 0; i < 16; i++) body();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < calls; i++) body();
-        return GC.GetAllocatedBytesForCurrentThread() - before;
+        return TestFixtures.AllocatedSince(before);
     }
 
     private static void PerceptionPublishAndPressure()

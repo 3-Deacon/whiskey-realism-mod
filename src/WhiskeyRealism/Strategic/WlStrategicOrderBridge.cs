@@ -118,6 +118,11 @@ namespace WhiskeyRealism.Strategic
         // AssignUnitToDefendCapital 11733-11740, no player exclusion). The map-group player
         // does, though MayMove is false for him: he is counted, never counted on. The
         // units under his command are inside the group that is counted, and a CIC side stands down.
+        // The one coverage predicate: the defense ledger's cover and the campaign planner's hold sums
+        // (ReserveRules.Hold, TheaterPlanner's sector facts and capital sum, ForceAllocator) both ask it,
+        // each reading the group at strength x morale where its last waypoint lies. Counting is not
+        // committing: mass, pledges, packages, recon picks and must-hold roles ask MayMove, which is false
+        // for the map-group player.
         public static bool CountsTowardCoverage(WlChainClass chain)
         {
             return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup || chain == WlChainClass.PlayerMapGroup;
@@ -201,15 +206,12 @@ namespace WhiskeyRealism.Strategic
     internal sealed class WlStrategicOrderRequest
     {
         internal int AllianceId;
-        internal int AifactionIndex;
         internal Regiment Unit;
         internal Vector3 TargetPosition;
         internal string TargetName;
-        internal int ObjectiveId;
         internal WlStrategicIntent Intent;
         internal float Width;
         internal float Depth;
-        internal string SourceSystem;
     }
 #pragma warning restore 0649
 
@@ -250,18 +252,6 @@ namespace WhiskeyRealism.Strategic
             if (outcome == "failed")
                 return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
             return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.WlOrderType, "campaign-dispatch:" + outcome);
-        }
-
-        internal static WlStrategicOrderDecision ClassifyOnly(WlStrategicOrderRequest request)
-        {
-            if (request == null) return InvalidRequest();
-            return ClassifyOnly(WlChainContext.Capture(), request.AllianceId, request.Unit, request.Intent);
-        }
-
-        // For loops: the caller captures the context once per pass.
-        internal static WlStrategicOrderDecision ClassifyOnly(in WlChainContext context, int allianceId, Regiment unit, WlStrategicIntent intent)
-        {
-            return Classify(intent, FactsFor(in context, allianceId, unit));
         }
 
         // The unit's chain class for code that changes vanilla state without an

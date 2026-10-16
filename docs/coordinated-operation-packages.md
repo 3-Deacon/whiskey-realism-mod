@@ -1,48 +1,19 @@
 # Coordinated Operation Packages
 
-Living reference for campaign-map coordinated attack/reinforcement packages. Source of truth remains shipped code first, then `docs/patch-catalog.md`, then this note. The archived design and plan are historical context only:
+**Superseded by the campaign planner (stage G6/G7).** The package layer (`CoordinatedOperationPackageLedger`, `CoordinatedOperationRuntime`, #38 `CoordinatedOffensiveOperationsPatch` and its micro-movement companion) was deleted with the phased-plan CIC. Source of truth is the shipped code, then `docs/patch-catalog.md`. The archived design and plan are historical context only:
 
 - `docs/superpowers/specs/archive/2026-05-06-coordinated-operation-packages-design.md`
 - `docs/superpowers/plans/archive/2026-05-06-coordinated-operation-packages.md`
 
-## Purpose
+## What replaced it
 
-Vanilla offensive logic can gather nearby forces, but Whiskey's strategic layer needed an explicit package layer so nearby formations can attack together, reinforce a lead, or remain single-lead when doctrine says not to mass. The package layer sits between strategic intent and vanilla movement/current-order execution.
+The need (nearby formations attacking together, not vanilla's per-call broadening) is met by the planner's allocation instead of a package decision on top of vanilla's offensive call:
 
-It does not create a separate campaign movement system. It builds a package decision, then commits through existing safe surfaces:
+- The **planned mass** is the allocation's MainEffort set (`TheaterPlan.MassInstanceIds`, `ForceAllocator`): own movable formations within the march horizon of the main target, net of the capital floor and of every other sector's hold.
+- The mover (`CampaignMoverRuntime`) is the only launcher of that mass; `MoveUnitTo` is vanilla's own call and the W&L player's chain classes are never moved (the map-group player gets a W&L dispatch order).
+- Vanilla's offensive cannot spend the mass behind the planner's back: the availability Postfix (#127) answers "not available" for MainEffort members and for the Support of a decision whose launch the chapter tempo roll has not released (see [`operational-tempo-doctrine.md`](operational-tempo-doctrine.md)). Vanilla's defensive operations may still take them; the next snapshot sees the formation as busy.
+- A move vanilla refuses or that fails is judged at the next review, retried once, then given up for 14 days and the role reassigned (`MoveTracker`, `CampaignMover`). Nothing is silently replaced by random broad movement.
 
-- `CoordinatedOperationRuntime` for package commits;
-- `WlStrategicOrderBridge` for eligible W&L player-chain current orders;
-- vanilla `AICampaign.MoveUnitTo(...)` only where direct movement is allowed;
-- #38 to stop vanilla's selected offensive call from silently broadening after Whiskey has committed the package.
+The invariants that survive: no partial package commits, no W&L player-chain movement, restore-in-Finalizer for every temporary vanilla-state edit.
 
-## Implementation
-
-Core files:
-
-- `src/WhiskeyRealism/Strategic/CoordinatedOperationPackageLedger.cs`
-- `src/WhiskeyRealism/Strategic/CoordinatedOperationRuntime.cs`
-- `src/WhiskeyRealism/Patches/CoordinatedOffensiveOperationsPatch.cs`
-- `src/WhiskeyRealism/Patches/CoordinatedOffensiveMicroMovementPatch.cs`
-- package integration in `OperationalProbeLedger` and `OperationalProbeRuntime`
-
-Patch catalog entry:
-
-- #38 `CoordinatedOffensiveOperationsPatch` + `CoordinatedOffensiveMicroMovementPatch`
-
-## Invariants
-
-- No hidden fallback. Selected package failures log `package-no-commit`; they do not silently become vanilla random broad movement.
-- Package commits preflight selected units before side effects.
-- Mixed W&L current-order/direct-move packages are rejected unless the whole package can commit atomically under the active rules.
-- Direct-move failures roll back package locks, defensive-moving-order state, and offensive-list state added by the package path.
-- W&L current-order units are not added to `unitsinoffensiveoperations`.
-- #38 restores `ownunits` snapshots in Postfix/Finalizer. If failure occurs before a snapshot exists, vanilla candidate lists are left unchanged.
-- Package-locked units can be temporarily filtered from vanilla offensive micro-movement so continuation logic does not retarget them before their initial package path is consumed.
-- Empty-target probes remain single-lead unless explicit operation posture permits massing.
-
-## Runtime Evidence
-
-Deployed build, harness count and smoke status live in [`handoff.md`](handoff.md). The 2026-10-14 Steam update removed the previous deployment, so no runtime evidence from earlier DLLs carries over.
-
-Runtime `[CoordinatedOps]` smoke is still pending a fresh game launch and an actual AI offensive opportunity. Do not claim in-game coordinated package fire until the log shows it.
+Runtime proof lives in the stage G smoke checklist in [`docs/handoff.md`](handoff.md); the `[CoordinatedOps]` event no longer exists (`[CampaignMover]`, `[CampaignTempo]`, `[Allocation]` replace it).

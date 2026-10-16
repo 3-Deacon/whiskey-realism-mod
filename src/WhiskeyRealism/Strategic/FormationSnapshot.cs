@@ -6,10 +6,7 @@ namespace WhiskeyRealism.Strategic
     {
         public string UnitKey;
         public string ParentUnitKey;
-        public int AllianceId;
         public int StableUnitId;
-        public string UnitName;
-        public string CommanderName;
         public int UnitType;
         public bool IsTopUnit;
         public bool IsGarrisoned;
@@ -25,16 +22,12 @@ namespace WhiskeyRealism.Strategic
         public float ArtilleryAmmo = 1f;
         public float Supply = 1f;
         public float Fatigue;
-        public float WeaponFirepower = 1f;
         public float CommandRange;
         public float BugleRange;
-        public bool InBattle;
         public bool OnRetreat;
         public bool HasActivePath;
-        public bool IsCavalryCapable;
         public FormationLevel VisibleEnemyLevel = FormationLevel.Unknown;
         public float LocalEnemyStrength;
-        public float LocalEnemyExchangePressure;
         public float LocalFriendlySupportStrength;
         public bool SupportCanReach;
         public bool IsPlanTargetArea;

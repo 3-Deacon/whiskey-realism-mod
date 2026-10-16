@@ -19,7 +19,6 @@ namespace WhiskeyRealism.Strategic
         public string CityName;
         public int StateId = -1;
         public string StateName;
-        public string StateAbbrev;
         public int Owner = -1;
         public int OriginalOwner = -1;
         public bool IsCapital;
@@ -37,15 +36,11 @@ namespace WhiskeyRealism.Strategic
 
     public sealed class CampaignMapState
     {
-        public int StateId = -1;
         public string Name;
-        public string Abbrev;
         public Theater Theater = Theater.Unknown;
         public int TownCount;
-        public int CapitalCount;
         public float X;
         public float Z;
-        public float Population;
     }
 
     public enum CampaignMapAssetKind
@@ -62,7 +57,6 @@ namespace WhiskeyRealism.Strategic
         public string Name;
         public int StateId = -1;
         public string StateName;
-        public string StateAbbrev;
         public int Owner = -1;
         public float X;
         public float Z;
@@ -137,16 +131,6 @@ namespace WhiskeyRealism.Strategic
             return ledger;
         }
 
-        public bool TryGetTown(string cityName, out CampaignMapTown town)
-        {
-            if (cityName == null)
-            {
-                town = null;
-                return false;
-            }
-            return _townByName.TryGetValue(cityName, out town);
-        }
-
         public bool TryGetStateTheater(int stateId, out Theater theater)
         {
             if (_stateById.TryGetValue(stateId, out var state))
@@ -196,21 +180,14 @@ namespace WhiskeyRealism.Strategic
         {
             if (!_stateById.TryGetValue(town.StateId, out var state))
             {
-                state = new CampaignMapState
-                {
-                    StateId = town.StateId,
-                    Name = town.StateName,
-                    Abbrev = town.StateAbbrev
-                };
+                state = new CampaignMapState { Name = town.StateName };
                 _stateById.Add(town.StateId, state);
                 _states.Add(state);
             }
 
             state.TownCount++;
-            if (town.IsCapital) state.CapitalCount++;
             state.X += town.X;
             state.Z += town.Z;
-            state.Population += Math.Max(0f, town.RepresentingPopulation);
         }
 
         private void FinalizeStates()
@@ -249,7 +226,6 @@ namespace WhiskeyRealism.Strategic
                 CityName = source.CityName,
                 StateId = source.StateId,
                 StateName = source.StateName,
-                StateAbbrev = source.StateAbbrev,
                 Owner = source.Owner,
                 OriginalOwner = source.OriginalOwner,
                 IsCapital = source.IsCapital,
@@ -272,7 +248,6 @@ namespace WhiskeyRealism.Strategic
                 Name = source.Name,
                 StateId = source.StateId,
                 StateName = source.StateName,
-                StateAbbrev = source.StateAbbrev,
                 Owner = source.Owner,
                 X = source.X,
                 Z = source.Z,

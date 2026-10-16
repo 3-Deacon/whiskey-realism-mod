@@ -1,3 +1,4 @@
+using WhiskeyRealism.Strategic.Planner;
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
@@ -140,14 +141,15 @@ internal static class IntegrationWiringTests
 
     private static void CampaignScopeHoldsCampaignOwners()
     {
-        CoordinatedOperationRuntime.MarkPackageLocked(5, "pkg");
+        ModWrittenObjective.Note(0, 5);
         OnceLog.Info("integration-wiring-test", "campaign scope test");
         var names = CampaignScope.RegisteredNames;
-        TestHarness.AssertTrue(Contains(names, "coordinated-operation-locks"), "package locks registered");
+        TestHarness.AssertTrue(Contains(names, "campaign-planner-mod-written-objective"), "the mod-written objective registered");
         TestHarness.AssertTrue(Contains(names, "oncelog"), "once-log registered");
         long before = OnceLog.FiredCount;
         CampaignScope.ResetAll();
         TestHarness.AssertTrue(OnceLog.FiredCount < before, "once-log keys cleared");
+        TestHarness.AssertEqual(-1, ModWrittenObjective.Get(0), "the mod-written objective cleared with the campaign");
     }
 
     private static bool Contains(IReadOnlyList<string> names, string name)

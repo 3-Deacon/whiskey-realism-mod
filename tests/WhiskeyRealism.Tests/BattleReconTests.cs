@@ -770,11 +770,10 @@ internal static class BattleReconTests
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
         rig.Sink.Clear();
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         rig.Sink.Clear();
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
-        long after = GC.GetAllocatedBytesForCurrentThread();
-        AssertEqual(0L, after - before, "zero allocation after warm-up");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "zero allocation after warm-up");
     }
 
     // ------------------------------------------------------------------ ledger

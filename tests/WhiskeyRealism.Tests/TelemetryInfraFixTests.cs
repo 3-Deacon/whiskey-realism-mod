@@ -118,7 +118,7 @@ internal static class TelemetryInfraFixTests
         string a = "node-123456";
         string b = "node--98765";
         TacticalPatchIds.NodeIdMatches(a, 123456, 7);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int hits = 0;
         for (int i = 0; i < 10000; i++)
         {
@@ -126,7 +126,7 @@ internal static class TelemetryInfraFixTests
             if (TacticalPatchIds.NodeIdMatches(b, 11, -98765)) hits++;
             if (TacticalPatchIds.NodeIdMatches(a, 11, 12)) hits++;
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         TestHarness.AssertEqual(20000, hits, "hit count");
         TestHarness.AssertEqual(0L, allocated, "NodeIdMatches allocated bytes");
         LogPass("node id matching does not allocate");
@@ -141,13 +141,13 @@ internal static class TelemetryInfraFixTests
         const string message = "[PTest] fired once";
         OnceLog.Info(key, message);
         OnceLog.Warning(key, message);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 1000; i++)
         {
             OnceLog.Info(key, message);
             OnceLog.Warning(key, message);
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         TestHarness.AssertEqual(0L, allocated, "fired OnceLog key allocated bytes");
         OnceLog.Reset();
         LogPass("oncelog fired key skips message work");
@@ -475,7 +475,7 @@ internal static class TelemetryInfraFixTests
                 }
             }
 
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = TestFixtures.BeginAllocationWindow();
             for (int i = 0; i < 10000; i++)
             {
                 using (TelemetryPerf.Scope("p-test.alloc.outer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
@@ -483,7 +483,7 @@ internal static class TelemetryInfraFixTests
                 {
                 }
             }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            long allocated = TestFixtures.AllocatedSince(before);
             TestHarness.AssertTrue(allocated < 1024, "20k sub-threshold scopes allocated " + allocated.ToString(CultureInfo.InvariantCulture) + " bytes");
         }
         finally
@@ -1124,13 +1124,13 @@ internal static class TelemetryInfraFixTests
         TelemetryFrameProbe.ResetForTests();
         for (int i = 0; i < 4; i++)
             TelemetryFrameProbe.Tick(0.016f);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 5000; i++)
         {
             TelemetryFrameProbe.RecordTopLevelScope("p-test.frame", 0.1);
             TelemetryFrameProbe.Tick(0.016f);
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         TestHarness.AssertEqual(0L, allocated, "normal-frame probe ticks allocated bytes");
         TelemetryFrameProbe.ResetForTests();
         LogPass("probe tick does not allocate on normal frames");
@@ -1342,14 +1342,14 @@ internal static class TelemetryInfraFixTests
             }
             TelemetryFrameProbe.Tick(0.016f);
 
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = TestFixtures.BeginAllocationWindow();
             for (int i = 0; i < 2000; i++)
             {
                 using (TelemetryPerf.Scope("campaign.p-test.suppressed", TelemetryLayer.Campaign, TelemetryCategory.Performance, 0.0))
                 {
                 }
             }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            long allocated = TestFixtures.AllocatedSince(before);
             TestHarness.AssertEqual(0L, allocated, "record-only scopes allocate nothing");
 
             TelemetryFrameProbe.Tick(0.6f);

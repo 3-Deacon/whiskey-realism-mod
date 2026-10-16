@@ -3,6 +3,7 @@ using System.Collections;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Construction
@@ -11,32 +12,51 @@ namespace WhiskeyRealism.Strategic.Construction
     {
         public static ConstructionInput BuildInput(
             int alliance,
-            EraStage era,
             FiscalOutput fiscal,
             FrontSectorLedger front,
             FormationDirectiveLedger formation)
         {
-            var input = new ConstructionInput
-            {
-                AllianceId = alliance,
-                EraStage = era,
-                CurrentYear = SafeYear(),
-                FiscalPosture = fiscal != null ? fiscal.Posture : FiscalPosture.BalancedWar,
-                FiscalDefendedGate = fiscal != null ? fiscal.DefendedGate : FiscalGate.None,
-                CurrentRating = SafeRating(alliance),
-                BondFloorRating = SafeBondFloor(),
-                SupplyProtection = fiscal != null && fiscal.SupplyProtection,
-                LogisticsExpansion = fiscal != null && fiscal.LogisticsExpansion,
-                ForceCapWarning = fiscal != null && fiscal.ForceCapWarning,
-                TopSupplyTheater = fiscal != null ? fiscal.TheaterSupplyPriority ?? "" : "",
-                ActiveRailroadStarts = CountActiveRailroads(alliance)
-            };
+            var input = NewInput(alliance, fiscal);
+            input.ActiveRailroadStarts = CountActiveRailroads(alliance);
 
             FillPressure(input, front, formation);
             AddPrivateBuildingCandidates(input);
             AddRailroadCandidates(input);
             AddFortSiteObservationCandidates(input);
+            AddDepotTaskCandidates(input);
             return input;
+        }
+
+        // The depot task executor's own evaluation (plan G5c): the fiscal and pressure facts and one SupplyDepot candidate per plan
+        // depot task, today's, so the ledger's verdict and its TopSupplyDepot name today's tasks (the full BuildInput above runs
+        // weekly and lags the plan). The private-building, railroad and fort scans are not repeated.
+        // The ledger's depot rules read the fiscal posture, the bond floor and the pressures, never the era stage, so none is passed
+        // (the planner reads no era stage, plan decision 7).
+        internal static ConstructionInput BuildDepotInput(
+            int alliance,
+            FiscalOutput fiscal,
+            FrontSectorLedger front,
+            FormationDirectiveLedger formation)
+        {
+            var input = NewInput(alliance, fiscal);
+            FillPressure(input, front, formation);
+            AddDepotTaskCandidates(input);
+            return input;
+        }
+
+        private static ConstructionInput NewInput(int alliance, FiscalOutput fiscal)
+        {
+            return new ConstructionInput
+            {
+                AllianceId = alliance,
+                CurrentYear = SafeYear(),
+                FiscalPosture = fiscal != null ? fiscal.Posture : FiscalPosture.BalancedWar,
+                CurrentRating = SafeRating(alliance),
+                BondFloorRating = SafeBondFloor(),
+                SupplyProtection = fiscal != null && fiscal.SupplyProtection,
+                LogisticsExpansion = fiscal != null && fiscal.LogisticsExpansion,
+                TopSupplyTheater = fiscal != null ? fiscal.TheaterSupplyPriority ?? "" : ""
+            };
         }
 
         private static int SafeYear()
@@ -71,7 +91,7 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.LowSupplyFormationCount = formation.Pressure.LowSupplyCount;
                     input.LowAmmoFormationCount = formation.Pressure.LowAmmoCount;
                     input.FormationCount = formation.Assignments != null ? formation.Assignments.Count : 0;
-                    // Area key (ArmyAreaClassifier), kept separate from the fiscal Theater name.
+                    // Area key (PlannerAreaKeys), kept separate from the fiscal Theater name.
                     if (!string.IsNullOrEmpty(formation.Pressure.TopSupplyAreaKey))
                         input.TopSupplyAreaKey = formation.Pressure.TopSupplyAreaKey;
                 }
@@ -132,7 +152,6 @@ namespace WhiskeyRealism.Strategic.Construction
                         TransportPressure = Clamp01(place.transportbottlenecks / 10f),
                         WoundedPressure = NearbyWoundedPressure(place, input.AllianceId),
                         VanillaValid = place.allianceowner == input.AllianceId && buildingType.aiplacement,
-                        SafeRear = SafeRear(position, input.AllianceId),
                         ArmsIndustry = IsArmsIndustry(typeId, buildingType.name),
                         SupportsActiveArmyCorridor = SupportsActiveCorridor(position, input)
                     });
@@ -163,6 +182,7 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.Candidates.Add(new ConstructionCandidate
                     {
                         Kind = ConstructionCandidateKind.Railroad,
+                        SiteIndex = i,
                         Name = RailroadName(railroad, i),
                         Theater = TheaterFromPosition(position),
                         VanillaValid = RailroadVanillaValid(railroad, input.AllianceId),
@@ -195,10 +215,10 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.Candidates.Add(new ConstructionCandidate
                     {
                         Kind = ConstructionCandidateKind.Fort,
+                        SiteIndex = i,
                         Name = "fort-site-" + i,
                         Theater = theater,
                         VanillaValid = true,
-                        SafeRear = SafeRear(position, input.AllianceId),
                         CriticalDefense = siteThreat > 0.35f,
                         CapitalThreat = siteThreat
                     });
@@ -208,6 +228,48 @@ namespace WhiskeyRealism.Strategic.Construction
             {
                 OnceLog.Warning("construction-runtime:fort-sites", "[ConstructionRuntime] fort site read failed: " + ex.Message);
             }
+        }
+
+        // The planner's depot tasks as SupplyDepot candidates (plan G5c): the ledger's depot kind was never fed before. The plan is the
+        // published one (CampaignPlanStore), so a patch-side caller and the review read the same day's tasks.
+        private static void AddDepotTaskCandidates(ConstructionInput input)
+        {
+            try
+            {
+                if (!CampaignPlanStore.TryGetPlan(input.AllianceId, out var plan)) return;
+                int alliance = input.AllianceId;
+                DepotCandidates.Add(input, plan,
+                    (x, z) => TheaterFromPosition(new Vector3(x, 0f, z)),
+                    (x, z) => NearestOwnIip(alliance, x, z) != null);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("construction-runtime:depot-candidates", "[ConstructionRuntime] depot candidate read failed: " + ex.Message);
+            }
+        }
+
+        // The IIP a depot wish at (x, z) calls (AddConstructionWish needs one, 97488; vanilla's job 19 passes the unit's
+        // closestiipforsupply, 14770): the nearest visible IIP the alliance owns that has no building under construction (a wish
+        // at an IIP with one returns that building and places nothing, 97481-97484). Null when none.
+        internal static IIP NearestOwnIip(int alliance, float x, float z)
+        {
+            var iips = BattleUnits.iips;
+            if (iips == null) return null;
+            IIP best = null;
+            float bestSq = float.MaxValue;
+            for (int i = 0; i < iips.Count; i++)
+            {
+                var iip = iips[i];
+                if ((UnityEngine.Object)iip == null || iip.allianceowner != alliance || iip.IIPType == IIP.id_invisible) continue;
+                if ((UnityEngine.Object)iip.currentlyunderconstruction != null) continue;
+                Vector3 p = ((Component)iip).transform.position;
+                float dx = p.x - x, dz = p.z - z;
+                float sq = dx * dx + dz * dz;
+                if (sq >= bestSq) continue;
+                bestSq = sq;
+                best = iip;
+            }
+            return best;
         }
 
         private static int CountActiveRailroads(int alliance)
@@ -256,18 +318,6 @@ namespace WhiskeyRealism.Strategic.Construction
             catch { return 0f; }
         }
 
-        private static bool SafeRear(Vector3 position, int alliance)
-        {
-            try
-            {
-                var battleUnits = GameObject.Find("GameController")?.GetComponent<BattleUnits>();
-                if (battleUnits == null || battleUnits.frontline2 == null || battleUnits.frontline2.numberofupdates <= 0)
-                    return true;
-                return battleUnits.frontline2.GetSideOnPosition(position) == alliance;
-            }
-            catch { return true; }
-        }
-
         private static bool SupportsActiveCorridor(Vector3 position, ConstructionInput input)
         {
             return input.SupplyProtection ||
@@ -283,7 +333,7 @@ namespace WhiskeyRealism.Strategic.Construction
                 input.TopSupplyTheater,
                 input.TopSupplyAreaKey,
                 TheaterFromPosition(position),
-                ArmyAreaClassifier.FromPosition(position.x, position.z));
+                PlannerAreaKeys.At(input.AllianceId, position.x, position.z));
         }
 
         private static bool RailroadVanillaValid(object railroad, int alliance)

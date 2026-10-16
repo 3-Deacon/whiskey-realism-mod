@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -11,18 +12,17 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla CheckArmyGroupManagement (decompile 17705) forms ArmyGroups from
     // nearby top units that already have theaterposition. This Postfix
-    // preserves vanilla's pass, then nudges historically related top formations
-    // into the same ArmyGroup using vanilla ArmyGroup APIs.
+    // preserves vanilla's pass, then nudges the top formations the campaign
+    // planner allocated to one sector into the same ArmyGroup using vanilla
+    // ArmyGroup APIs. It seats no commander: appointments are the planner's
+    // appointment executor's (CommanderAppointmentRuntime).
     //
     // 2026-10-14 (C-ArmyGroup): repeats vanilla's early-return guard (army
     // groups disabled / reform not researched / the CIC test, applied as #70
     // applies it: only to the W&L CIC player's own alliance); never
-    // attaches to or re-commands the W&L player's group (GetArmyGroupInRange
-    // 75631); CanAddFurtherUnits (75770) gates attaching only, and commanders
-    // change only on a group holding at least one plan unit; picks
-    // commanders only through Commander.CanBePickedForAIReplacement (60748)
-    // with exact historical-name matching; skips W&L player-commanded units
-    // like CheckCombinationOfUnits (17141).
+    // attaches to the W&L player's group (GetArmyGroupInRange 75631);
+    // CanAddFurtherUnits (75770) gates attaching; skips W&L player-commanded
+    // units like CheckCombinationOfUnits (17141).
     [HarmonyPatch(typeof(AICampaign), "CheckArmyGroupManagement")]
     internal static class ArmyGroupManagementPatch
     {
@@ -41,18 +41,22 @@ namespace WhiskeyRealism.Patches
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                     if (StrategicCoordinator.Instance == null) return;
 
+                    // The planner's executors write the grouping: with them off vanilla's pass stands alone.
+                    if (!CampaignPlannerRuntime.ExecutorsEnabled()) return;
+
                     int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                    if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.ArmyAreas.Length) return;
+                    if (allianceId < 0 || allianceId > 1) return;
 
                     int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                     if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
                     if (StrategicCoordinator.WlCareerStartPending()) return;
                     if (!VanillaAllowsArmyGroups(allianceId)) return;
 
-                    var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
-                    if (ledger == null) return;
+                    if (!CampaignPlanStore.TryGetPlan(allianceId, out var published) || !PlanFreshness.IsFresh(published.DaySerial)) return;
+                    if (!CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)) return;
+                    CampaignPlanStore.TryGetSectors(allianceId, out var sectors);
 
-                    var plans = ArmyGroupDoctrine.PlanGroups(ledger);
+                    var plans = ArmyGroupDoctrine.PlanGroups(allocation);
                     if (plans.Count == 0) return;
 
                     var faction = AICampaignReflect.GetFaction(_aifaction);
@@ -66,7 +70,7 @@ namespace WhiskeyRealism.Patches
                     }
 
                     for (int i = 0; i < plans.Count; i++)
-                        ApplyPlan(__instance, allianceId, plans[i], ownUnits);
+                        ApplyPlan(__instance, allianceId, plans[i], ownUnits, sectors);
                 }
                 catch (Exception ex)
                 {
@@ -75,14 +79,14 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void ApplyPlan(AICampaign campaign, int allianceId, ArmyGroupPlan plan, IList ownUnits)
+        private static void ApplyPlan(AICampaign campaign, int allianceId, ArmyGroupPlan plan, IList ownUnits, SectorModel sectors)
         {
             var units = ResolveUnits(plan, ownUnits, allianceId);
             if (units.Count < 2) return;
 
             ArmyGroup own = OwnGroupFor(units);
             ArmyGroup area = (UnityEngine.Object)(object)own == (UnityEngine.Object)null
-                ? FindGroupInArea(allianceId, plan.AreaKey, units)
+                ? FindGroupInArea(allianceId, sectors, plan.SectorId, units)
                 : null;
             var action = ArmyGroupDoctrine.ResolveArmyGroupPlanAction(
                 (UnityEngine.Object)(object)own != (UnityEngine.Object)null,
@@ -107,13 +111,10 @@ namespace WhiskeyRealism.Patches
                 if (attached > 0)
                 {
                     EmitCampaignInfoOnce(
-                        $"armygroup:{allianceId}:{plan.AreaKey}:attach:{UnitSignature(units)}",
-                        $"[ArmyArea] alliance={allianceId} area={plan.AreaKey} action=armygroup-attach units={attached}",
+                        $"armygroup:{allianceId}:{plan.SectorId}:attach:{UnitSignature(units)}",
+                        $"[ArmyGroup] alliance={allianceId} sector={plan.SectorId} action=armygroup-attach units={attached}",
                         TelemetryLayer.Campaign);
                 }
-
-                if (ArmyGroupDoctrine.ShouldAppointAfter(action, attached))
-                    AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
                 return;
             }
 
@@ -136,11 +137,9 @@ namespace WhiskeyRealism.Patches
             if ((UnityEngine.Object)(object)created == (UnityEngine.Object)null) return;
 
             EmitCampaignInfoOnce(
-                $"armygroup:{allianceId}:{plan.AreaKey}:create:{UnitSignature(unassigned)}",
-                $"[ArmyArea] alliance={allianceId} area={plan.AreaKey} action=armygroup-create units={unassigned.Count}",
+                $"armygroup:{allianceId}:{plan.SectorId}:create:{UnitSignature(unassigned)}",
+                $"[ArmyGroup] alliance={allianceId} sector={plan.SectorId} action=armygroup-create units={unassigned.Count}",
                 TelemetryLayer.Campaign);
-
-            AppointPreferredCommander(allianceId, plan.AreaKey, created, units);
         }
 
         private static List<Regiment> ResolveUnits(ArmyGroupPlan plan, IList ownUnits, int allianceId)
@@ -150,9 +149,8 @@ namespace WhiskeyRealism.Patches
             {
                 var unit = ownUnits[i] as Regiment;
                 if (!IsEligibleTopUnit(unit)) continue;
-                string unitKey = UnitKey(unit);
-                if (!plan.UnitKeys.Contains(unitKey)) continue;
-                if (unit.unittyp == 14 && !FormationDirectiveRuntime.AllowsArmyGroupAttachment(allianceId, unitKey)) continue;
+                if (!plan.InstanceIds.Contains(((UnityEngine.Object)unit).GetInstanceID())) continue;
+                if (unit.unittyp == 14 && !FormationDirectiveRuntime.AllowsArmyGroupAttachment(allianceId, UnitKey(unit))) continue;
                 result.Add(unit);
             }
             return result;
@@ -223,11 +221,15 @@ namespace WhiskeyRealism.Patches
             return null;
         }
 
-        private static ArmyGroup FindGroupInArea(int allianceId, string areaKey, List<Regiment> units)
+        // The army group in range of the sector's centre (the formations' mean position when the sector has none).
+        private static ArmyGroup FindGroupInArea(int allianceId, SectorModel sectors, int sectorId, List<Regiment> units)
         {
-            Vector3 anchor;
-            if (!ArmyAreaRuntime.TryGetAnchor(areaKey, out anchor))
-                anchor = AveragePosition(units);
+            Vector3 anchor = AveragePosition(units);
+            if (sectors != null && sectorId >= 0 && sectorId < sectors.Count)
+            {
+                sectors.Centroid(sectorId, out float x, out float z);
+                anchor = new Vector3(x, 0f, z);
+            }
 
             float range = GamePrefs.aiarmygroupmaxtheaterrange;
             return ArmyGroup.GetArmyGroupInRange(allianceId, anchor, range);
@@ -245,78 +247,6 @@ namespace WhiskeyRealism.Patches
             return count > 0 ? total / count : default(Vector3);
         }
 
-        private static void AppointPreferredCommander(int allianceId, string areaKey, ArmyGroup group, List<Regiment> units)
-        {
-            var preference = ArmyGroupDoctrine.ResolveCommanderPreference(allianceId, areaKey);
-            if (preference.PreferredLastNames.Count == 0) return;
-
-            if (IsPlayerGroup(group)) return;
-            int currentId = group.GetCommanderID();
-            if (CommanderMatches(allianceId, currentId, preference.PreferredLastNames)) return;
-
-            int commanderId = FindPreferredCommander(allianceId, preference.PreferredLastNames, units);
-            if (commanderId < 0 || commanderId == currentId) return;
-
-            ArmyGroup.AppointCommander(group, commanderId, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
-            TelemetryRouter.LegacyInfo(
-                $"[ArmyArea] alliance={allianceId} area={areaKey} action=armygroup-appoint commander={CommanderName(commanderId)}",
-                TelemetryLayer.Campaign);
-        }
-
-        private static int FindPreferredCommander(int allianceId, List<string> preferredLastNames, List<Regiment> units)
-        {
-            var commanders = GameVars.commander;
-            if (commanders == null) return -1;
-
-            for (int p = 0; p < preferredLastNames.Count; p++)
-            {
-                string preferred = preferredLastNames[p];
-                for (int i = 0; i < commanders.Count; i++)
-                {
-                    var commander = commanders[i];
-                    if (commander == null || commander.alliance != allianceId) continue;
-                    if (!ArmyGroupDoctrine.CommanderNameMatches(allianceId, preferred, commander.combinedname)) continue;
-
-                    bool pickable;
-                    try { pickable = commander.CanBePickedForAIReplacement(allianceId, includeofficerswithcommand: true); }
-                    catch { pickable = false; }
-
-                    if (ArmyGroupDoctrine.IsEligibleArmyGroupCommander(
-                            pickable,
-                            IsPlayerCommander(i),
-                            CommanderCommandsOneOf(commander, units) || (UnityEngine.Object)(object)commander.currentcommand == (UnityEngine.Object)null))
-                        return i;
-                }
-            }
-            return -1;
-        }
-
-        private static bool CommanderMatches(int allianceId, int commanderId, List<string> preferredLastNames)
-        {
-            var commanders = GameVars.commander;
-            if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return false;
-            string name = commanders[commanderId]?.combinedname;
-            for (int i = 0; i < preferredLastNames.Count; i++)
-                if (ArmyGroupDoctrine.CommanderNameMatches(allianceId, preferredLastNames[i], name))
-                    return true;
-            return false;
-        }
-
-        private static bool CommanderCommandsOneOf(GameVars.Commander commander, List<Regiment> units)
-        {
-            var currentCommand = commander.currentcommand;
-            if ((UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)null) return false;
-            for (int i = 0; i < units.Count; i++)
-                if ((UnityEngine.Object)(object)currentCommand == (UnityEngine.Object)(object)units[i])
-                    return true;
-            return false;
-        }
-
-        private static bool IsPlayerCommander(int commanderId)
-        {
-            return DLC_WL.dlc_scenarioactive && commanderId == DLC_WL.dlc_chosencommander;
-        }
-
         private static string UnitKey(Regiment unit)
         {
             return ((UnityEngine.Object)unit).name + ":" + unit.commander.ToString();
@@ -329,13 +259,6 @@ namespace WhiskeyRealism.Patches
                 names.Add(((UnityEngine.Object)units[i]).name);
             names.Sort(StringComparer.Ordinal);
             return string.Join("+", names);
-        }
-
-        private static string CommanderName(int commanderId)
-        {
-            var commanders = GameVars.commander;
-            if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return "<unknown>";
-            return commanders[commanderId]?.combinedname ?? "<unknown>";
         }
 
         private static void EmitCampaignInfoOnce(string key, string line, TelemetryLayer layer)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using static TestFixtures;
 using static TestHarness;
 
@@ -125,7 +126,7 @@ internal static class PlayerPositionTests
     private static void CorpsCoversOneThreatOnce()
     {
         // Two threats at the same spot (distinct signatures): the corps is credited to the first only.
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30));
         input.Threats.Add(Threat(31));
         input.Candidates.Add(Player(ThreatX, ThreatZ));
@@ -172,7 +173,14 @@ internal static class PlayerPositionTests
         float needWith = CampaignMilitaryGates.VanillaCapitalDefenseNeed(500f, 650f, enemies, withPlayer);
         AssertTrue(needWithout > 0f, "AI alone leaves the capital short: " + needWithout);
         AssertTrue(needWith <= 0f, "the player's group at the capital covers it: " + needWith);
-        AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(needWith, needWith), "no pledge when the player covers");
+
+        // The pledge follows the need: a guard is pledged while the AI alone leaves the capital short, none
+        // when the player's group covers it.
+        var allocation = new Allocation();
+        allocation.Assignments.Add(new Assignment { InstanceId = AiId, Role = FormationRole.CapitalGuard });
+        var pool = new[] { new PledgeCandidate { InstanceId = AiId, DistanceToCapital = 10f, Chain = WlChainClass.None, PassesVanillaFilters = true } };
+        AssertEqual(AiId, CapitalFloorPolicy.PickPledge(allocation, needWithout, pool), "the AI guard is pledged while the capital is short");
+        AssertEqual(-1, CapitalFloorPolicy.PickPledge(allocation, needWith, pool), "no pledge when the player covers");
 
         // And when it does not cover, the pick still never takes him.
         AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerMapGroup), "pre-pledge uses may-commit: never the map-group player");
@@ -181,8 +189,11 @@ internal static class PlayerPositionTests
     private static void RuntimeWiring()
     {
         string pledge = ReadRepoFile("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs");
-        AssertTrue(HasLine(pledge, "if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;"),
-            "#4 pre-pledge asks may-commit");
+        AssertTrue(HasLine(pledge, "Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit),"),
+            "#4 hands every candidate's chain class to the pick");
+        string policy = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CapitalFloorPolicy.cs");
+        AssertTrue(HasLine(policy, "if (!c.PassesVanillaFilters || c.CustomOrdered || !WlChainRules.MayMove(c.Chain)) continue;"),
+            "the pick asks may-commit");
         AssertFalse(pledge.Contains("CountsTowardCoverage"), "#4 pre-pledge never asks the coverage question");
         AssertFalse(pledge.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
 
@@ -211,7 +222,7 @@ internal static class PlayerPositionTests
         // Both threats lie inside the cover radius of the corps; it stands at the second one.
         // The first in processing order must not take the credit: that would leave the corps's
         // own spot uncovered and send AI units to it.
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30, ThreatX));
         input.Threats.Add(Threat(31, ThreatX + 200f));
         input.Candidates.Add(Player(ThreatX + 200f, ThreatZ));
@@ -245,7 +256,7 @@ internal static class PlayerPositionTests
 
     private static void EquidistantTargetsGoToLowestIndex()
     {
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30, ThreatX - 100f));
         input.Threats.Add(Threat(31, ThreatX + 100f));
         input.Candidates.Add(Player(ThreatX, ThreatZ));
@@ -260,8 +271,8 @@ internal static class PlayerPositionTests
         // A recovered threat emits an empty response and spends no cover; the corps, standing
         // nearest to it, must still cover the live threat in range.
         var recovered = Threat(30, ThreatX);
-        recovered.VanillaCollapsed = true;
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        recovered.SightingLapsed = true; // the belief no longer qualifies (this branch's replacement for vanilla's collapsed force)
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(recovered);
         input.Threats.Add(Threat(31, ThreatX + 200f));
         input.Candidates.Add(Player(ThreatX, ThreatZ));
@@ -277,7 +288,7 @@ internal static class PlayerPositionTests
         // The guard asset "harbor30" is the threat's own asset, so its guard pass is skipped.
         // A corps standing exactly at that asset, 100 from the threat, must cover the threat:
         // crediting the skipped guard slot would lose the cover.
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30, ThreatX));
         input.GuardCandidateAssets.Add(new CampaignMapAsset
         {
@@ -315,7 +326,7 @@ internal static class PlayerPositionTests
         // critical-front unit to the one aggregator pass. The corps holds 6000, the pool offers
         // 3000 + 8000: adequate only if the held 6000 counts (11000 alone is short).
         var threat = Threat(30, ThreatX, strength: 8000f);
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 200000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 200000f, HoldCoverRadius = Radius };
         input.Threats.Add(threat);
         input.Candidates.Add(Player(ThreatX, ThreatZ, strength: 6000f));
         input.Candidates.Add(Ai(AiId, 3000f));
@@ -336,9 +347,7 @@ internal static class PlayerPositionTests
         return new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = forceId,
-            SpotName = "spot" + forceId,
-            SourcePortName = "port",
+            EnemyUnitKey = "force" + forceId,
             LandedSignal = true,
             AssetName = "harbor" + forceId,
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -350,7 +359,7 @@ internal static class PlayerPositionTests
 
     private static DefenseIntentInput ThreatInput(params DefenseCandidate[] candidates)
     {
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.Threats.Add(Threat(30));
         input.Candidates.AddRange(candidates);
         return input;
@@ -370,7 +379,7 @@ internal static class PlayerPositionTests
 
     private static DefenseIntentInput GuardInput(params DefenseCandidate[] candidates)
     {
-        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        var input = new DefenseIntentInput { TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
         input.GuardCandidateAssets.Add(new CampaignMapAsset
         {
             Kind = CampaignMapAssetKind.SeaHarbor, Name = "harbor", Owner = 1,

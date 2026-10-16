@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Patches
             _setTargetArea(data, pushed);
             _setDistance(data, XZ(start, pushed));
             _setDistanceToWpTarget(data, XZ(block, pushed));
-            _setDistanceLastWp(data, XZ(unit.GetLastTransmittedPathPos(ignoreorderdelay: true), pushed));
+            _setDistanceLastWp(data, XZ(unit.GetLastTransmittedPathPos(ignoreorderdelay: true), pushed)); // the destination of the AI's own skirmisher link, a battle steer, not an enemy read
             _setOnWater(data, BattlefieldSetup.GetCurrentTerrainOnPos(pushed) == RiverTerrain);
             _setSollDistance(data, _getSollDistance(data) + extra);
         }
