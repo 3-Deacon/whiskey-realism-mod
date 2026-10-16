@@ -88,6 +88,13 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderReadmit { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
+        internal static ConfigEntry<bool> FixCapitalDefensePlayerOrder { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderFollowUp { get; private set; }
+        internal static ConfigEntry<bool> EnableWlEnemyRetreatGuard { get; private set; }
+        internal static ConfigEntry<bool> FixLostOrdersFogGrid { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -556,6 +563,65 @@ namespace WhiskeyRealism
                 "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
                 "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
                 "player's regiments count fully and nothing is recorded.");
+            EnableWlOrderReadmit = Config.Bind(
+                "W&L",
+                "Enable W&L Order Readmit",
+                true,
+                "Default ON. W&L subordinate career: a new order from your superiors reaches you when the situation changes " +
+                "(the same kind of order at a new place after 15 game minutes, a retreat over 'Engage at will', a defend once the " +
+                "objective is held or the army turns defensive), instead of being dropped by vanilla's one-order-per-type rule; " +
+                "'Engage at will' is released to 'hold current position' when contact ends. Writes the W&L order slot " +
+                "(DLC_WL.givenorder) and restores it if vanilla refuses the new order. Needs Tactical Commander Mode = Active. " +
+                "Off: vanilla's order dedupe.");
+            EnableWlOrderCouriers = Config.Bind(
+                "W&L",
+                "Enable W&L Order Couriers",
+                true,
+                "Default ON. W&L career: orders from your superiors (vanilla's and Whiskey's) arrive after the courier delay from the " +
+                "issuing headquarters instead of appearing the instant they are given. In battle that is vanilla's own order-delay " +
+                "settings (bugle within range, a mounted courier beyond it, relays down the chain; needs Tactical Commander Mode = " +
+                "Active). On the campaign map it is vanilla's campaign order delay from your senior commander (distance, telegraph, " +
+                "winter quarters, entrenchment, readiness and perks of the sender); a campaign order still on its way is saved with " +
+                "the game. Off: orders are delivered at the next order pass.");
+            EnableWlOrderText = Config.Bind(
+                "W&L",
+                "Enable W&L Order Text",
+                true,
+                "Default ON. W&L career: order texts name real places and formations. Whiskey's orders name the nearest named objective " +
+                "or say where the point lies from your command (\"about 1,200 yards ahead and to the right of your position\") instead of " +
+                "an internal key, vanilla's \"My Division\" becomes the formation's name (\"Hood's Division\"), and Whiskey's orders carry " +
+                "a short condition line and your neighbours. Also corrects the portrait of an issuer who has been replaced. Off: vanilla texts " +
+                "(Whiskey's orders name the objective or \"Objective\").");
+            EnableWlOrderFollowUp = Config.Bind(
+                "W&L",
+                "Enable W&L Order Follow-Up",
+                true,
+                "Default ON. W&L career: after you reach and hold the position of a battle order from your superiors, your superior " +
+                "tells you to hold that position (an information-style 'hold current position' order, no prestige, no compliance " +
+                "sample; needs Enable W&L Order Readmit); on the campaign map a reached Redeploy, Offensive, Offensive Operation " +
+                "or Engage order is acknowledged with a short message. Information only: nothing moves and nothing is taken away. " +
+                "Off: no follow-up and no acknowledgement.");
+            EnableWlEnemyRetreatGuard = Config.Bind(
+                "W&L",
+                "Enable W&L Enemy Retreat Order Guard",
+                true,
+                "Default ON. Vanilla checks the enemy army's order list with the same code as yours, so when the ENEMY army retreats a " +
+                "top-level W&L player is told 'our army retreats'. With this on that order is not sent to you (BUG-WL-019). Your own " +
+                "army's retreat order is unchanged. Off: vanilla.");
+            FixLostOrdersFogGrid = Config.Bind(
+                "W&L",
+                "Fix Lost Orders Fog Grid",
+                true,
+                "Default ON. Vanilla hides the paper-map fog-of-war grid when the Lost Orders incident is rolled and then, when the " +
+                "incident does not apply (no Expert Spy companion), leaves it hidden until the paper map is closed and opened again. " +
+                "With this on the grid is shown again at once (BUG-WL-020). Off: vanilla.");
+            FixCapitalDefensePlayerOrder = Config.Bind(
+                "W&L",
+                "Fix Capital Defense Player Order",
+                true,
+                "Default ON. Vanilla re-sends the defend-capital order to a top-level W&L player on every pass and sets forced march " +
+                "(running and double quick, which costs condition on the campaign map) on the player's own group each time. With this " +
+                "on the order is shown once per capital and your group keeps the march mode you set (BUG-WL-018). Off: vanilla.");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",
                 "Enable CIC Faction AI Bug Guard",

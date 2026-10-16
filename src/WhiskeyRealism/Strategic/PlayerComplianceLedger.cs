@@ -272,4 +272,36 @@ namespace WhiskeyRealism.Strategic
             _last = default(ComplianceOrderKey);
         }
     }
+
+    // Does an order start a compliance sample? Only when the player's command is outside the order's
+    // zone when the order reaches him (plan 2026-10-15-wl-order-flow.md D17 (a)). Vanilla widens a zone
+    // to the player's parent group (AIBattle.CheckCurrentOrderUpdate 8402-8429) and the automatic
+    // release and follow-up holds sit on him, so "reaching" such a zone is instant, not compliance;
+    // counting it inflated the reliability the battle AI reads.
+    //
+    // The zone is the order mark (OrderMark.Initialize, decompile 199995-200005): centred on the order
+    // point, yawed arearotation + 180 degrees, `width` along its local x and `depth` along its local z;
+    // inside includes the edge, as vanilla's collider ClosestPoint test does (AvatarButton.InsideCombatZone).
+    // A value that cannot be read keeps the old behaviour: a sample starts.
+    internal static class ComplianceSampleGate
+    {
+        private const float EdgeTolerance = 1e-3f;
+
+        public static bool StartsSample(float playerX, float playerZ, float zoneX, float zoneZ, float rotationDegrees, float width, float depth)
+        {
+            if (!Finite(playerX) || !Finite(playerZ) || !Finite(zoneX) || !Finite(zoneZ) || !Finite(rotationDegrees)
+                || !Finite(width) || !Finite(depth) || width <= 0f || depth <= 0f) return true;
+            double yaw = (rotationDegrees + 180.0) * Math.PI / 180.0;
+            double sin = Math.Sin(yaw);
+            double cos = Math.Cos(yaw);
+            double dx = playerX - zoneX;
+            double dz = playerZ - zoneZ;
+            double along = dx * sin + dz * cos;      // local z (depth)
+            double across = dx * cos - dz * sin;     // local x (width)
+            bool inside = Math.Abs(across) <= width * 0.5 + EdgeTolerance && Math.Abs(along) <= depth * 0.5 + EdgeTolerance;
+            return !inside;
+        }
+
+        private static bool Finite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+    }
 }

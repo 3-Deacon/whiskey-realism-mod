@@ -1,52 +1,83 @@
 using System;
-using UnityEngine;
 using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle
 {
-    // The one emitter of W&L battle dispatches (battle-core D9, chain-of-command
-    // spec §C). #62 PlayerSubordinateOrderPatch (the player's own order) and the
-    // battle-core executor (the player's share of an order given to an ancestor)
-    // both call Emit, so they share one dedupe and never double-pop the career panel.
+    // The one emitter of W&L battle dispatches (battle-core D9, chain-of-command spec section C).
+    // #62 PlayerSubordinateOrderPatch (the player's own order) and the battle-core executor (the
+    // player's share of an order given to an ancestor) both call Emit.
     //
-    // Vanilla anchors (decompile, build 14703111):
-    //   AIBattle.CheckCurrentOrderUpdate 8233-8667, battle path
-    //   (calledfromcampaign: false): returns for a commanding-officer player (8329);
-    //   relays type 11 via unitlinkedto (8333-8336); passes only orders to the
-    //   player's parent chain with the same groupaiobject (8337); remaps the issuer
-    //   to the parent's commander (8341-8360); widens the zone to the parent group
-    //   and dlcwl_minimumobjectivezone (8398-8428); dedupes against the active order
-    //   (8643: same type for type > 0, within 110 m for type 0; 12 never replaces an
-    //   attack; 15 terminal; 13 sticky); bumps givenorderssession (8651) except for a
-    //   type-11 refresh (flag4); shows the panel (8653-8664).
-    // Vanilla already dedupes, more strictly: 8643 rejects any repeat of the same
-    // type > 0 whatever the distance. This emitter's 110 m record skips the call
-    // only while the player still holds the order the last dispatch produced
-    // (PlayerOrderDedupeState.IsDuplicateDispatch). A call vanilla rejects costs its
-    // tooltip lookups and a terrain sample, not a Debug.Log (only on accept, 8666).
-    // Callers: #62 (bounded by its signature check and 120-tick throttle) and the
-    // order executor's ancestor dispatch (Move winners only, behind the move dedupe,
-    // the 180 battle-second recent-order cooldown and at most one retry).
+    // Emit and EmitP62 no longer call AIBattle.CheckCurrentOrderUpdate itself: the order goes onto the W&L order
+    // flow's courier queue (WlOrderFlowRuntime.EnqueueWhiskey) and is delivered to vanilla after the
+    // courier delay from the issuing headquarters, so Whiskey's orders and vanilla's arrive the same
+    // way and are subject to the same re-admit policy. The queue's cadence (one order per issuer,
+    // type and origin per 0.25 h) and en-route test (same type within 110 m already riding) replace the
+    // old 110 m last-dispatch record. Vanilla's gates and dedupe (decompile 8251-8369, 8640-8646) still
+    // run at delivery. With both order-flow switches off the call goes to vanilla at once, as before.
+    // #62's accept/attempt bookkeeping follows the delivery (OnP62Outcome), not the enqueue.
     internal static class TacticalPlayerDispatchRuntime
     {
         internal static readonly PlayerOrderDedupeState Dedupe = new PlayerOrderDedupeState();
-        internal const float DispatchDedupeMeters = 110f;
-
-        // The zone sizes #62 always passed; vanilla widens them to the parent group.
-        private const float ZoneWidth = 100f;
-        private const float ZoneDepth = 50f;
+        // #62's view of the game (the active order, its provenance, the candidate it composes); the
+        // delivery callback below uses the same adapter to read what vanilla stored.
+        internal static readonly PlayerOrderRuntimeAdapter Adapter = new PlayerOrderRuntimeAdapter(Dedupe);
 
         static TacticalPlayerDispatchRuntime()
         {
             BattleScope.Register("tactical-player-dispatch", () => Dedupe.ClearForBattleBoundary(string.Empty));
         }
 
-        // Returns true when vanilla issued a new given order (session advanced).
-        // A type-11 refresh of an active reserve order updates in place and
-        // returns false, as does a deduped or refused dispatch.
-        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName)
+        // #62's order for the player: `unit` is the player's parent unit (never his own command, which
+        // vanilla's gate at 8337 refuses for a subordinate). True when it went onto a courier.
+        internal static bool EmitP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName, OrderIntentKind kind)
+        {
+            using (TelemetryPerf.Scope("tactical.dispatch.emit-p62", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    if ((UnityEngine.Object)unit == null || !candidate.HasCandidate || !TacticalWriteGuard.ModeAllowsWrites()) return false;
+                    return WlOrderFlowRuntime.EnqueueP62(unit, in candidate, destinationName, kind);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-dispatch:emit-p62", "[TacticalPlayerDispatch] #62 enqueue failed: " + ex.GetType().Name + " " + ex.Message);
+                    return false;
+                }
+            }
+        }
+
+        // The delivery callback for a #62 entry (WlOrderFlow): vanilla accepted it, refused or dropped it,
+        // or it is gone for a structural reason.
+        internal static void OnP62Outcome(AIBattle battle, in PlayerOrderCandidate candidate, P62Outcome outcome, double nowHours)
+        {
+            try
+            {
+                if (!candidate.HasCandidate) return;
+                switch (outcome)
+                {
+                    case P62Outcome.Accepted:
+                        PlayerOrderActiveSnapshot after = Adapter.Snapshot(battle, forceVanillaProvenance: false).ActiveOrder;
+                        Dedupe.RecordAccepted(Adapter.WithSession(candidate, after.GivenOrderSession), Adapter.WithAcceptedOrder(candidate, after), nowHours);
+                        break;
+                    case P62Outcome.Attempt:
+                        Dedupe.RecordAttempt(candidate, nowHours);
+                        break;
+                    case P62Outcome.ClearPending:
+                        Dedupe.ClearPending(candidate.UnitKey);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-dispatch:p62-outcome", "[TacticalPlayerDispatch] #62 bookkeeping failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // True when the order went onto a courier (or, with the flow off, vanilla showed a new order).
+        // Deduped, refused and dropped orders return false.
+        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind)
         {
             using (TelemetryPerf.Scope("tactical.dispatch.emit", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
@@ -54,36 +85,14 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0
                         || !TacticalWriteGuard.ModeAllowsWrites()) return false;
-
-                    int before = DLC_WL.GivenOrders.givenorderssession;
-                    if (Dedupe.IsDuplicateDispatch(vanillaType, x, z, CurrentGivenOrder(before), DispatchDedupeMeters)) return false;
-
-                    AIBattle.CheckCurrentOrderUpdate(
-                        ancestorOrPlayerCommand,
-                        vanillaType,
-                        new Vector3(x, 0f, z),
-                        destinationName ?? string.Empty,
-                        rotation,
-                        ZoneWidth,
-                        ZoneDepth);
-
-                    int after = DLC_WL.GivenOrders.givenorderssession;
-                    Dedupe.RecordDispatch(vanillaType, x, z, after);
-                    return after != before;
+                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind);
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("tactical-dispatch:emit", "[TacticalPlayerDispatch] CheckCurrentOrderUpdate failed: " + ex.GetType().Name + " " + ex.Message);
+                    OnceLog.Warning("tactical-dispatch:emit", "[TacticalPlayerDispatch] order flow enqueue failed: " + ex.GetType().Name + " " + ex.Message);
                     return false;
                 }
             }
-        }
-
-        private static GivenOrderView CurrentGivenOrder(int session)
-        {
-            DLC_WL.GivenOrders order = DLC_WL.givenorder;
-            if (order == null) return new GivenOrderView(false, -1, 0f, 0f, session);
-            return new GivenOrderView(true, order.type, order.position.x, order.position.z, session);
         }
     }
 }

@@ -21,75 +21,43 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public int Session { get; } // DLC_WL.GivenOrders.givenorderssession
     }
 
-    // Owned by TacticalPlayerDispatchRuntime (battle-core D9): one instance serves
-    // #62's player-order shadows and the emitter's last-dispatch record, so #62 and
-    // the executor's ancestor dispatches share one dedupe.
+    // Owned by TacticalPlayerDispatchRuntime: #62's player-order shadows. (The emitter's
+    // own 110 m last-dispatch record is gone: the courier queue's cadence and en-route
+    // tests, WlCourierQueue, cover #62 and the executor's ancestor dispatches alike.)
     internal sealed class PlayerOrderDedupeState
     {
         private readonly Dictionary<string, PlayerOrderShadow> _shadows = new Dictionary<string, PlayerOrderShadow>();
-        private bool _hasDispatch;
-        private int _dispatchType;
-        private float _dispatchX;
-        private float _dispatchZ;
-        private int _dispatchSession;
-
-        // A dispatch repeats the last one only while the player still holds what it
-        // produced: same type, target within `meters` of the last emitted one, no
-        // given order issued since (vanilla bumps givenorderssession on every new
-        // order, 8651), and the current given order is still that dispatch. Vanilla
-        // clears givenorder without moving the session (end of day 47989, zone
-        // completion 123533), and a refused attempt leaves another order active;
-        // both re-arm. Type 11 is never suppressed: onto an active type 11 it is
-        // vanilla's in-place refresh (flag4, no session bump), which vanilla's own
-        // 8643 test already limits.
-        public bool IsDuplicateDispatch(int type, float x, float z, in GivenOrderView current, float meters)
-        {
-            if (!_hasDispatch || type == 11 || _dispatchType != type) return false;
-            if (!current.HasOrder || current.Session != _dispatchSession || current.Type != _dispatchType) return false;
-            return Within(x, z, _dispatchX, _dispatchZ, meters) &&
-                Within(current.X, current.Z, _dispatchX, _dispatchZ, meters);
-        }
-
-        private static bool Within(float ax, float az, float bx, float bz, float meters)
-        {
-            float dx = ax - bx;
-            float dz = az - bz;
-            return dx * dx + dz * dz < meters * meters;
-        }
-
-        // givenOrderSession is the session after the vanilla call, so an accepted
-        // order and a rejected attempt both dedupe until the next given order.
-        public void RecordDispatch(int type, float x, float z, int givenOrderSession)
-        {
-            _hasDispatch = true;
-            _dispatchType = type;
-            _dispatchX = x;
-            _dispatchZ = z;
-            _dispatchSession = givenOrderSession;
-        }
-
         public bool TryGetShadow(string unitKey, out PlayerOrderShadow shadow)
         {
             return _shadows.TryGetValue(unitKey ?? string.Empty, out shadow);
         }
 
-        public void Record(PlayerOrderCandidate candidate, long tick)
+        public void Record(PlayerOrderCandidate candidate, double nowHours)
         {
-            RecordAttempt(candidate, tick);
+            RecordAttempt(candidate, nowHours);
         }
 
-        public void RecordAttempt(PlayerOrderCandidate candidate, long tick)
+        // The candidate was queued or refused: its signature suppresses a repeat, and the throttle
+        // window starts now.
+        public void RecordAttempt(PlayerOrderCandidate candidate, double nowHours)
         {
             if (!candidate.HasCandidate) return;
             var signature = PlayerOrderSignature.FromCandidate(candidate);
-            _shadows[candidate.UnitKey] = new PlayerOrderShadow(signature, tick, candidate.BattleIdentity);
+            _shadows[candidate.UnitKey] = new PlayerOrderShadow(signature, nowHours, candidate.BattleIdentity);
         }
 
-        public void RecordAccepted(PlayerOrderCandidate request, PlayerOrderCandidate active, long tick)
+        // The candidate's order is gone for a reason that says nothing about #62 (superseded, unit gone,
+        // cleared): forget the pending signature so the next evaluation starts fresh.
+        public void ClearPending(string unitKey)
+        {
+            _shadows.Remove(unitKey ?? string.Empty);
+        }
+
+        public void RecordAccepted(PlayerOrderCandidate request, PlayerOrderCandidate active, double nowHours)
         {
             var requestSignature = PlayerOrderSignature.FromCandidate(request);
             var activeSignature = PlayerOrderSignature.FromCandidate(active);
-            var shadow = new PlayerOrderShadow(requestSignature, activeSignature, tick, request.BattleIdentity);
+            var shadow = new PlayerOrderShadow(requestSignature, activeSignature, nowHours, request.BattleIdentity);
             _shadows[request.UnitKey] = shadow;
             if (!string.Equals(request.UnitKey, active.UnitKey, System.StringComparison.Ordinal))
             {
@@ -100,68 +68,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void ClearForBattleBoundary(string battleIdentity)
         {
             _shadows.Clear();
-            _hasDispatch = false;
         }
 
         public void ClearForPlayerCommandChange()
         {
             _shadows.Clear();
-            _hasDispatch = false;
         }
     }
 
     internal static class PlayerOrderDedupe
     {
-        public static bool VanillaWouldBlock(
-            PlayerOrderActiveSnapshot active,
-            PlayerOrderCandidate candidate,
-            bool campaignGroupFlag)
-        {
-            if (!active.HasActiveOrder || !candidate.HasCandidate)
-            {
-                return false;
-            }
-
-            if (active.Stale || active.BattleEnded)
-            {
-                return false;
-            }
-
-            if (active.VanillaType == 15 &&
-                candidate.Scope == PlayerOrderScope.Tactical)
-            {
-                return true;
-            }
-
-            if (candidate.VanillaType == 12 && IsAny(active.VanillaType, 0, 1, 2, 3, 4, 5, 13))
-            {
-                return true;
-            }
-
-            if (active.VanillaType == 13 && candidate.VanillaType != 13)
-            {
-                return true;
-            }
-
-            if (candidate.VanillaType == 14 && active.VanillaType != 12)
-            {
-                return true;
-            }
-
-            if (campaignGroupFlag && candidate.VanillaType == 2 && IsAny(active.VanillaType, 0, 1, 2, 3, 4))
-            {
-                return true;
-            }
-
-            return active.VanillaType == candidate.VanillaType;
-        }
-
         public static PlayerOrderDedupeDecision Decide(
             PlayerOrderCandidate candidate,
             PlayerOrderActiveSnapshot active,
             PlayerOrderDedupeState state,
             PlayerOrderDedupeOptions options,
-            long tick)
+            double nowHours)
         {
             state = state ?? new PlayerOrderDedupeState();
             if (!candidate.HasCandidate)
@@ -174,21 +96,29 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByDisabledWrites, "writes-disabled");
             }
 
-            if (IsVanillaTransition(active))
+            bool retreat = IsValidEmergencyRetreat(candidate);
+
+            // A retreat is the one order that goes through engage-at-will, a clear-hold transition or a
+            // fresh order (capture policy rule 1); everything else yields to vanilla's own transitions.
+            if (!retreat && IsVanillaTransition(active))
             {
                 return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.YieldVanillaTransition, "vanilla-transition");
             }
 
             if (IsAmbiguousUnknownOrVanilla(active) &&
-                !IsValidEmergencyRetreat(candidate) &&
+                !retreat &&
                 !HasWhiskeyShadowForActive(active, state))
             {
                 return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, "ambiguous-active-order");
             }
 
-            if (VanillaWouldBlock(active, candidate, candidate.CampaignGroupFlag || active.CampaignGroupFlag))
+            // Nothing replaces a retreat (vanilla's clause g). Every other question of what vanilla's
+            // dedupe would drop, and what Whiskey re-admits, is PlayerOrderReadmitPolicy's, decided
+            // where the order is captured; #62 keeps no second model of it.
+            if (active.HasActiveOrder && !active.Stale && !active.BattleEnded && active.VanillaType == 15 &&
+                candidate.Scope == PlayerOrderScope.Tactical)
             {
-                return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe, "vanilla-dedupe");
+                return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe, "retreat-terminal");
             }
 
             if (IsVanillaSupportRequest(active) && candidate.Priority <= active.Priority)
@@ -206,7 +136,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 active.Priority > candidate.Priority &&
                 !active.Stale &&
                 !active.BattleEnded &&
-                !IsClearHoldTransition(candidate, active))
+                !retreat &&
+                active.AgeHours < PlayerOrderReadmitPolicy.MinHoldBattleHours)
             {
                 return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, "same-scope-priority");
             }
@@ -224,7 +155,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.SuppressSignature, "signature-match");
                 }
 
-                if (tick - shadow.Tick >= 0 && tick - shadow.Tick < options.ThrottleTicks)
+                double since = nowHours - shadow.NowHours;
+                if (since >= 0.0 && since < options.ThrottleHours)
                 {
                     return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.SuppressThrottle, "throttle-window");
                 }
@@ -237,15 +169,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             PlayerOrderCandidate candidate,
             PlayerOrderActiveSnapshot active,
             PlayerOrderDedupeState state,
-            long throttleTicks,
-            long tick)
+            double throttleHours,
+            double nowHours)
         {
             return Decide(
                 candidate,
                 active,
                 state,
-                new PlayerOrderDedupeOptions(writesEnabled: true, throttleTicks: throttleTicks),
-                tick);
+                new PlayerOrderDedupeOptions(writesEnabled: true, throttleHours: throttleHours),
+                nowHours);
         }
 
         private static bool IsVanillaTransition(PlayerOrderActiveSnapshot active)
@@ -288,11 +220,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return state.TryGetShadow(active.UnitKey, out var shadow) &&
                 shadow.BattleIdentity == active.BattleIdentity &&
                 shadow.ActiveSignature.MatchesActiveOrder(active);
-        }
-
-        private static bool IsClearHoldTransition(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
-        {
-            return candidate.VanillaType == 14 && active.VanillaType == 12;
         }
 
         private static bool IsValidEmergencyRetreat(PlayerOrderCandidate candidate)
