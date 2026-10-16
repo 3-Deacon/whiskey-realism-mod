@@ -232,6 +232,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFormationCorrection.cs" Link="Operations\CommandFormationCorrection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalFacingPulseDoctrine.cs" Link="Operations\TacticalFacingPulseDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleCoreContracts.cs" Link="Battle\BattleCoreContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CommanderPersonality.cs" Link="Battle\CommanderPersonality.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ChargeDoctrine.cs" Link="Battle\ChargeDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshot.cs" Link="Battle\BattleSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleSnapshotAssembler.cs" Link="Battle\BattleSnapshotAssembler.cs" />
