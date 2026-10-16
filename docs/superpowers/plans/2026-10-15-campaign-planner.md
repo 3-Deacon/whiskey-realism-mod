@@ -806,7 +806,7 @@ Every other 001 objective has no ground and maps to nothing: morale (0, 1, 26, 2
 **Plants (≥ 5):** availability ignores the at-war count; mapping applied to 002; `IsDeactivated` skipped for mapped records; Washington alias dropped; sub-scenario E keeps Western Virginia or the Cut; Kentucky mapped to the Union.
 **Steps:** tests red → table and rule → snapshot branch → gates → commit `feat(campaign-planner): 001 objective ground for the planner's candidates [G3c]`.
 **Smoke (G7 Session E):** `[CampaignPlanner] first review alliance=<a> … objectives=<n> mapped=<m ≥ 1>`; after the war starts a `[CampaignPlan] alliance=<a> main=<theater>/<id>` with id in {2, 14, 17} for the Union before policy 170 and {3, 14, 17} after it (policy 170 moves the capital: 2 off, 3 on, 178927-178934), or {4, 15, 16} for the CSA; never `main=3` before policy 170 and never `main=2` after it; never a ground-less id.
-**Census (to add at G7):** `ObjectiveGround` (all members) | G3c `CampaignSnapshotRuntime.ReadObjectives`; `CampaignSnapshot.MappedObjectiveCount` | G3c `LogFirstReview` (`mapped=`).
+**Census (to add at G7):** `ObjectiveGround` (all members) | G3c `CampaignSnapshotRuntime.ReadMappedGround` (called from `ReadObjectives`; `ResolveGroundTown` resolves the towns); `CampaignSnapshot.MappedObjectiveCount` | G3c `LogFirstReview` (`mapped=`).
 
 ### G3C as built (2026-10-15; branch `feat/campaign-planner-g3c`)
 
