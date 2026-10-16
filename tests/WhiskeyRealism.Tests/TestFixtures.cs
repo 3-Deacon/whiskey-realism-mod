@@ -208,8 +208,6 @@ internal static class TestFixtures
         return new FormationSnapshot
         {
             UnitKey = key,
-            AllianceId = alliance,
-            UnitName = key,
             UnitType = unitType,
             IsTopUnit = true,
             GroupStrengthActive = strength,
@@ -218,7 +216,6 @@ internal static class TestFixtures
             RifleAmmo = 0.8f,
             ArtilleryAmmo = 0.8f,
             Supply = 0.8f,
-            WeaponFirepower = 1.0f,
             AreaKey = "VirginiaCapitalCorridor",
             SectorKey = "Richmond",
             LocalEnemyStrength = enemy,
@@ -366,6 +363,32 @@ internal static class TestFixtures
 
     internal static string ReadRepoFile(string relativePath)
         => File.ReadAllText(FindRepoPath(relativePath));
+
+    // Every field of every assignment and both reinforcement lists, in order: two allocations are equal iff their signatures are.
+    internal static string AllocationSignature(WhiskeyRealism.Strategic.Planner.Allocation a)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var x in a.Assignments)
+            sb.Append(x.InstanceId).Append(':').Append(x.Role).Append('@').Append(x.SectorId).Append(':').Append(x.TargetX.ToString("0.###")).Append(',')
+              .Append(x.TargetZ.ToString("0.###")).Append(x.Withheld ? "w" : "-").Append(x.Reason).Append('|');
+        sb.Append("short=").Append(string.Join(",", a.Shortfalls)).Append("|surplus=").Append(string.Join(",", a.Surpluses));
+        return sb.ToString();
+    }
+
+    // The text of the method whose declaration starts with `signature` (braces balanced), for source pins.
+    internal static string BodyOf(string src, string signature)
+    {
+        int start = src.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) throw new Exception("method not found: " + signature);
+        int open = src.IndexOf('{', start);
+        int depth = 0;
+        for (int i = open; i < src.Length; i++)
+        {
+            if (src[i] == '{') depth++;
+            else if (src[i] == '}' && --depth == 0) return src.Substring(start, i - start + 1);
+        }
+        throw new Exception("unbalanced body: " + signature);
+    }
 
     // True when one line of the body, trimmed, is exactly `line`: a commented-out or prefixed
     // copy of the statement does not match.

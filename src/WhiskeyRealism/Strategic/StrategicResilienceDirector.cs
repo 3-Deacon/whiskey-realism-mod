@@ -6,8 +6,7 @@ namespace WhiskeyRealism.Strategic
     {
         public static DirectorPosture ProposePosture(
             int allianceId,
-            CampaignPaceOutput pace,
-            PersonalityVector personality)
+            CampaignPaceOutput pace)
         {
             var posture = new DirectorPosture
             {
@@ -17,16 +16,16 @@ namespace WhiskeyRealism.Strategic
                 Reason = pace?.Reason ?? "no-pace-input"
             };
 
-            posture.Intent = ProposeIntent(posture.Pace, posture.Risk, personality);
+            posture.Intent = ProposeIntent(posture.Pace, posture.Risk);
 
             if (pace != null && pace.IntentBlockedFromPreserve && posture.Intent == StrategicIntent.Preserve)
                 posture.Intent = StrategicIntent.Delay;
 
-            ApplyThresholdModifiers(posture, personality);
+            ApplyThresholdModifiers(posture);
             return posture;
         }
 
-        private static StrategicIntent ProposeIntent(CampaignPace pace, CollapseRisk risk, PersonalityVector personality)
+        private static StrategicIntent ProposeIntent(CampaignPace pace, CollapseRisk risk)
         {
             switch (pace)
             {
@@ -39,63 +38,10 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Personality contributions from OperationalTempoDoctrine.ApplyPersonality:
-        //   MaximumProbeStrengthFraction += 0.05*audacity - 0.04*caution
-        //   EscalateFriendlyRatio        += 0.15*caution  - 0.10*audacity
-        //   MinimumProbeDays             ±1 on |audacity|/|caution| > 0.35
-        // Director modifiers are bounded to ±50% of the absolute personality delta on the same field.
-        private static void ApplyThresholdModifiers(DirectorPosture posture, PersonalityVector personality)
+        // The pace's threshold modifiers, each bounded: the front ledger's hold and concession ratios, the formation
+        // directives' recover floor and mass ratios, the fiscal and construction biases and the defence guard budget.
+        private static void ApplyThresholdModifiers(DirectorPosture posture)
         {
-            float audacity = personality.Audacity;
-            float caution = personality.Caution;
-
-            float pFraction = Math.Abs(0.05f * audacity - 0.04f * caution);
-            float pEscalate = Math.Abs(0.15f * caution - 0.10f * audacity);
-            float pReaction = 0.10f; // doctrine doesn't adjust this from personality; cap at 0.10
-            float pWithdraw = 0.08f; // same — small fixed cap
-            float pDays     = (Math.Abs(audacity) > 0.35f || Math.Abs(caution) > 0.35f) ? 1f : 0.5f;
-
-            float fractionMod = 0f, escalateMod = 0f, reactionMod = 0f, withdrawMod = 0f, daysMod = 0f;
-
-            switch (posture.Pace)
-            {
-                case CampaignPace.Overheated:
-                    fractionMod = -0.5f * pFraction;
-                    escalateMod = +0.5f * pEscalate;
-                    daysMod     = +0.5f * pDays;
-                    break;
-                case CampaignPace.TooQuiet:
-                    fractionMod = +0.5f * pFraction;
-                    escalateMod = -0.5f * pEscalate;
-                    daysMod     = -0.5f * pDays;
-                    break;
-                case CampaignPace.LateWarPressure:
-                    if (posture.AllianceId == 0)
-                    {
-                        fractionMod = +0.5f * pFraction;
-                        escalateMod = -0.5f * pEscalate;
-                    }
-                    else
-                    {
-                        withdrawMod = +0.5f * pWithdraw;
-                    }
-                    break;
-                case CampaignPace.TooFastCollapse:
-                    fractionMod = -0.5f * pFraction;
-                    daysMod     = +0.5f * pDays;
-                    reactionMod = -0.5f * pReaction;
-                    break;
-                case CampaignPace.Stalemated:
-                    daysMod = -0.5f * pDays;
-                    break;
-            }
-
-            posture.MaximumProbeStrengthFractionModifier = fractionMod;
-            posture.EscalateFriendlyRatioModifier        = escalateMod;
-            posture.EnemyReactionMultiplierModifier      = reactionMod;
-            posture.WithdrawFriendlyRatioModifier        = withdrawMod;
-            posture.MinimumProbeDaysModifier             = daysMod;
-
             float holdMod = 0f, concessionMod = 0f;
             switch (posture.Pace)
             {
@@ -162,33 +108,20 @@ namespace WhiskeyRealism.Strategic
             posture.LogisticsBias          = Clamp(logisticsBias,   -0.20f, +0.40f);
             posture.ExpansionDamper        = Clamp(expansionDamper,  0f,    +0.50f);
 
-            float guardMod = 0f, capitalMod = 0f;
+            float guardMod = 0f;
             switch (posture.Pace)
             {
                 case CampaignPace.TooFastCollapse:
-                    capitalMod = +0.10f;
-                    guardMod   = +0.03f;
+                    guardMod = +0.03f;
                     break;
                 case CampaignPace.Overheated:
                     guardMod = +0.05f;
                     break;
                 case CampaignPace.LateWarPressure:
-                    if (posture.AllianceId == 0) guardMod   = -0.03f;
-                    else                          capitalMod = +0.05f;
+                    if (posture.AllianceId == 0) guardMod = -0.03f;
                     break;
             }
-            posture.GuardBudgetFractionModifier  = Clamp(guardMod,   -0.05f, +0.05f);
-            posture.CapitalDefenseBudgetModifier  = Clamp(capitalMod, -0.05f, +0.10f);
-        }
-
-        public static void ApplyTo(OperationalProbeOptions options, DirectorPosture posture)
-        {
-            if (options == null || posture == null) return;
-            options.MaximumProbeStrengthFraction = Clamp(options.MaximumProbeStrengthFraction + posture.MaximumProbeStrengthFractionModifier, 0.15f, 0.55f);
-            options.EscalateFriendlyRatio        = Clamp(options.EscalateFriendlyRatio        + posture.EscalateFriendlyRatioModifier,        1.35f, 2.60f);
-            options.EnemyReactionMultiplier      = Clamp(options.EnemyReactionMultiplier      + posture.EnemyReactionMultiplierModifier,      1.15f, 1.85f);
-            options.WithdrawFriendlyRatio        = Clamp(options.WithdrawFriendlyRatio        + posture.WithdrawFriendlyRatioModifier,        0.35f, 0.85f);
-            options.MinimumProbeDays             = ClampInt(options.MinimumProbeDays + (int)Math.Round(posture.MinimumProbeDaysModifier), 1, 9);
+            posture.GuardBudgetFractionModifier = Clamp(guardMod, -0.05f, +0.05f);
         }
 
         internal static DirectorMemoryDto MemoryToDto(DirectorMemory memory)
@@ -235,6 +168,5 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);
-        private static int   ClampInt(int v, int lo, int hi)    => v < lo ? lo : (v > hi ? hi : v);
     }
 }

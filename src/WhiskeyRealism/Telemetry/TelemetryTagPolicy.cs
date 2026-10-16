@@ -127,7 +127,6 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Heartbeat", TelemetryCategory.Health);
             AddCampaign("DailyOps", TelemetryCategory.State);
             AddCampaign("DailyOps:Perf", TelemetryCategory.Performance);
-            AddCampaign("HistoricalOperation", TelemetryCategory.Decision);
             AddCampaign("DefenseIntent", TelemetryCategory.State);
             AddCampaign("DefenseIntent:asset", TelemetryCategory.State);
             AddCampaign("FiscalIntent", TelemetryCategory.Decision);
@@ -136,14 +135,12 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("ConstructionTelemetry", TelemetryCategory.State);
             AddCampaign("FormationDirective", TelemetryCategory.State);
             AddCampaign("FrontLedger", TelemetryCategory.State);
-            AddCampaign("ArmyArea", TelemetryCategory.State);
+            AddCampaign("ArmyGroup", TelemetryCategory.Write);
             AddCampaign("CampaignMap", TelemetryCategory.State);
             AddCampaign("CampaignPace", TelemetryCategory.State);
             AddCampaign("CollapseRisk", TelemetryCategory.State);
             AddCampaign("Director", TelemetryCategory.Decision);
             AddCampaign("Director:trace", TelemetryCategory.Trace);
-            AddCampaign("OperationalProbe", TelemetryCategory.Decision);
-            AddCampaign("CoordinatedOps", TelemetryCategory.Write);
             AddCampaign("CampaignPlayerOrderFlow", TelemetryCategory.Decision);
             AddCampaign("ProjectDoctrine", TelemetryCategory.Decision);
             AddCampaign("ProjectAppointed", TelemetryCategory.State);
@@ -154,6 +151,23 @@ namespace WhiskeyRealism.Telemetry
             // profile (bounded: one order per target per game day, last four targets);
             // skip lines are written with LegacyInfo and stay on the campaign sidecar.
             AddCampaignAndMainLog("W&LCampaignDispatch", TelemetryCategory.Decision);
+            // Stage G campaign planner (plan G0 registers every event of G0-G7). The first-review
+            // line is G0's runtime proof and reaches LogOutput.log under every profile (bounded:
+            // once per alliance per campaign), as the #69 dispatch line does.
+            AddCampaignAndMainLog("CampaignPlanner", TelemetryCategory.State);
+            AddCampaign("CampaignPlan", TelemetryCategory.Decision);
+            AddCampaign("EnemyBeliefs", TelemetryCategory.State);
+            AddCampaign("Recon", TelemetryCategory.State);
+            AddCampaign("ReconMission", TelemetryCategory.Write);
+            AddCampaign("Appointment", TelemetryCategory.Write);
+            AddCampaign("Allocation", TelemetryCategory.Decision);
+            AddCampaign("CampaignMover", TelemetryCategory.Write);
+            AddCampaign("CampaignSteer", TelemetryCategory.Write);
+            AddCampaign("CampaignTempo", TelemetryCategory.Decision);
+            AddCampaign("DepotTask", TelemetryCategory.Write);
+            AddCampaign("RailroadSteer", TelemetryCategory.Write);
+            AddCampaign("CapitalFloor", TelemetryCategory.Write);
+            AddCampaign("ReplacementFlow", TelemetryCategory.Write);
             AddCampaign("Succession", TelemetryCategory.Decision);
             AddCampaign("Plan", TelemetryCategory.Decision);
         }
@@ -226,7 +240,6 @@ namespace WhiskeyRealism.Telemetry
                 || tag.StartsWith("Construction", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Fiscal", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("DailyOps", StringComparison.OrdinalIgnoreCase)
-                || tag.StartsWith("CoordinatedOps", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Director", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("W&L", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Project", StringComparison.OrdinalIgnoreCase)
@@ -234,10 +247,7 @@ namespace WhiskeyRealism.Telemetry
                 || tag.StartsWith("Plan", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Campaign", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(tag, "FrontLedger", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(tag, "ArmyArea", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(tag, "FormationDirective", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(tag, "OperationalProbe", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(tag, "HistoricalOperation", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(tag, "FormationDirective", StringComparison.OrdinalIgnoreCase);
         }
 
         // Serious = a whole word token (failed/failure/exception/error/fatal, plural ok), a

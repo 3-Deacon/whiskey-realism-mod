@@ -12,11 +12,8 @@ namespace WhiskeyRealism.Strategic
     public sealed class DefenseThreatSource
     {
         public DefenseThreatSourceKind Kind;
-        public int InvasionForceInstanceId;
-        public string SpotName;
-        public string SourcePortName;
-        public int RaidGroupInstanceId;
-        public int RaidCurrentState;
+        // The believed enemy group behind a SeaInvasion or RaidForce threat (EnemyBelief.UnitKey).
+        public string EnemyUnitKey;
         public string AssetName;
         public CampaignMapAssetKind AssetKind;
         public AssetStrategicRole AssetRole;
@@ -25,12 +22,13 @@ namespace WhiskeyRealism.Strategic
         public float EnemyStrength;
         public int[] EnemyInstanceIds;
         public bool LandedSignal;
-        public bool VanillaCollapsed;
+        // The belief that raised this sea-invasion or raid threat last review no longer qualifies
+        // (LapsedThreatTracker): reported once more, as Recovered.
+        public bool SightingLapsed;
     }
 
     public sealed class DefenseIntentInput
     {
-        public int AllianceId;
         public bool PlayerIsCIC;
         public PersonalityVector CICPersonality;
         public List<DefenseThreatSource> Threats = new List<DefenseThreatSource>();

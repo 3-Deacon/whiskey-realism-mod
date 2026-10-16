@@ -43,6 +43,8 @@ Dedupe state is cleared when the battle identity, the player's current command o
 
 The campaign side is `WlStrategicOrderBridge` + `WlCampaignDispatchRuntime` (stage F, `docs/wl-dispatch-objective-bridge.md`): it no longer uses `PlayerOrderDedupe` or vanilla's gated `calledfromcampaign: true` call; it builds vanilla's campaign order itself with its own dedupe (`WlCampaignDispatchPolicy`), and since the order flow its orders ride the campaign courier queue.
 
+Campaign planner invariants (stage G): the planner stands down for a CIC player's alliance; the map-group player is order-only (his Support order is a dispatch through this bridge by the same rule an AI Support move follows, never a move, MainEffort, picket or recon mission); an AI group above a player below map level is movable and #69 turns the move into his dispatch; the player's own command and units under it are never moved, appointed or re-tasked by the mover, the recon executor or the appointment planner (`WlChainRules.MayMove`).
+
 ## Order flow
 
 One path for every order bound for the player's panel. Vanilla anchors are decompile build 14703111.

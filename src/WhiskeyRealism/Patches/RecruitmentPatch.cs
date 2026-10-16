@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -16,6 +17,11 @@ namespace WhiskeyRealism.Patches
         [ThreadStatic] private static int _zoneDepth;
         [ThreadStatic] private static int _activeAifaction;
         private static readonly RecruitmentLogGate _logGate = new RecruitmentLogGate();
+
+        // True while vanilla is inside ZoneRecruiting, and the aifaction it recruits for: RecruitRoutingPatch
+        // acts only there, so the transfer call to the same GrabExistingGroup (17319) is untouched.
+        internal static bool InZoneRecruiting => _zoneDepth > 0;
+        internal static int ActiveAifaction => _activeAifaction;
 
         [HarmonyPatch(typeof(AICampaign), "ZoneRecruiting")]
         internal static class ZoneRecruitingScope
@@ -133,10 +139,13 @@ namespace WhiskeyRealism.Patches
                 AllowDraftReplacement = IsConscriptionActive(alliance)
             };
 
-            var cic = StrategicCoordinator.Instance?.CICs?[alliance];
-            int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            if (ObjectiveCatalog.TryResolve(objectiveId, out var meta) && meta.Theater != Theater.Unknown)
-                intent.PreferredTheater = meta.Theater;
+            // The theater of the published plan's main-effort sector; no fresh plan or main effort leaves Unknown.
+            if (CampaignPlanStore.TryGetPlan(alliance, out var plan) && PlanFreshness.IsFresh(plan.DaySerial))
+            {
+                var main = plan.SectorById(plan.MainSectorId);
+                if (main != null && main.Theater != Theater.Unknown)
+                    intent.PreferredTheater = main.Theater;
+            }
 
             ApplyProtectedAreaIntent(intent, alliance);
             return intent;
@@ -144,10 +153,25 @@ namespace WhiskeyRealism.Patches
 
         private static void ApplyProtectedAreaIntent(RecruitmentIntent intent, int alliance)
         {
-            string protectedArea = alliance == 1 ? "VirginiaCapitalCorridor" : "WashingtonDefenses";
+            string protectedArea = CapitalAreaKey(alliance);
+            if (protectedArea == null) return;
             intent.ProtectedAreaKey = protectedArea;
             intent.ProtectedAreaThreatLevel = ProtectedAreaThreatLevel(alliance, protectedArea);
             intent.ProtectedAreaThreatThreshold = 0.35f;
+        }
+
+        // The area key of the alliance's capital (the protected area), the same PlannerAreaKeys key the formation
+        // directive ledger files its assignments under; null when the capital is unknown.
+        private static string CapitalAreaKey(int alliance)
+        {
+            try
+            {
+                var capital = GameVars.alliance != null && alliance < GameVars.alliance.Length ? GameVars.alliance[alliance].capital : null;
+                if (capital == null) return null;
+                var position = capital.transform.position;
+                return PlannerAreaKeys.At(alliance, position.x, position.z);
+            }
+            catch { return null; }
         }
 
         private static float ProtectedAreaThreatLevel(int alliance, string areaKey)
@@ -175,9 +199,23 @@ namespace WhiskeyRealism.Patches
             catch { return 0f; }
         }
 
+        // Vanilla GetStrengthRatio's shape (12366-12404) on fog-honest beliefs (G1): own direct
+        // strength - contract expiries + recruits in training (own knowledge) over the believed
+        // enemy. The enemy's recruits in training and chapter-0 neutrals are not seen and drop out.
+        // Called inside ZoneRecruiting, so _activeAifaction is this alliance's faction.
         private static float SafeStrengthRatio(int alliance)
         {
-            try { return AICampaign.GetStrengthRatio(alliance); }
+            try
+            {
+                var ownUnits = VanillaFieldCache.List(AICampaignReflect.GetFaction(_activeAifaction), "ownunits");
+                if (ownUnits == null) return 1f;
+                float own = 0f;
+                for (int i = 0; i < ownUnits.Count; i++)
+                    if (ownUnits[i] is Regiment unit && unit != null) own += unit.groupstrengthdirect;
+                var state = GameVars.alliance[alliance];
+                own += state.troopsinrecruitment - state.recruitscontractexpiries;
+                return EnemyBeliefReadings.StrengthRatio(own, EnemyDetectionRuntime.BeliefsFor(alliance));
+            }
             catch { return 1f; }
         }
 
@@ -232,7 +270,7 @@ namespace WhiskeyRealism.Patches
                 {
                     StateId = stateId,
                     Theater = StateTheater(stateId),
-                    AreaKey = StateAreaKey(stateId),
+                    AreaKey = StateAreaKey(stateId, alliance),
                     Volunteers = Math.Max(0, state.volunteers[alliance]),
                     Drafts = Math.Max(0, state.drafts[alliance]),
                     Support = state.support[alliance],
@@ -269,7 +307,8 @@ namespace WhiskeyRealism.Patches
             return Theater.Unknown;
         }
 
-        private static string StateAreaKey(int stateId)
+        // The area key of the state's centre (the same PlannerAreaKeys key as the directive ledger's assignments).
+        private static string StateAreaKey(int stateId, int alliance)
         {
             try
             {
@@ -278,15 +317,7 @@ namespace WhiskeyRealism.Patches
 
                 var state = GameVars.nation[stateId];
                 if (state == null) return null;
-
-                string name = state.name ?? string.Empty;
-                if (name == "Virginia") return "VirginiaCapitalCorridor";
-                if (name == "District of Columbia") return "WashingtonDefenses";
-                if (name == "Maryland" || name == "Pennsylvania") return "MarylandPennsylvaniaCorridor";
-                if (name == "Ohio") return "OhioValley";
-                if (name == "North Carolina" || name == "South Carolina") return "CarolinaInterior";
-
-                return ArmyAreaClassifier.FromPosition(state.averageposition.x, state.averageposition.z);
+                return PlannerAreaKeys.At(alliance, state.averageposition.x, state.averageposition.z);
             }
             catch { return null; }
         }

@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Strategic.Policies;
 
 using static TestHarness;
+using static TestFixtures;
 
 // The time-sliced daily strategic review (perf slice, M2). DailyReviewScheduler runs
 // DailyReviewJobList in order across frames; StrategicCoordinator publishes the working
@@ -15,16 +17,15 @@ using static TestHarness;
 // model review whose jobs read and write the working set through the coordinator's View rule
 // (working inside a job, published outside), using the real pure ledgers. Its jobs reproduce
 // the coordinator's dependency web: same-day reads of earlier jobs (posture -> front ->
-// formation -> probe), previous-day reads of later jobs (fiscal and defense read yesterday's
-// front / formation), and the in-place mutations (CIC plan, era, director memory, policy plan,
-// the probe overlay on a formation ledger that was not rebuilt today).
+// formation), previous-day reads of later jobs (fiscal and defense read yesterday's
+// front / formation), and the in-place mutations (era, director memory, policy plan).
 internal static class DailyReviewSchedulerTests
 {
     public static void Run()
     {
         RunAll(new (string name, Action run)[]
         {
-            ("daily review job list is map then per alliance cic through report", JobListOrder),
+            ("daily review job list is map then per alliance head through report", JobListOrder),
             ("daily review zero budget runs exactly one job per pump", ZeroBudgetOneJobPerPump),
             ("daily review slice is at most budget plus one job", SliceBoundedByBudgetPlusOneJob),
             ("daily review drain finishes the day in one call", DrainFinishesDay),
@@ -42,6 +43,14 @@ internal static class DailyReviewSchedulerTests
             ("daily review commit applies deferred battles even when the publish throws", CommitAppliesDeferredWhenPublishThrows),
             ("daily review commit keeps both failures when publish and deferred battles throw", CommitKeepsBothFailures),
             ("daily review jobs hand off what the single-frame review did", JobHandOffsPinned),
+            ("daily review published day swaps only a complete copy", PublishedDaySwapsOnlyCompleteCopy),
+            ("daily review commit prepares every copy before swapping any", CommitPreparesEveryCopyBeforeSwapping),
+            ("daily review planner follows the pause the day captured", PlannerFollowsTheDaysPauseAcrossAMidDayFlip),
+            ("daily review review mode follows the supplied pause", ReviewModeFollowsTheSuppliedPause),
+            ("daily review coordinator hands the day's pause to the planner", CoordinatorHandsTheDaysPauseToThePlanner),
+            ("daily review terrain drain never shares a frame with review work", TerrainDrainNeverSharesAFrameWithReviewWork),
+            ("daily review terrain queue drops at a load onto another scenario", TerrainQueueDropsAtLoadOntoAnotherScenario),
+            ("daily review planner header and belief comment describe the code", PlannerCommentsDescribeTheCode),
         });
     }
 
@@ -51,7 +60,7 @@ internal static class DailyReviewSchedulerTests
     {
         var jobs = DailyReviewJobList.Ordered;
         var expected = new List<string> { "Map:-1" };
-        string[] perAlliance = { "Cic", "Fiscal", "Policy", "Front", "Defense", "Formation", "Probe", "ArmyArea", "Construction", "Report" };
+        string[] perAlliance = { "Head", "Fiscal", "Policy", "Plan", "Front", "Defense", "Execute", "Formation", "Construction", "Report" };
         for (int a = 0; a < 2; a++)
             foreach (var kind in perAlliance)
                 expected.Add(kind + ":" + a);
@@ -225,6 +234,13 @@ internal static class DailyReviewSchedulerTests
 
         AssertDaysEqual(unsliced, oneJob, "one job per frame");
         AssertTrue(unsliced.Committed[Days - 1] != unsliced.Committed[Days - 2], "the model changes state from day to day");
+        string allocations = string.Join("", unsliced.CommittedPlanner);
+        foreach (string role in new[] { "MainEffort", "CapitalGuard", "Hold", "Recover", "Recon", "Reserve" })
+            AssertContains(allocations, ":" + role + "@", "the model's allocations exercise " + role + ": the sliced comparison covers the allocator");
+        // G1b runtime step: the model's days carry missions of every kind, a probe's verdicts and a paused day's aging,
+        // so the sliced==unsliced comparison covers the ledger, the verdicts and the row counts.
+        foreach (string token in new[] { ":Probe:", ":Screen:", ":Picket:", ":Recalled:", "probe-withdraw", "[Recon] alliance=" })
+            AssertContains(allocations, token, "the model's days exercise '" + token + "': the sliced comparison covers the recon step");
     }
 
     private static void ReaderBetweenSlicesSeesPreviousDay()
@@ -278,11 +294,155 @@ internal static class DailyReviewSchedulerTests
         AssertDaysEqual(unsliced, hurried, "a day cut short by the next date change");
     }
 
+    // F1 (integration verify): a pause that flips between the frames of a sliced day must not split the day into
+    // a planned half and a bookkeeping half. The model flips its live predicate after the third frame of every
+    // day; the unsliced review (no frames between jobs) never sees a flip. Following the day's capture, the
+    // sliced days equal the unsliced ones; reading the live value per job (the control) does not.
+    private static void PlannerFollowsTheDaysPauseAcrossAMidDayFlip()
+    {
+        bool PausedAtStart(int day) => day % 4 == 2;
+
+        var unsliced = new ModelReview();
+        for (int day = 1; day <= Days; day++)
+        {
+            unsliced.LivePause = PausedAtStart(day);
+            unsliced.BeginDay(day);
+            AssertTrue(unsliced.Drain(), "unsliced day completes");
+        }
+
+        ModelReview Sliced(bool readLive)
+        {
+            var review = new ModelReview(0, readLive);
+            for (int day = 1; day <= Days; day++)
+            {
+                review.LivePause = PausedAtStart(day);
+                review.BeginDay(day);
+                int pumps = 0;
+                while (!review.Pump(0))
+                {
+                    AssertTrue(pumps < DailyReviewJobList.Ordered.Length, "day " + day + " finishes");
+                    if (++pumps == 3) review.LivePause = !PausedAtStart(day); // the flip, before the Policy job
+                }
+            }
+            return review;
+        }
+
+        AssertDaysEqual(unsliced, Sliced(false), "a pause flip mid-day, captured at the day's start");
+        var control = Sliced(true);
+        bool differs = false;
+        for (int i = 0; i < unsliced.CommittedPlanner.Count; i++)
+            if (unsliced.CommittedPlanner[i] != control.CommittedPlanner[i]) differs = true;
+        AssertTrue(differs, "reading the live pause per job does split a day (the control has teeth)");
+        string all = string.Join("|", unsliced.CommittedPlanner);
+        AssertContains(all, "bookkeeping:", "paused days run bookkeeping only");
+        AssertContains(all, "paused:", "and execute nothing");
+    }
+
+    private static void ReviewModeFollowsTheSuppliedPause()
+    {
+        foreach (int alliance in new[] { 0, 1 })
+        {
+            AssertEqual(PlannerReviewMode.Bookkeeping, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.BelowMapLevel, 0, alliance, true), "the day's captured pause pauses both alliances");
+            AssertEqual(PlannerReviewMode.Full, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.NoCommand, 0, alliance, false), "...and the day's captured 'not paused' wins over the live class");
+        }
+        AssertEqual(PlannerReviewMode.StandDown, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.CommanderInChief, 1, 1, true), "the CIC player's own alliance stands down whatever the pause");
+        AssertEqual(PlannerReviewMode.Bookkeeping, PlayerCommandClassifier.ReviewMode(PlayerCommandClass.NoCommand, 0, 1),
+            "the live overload still derives the pause from the class (the executor's defence in depth)");
+    }
+
+    private static void CoordinatorHandsTheDaysPauseToThePlanner()
+    {
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string job = BodyOf(coordinator, "private void RunReviewJob(");
+        string plan = "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused)";
+        AssertEqual(2, job.Split(new[] { plan }, StringSplitOptions.None).Length - 1, "both Plan calls (the CIC player's bookkeeping and the AI alliance's) carry the day's pause");
+        AssertContains(job, "CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused)", "the Execute job carries it too");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertContains(BodyOf(runtime, "internal static void ReviewPlan("), "PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance, jobMachinePaused)", "the plan step's mode follows the capture");
+        string execute = BodyOf(runtime, "internal static void ReviewExecute(");
+        AssertContains(execute, "PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance, jobMachinePaused) != PlannerReviewMode.Full) return;", "the executor obeys the capture");
+        AssertContains(execute, "PlayerCommandClassifier.ReviewMode(live, GameVars.playeralliance, alliance) != PlannerReviewMode.Full) return;", "and still re-checks the live predicate");
+    }
+
+    // F4: the terrain drain runs on a frame only when no review slice ran on it. The one route to a shared
+    // frame was the save drain (SaveAll Prefix) finishing a review before the Update Postfix that pumps.
+    private static void TerrainDrainNeverSharesAFrameWithReviewWork()
+    {
+        var gate = new ReviewFrameGate();
+        AssertTrue(gate.MayDrain(10), "a frame with no review work may drain");
+        gate.MarkWork(10);
+        AssertFalse(gate.MayDrain(10), "a frame that ran a review slice (a save drain, a pump) may not");
+        AssertTrue(gate.MayDrain(11), "the next frame may");
+        gate.MarkWork(12);
+        gate.MarkWork(13);
+        AssertTrue(gate.MayDrain(12), "only the latest marked frame is remembered, and 12 is behind it");
+        AssertFalse(gate.MayDrain(13), "the latest one is blocked");
+
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        string slice = BodyOf(coordinator, "private void RunReviewSlice(");
+        AssertTrue(slice.IndexOf("_reviewFrames.MarkWork(Time.frameCount);", StringComparison.Ordinal) is int mark && mark >= 0
+            && mark < slice.IndexOf("_review.Pump(", StringComparison.Ordinal), "every slice marks its frame before it works");
+        string pump = BodyOf(coordinator, "internal void PumpDailyReview(");
+        AssertContains(pump, "if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick();", "the drain asks the gate");
+        string drain = BodyOf(coordinator, "private void DrainDailyReview(");
+        AssertContains(drain, "RunReviewSlice(long.MaxValue)", "the save drain and the new-day drain are slices too, so they mark the frame");
+        int callers = 0;
+        foreach (string file in System.IO.Directory.GetFiles(FindRepoPath("src"), "*.cs", System.IO.SearchOption.AllDirectories))
+            callers += System.IO.File.ReadAllText(file).Split(new[] { "TerrainLineRuntime.DrainTick(" }, StringSplitOptions.None).Length - 1;
+        AssertEqual(1, callers, "the coordinator's pump is the drain's only caller");
+    }
+
+    // F3: a load onto another scenario drops the old map's queue at the load; the same scenario (a save of
+    // the same campaign, the return from a battle) keeps queue and memo.
+    private static void TerrainQueueDropsAtLoadOntoAnotherScenario()
+    {
+        var areas = new List<AreaRecord>();
+        for (int i = 0; i < 5; i++)
+            areas.Add(new AreaRecord { Index = i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f } });
+        var drain = new TerrainMemoDrain();
+        AssertFalse(drain.DropForScenario("002"), "nothing prepared: nothing to drop");
+        long map = TerrainMemoDrain.MapIdentity("002", areas);
+        drain.Prepare(map, areas, new List<FormationRecord>(), 100000, out bool changed);
+        AssertTrue(changed, "queue prepared for the map");
+        drain.NoteScenario("002");
+        int queued = drain.Remaining;
+        AssertTrue(queued > 0, "questions queued");
+        AssertFalse(drain.DropForScenario("002"), "the same scenario keeps the queue");
+        AssertEqual(queued, drain.Remaining, "queue intact");
+        AssertTrue(drain.DropForScenario("003"), "another scenario drops it at the load");
+        AssertEqual(0, drain.Remaining, "no stale question is probed against the new map");
+        AssertFalse(drain.DropForScenario("004"), "and a second drop finds nothing");
+        drain.Prepare(TerrainMemoDrain.MapIdentity("003", areas), areas, new List<FormationRecord>(), 100000, out bool again);
+        AssertTrue(again && drain.Remaining > 0, "the new map prepares afresh");
+
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TerrainLineRuntime.cs");
+        string reset = BodyOf(runtime, "private static void Reset(");
+        AssertContains(reset, "if (Drain.DropForScenario(SceneManagement.currentcampaignscenario)) ClearMap();", "the CampaignScope reset (a load) drops the old map's queue and memo");
+        AssertContains(BodyOf(runtime, "internal static void PrepareDrain("), "Drain.NoteScenario(SceneManagement.currentcampaignscenario);", "each prepared queue is tagged with its scenario");
+    }
+
+    // F2 and F5: comments that named code which no longer exists.
+    private static void PlannerCommentsDescribeTheCode()
+    {
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertFalse(runtime.Contains("RunStrategicReviewCore"), "the runtime header names the Plan and Execute jobs, not the removed single-frame core");
+        AssertContains(runtime, "StrategicCoordinator.RunReviewJob", "it names the jobs");
+        string beliefs = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyArmyModel.cs");
+        AssertFalse(System.Text.RegularExpressions.Regex.IsMatch(beliefs, @"sidecar-\s*//\s*restored after a load"), "no claim that beliefs are restored after a load");
+        AssertFalse(beliefs.Contains("has no caller yet"), "Restore has a caller since G6 (CampaignPlannerRuntime.Restore)");
+        AssertContains(beliefs, "restored by CampaignPlannerRuntime.Restore", "the comment names the caller that restores the beliefs");
+        AssertContains(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "EnemyDetectionRuntime.ModelFor(alliance).Restore(saved.Beliefs);", "and the caller exists");
+        AssertFalse(runtime.Contains("G6 persists the state") || runtime.Contains("G6 adds it to the sidecar"), "no future tense about the sidecar (G6 shipped)");
+    }
+
     private static void AssertDaysEqual(ModelReview expected, ModelReview actual, string label)
     {
         AssertEqual(expected.Committed.Count, actual.Committed.Count, label + ": day count");
         for (int i = 0; i < expected.Committed.Count; i++)
+        {
             AssertEqual(expected.Committed[i], actual.Committed[i], label + ": day " + (i + 1));
+            AssertEqual(expected.CommittedPlanner[i], actual.CommittedPlanner[i], label + ": planner, day " + (i + 1));
+        }
         AssertEqual(Signature(expected.Work), Signature(actual.Work), label + ": final working state");
     }
 
@@ -294,16 +454,120 @@ internal static class DailyReviewSchedulerTests
         internal readonly StrategicLedgerSet Published = new StrategicLedgerSet();
         internal readonly DailyReviewScheduler Scheduler = new DailyReviewScheduler();
         internal readonly List<string> Committed = new List<string>();
+        internal readonly List<string> CommittedPlanner = new List<string>();
+        // The campaign planner's state (CampaignPlannerRuntime: plan store, beliefs, executors)
+        // lives outside the ledger set; the model carries it so the sliced review is checked
+        // with the planner's jobs too.
+        private readonly string[] _plans = new string[2];
+        private readonly string[] _executed = new string[2];
         internal int InJobReadsSawWorking;
         internal int InJobReadsSawPublished;
         private readonly Random _cost;
         private long _clock;
         private int _day;
 
-        internal ModelReview(int costSeed = 0)
+        // Vanilla's job-machine predicate (11368) as the model sees it now; it can flip between frames. The
+        // coordinator captures it when the day begins (BeginReviewDay) and the planner's jobs follow that
+        // capture; readPauseLive models the pre-fix behaviour (each job reads the live value) as a control.
+        internal bool LivePause;
+        private bool _capturedPause;
+        private readonly bool _readPauseLive;
+
+        internal ModelReview(int costSeed = 0, bool readPauseLive = false)
         {
             _cost = new Random(costSeed);
+            _readPauseLive = readPauseLive;
         }
+
+        private readonly ReconMissionLedger[] _recon = { new ReconMissionLedger(), new ReconMissionLedger() };
+        private readonly Allocation[] _previousAllocation = new Allocation[2];
+
+        // The snapshot of CampaignPlannerRuntime.ReviewPlan: a pure function of (day, alliance), as the job's
+        // vanilla reads are; the recon ledger and the previous allocation are what carries over.
+        private CampaignSnapshot ModelSnapshot(int a, Random rng)
+        {
+            var s = new CampaignSnapshot();
+            s.Reset(a, a, 1000 + _day, PlayerCommandClass.NotCareer, -1, null);
+            s.RelocationRange = 150f;
+            s.OffensiveDominance = 1.1f;
+            s.MinStrengthForMovement = 1000f;
+            s.MinMoraleForMovement = 0.3f;
+            s.HasCapital = true;
+            for (int i = 0; i < 7; i++)
+                s.Areas.Add(new AreaRecord { Index = i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f }, Importance = 1f, SupplyCapacity = 100f });
+            s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = a, X = 100f, Z = 0f, Condition = 1f, Built = true });
+            foreach (float x in new[] { 100f, 300f, 500f })
+                s.Objectives.Add(new ObjectiveRecord { ObjectiveId = (int)x, X = x, Z = 0f, HolderAlliance = 1 - a, Available = true, Importance01 = 0.5f });
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 550, X = 550f, Z = 0f, HolderAlliance = a, Available = true, Importance01 = 0.8f }); // an own town for a picket
+            for (int i = 1; i <= 7; i++)
+                s.Own.Add(new FormationRecord
+                {
+                    InstanceId = i, UnitKey = "m" + i + ":" + i, UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 3000f + rng.Next(9000),
+                    Morale = 0.8f, Supply01 = rng.Next(5) == 0 ? 0.2f : 0.9f, ReadinessStep = 3, CommandRange = 40f, BugleRange = 5f, CommanderId = i,
+                    AreaIndex = -1, Flags = FormationFlags.FightingForce | (rng.Next(6) == 0 ? FormationFlags.InBattle : default(FormationFlags)),
+                    CavalryShare = rng.Next(3) == 0 ? 0.9f : 0f, SightRadius = 50f, Name = "m" + i, ParentInstanceId = -1
+                });
+            // A third of the beliefs are decayed, so the probe trigger (no belief of confidence >= 0.5 near the
+            // objective) and the stale-picture gate both come up over the 40 days.
+            for (int i = 0; i < 2; i++)
+            {
+                bool decayed = rng.Next(3) == 0;
+                s.Beliefs.Add(new EnemyBelief
+                {
+                    InstanceId = -1, UnitKey = "e" + i + ":0", UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 4000f + rng.Next(9000),
+                    Confidence01 = decayed ? 0.3f : 1f, LastSeenDay = s.DaySerial - (decayed ? 9 : 0), UncertaintyRadius = decayed ? 60f : 5f
+                });
+            }
+            return s;
+        }
+
+        // The allocation step of CampaignPlannerRuntime.ReviewPlan, in its order: AgeRecon (OnReview), the plan,
+        // PlanRecon (ReconStep.Plan on the battles the review judged), the allocation, SyncRecon. The snapshot
+        // and plan are a pure function of (day, alliance); the ledger and the previous allocation carry over.
+        private string AllocateModelDay(int a, Random rng)
+        {
+            var s = ModelSnapshot(a, rng);
+            _recon[a].OnReview(s, _previousAllocation[a]);
+            var sectors = SectorModel.Build(s);
+            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, CapitalFloorStrength = rng.Next(6000) };
+            plan.Sectors.Add(new SectorPlan { SectorId = plan.MainSectorId, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 100, TargetX = 100f, TargetZ = 0f });
+            plan.Sectors.Add(new SectorPlan { SectorId = sectors.SectorAt(550f, 0f), Posture = TheaterPosture.Hold, HoldNeed = rng.Next(9000) });
+            for (int i = 1; i <= 7; i++)
+                if (rng.Next(2) == 0) plan.MassInstanceIds.Add(i);
+            plan.MassStrength = rng.Next(3) == 0 ? rng.Next(4000) : rng.Next(30000);
+            var battles = new List<BattleHistoryRecord>();
+            if (rng.Next(4) == 0)
+                battles.Add(new BattleHistoryRecord
+                {
+                    BattleName = "b" + _day, Day = 1 + _day % 28, Month = 1 + _day / 28, Year = 1862, PositionX = 100f, PositionZ = 0f,
+                    BattleResultType = 1, AllianceWon = rng.Next(2), Alliance = new[] { 0, 1 }
+                });
+            plan.MainEnemyStrength = 4000f + rng.Next(9000); // G4: the odds' enemy at the main objective (drawn last, so the earlier draws keep their stream)
+            var tasks = new List<ReconTask>();
+            ReconStep.Plan(s, sectors, plan, battles, BattleHistoryQuery.LegacySerial(1862, 1 + _day / 28, 1 + _day % 28), _recon[a], tasks);
+            var allocation = ForceAllocator.Allocate(plan, s, sectors, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
+            _recon[a].Sync(s, tasks, allocation);
+            _previousAllocation[a] = allocation;
+            return AllocationSignature(allocation) + "#" + MissionSignature(_recon[a]) + "#" + ReconStep.CountsOf(s, _recon[a], tasks).Row(a);
+        }
+
+        // A paused day keeps the planner's bookkeeping, which includes the mission ledger's aging.
+        private string AgeModelDay(int a, Random rng)
+        {
+            _recon[a].OnReview(ModelSnapshot(a, rng), _previousAllocation[a]);
+            return MissionSignature(_recon[a]);
+        }
+
+        private static string MissionSignature(ReconMissionLedger ledger)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var m in ledger.Missions)
+                sb.Append(m.MissionId).Append(':').Append(m.Kind).Append(':').Append(m.State).Append(':').Append(m.Reason).Append('@')
+                  .Append(m.InstanceId).Append('/').Append(m.IssuedDay).Append('/').Append(m.ObservedEnemyStrength.ToString("0.#")).Append(';');
+            return sb.ToString();
+        }
+
+        private bool PauseNow => _readPauseLive ? LivePause : _capturedPause;
 
         // StrategicCoordinator.View.
         private StrategicLedgerSet View => Scheduler.RunningJob ? Work : Published;
@@ -313,6 +577,7 @@ internal static class DailyReviewSchedulerTests
         internal void BeginDay(int day)
         {
             _day = day;
+            _capturedPause = LivePause;
             Scheduler.Begin(DailyReviewJobList.Ordered.Length);
         }
 
@@ -326,6 +591,7 @@ internal static class DailyReviewSchedulerTests
             {
                 Published.PublishFrom(Work);
                 Committed.Add(Signature(Published));
+                CommittedPlanner.Add("plans:" + _plans[0] + "," + _plans[1] + "|exec:" + _executed[0] + "," + _executed[1]);
             }
             return completed;
         }
@@ -351,23 +617,8 @@ internal static class DailyReviewSchedulerTests
                     }
                     break;
 
-                case DailyReviewJobKind.Cic:
+                case DailyReviewJobKind.Head:
                 {
-                    if (View.CICs[a] == null || _day % 10 == 0)
-                    {
-                        Work.CICs[a] = Work.CICs[a] ?? new CIC { AllianceId = a, OfficerName = "cic" + a };
-                        Work.CICs[a].ActivePlan = new OperationalPlan
-                        {
-                            OperationId = "op" + _day,
-                            Phases = { new Phase { TargetObjectiveId = 10 + a }, new Phase { TargetObjectiveId = 20 + rng.Next(5) } }
-                        };
-                    }
-                    var plan = View.CICs[a].ActivePlan;
-                    plan.CurrentPhaseIndex = (_day / 3) % plan.Phases.Count;
-                    plan.IsDirty = rng.Next(2) == 0;
-                    plan.OperationLastDecisionDaySerial = _day;
-                    plan.Phases[plan.CurrentPhaseIndex].PhaseStartedDaySerial = _day;
-
                     Work.Eras[a] = Work.Eras[a] ?? new EraStageManager();
                     View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, 1);
 
@@ -411,6 +662,24 @@ internal static class DailyReviewSchedulerTests
                     break;
                 }
 
+                case DailyReviewJobKind.Plan:
+                    // Today's posture (the head job) and policy, yesterday's front (the front runs later); the force
+                    // allocation (G4) runs inside the Plan job, after the plan, with the recon ledger that carries over.
+                    // While the job machine is paused the planner keeps its bookkeeping only: no replan, no allocation.
+                    if (PauseNow)
+                    {
+                        _plans[a] = "bookkeeping:" + _day + ":" + AgeModelDay(a, rng);
+                        break;
+                    }
+                    _plans[a] = "p" + _day + ":" + View.DirectorMemories[a].LastPosture.Pace + "/" + View.PolicyPlans[a].CurrentPick
+                        + "/" + (View.Fronts[a]?.Signature() ?? "-") + "/" + rng.Next(100) + "/alloc:" + AllocateModelDay(a, rng);
+                    break;
+
+                case DailyReviewJobKind.Execute:
+                    // Today's plan and defense intent.
+                    _executed[a] = PauseNow ? "paused:" + _day : _plans[a] + "|" + View.DefenseIntents[a].Signature;
+                    break;
+
                 case DailyReviewJobKind.Front:
                 {
                     var posture = View.DirectorMemories[a].LastPosture;
@@ -437,7 +706,6 @@ internal static class DailyReviewSchedulerTests
                     // Today's front, yesterday's formations (formation runs later).
                     Work.DefenseIntents[a] = new DefenseIntentLedgerOutput
                     {
-                        AllianceId = a,
                         Signature = View.Fronts[a].Signature() + "|" + (View.FormationDirectives[a]?.Summary() ?? "-")
                     };
                     break;
@@ -452,7 +720,6 @@ internal static class DailyReviewSchedulerTests
                             snapshots.Add(new FormationSnapshot
                             {
                                 UnitKey = "u" + a + i,
-                                AllianceId = a,
                                 UnitType = 14 + i,
                                 IsTopUnit = true,
                                 GroupStrengthActive = 1000f + rng.Next(9000),
@@ -461,7 +728,6 @@ internal static class DailyReviewSchedulerTests
                                 RifleAmmo = (float)rng.NextDouble(),
                                 ArtilleryAmmo = 0.8f,
                                 Supply = (float)rng.NextDouble(),
-                                WeaponFirepower = 1f,
                                 AreaKey = "A" + i,
                                 SectorKey = sector?.SectorKey,
                                 FrontPosture = sector != null ? sector.Posture : FrontPosture.Hold,
@@ -469,29 +735,6 @@ internal static class DailyReviewSchedulerTests
                             });
                         }
                         Work.FormationDirectives[a] = FormationDirectiveLedger.Build(snapshots, View.Eras[a].Stage, "A1");
-                    }
-                    break;
-
-                case DailyReviewJobKind.Probe:
-                {
-                    // On days the formations were not rebuilt this mutates yesterday's ledger.
-                    var decisions = new[] { OperationalProbeDecision.Probe, OperationalProbeDecision.Pause, OperationalProbeDecision.Withdraw, OperationalProbeDecision.Escalate };
-                    View.FormationDirectives[a].ApplyOperationalProbe(new OperationalProbeOutput
-                    {
-                        SelectedUnitKey = "u" + a + (_day % 3),
-                        Decision = decisions[rng.Next(decisions.Length)],
-                        Reason = "probe" + _day
-                    });
-                    break;
-                }
-
-                case DailyReviewJobKind.ArmyArea:
-                    if (_day % 7 == 3)
-                    {
-                        var inputs = new List<ArmyAreaInput>();
-                        for (int i = 0; i < 3; i++)
-                            inputs.Add(new ArmyAreaInput { UnitKey = "u" + a + i, AllianceId = a, CurrentAreaKey = "A" + rng.Next(3), Strength = rng.Next(9000) });
-                        Work.ArmyAreas[a] = ArmyAreaLedger.Build(inputs, "A1");
                     }
                     break;
 
@@ -516,22 +759,8 @@ internal static class DailyReviewSchedulerTests
         for (int a = 0; a < 2; a++)
         {
             sb.Append("|A").Append(a);
-            var cic = set.CICs[a];
-            if (cic == null) sb.Append("|cic:-");
-            else
-            {
-                sb.Append("|cic:").Append(cic.AllianceId).Append(',').Append(cic.OfficerName);
-                var plan = cic.ActivePlan;
-                if (plan != null)
-                {
-                    sb.Append(',').Append(plan.OperationId).Append(',').Append(plan.CurrentPhaseIndex).Append(',').Append(plan.IsDirty)
-                      .Append(',').Append(plan.OperationLastDecisionDaySerial);
-                    foreach (var p in plan.Phases) sb.Append(",p").Append(p.TargetObjectiveId).Append('@').Append(p.PhaseStartedDaySerial);
-                }
-            }
             sb.Append("|era:").Append(set.Eras[a]?.Stage.ToString() ?? "-");
             sb.Append("|front:").Append(set.Fronts[a]?.Signature() ?? "-");
-            sb.Append("|area:").Append(set.ArmyAreas[a]?.Summary() ?? "-");
             var f = set.FormationDirectives[a];
             sb.Append("|form:").Append(f == null ? "-" : f.Summary() + "/" + f.Pressure.LowSupplyCount + "/" + f.Pressure.MassCount + "/" + f.Pressure.RecoverCount + "/" + f.Pressure.TopSupplyAreaKey);
             sb.Append("|fiscal:").Append(set.FiscalIntents[a]?.Signature ?? "-");
@@ -580,7 +809,7 @@ internal static class DailyReviewSchedulerTests
         AssertContains(src, "private StrategicLedgerSet View => _review.RunningJob ? _work : _published;", "view rule");
         string[] fields =
         {
-            "CIC[] CICs", "EraStageManager[] Eras", "FrontSectorLedger[] Fronts", "ArmyAreaLedger[] ArmyAreas",
+            "EraStageManager[] Eras", "FrontSectorLedger[] Fronts",
             "FormationDirectiveLedger[] FormationDirectives", "FiscalOutput[] FiscalIntents", "ConstructionOutput[] ConstructionIntents",
             "DefenseIntentLedgerOutput[] DefenseIntents", "NeedVector[] Needs", "NeedSnapshot[] NeedSnapshots",
             "PolicyPlanLedger[] PolicyPlans", "DirectorMemory[] DirectorMemories", "CampaignMapLedger CampaignMap"
@@ -595,10 +824,10 @@ internal static class DailyReviewSchedulerTests
         AssertContains(Body(src, "private void PublishAndReportReviewDay("), "PublishStrategicState();", "the day is published on commit");
         AssertContains(Body(src, "private void ApplyDeferredBattleOutcomes("), "RecordBattleOutcome(deferred[i]);", "deferred battles recorded");
         string publish = Body(src, "private void PublishStrategicState(");
-        AssertContains(publish, "ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);", "published replaced by a complete copy");
+        AssertContains(publish, "ReviewDayCommit.Publish(ref _published, _work, PrepareDay);", "published replaced by a complete copy");
+        AssertContains(Body(src, "private static StrategicLedgerSet PrepareDay("), "StrategicLedgerSet.PublishedCopyOf(work);", "the ledger copy");
         AssertEqual(1, src.Split(new[] { "_published = " }, StringSplitOptions.None).Length - 1, "published assigned only at its declaration");
         AssertContains(src, "private StrategicLedgerSet _published = new StrategicLedgerSet();", "declaration");
-        AssertContains(publish, "Succession.PublishFired();", "succession events publish with the day");
     }
 
     private static void CoordinatorDrainAndResetHooks()
@@ -623,19 +852,18 @@ internal static class DailyReviewSchedulerTests
         AssertContains(job, "DailyReviewJobList.Ordered[jobIndex]", "jobs come from the ordered list");
     }
 
-    private static StrategicLedgerSet WorkingWithCic(string officer)
+    private static StrategicLedgerSet WorkingInEra(EraStage stage)
     {
         var working = new StrategicLedgerSet();
-        working.CICs[0] = new CIC { AllianceId = 0, OfficerName = officer };
-        working.Eras[0] = new EraStageManager { Stage = EraStage.Amateur1861 };
+        working.Eras[0] = new EraStageManager { Stage = stage };
         return working;
     }
 
     private static void CommitKeepsPreviousDayWhenCopyThrows()
     {
-        StrategicLedgerSet published = StrategicLedgerSet.PublishedCopyOf(WorkingWithCic("Monday"));
+        StrategicLedgerSet published = StrategicLedgerSet.PublishedCopyOf(WorkingInEra(EraStage.Amateur1861));
         StrategicLedgerSet monday = published;
-        var tuesday = WorkingWithCic("Tuesday");
+        var tuesday = WorkingInEra(EraStage.Operational1862);
         bool threw = false;
         try
         {
@@ -653,13 +881,13 @@ internal static class DailyReviewSchedulerTests
         }
         AssertTrue(threw, "the failure reaches the caller");
         AssertTrue(ReferenceEquals(monday, published), "previous day still published");
-        AssertEqual("Monday", published.CICs[0].OfficerName, "previous day whole");
+        AssertEqual(EraStage.Amateur1861, published.Eras[0].Stage, "previous day whole");
 
         ReviewDayCommit.Publish(ref published, tuesday, StrategicLedgerSet.PublishedCopyOf);
         AssertFalse(ReferenceEquals(monday, published), "a completed copy replaces the set");
-        AssertEqual("Tuesday", published.CICs[0].OfficerName, "new day published");
-        AssertEqual("Monday", monday.CICs[0].OfficerName, "a replaced set is never written again");
-        AssertFalse(ReferenceEquals(tuesday.CICs[0], published.CICs[0]), "published CIC is a copy");
+        AssertEqual(EraStage.Operational1862, published.Eras[0].Stage, "new day published");
+        AssertEqual(EraStage.Amateur1861, monday.Eras[0].Stage, "a replaced set is never written again");
+        AssertFalse(ReferenceEquals(tuesday.Eras[0], published.Eras[0]), "published era is a copy");
     }
 
     private static void CommitAppliesDeferredWhenPublishThrows()
@@ -734,32 +962,119 @@ internal static class DailyReviewSchedulerTests
             "UpdateCampaignMapLedger(d.Day, d.LogHeartbeat, d.WeeklyCatchUp)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: true)",
-            "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial)",
-            "frontChanged = UpdateFrontLedger(alliance, a.Cic)",
-            "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.DaySerial;",
+            "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay)",
+            "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused)",
+            "case DailyReviewJobKind.Execute: if (ready && !paused) d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused));",
+            "case DailyReviewJobKind.Front: { a.FrontChanged = false; if (paused) break;",
+            "case DailyReviewJobKind.Defense: if (!paused)",
+            "if (!ready || paused) break;",
+            "EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);",
+            "frontChanged = UpdateFrontLedger(alliance)",
+            "if (frontChanged || _frontChangedDay[alliance] < 0) _frontChangedDay[alliance] = a.LegacySerial;",
             "a.FrontChanged = frontChanged;",
             "UpdateDefenseIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year)",
-            "a.FormationChanged = false;",
             "StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) || StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) || a.FrontChanged;",
-            "a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Cic, a.Era)",
-            "if (UpdateOperationalProbe(alliance, a.Cic, d.Day, d.Month, d.Year)) a.FormationChanged = true;",
-            "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, armyAreaSource, _armyAreaSourceSignatures[alliance], a.FormationChanged || d.WeeklyCatchUp)",
-            "UpdateArmyAreaLedger(alliance, a.Cic)",
+            "d.FormationMs += Measure(() => UpdateFormationDirectiveLedger(alliance, a.Era));",
             "StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, constructionSource, _constructionSourceSignatures[alliance], d.WeeklyCatchUp)",
-            "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat)",
+            "UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat, paused)",
         };
         foreach (string pin in pins)
             AssertContains(job, pin, "hand-off: " + pin);
-        AssertBefore(job, "a.FormationChanged = false;", "a.FormationChanged = UpdateFormationDirectiveLedger(", "formation flag reset before the ledger runs");
-        string cic = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunCicReviewJob("), @"\s+", " ");
-        foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.Cic = cic;", "a.DaySerial = daySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;" })
-            AssertContains(cic, pin, "cic hand-off: " + pin);
+        AssertBefore(job, "EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);", "if (d.OperationalRuntimeReady)", "the belief day is stamped by the first job, before any reader");
+        string head = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "private void RunHeadReviewJob("), @"\s+", " ");
+        foreach (string pin in new[] { "a.Mode = AllianceReviewMode.Ai;", "a.Era = era;", "a.LegacySerial = legacySerial;", "a.Mode = AllianceReviewMode.PlayerCic;", "a.Mode = AllianceReviewMode.Skipped;",
+            "if (!d.JobMachinePaused) { var fired = Succession.CheckEvents(", "SwapOfficer(alliance, e);", "PublishDirectorPosture(alliance, day, month, year, legacySerial);" })
+            AssertContains(head, pin, "head hand-off: " + pin);
+        // The planner reads today's director posture (head job) and runs before the front and its
+        // executors after the defense ledger, as in the single-frame review.
+        string list = string.Join(",", Array.ConvertAll(DailyReviewJobList.Ordered, j => j.Kind + ":" + j.Alliance));
+        AssertBefore(list, "Head:0", "Plan:0", "plan after today's head review");
+        AssertBefore(list, "Policy:0", "Plan:0", "plan after policy");
+        AssertBefore(list, "Plan:0", "Front:0", "plan before the front ledger");
+        AssertBefore(list, "Defense:0", "Execute:0", "executors after the defense ledger");
+        AssertBefore(list, "Execute:0", "Formation:0", "executors before the formation directives");
+    }
+
+    // The planner's reader-facing copies (beliefs, plan store): a fill that throws keeps the
+    // previous day, and a swap only follows a complete fill.
+    private static void PublishedDaySwapsOnlyCompleteCopy()
+    {
+        var day = new PublishedDay<List<string>>(new List<string> { "monday" }, new List<string>());
+        day.Prepare(c => { c.Clear(); c.Add("tuesday"); });
+        AssertEqual("monday", day.Published[0], "prepared, not yet swapped");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "swapped");
+        bool threw = false;
+        try { day.Prepare(c => { c.Clear(); c.Add("half"); throw new InvalidOperationException("copy failed"); }); }
+        catch (InvalidOperationException) { threw = true; }
+        AssertTrue(threw, "the fill's exception reaches the commit");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "a throwing copy keeps the previous day");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "no swap without a complete prepare");
+        day.Reset(c => c.Clear());
+        AssertEqual(0, day.Published.Count, "reset clears");
+    }
+
+    // StrategicCoordinator.PublishStrategicState: every copy (ledgers, beliefs, plan store) is
+    // made inside the ledger copy's function, so any throw leaves the whole previous day
+    // published; the reference swaps follow only a complete set. The coordinator attaches the
+    // stores' view to its scheduler.
+    private static void CommitPreparesEveryCopyBeforeSwapping()
+    {
+        string src = Coordinator();
+        string prepare = Body(src, "private static StrategicLedgerSet PrepareDay(");
+        AssertBefore(prepare, "StrategicLedgerSet.PublishedCopyOf(work);", "EnemyBeliefStore.PreparePublish();", "ledgers, then beliefs");
+        AssertBefore(prepare, "EnemyBeliefStore.PreparePublish();", "CampaignPlanStore.PreparePublish();", "beliefs, then the plan store");
+        AssertBefore(prepare, "CampaignPlanStore.PreparePublish();", "return ledgers;", "all prepared before the ledger swap");
+        string publish = Body(src, "private void PublishStrategicState(");
+        AssertBefore(publish, "ReviewDayCommit.Publish(ref _published, _work, PrepareDay);", "EnemyBeliefStore.SwapPublished();", "stores swap after the ledgers");
+        AssertBefore(publish, "EnemyBeliefStore.SwapPublished();", "CampaignPlanStore.SwapPublished();", "both stores swap");
+        AssertContains(Body(src, "public static void Bootstrap("), "DailyReviewView.Attach(Instance.InReviewJob);", "stores follow the scheduler's view");
+        AssertContains(Body(src, "private bool InReviewJob("), "return _review.RunningJob;", "the same rule as View");
+
+        // A throwing copy, end to end on the stores: nothing of the new day is published.
+        bool inJob = false;
+        WhiskeyRealism.Util.CampaignScope.ResetAll();
+        DailyReviewView.Attach(() => inJob);
+        try
+        {
+            var plan = new TheaterPlan { Alliance = 0, DaySerial = 1 };
+            inJob = true;
+            CampaignPlanStore.Publish(0, plan, new Allocation(), null);
+            inJob = false;
+            StrategicLedgerSet published = new StrategicLedgerSet();
+            bool threw = false;
+            try
+            {
+                ReviewDayCommit.Publish(ref published, new StrategicLedgerSet(), w =>
+                {
+                    EnemyBeliefStore.PreparePublish();
+                    CampaignPlanStore.PreparePublish();
+                    throw new InvalidOperationException("ledger copy failed");
+                });
+                EnemyBeliefStore.SwapPublished();
+                CampaignPlanStore.SwapPublished();
+            }
+            catch (InvalidOperationException) { threw = true; }
+            AssertTrue(threw, "the copy threw");
+            AssertFalse(CampaignPlanStore.TryGetPlan(0, out _), "the plan of a failed commit is not published");
+        }
+        finally
+        {
+            DailyReviewView.Attach(null);
+            WhiskeyRealism.Util.CampaignScope.ResetAll();
+        }
     }
 
     private static void PatchesPumpAndDrain()
     {
         string tick = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Patches/MonthlyTickHookPatch.cs");
         AssertBefore(tick, "if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))", "StrategicCoordinator.Instance?.PumpDailyReview();", "frames without a date change pump");
+        // The campaign planner's terrain drain is a client of the same frame pump: only on a
+        // frame with no review day in flight.
+        string pump = System.Text.RegularExpressions.Regex.Replace(Body(Coordinator(), "internal void PumpDailyReview("), @"\s+", " ");
+        AssertContains(pump, "if (!_review.InFlight) { if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick(); return; }", "drain only when no day is in flight and no review slice ran this frame (F4)");
         AssertBefore(tick, "CampaignIsLive(SceneManagement.currentoperation)", "PumpDailyReview()", "no pumping while the campaign is not live");
         string drain = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Patches/DailyReviewSaveDrainPatch.cs");
         AssertContains(drain, "[HarmonyPatch(typeof(SceneManagement), \"SaveAll\")]", "drain patch targets SaveAll");

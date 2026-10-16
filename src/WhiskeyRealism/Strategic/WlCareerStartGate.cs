@@ -7,6 +7,24 @@ namespace WhiskeyRealism.Strategic
             return dlcScenarioActive && (chosenCommanderId < 0 || !chosenCommanderHasCommand);
         }
 
+        // Stage G spec C5: the coordinator defers the whole strategic review only until the W&L
+        // player has picked a commander. Between commands (hierarchy -1) the review runs and
+        // VanillaJobMachinePaused narrows what it may do.
+        public static bool CareerNotStarted(bool dlcScenarioActive, int chosenCommanderId)
+        {
+            return dlcScenarioActive && chosenCommanderId < 0;
+        }
+
+        // Vanilla's job-machine pause, AICampaign.UpdateUnitAI 11368:
+        // DLC_WL.dlc_scenarioactive && GetPlayerCommandHierarchy() == -1 && !IsCommanderInChief().
+        // While it holds vanilla freezes every faction's job machine, so Whiskey's order-issuing
+        // ledgers and the planner's executors pause for every alliance; bookkeeping keeps running.
+        // A CIC or army-group player without a currentcommand has hierarchy 18 and never pauses.
+        public static bool VanillaJobMachinePaused(bool dlcScenarioActive, int hierarchy, bool isCommanderInChief)
+        {
+            return dlcScenarioActive && hierarchy == -1 && !isCommanderInChief;
+        }
+
         public static bool ShouldSkipDiaryEventUpdate(
             bool dlcScenarioActive,
             int frame,

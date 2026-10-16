@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -99,7 +100,7 @@ namespace WhiskeyRealism.Strategic
                 var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                 if (defOps == null || ownUnits == null) return;
                 var offensive = VanillaFieldCache.Get(faction, "unitsinoffensiveoperations") as IList;
-                var enemyUnits = VanillaFieldCache.Get(faction, "enemyunits") as IList;
+                var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
 
                 bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
@@ -136,15 +137,12 @@ namespace WhiskeyRealism.Strategic
                         var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
                         {
                             AllianceId = allianceId,
-                            AifactionIndex = aifactionIndex,
                             Unit = unit,
                             TargetPosition = anchor,
                             TargetName = sig,
-                            ObjectiveId = -1,
                             Intent = WlStrategicIntent.EngageEnemy,
                             Width = 20f,
-                            Depth = 20f,
-                            SourceSystem = "CoastalDefense"
+                            Depth = 20f
                         });
 
                         if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
@@ -157,7 +155,7 @@ namespace WhiskeyRealism.Strategic
                         }
                         else if (bridgeDecision.MayDirectMove)
                         {
-                            var destination = InterceptDestination(enemyUnits, anchor, unit);
+                            var destination = InterceptDestination(beliefs, anchor, unit);
                             string orderName = string.IsNullOrEmpty(response.Threat.AssetName) ? "Coastal defense" : response.Threat.AssetName;
                             if (!QueueVanillaDefensiveMove(unit, destination, orderName))
                             {
@@ -322,27 +320,13 @@ namespace WhiskeyRealism.Strategic
             defOps.Remove(unit);
         }
 
-        private static Vector3 InterceptDestination(IList enemyUnits, Vector3 anchor, Regiment unit)
+        // The nearest believed enemy to the threat anchor (G1: fog-honest, its last-seen position).
+        private static Vector3 InterceptDestination(IReadOnlyList<EnemyBelief> beliefs, Vector3 anchor, Regiment unit)
         {
             Vector3 enemy = anchor;
-            float best = float.MaxValue;
-            if (enemyUnits != null)
-            {
-                for (int i = 0; i < enemyUnits.Count; i++)
-                {
-                    var e = enemyUnits[i] as Regiment;
-                    if ((UnityEngine.Object)(object)e == (UnityEngine.Object)null) continue;
-                    var p = ((Component)e).transform.position;
-                    float dx = p.x - anchor.x;
-                    float dz = p.z - anchor.z;
-                    float d = dx * dx + dz * dz;
-                    if (d < best)
-                    {
-                        best = d;
-                        enemy = p;
-                    }
-                }
-            }
+            int nearest = EnemyBeliefQuery.Nearest(beliefs, anchor.x, anchor.z, out float distance);
+            if (nearest >= 0) enemy = new Vector3(beliefs[nearest].X, anchor.y, beliefs[nearest].Z);
+            float best = nearest >= 0 ? distance * distance : float.MaxValue;
             float searchRadius = GamePrefs.maxdistancedefensiveoperations;
             if (best > searchRadius * searchRadius) enemy = anchor;
 

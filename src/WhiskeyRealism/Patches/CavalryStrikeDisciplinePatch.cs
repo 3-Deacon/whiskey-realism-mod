@@ -72,7 +72,7 @@ namespace WhiskeyRealism.Patches
         }
     }
 
-    [HarmonyPatch(typeof(Regiment), "GetClosestEnemyUnitReg", new[] { typeof(float), typeof(int[]) })]
+    [HarmonyPatch(typeof(Regiment), "GetClosestEnemyUnitReg", new[] { typeof(float), typeof(int[]) })] // battle result-override steer on vanilla's own cavalry target (BC13), not a campaign read
     internal static class CavalryStrikeTargetPatch
     {
         private const double RowIntervalHours = 0.05;

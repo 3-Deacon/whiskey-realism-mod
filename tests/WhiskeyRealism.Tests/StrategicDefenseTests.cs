@@ -30,8 +30,8 @@ internal static class StrategicDefenseTests
             ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("defense posture defaults to not-evaluated", DefensePostureDefaultsToNotEvaluated),
             ("defense threat carries signature and posture", DefenseThreatCarriesSignatureAndPosture),
-            ("threat signature for sif uses instance and spot", ThreatSignatureForSifUsesInstanceAndSpot),
-            ("threat signature for raid uses instance and asset", ThreatSignatureForRaidUsesInstanceAndAsset),
+            ("threat signature for sif uses the belief key", ThreatSignatureForSifUsesBeliefKey),
+            ("threat signature for raid uses the belief key and asset", ThreatSignatureForRaidUsesBeliefKeyAndAsset),
             ("threat signature for asset uses sorted top-n enemies", ThreatSignatureForAssetUsesSortedTopN),
             ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies),
             ("threat signature for raid handles null asset", ThreatSignatureForRaidHandlesNullAsset),
@@ -60,7 +60,6 @@ internal static class StrategicDefenseTests
             ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
             ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated),
             ("defense telemetry summary compresses response burst", DefenseTelemetrySummaryCompressesResponseBurst),
-            ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex),
             ("defense ledger asset proximity stays local and cannot custom order", DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder),
             ("defense ledger donor theater budget blocks critical front export", DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport),
             ("defense ledger formation directive blocks defense movement", DefenseLedgerFormationDirectiveBlocksDefenseMovement),
@@ -139,21 +138,21 @@ internal static class StrategicDefenseTests
         AssertEqual(ThreatScale.Landing, threat.Scale);
     }
 
-    private static void ThreatSignatureForSifUsesInstanceAndSpot()
+    // G1: sea invasions are keyed on the believed enemy group's UnitKey (no landing spot or port:
+    // that is the enemy's plan state).
+    private static void ThreatSignatureForSifUsesBeliefKey()
     {
-        var sig = DefenseThreatSignature.ForSeaInvasion(
-            invasionForceInstanceId: 42, spotName: "Hampton", sourcePortName: "Boston");
-        AssertEqual("sif:42:Hampton:Boston", sig);
+        var sig = DefenseThreatSignature.ForSeaInvasion("Burnside Expedition:42");
+        AssertEqual("sif:Burnside Expedition:42", sig);
 
-        var nullSpot = DefenseThreatSignature.ForSeaInvasion(
-            invasionForceInstanceId: 42, spotName: null, sourcePortName: null);
-        AssertEqual("sif:42:<no-spot>:<no-port>", nullSpot);
+        var nullKey = DefenseThreatSignature.ForSeaInvasion(null);
+        AssertEqual("sif:<no-key>", nullKey);
     }
 
-    private static void ThreatSignatureForRaidUsesInstanceAndAsset()
+    private static void ThreatSignatureForRaidUsesBeliefKeyAndAsset()
     {
-        var sig = DefenseThreatSignature.ForRaid(raidGroupInstanceId: 7, nearestAssetName: "wilmington-harbor");
-        AssertEqual("raid:7:wilmington-harbor", sig);
+        var sig = DefenseThreatSignature.ForRaid(enemyUnitKey: "Stuart:7", nearestAssetName: "wilmington-harbor");
+        AssertEqual("raid:Stuart:7:wilmington-harbor", sig);
     }
 
     private static void ThreatSignatureForAssetUsesSortedTopN()
@@ -177,8 +176,8 @@ internal static class StrategicDefenseTests
 
     private static void ThreatSignatureForRaidHandlesNullAsset()
     {
-        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, null));
-        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, ""));
+        AssertEqual("raid:Stuart:7:<no-asset>", DefenseThreatSignature.ForRaid("Stuart:7", null));
+        AssertEqual("raid:Stuart:7:<no-asset>", DefenseThreatSignature.ForRaid("Stuart:7", ""));
     }
 
     private static void ThreatSignatureForAssetHandlesNullName()
@@ -341,7 +340,7 @@ internal static class StrategicDefenseTests
     // Test #1: coastal guard response suppresses cross-map candidate.
     private static void DefenseLedgerCoastalGuardForbidsCrossMap()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.GuardCandidateAssets.Add(new CampaignMapAsset
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
@@ -352,7 +351,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "XII Corps",
             ActiveStrength = 18000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -375,18 +373,17 @@ internal static class StrategicDefenseTests
     // Test #2: minor raid response suppresses cross-map candidate.
     private static void DefenseLedgerMinorRaidForbidsCrossMap()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
-            RaidGroupInstanceId = 7,
+            EnemyUnitKey = "Raider:7",
             AssetName = "hampton-harbor",
             EnemyStrength = 1500f
         });
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "Far Army",
             ActiveStrength = 20000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -408,13 +405,11 @@ internal static class StrategicDefenseTests
     // Test #3: decisive landing allows cross-theater candidates.
     private static void DefenseLedgerDecisiveLandingAllowsCrossTheater()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 42,
-            SpotName = "hampton-spot",
-            SourcePortName = "boston",
+            EnemyUnitKey = "hampton-spot:42",
             LandedSignal = true,
             AssetName = "norfolk-harbor",
             AssetRole = AssetStrategicRole.KeyFort,
@@ -424,7 +419,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Division",
             ActiveStrength = 4000f,
             Morale = 0.8f,
             ReadinessStep = 2f,
@@ -435,7 +429,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Adjacent Army",
             ActiveStrength = 15000f,
             Morale = 0.85f,
             ReadinessStep = 2f,
@@ -463,13 +456,11 @@ internal static class StrategicDefenseTests
     // Test #4: same-theater adequate package beats remote oversized cross-map.
     private static void DefenseLedgerSameTheaterAdequateBeatsRemoteOversized()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 5,
-            SpotName = "charleston-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "charleston-spot:5",
             LandedSignal = true,
             AssetName = "wilmington-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -479,7 +470,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Brigade Alpha",
             ActiveStrength = 3000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -489,7 +479,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Brigade Beta",
             ActiveStrength = 3000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -500,7 +489,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 99,
-            UnitName = "Far Army",
             ActiveStrength = 20000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -536,7 +524,7 @@ internal static class StrategicDefenseTests
     // floor(6000/2250)=2 units can be assigned before the budget is exhausted.
     private static void DefenseLedgerGuardBudgetCapsLowValuePorts()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.TotalAllianceEffectiveStrength = 60000f;
         input.GuardBudgetFraction = 0.10f; // budget = 6000
 
@@ -552,7 +540,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 10 + i,
-                UnitName = $"Guard Unit {i}",
                 ActiveStrength = 2500f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -587,13 +574,11 @@ internal static class StrategicDefenseTests
     // Test #6: active invasion persists through a favorable tick (strength drop doesn't flip to Recovered).
     private static void DefenseLedgerActiveInvasionPersistsThroughFavorableTick()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         var src = new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 10,
-            SpotName = "mobile-spot",
-            SourcePortName = "new-orleans",
+            EnemyUnitKey = "mobile-spot:10",
             LandedSignal = true,
             AssetName = "mobile-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -603,7 +588,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Brigade",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -634,17 +618,15 @@ internal static class StrategicDefenseTests
     // pairs and asserts the counter ticks down once per Tick, not once per call.
     private static void DefenseLedgerRecoveredThreatReleasesAfterCooldown()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.CooldownDays = 2;
 
         var src = new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 20,
-            SpotName = "savannah-spot",
-            SourcePortName = "baltimore",
+            EnemyUnitKey = "savannah-spot:20",
             LandedSignal = true,
-            VanillaCollapsed = false,
+            SightingLapsed = false,
             AssetName = "savannah-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
             EnemyStrength = 5000f
@@ -653,7 +635,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Garrison",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -668,8 +649,8 @@ internal static class StrategicDefenseTests
         AssertTrue(input.Cooldown.IsActive(sig), "tick1: should be active after Active build");
         input.Cooldown.Tick();
 
-        // Tick 2: Recovered (VanillaCollapsed=true). Builder emits Recovered + calls MarkRecovered.
-        src.VanillaCollapsed = true;
+        // Tick 2: Recovered (SightingLapsed=true). Builder emits Recovered + calls MarkRecovered.
+        src.SightingLapsed = true;
         src.LandedSignal = false;
         var out2 = DefenseIntentLedger.Build(input);
         AssertTrue(out2.Responses.Count >= 1, "tick2: expected response");
@@ -699,21 +680,18 @@ internal static class StrategicDefenseTests
     // Test #8: player CIC short-circuits the entire ledger.
     private static void DefenseLedgerPlayerCicShortCircuitsAlliance()
     {
-        var input = MakeDefenseInput(0);
+        var input = MakeDefenseInput();
         input.PlayerIsCIC = true;
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 1,
-            SpotName = "annapolis-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "annapolis-spot:1",
             LandedSignal = true,
             EnemyStrength = 8000f
         });
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Division A",
             ActiveStrength = 10000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -729,13 +707,11 @@ internal static class StrategicDefenseTests
     // Test #9: player-controlled candidate is suppressed; AI candidate is selected.
     private static void DefenseLedgerWlSubordinateProtectsOnlyMarkedUnit()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 30,
-            SpotName = "beaufort-spot",
-            SourcePortName = "savannah",
+            EnemyUnitKey = "beaufort-spot:30",
             LandedSignal = true,
             AssetName = "beaufort-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -745,7 +721,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Player Division",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -757,7 +732,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "AI Brigade",
             ActiveStrength = 8000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -785,13 +759,11 @@ internal static class StrategicDefenseTests
     {
         // Sub-fixture A: Landing scale (not decisive) — critical-front suppressed, package empty.
         {
-            var input = MakeDefenseInput(1);
+            var input = MakeDefenseInput();
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
-                InvasionForceInstanceId = 50,
-                SpotName = "port-royal-spot",
-                SourcePortName = "norfolk",
+                EnemyUnitKey = "port-royal-spot:50",
                 LandedSignal = true,
                 AssetName = "port-royal-harbor",
                 AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -800,7 +772,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 1,
-                UnitName = "Critical Front Division",
                 ActiveStrength = 6000f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -821,13 +792,11 @@ internal static class StrategicDefenseTests
 
         // Sub-fixture B: DecisiveLanding scale, critical-front is the only candidate — should be selected.
         {
-            var input = MakeDefenseInput(1);
+            var input = MakeDefenseInput();
             input.Threats.Add(new DefenseThreatSource
             {
                 Kind = DefenseThreatSourceKind.SeaInvasion,
-                InvasionForceInstanceId = 51,
-                SpotName = "richmond-spot",
-                SourcePortName = "norfolk",
+                EnemyUnitKey = "richmond-spot:51",
                 LandedSignal = true,
                 AssetName = "richmond-harbor",
                 AssetRole = AssetStrategicRole.CapitalApproach,
@@ -836,7 +805,6 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 1,
-                UnitName = "Critical Front Division",
                 ActiveStrength = 6000f,
                 Morale = 0.9f,
                 ReadinessStep = 2f,
@@ -859,7 +827,7 @@ internal static class StrategicDefenseTests
     // Test #11: river harbor detected via AssetProximity (no SeaInvasionForce).
     private static void DefenseLedgerRiverHarborDetectsWithoutSif()
     {
-        var input = MakeDefenseInput(0);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.AssetProximity,
@@ -881,11 +849,11 @@ internal static class StrategicDefenseTests
     // Test #12: RaidForce source produces Raid scale and correct signature prefix.
     private static void DefenseLedgerRaidforceCoverage()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.RaidForce,
-            RaidGroupInstanceId = 7,
+            EnemyUnitKey = "Raider:7",
             AssetName = "hampton-spot",
             EnemyStrength = 2000f
         });
@@ -895,14 +863,14 @@ internal static class StrategicDefenseTests
         AssertTrue(output.Responses.Count >= 1, "expected at least one response");
         var response = output.Responses[0];
         AssertEqual(ThreatScale.Raid, response.Threat.Scale);
-        AssertTrue(response.Threat.Signature.StartsWith("raid:7:"),
-            $"expected signature to start with 'raid:7:', got '{response.Threat.Signature}'");
+        AssertTrue(response.Threat.Signature.StartsWith("raid:Raider:7:"),
+            $"expected signature to start with 'raid:Raider:7:', got '{response.Threat.Signature}'");
     }
 
     // Test #13: when SeaInvasion gate is off, AssetProximity fallback works without throw.
     private static void DefenseLedgerDebugSeainvasionsactiveOffFallsBack()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         // No SeaInvasion source — runtime fell back to AssetProximity.
         input.Threats.Add(new DefenseThreatSource
         {
@@ -915,7 +883,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Guard",
             ActiveStrength = 6000f,
             Morale = 0.85f,
             ReadinessStep = 2f,
@@ -937,13 +904,11 @@ internal static class StrategicDefenseTests
     // that starts with the posture name, so Task 14 telemetry has a stable key.
     private static void DefenseLedgerTelemetrySignaturePopulated()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 99,
-            SpotName = "charlestown-spot",
-            SourcePortName = "hampton-roads",
+            EnemyUnitKey = "charlestown-spot:99",
             LandedSignal = true,
             AssetName = "charlestown-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -952,7 +917,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Guard Brigade",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -977,7 +941,6 @@ internal static class StrategicDefenseTests
     {
         var output = new DefenseIntentLedgerOutput
         {
-            AllianceId = 1,
             Signature = "sig-a"
         };
         output.Responses.Add(new DefenseResponse
@@ -996,30 +959,9 @@ internal static class StrategicDefenseTests
         AssertEqual("responses=2 active=1 guard=1 selected=1 suppressed=1 signature=sig-a", summary);
     }
 
-    // Test: pure builder must accept allianceId=2 (Europe) without throwing.
-    // Vanilla AICampaign.aifaction includes alliance 2 for some CSA-side
-    // scenarios (decompile lines 9226/9249/9271/9367). The runtime arrays on
-    // StrategicCoordinator are length 2 — the bound-check that short-circuits
-    // alliance 2+ lives at the coordinator / patch layer. The builder itself
-    // is alliance-agnostic and must not throw on any non-negative ID.
-    private static void DefenseLedgerDoesNotCrashOnEuropeAllianceIndex()
-    {
-        var input = MakeDefenseInput(allianceId: 2);
-        DefenseIntentLedgerOutput output = null;
-        Exception caught = null;
-        try { output = DefenseIntentLedger.Build(input); }
-        catch (Exception ex) { caught = ex; }
-
-        AssertTrue(caught == null, $"expected no exception for allianceId=2, got: {caught}");
-        AssertTrue(output != null, "Build must return a non-null output for allianceId=2");
-        AssertEqual(2, output.AllianceId);
-        AssertTrue(output.Responses != null,
-            "Responses list must not be null even for europe alliance");
-    }
-
     private static void DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.AssetProximity,
@@ -1033,22 +975,18 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Local Garrison",
             ActiveStrength = 4000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.East,
             Tier = CandidateTier.Local,
             DistanceToThreat = 20f
         });
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 2,
-            UnitName = "Distant Army",
             ActiveStrength = 25000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.West,
             Tier = CandidateTier.AdjacentTheater,
             TransferDonorAllowed = true,
             DirectMovementAllowed = true,
@@ -1074,7 +1012,7 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.FrontLedger = FrontSectorLedger.Build(new[]
         {
             new FrontSectorInput
@@ -1102,9 +1040,7 @@ internal static class StrategicDefenseTests
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 44,
-            SpotName = "norfolk-spot",
-            SourcePortName = "baltimore",
+            EnemyUnitKey = "norfolk-spot:44",
             LandedSignal = true,
             AssetName = "richmond-approach",
             AssetRole = AssetStrategicRole.CapitalApproach,
@@ -1115,11 +1051,9 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Eastern Field Army",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
-            Theater = Theater.East,
             SectorKey = "VirginiaCapitalCorridor",
             Tier = CandidateTier.AdjacentTheater,
             TransferDonorAllowed = true,
@@ -1140,13 +1074,11 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerFormationDirectiveBlocksDefenseMovement()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 55,
-            SpotName = "mobile-spot",
-            SourcePortName = "new-orleans",
+            EnemyUnitKey = "mobile-spot:55",
             LandedSignal = true,
             AssetName = "mobile",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
@@ -1155,7 +1087,6 @@ internal static class StrategicDefenseTests
         input.Candidates.Add(new DefenseCandidate
         {
             UnitInstanceId = 1,
-            UnitName = "Recovering Corps",
             ActiveStrength = 9000f,
             Morale = 0.9f,
             ReadinessStep = 2f,
@@ -1177,15 +1108,13 @@ internal static class StrategicDefenseTests
 
     private static void DefenseLedgerCapitalDefensePackageIsCapped()
     {
-        var input = MakeDefenseInput(1);
+        var input = MakeDefenseInput();
         input.TotalAllianceEffectiveStrength = 60000f;
         input.CapitalDefenseBudgetFraction = 0.18f;
         input.Threats.Add(new DefenseThreatSource
         {
             Kind = DefenseThreatSourceKind.SeaInvasion,
-            InvasionForceInstanceId = 66,
-            SpotName = "richmond-spot",
-            SourcePortName = "norfolk",
+            EnemyUnitKey = "richmond-spot:66",
             LandedSignal = true,
             AssetName = "richmond",
             AssetRole = AssetStrategicRole.CapitalApproach,
@@ -1196,11 +1125,9 @@ internal static class StrategicDefenseTests
             input.Candidates.Add(new DefenseCandidate
             {
                 UnitInstanceId = 10 + i,
-                UnitName = "Capital Reserve " + i,
                 ActiveStrength = 7000f,
                 Morale = 1f,
                 ReadinessStep = 2f,
-                Theater = Theater.East,
                 Tier = CandidateTier.SameTheater,
                 TransferDonorAllowed = true,
                 DirectMovementAllowed = true,
@@ -1224,11 +1151,10 @@ internal static class StrategicDefenseTests
     // Helper: build a minimal DefenseIntentInput.
     // -----------------------------------------------------------------------
 
-    private static DefenseIntentInput MakeDefenseInput(int allianceId)
+    private static DefenseIntentInput MakeDefenseInput()
     {
         return new DefenseIntentInput
         {
-            AllianceId = allianceId,
             PlayerIsCIC = false,
             CICPersonality = default(PersonalityVector),
             TotalAllianceEffectiveStrength = 60000f

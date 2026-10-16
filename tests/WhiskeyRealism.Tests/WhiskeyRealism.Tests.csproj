@@ -7,7 +7,7 @@
     <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
     <!-- CS0649 (field never assigned): the harness compiles only the pure src
          files, so fields their runtime halves assign (e.g. BattleArtilleryState,
-         SuccessionScheduler.WarStateView, AreaOrderBusyFlags) look unassigned here.
+         SuccessionScheduler.WarStateView) look unassigned here.
          ./build.sh compiles every file and still reports CS0649. -->
     <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
@@ -42,18 +42,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterClassifier.cs" Link="TheaterClassifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseForceSizer.cs" Link="DefenseForceSizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FrontSectorLedger.cs" Link="FrontSectorLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaClassifier.cs" Link="ArmyAreaClassifier.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DynamicArmyAreaDoctrine.cs" Link="DynamicArmyAreaDoctrine.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryRecord.cs" Link="BattleHistoryRecord.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryQuery.cs" Link="BattleHistoryQuery.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ContactEvidenceLedger.cs" Link="ContactEvidenceLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterPressureView.cs" Link="TheaterPressureView.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Phase.cs" Link="Phase.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\PhaseTruthLedger.cs" Link="PhaseTruthLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicReviewRouter.cs" Link="CicReviewRouter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicCadencePolicy.cs" Link="StrategicCadencePolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
@@ -66,6 +57,51 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignCourierRuntime.cs" Link="WlCampaignCourierRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchRuntime.cs" Link="WlCampaignDispatchRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PlayerComplianceLedger.cs" Link="PlayerComplianceLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlannerContracts.cs" Link="Planner\CampaignPlannerContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignSnapshot.cs" Link="Planner\CampaignSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SightRadiusFormula.cs" Link="Planner\SightRadiusFormula.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefQuery.cs" Link="Planner\EnemyBeliefQuery.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ViewerCoverage.cs" Link="Planner\ViewerCoverage.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SectorModel.cs" Link="Planner\SectorModel.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.cs" Link="Planner\LogisticsGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlayerCommandClassifier.cs" Link="Planner\PlayerCommandClassifier.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerEligibility.cs" Link="Planner\PlannerEligibility.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerSettings.cs" Link="Planner\PlannerSettings.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlanTriggers.cs" Link="Planner\PlanTriggers.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerAreaKeys.cs" Link="Planner\PlannerAreaKeys.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerSnapshot.cs" Link="Planner\PlannerSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ModWrittenObjective.cs" Link="Planner\ModWrittenObjective.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyArmyModel.cs" Link="Planner\EnemyArmyModel.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefReadings.cs" Link="Planner\EnemyBeliefReadings.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderProfiles.cs" Link="Planner\CommanderProfiles.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderAppointmentPlanner.cs" Link="Planner\CommanderAppointmentPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\AppointmentProtection.cs" Link="Planner\AppointmentProtection.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconPlanner.cs" Link="Planner\ReconPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconMissionLedger.cs" Link="Planner\ReconMissionLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconOrders.cs" Link="Planner\ReconOrders.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconExecutor.cs" Link="Planner\ReconExecutor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReconStep.cs" Link="Planner\ReconStep.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.DepotTasks.cs" Link="Planner\LogisticsGate.DepotTasks.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RiverLines.cs" Link="Planner\RiverLines.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarchTime.cs" Link="Planner\MarchTime.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HistoricalPriorTable.cs" Link="Planner\HistoricalPriorTable.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ObjectiveGround.cs" Link="Planner\ObjectiveGround.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerState.cs" Link="Planner\PlannerState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReserveRules.cs" Link="Planner\ReserveRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HomeTheaterPrior.cs" Link="Planner\HomeTheaterPrior.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerChapterRules.cs" Link="Planner\PlannerChapterRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignTempoGate.cs" Link="Planner\CampaignTempoGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveIssue.cs" Link="Planner\MoveIssue.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignMover.cs" Link="Planner\CampaignMover.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CapitalFloorPolicy.cs" Link="Planner\CapitalFloorPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReinforcementRouting.cs" Link="Planner\ReinforcementRouting.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReplacementFlowPolicy.cs" Link="Planner\ReplacementFlowPolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />
@@ -73,7 +109,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalFigureRegistry.cs" Link="HistoricalFigureRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\Reflection.cs" Link="Util\Reflection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\VanillaTerrain.cs" Link="Util\VanillaTerrain.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DifficultyPersonalityModifier.cs" Link="DifficultyPersonalityModifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PerkSelectionScorer.cs" Link="PerkSelectionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\VanillaPerkTables.cs" Link="VanillaPerkTables.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\AllocationTrimIl.cs" Link="Patches\AllocationTrimIl.cs" />
@@ -97,18 +132,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveAdapter.cs" Link="ObjectiveAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationModels.cs" Link="HistoricalOperationModels.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationCatalog.cs" Link="HistoricalOperationCatalog.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDynamicRuleEvaluator.cs" Link="OperationDynamicRuleEvaluator.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDecisionMemory.cs" Link="OperationDecisionMemory.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CIC.cs" Link="CIC.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStageManager.cs" Link="EraStageManager.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\SuccessionScheduler.cs" Link="SuccessionScheduler.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyReviewScheduler.cs" Link="DailyReviewScheduler.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicLedgerSet.cs" Link="StrategicLedgerSet.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\SidecarDtoCodec.cs" Link="SidecarDtoCodec.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationContextBuilder.cs" Link="HistoricalOperationContextBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\RecruitmentIntentLedger.cs" Link="RecruitmentIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineCatalog.cs" Link="ProjectDoctrineCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineModels.cs" Link="ProjectDoctrineModels.cs" />
@@ -119,11 +147,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationSnapshot.cs" Link="FormationSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirectiveLedger.cs" Link="FormationDirectiveLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalTempoDoctrine.cs" Link="OperationalTempoDoctrine.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalProbeLedger.cs" Link="OperationalProbeLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationPackageLedger.cs" Link="CoordinatedOperationPackageLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationRuntime.cs" Link="CoordinatedOperationRuntime.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOffensiveScratch.cs" Link="CoordinatedOffensiveScratch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\AICampaignReflect.cs" Link="AICampaignReflect.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
@@ -158,6 +181,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionProbabilitySanitizer.cs" Link="ConstructionProbabilitySanitizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\FortConstructionGovernor.cs" Link="FortConstructionGovernor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ConstructionSteeringBoard.cs" Link="Planner\ConstructionSteeringBoard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\DepotTaskLedger.cs" Link="Planner\DepotTaskLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineScorer.cs" Link="Planner\RailLineScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineSteering.cs" Link="Planner\RailLineSteering.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphIntent.cs" Link="TelegraphIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphWishCharge.cs" Link="TelegraphWishCharge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FinancialAiLogGate.cs" Link="FinancialAiLogGate.cs" />
@@ -174,6 +201,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentLedger.cs" Link="DefenseIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentTelemetry.cs" Link="DefenseIntentTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignMilitaryGates.cs" Link="CampaignMilitaryGates.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\VanillaFieldCache.cs" Link="VanillaFieldCache.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignResponsivenessSignals.cs" Link="CampaignResponsivenessSignals.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryContracts.cs" Link="Telemetry\TelemetryContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryFields.cs" Link="Telemetry\TelemetryFields.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryJson.cs" Link="Telemetry\TelemetryJson.cs" />
@@ -415,9 +444,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalEnemyContactLedger.cs" Link="Orchestrator\TacticalEnemyContactLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDoctrineTime.cs" Link="Orchestrator\TacticalDoctrineTime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\PlayerIntelIncidents.cs" Link="Util\PlayerIntelIncidents.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\PatchFirstFire.cs" Link="Util\PatchFirstFire.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\ScopedState.cs" Link="Util\ScopedState.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Util\KeyedResolveCache.cs" Link="Util\KeyedResolveCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalRegimentDiagnosticsPatch.cs" Link="Patches\TacticalRegimentDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleWriterPolicy.cs" Link="Tactical\BattleWriterPolicy.cs" />

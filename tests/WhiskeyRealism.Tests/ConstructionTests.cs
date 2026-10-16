@@ -132,14 +132,11 @@ internal static class ConstructionTests
         return new ConstructionInput
         {
             AllianceId = alliance,
-            EraStage = EraStage.Amateur1861,
             FiscalPosture = FiscalPosture.BalancedWar,
-            FiscalDefendedGate = FiscalGate.Construction,
             CurrentRating = 3,
             BondFloorRating = 11,
             SupplyProtection = false,
             LogisticsExpansion = false,
-            ForceCapWarning = false,
             TopSupplyTheater = "",
             LowSupplyFormationCount = 0,
             LowAmmoFormationCount = 0,
@@ -179,7 +176,6 @@ internal static class ConstructionTests
     private static void ConstructionLedgerAllowsCsaEarlyArmsStress()
     {
         var input = BaseConstructionInput(1);
-        input.EraStage = EraStage.Amateur1861;
         input.FiscalPosture = FiscalPosture.CreditDefense;
         input.CurrentRating = 6;
         input.BondFloorRating = 11;

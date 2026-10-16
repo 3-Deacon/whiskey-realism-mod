@@ -8,6 +8,7 @@ using HarmonyLib;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Util;
 using static TestHarness;
 
 // Campaign terrain, perk-pick and engineer bug fixes (BUG-AI-011..014, BUG-WL-015,
@@ -241,9 +242,9 @@ internal static class CampaignTerrainFixTests
         AssertFalse(BattlePerception.MasksPlayerIntelIncidents(PerceptionMode.OwnSideWithinFog, true), "player alliance side keeps the incident");
         AssertFalse(BattlePerception.MasksPlayerIntelIncidents(PerceptionMode.RangeOnly, true), "range only never asks the grid");
         AssertFalse(BattlePerception.MasksPlayerIntelIncidents(PerceptionMode.FogGrid, false), "no W&L scenario");
-        AssertEqual("60,61,64", string.Join(",", BattlePerception.PlayerIntelIncidents), "Lost Orders and Scouting Ahead (101183)");
-        AssertTrue(BattlePerception.IncidentLaunched(0f), "launched at time 0");
-        AssertFalse(BattlePerception.IncidentLaunched(BattlePerception.IncidentNotLaunched), "masked value reads not launched");
+        AssertEqual("60,61,64", string.Join(",", PlayerIntelIncidents.Ids), "Lost Orders and Scouting Ahead (101183)");
+        AssertTrue(PlayerIntelIncidents.Launched(0f), "launched at time 0");
+        AssertFalse(PlayerIntelIncidents.Launched(PlayerIntelIncidents.NotLaunched), "masked value reads not launched");
     }
 
 
@@ -290,9 +291,9 @@ internal static class CampaignTerrainFixTests
         var idle = (DLC_WL.Incident)RuntimeHelpers.GetUninitializedObject(typeof(DLC_WL.Incident));
         incident.launchedtime = 12.5f;
         idle.launchedtime = -1f;
-        var mask = new FieldMask<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v, BattlePerception.IncidentNotLaunched);
-        AssertEqual(1, mask.Mask(new[] { incident, null, idle }, i => BattlePerception.IncidentLaunched(i.launchedtime)), "only the launched one");
-        AssertFalse(BattlePerception.IncidentLaunched(incident.launchedtime), "masked");
+        var mask = new FieldMask<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v, PlayerIntelIncidents.NotLaunched);
+        AssertEqual(1, mask.Mask(new[] { incident, null, idle }, i => PlayerIntelIncidents.Launched(i.launchedtime)), "only the launched one");
+        AssertFalse(PlayerIntelIncidents.Launched(incident.launchedtime), "masked");
         AssertEqual(null, mask.Restore(i => i == null), "clean restore");
         AssertNear(12.5f, incident.launchedtime, 1e-6f, "launch time back");
         AssertNear(-1f, idle.launchedtime, 1e-6f, "idle untouched");
