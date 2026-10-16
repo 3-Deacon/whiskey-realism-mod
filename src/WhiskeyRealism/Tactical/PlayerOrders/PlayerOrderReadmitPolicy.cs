@@ -14,10 +14,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         Release,
         FollowUp,
         Retreat,
-        // The campaign map's Whiskey orders: Whiskey's strategic order bridge and the #69 dispatcher
+        // The campaign map's Whiskey orders: Whiskey's strategic order bridge, shown by the dispatcher
         // (WlCampaignDispatchRuntime). Vanilla's own campaign calls are Vanilla.
         CampaignBridge,
-        C69,
     }
 
     internal enum ReadmitAction

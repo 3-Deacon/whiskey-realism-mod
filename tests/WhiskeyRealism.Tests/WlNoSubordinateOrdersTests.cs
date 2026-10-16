@@ -30,6 +30,10 @@ internal static class WlNoSubordinateOrdersTests
             ("wl no subordinate orders the dispatcher is reached only from the bridge", DispatcherReachedOnlyFromBridge),
             ("wl no subordinate orders the order origins have no #69 member", OriginsHaveNoC69),
             ("wl no subordinate orders a saved #69 courier entry is dropped on load", SavedC69EntryDroppedOnLoad),
+            ("wl no subordinate orders every order type is refused a carried player and kept for a map-group player", EveryOrderTypeByPlayerClass),
+            ("wl no subordinate orders vanilla's own campaign gate passes a map-group player and no carried one", VanillaGateByPlayerClass),
+            ("wl no subordinate orders a leftover campaign order of a carried player is cleared, a battle order and a map-group player's stay", StaleCarriedOrderRule),
+            ("wl no subordinate orders the leftover clear is vanilla's own null write, ahead of delivery", StaleClearWiring),
             ("wl no subordinate orders a whiskey order rides from the senior headquarters and shows its zone", WhiskeyOrderRidesFromSeniorHeadquarters),
             ("wl no subordinate orders the carrying group is never ordered by the bridge", CarryingGroupNeverOrdered),
             ("wl no subordinate orders the map-group player still gets the bridge order", MapGroupPlayerStillOrdered),
@@ -74,10 +78,11 @@ internal static class WlNoSubordinateOrdersTests
         AssertTrue(patch.Contains("[HarmonyPatch(typeof(AICampaign), \"UpdateUnitAI\")]"), "the pass is the UpdateUnitAI Postfix");
         AssertFalse(patch.Contains("WlCampaignDispatchRuntime.Flush("), "no pending-move flush");
         AssertFalse(patch.Contains("OnMoveUnitTo"), "no move recording");
+        int clear = patch.IndexOf("WlCampaignCourierRuntime.ClearStaleCarriedOrder();", StringComparison.Ordinal);
         int deliver = patch.IndexOf("WlCampaignCourierRuntime.DeliverDue();", StringComparison.Ordinal);
         int acknowledge = patch.IndexOf("WlCampaignCourierRuntime.AcknowledgeReached();", StringComparison.Ordinal);
         int observe = patch.IndexOf("PlayerComplianceRuntime.ObserveCampaign();", StringComparison.Ordinal);
-        AssertTrue(deliver >= 0 && acknowledge > deliver && observe > acknowledge, "delivery, then acknowledgement, then the compliance observation of what was delivered");
+        AssertTrue(clear >= 0 && deliver > clear && acknowledge > deliver && observe > acknowledge, "leftover clear, delivery, acknowledgement, then the compliance observation of what was delivered");
     }
 
     private static void DispatcherRecordsNoMove()
@@ -121,13 +126,18 @@ internal static class WlNoSubordinateOrdersTests
     {
         // A sidecar written before this fix can hold a pending #69 order for a subordinate player; it must
         // not be shown after the load (the entry is dropped, never trusted).
-        var old = new CampaignCourierDto
+        // Every type the dispatcher maps: 5 redeploy, 6 offensive operation, 7 engage, 8 capital, 16 offensive.
+        CampaignCourierDto old = null;
+        foreach (int type in new[] { 5, 6, 7, 8, 16 })
         {
-            Unit = "Army of the Potomac", UnitCommander = 3, Type = 5, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective",
-            Rotation = -1f, Width = 20f, Depth = 20f, Origin = "C69", Issuer = 4, ShowZone = true, PlayerCommand = "1st Brigade#2",
-            IssuedAt = 3.25, DueAt = 3.2502,
-        };
-        AssertFalse(WlCampaignCourierSidecar.TryFromDto(old, out _), "a #69 entry does not load");
+            old = new CampaignCourierDto
+            {
+                Unit = "Army of the Potomac", UnitCommander = 3, Type = type, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective",
+                Rotation = -1f, Width = 20f, Depth = 20f, Origin = "C69", Issuer = 4, ShowZone = true, PlayerCommand = "1st Brigade#2",
+                IssuedAt = 3.25, DueAt = 3.2502,
+            };
+            AssertFalse(WlCampaignCourierSidecar.TryFromDto(old, out _), "a #69 entry of type " + type + " does not load");
+        }
         var bridgeEntry = new CampaignCourierDto
         {
             Unit = null, UnitCommander = -1, Type = 5, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective",
@@ -155,6 +165,73 @@ internal static class WlNoSubordinateOrdersTests
 
     private static WlStrategicRoleFacts MapGroupFacts()
         => new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isUnderCommander: true, currentCommandIsCampaignGroup: true, currentCommandParentIsUnderTargetUnit: true);
+
+    // Every intent the bridge maps, with the vanilla order type it stands for (WlOrderTypeForIntent).
+    private static readonly (WlStrategicIntent intent, int type)[] IntentTypes =
+    {
+        (WlStrategicIntent.Redeploy, 5), (WlStrategicIntent.OffensiveContinuation, 6), (WlStrategicIntent.EngageEnemy, 7),
+        (WlStrategicIntent.DefendCapital, 8), (WlStrategicIntent.ConstructFort, 9), (WlStrategicIntent.ConstructSupplyDepot, 10),
+        (WlStrategicIntent.Offensive, 16),
+    };
+
+    private static void EveryOrderTypeByPlayerClass()
+    {
+        foreach (var (intent, type) in IntentTypes)
+        {
+            AssertEqual(type, WlStrategicOrderBridge.WlOrderTypeForIntent(intent), "intent " + intent + " is order type " + type);
+            var carried = WlStrategicOrderBridge.Classify(intent, CarryingFacts());
+            AssertFalse(carried.Result == WlStrategicOrderResult.IssuedWlCurrentOrder, "type " + type + ": a player carried by his corps is issued nothing");
+            var cic = WlStrategicOrderBridge.Classify(intent, new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPlayerCic: true));
+            AssertFalse(cic.Result == WlStrategicOrderResult.IssuedWlCurrentOrder, "type " + type + ": a CIC side is issued nothing");
+            var own = WlStrategicOrderBridge.Classify(intent, new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isUnderCommander: true));
+            AssertFalse(own.Result == WlStrategicOrderResult.IssuedWlCurrentOrder, "type " + type + ": a unit under the player below map level is issued nothing");
+            var mapGroup = WlStrategicOrderBridge.Classify(intent, MapGroupFacts());
+            AssertEqual(WlStrategicOrderResult.IssuedWlCurrentOrder, mapGroup.Result, "type " + type + ": the map-group player keeps Whiskey's dispatcher order");
+            AssertEqual(type, mapGroup.WlOrderType);
+        }
+    }
+
+    // Vanilla's own campaign orders (the offensive 5/16, the micro-movement 6, engage 7, capital defense 8)
+    // reach the capture gate; vanilla's gate (8366) lets only the map-group player's through.
+    private static void VanillaGateByPlayerClass()
+    {
+        foreach (int type in new[] { 5, 6, 7, 8, 9, 10, 16 })
+        {
+            var mapGroup = new CaptureFacts
+            {
+                WlActive = true, HasCurrentCommand = true, UnitIsPlayerAlliance = true, CampaignCall = true,
+                CampaignGroupIsOwnCommand = true, ParentIsUnderUnit = true, UnitIsUnderCommander = true, Type = type,
+            };
+            AssertTrue(WlOrderCaptureGate.ReachesDedupe(mapGroup), "type " + type + ": vanilla's order reaches the map-group player");
+            var carried = mapGroup;
+            carried.CampaignGroupIsOwnCommand = false;
+            AssertFalse(WlOrderCaptureGate.ReachesDedupe(carried), "type " + type + ": vanilla sends the carried player nothing");
+        }
+    }
+
+    private static void StaleCarriedOrderRule()
+    {
+        // wlActive, cic, ownMapGroup, hasOrder, isBattleOrder
+        AssertTrue(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, false, false, true, false), "a campaign order on a carried player's panel is a leftover");
+        AssertFalse(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, false, true, true, false), "the map-group player's order is his");
+        AssertFalse(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, false, false, true, true), "a battle order is the battle flow's");
+        AssertFalse(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, false, false, false, false), "an empty slot has nothing to clear");
+        AssertFalse(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(false, false, false, true, false), "outside a W&L career");
+        AssertFalse(WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, true, false, true, false), "the CIC was never sent one and stays untouched");
+    }
+
+    private static void StaleClearWiring()
+    {
+        string courier = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
+        string body = TestFixtures.BodyOf(courier, "internal static void ClearStaleCarriedOrder()");
+        int rule = body.IndexOf("WlCampaignCourierPolicy.HoldsStaleCarriedOrder(", StringComparison.Ordinal);
+        int write = body.IndexOf("DLC_WL.givenorder = null;", StringComparison.Ordinal);
+        AssertTrue(rule >= 0 && write > rule, "the slot is emptied only after the pure rule says so");
+        AssertTrue(body.Contains("order.IsBattleOrder()"), "the order's own vanilla battle test");
+        AssertTrue(body.Contains("BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command"), "the map-group test is vanilla's flag2 (8271-8274)");
+        AssertTrue(body.Contains("_watched = null;"), "no acknowledgement is shown for a cleared leftover");
+        AssertTrue(body.Contains("catch (Exception"), "never throws out of the patch");
+    }
 
     private static void CarryingGroupNeverOrdered()
     {

@@ -12,6 +12,8 @@ namespace WhiskeyRealism.Strategic
     // therefore never meets the battle re-admit policy: it is dropped as a re-pop of the active order,
     // or it rides a courier whose delay is vanilla's own campaign formula (WlCourierDelay.CampaignYears)
     // and is then shown by vanilla (a vanilla order) or by WlCampaignDispatchRuntime (a Whiskey order).
+    // Only a W&L player whose command is its own campaign-map group is ever sent one of either (vanilla's
+    // gate, 8366); a player carried by an AI corps holds none (HoldsStaleCarriedOrder).
     internal static class WlCampaignCourierPolicy
     {
         public const string Repop = "repop";
@@ -79,10 +81,22 @@ namespace WhiskeyRealism.Strategic
                 || string.Equals(entryCommandKey, currentCommandKey, StringComparison.Ordinal);
         }
 
-        // A Whiskey order (the bridge and #69) leaves a record in the dispatch history when it is shown.
+        // A Whiskey order (the strategic order bridge) leaves a record in the dispatch history when it is shown.
         public static bool RecordsHistory(OrderOrigin origin)
         {
-            return origin == OrderOrigin.CampaignBridge || origin == OrderOrigin.C69;
+            return origin == OrderOrigin.CampaignBridge;
+        }
+
+        // A campaign order sitting in the slot of a player who is not his own campaign-map group, with W&L
+        // active and he is not the CIC (a CIC is sent none either, 8366). Vanilla never gives such a player
+        // a campaign order, and Whiskey stopped on 2026-10-16, so one found there is a leftover of the
+        // removed #69 dispatch (a save made before, or a demotion); a battle order is the battle flow's
+        // and stays. Cleared the way vanilla clears a reached or end-of-day order: the slot set to null
+        // (CheckDLCWLTopics 123533, CheckClearingBattleOrdersEOD 47989); AvatarButtonPanel.Update then
+        // deletes the zone mark (160794-160799).
+        public static bool HoldsStaleCarriedOrder(bool wlActive, bool playerIsCic, bool playerIsOwnMapGroup, bool hasOrder, bool orderIsBattleOrder)
+        {
+            return wlActive && !playerIsCic && !playerIsOwnMapGroup && hasOrder && !orderIsBattleOrder;
         }
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
@@ -191,7 +205,6 @@ namespace WhiskeyRealism.Strategic
             if (text == null) return false;
             if (string.Equals(text, nameof(OrderOrigin.Vanilla), StringComparison.Ordinal)) { origin = OrderOrigin.Vanilla; return true; }
             if (string.Equals(text, nameof(OrderOrigin.CampaignBridge), StringComparison.Ordinal)) { origin = OrderOrigin.CampaignBridge; return true; }
-            if (string.Equals(text, nameof(OrderOrigin.C69), StringComparison.Ordinal)) { origin = OrderOrigin.C69; return true; }
             return false;
         }
 

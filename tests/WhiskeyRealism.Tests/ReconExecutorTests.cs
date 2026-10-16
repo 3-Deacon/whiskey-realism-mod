@@ -87,7 +87,7 @@ internal static class ReconExecutorTests
     private static void NoScoutingOrderOnGroupContainingPlayerCommand()
     {
         // A CarryingGroup screen holds the W&L player's brigade: the order would reach him (PerformActionForGroupForAllUnitsOnLevel
-        // at level -1, 92572-92620). The group is moved like any AI formation (stage F's MoveUnitTo Postfix dispatches).
+        // at level -1, 92572-92620). The group is moved like any AI formation (the player it carries is sent no order).
         var s = World();
         s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.9f, chain: WlChainClass.CarryingGroup));
         var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f));
