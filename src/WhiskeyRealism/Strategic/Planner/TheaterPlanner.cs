@@ -126,8 +126,8 @@ namespace WhiskeyRealism.Strategic.Planner
             internal float[] RoadPerDay;
             internal HashSet<int> OwnIips;
             internal readonly List<int> Scratch = new List<int>();
-            // P8: formations that gave up on an objective (MoveTracker); MassFor leaves them out of that objective's mass.
-            internal IReadOnlyList<GaveUpObjective> GaveUp;
+            // P8: moves the tracker gave up on, each with the objective it was issued for; MassFor leaves them out of that objective's mass.
+            internal IReadOnlyList<GaveUpMove> GaveUp;
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
@@ -140,7 +140,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
-                                         IReadOnlyList<GaveUpObjective> gaveUp = null)
+                                         IReadOnlyList<GaveUpMove> gaveUp = null)
         {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
@@ -561,7 +561,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The massable set for a target in targetSector (indexes into s.Own, written to `into`) and
-        // its strength. A formation the move tracker gave up on for this objective (P8, GaveUpObjective) is left out like a busy
+        // its strength. A formation the move tracker gave up on for this objective (P8, GaveUpMove.ObjectiveId) is left out like a busy
         // one, so a mass whose members all gave up is empty: the existing no-force rule drops the main effort and the odds are
         // judged on the force that can still march.
         internal static float MassFor(Inputs c, float tx, float tz, int targetSector, int objectiveId, List<int> into)

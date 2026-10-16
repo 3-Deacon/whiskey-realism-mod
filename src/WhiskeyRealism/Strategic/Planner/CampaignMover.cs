@@ -312,30 +312,42 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
 
             bool queued = (f.Flags & FormationFlags.MoveQueued) != 0;
+            int objective = ObjectiveOf(inputs.Plan, a);
             bool retry = tracker.IssueOutcome(f.InstanceId, tx, tz, queued) == MoveOutcome.Retried;
             if (host.TargetRestricted(tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey);
+                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey, objective);
                 Count(tally, retry);
                 return;
             }
             if (inputs.WlPlayerAlliance && (!f.UseRails || !f.UseRivers)) host.RaiseTransportModes(f.InstanceId);
             if (queued)
             {
-                tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: true, unitKey: f.UnitKey);
+                tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: true, unitKey: f.UnitKey, objectiveId: objective);
                 tally.Queued++;
                 return;
             }
             if (!host.Move(f.InstanceId, tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey);
+                tracker.RecordRefused(f.InstanceId, tx, tz, s.DaySerial, f.UnitKey, objective);
                 Count(tally, retry);
                 return;
             }
-            tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: false, unitKey: f.UnitKey);
+            tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, s.DaySerial, queued: false, unitKey: f.UnitKey, objectiveId: objective);
             if (retry) tally.Retried++;
             else tally.Issued++;
             if (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support) host.ListOffensive(f.InstanceId, true);
+        }
+
+        // The objective a move is toward: a MainEffort or Support assignment goes to its sector's target, the objective of that
+        // sector's plan; any other role's target (a depot, a hold point, a supply source, the capital) is none. G3 reads it from
+        // the tracker when a formation gives up (MoveTracker, GaveUpMove.ObjectiveId).
+        private static int ObjectiveOf(TheaterPlan plan, Assignment a)
+        {
+            if (a.Role != FormationRole.MainEffort && a.Role != FormationRole.Support) return -1;
+            for (int k = 0; k < plan.Sectors.Count; k++)
+                if (plan.Sectors[k] != null && plan.Sectors[k].SectorId == a.SectorId) return plan.Sectors[k].TargetObjectiveId;
+            return -1;
         }
 
         private static void Count(MoverTally tally, bool retry)

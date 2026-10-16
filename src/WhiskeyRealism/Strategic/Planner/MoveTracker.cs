@@ -14,47 +14,21 @@ namespace WhiskeyRealism.Strategic.Planner
         public float TargetX, TargetZ;
         public int IssuedDay;
         public int Retries;
+        public int ObjectiveId;     // the objective a MainEffort or Support move went toward, -1 none (G3 reads it; persisted with the record)
     }
 
     // A move the tracker gave up on (P8): this formation, at this target. The allocator reads the set so the next review does not
-    // send the same formation to the same place again (plan G5a, "the allocator reassigns the role"); G3 reads it as
-    // GaveUpObjective, so a mass whose members all gave up on the main objective is not kept.
+    // send the same formation to the same place again (plan G5a, "the allocator reassigns the role"); G3 reads the objective
+    // the move was issued for, so a mass whose members all gave up on the main objective is not kept.
     public struct GaveUpMove
     {
         public int InstanceId;
         public float TargetX, TargetZ;
+        public int ObjectiveId;     // -1 when the move was not toward an objective (a depot, a recon hold point, a supply source)
 
         public bool Matches(float tx, float tz)
         {
             return MoveTracker.SameTarget(TargetX, TargetZ, tx, tz);
-        }
-    }
-
-    // A formation that gave up on a main objective (the G3 form of GaveUpMove): TheaterPlanner.MassFor leaves it out of the mass
-    // of that objective, as it leaves out a busy formation.
-    public struct GaveUpObjective
-    {
-        public int InstanceId;
-        public int ObjectiveId;
-    }
-
-    public static class GaveUpObjectives
-    {
-        // Names the objective each gave-up move was sent toward: the previous published plan's sector whose target the move's
-        // target is (a MainEffort or Support move goes to its sector's TargetX/Z, the Assignment's own target). A move toward
-        // anything else (a depot, a recon hold point, a supply source) has no objective and is not G3's concern. Pure.
-        public static void Resolve(IReadOnlyList<GaveUpMove> moves, TheaterPlan previous, List<GaveUpObjective> into)
-        {
-            into.Clear();
-            if (moves == null || previous == null) return;
-            for (int m = 0; m < moves.Count; m++)
-                for (int k = 0; k < previous.Sectors.Count; k++)
-                {
-                    var sp = previous.Sectors[k];
-                    if (sp == null || sp.TargetObjectiveId < 0 || !moves[m].Matches(sp.TargetX, sp.TargetZ)) continue;
-                    into.Add(new GaveUpObjective { InstanceId = moves[m].InstanceId, ObjectiveId = sp.TargetObjectiveId });
-                    break;
-                }
         }
     }
 
@@ -90,6 +64,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public float FromX, FromZ, TargetX, TargetZ;
             public int IssuedDay;
             public int Retries;
+            public int ObjectiveId = -1;
             public State State;
         }
 
@@ -114,7 +89,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        public void RecordIssued(int instanceId, float fromX, float fromZ, float tx, float tz, int daySerial, bool queued, string unitKey = null)
+        public void RecordIssued(int instanceId, float fromX, float fromZ, float tx, float tz, int daySerial, bool queued, string unitKey = null, int objectiveId = -1)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool same = previous != null && SameTarget(previous, tx, tz);
@@ -125,7 +100,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = fromX, FromZ = fromZ, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = retries, State = queued ? State.Queued : State.Issued
+                IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, State = queued ? State.Queued : State.Issued
             };
             if (!queued) Spend(daySerial);
         }
@@ -141,7 +116,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Vanilla refused the move (MoveUnitTo returned false with no order running: a state neither own, allied nor at war,
         // 14493) or the target is restricted ground. A first refusal allows one retry, the second ends it for this target.
-        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null)
+        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null, int objectiveId = -1)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool again = previous != null && SameTarget(previous, tx, tz) && previous.State == State.Failed;
@@ -149,7 +124,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = tx, FromZ = tz, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0,
+                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0, ObjectiveId = objectiveId,
                 State = again ? State.GaveUp : State.Failed
             };
         }
@@ -197,7 +172,7 @@ namespace WhiskeyRealism.Strategic.Planner
             into.Clear();
             foreach (var pair in _entries)
                 if (pair.Value.State == State.GaveUp && !Expired(pair.Value, daySerial))
-                    into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ });
+                    into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ, ObjectiveId = pair.Value.ObjectiveId });
             into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
         }
 
@@ -218,7 +193,7 @@ namespace WhiskeyRealism.Strategic.Planner
             get
             {
                 foreach (var e in _entries.Values)
-                    yield return new MoveRecord { InstanceId = e.InstanceId, UnitKey = e.UnitKey, TargetX = e.TargetX, TargetZ = e.TargetZ, IssuedDay = e.IssuedDay, Retries = e.Retries };
+                    yield return new MoveRecord { InstanceId = e.InstanceId, UnitKey = e.UnitKey, TargetX = e.TargetX, TargetZ = e.TargetZ, IssuedDay = e.IssuedDay, Retries = e.Retries, ObjectiveId = e.ObjectiveId };
             }
         }
 
@@ -232,7 +207,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 _entries[r.InstanceId] = new Entry
                 {
                     InstanceId = r.InstanceId, UnitKey = r.UnitKey, FromX = r.TargetX, FromZ = r.TargetZ, TargetX = r.TargetX, TargetZ = r.TargetZ,
-                    IssuedDay = r.IssuedDay, Retries = r.Retries, State = r.Retries >= 1 ? State.GaveUp : State.Failed
+                    IssuedDay = r.IssuedDay, Retries = r.Retries, ObjectiveId = r.ObjectiveId, State = r.Retries >= 1 ? State.GaveUp : State.Failed
                 };
         }
 
