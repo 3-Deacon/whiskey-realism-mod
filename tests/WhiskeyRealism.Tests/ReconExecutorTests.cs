@@ -40,6 +40,8 @@ internal static class ReconExecutorTests
             ("RowOncePerTransition", RowOncePerTransition),
             ("ClearedAndMissingMissionsLogOnce", ClearedAndMissingMissionsLogOnce),
             ("ReconTallyCountsWhatTheExecutorDid", ReconTallyCountsWhatTheExecutorDid),
+            ("OrderedCountsOnlyCallsTheHostMade", OrderedCountsOnlyCallsTheHostMade),
+            ("RowMemoryIsPrunedWhenMissionsLeaveTheLedger", RowMemoryIsPrunedWhenMissionsLeaveTheLedger),
             ("ReconGaveUpFeedsTheAllocator", ReconGaveUpFeedsTheAllocator),
             ("CavalryModeIsTheCodeMinusOneTwenty", CavalryModeIsTheCodeMinusOneTwenty),
             ("ReconFormationStandsDownFromAreaMoves", ReconFormationStandsDownFromAreaMoves),
@@ -305,6 +307,11 @@ internal static class ReconExecutorTests
         for (int i = 1; i <= MoveTracker.MaxReconMovesPerDay; i++) other.RecordIssued(i, 500f, 0f, 100f, 0f, day, queued: false, budget: MoveBudget.Recon);
         AssertTrue(other.ShouldIssue(50, 100f, 0f, day), "recon moves spend none of the main effort's budget");
         AssertEqual(3, MoveTracker.MaxReconMovesPerDay, "the plan's cap");
+        var cleared = new MoveTracker();
+        for (int i = 1; i <= MoveTracker.MaxReconMovesPerDay; i++) cleared.RecordIssued(i, 500f, 0f, 100f, 0f, day, queued: false, budget: MoveBudget.Recon);
+        for (int i = 11; i <= 10 + MoveTracker.MaxMovesPerDay; i++) cleared.RecordIssued(i, 500f, 0f, 100f, 0f, day, queued: false);
+        cleared.Clear();
+        AssertTrue(cleared.ShouldIssue(30, 100f, 0f, day, MoveBudget.Recon) && cleared.ShouldIssue(31, 100f, 0f, day), "Clear gives both budgets back");
         AssertEqual(6, MoveTracker.MaxMovesPerDay, "and P8's, unchanged");
         other.RecordIssued(60, 500f, 0f, 100f, 0f, day, queued: true, budget: MoveBudget.Recon);
         AssertTrue(other.ShouldIssue(70, 100f, 0f, day + 1, MoveBudget.Recon), "a queued recon move spends nothing");
@@ -480,6 +487,31 @@ internal static class ReconExecutorTests
         AssertEqual(1, tally.Ordered, "ordered");
         AssertEqual(1, tally.SkippedPlayer, "skipped (player)");
         AssertEqual(1, tally.SkippedBusy, "skipped (busy)");
+    }
+
+    // The host reports whether it called ChangeCampaignOrders (not when the order is already set or queued): only those are counted.
+    private static void OrderedCountsOnlyCallsTheHostMade()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.9f));
+        var host = new FakeReconHost { OrderResult = false };
+        var tally = new ReconExecutor().Review(s, Ledger(s, (ReconKind.Screen, 1, 300f, 0f)), host, new MoveTracker(), false);
+        AssertEqual(1, host.Orders.Count, "the host was asked");
+        AssertEqual(0, tally.Ordered, "and said it was already so: nothing counted");
+    }
+
+    // Mission ids restart when a ledger is rebuilt (a load, G6's Restore): a row's memory must not outlive its mission or the
+    // new mission with the same id would log nothing.
+    private static void RowMemoryIsPrunedWhenMissionsLeaveTheLedger()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f));
+        var executor = new ReconExecutor();
+        var first = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));
+        AssertEqual(1, executor.Review(s, first, new FakeReconHost(), new MoveTracker(), false).Rows.Count, "fixture: mission 1 logs");
+        AssertEqual(0, executor.Review(s, new ReconMissionLedger(), new FakeReconHost(), new MoveTracker(), false).Rows.Count, "an empty ledger logs nothing");
+        var rebuilt = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));      // mission id 1 again
+        AssertEqual(1, executor.Review(s, rebuilt, new FakeReconHost(), new MoveTracker(), false).Rows.Count, "the new mission 1 logs its own row");
     }
 
     private static void ReconGaveUpFeedsTheAllocator()
@@ -675,6 +707,7 @@ internal sealed class FakeReconHost : IReconHost
     public Func<float, float, bool> Restricted = (x, z) => false;
     public readonly HashSet<int> Locked = new HashSet<int>();
     public bool MoveResult = true;
+    public bool OrderResult = true;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
     public readonly List<(int id, int code)> Orders = new List<(int id, int code)>();
     public readonly List<int> Raised = new List<int>();
@@ -684,5 +717,5 @@ internal sealed class FakeReconHost : IReconHost
     public bool PackageLocked(int instanceId) { return Locked.Contains(instanceId); }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
-    public bool SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return true; }
+    public bool SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return OrderResult; }
 }
