@@ -79,7 +79,7 @@ Net: **vanilla battle AI is omniscient within about 200-450 m, and fully omnisci
 | Tactical/Orchestrator/ArmyEvidenceBuilder.cs:279, 420-429 → EnemyVisibleState.cs | "visible" sector enemy strength = `enemystrengthwithinangle` sum; enemy reinforcements from `sideinformation.reinforcementarrivalswithin24hrs` (295) | **yes**, despite the struct's "no omniscient reads" doc comment | — | R2 should populate this struct |
 | Tactical/TacticalTerrainProbe.cs:88-130 | enemy bearing from `enemyinrangereg`; `CheckTerrainLine` water probe (200-212; deleted in `93cab34`, the only caller now is `WaypointValidatorRuntime`) | range-only | good: real terrain ids | R1 |
 | Strategic/{FrontSectorRuntime:37, DefenseIntentRuntime:140/431}, Patches/{TransferOfUnits:79, FortConstructionGovernor:301, DefensiveOps:67} | `AIFaction.enemyunits` | **yes** (vanilla parity) | — | optional campaign R3 |
-| Strategic/{OperationalProbeRuntime:269, CoordinatedOperationRuntime:413, ArmyAreaRuntime:300, CoastalDefenseCustomOrderRunner:238}, CheckForDefensiveOpsCandidateFilter:406 | `MoveUnitTo(…, movearoundenemyunits:true)` | — | `true` means *queued*; a second order the same tick returns `false`; :245 ignores the bool | treat `true` as pending; check `regimentpaths>0` next tick |
+| Strategic/{CoastalDefenseCustomOrderRunner:238} and, since stage G, Strategic/Planner/VanillaMoveHost (the mover and recon executor's single `MoveUnitTo` call site), CheckForDefensiveOpsCandidateFilter:406 | `MoveUnitTo(…, movearoundenemyunits:true)` | — | `true` means *queued*; a second order the same tick returns `false`; :245 ignores the bool | treat `true` as pending; check `regimentpaths>0` next tick |
 
 ## Recommended changes
 

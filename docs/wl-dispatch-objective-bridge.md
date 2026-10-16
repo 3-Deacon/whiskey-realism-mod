@@ -26,7 +26,7 @@ Core files:
 - `src/WhiskeyRealism/Strategic/WlCampaignDispatchPolicy.cs` (pure: trigger, type, dedupe) and `WlCampaignDispatchRuntime.cs` (the one campaign dispatcher)
 - `src/WhiskeyRealism/Patches/WlCampaignMoveDispatchPatch.cs` (#69; its `UpdateUnitAI` Postfix also runs the courier delivery and the acknowledgement)
 - `src/WhiskeyRealism/Strategic/WlCampaignCourierPolicy.cs` (pure) and `WlCampaignCourierRuntime.cs` (campaign courier queue, delivery, sidecar), `Patches/CapitalDefensePlayerSpeedFixPatch.cs`
-- callers in `OperationalProbeRuntime`, `ArmyAreaRuntime`, `CoastalDefenseCustomOrderRunner`, and `CoordinatedOperationRuntime`
+- callers: the campaign planner's `CampaignMoverRuntime` and `ReconExecutorRuntime` (through `VanillaMoveHost`), `CommanderAppointmentRuntime` and `CoastalDefenseCustomOrderRunner` (the probe, army-area and package runtimes were deleted in stage G6)
 
 Patch catalog entries:
 
@@ -45,11 +45,12 @@ Dispatcher (chain-of-command spec §D, decompile build 14703111):
 ## Invariants
 
 - One classifier, `WlChainRules` (stage G decision C4, applied in stage F 2026-10-15): a CIC side → Whiskey stands down; the player's own command and units under it (player-owned, in his operation, inside the group carrying him, an army-group player's units) → never moved, stopped or re-tasked; the player's command is itself a map group → order-only by dispatch, never pledged, packaged or given a must-hold role (`MayMove` false), yet counted toward the coverage of the area its last waypoint lies in (`CountsTowardCoverage`); the AI map group above a player below map-group level → moved as an AI asset (`DirectMovementAllowed`, reason `carrying-group`) through `AICampaign.MoveUnitTo`, which #69 turns into the player's dispatch.
+- Planner invariants (stage G): the planner stands down for a CIC player's alliance; a map-group player is order-only (the mover gives him his Support order by exactly the rule an AI Support formation's move follows, never a move, never MainEffort, never picket or recon); the AI group above a player below map level is movable as any AI formation and #69 turns the move into his dispatch; the player's own command and units under it are never in a recon mission or an appointment.
 - No Transpiler.
 - No edit to `GameVars.groupstancename[0]`.
 - No direct movement fallback for W&L player-chain/player-involved units when the bridge rejects, fails, or the dispatcher skips.
 - Null requests fail closed: no direct movement and no operation-list mutation.
-- `IsMovedByPlayer`, player-CIC, player-owned and `IsPlayerPartOfUnit` cases block Whiskey movement, except the carrying group itself (`IsPlayerPartOfUnit` and `GetCampaignGroup(command) == unit` while the command is below map-group level). The same classifier gates #4's capital pre-pledge, #25's forbidden-commit revert, the coastal runner, the probe pause/withdraw stop and defense coverage (`MayMove` for what Whiskey may commit; `CountsTowardCoverage` for what already covers an area).
+- `IsMovedByPlayer`, player-CIC, player-owned and `IsPlayerPartOfUnit` cases block Whiskey movement, except the carrying group itself (`IsPlayerPartOfUnit` and `GetCampaignGroup(command) == unit` while the command is below map-group level). The same classifier gates #4's capital pre-pledge, #25's forbidden-commit revert, the coastal runner, the planner's mover, recon executor and appointments, and defense coverage (`MayMove` for what Whiskey may commit; `CountsTowardCoverage` for what already covers an area).
 - Coverage decision (integrator, user delegated 2026-10-15), verbatim: "The W&L map-group player's group counts at full strength (strength x morale) toward coverage/holding of the area where it actually is or where its last waypoint lies, as vanilla does. It is never pre-pledged (#4), never assigned a must-hold role or moved, and is never counted as a package member Whiskey commits; if the player marches away, the next review sees the gap. Compliance reliability stays telemetry/battle-evidence only."
 - `IssuedWlCurrentOrder` does not mutate vanilla offensive/defensive operation lists.
 - Failed or skipped dispatches log and skip; callers must not reattempt direct movement for that unit in the same path.
