@@ -84,6 +84,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // 120438-120440), starting at unitbasicspeed[15, 1] (120179); RegimentMove multiplies a
         // campaign group's speed by it (133991). G3's march-time estimate.
         public float GroupSpeed;
+        // Regiment.timeofnotmoving (110614): the campaign date (GameVars.GetCampaignFloatingDate, years)
+        // the group last moved. G5a's tempo roll takes the mass's idle time from it (vanilla 14321-14327).
+        public float TimeOfNotMoving;
     }
 
     // No enemy aggregate (spec C25): points, distancepoints, enemycampaignunitsstrength* and

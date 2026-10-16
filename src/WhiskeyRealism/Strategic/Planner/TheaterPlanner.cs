@@ -90,8 +90,14 @@ namespace WhiskeyRealism.Strategic.Planner
         public const int MaxTraceCandidates = 12;
         private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
         // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
+        // InDefensiveOps (G5a, chapters decision 5): vanilla's defensive operations may take a deferred
+        // mass member (the offense-only withhold leaves it to vanilla's defence, 13716-13717); a formation
+        // in one is busy until vanilla ends it (13782-13848), so G3 drops it from the mass and G4 keeps it
+        // Hold. Not InOffensiveOps: the mover lists its own dispatched units there, and that flag would
+        // freeze the mass after its first dispatch.
         internal const FormationFlags Busy = FormationFlags.InBattle | FormationFlags.OnRetreat | FormationFlags.RaidForce | FormationFlags.SeaInvasion
-            | FormationFlags.Embarked | FormationFlags.FortBuilder | FormationFlags.VanillaDepotBuilder | FormationFlags.InTransfer;
+            | FormationFlags.Embarked | FormationFlags.FortBuilder | FormationFlags.VanillaDepotBuilder | FormationFlags.InTransfer
+            | FormationFlags.InDefensiveOps;
 
         internal struct Candidate
         {

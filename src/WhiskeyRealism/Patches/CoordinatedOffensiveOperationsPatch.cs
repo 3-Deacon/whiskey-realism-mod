@@ -8,6 +8,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.BugFixes;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using TroopQualityRuntime = WhiskeyRealism.Tactical.Battle.TroopQualityRuntime;
 using WhiskeyRealism.Util;
@@ -543,8 +544,6 @@ namespace WhiskeyRealism.Patches
         private static Func<Vector3, AICampaign.AIArea, int, bool, Vector3> _closestObjectivePos;
         private static bool _recruitingZonesFieldResolved;
         private static FieldInfo _recruitingZonesField;
-        private static bool _bunitsFieldResolved;
-        private static FieldInfo _bunitsField;
 
         // Mirrors vanilla's target choice (14204-14227): the lead's AIArea picks
         // mostvaluealbeaiareaclosedistanceonly with no enemy in the area,
@@ -687,12 +686,12 @@ namespace WhiskeyRealism.Patches
                     allianceId < GamePrefs.aiagressivenessoffensiveoperationfaction.Length
                     ? GamePrefs.aiagressivenessoffensiveoperationfaction[allianceId] : 1f;
 
-                float tval = CoordinatedOffensiveVanillaGates.TempoProbability(
+                float tval = CampaignTempoGate.TempoProbability(
                     chapterAggression,
                     timediff,
                     factionAggression,
                     GameVars.usedcampaignagressiveness,
-                    WinterModifier(),
+                    WinterOffensiveModifierPatch.CurrentRollModifier(),
                     date - AverageTimeOfNotMoving(decision.Output, Scratch.Units),
                     DLC_WL.dlc_scenarioactive,
                     GamePrefs.dlcwl_careerincreasedaggressiveness,
@@ -721,26 +720,6 @@ namespace WhiskeyRealism.Patches
             int playerId = ((UnityEngine.Object)playerGroup).GetInstanceID();
             if (output.LeadStableUnitId == playerId) return true;
             return output.SupportStableUnitIds.Contains(playerId);
-        }
-
-        private static float WinterModifier()
-        {
-            if (!_bunitsFieldResolved)
-            {
-                _bunitsFieldResolved = true;
-                _bunitsField = AccessTools.Field(typeof(AICampaign), "bunits");
-            }
-            var bunits = _bunitsField?.GetValue(null) as BattleUnits;
-            var storm = bunits != null ? bunits.uniStormSystem : null;
-            if (storm == null) return 1f;
-            // Vanilla rolls with winterdefensiveoperationsmodifier (14310-14312); with the
-            // winter fix on (BUG-LOG-004, WinterOffensiveModifierPatch) the offensive one.
-            bool winter = WinterOperationsModifier.IsWinterMonth(storm.monthCounter, GamePrefs.winterquartersmonthuntil, GamePrefs.winterquartersmonthfrom);
-            return WinterOperationsModifier.OffensiveRollModifier(
-                winter,
-                WinterOffensiveModifierPatch.Enabled(),
-                GamePrefs.winteroffensiveoperationsmodifier,
-                GamePrefs.winterdefensiveoperationsmodifier);
         }
 
         // units: this call's ownunits index (built by BuildAllowedSet; ownunits is unchanged

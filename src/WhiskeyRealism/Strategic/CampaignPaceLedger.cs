@@ -78,9 +78,11 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            // Rule 4 — TooQuiet (suppressed in chapter 1 winter).
-            bool chapter1Winter = input.PolicyChapter <= 1 && input.IsWinter;
-            if (!chapter1Winter &&
+            // Rule 4 — TooQuiet (suppressed before the war and in chapter 1 winter). Scenario 001's chapter 0
+            // (and -1, before vanilla's frame-50 update) is the pre-war idle: no battle is possible before
+            // 15 Apr 1861 (211642-211656) and vanilla refuses every move (SetWaypoint 91366).
+            bool quietSuppressed = input.PolicyChapter <= 0 || (input.PolicyChapter <= 1 && input.IsWinter);
+            if (!quietSuppressed &&
                 input.BattlesIn14Days == 0 &&
                 input.CapitalDangerStreakDays == 0)
             {
