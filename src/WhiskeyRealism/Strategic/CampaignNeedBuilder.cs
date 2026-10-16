@@ -19,6 +19,8 @@ namespace WhiskeyRealism.Strategic
         public float ContractExpiries;        // recruitscontractexpiries
         public int RecruitableStates = -1;    // states able to raise a max-size unit (GetAIPersonality 62716); -1 unread
         public float NationalMorale = 1f;
+        public int ElectionDaysToVerdict = ElectionMorale.NoVerdictAhead; // days to 9 Nov 1864 while vanilla's objective 26 is live
+        public float ElectionMoraleThreshold;  // GamePrefs.lincolnmaintainmoraleabove
         public float AverageSupport = 1f;
         public float InterventionProbability; // max(GetInterventionProbability(2), (3)) — public diplomacy
         public float OwnBlockadeRatio;        // own harbors (GetAverageBlockadeRatio 93766)
@@ -97,7 +99,7 @@ namespace WhiskeyRealism.Strategic
                 ? Clamp01((s.ContractExpiries / s.TroopsFielded) / ContractExpiryShare)
                 : 0f;
 
-            v[NeedKind.Morale] = IsFinite(s.NationalMorale) ? Clamp01(1f - s.NationalMorale) : 0f;
+            v[NeedKind.Morale] = IsFinite(s.NationalMorale) ? Clamp01(1f - s.NationalMorale + ElectionBoost(s)) : 0f;
             v[NeedKind.Support] = IsFinite(s.AverageSupport) ? Clamp01(1f - s.AverageSupport) : 0f;
             v[NeedKind.Recognition] = Clamp01(s.InterventionProbability);
             v[NeedKind.Blockade] = s.Alliance == 1
@@ -108,6 +110,14 @@ namespace WhiskeyRealism.Strategic
             v[NeedKind.Logistics] = Clamp01((s.PeakTransportUse - TransportComfortableUse) / (1f - TransportComfortableUse));
             v[NeedKind.Supply] = Clamp01(s.SupplyPressure);
             return v;
+        }
+
+        // The Union's extra morale need before the 1864 election (ElectionMorale). Zero for the
+        // CSA and whenever vanilla's objective 26 is not live (ElectionDaysToVerdict unset).
+        public static float ElectionBoost(NeedSnapshot s)
+        {
+            if (s == null || s.Alliance != ElectionMorale.UnionAlliance) return 0f;
+            return ElectionMorale.Boost(s.NationalMorale, s.ElectionMoraleThreshold, s.ElectionDaysToVerdict);
         }
 
         // One lane's arming need: the larger of

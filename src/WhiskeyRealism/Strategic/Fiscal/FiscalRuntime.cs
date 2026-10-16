@@ -12,7 +12,6 @@ namespace WhiskeyRealism.Strategic.Fiscal
             {
                 AllianceId = alliance,
                 EraStage = era,
-                CurrentChapter = SafePolicyChapter(),
                 Memory = memory != null ? memory : new FiscalStateMemory(),
                 RatingNotches = GamePrefs.ratingnotches != null ? GamePrefs.ratingnotches.Length : 12,
                 CurrentRating = SafeRating(alliance),
@@ -49,12 +48,6 @@ namespace WhiskeyRealism.Strategic.Fiscal
         private static int RatingFailureFromFraction(float fraction, int notches)
         {
             return Mathf.CeilToInt((1f - fraction) * notches);
-        }
-
-        private static int SafePolicyChapter()
-        {
-            try { return Policy.CurrentChapter; }
-            catch { return -1; }
         }
 
         private static int SafeRating(int alliance)

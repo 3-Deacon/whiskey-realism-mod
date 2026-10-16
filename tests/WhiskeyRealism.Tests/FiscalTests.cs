@@ -367,7 +367,6 @@ internal static class FiscalTests
         {
             AllianceId = 1,
             EraStage = EraStage.Amateur1861,
-            CurrentChapter = 1,
             CurrentRating = 4,
             RatingNotches = 12,
             EmergencyPolicyFailureRating = 7,

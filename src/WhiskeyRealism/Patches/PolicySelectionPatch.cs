@@ -28,7 +28,11 @@ namespace WhiskeyRealism.Patches
     //    (PolicyEligibility) and skips vanilla. With nothing eligible, vanilla's fallback walk
     //    (211076-211090) runs with the irreversible acts held below their need gate
     //    (PolicyNeedScorer.IsHeld under the review's need vector) taken out of the personality
-    //    list, so neither Whiskey nor vanilla starts one. No need vector yet: vanilla.
+    //    list, so neither Whiskey nor vanilla starts one; before the war (chapter <= 0) Militia
+    //    Act I (36, the scripted war start) leaves the walk too, with or without a need vector,
+    //    because the pick filter refuses it and vanilla's chapter gate alone would not (the
+    //    exposure window is 4 Mar - 14 Apr 1861: IsDeactivated 210957). No need vector, war
+    //    started: vanilla.
     //
     // The Prefix reads the call's facts and follows PolicyListOverride.Decide (pure,
     // harness-tested: emergency first, then research in progress, then the flag, then the
@@ -68,7 +72,8 @@ namespace WhiskeyRealism.Patches
                         PlayerAlliance = alliance == playerAlliance,
                         ResearchInProgress = PolicyRuntime.HasResearchInProgress(alliance),
                         SelectionEnabled = Plugin.Instance.EnableNeedDrivenPolicySelection.Value,
-                        HasNeed = need != null
+                        HasNeed = need != null,
+                        WarStartHeld = PolicyEligibility.HoldsScriptedWarStart(Policy.CurrentChapter)
                     };
 
                     PolicyPlanLedger plan = coordinator != null && coordinator.PolicyPlans != null && alliance < coordinator.PolicyPlans.Length ? coordinator.PolicyPlans[alliance] : null;
@@ -158,7 +163,7 @@ namespace WhiskeyRealism.Patches
         // vanilla is about to walk. Remove publishes the snapshot first.
         private static void HoldIrreversibleActs(int alliance, NeedVector need, GameVars.Alliance.AIPersonality personality, out PolicyListOverride.Snapshot snapshot)
         {
-            var held = PolicyListOverride.HeldIdsToRemove(need, personality.policies);
+            var held = PolicyListOverride.HeldIdsToRemove(need, personality.policies, Policy.CurrentChapter);
             PolicyListOverride.Remove(personality.policies, held, out snapshot);
             if (snapshot == null) return;
 
