@@ -204,7 +204,12 @@ namespace WhiskeyRealism.Tactical.Battle
         private float[] _x = Array.Empty<float>(), _z = Array.Empty<float>(), _reach = Array.Empty<float>();
         private int _count;
 
-        public void SetReach(OwnReachBuffer buffer) => SetReach(buffer.X, buffer.Z, buffer.Reach, buffer.Count);
+        /// <summary>A null buffer (an alliance with no battle side) means no reach at all.</summary>
+        public void SetReach(OwnReachBuffer buffer)
+        {
+            if (buffer == null) SetReach(Array.Empty<float>(), Array.Empty<float>(), Array.Empty<float>(), 0);
+            else SetReach(buffer.X, buffer.Z, buffer.Reach, buffer.Count);
+        }
 
         public void SetReach(float[] ownX, float[] ownZ, float[] reach, int count)
         {
@@ -233,10 +238,17 @@ namespace WhiskeyRealism.Tactical.Battle
             WhiskeyRealism.Util.BattleScope.Register("own-reach-buffer", () => { for (int i = 0; i < Sides.Length; i++) Sides[i].Count = 0; });
         }
 
-        /// <summary>The side's buffer; alliances other than 0 and 1 (Europe has no battle side) get a throwaway empty one.</summary>
+        /// <summary>The side's buffer; null for an alliance other than 0 and 1 (Europe has no battle side): no buffer is created, and a caller treats null as no reach.</summary>
         public static OwnReachBuffer ForAlliance(int alliance)
         {
-            return alliance >= 0 && alliance < Sides.Length ? Sides[alliance] : new OwnReachBuffer();
+            return alliance >= 0 && alliance < Sides.Length ? Sides[alliance] : null;
+        }
+
+        /// <summary>Whether (x, z) lies within the side's own reach; false (fail closed: not perceived) for an alliance with no buffer.</summary>
+        public static bool WithinFor(int alliance, float x, float z)
+        {
+            OwnReachBuffer buffer = ForAlliance(alliance);
+            return buffer != null && buffer.Within(x, z);
         }
 
         public void Add(float x, float z, float reach)

@@ -104,7 +104,15 @@ internal static partial class CommanderOpportunityTests
         BattleScope.ResetAll();
         OwnReachBuffer own0 = OwnReachBuffer.ForAlliance(0), own1 = OwnReachBuffer.ForAlliance(1);
         AssertFalse(ReferenceEquals(own0, own1), "one buffer per alliance");
-        AssertFalse(ReferenceEquals(own0, OwnReachBuffer.ForAlliance(2)) || ReferenceEquals(own1, OwnReachBuffer.ForAlliance(2)), "Europe shares neither");
+        AssertTrue(OwnReachBuffer.ForAlliance(2) == null && OwnReachBuffer.ForAlliance(-1) == null, "Europe (and no side) gets no buffer, none is created");
+        AssertFalse(OwnReachBuffer.WithinFor(2, 0f, 0f), "and no reach: not perceived (fail closed)");
+        var none = new RangeOnlyPerceivedGround();
+        var held = new OwnReachBuffer();
+        held.Add(0f, 0f, 500f);
+        none.SetReach(held);
+        AssertTrue(none.IsPerceived(0f, 0f), "control: a ground holding reach perceives its own point");
+        none.SetReach(OwnReachBuffer.ForAlliance(2));
+        AssertFalse(none.IsPerceived(0f, 0f), "a ground for such an alliance perceives nothing");
         own0.Add(0f, 0f, 100f);
         own1.Add(1000f, 0f, 100f);   // the second side's probe runs after the first side's, on the same tick
         var g0 = new RangeOnlyPerceivedGround();
@@ -118,6 +126,8 @@ internal static partial class CommanderOpportunityTests
         string probe = ReadSrc("Tactical/Battle/BattlePerceptionProbe.cs");
         AssertFalse(probe.Contains("_ownReachCount") || probe.Contains("_ownX"), "the probe keeps no shared reach buffer");
         AssertContains(probe, "OwnReachBuffer.ForAlliance(s.Alliance)", "the probe fills the side's own buffer");
+        AssertContains(probe, "OwnReachBuffer.WithinFor(s.Alliance, record.X, record.Z)", "and reads reach through the fail-closed lookup");
+        AssertEqual(2, ReadSrc("Tactical/Battle/PerceivedGroundLattice.cs").Split(new[] { "new OwnReachBuffer()" }, StringSplitOptions.None).Length - 1, "a buffer is built only for the two sides");
         AssertContains(ReadSrc("Tactical/Battle/PerceivedGroundRuntime.cs"), "FillRangeOnlyGround(alliance, Range[alliance])", "and the oracle reads the side's");
     }
 
@@ -159,6 +169,13 @@ internal static partial class CommanderOpportunityTests
         AssertTrue(sink.Intents.Count >= 2, "intents were submitted");
         foreach (BattleOrderIntent intent in sink.Intents)
             AssertEqual(5, intent.ExploitId, intent.Channel + " carries the exploit id");
+        // The stamp itself (PosturePipeline asks this helper for the request's ExploitId).
+        AssertEqual(5, ExploitPosture.IntentExploitId(true, true, 5), "an exploit asset with its order stamps the order's id");
+        AssertEqual(0, ExploitPosture.IntentExploitId(false, true, 5), "a ledger order stamps none");
+        AssertEqual(0, ExploitPosture.IntentExploitId(true, false, 5), "no order, none");
+        AssertEqual(0, ExploitPosture.IntentExploitId(true, true, 0), "an order without an exploit id, none");
+        AssertEqual(0, ExploitPosture.IntentExploitId(true, true, -1), "ExploitId -1 (not an exploit order), none");
+        AssertContains(ReadSrc("Tactical/Battle/Producers/PostureIntentProducer.cs"), "ExploitId = ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId),", "the pipeline stamps through it");
         var ledger = new IntentCollector();
         var plain = request;
         plain.Exploit = false;

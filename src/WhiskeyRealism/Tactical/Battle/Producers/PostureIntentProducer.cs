@@ -699,7 +699,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 InContactWithdrawal = closeEngaged || flankRisk,
                 AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
                 Exploit = exploit,
-                ExploitId = exploit && hasOrder && order.ExploitId > 0 ? order.ExploitId : 0,
+                ExploitId = ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId),
                 Refuse = refuseDue ? refuse : RefuseFlank.None,
                 // #61 wheeled with the threat heading whenever it had one (not only
                 // when the facing was off): a refuse-only wheel faces the threat.

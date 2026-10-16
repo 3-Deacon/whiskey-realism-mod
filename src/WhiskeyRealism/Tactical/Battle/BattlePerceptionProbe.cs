@@ -289,7 +289,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     if (_rangeVisible.Contains(record.InstanceId)) return true;
                     return (record.Flags & UnitFlags.Routed) != 0
-                        && OwnReachBuffer.ForAlliance(s.Alliance).Within(record.X, record.Z);
+                        && OwnReachBuffer.WithinFor(s.Alliance, record.X, record.Z);
             }
         }
 
@@ -308,7 +308,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (column.gameObject.activeInHierarchy) continue; // arrived: probed as a unit
                 Vector3 pos = entry.entrypointposition;
                 bool visible = mode == PerceptionMode.RangeOnly
-                    ? OwnReachBuffer.ForAlliance(alliance).Within(pos.x, pos.z)
+                    ? OwnReachBuffer.WithinFor(alliance, pos.x, pos.z)
                     : (UnityEngine.Object)grid != null && !grid.UnitIsHidden(pos);
                 AddRow(ref side.Result, column.gameObject.GetInstanceID(), visible, pos.x, pos.z, column.groupstrength,
                     column.unittyp, routed: false, reinforcement: true, arrivalHours: arrival.durationleft, experience: 0f, morale: 0f);
@@ -346,8 +346,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void CollectRangeVisible(BattleSnapshot s)
         {
             _rangeVisible.Clear();
-            OwnReachBuffer reach = OwnReachBuffer.ForAlliance(s.Alliance);
-            reach.Count = 0;
+            OwnReachBuffer reach = OwnReachBuffer.ForAlliance(s.Alliance);   // null: no battle side, no reach is kept
+            if (reach != null) reach.Count = 0;
             float[] sight = GamePrefs.maximumlineofsight;
             UnitRecord[] own = s.Own;
             for (int i = 0; i < s.OwnCount; i++)
@@ -360,7 +360,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 if ((own[i].Flags & UnitFlags.Active) == 0 || (own[i].Flags & UnitFlags.Routed) != 0) continue;
                 int t = own[i].UnitTyp;
-                reach.Add(own[i].X, own[i].Z, BattlePerception.RangeOnlyReach(
+                reach?.Add(own[i].X, own[i].Z, BattlePerception.RangeOnlyReach(
                     sight != null && t >= 0 && t < sight.Length ? sight[t] : 0f,
                     GamePrefs.distancetoenemytocancelinterruption));
             }
