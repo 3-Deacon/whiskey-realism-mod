@@ -68,7 +68,8 @@ internal static partial class WlOrderFlowTests
             ("wl order capture mode not active passes battle calls", ModeNotActivePassesBattleCalls),
             ("wl order capture routed drops vanilla thirteen and fourteen", RoutedDropsVanillaThirteenAndFourteen),
             ("wl order capture couriers off delivers next pass", CouriersOffDeliversNextPass),
-            ("wl order capture drops against slot unless pending may change it", CaptureDropsAgainstSlotUnlessPendingMayChangeIt),
+            ("wl order capture drops against the slot and never queues the drop", CaptureDropsAgainstTheSlotAndNeverQueuesTheDrop),
+            ("wl order capture dropped re-sends cannot evict real entries", DroppedCapturesCannotEvictRealEntries),
             ("wl order age tracker stamps sessions", OrderAgeTrackerStampsSessions),
             // source pins
             ("wl order pin capture returns true on exception", CaptureReturnsTrueOnException),
@@ -93,6 +94,12 @@ internal static partial class WlOrderFlowTests
             ("wl order followup none when a newer order is pending", NoFollowUpWhenNewerPending),
             ("wl order followup stale when the slot moved on", FollowUpStaleWhenTheSlotMovedOn),
             ("wl order pin followup wired to the reached flag and the hold", FollowUpWiredToTheReachedFlagAndTheHold),
+            ("wl order followup does not reopen the replaced order", FollowUpDoesNotReopenTheReplacedOrder),
+            ("wl order followup hold lets other orders follow the normal rules", FollowUpHoldLeavesOtherOrdersToTheNormalRules),
+            ("wl order followup hold ends with the follow-up", FollowUpHoldEndsWithTheFollowUp),
+            ("wl order followup hold also voids a queued repeat", FollowUpHoldVoidsAQueuedRepeat),
+            ("wl order pin reserve refresh from an emitter goes to vanilla", ReserveRefreshFromAnEmitterGoesToVanilla),
+            ("wl order pin derived retreat needs macroai three", DerivedRetreatNeedsMacroAiThree),
             ("wl order pin prestige delta row is sampled per session", PrestigeDeltaRowIsSampledPerSession),
             // release
             ("wl order release needs quiet for hysteresis", ReleaseNeedsQuietForHysteresis),

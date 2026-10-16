@@ -659,7 +659,7 @@ internal static partial class WlOrderFlowTests
     }
 
     private static CaptureVerdict Verdict(in CaptureInput c, ActiveOrderView active, out string reason)
-        => WlOrderFlow.DecideCapture(in c, in active, anyPending: false, out _, out reason);
+        => WlOrderFlow.DecideCapture(in c, in active, out _, out reason);
 
     private static void DeliveringFlagBypassesCapture()
     {
@@ -749,23 +749,41 @@ internal static partial class WlOrderFlowTests
         AssertEqual(1, host.Calls, "delivered by the very next pass");
     }
 
-    private static void CaptureDropsAgainstSlotUnlessPendingMayChangeIt()
+    private static void CaptureDropsAgainstTheSlotAndNeverQueuesTheDrop()
     {
         CaptureInput c = Capturable(type: 3);
         ActiveOrderView engage = new ActiveOrderView(true, 13, 0, 0, 0, 0f, 99.0, 10.0, false, false, false);
-        AssertEqual(CaptureVerdict.Drop, WlOrderFlow.DecideCapture(in c, in engage, anyPending: false, out _, out string reason), "policy drop");
+        AssertEqual(CaptureVerdict.Drop, WlOrderFlow.DecideCapture(in c, in engage, out _, out string reason), "policy drop");
         AssertEqual("engage-at-will", reason, "reason");
-        AssertEqual(CaptureVerdict.Queue, WlOrderFlow.DecideCapture(in c, in engage, anyPending: true, out _, out _), "a pending entry may change the slot first: decide at delivery");
         // Readmit off: vanilla's dedupe only.
         c.ReadmitOn = false;
         ActiveOrderView sameType = new ActiveOrderView(true, 3, 0, 0, 0, 0f, 99.0, 10.0, false, false, false);
-        AssertEqual(CaptureVerdict.Drop, WlOrderFlow.DecideCapture(in c, in sameType, false, out _, out reason), "vanilla would drop it");
+        AssertEqual(CaptureVerdict.Drop, WlOrderFlow.DecideCapture(in c, in sameType, out _, out reason), "vanilla would drop it");
         AssertEqual("vanilla-drops", reason, "reason");
         // A defer carries its time.
         c = Capturable(type: 2, x: 5000f);
         ActiveOrderView young = new ActiveOrderView(true, 2, 0, 0, 0, 0f, 0.05, 10.0, false, false, false);
-        AssertEqual(CaptureVerdict.Queue, WlOrderFlow.DecideCapture(in c, in young, false, out double until, out reason), "deferred is queued");
+        AssertEqual(CaptureVerdict.Queue, WlOrderFlow.DecideCapture(in c, in young, out double until, out reason), "deferred is queued");
         AssertTrue(Math.Abs(until - (10.0 - 0.05 + PlayerOrderReadmitPolicy.MinHoldBattleHours)) < 1e-9, "deferUntil carried");
+    }
+
+    private static void DroppedCapturesCannotEvictRealEntries()
+    {
+        // Seven real entries ride; vanilla's continuous callers re-send an order the policy drops on every
+        // pass. None of the re-sends may take a place in the eight-entry queue.
+        var host = new FakeHost { Slot = new FakeOrder { Type = 13 }, Now = 10.0 };
+        var flow = NewFlow(host);
+        for (int i = 0; i < 7; i++) Put(flow, 1 + i % 4, 10.0, 99.0, unit: 1 + i, x: 1000f * (i + 1), origin: OrderOrigin.Vanilla, issuer: 100 + i);
+        AssertEqual(7, flow.Queue.Count, "seven real entries");
+        ActiveOrderView engage = new ActiveOrderView(true, 13, 0, 0, 0, 0f, 99.0, 10.0, false, false, false);
+        for (int i = 0; i < 40; i++)
+        {
+            CaptureInput c = Capturable(type: 2 + i % 3, x: 3000f + i * 500f);
+            CaptureVerdict v = WlOrderFlow.DecideCapture(in c, in engage, out _, out _);
+            AssertEqual(CaptureVerdict.Drop, v, "re-send " + i + " is dropped at capture");
+        }
+        AssertEqual(7, flow.Queue.Count, "the queue holds only the real entries");
+        AssertEqual(0, host.Rows.FindAll(r => r.Contains("courier-overflow")).Count, "nothing was evicted");
     }
 
     // ------------------------------------------------------------- order age

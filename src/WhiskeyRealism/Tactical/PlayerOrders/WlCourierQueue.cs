@@ -31,6 +31,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public int UnitCommanderId;
         public int IssuerCommanderId;
         public bool ShowZone;
+        // Campaign entries: the player's command (instance id) the order was queued for; 0 = unknown (restored
+        // from a save). An order never rides on to a different command.
+        public int PlayerCommandId;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture

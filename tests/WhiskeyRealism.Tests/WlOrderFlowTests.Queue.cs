@@ -237,7 +237,7 @@ internal static partial class WlOrderFlowTests
 
     private static void CampaignWindowIsOneDayInYears()
     {
-        AssertNear(1f / 365f, (float)WlCampaignDispatchPolicy.RateLimitYears, 1e-9f, "one game day in campaign years");
+        AssertNear(1f / 365.25f, (float)WlCampaignDispatchPolicy.RateLimitYears, 1e-9f, "one game day in campaign years (8,766 hours a year, vanilla's clock)");
         double window = WlCampaignDispatchPolicy.RateLimitYears;
         var q = new WlCourierQueue(new RecordingSink());
         // A campaign key includes the target: another capital inside the day still arrives.

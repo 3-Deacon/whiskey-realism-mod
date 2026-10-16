@@ -21,7 +21,9 @@ internal static class WlCampaignCourierTests
             ("wl campaign courier capture never consults readmit", CampaignNeverConsultsReadmit),
             ("wl campaign courier cadence key includes the target", CampaignCadenceKeyIncludesTarget),
             ("wl campaign courier window is one day in years", CampaignWindowIsOneDayInYears),
+            ("wl campaign courier clock is vanilla's 8766 hours a year", CampaignClockIsVanillasYear),
             ("wl campaign courier years formula", CampaignYearsFormula),
+            ("wl campaign courier an order never rides to another command", OrderNeverRidesToAnotherCommand),
             ("wl campaign courier non-positive factor counts as one", NonPositiveFactorCountsAsOne),
             ("wl campaign courier delivery re-decides a whiskey order", CampaignDeliveryReDecides),
             ("wl campaign courier delivery drops a vanilla repop", DeliveryDropsVanillaRepop),
@@ -129,6 +131,29 @@ internal static class WlCampaignCourierTests
     {
         AssertNear(1f / 365f, (float)WlCampaignDispatchPolicy.RateLimitYears, 1e-5f, "a game day in years");
         AssertNear((float)(24.0 / WlCampaignDispatchPolicy.HoursPerYear), (float)WlCampaignDispatchPolicy.RateLimitYears, 1e-9f, "one definition");
+    }
+
+    private static void CampaignClockIsVanillasYear()
+    {
+        // GameVars.currenttimefromstart adds uniStormSystem.Hour / 8766f (30171): 365.25 days.
+        AssertEqual(8766.0, WlCampaignDispatchPolicy.HoursPerYear, "hours per campaign year");
+        AssertNear(1f / 365.25f, (float)WlCampaignDispatchPolicy.RateLimitYears, 1e-9f, "one game day in campaign years");
+        string compliance = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs");
+        AssertFalse(compliance.Contains("8760"), "the compliance clock does not keep its own year");
+    }
+
+    // F4: the baseline is the command the entry was queued for, not whatever the last non-empty pass saw.
+    private static void OrderNeverRidesToAnotherCommand()
+    {
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(42, 42), "the same command");
+        AssertFalse(WlCampaignCourierPolicy.BelongsToCommand(42, 43), "a promotion since: the order is void");
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(0, 43), "a restored entry carries no id and is taken as the current command's");
+        string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(runtime, @"PlayerCommandId = CurrentCommandId\(\)").Count, "both enqueue paths stamp the command");
+        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandId, commandId)"), "delivery checks it");
+        int deliver = runtime.IndexOf("internal static void DeliverDue()", StringComparison.Ordinal);
+        string body = runtime.Substring(deliver, runtime.IndexOf("internal static void AcknowledgeReached(", deliver, StringComparison.Ordinal) - deliver);
+        AssertFalse(body.Contains("_boundary"), "no baseline that an empty queue could reset");
     }
 
     private static void CampaignYearsFormula()

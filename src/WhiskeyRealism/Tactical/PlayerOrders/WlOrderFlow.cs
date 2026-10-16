@@ -26,10 +26,39 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         Queue, // the call is skipped and its order goes on a courier
     }
 
+    // The order a follow-up replaced, while the follow-up is the order on the panel (D17 (b)). A repeat of
+    // that order (same type, within 110 m of its point) would only reopen what the player has reached:
+    // vanilla's same-type dedupe no longer sees it behind the hold, and it would open a paying session with
+    // the player already in the zone. It is dropped, `follow-up-holds`; anything else follows the normal rules.
+    internal readonly struct FollowUpHoldView
+    {
+        public FollowUpHoldView(bool active, int type, float x, float z)
+        {
+            Active = active;
+            Type = type;
+            X = x;
+            Z = z;
+        }
+
+        public bool Active { get; }
+        public int Type { get; }
+        public float X { get; }
+        public float Z { get; }
+
+        public bool Blocks(int type, float x, float z)
+        {
+            if (!Active || type != Type) return false;
+            float dx = x - X;
+            float dz = z - Z;
+            return dx * dx + dz * dz <= PlayerOrderReadmitPolicy.ReadmitMeters * PlayerOrderReadmitPolicy.ReadmitMeters;
+        }
+    }
+
     // One CheckCurrentOrderUpdate call, as the capture Prefix sees it.
     internal struct CaptureInput
     {
         public CaptureFacts Facts;
+        public FollowUpHoldView Hold;
         public bool Enabled;
         public bool ReadmitOn;
         public bool CouriersOn;
@@ -158,6 +187,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private string _commandKey;
         private bool _wasCic;
         private bool _hasBoundary;
+        // The follow-up in force: the order it replaced (type, point) and the session it opened.
+        private int _holdSession = int.MinValue;
+        private int _holdType;
+        private float _holdX, _holdZ;
+        private int _replacedType;
+        private float _replacedX, _replacedZ;
+
+        public const string FollowUpHolds = "follow-up-holds";
 
         public WlOrderFlow(IWlOrderHost host)
         {
@@ -166,6 +203,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
 
         public WlCourierQueue Queue { get; }
+
+        // The replaced order while the follow-up is still the order on the panel; inactive once anything
+        // else has been shown (a new session) or the slot is no longer a 12.
+        public FollowUpHoldView Hold()
+        {
+            if (_holdSession == int.MinValue || _holdSession != _host.Session || _host.SlotType != 12) return default(FollowUpHoldView);
+            return new FollowUpHoldView(true, _holdType, _holdX, _holdZ);
+        }
+
+        public void ResetHold()
+        {
+            _holdSession = int.MinValue;
+        }
 
         // Reasons a discard is structural: the order is gone for a reason that says nothing about the
         // player's own panel logic (#62 clears its pending signature and no more).
@@ -225,8 +275,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
 
         // Capture: does this call go on a courier, get dropped, or reach vanilla untouched?
-        // anyPending: the queue holds an entry that may change the slot before this one is delivered.
-        public static CaptureVerdict DecideCapture(in CaptureInput c, in ActiveOrderView active, bool anyPending, out double deferUntil, out string reason)
+        // A call vanilla's own rules would drop, and the policy drops too, is dropped here and never queued:
+        // vanilla's continuous callers repeat it on every pass, and queued copies would crowd real entries
+        // out of the eight-entry queue.
+        public static CaptureVerdict DecideCapture(in CaptureInput c, in ActiveOrderView active, out double deferUntil, out string reason)
         {
             deferUntil = double.NaN;
             if (PassesUntouched(in c, out reason)) return CaptureVerdict.Pass;
@@ -242,6 +294,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return CaptureVerdict.Pass;
             }
             if (type == 11 && active.HasOrder && active.Type == 11) { reason = "reserve-refresh"; return CaptureVerdict.Pass; }
+
+            if (c.Hold.Blocks(type, c.Candidate.X, c.Candidate.Z)) { reason = FollowUpHolds; return CaptureVerdict.Drop; }
 
             ReadmitAction action;
             if (c.ReadmitOn)
@@ -259,9 +313,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 reason = "vanilla-accepts";
             }
 
-            // A drop against the slot as it stands is final only when nothing waiting can change the
-            // slot first; otherwise the delivery pass decides.
-            if (action == ReadmitAction.Drop && !anyPending) return CaptureVerdict.Drop;
+            if (action == ReadmitAction.Drop) return CaptureVerdict.Drop;
             return CaptureVerdict.Queue;
         }
 
@@ -382,9 +434,20 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 Queue.Discard(in e, "follow-up-stale");
                 return false;
             }
+            if (Hold().Blocks(e.Type, e.X, e.Z))
+            {
+                Queue.Discard(in e, FollowUpHolds);
+                return false;
+            }
 
             object token = _host.SlotObject;
             ActiveOrderView active = _host.ReadActive();
+            if (e.Origin == OrderOrigin.FollowUp)
+            {
+                _replacedType = active.Type;
+                _replacedX = active.X;
+                _replacedZ = active.Z;
+            }
             var candidate = new OrderCandidateView(e.Type, e.X, e.Y, e.Z, e.Rotation, e.Origin, e.CampaignCall);
             ReadmitAction action;
             string reason;
@@ -477,6 +540,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     _host.Row(in e, "deliver", "accepted");
                     if (e.Origin == OrderOrigin.P62) _host.NotifyP62(in e, P62Outcome.Accepted);
                     if (IsNonPaying(e.Origin)) _host.MarkNonPayingSession(sessionAfter);
+                    if (e.Origin == OrderOrigin.FollowUp)
+                    {
+                        _holdSession = sessionAfter;
+                        _holdType = _replacedType;
+                        _holdX = _replacedX;
+                        _holdZ = _replacedZ;
+                    }
                     return false;
                 }
                 // Vanilla's nested type-11 relay (8333-8336) took the slot; its order stays.

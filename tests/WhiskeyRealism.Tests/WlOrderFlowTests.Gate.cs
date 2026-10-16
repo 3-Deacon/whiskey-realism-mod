@@ -58,6 +58,18 @@ internal static partial class WlOrderFlowTests
         c = new CaptureFacts { WlActive = true, HasCurrentCommand = true, UnitIsPlayerAlliance = true, CampaignGroupIsOwnCommand = true, UnitIsPlayerCommand = true, UnitIsUnderCommander = true, ParentIsUnderUnit = true, Type = 12 };
         AssertTrue(WlOrderCaptureGate.ReachesDedupe(c), "top level player's own command");
 
+        // 8337's second half: (!isundercommander && unit != the player's command && !flag) returns, whoever the
+        // player is. A top-level player (flag2 true, so the first half passes) still refuses an AI unit that is
+        // not under his command, is not his command, and is not an ancestor of his parent.
+        c = new CaptureFacts { WlActive = true, HasCurrentCommand = true, UnitIsPlayerAlliance = true, CampaignGroupIsOwnCommand = true, UnitIsUnderCommander = false, UnitIsPlayerCommand = false, ParentIsUnderUnit = false, Type = 12 };
+        AssertFalse(WlOrderCaptureGate.ReachesDedupe(c), "top-level player, a stranger that is not an ancestor");
+        c.ParentIsUnderUnit = true;
+        AssertTrue(WlOrderCaptureGate.ReachesDedupe(c), "the same unit as an ancestor of his parent");
+        c.ParentIsUnderUnit = false; c.UnitIsPlayerCommand = true;
+        AssertTrue(WlOrderCaptureGate.ReachesDedupe(c), "or as his own command");
+        c.UnitIsPlayerCommand = false; c.UnitIsUnderCommander = true;
+        AssertTrue(WlOrderCaptureGate.ReachesDedupe(c), "or under his command");
+
         // 8362-8365: a type 2 aimed at the player's own subtree is dropped by vanilla.
         c = AncestorCall(); c.Type = 2; c.UnitInPlayerSubtree = true;
         AssertFalse(WlOrderCaptureGate.ReachesDedupe(c), "type 2 at the player's own subtree");

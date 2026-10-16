@@ -42,9 +42,6 @@ namespace WhiskeyRealism.Strategic
         private static string _lastDropReason;
         private static int _lastDropType, _lastDropX, _lastDropZ, _lastDropSession;
 
-        // The player's command the queued orders belong to (instance id); 0 until first seen.
-        private static int _boundaryCommandId;
-
         // D17 (b): the campaign order last seen on the panel, to notice vanilla clearing it on arrival.
         private static DLC_WL.GivenOrders _watched;
 
@@ -59,7 +56,6 @@ namespace WhiskeyRealism.Strategic
             catch { }
             _lastDropReason = null;
             _lastDropType = _lastDropX = _lastDropZ = _lastDropSession = 0;
-            _boundaryCommandId = 0;
             _watched = null;
             Loaded.Clear();
         }
@@ -144,6 +140,7 @@ namespace WhiskeyRealism.Strategic
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
                     Legs = 1,
+                    PlayerCommandId = CurrentCommandId(),
                 };
                 if (!Queue.TryEnqueue(in entry, WlCampaignDispatchPolicy.RateLimitYears, out string reason))
                 {
@@ -197,6 +194,7 @@ namespace WhiskeyRealism.Strategic
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
                     Legs = 1,
+                    PlayerCommandId = CurrentCommandId(),
                 };
                 if (!Queue.TryEnqueue(in entry, WlCampaignDispatchPolicy.RateLimitYears, out string reason))
                 {
@@ -219,23 +217,31 @@ namespace WhiskeyRealism.Strategic
         // The UpdateUnitAI Postfix, after the dispatcher's Flush: boundary, then every due courier.
         internal static void DeliverDue()
         {
-            if (Queue.Count == 0)
-            {
-                _boundaryCommandId = 0;
-                return;
-            }
+            if (Queue.Count == 0) return;
             try
             {
                 if (!MasterEnabled() || !DLC_WL.dlc_scenarioactive) return;
                 Regiment command = PlayerCommand();
                 if ((UnityEngine.Object)command == null) return;
-                if (NoteBoundary(command)) return;
+                if (DLC_WL.IsCommanderInChief())
+                {
+                    Queue.Clear("command-change");
+                    return;
+                }
 
                 double now = GameVars.currenttimefromstart;
+                int commandId = command.GetInstanceID();
                 for (int pass = 0; pass < MaxDeliveriesPerPass; pass++)
                 {
                     if (!Queue.TryTakeDue(now, out CourierEntry entry, out bool superseded)) break;
                     if (superseded) continue;
+                    // An order queued for another command (a promotion since) is void, however empty the
+                    // queue was in between.
+                    if (!WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandId, commandId))
+                    {
+                        Queue.Discard(in entry, "command-change");
+                        continue;
+                    }
                     DeliverOne(in entry);
                 }
             }
@@ -278,27 +284,6 @@ namespace WhiskeyRealism.Strategic
             string place = string.IsNullOrEmpty(was.destinationname) ? "the position" : was.destinationname;
             panel.ShowNewInfo("Well done", place + " is reached. Hold it and await further orders.");
             OnceLog.Info("wl-campaign-courier:first-acknowledgement", "[W&LCourier] reached campaign order acknowledged type=" + was.type);
-        }
-
-        // The player's command changed (a promotion, a new career) or he became CIC: queued orders
-        // belonged to the old one. The first look after a load only sets the baseline.
-        private static bool NoteBoundary(Regiment command)
-        {
-            int id = command.GetInstanceID();
-            if (DLC_WL.IsCommanderInChief())
-            {
-                Queue.Clear("command-change");
-                _boundaryCommandId = id;
-                return true;
-            }
-            if (_boundaryCommandId != 0 && _boundaryCommandId != id)
-            {
-                Queue.Clear("command-change");
-                _boundaryCommandId = id;
-                return true;
-            }
-            _boundaryCommandId = id;
-            return false;
         }
 
         private static void DeliverOne(in CourierEntry e)
@@ -429,6 +414,13 @@ namespace WhiskeyRealism.Strategic
         }
 
         // ---------------------------------------------------------------- helpers
+
+        // The player's command as an instance id; 0 when there is none.
+        private static int CurrentCommandId()
+        {
+            Regiment command = PlayerCommand();
+            return (UnityEngine.Object)command != null ? command.GetInstanceID() : 0;
+        }
 
         private static Regiment PlayerCommand()
         {

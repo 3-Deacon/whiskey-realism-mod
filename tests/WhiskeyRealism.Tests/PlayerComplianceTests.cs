@@ -38,6 +38,7 @@ internal static class PlayerComplianceTests
             ("player compliance no sample when inside the zone at issue", NoSampleWhenInsideZoneAtIssue),
             ("player compliance sample when outside the zone", SampleWhenOutsideZone),
             ("player compliance rotated zone box test", RotatedZoneBoxTest),
+            ("player compliance oblique zone follows the order mark's rotation", ObliqueZoneFollowsTheOrderMarkRotation),
             ("player compliance a hold at the player's position starts no sample", NonPayingSessionStartsNoSample),
             ("player compliance gate is a battle-only skip with a row", RuntimeSkipsInsideAtIssueInBattleOnly),
             ("player compliance adds no penalty path", NoPenaltyPathAdded),
@@ -374,6 +375,28 @@ internal static class PlayerComplianceTests
         // distance is outside where the unrotated box would hold it.
         AssertTrue(Starts(0f, 49f, rotation: 225f, width: 100f, depth: 20f), "rotated 45 degrees, depth 20: 49 along the world z axis is outside");
         AssertFalse(Starts(0f, 49f, rotation: 180f, width: 100f, depth: 100f), "the same point in an unrotated 100 x 100 box is inside");
+    }
+
+    // OrderMark.Initialize (200005): Euler(0, rotation + 180, 0), width along local x, depth along local z.
+    // Unity's yaw theta turns +z to (sin theta, cos theta) and +x to (cos theta, -sin theta). At yaw 30 degrees
+    // (arearotation -150) a point 45 along local x and one 8 along local z has both world components non-zero;
+    // a mirrored rotation direction puts it somewhere else.
+    private static void ObliqueZoneFollowsTheOrderMarkRotation()
+    {
+        double yaw = 30.0 * Math.PI / 180.0;
+        double sx = Math.Sin(yaw), cx = Math.Cos(yaw);
+        float RotationFor30 = -150f;
+        // local x = (cos, -sin), local z = (sin, cos)
+        float Wx(double lx, double lz) => (float)(lx * cx + lz * sx);
+        float Wz(double lx, double lz) => (float)(-lx * sx + lz * cx);
+        // width 60 (half 30), depth 20 (half 10)
+        AssertTrue(Starts(Wx(45, 0), Wz(45, 0), rotation: RotationFor30, width: 60f, depth: 20f), "45 along the width axis is outside half 30");
+        AssertFalse(Starts(Wx(25, 8), Wz(25, 8), rotation: RotationFor30, width: 60f, depth: 20f), "25 along x and 8 along z is inside");
+        AssertTrue(Starts(Wx(25, 14), Wz(25, 14), rotation: RotationFor30, width: 60f, depth: 20f), "14 along z is outside half 10");
+        AssertTrue(Starts(Wx(0, 12), Wz(0, 12), rotation: RotationFor30, width: 60f, depth: 20f), "12 along the depth axis is outside");
+        // The mirrored direction (yaw -30) would hold the first of these and not the second.
+        AssertTrue(Starts(Wx(-45, 0), Wz(-45, 0), rotation: RotationFor30, width: 60f, depth: 20f), "the other side of the width axis");
+        AssertFalse(Starts(Wx(-29, -9), Wz(-29, -9), rotation: RotationFor30, width: 60f, depth: 20f), "inside at the far corner");
     }
 
     private static void NonPayingSessionStartsNoSample()

@@ -101,6 +101,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             try { Flow.Queue.Clear("battle-end"); }
             catch { }
             Age.Reset();
+            Flow.ResetHold();
             Delivering = false;
             CapturedThisCall = false;
             _frame = -1;
@@ -255,6 +256,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (!MasterEnabled()) return false;
             if (!ReadmitOn() && !CouriersOn()) return CallVanillaDirect(in call);
             CaptureVerdict verdict = Route(in call, out bool queued);
+            // A reserve order onto an active reserve order is vanilla's in-place refresh of the reserve zone
+            // (flag4, 8549-8552): the capture passes it, so the emitter's call goes to vanilla as it did before.
+            if (verdict == CaptureVerdict.Pass && call.Type == 11 && DLC_WL.givenorder != null && DLC_WL.givenorder.type == 11)
+                CallVanillaDirect(in call);
             return verdict == CaptureVerdict.Queue && queued;
         }
 
@@ -312,9 +317,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             ActiveOrderView active = Host.ReadActive();
             Vector3 position = call.Position;
             float y = VanillaTerrain.SampleHeight(position, position.y);
+            input.Hold = Flow.Hold();
             input.Candidate = new OrderCandidateView(type, position.x, y, position.z, call.Rotation, call.Origin, false);
 
-            CaptureVerdict verdict = WlOrderFlow.DecideCapture(in input, in active, Flow.Queue.Count > 0, out double deferUntil, out string reason);
+            CaptureVerdict verdict = WlOrderFlow.DecideCapture(in input, in active, out double deferUntil, out string reason);
             if (verdict == CaptureVerdict.Pass) return verdict;
 
             if (!havePlayerSnapshot)

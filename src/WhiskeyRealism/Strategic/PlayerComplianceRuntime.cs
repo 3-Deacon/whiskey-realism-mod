@@ -24,7 +24,7 @@ namespace WhiskeyRealism.Strategic
     // Vanilla's re-issue of the same order is one sample (ComplianceOrderStream).
     internal static class PlayerComplianceRuntime
     {
-        private const double HoursPerYear = 8760.0;
+        private const double HoursPerYear = WlCampaignDispatchPolicy.HoursPerYear;
 
         private static readonly PlayerComplianceCareers _careers = new PlayerComplianceCareers();
         private static readonly ComplianceOrderStream _orders = new ComplianceOrderStream();

@@ -7,9 +7,9 @@ using static TestHarness;
 // player's command (AIBattle/BattleUnits.AddOrderCourierline, decompile 125009-125171).
 internal static partial class WlOrderFlowTests
 {
-    // unitprefs.txt defaults: processing 0.02 h, route 0.02 h, bugle recognition 0.02 h,
+    // unitprefs.txt defaults: processing 0.02 h, route 0.02 h (0.05 here, so the two cannot be mistaken for each other), bugle recognition 0.02 h,
     // courier speed 2.33 * 2.2 * 1000 = 5126 m per game hour.
-    private static BattleCourierPrefs DefaultBattlePrefs() => new BattleCourierPrefs(0.02f, 0.02f, 0.02f, 5126f, true);
+    private static BattleCourierPrefs DefaultBattlePrefs() => new BattleCourierPrefs(0.02f, 0.05f, 0.02f, 5126f, true);
 
     private static CourierLeg[] Legs(params (float meters, float bugle)[] legs)
     {
@@ -45,7 +45,7 @@ internal static partial class WlOrderFlowTests
         var p = DefaultBattlePrefs();
         // Issuer 50 m from the division (bugle), the division 1000 m from the player (courier relay).
         double hours = WlCourierDelay.BattleHours(Legs((50f, 75f), (1000f, 75f)), 2, in p);
-        AssertNear(0.02f + (0.02f + 1000f / 5126f), (float)hours, 1e-5f, "bugle leg + route time + travel");
+        AssertNear(0.02f + (0.05f + 1000f / 5126f), (float)hours, 1e-5f, "bugle leg + route time (not the processing time) + travel");
     }
 
     private static void BugleRelayLegHasNoRouteTime()

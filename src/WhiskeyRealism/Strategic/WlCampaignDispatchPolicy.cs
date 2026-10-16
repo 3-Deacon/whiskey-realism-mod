@@ -221,10 +221,10 @@ namespace WhiskeyRealism.Strategic
         public const float DedupeUnits = 110f;
         // One pop per target per game day.
         public const double RateLimitDays = 1.0;
-        // The campaign clock (GetCampaignFloatingDate) counts years of 8,760 hours; the one
+        // The campaign clock counts years of 8,766 hours (365.25 days, vanilla's own: 30171, 66611); the one
         // day-to-year conversion every campaign window uses (WlCampaignDispatchRuntime.NowDays,
         // the courier queue's cadence window).
-        public const double HoursPerYear = 8760.0;
+        public const double HoursPerYear = 8766.0;
         public const double RateLimitYears = RateLimitDays * 24.0 / HoursPerYear;
         // Vanilla's campaign order zone is 20 x 20 (14455, 14052); a move shorter than
         // that (a water or stacking correction, CheckFinalPositions 17928) is no order.

@@ -69,6 +69,13 @@ namespace WhiskeyRealism.Strategic
             return clears && firstUnitReached && slotEmptyNow;
         }
 
+        // The order was queued for the command the player has now (a promotion or a new career in between
+        // voids it). An entry restored from a save has no command id and is taken as the current one's.
+        public static bool BelongsToCommand(int entryCommandId, int currentCommandId)
+        {
+            return entryCommandId == 0 || entryCommandId == currentCommandId;
+        }
+
         // A Whiskey order (the bridge and #69) leaves a record in the dispatch history when it is shown.
         public static bool RecordsHistory(OrderOrigin origin)
         {
