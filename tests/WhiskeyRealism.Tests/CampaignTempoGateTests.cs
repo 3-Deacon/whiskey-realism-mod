@@ -47,6 +47,7 @@ internal static class CampaignTempoGateTests
             ("DeferredSupportWithheldFromVanillaOffenseUntilRelease", DeferredSupportWithheldFromVanillaOffenseUntilRelease),
             ("WlCareerMultipliesTwiceWithPlayerInMass", WlCareerMultipliesTwiceWithPlayerInMass),
             ("ReleasedDecisionSurvivesRestore", ReleasedDecisionSurvivesRestore),
+            ("WinterFactorIsTheFactorVanillasRollHasInThisInstall", WinterFactorIsTheFactorVanillasRollHasInThisInstall),
             ("ForcedWorldReleasesTheDecision", ForcedWorldReleasesTheDecision),
             ("AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne", AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne),
             ("TempoRowsAreBoundedToTwoPerDecision", TempoRowsAreBoundedToTwoPerDecision),
@@ -702,6 +703,28 @@ internal static class CampaignTempoGateTests
         var tally = Run(g, ExecutorFixtures.ClosedTempo());
         AssertTrue(tally.Tempo.NeedsRoll && !tally.Tempo.Released, "the pass rolls for decision 3");
         AssertEqual(2, g.State.TempoReleasedDecision, "and leaves the old release alone");
+    }
+
+    // Vanilla's roll reads winterdefensiveoperationsmodifier in the winter months (num5, 14310-14312). That is BUG-LOG-004: the
+    // offensive modifier is loaded (56381) and never read, the defensive one is CheckForDefensiveOperations' own (13567). The
+    // fix makes the roll read the offensive one; the planner replaces the roll, so it applies the factor the roll has in this
+    // install: offensive with the fix on, vanilla's literal defensive one with it off, 1 outside winter.
+    private static void WinterFactorIsTheFactorVanillasRollHasInThisInstall()
+    {
+        const float offensive = 0.05f, defensive = 0.2f;
+        AssertNear(offensive, WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.OffensiveRollModifier(true, true, offensive, defensive), 1e-6f, "winter, fix on: the offensive modifier");
+        AssertNear(defensive, WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.OffensiveRollModifier(true, false, offensive, defensive), 1e-6f, "winter, fix off: vanilla's literal defensive modifier (14312)");
+        AssertNear(1f, WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.OffensiveRollModifier(false, true, offensive, defensive), 1e-6f, "outside winter: 1 (num5 starts at 1, 14308)");
+        AssertTrue(WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.IsWinterMonth(12, 2, 11) && WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.IsWinterMonth(2, 2, 11)
+            && !WhiskeyRealism.Strategic.BugFixes.WinterOperationsModifier.IsWinterMonth(6, 2, 11), "the winter months are vanilla's test (14310)");
+
+        string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Patches/WinterOffensiveModifierPatch.cs"), "internal static float CurrentRollModifier(");
+        AssertTrue(HasLine(body, "bool winter = WinterOperationsModifier.IsWinterMonth(storm.monthCounter, GamePrefs.winterquartersmonthuntil, GamePrefs.winterquartersmonthfrom);"), "vanilla's winter test");
+        AssertTrue(HasLine(body, "Enabled(),"), "the fix flag the Prefix reads");
+        AssertTrue(HasLine(body, "GamePrefs.winteroffensiveoperationsmodifier,") && HasLine(body, "GamePrefs.winterdefensiveoperationsmodifier);"), "both prefs, chosen by the pure rule");
+        string prefix = BodyOf(ReadRepoFile("src/WhiskeyRealism/Patches/WinterOffensiveModifierPatch.cs"), "internal static void Prefix(");
+        AssertTrue(HasLine(prefix, "float roll = WinterOperationsModifier.OffensiveRollModifier(true, true, GamePrefs.winteroffensiveoperationsmodifier, GamePrefs.winterdefensiveoperationsmodifier);"), "the fix makes vanilla's roll read the offensive modifier: the factor the planner applies");
+        AssertTrue(HasLine(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs"), "WinterModifier = WinterOffensiveModifierPatch.CurrentRollModifier(),"), "the mover reads that one factor");
     }
 
     private static void TempoRowsAreBoundedToTwoPerDecision()
