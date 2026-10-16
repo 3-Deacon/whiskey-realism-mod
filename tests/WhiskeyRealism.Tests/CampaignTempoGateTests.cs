@@ -46,6 +46,8 @@ internal static class CampaignTempoGateTests
             ("DeferredSupportWithheldFromVanillaOffenseUntilRelease", DeferredSupportWithheldFromVanillaOffenseUntilRelease),
             ("WlCareerMultipliesTwiceWithPlayerInMass", WlCareerMultipliesTwiceWithPlayerInMass),
             ("ReleasedDecisionSurvivesRestore", ReleasedDecisionSurvivesRestore),
+            ("ForcedWorldReleasesTheDecision", ForcedWorldReleasesTheDecision),
+            ("AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne", AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne),
             ("TempoRowsAreBoundedToTwoPerDecision", TempoRowsAreBoundedToTwoPerDecision),
             ("PlannerReadsNoCalendarEra", PlannerReadsNoCalendarEra),
             ("TempoGateMovedOutOfThePackageLedger", TempoGateMovedOutOfThePackageLedger),
@@ -649,6 +651,37 @@ internal static class CampaignTempoGateTests
         var fresh = new PlannerState();
         fresh.Restore(2, 98, -1, 0, 3, 1861L, tempoReleasedDecision: 2);
         AssertTrue(fresh.TempoReleasedDecision != fresh.DecisionSerial, "an older decision's release does not release the current one");
+    }
+
+    // The scripted 1861 push or debug_permanentaimovement (the runtime ORs them into the world's Forced) releases every roll.
+    private static void ForcedWorldReleasesTheDecision()
+    {
+        var g = GateWith(believedEnemy: true);
+        var world = ExecutorFixtures.ClosedTempo();
+        world.Forced = true;
+        var tally = Run(g, world);
+        AssertTrue(tally.Tempo.NeedsRoll && tally.Tempo.Released && tally.Tempo.Forced, "the roll applies and the forced flag releases it");
+        AssertEqual(g.State.DecisionSerial, g.State.TempoReleasedDecision, "released");
+        AssertEqual(3, g.Host.Moves.Count, "and the mass and Support go out");
+        AssertContains(tally.TempoRow(0), "released=true forced=true", "the row says why");
+    }
+
+    // The release belongs to a decision: an earlier decision's release does not release the current one, in the pass and for the patches.
+    private static void AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne()
+    {
+        var w = ExecutorFixtures.PublishedWorld(out _);
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 3, ReleasedDecision = 2, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "decision 3 is deferred though decision 2 was released: Support stays withheld");
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { DecisionSerial = 3, ReleasedDecision = 3, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "released: vanilla's again");
+        CampaignScope.ResetAll();
+
+        var g = GateWith(believedEnemy: true);
+        g.State.DecisionSerial = 3;
+        g.State.TempoReleasedDecision = 2;
+        var tally = Run(g, ExecutorFixtures.ClosedTempo());
+        AssertTrue(tally.Tempo.NeedsRoll && !tally.Tempo.Released, "the pass rolls for decision 3");
+        AssertEqual(2, g.State.TempoReleasedDecision, "and leaves the old release alone");
     }
 
     private static void TempoRowsAreBoundedToTwoPerDecision()
