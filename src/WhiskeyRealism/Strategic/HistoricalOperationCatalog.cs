@@ -96,6 +96,12 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
 
+            if (profile.MaxEra < profile.Era)
+            {
+                reason = "invalid-era-span";
+                return false;
+            }
+
             if (profile.PrimaryObjectiveId < 0)
             {
                 reason = "invalid-primary-objective";
@@ -499,7 +505,7 @@ namespace WhiskeyRealism.Strategic
             };
         }
 
-        // A profile that matches a span of eras instead of one (Profile sets MaxEra = Era).
+        // A profile that matches a span of eras instead of one (an unset MaxEra is Era).
         private static HistoricalOperationProfile WithMaxEra(HistoricalOperationProfile profile, EraStage maxEra)
         {
             profile.MaxEra = maxEra;
@@ -534,7 +540,6 @@ namespace WhiskeyRealism.Strategic
                 AllianceId = allianceId,
                 Theater = theater,
                 Era = era,
-                MaxEra = era,
                 MinChapter = minChapter,
                 MaxChapter = maxChapter,
                 StartMonth = startMonth,

@@ -45,6 +45,8 @@ internal static class StrategicDirectorTests
             ("campaign pace too fast collapse on early national morale crash", CampaignPaceTooFastCollapseOnEarlyMoraleCrash),
             ("campaign pace late war pressure on chapter three", CampaignPaceLateWarPressureOnChapterThree),
             ("campaign pace union in 1864 before chapter three is not late war", CampaignPaceUnion1864BeforeChapterThreeIsNotLateWar),
+            ("campaign pace csa collapse floor stays on the calendar after a lost election", CampaignPaceCsaFloorIsCalendarAtChapterTwo),
+            ("campaign pace too fast collapse is calendar not chapter", CampaignPaceTooFastCollapseIsCalendarNotChapter),
             ("campaign pace overheated on heavy 14-day battle volume", CampaignPaceOverheatedOnHeavy14DayBattles),
             ("campaign pace too quiet only outside chapter one winter", CampaignPaceTooQuietSuppressedInChapterOneWinter),
             ("campaign pace stalemated when chapter two front static", CampaignPaceStalematedWhenChapterTwoFrontStatic),
@@ -401,6 +403,45 @@ internal static class StrategicDirectorTests
         var output = CampaignPaceLedger.Build(input);
         AssertEqual(CampaignPace.Stable, output.Pace);
         AssertEqual("default", output.Reason);
+    }
+
+    // Integrator decision D13: these two CSA rules are historical timing and stay on the calendar,
+    // so they are pinned where the calendar and the chapter disagree.
+    private static void CampaignPaceCsaFloorIsCalendarAtChapterTwo()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.40f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
+        AssertTrue(output.IntentBlockedFromPreserve, "1864, chapter 2 (election pending or lost): the CSA still may not Preserve");
+        var earlier = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.40f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertFalse(CampaignPaceLedger.Build(earlier).IntentBlockedFromPreserve, "1863 is before the floor whatever the chapter");
+    }
+
+    private static void CampaignPaceTooFastCollapseIsCalendarNotChapter()
+    {
+        var critical1863 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863).Pace);
+        var critical1863Chapter3 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863Chapter3).Pace);
+        var critical1864 = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(critical1864);
+        AssertEqual(CollapseRisk.Critical, output.Risk);
+        AssertTrue(output.Pace != CampaignPace.TooFastCollapse, "from 1864 a critical CSA is not 'too fast', chapter 2 or not");
     }
 
     private static void CampaignPaceOverheatedOnHeavy14DayBattles()

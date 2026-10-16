@@ -13,6 +13,7 @@ internal static class ChapterFixTests
         {
             ("chapter late war starts at chapter 3 only", LateWarStartsAtChapterThree),
             ("chapter era is not late war in 1864 before the election chapter", EraNotLateWarIn1864BeforeChapterThree),
+            ("chapter era September to December 1864 follows the election outcome", EraSeptemberToDecember1864FollowsTheElection),
             ("chapter era stays out of late war in 1865 when the election was lost", EraStaysOutOfLateWarWhenElectionLost),
             ("chapter era reaches late war at chapter 3", EraReachesLateWarAtChapterThree),
             ("chapter era keeps calendar stages before the election", EraKeepsCalendarStagesBeforeElection),
@@ -35,6 +36,7 @@ internal static class ChapterFixTests
             ("chapter election pressure stays in unit range and off without a verdict day", ElectionNeedStaysInRangeAndOffWithoutVerdict),
             ("chapter election pressure reaches the policy score of a morale policy", ElectionReachesThePolicyScore),
             ("chapter election runtime reads objective 26 and threads the review date", ElectionRuntimeWiring),
+            ("chapter election countdown is on while objective 26 is live and off once it is deactivated", ElectionCountdownFollowsTheObjective),
             ("chapter wait treats only a negative chapter as unknown", ChapterKnownOnlyAfterVanillaUpdate),
             ("chapter wait gates the cadence hook before it consumes a notify", HookWaitsForVanillaChapterBeforeNotifying),
             ("chapter wait is bounded: it ends at a frame limit if the chapter never arrives", ChapterWaitIsBounded),
@@ -49,6 +51,8 @@ internal static class ChapterFixTests
             ("chapter late operation is not available before May 1864", LateOperationNotBeforeMay1864),
             ("chapter late operation needs the decisive era or later", LateOperationNeedsDecisiveEraOrLater),
             ("chapter every other operation keeps its single era so its match set is unchanged", OtherOperationsKeepTheirSingleEra),
+            ("chapter an unset era span means the single era", UnsetEraSpanMeansTheSingleEra),
+            ("chapter validate profile rejects an era span that ends before it starts", ValidateProfileRejectsInvertedEraSpan),
             ("chapter early operations still reject every later era in their window", EarlyOperationsRejectLaterErasInTheirWindow),
             ("chapter grand strategy profile is decisive before chapter three", GrandStrategyStaysDecisiveBeforeChapterThree),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
@@ -68,6 +72,19 @@ internal static class ChapterFixTests
     {
         AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(1, 1864, false, 2), "1 Jan 1864 is no longer total war");
         AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(8, 1864, false, 2), "Atlanta summer, still chapter 2");
+    }
+
+    private static void EraSeptemberToDecember1864FollowsTheElection()
+    {
+        // Chapter 2 until the election is won; chapter 3 only with it. No Atlanta-style pull in between.
+        for (int month = 9; month <= 12; month++)
+        {
+            AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(month, 1864, false, 2), "chapter 2, month " + month);
+            AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(month, 1864, false, 3), "chapter 3, month " + month);
+            var era = new EraStageManager { Stage = EraStage.Decisive1863 };
+            era.CheckTransition(month, 1864, true, 2);
+            AssertEqual(EraStage.Decisive1863, era.Stage, "no advance at chapter 2, month " + month);
+        }
     }
 
     private static void EraStaysOutOfLateWarWhenElectionLost()
@@ -324,11 +341,20 @@ internal static class ChapterFixTests
         AssertTrue(pressed.Need > calm.Need, "the election raises what a morale policy is worth");
     }
 
+    private static void ElectionCountdownFollowsTheObjective()
+    {
+        // GetObjectiveDeactivated is true outside chapter 2 and the objective's dates (179604-179615).
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.VerdictCountdown(true, 1, 6, 1864), "objective deactivated: no election");
+        AssertEqual(ElectionMorale.DaysToVerdict(1, 6, 1864), ElectionMorale.VerdictCountdown(false, 1, 6, 1864), "objective live: the countdown");
+        AssertTrue(ElectionMorale.VerdictCountdown(false, 1, 6, 1864) > 0, "live in June");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.VerdictCountdown(false, 10, 11, 1864), "live but past the verdict day");
+        AssertEqual(ElectionMorale.NoVerdictAhead, ElectionMorale.VerdictCountdown(true, 9, 11, 1864), "deactivated on the verdict day itself");
+    }
+
     private static void ElectionRuntimeWiring()
     {
         string runtime = Flat("src/WhiskeyRealism/Strategic/CampaignNeedRuntime.cs");
-        AssertContains(runtime, "CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId)", "vanilla decides whether objective 26 is live");
-        AssertContains(runtime, "s.ElectionDaysToVerdict = ElectionMorale.DaysToVerdict(day, month, year);", "countdown from the review's date");
+        AssertContains(runtime, "s.ElectionDaysToVerdict = ElectionMorale.VerdictCountdown(CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId), day, month, year);", "vanilla decides whether objective 26 is live; the countdown runs from the review's date");
         AssertContains(runtime, "s.ElectionMoraleThreshold = GamePrefs.lincolnmaintainmoraleabove;", "vanilla's own threshold");
         string coordinator = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         AssertContains(coordinator, "CampaignNeedRuntime.Read(alliance, era, day, month, year,", "the review date reaches the read");
@@ -534,6 +560,43 @@ internal static class ChapterFixTests
             AssertTrue(HistoricalOperationCatalog.TryGetById(id, out var profile), id);
             AssertEqual(profile.Era, profile.MaxEra, id + " single era");
         }
+    }
+
+    // A profile built outside Profile(): every field of an existing one, MaxEra left alone.
+    private static HistoricalOperationProfile CopyOfEastPressure()
+    {
+        AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var p), "source profile");
+        return new HistoricalOperationProfile
+        {
+            OperationId = "test-copy", OperationName = p.OperationName, AllianceId = p.AllianceId, Theater = p.Theater,
+            Era = EraStage.Operational1862, MinChapter = p.MinChapter, MaxChapter = p.MaxChapter,
+            StartMonth = p.StartMonth, StartYear = p.StartYear, EndMonth = p.EndMonth, EndYear = p.EndYear,
+            PrimaryObjectiveId = p.PrimaryObjectiveId, ObjectiveAllowList = p.ObjectiveAllowList, ChapterPolicy = p.ChapterPolicy,
+            Priority = p.Priority, RequiredTags = p.RequiredTags, PreferredTags = p.PreferredTags, Tempo = p.Tempo,
+            Posture = p.Posture, Phases = p.Phases, DynamicRules = p.DynamicRules, AlternateOperationIds = p.AlternateOperationIds,
+            NearTargetRadius = p.NearTargetRadius
+        };
+    }
+
+    private static void UnsetEraSpanMeansTheSingleEra()
+    {
+        var profile = CopyOfEastPressure();
+        AssertEqual(EraStage.Operational1862, profile.MaxEra, "unset MaxEra follows Era, not Amateur1861");
+        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "valid");
+        profile.MaxEra = EraStage.TotalWar1864;
+        AssertEqual(EraStage.TotalWar1864, profile.MaxEra, "an explicit span is kept");
+    }
+
+    private static void ValidateProfileRejectsInvertedEraSpan()
+    {
+        var profile = CopyOfEastPressure();
+        profile.MaxEra = EraStage.Amateur1861;
+        AssertFalse(HistoricalOperationCatalog.ValidateProfile(profile, out string reason), "MaxEra below Era");
+        AssertEqual("invalid-era-span", reason, "reason");
+        profile.MaxEra = EraStage.Operational1862;
+        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "MaxEra equal to Era");
+        profile.MaxEra = EraStage.Decisive1863;
+        AssertTrue(HistoricalOperationCatalog.ValidateProfile(profile, out _), "MaxEra above Era");
     }
 
     private static void EarlyOperationsRejectLaterErasInTheirWindow()

@@ -67,14 +67,13 @@ namespace WhiskeyRealism.Strategic
 
         // The 1864 election (ElectionMorale): live while vanilla's objective 26 is not deactivated,
         // which it is outside chapter 2 and its dates (IsDeactivated 178914-178946). The line is
-        // vanilla's own pref. Stays unset (no election) when the objective is not live.
+        // vanilla's own pref. The countdown stays NoVerdictAhead (no election) when the objective is not live.
         private static void ReadElection(NeedSnapshot s, int day, int month, int year)
         {
             try
             {
-                if (CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId)) return;
                 s.ElectionMoraleThreshold = GamePrefs.lincolnmaintainmoraleabove;
-                s.ElectionDaysToVerdict = ElectionMorale.DaysToVerdict(day, month, year);
+                s.ElectionDaysToVerdict = ElectionMorale.VerdictCountdown(CampaignObjective.GetObjectiveDeactivated(ElectionMorale.ObjectiveId), day, month, year);
             }
             catch (Exception ex)
             {

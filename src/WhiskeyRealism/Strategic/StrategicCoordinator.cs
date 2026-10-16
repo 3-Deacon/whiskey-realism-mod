@@ -250,7 +250,9 @@ namespace WhiskeyRealism.Strategic
 
             // Sidecar migration. A loaded save restores LastSeenMonth, so firstCall below is false for
             // every save written after its first review: the migration is its own one-shot. The chapter
-            // is known here (MonthlyTickHookPatch waits for vanilla's update).
+            // is known here (MonthlyTickHookPatch waits for vanilla's update) except when that wait
+            // expired at frame 200: the chapter can then be -1, ResetStaleLateWar does nothing, and an
+            // old sidecar's TotalWar1864 survives that load. The wait should never expire.
             if (_eraMigrationPending)
             {
                 _eraMigrationPending = false;

@@ -39,6 +39,14 @@ namespace WhiskeyRealism.Strategic
             return days < 0 ? NoVerdictAhead : days;
         }
 
+        // The countdown the need snapshot carries: only while vanilla's objective 26 is live
+        // (CampaignObjective.GetObjectiveDeactivated is true outside chapter 2 and the objective's dates,
+        // 179604-179615), else NoVerdictAhead.
+        public static int VerdictCountdown(bool objectiveDeactivated, int day, int month, int year)
+        {
+            return objectiveDeactivated ? NoVerdictAhead : DaysToVerdict(day, month, year);
+        }
+
         // The extra morale need in [0, 1]: the shortfall to the line (plus the margin) as a share
         // of the line, times how far the ramp has run.
         public static float Boost(float morale, float threshold, int daysToVerdict)
