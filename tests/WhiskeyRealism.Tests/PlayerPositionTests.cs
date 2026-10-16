@@ -32,6 +32,7 @@ internal static class PlayerPositionTests
             ("player position: corps between a threat and a guard asset covers only the nearer", CorpsCoversNearerOfThreatAndAsset),
             ("player position: equidistant targets go to the lowest index", EquidistantTargetsGoToLowestIndex),
             ("player position: a recovered threat does not take the corps", RecoveredThreatDoesNotTakeCorps),
+            ("player position: an asset a threat already answers takes no cover", AssetAnsweredByThreatTakesNoCover),
             ("player position: guard asset covered by position needs no guard budget", GuardCoveredByPositionNeedsNoBudget),
             ("player position: critical-front rerun keeps the held strength", CriticalFrontRerunKeepsHeld),
         });
@@ -269,6 +270,26 @@ internal static class PlayerPositionTests
         DefenseResponse live = output.Responses.Find(r => r.Threat.Posture != DefensePosture.Recovered);
         AssertTrue(live != null, "a live response");
         AssertNear(20000f, live.HeldStrength, 0.01f, "the corps covers the live threat in range");
+    }
+
+    private static void AssetAnsweredByThreatTakesNoCover()
+    {
+        // The guard asset "harbor30" is the threat's own asset, so its guard pass is skipped.
+        // A corps standing exactly at that asset, 100 from the threat, must cover the threat:
+        // crediting the skipped guard slot would lose the cover.
+        var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f, HoldCoverRadius = Radius };
+        input.Threats.Add(Threat(30, ThreatX));
+        input.GuardCandidateAssets.Add(new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "harbor30", Owner = 1,
+            StrategicRole = AssetStrategicRole.BlockadeRunnerPort, X = ThreatX + 100f, Z = ThreatZ
+        });
+        input.Candidates.Add(Player(ThreatX + 100f, ThreatZ));
+        input.Candidates.Add(Ai(AiId, 8000f));
+        var output = DefenseIntentLedger.Build(input);
+        AssertEqual(1, output.Responses.Count, "the threat answers the asset: no guard response");
+        AssertNear(20000f, output.Responses[0].HeldStrength, 0.01f, "the corps covers the threat");
+        AssertEqual(0, output.Responses[0].SelectedPackage.Count, "no package sent");
     }
 
     private static void GuardCoveredByPositionNeedsNoBudget()
