@@ -59,10 +59,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float AgeWeight = 0.5f, RadiusWeight = 0.3f, StrengthWeight = 0.2f;
         public const float AdvanceGuardMaxStrengthShare = 0.25f; // of the main-effort strength
 
-        // Values owned by slices merging in parallel, mirrored here until G7 points them at one source.
-        internal const int BeliefExpireDays = 30;      // G1 EnemyArmyModel.ExpireDays
-        internal const float PicketHoldRatio = 0.6f;   // G3 TheaterPlanner.HoldRatio (G4's hold need)
-
         // A belief below this is stale: it sends a probe, and the probe's verdict never escalates on it.
         internal const float ProbeStaleConfidence = ContactEvidenceLedger.MinEscalationConfidence;
         // The reasons of the tasks that exist because an approach is unwatched (the [Recon] row counts them).
@@ -123,7 +119,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (sectors == null) return -1;
                 SectorStrengths(s, sectors, task.SectorId, out sectorOwn, out sectorEnemy);
             }
-            float holdNeed = (PicketHoldRatio + (s.Tempo?.MinimumHoldRatioModifier ?? 0f)) * sectorEnemy;
+            float holdNeed = (TheaterPlanner.HoldRatio + (s.Tempo?.MinimumHoldRatioModifier ?? 0f)) * sectorEnemy;
 
             int best = -1, bestTier = int.MaxValue;
             float bestStrength = 0f, bestDistance = 0f;
@@ -264,7 +260,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     fz = ctx.S.CapitalZ;
                 }
                 float age = Math.Max(0, ctx.S.DaySerial - b.LastSeenDay);
-                float score = AgeWeight * Math.Min(1f, age / BeliefExpireDays) +
+                float score = AgeWeight * Math.Min(1f, age / EnemyArmyModel.ExpireDays) +
                               RadiusWeight * (maxRadius > 0f ? b.UncertaintyRadius / maxRadius : 0f) +
                               StrengthWeight * (maxStrength > 0f ? b.Strength / maxStrength : 0f);
                 PointShort(fx, fz, b.X, b.Z, ctx.Standoff, out float hx, out float hz);

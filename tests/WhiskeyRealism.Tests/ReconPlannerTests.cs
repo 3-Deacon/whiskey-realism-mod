@@ -86,6 +86,7 @@ internal static class ReconPlannerTests
             ("ReconStepAllocatesNothingOnceWarm", ReconStepAllocatesNothingOnceWarm),
             ("ReconStepPinned", ReconStepPinned),
             ("ReconLedgerHasNoReaderOutsideTheReview", ReconLedgerHasNoReaderOutsideTheReview),
+            ("ReconPlannerReadsTheOneOwnerOfEachSharedValue", ReconPlannerReadsTheOneOwnerOfEachSharedValue),
             ("ReconFlagIsBoundAndRead", ReconFlagIsBoundAndRead),
             ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
             ("ClearedMissionIsGoneAfterTheNextReview", ClearedMissionIsGoneAfterTheNextReview),
@@ -1395,6 +1396,18 @@ internal static class ReconPlannerTests
         AssertContains(filter, "FlagOn(Plugin.EnableCampaignReconnaissance) && ReconStep.IsReconKey(Snapshots[alliance], Recon[alliance], unitKey)", "unit key -> the snapshot's index -> IsRecon, only while the flag is on");
         AssertContains(BodyOf(src, "internal static Func<string, bool> ReconFilterFor(int alliance)"), "return alliance >= 0 && alliance < ReconFilters.Length ? ReconFilters[alliance] : null;", "the directive ledger's filter, for alliances 0 and 1 only");
         AssertContains(src, "ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };", "one delegate per alliance, built once");
+    }
+
+    // The belief expiry and the picket hold ratio each have one owner (G1 EnemyArmyModel.ExpireDays, G3 TheaterPlanner.HoldRatio):
+    // the recon planner reads them, it keeps no copy that a retuned owner would leave behind.
+    private static void ReconPlannerReadsTheOneOwnerOfEachSharedValue()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconPlanner.cs");
+        AssertContains(src, "age / EnemyArmyModel.ExpireDays", "a belief's age is scored against the model's expiry");
+        AssertContains(src, "(TheaterPlanner.HoldRatio + (s.Tempo?.MinimumHoldRatioModifier ?? 0f)) * sectorEnemy", "the picket leaves the planner's hold ratio");
+        AssertFalse(src.Contains("BeliefExpireDays") || src.Contains("PicketHoldRatio"), "no mirrored copy of either value remains");
+        AssertEqual(30, EnemyArmyModel.ExpireDays, "the owner's expiry (the recon scoring's age term was written for it)");
+        AssertEqual(0.6f, TheaterPlanner.HoldRatio, "the owner's hold ratio (the picket rule was written for it)");
     }
 
     // Planner state a patch reads joins the atomic publish (PrepareDay); the mission ledger is read only
