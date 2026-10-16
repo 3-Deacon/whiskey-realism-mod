@@ -113,6 +113,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (built != null) BattlePerceptionProbe.Probe(built, battle);
                 // The battle's terrain grid exists from the first snapshot (deployment) on.
                 BattleTerrainGridRuntime.Get();
+                // BC12: the terrain picture builds one budgeted step per frame until it is Ready.
+                TerrainPictureRuntime.Step();
                 _builtFrame[alliance] = frame;
                 _builtBattleKey[alliance] = battleKey;
                 return built;

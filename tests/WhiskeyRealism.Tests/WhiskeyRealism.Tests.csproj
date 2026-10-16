@@ -257,6 +257,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedFlanking.cs" Link="Battle\PerceivedFlanking.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CoveredCrossings.cs" Link="Battle\CoveredCrossings.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleTerrainGrid.cs" Link="Battle\BattleTerrainGrid.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TerrainPicture.cs" Link="Battle\TerrainPicture.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TerrainPictureBuilder.cs" Link="Battle\TerrainPictureBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalTerrainObjectiveClassifier.cs" Link="Operations\TacticalTerrainObjectiveClassifier.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalTerrainLinePlanner.cs" Link="Operations\TacticalTerrainLinePlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ArrivalShield.cs" Link="Battle\ArrivalShield.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\WithdrawalIntentProducer.Plan.cs" Link="Battle\Producers\WithdrawalIntentProducer.Plan.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\ChargeDemotionTracker.cs" Link="Battle\Producers\ChargeDemotionTracker.cs" />

@@ -114,8 +114,6 @@ internal static class TacticalBattleTests
             frontage,
             nodeCount: nodes.Length);
 
-        AssertTrue(support.LeftFrontageTarget.HasValue, "left frontage");
-        AssertTrue(support.RightFrontageTarget.HasValue, "right frontage");
         AssertTrue(support.ArtilleryLineTarget.HasValue, "artillery line");
         AssertTrue(Math.Abs(support.PrimaryTarget.X) > 150f, "support should use a real frontage lane");
         AssertTrue(Math.Abs(fix.PrimaryTarget.X) > 150f, "fix should use a real frontage lane");

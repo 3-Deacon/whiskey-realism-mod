@@ -609,9 +609,8 @@ internal static class TacticalEvidenceFixTests
             new EnemyVisibleSector(1, 20000f, 600f, true),
             new EnemyVisibleSector(3, 20000f, 0f, false),
         }, 0.5f, true, false);
-        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
-        float cSmall = ArmyIntentInference.Build(ev, small).Confidence01;
-        float cBig = ArmyIntentInference.Build(ev, big).Confidence01;
+        float cSmall = ArmyIntentInference.Build(small).Confidence01;
+        float cBig = ArmyIntentInference.Build(big).Confidence01;
         TestHarness.AssertTrue(cSmall > cBig, "confidence scales with enemy relative to own force: " + cSmall + " vs " + cBig);
     }
 

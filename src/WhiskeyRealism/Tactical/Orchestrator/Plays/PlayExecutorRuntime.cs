@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -146,7 +147,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
                 float frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
 
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage);
+                // BC12: ReverseSlopeDefense is anchored to the crest the terrain picture found across the front.
+                TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
+                    ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
+                    : default(TerrainLine);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.

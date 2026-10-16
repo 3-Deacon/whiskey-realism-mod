@@ -59,6 +59,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float hintScore = HintAffinity(pb.Id, ctx.OpposingCommanderHint);
                 state = NextRand(state);
                 float jitter = (state & 0xFFFFu) / 65535f;
+                // BC12: a play built on a crest (ReverseSlopeDefense) needs the picture to have found one across the front. The
+                // check follows the jitter draw so the other plays' jitter stream does not depend on whether a crest exists.
+                if (pb.RequiresCrest && !ctx.HasCrestLine)
+                {
+                    preconditionFiltered++;
+                    continue;
+                }
 
                 float score = 0.5f * personalityScore
                             + 0.2f * terrainScore

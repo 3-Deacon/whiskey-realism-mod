@@ -1518,7 +1518,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     flankBuckets[i] = TacticalFrontAxis.FlankExposureBucket(
                         leftWing || rightWing, overlapped,
                         enemyVisForChildren.FlankThreatForInstance(childInstanceIds[i]));
-                    perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], enemyVisForChildren, ownStrengthBucket: 1);
+                    perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], enemyVisForChildren);
                 }
 
                 var snapshots = new DirectChildSnapshot[childCount];

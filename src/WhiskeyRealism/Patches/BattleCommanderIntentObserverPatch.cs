@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -75,7 +76,8 @@ namespace WhiskeyRealism.Patches
                 hasReserveAvailable: HasReserveAvailable(battle),
                 anchoredFlankLeft: AnchoredFlank(battle, 0),
                 anchoredFlankRight: AnchoredFlank(battle, 1),
-                stalenessPressure: 0f);
+                stalenessPressure: 0f,
+                ownOnHighGroundShare: OwnOnHighGroundShare(battle));
             var playbook = TacticalPlaybookLedger.Decide(playbookInput);
 
             EmitIntent(side, macro, intentInput, intent);
@@ -121,6 +123,26 @@ namespace WhiskeyRealism.Patches
                     availability);
                 EmitReserveIntent(side, TacticalReservePolicyLedger.Decide(reserveInput));
             }
+        }
+
+        // BC12: the share of the side's command groups standing on a terrain-picture crest cell; HighGroundDefense is
+        // claimed only at TacticalPlaybookLedger.HighGroundShare (0 without a ready picture or with the flag off).
+        private static float OwnOnHighGroundShare(AIBattle battle)
+        {
+            TerrainPicture picture = TerrainPicture.CurrentForPlanning();
+            if (picture == null) return 0f;
+            IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+            if (units == null) return 0f;
+            int groups = 0, high = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var group = units[i] as Regiment;
+                if (group == null || group.unittyp <= 13) continue;
+                Vector3 p = group.transform.position;
+                groups++;
+                if (picture.CrestProminenceAt(p.x, p.z) > 0f) high++;
+            }
+            return groups == 0 ? 0f : (float)high / groups;
         }
 
         private static TacticalIntentInput BuildIntentInput(int macro, int side, AIBattle battle)

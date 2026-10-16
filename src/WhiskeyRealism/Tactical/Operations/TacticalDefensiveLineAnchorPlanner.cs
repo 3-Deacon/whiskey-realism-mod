@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -11,7 +12,13 @@ namespace WhiskeyRealism.Tactical.Operations
             float frontageWidth,
             float defensiveArtilleryDepth,
             bool corridorAnchor,
-            string reason)
+            string reason,
+            bool terrainLine = false,
+            bool anchoredLeft = false,
+            bool anchoredRight = false,
+            float lineDirX = 0f,
+            float lineDirZ = 0f,
+            float lineHalfLength = 0f)
         {
             HasAnchor = hasAnchor && center.HasValue && approachAvenue.HasAvenue;
             Center = HasAnchor ? center : DoctrineTargetPoint.None;
@@ -19,6 +26,13 @@ namespace WhiskeyRealism.Tactical.Operations
             FrontageWidth = SanitizeNonNegative(frontageWidth);
             DefensiveArtilleryDepth = SanitizeNonNegative(defensiveArtilleryDepth);
             CorridorAnchor = HasAnchor && corridorAnchor;
+            OnTerrainLine = HasAnchor && terrainLine && !corridorAnchor;
+            AnchoredLeft = OnTerrainLine && anchoredLeft;
+            AnchoredRight = OnTerrainLine && anchoredRight;
+            bool hasDirection = OnTerrainLine && lineHalfLength > 0f && (lineDirX != 0f || lineDirZ != 0f);
+            LineDirX = hasDirection ? lineDirX : 0f;
+            LineDirZ = hasDirection ? lineDirZ : 0f;
+            LineHalfLength = hasDirection ? lineHalfLength : 0f;
             Reason = string.IsNullOrWhiteSpace(reason) ? "defensive-line-none" : reason;
         }
 
@@ -28,6 +42,17 @@ namespace WhiskeyRealism.Tactical.Operations
         public float FrontageWidth { get; }
         public float DefensiveArtilleryDepth { get; }
         public bool CorridorAnchor { get; }
+        /// <summary>BC12: the anchor is a terrain line (crest, wall, river ...) from the terrain picture, not an approach intercept.</summary>
+        public bool OnTerrainLine { get; }
+        /// <summary>BC12: the +L end of the line (L = (-Dz, Dx) of the approach axis; command index 0) rests on a river or crest.</summary>
+        public bool AnchoredLeft { get; }
+        /// <summary>BC12: the -L end of the line (command index n-1) rests on a river or crest.</summary>
+        public bool AnchoredRight { get; }
+        /// <summary>BC12: unit direction of the terrain line itself (a wall's cover segment, a crest or river run); 0 when the anchor is not a terrain line.</summary>
+        public float LineDirX { get; }
+        public float LineDirZ { get; }
+        /// <summary>BC12: half the terrain line's own length (m), which can be less than half the frontage; 0 when not a terrain line.</summary>
+        public float LineHalfLength { get; }
         public string Reason { get; }
 
         public static TacticalDefensiveLineAnchor None(string reason)
@@ -59,7 +84,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 objective.Value,
                 Center.X,
                 Center.Z,
-                CorridorAnchor ? Math.Max(objective.TerrainStrength, 0.55f) : objective.TerrainStrength,
+                CorridorAnchor ? Math.Max(objective.TerrainStrength, TerrainPicture.AnchorStrength) : objective.TerrainStrength,
                 objective.ApproachDifficulty,
                 TacticalApproachAvenueEstimate.Create(
                     ApproachAvenue.Origin,
@@ -91,10 +116,26 @@ namespace WhiskeyRealism.Tactical.Operations
         private const float MinimumFrontageWidth = 350f;
         private const float DefensiveArtilleryDepth = 260f;
 
+        /// <summary>The anchor over the planning picture (null when the flag is off or the picture is not ready).</summary>
         public static TacticalDefensiveLineAnchor Plan(
             BattlefieldObjectiveEstimate objective,
             TacticalBattlefrontSnapshot battlefront,
             int nodeCount)
+        {
+            return Plan(objective, battlefront, nodeCount, TerrainPicture.CurrentForPlanning());
+        }
+
+        /// <summary>
+        /// BC12 decision 6: a strong terrain objective with no corridor evidence takes the best terrain line near it as its anchor
+        /// (reason terrain-line:kind[:anchored-left|:anchored-right]); without a picture or a line it stays preserved.
+        /// <paramref name="reverseSlope"/> holds a crest 80 m behind it instead of at its forward edge.
+        /// </summary>
+        public static TacticalDefensiveLineAnchor Plan(
+            BattlefieldObjectiveEstimate objective,
+            TacticalBattlefrontSnapshot battlefront,
+            int nodeCount,
+            TerrainPicture picture,
+            bool reverseSlope = false)
         {
             TacticalApproachAvenueEstimate avenue = objective.ApproachAvenue;
             if (!avenue.HasAvenue)
@@ -112,7 +153,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 explicitChokeObjective ||
                 (!strongTerrainAnchor && avenue.RoadAnchored);
             if (strongTerrainAnchor && !corridorEvidence)
-                return TacticalDefensiveLineAnchor.None("defensive-line-terrain-anchor-preserved");
+                return TerrainLineAnchor(objective, avenue, picture, reverseSlope)
+                    ?? TacticalDefensiveLineAnchor.None("defensive-line-terrain-anchor-preserved");
 
             float distance = Distance(avenue.Origin.X, avenue.Origin.Z, objective.X, objective.Z);
             if (distance < MinimumAvenueLength)
@@ -151,11 +193,66 @@ namespace WhiskeyRealism.Tactical.Operations
                 reason);
         }
 
+        private const float MaxTerrainFrontage = 760f;
+
+        // Null when there is no usable line. The threat axis is the reverse of the avenue axis (the enemy's travel direction).
+        private static TacticalDefensiveLineAnchor? TerrainLineAnchor(
+            BattlefieldObjectiveEstimate objective,
+            TacticalApproachAvenueEstimate avenue,
+            TerrainPicture picture,
+            bool reverseSlope)
+        {
+            if (picture == null || !picture.Ready) return null;
+            float threatX = -avenue.AxisX, threatZ = -avenue.AxisZ;
+            TerrainLine line = TacticalTerrainLinePlanner.BestLine(picture, objective.X, objective.Z, threatX, threatZ, MaxTerrainFrontage);
+            if (!line.Has) return null;
+
+            TacticalTerrainLinePlanner.AnchorPoint(in line, threatX, threatZ, reverseSlope, out float cx, out float cz);
+            float frontage = Math.Max(MinimumFrontageWidth, Math.Min(line.Length, MaxTerrainFrontage));
+
+            // The line's ends: L = (-Dz, Dx) of the approach axis D (command index 0 stands on +L).
+            float lx = -avenue.AxisZ, lz = avenue.AxisX;
+            float half = frontage * 0.5f;
+            bool includeCrest = line.Kind != TerrainLineKind.Crest;
+            bool left = TacticalTerrainLinePlanner.FlankAnchored(picture, cx + lx * half, cz + lz * half, lx, lz, includeCrest);
+            bool right = TacticalTerrainLinePlanner.FlankAnchored(picture, cx - lx * half, cz - lz * half, -lx, -lz, includeCrest);
+
+            string reason = "terrain-line:" + KindName(line.Kind) + (left ? ":anchored-left" : string.Empty) + (right ? ":anchored-right" : string.Empty);
+            return new TacticalDefensiveLineAnchor(
+                true,
+                DoctrineTargetPoint.From(cx, cz),
+                avenue,
+                frontage,
+                DefensiveArtilleryDepth,
+                corridorAnchor: false,
+                reason,
+                terrainLine: true,
+                anchoredLeft: left,
+                anchoredRight: right,
+                lineDirX: (line.X1 - line.X0) / Math.Max(0.001f, line.Length),
+                lineDirZ: (line.Z1 - line.Z0) / Math.Max(0.001f, line.Length),
+                lineHalfLength: line.Length * 0.5f);
+        }
+
+        private static string KindName(TerrainLineKind kind)
+        {
+            switch (kind)
+            {
+                case TerrainLineKind.Crest: return "crest";
+                case TerrainLineKind.Wall: return "wall";
+                case TerrainLineKind.SunkenRoad: return "sunken";
+                case TerrainLineKind.Fence: return "fence";
+                case TerrainLineKind.Embankment: return "embankment";
+                case TerrainLineKind.River: return "river";
+                default: return "line";
+            }
+        }
+
         private static bool IsStrongTerrainAnchor(BattlefieldObjectiveEstimate objective)
         {
             return objective.Type == TacticalObjectiveType.Ridge ||
                 objective.Type == TacticalObjectiveType.Town ||
-                objective.TerrainStrength >= 0.55f;
+                objective.TerrainStrength >= TerrainPicture.AnchorStrength;
         }
 
         private static bool IsExplicitChokeObjective(BattlefieldObjectiveEstimate objective)

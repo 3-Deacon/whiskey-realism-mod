@@ -10,7 +10,9 @@ namespace WhiskeyRealism.Tactical
         RefuseRight = 2,
         RefuseLeft = 3,
         ProbeAndFix = 4,
-        WeakPointPressure = 5
+        WeakPointPressure = 5,
+        /// <summary>BC12: hold the present line with no crest under it (HighGroundDefense is only claimed with the crest share).</summary>
+        LineHold = 6
     }
 
     public enum TacticalRefusedFlank
@@ -102,8 +104,10 @@ namespace WhiskeyRealism.Tactical
             bool hasReserveAvailable,
             bool anchoredFlankLeft,
             bool anchoredFlankRight,
-            float stalenessPressure)
+            float stalenessPressure,
+            float ownOnHighGroundShare = 0f)
         {
+            OwnOnHighGroundShare = float.IsNaN(ownOnHighGroundShare) ? 0f : Math.Max(0f, Math.Min(1f, ownOnHighGroundShare));
             Intent = intent;
             DecisiveSectorId = decisiveSectorId;
             Sectors = sectors ?? Array.Empty<TacticalPlaybookSectorView>();
@@ -120,6 +124,12 @@ namespace WhiskeyRealism.Tactical
         public bool AnchoredFlankLeft { get; }
         public bool AnchoredFlankRight { get; }
         public float StalenessPressure { get; }
+
+        /// <summary>
+        /// BC12: the share (0-1) of the side's held groups standing on a terrain-picture crest cell. HighGroundDefense is the
+        /// label only at <see cref="TacticalPlaybookLedger.HighGroundShare"/> or more; below it the hold is a LineHold.
+        /// </summary>
+        public float OwnOnHighGroundShare { get; }
     }
 
     public readonly struct TacticalPlaybookDecision
@@ -170,6 +180,9 @@ namespace WhiskeyRealism.Tactical
 
     public static class TacticalPlaybookLedger
     {
+        /// <summary>Share of held groups on crest cells at which a hold is called a high-ground defense.</summary>
+        public const float HighGroundShare = 0.5f;
+
         public static TacticalPlaybookDecision Decide(TacticalPlaybookInput input)
         {
             if (input.Sectors.Length == 0)
@@ -259,7 +272,7 @@ namespace WhiskeyRealism.Tactical
             for (int i = 0; i < input.Sectors.Length; i++)
                 hold.Add(input.Sectors[i].SectorId);
             return new TacticalPlaybookDecision(
-                TacticalPlaybookKind.HighGroundDefense,
+                input.OwnOnHighGroundShare >= HighGroundShare ? TacticalPlaybookKind.HighGroundDefense : TacticalPlaybookKind.LineHold,
                 mainEffortSectorId: -1,
                 refusedFlank: refused,
                 probeSectorIds: Array.Empty<int>(),
@@ -326,7 +339,7 @@ namespace WhiskeyRealism.Tactical
         private static TacticalPlaybookDecision Empty(CommanderIntent intent, string reason)
         {
             return new TacticalPlaybookDecision(
-                TacticalPlaybookKind.HighGroundDefense,
+                TacticalPlaybookKind.LineHold,
                 mainEffortSectorId: -1,
                 refusedFlank: TacticalRefusedFlank.None,
                 probeSectorIds: Array.Empty<int>(),

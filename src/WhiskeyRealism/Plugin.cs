@@ -63,6 +63,14 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableBattleHqConditionFix;
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
+        internal static ConfigEntry<bool> EnableBattleTerrainPicture;
+
+        /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
+        internal static bool TerrainPictureEnabled()
+        {
+            try { return EnableBattleTerrainPicture != null && EnableBattleTerrainPicture.Value; }
+            catch { return false; }
+        }
 
         /// <summary>Tactical / Enable Flank Response And Envelopment (BC11 decisions 1, 3, 4).</summary>
         internal static bool FlankResponseEnabled()
@@ -239,6 +247,8 @@ namespace WhiskeyRealism
             Instance = this;
             Log = Logger;
             Tactical.Battle.BattleTerrainGrid.Provider = Tactical.Battle.BattleTerrainGridRuntime.Get;
+            Tactical.Battle.TerrainPicture.Provider = Tactical.Battle.TerrainPictureRuntime.Get;
+            Tactical.Battle.TerrainPicture.PlanningEnabled = TerrainPictureEnabled;
 
             Enabled = Config.Bind(
                 "General", "Enabled", true,
@@ -512,6 +522,18 @@ namespace WhiskeyRealism
                 "end, face it and attack it as orders to the child, instead of only relabelling roles. Never for a Defender side. " +
                 "The refused flank that reaches vanilla (the wheel and the in-combat rotation) is a bug fix and is not behind this. Off: " +
                 "the closest visible enemy decides facing, reserves release as before, plays only relabel roles.");
+            EnableBattleTerrainPicture = Config.Bind(
+                "Tactical",
+                "Enable Battle Terrain Picture",
+                true,
+                "Default ON. BC12: the AI picks ground. A map picture built once per battle from public terrain data (crests, walls, " +
+                "fences, sunken roads and embankments, river lines, fords, bridges, road junctions, towns) classifies the objectives " +
+                "(Bridge, Ford, Town, RoadJunction, Ridge), scores terrain strength and approach difficulty, lets a defending side form " +
+                "on the best crest, wall or river line near its objective and skip a flank guard on a river- or crest-anchored flank, " +
+                "reads an enemy standing on strong ground as defending, and makes ReverseSlopeDefense need a crest across the front. " +
+                "The picture itself builds either way (the playbook terrain reads it). Off: objectives keep their types and zero " +
+                "terrain strength, the defensive anchor keeps its terrain-anchor-preserved behaviour, no strong-ground evidence, and " +
+                "ReverseSlopeDefense is never chosen (it needs a crest line).");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

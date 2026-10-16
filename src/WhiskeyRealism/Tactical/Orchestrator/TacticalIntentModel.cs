@@ -20,7 +20,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ReserveUncommitted,
         ContactSpotted,
         ContactBroken,
-        ReceivingFire
+        ReceivingFire,
+        /// <summary>BC12: the busiest sector's visible enemy stands on strong ground and has not fired (reads Defend).</summary>
+        EnemyOnStrongGround
     }
 
     /// <summary>

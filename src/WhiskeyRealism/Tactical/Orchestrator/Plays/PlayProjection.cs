@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 {
@@ -88,6 +89,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float enemyCentroidX, float enemyCentroidZ,
             float frontageMeters)
         {
+            var noCrest = default(TerrainLine);
+            return Project(template, armyCentroidX, armyCentroidZ, enemyCentroidX, enemyCentroidZ, frontageMeters, in noCrest);
+        }
+
+        /// <summary>
+        /// BC12 decision 8: with a crest line (<see cref="TerrainLine.Has"/>) the ReverseSlopeDefense template is anchored to it
+        /// instead of to proportions of the engagement distance: the forward screen stands on the crest centre, and the centre
+        /// and flank holds sit <see cref="TacticalTerrainLinePlanner.ReverseSlopeSetbackMeters"/> behind the crest along the
+        /// forward axis (their lateral layout stays the template's). Other templates ignore the crest.
+        /// </summary>
+        public static IReadOnlyList<WorldPlayRect> Project(
+            PlayTemplate template,
+            float armyCentroidX, float armyCentroidZ,
+            float enemyCentroidX, float enemyCentroidZ,
+            float frontageMeters,
+            in TerrainLine crest)
+        {
             if (template == null || template.Rects == null || template.Rects.Count == 0)
                 return Array.Empty<WorldPlayRect>();
 
@@ -131,6 +149,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 float forwardOffset = relAy * dist;
                 float anchorWorldX = armyCentroidX + rightX * lateralOffset + forwardX * forwardOffset;
                 float anchorWorldZ = armyCentroidZ + rightZ * lateralOffset + forwardZ * forwardOffset;
+                if (crest.Has && template.PlaybookId == BattlePlanId.ReverseSlopeDefense)
+                    AnchorToCrest(rect.Kind, crest, armyCentroidX, armyCentroidZ, forwardX, forwardZ, ref anchorWorldX, ref anchorWorldZ);
 
                 // Half-extents in world units. Lateral extent scales with
                 // frontage; forward extent scales with engagement distance.
@@ -146,6 +166,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     rect.Envelops);
             }
             return result;
+        }
+
+        // The screen stands on the crest centre; the holds keep their lateral place and move along the forward axis to
+        // ReverseSlopeSetbackMeters behind the crest's forward position.
+        private static void AnchorToCrest(PlayRectKind kind, in TerrainLine crest, float armyX, float armyZ, float forwardX, float forwardZ,
+            ref float anchorX, ref float anchorZ)
+        {
+            if (kind == PlayRectKind.ForwardScreen)
+            {
+                anchorX = crest.CenterX;
+                anchorZ = crest.CenterZ;
+                return;
+            }
+            if (kind != PlayRectKind.CenterHold && kind != PlayRectKind.LeftFlank && kind != PlayRectKind.RightFlank) return;
+            float crestForward = (crest.CenterX - armyX) * forwardX + (crest.CenterZ - armyZ) * forwardZ;
+            float current = (anchorX - armyX) * forwardX + (anchorZ - armyZ) * forwardZ;
+            float shift = crestForward - TacticalTerrainLinePlanner.ReverseSlopeSetbackMeters - current;
+            anchorX += forwardX * shift;
+            anchorZ += forwardZ * shift;
         }
 
         /// <summary>
