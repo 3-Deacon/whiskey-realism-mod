@@ -53,6 +53,8 @@ internal static class ForceAllocatorTests
             ("MapGroupPlayerIsNeverPickedAsAPicket", MapGroupPlayerIsNeverPickedAsAPicket),
             ("MixedSectorRealPlannerNeverPicketsThePlayer", MixedSectorRealPlannerNeverPicketsThePlayer),
             ("StarvingPlayerAloneInAThreatenedSectorIsNotRecover", StarvingPlayerAloneInAThreatenedSectorIsNotRecover),
+            ("StarvingAICorpsBesideAHealthyMapGroupPlayerStillMakesTheSectorRecover", StarvingAICorpsBesideAHealthyMapGroupPlayerStillMakesTheSectorRecover),
+            ("ScreenSectorHeldOnlyByThePlayerGetsAnAIScreen", ScreenSectorHeldOnlyByThePlayerGetsAnAIScreen),
             ("PlayerBoundForAnEmptyThreatenedSectorMakesItHold", PlayerBoundForAnEmptyThreatenedSectorMakesItHold),
             ("HoldSectorOfCreditsTheWaypointWhateverThePosition", HoldSectorOfCreditsTheWaypointWhateverThePosition),
             ("SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck", SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck),
@@ -1015,6 +1017,71 @@ internal static class ForceAllocatorTests
                 }
                 AssertEqual(TheaterPosture.Screen, posture, label + "the player's supply and morale do not; at morale 0.1 his strength counts too little (2000 at most against 6000) to hold");
             }
+    }
+
+    // G4 verify r5 W1: the Recover average is taken over the formations the planner can order, not the player's. A
+    // starving AI corps (supply 0.3) beside a healthy map-group player (supply 1) still sends its sector to
+    // Recover: summing every formation's supply while dividing by the orderable count would read 1.3 and miss it.
+    private static void StarvingAICorpsBesideAHealthyMapGroupPlayerStillMakesTheSectorRecover()
+    {
+        foreach (bool bySupply in new[] { true, false })
+        {
+            var s = Wide();
+            var guard = Corps(1, 100f, 30000f);
+            guard.SightRadius = 30f;
+            s.Own.Add(guard);
+            var hungry = Corps(8, 540f, 5000f);
+            if (bySupply) hungry.Supply01 = 0.3f; else hungry.Morale = 0.2f; // below the movement minimum 0.3
+            s.Own.Add(hungry);
+            var player = Corps(9, 550f, 20000f);
+            player.Chain = WlChainClass.PlayerMapGroup;
+            s.Own.Add(player);
+            s.Beliefs.Add(Belief(600f, 0f, 10000f));
+            var sectors = Sectors(s);
+            var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+            AssertEqual(TheaterPosture.Recover, PostureOfSector(plan, sectors.SectorAt(550f, 0f)),
+                (bySupply ? "supply" : "morale") + ": the AI corps decides, not the healthy player's");
+        }
+    }
+
+    // G4 verify r5 W2, through the real planner and PlanTasks: a Screen sector held only by a starving map-group player
+    // gets a screen-posture task from an AI formation, never from him, starving or healthy (the healthy case is what shows the MayMove guard, since a starving formation fails CanMove anyway). The post (x 576) must be within command range
+    // (40) of an own IIP, else LogisticsGate.ClampToReach makes no task at all: here an own IIP at x 560.
+    private static void ScreenSectorHeldOnlyByThePlayerGetsAnAIScreen()
+    {
+        foreach (bool starving in new[] { true, false })
+        {
+        var s = Wide();
+        s.Supply.Add(Iip(506, 560f, 0));
+        var guard = Corps(1, 100f, 30000f);
+        guard.SightRadius = 30f;
+        s.Own.Add(guard);
+        var lone = Corps(9, 550f, 2000f);
+        lone.Chain = WlChainClass.PlayerMapGroup;
+        if (starving)
+        {
+            lone.Supply01 = 0.1f;
+            lone.Morale = 0.1f;
+        }
+        s.Own.Add(lone);
+        s.Beliefs.Add(Belief(600f, 0f, 10000f));
+        var sectors = Sectors(s);
+        int k = sectors.SectorAt(550f, 0f);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+        AssertEqual(TheaterPosture.Screen, PostureOfSector(plan, k), "his strength x morale does not hold the sector, and his supply does not make it Recover");
+        var missions = new ReconMissionLedger();
+        var tasks = new List<ReconTask>();
+        ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
+        ReconTask screen = default;
+        bool found = false;
+        foreach (var task in tasks)
+            if (task.SectorId == k && task.Reason == "screen-posture") { screen = task; found = true; }
+        AssertTrue(found, "the Screen sector keeps its screen task");
+        int holder = ReconPlanner.PickFormation(s, sectors, plan, missions, screen, null, false);
+        AssertEqual(1, holder, "an AI formation takes it, never the player");
+        var a = Alloc(plan, s, null, tasks, missions);
+        AssertTrue(Of(a, 9).Role != FormationRole.Recon && !Of(a, 9).Withheld, "and he stays out of the allocation's recon posts");
+        }
     }
 
     // G4 verify r3 F2, through the real planner and ReconPlanner.PlanTasks: the player stands at x 310 (sector 1)
