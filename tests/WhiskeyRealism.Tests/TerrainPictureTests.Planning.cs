@@ -43,6 +43,7 @@ internal static partial class TerrainPictureTests
             ("bc12 TiltedWallSlotsStayOnTheWall", TiltedWallSlotsStayOnTheWall),
             ("bc12 ShortWallEndsFallBackToThePerpendicular", ShortWallEndsFallBackToThePerpendicular),
             ("bc12 LineDirectionIsClampedToTheAngleLimit", LineDirectionIsClampedToTheAngleLimit),
+            ("bc12 InterceptSlotsStandOnTheOwnSide", InterceptSlotsStandOnTheOwnSide),
             ("bc12 OnlyARiverAnchorsAFlank", OnlyARiverAnchorsAFlank),
             ("bc12 EnemyHeldObjectiveWaterIsOnOurSide", EnemyHeldObjectiveWaterIsOnOurSide),
             ("bc12 EnemyHeldObjectiveApproachIsOnOurSide", EnemyHeldObjectiveApproachIsOnOurSide),
@@ -850,6 +851,37 @@ internal static partial class TerrainPictureTests
             float lane = 0.8f * 600f * (7f / 9f - 0.5f);
             float along = plan.PrimaryTarget.Z - (-400f);
             AssertNear(Math.Abs(lane) * (float)Math.Tan(30.0 * Math.PI / 180.0), Math.Abs(along), 4f, "sign " + sign + ": the lane climbs at the 30 degree limit, not 50");
+        }
+    }
+
+    // Scope register (verify r2): a generic approach intercept (no road, no crossing) formed its line slots 210 m in FRONT of its own
+    // intercept point (z -790, past the enemy's entry at -760). Every approach intercept, corridor or generic, is a line to hold:
+    // every order of a Defender stands on the own side of it (no nearer the enemy than the intercept) and not past the objective.
+    private static void InterceptSlotsStandOnTheOwnSide()
+    {
+        foreach (string kind in new[] { "crossing", "road", "generic" })
+        foreach (float originZ in new[] { -760f, -1400f })
+        {
+            var avenue = TacticalApproachAvenueEstimate.Create(new TacticalMapPoint(400f, originZ), new TacticalMapPoint(400f, -360f),
+                TacticalApproachAvenueSource.ScheduledArrival, 0.9f, roadAnchored: kind == "road", crossingAnchored: kind == "crossing", "t");
+            var objective = new BattlefieldObjectiveEstimate("o", TacticalObjectiveType.VictoryPoint, 0f, 0.8f, false, 0.6f, 400f, -360f, 0.2f, 0.2f, avenue);
+            CommandNodeOperationalState[] nodes = SixDefenderNodes(6);
+            var operation = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, "o", 900f);
+            TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, TacticalBattlefrontGeometry.Build(nodes, objective), nodes.Length);
+            string label = kind + "/" + originZ;
+            AssertTrue(anchor.HasAnchor && anchor.Reason.StartsWith("approach-intercept", StringComparison.Ordinal), label + ": an intercept anchor, " + anchor.Reason);
+            AssertTrue(anchor.Center.Z < -360f - 150f, label + ": the intercept lies in front of the objective, z " + anchor.Center.Z);
+            CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, new BattlefieldPictureSnapshot(new[] { objective }), 5000f, 100f, 0.2f, BattleStance.Defender);
+            for (int i = 0; i < orders.Length; i++)
+            {
+                float z = orders[i].PrimaryTarget.Z;
+                // The axis is +z (the enemy comes from lower z): own side = higher z.
+                AssertTrue(z >= anchor.Center.Z, label + ": order " + i + " (" + orders[i].Task + ") at z " + z + " is not in front of the intercept at " + anchor.Center.Z);
+                AssertTrue(z <= -360f + 400f, label + ": order " + i + " stays near the defended objective, z " + z);
+                if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) >= 0)
+                    AssertTrue(z > originZ + 200f, label + ": the line slot " + i + " stands well inside the enemy's entry at " + originZ + ", z " + z);
+            }
+            AssertContains(orders[2].Reason, kind == "generic" ? "defensive-side-intercept" : "defensive-side-corridor", label + " reason");
         }
     }
 

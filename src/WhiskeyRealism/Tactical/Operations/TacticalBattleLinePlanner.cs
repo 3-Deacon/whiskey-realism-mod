@@ -15,8 +15,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 supportTarget,
                 fallbackTarget,
                 DoctrineTargetPoint.None,
-                DoctrineTargetPoint.None,
-                DoctrineTargetPoint.None,
                 0f,
                 reason)
         {
@@ -26,8 +24,6 @@ namespace WhiskeyRealism.Tactical.Operations
             DoctrineTargetPoint primaryTarget,
             DoctrineTargetPoint supportTarget,
             DoctrineTargetPoint fallbackTarget,
-            DoctrineTargetPoint leftFrontageTarget,
-            DoctrineTargetPoint rightFrontageTarget,
             DoctrineTargetPoint artilleryLineTarget,
             float echelonDepth,
             string reason)
@@ -35,8 +31,6 @@ namespace WhiskeyRealism.Tactical.Operations
             PrimaryTarget = primaryTarget;
             SupportTarget = supportTarget;
             FallbackTarget = fallbackTarget;
-            LeftFrontageTarget = leftFrontageTarget;
-            RightFrontageTarget = rightFrontageTarget;
             ArtilleryLineTarget = artilleryLineTarget;
             EchelonDepth = SanitizeNonNegative(echelonDepth);
             Reason = string.IsNullOrWhiteSpace(reason) ? "battle-line-unspecified" : reason;
@@ -45,8 +39,6 @@ namespace WhiskeyRealism.Tactical.Operations
         public DoctrineTargetPoint PrimaryTarget { get; }
         public DoctrineTargetPoint SupportTarget { get; }
         public DoctrineTargetPoint FallbackTarget { get; }
-        public DoctrineTargetPoint LeftFrontageTarget { get; }
-        public DoctrineTargetPoint RightFrontageTarget { get; }
         public DoctrineTargetPoint ArtilleryLineTarget { get; }
         public float EchelonDepth { get; }
         public string Reason { get; }
@@ -140,8 +132,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.Target(MainApproachDistance, frontage.MainLane(commandIndex, nodeCount)),
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)MainApproachDistance,
                         "battle-line-main-effort" + frontage.ReasonSuffix);
@@ -150,8 +140,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.Target(SupportApproachDistance, frontage.RoleLane(frontage.SupportLane(side), commandIndex, nodeCount)),
                         frontage.Target(MainApproachDistance, 0d),
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)SupportApproachDistance,
                         "battle-line-supporting-attack" + frontage.ReasonSuffix);
@@ -160,8 +148,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.Target(FixApproachDistance, frontage.RoleLane(frontage.FixLane(side), commandIndex, nodeCount)),
                         frontage.Target(MainApproachDistance, 0d),
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)FixApproachDistance,
                         "battle-line-fixing-force" + frontage.ReasonSuffix);
@@ -172,8 +158,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.Target(ScreenApproachDistance, frontage.RoleLane(frontage.ScreenLane(side), commandIndex, nodeCount)),
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, ScreenApproachDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)ScreenApproachDistance,
                         "battle-line-screen-probe" + frontage.ReasonSuffix);
@@ -182,8 +166,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.FlankGuardTarget(commandIndex, nodeCount),
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)FlankGuardDistance,
                         "battle-line-guard-flank" + frontage.ReasonSuffix + ":scourge-slot-flank-guard");
@@ -199,8 +181,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         direction.UsesApproachAvenue ? BehindObjective(lineObjective, direction, ReserveDistance, ReserveLane(commandIndex)) : reserve.HasTarget ? reserve.Target : frontage.Target(ReserveDistance, 0d),
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)ReserveDistance,
                         (reserve.HasTarget ? reserve.Reason : "battle-line-reserve-rally") + frontage.ReasonSuffix);
@@ -210,8 +190,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         frontage.AssemblySlotTarget(commandIndex, nodeCount),
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)AssemblyDistance,
                         "battle-line-assembly" + frontage.ReasonSuffix + frontage.AssemblySlotReasonSuffix(commandIndex, nodeCount));
@@ -220,8 +198,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         DoctrineTargetPoint.None,
                         DoctrineTargetPoint.None,
                         Fallback(node, lineObjective, direction, FallbackDistance),
-                        frontage.Left,
-                        frontage.Right,
                         frontage.Artillery,
                         (float)FallbackDistance,
                         "battle-line-fallback" + frontage.ReasonSuffix);
@@ -305,8 +281,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 bool defensiveSideTargets,
                 double assemblyStandOff,
                 double lineX, double lineZ, double lineHalf, double lineCos,
-                DoctrineTargetPoint left,
-                DoctrineTargetPoint right,
                 DoctrineTargetPoint artillery,
                 string reasonSuffix)
             {
@@ -320,14 +294,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 _lineZ = lineZ;
                 _lineHalf = lineHalf;
                 _lineCos = lineCos;
-                Left = left;
-                Right = right;
                 Artillery = artillery;
                 ReasonSuffix = reasonSuffix;
             }
 
-            public DoctrineTargetPoint Left { get; }
-            public DoctrineTargetPoint Right { get; }
             public DoctrineTargetPoint Artillery { get; }
             public string ReasonSuffix { get; }
 
@@ -504,31 +474,25 @@ namespace WhiskeyRealism.Tactical.Operations
 
                 double half = width * 0.5d;
                 double laneScale = defensiveAnchor.CorridorAnchor || IsChokeObjective(objective) ? 0.65d : 1d;
-                // A held terrain line is stood on its own side like a corridor intercept (never 75 m out in front of it).
-                bool defensiveSideTargets = defensiveAnchor.CorridorAnchor || defensiveAnchor.OnTerrainLine;
+                // Every defensive anchor (a corridor intercept, a generic approach intercept, a terrain line) is stood on its own side, the
+                // side away from the approach; the Approach() geometry (in front of the point, toward the enemy) is for an objective with no
+                // anchor. A generic approach intercept used to take Approach() and formed 210 m in front of its own intercept point.
+                bool defensiveSideTargets = defensiveAnchor.HasAnchor;
                 // A corridor intercept is a line to form up behind (AssemblyDistance back); a terrain line is the line to stand on: the
                 // line slots take the anchor itself, which already sits at the crest's forward edge, 80 m behind the crest under
                 // ReverseSlopeDefense, or on the wall / river line (inside vanilla's cover snap). Depth slots keep their distance.
                 double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;
                 LineFrame(in defensiveAnchor, direction, out double lineX, out double lineZ, out double lineHalf, out double lineCos);
-                var frame = new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos,
-                    DoctrineTargetPoint.None, DoctrineTargetPoint.None, DoctrineTargetPoint.None, string.Empty);
-                DoctrineTargetPoint left = defensiveSideTargets
-                    ? frame.BehindLine(MainApproachDistance, half)
-                    : Approach(objective, direction, MainApproachDistance, half);
-                DoctrineTargetPoint right = defensiveSideTargets
-                    ? frame.BehindLine(MainApproachDistance, -half)
-                    : Approach(objective, direction, MainApproachDistance, -half);
                 DoctrineTargetPoint artillery = defensiveAnchor.HasAnchor && defensiveAnchor.DefensiveArtilleryDepth > 0f
                     ? BehindObjective(objective, direction, defensiveAnchor.DefensiveArtilleryDepth, 0d)
                     : Approach(objective, direction, ArtilleryLineDistance, 0d);
                 string suffix = battlefront.HasFrontage ? ":frontage" : ":generated-frontage";
                 if (direction.UsesApproachAvenue) suffix += ":approach-avenue";
                 if (defensiveAnchor.HasAnchor) suffix += ":" + defensiveAnchor.Reason;
-                if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : ":defensive-side-corridor";
+                if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : defensiveAnchor.CorridorAnchor ? ":defensive-side-corridor" : ":defensive-side-intercept";
                 if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
-                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos, left, right, artillery, suffix);
+                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos, artillery, suffix);
             }
 
             private static bool IsTerrainAnchor(BattlefieldObjectiveEstimate objective)
