@@ -24,6 +24,10 @@ internal static class WlCampaignCourierTests
             ("wl campaign courier clock is vanilla's 8766 hours a year", CampaignClockIsVanillasYear),
             ("wl campaign courier years formula", CampaignYearsFormula),
             ("wl campaign courier an order never rides to another command", OrderNeverRidesToAnotherCommand),
+            ("wl campaign courier promotion then save then reload voids the order", PromotionThenSaveThenReloadVoidsTheOrder),
+            ("wl campaign courier reload then promotion voids the order", ReloadThenPromotionVoidsTheOrder),
+            ("wl campaign courier an old entry without identity is stamped then checked", AnOldEntryWithoutIdentityIsStampedThenChecked),
+            ("wl campaign courier pin a battle round trip keeps pending orders", BattleRoundTripKeepsPendingOrders),
             ("wl campaign courier non-positive factor counts as one", NonPositiveFactorCountsAsOne),
             ("wl campaign courier delivery re-decides a whiskey order", CampaignDeliveryReDecides),
             ("wl campaign courier delivery drops a vanilla repop", DeliveryDropsVanillaRepop),
@@ -142,18 +146,109 @@ internal static class WlCampaignCourierTests
         AssertFalse(compliance.Contains("8760"), "the compliance clock does not keep its own year");
     }
 
-    // F4: the baseline is the command the entry was queued for, not whatever the last non-empty pass saw.
+    // F4 and N1: the entry carries the command it was queued for as a key that survives a reload (the command
+    // unit's GameObject name plus the chosen commander id), never an instance id.
+    private const string CommandA = "II Corps#3";
+    private const string CommandB = "III Corps#3";
+
+    private static CourierEntry Keyed(string key)
+    {
+        CourierEntry e = Entry(OrderOrigin.C69, 5, 1000f, 1000f);
+        e.PlayerCommandKey = key;
+        return e;
+    }
+
     private static void OrderNeverRidesToAnotherCommand()
     {
-        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(42, 42), "the same command");
-        AssertFalse(WlCampaignCourierPolicy.BelongsToCommand(42, 43), "a promotion since: the order is void");
-        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(0, 43), "a restored entry carries no id and is taken as the current command's");
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(CommandA, CommandA), "the same command");
+        AssertFalse(WlCampaignCourierPolicy.BelongsToCommand(CommandA, CommandB), "a promotion since: the order is void");
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(null, CommandB), "an entry with no identity is not yet known to be wrong (the runtime stamps it first)");
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(CommandA, null), "no command to compare with: nothing to void");
         string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
-        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(runtime, @"PlayerCommandId = CurrentCommandId\(\)").Count, "both enqueue paths stamp the command");
-        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandId, commandId)"), "delivery checks it");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(runtime, @"PlayerCommandKey = CurrentCommandKey\(\)").Count, "both enqueue paths stamp the command");
+        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey)"), "delivery checks it");
         int deliver = runtime.IndexOf("internal static void DeliverDue()", StringComparison.Ordinal);
         string body = runtime.Substring(deliver, runtime.IndexOf("internal static void AcknowledgeReached(", deliver, StringComparison.Ordinal) - deliver);
         AssertFalse(body.Contains("_boundary"), "no baseline that an empty queue could reset");
+        AssertTrue(TestFixtures.HasLine(body, "Queue.StampPlayerCommand(commandKey);   // an entry from an old sidecar has no identity yet") || TestFixtures.HasLine(body, "Queue.StampPlayerCommand(commandKey);"), "an entry with no identity is stamped on the first pass");
+        AssertTrue(body.IndexOf("Queue.StampPlayerCommand(commandKey);", StringComparison.Ordinal) < body.IndexOf("Queue.TryTakeDue(", StringComparison.Ordinal), "before anything is taken");
+        int export = runtime.IndexOf("internal static List<CampaignCourierDto> Export()", StringComparison.Ordinal);
+        string exportBody = runtime.Substring(export, runtime.IndexOf("internal static void Restore(", export, StringComparison.Ordinal) - export);
+        AssertTrue(TestFixtures.HasLine(exportBody, "WlCampaignCourierSidecar.Select(Scratch, n, CurrentCommandKey(), list);"), "the save keeps only the current command's orders");
+    }
+
+    // N1 (a): the player is promoted, then the game is saved, then loaded. The order queued for the old
+    // command is not written to the sidecar.
+    private static void PromotionThenSaveThenReloadVoidsTheOrder()
+    {
+        var queue = new WlCourierQueue(new NullSink());
+        queue.Restore(Keyed(CommandA));
+        var pending = new CourierEntry[WlCourierQueue.MaxPending];
+        int n = queue.CopyPending(pending);
+        var saved = new List<CampaignCourierDto>();
+        WlCampaignCourierSidecar.Select(pending, n, CommandB, saved);
+        AssertEqual(0, saved.Count, "an order for the old command is not exported");
+        WlCampaignCourierSidecar.Select(pending, n, CommandA, saved);
+        AssertEqual(1, saved.Count, "an order for the current command is");
+        AssertEqual(CommandA, saved[0].PlayerCommand, "with the command it belongs to");
+    }
+
+    // N1 (b): saved for command A, loaded, and the player is promoted before the first delivery pass.
+    private static void ReloadThenPromotionVoidsTheOrder()
+    {
+        var snap = SidecarSnapshot.Empty();
+        snap.CampaignCouriers = new List<CampaignCourierDto> { WlCampaignCourierSidecar.ToDto(Keyed(CommandA)) };
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+        AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out _), "deserialize");
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out _), "decode");
+        var loaded = new List<CourierEntry>();
+        WlCampaignCourierSidecar.Sanitize(back.CampaignCouriers, loaded);
+        AssertEqual(1, loaded.Count, "restored");
+        AssertEqual(CommandA, loaded[0].PlayerCommandKey, "the identity survived the file");
+        var queue = new WlCourierQueue(new NullSink());
+        queue.Restore(loaded[0]);
+        queue.StampPlayerCommand(CommandB);   // the first delivery pass after the load, promoted meanwhile
+        AssertTrue(queue.TryTakeDue(1e9, out CourierEntry e, out _), "taken");
+        AssertEqual(CommandA, e.PlayerCommandKey, "a keyed entry is never re-stamped");
+        AssertFalse(WlCampaignCourierPolicy.BelongsToCommand(e.PlayerCommandKey, CommandB), "voided as command-change");
+    }
+
+    // N1 (c): a sidecar written before the identity existed.
+    private static void AnOldEntryWithoutIdentityIsStampedThenChecked()
+    {
+        CourierEntry old = Keyed(null);
+        CampaignCourierDto dto = WlCampaignCourierSidecar.ToDto(old);
+        dto.PlayerCommand = null;
+        AssertTrue(WlCampaignCourierSidecar.TryFromDto(dto, out CourierEntry loaded), "an old entry loads");
+        AssertTrue(string.IsNullOrEmpty(loaded.PlayerCommandKey), "with no identity");
+        var queue = new WlCourierQueue(new NullSink());
+        queue.Restore(loaded);
+        queue.StampPlayerCommand(CommandA);   // first delivery pass after the load
+        AssertTrue(queue.TryTakeDue(1e9, out CourierEntry stamped, out _), "taken");
+        AssertEqual(CommandA, stamped.PlayerCommandKey, "stamped with the current command");
+        AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(stamped.PlayerCommandKey, CommandA), "delivered to it");
+        AssertFalse(WlCampaignCourierPolicy.BelongsToCommand(stamped.PlayerCommandKey, CommandB), "and checked as normal after that");
+        // At save time an unkeyed entry is written with the current command.
+        var pending = new[] { loaded };
+        var saved = new List<CampaignCourierDto>();
+        WlCampaignCourierSidecar.Select(pending, 1, CommandA, saved);
+        AssertEqual(CommandA, saved[0].PlayerCommand, "an unkeyed entry is exported with the current command");
+    }
+
+    // The Whiskey sidecar is how a battle round trip rebuilds the campaign map (AICampaign.Save before the
+    // battle, op 4; AICampaign.Load after it, op 5, which resets the campaign scope and then restores): the
+    // identity must be stable across that, so no pending order is voided by the trip itself.
+    private static void BattleRoundTripKeepsPendingOrders()
+    {
+        string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
+        int key = runtime.IndexOf("private static string CurrentCommandKey()", StringComparison.Ordinal);
+        AssertTrue(key >= 0, "a command key");
+        string body = runtime.Substring(key, runtime.IndexOf("\n        }", key, StringComparison.Ordinal) - key);
+        AssertTrue(TestFixtures.HasLine(body, "_key = command.name + \"#\" + chosen;"), "the key is the unit name plus the chosen commander (an instance id changes when the scene is rebuilt; it only keys the cache)");
+        string coordinator = Code("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertTrue(coordinator.Contains("snap.CampaignCouriers = WlCampaignCourierRuntime.Export();") && coordinator.Contains("WlCampaignCourierRuntime.Restore(snap.CampaignCouriers);"), "saved with the sidecar and restored with it");
+        string load = Code("src/WhiskeyRealism/Patches/AICampaignSaveLoadPatch.cs");
+        AssertTrue(load.Contains("coordinator.ResetAll(\"load\");") && load.Contains("coordinator.LoadSidecar("), "the return from a battle is a sidecar load");
     }
 
     private static void CampaignYearsFormula()

@@ -42,6 +42,11 @@ namespace WhiskeyRealism.Strategic
         private static string _lastDropReason;
         private static int _lastDropType, _lastDropX, _lastDropZ, _lastDropSession;
 
+        // CurrentCommandKey's cache.
+        private static int _keyInstanceId;
+        private static int _keyChosen = -1;
+        private static string _key;
+
         // D17 (b): the campaign order last seen on the panel, to notice vanilla clearing it on arrival.
         private static DLC_WL.GivenOrders _watched;
 
@@ -57,6 +62,9 @@ namespace WhiskeyRealism.Strategic
             _lastDropReason = null;
             _lastDropType = _lastDropX = _lastDropZ = _lastDropSession = 0;
             _watched = null;
+            _keyInstanceId = 0;
+            _keyChosen = -1;
+            _key = null;
             Loaded.Clear();
         }
 
@@ -140,7 +148,7 @@ namespace WhiskeyRealism.Strategic
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
                     Legs = 1,
-                    PlayerCommandId = CurrentCommandId(),
+                    PlayerCommandKey = CurrentCommandKey(),
                 };
                 if (!Queue.TryEnqueue(in entry, WlCampaignDispatchPolicy.RateLimitYears, out string reason))
                 {
@@ -194,7 +202,7 @@ namespace WhiskeyRealism.Strategic
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
                     Legs = 1,
-                    PlayerCommandId = CurrentCommandId(),
+                    PlayerCommandKey = CurrentCommandKey(),
                 };
                 if (!Queue.TryEnqueue(in entry, WlCampaignDispatchPolicy.RateLimitYears, out string reason))
                 {
@@ -230,14 +238,15 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 double now = GameVars.currenttimefromstart;
-                int commandId = command.GetInstanceID();
+                string commandKey = CurrentCommandKey();
+                Queue.StampPlayerCommand(commandKey);   // an entry from an old sidecar has no identity yet
                 for (int pass = 0; pass < MaxDeliveriesPerPass; pass++)
                 {
                     if (!Queue.TryTakeDue(now, out CourierEntry entry, out bool superseded)) break;
                     if (superseded) continue;
                     // An order queued for another command (a promotion since) is void, however empty the
                     // queue was in between.
-                    if (!WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandId, commandId))
+                    if (!WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey))
                     {
                         Queue.Discard(in entry, "command-change");
                         continue;
@@ -374,8 +383,8 @@ namespace WhiskeyRealism.Strategic
                 int n = Queue.CopyPending(Scratch);
                 if (n == 0) return null;
                 var list = new List<CampaignCourierDto>(n);
-                for (int i = 0; i < n; i++) list.Add(WlCampaignCourierSidecar.ToDto(in Scratch[i]));
-                return list;
+                WlCampaignCourierSidecar.Select(Scratch, n, CurrentCommandKey(), list);
+                return list.Count > 0 ? list : null;
             }
             catch (Exception ex)
             {
@@ -415,11 +424,22 @@ namespace WhiskeyRealism.Strategic
 
         // ---------------------------------------------------------------- helpers
 
-        // The player's command as an instance id; 0 when there is none.
-        private static int CurrentCommandId()
+        // The player's command as a key that survives a reload and a battle round trip (both rebuild the scene,
+        // so instance ids change): the command unit's GameObject name and the chosen commander id. Null when
+        // there is none. Cached per command object, the name getter allocates.
+        private static string CurrentCommandKey()
         {
             Regiment command = PlayerCommand();
-            return (UnityEngine.Object)command != null ? command.GetInstanceID() : 0;
+            if ((UnityEngine.Object)command == null) return null;
+            int id = command.GetInstanceID();
+            int chosen = DLC_WL.dlc_chosencommander;
+            if (id != _keyInstanceId || chosen != _keyChosen)
+            {
+                _keyInstanceId = id;
+                _keyChosen = chosen;
+                _key = command.name + "#" + chosen;
+            }
+            return _key;
         }
 
         private static Regiment PlayerCommand()

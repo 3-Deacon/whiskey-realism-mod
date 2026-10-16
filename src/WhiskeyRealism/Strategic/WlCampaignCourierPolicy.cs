@@ -70,10 +70,13 @@ namespace WhiskeyRealism.Strategic
         }
 
         // The order was queued for the command the player has now (a promotion or a new career in between
-        // voids it). An entry restored from a save has no command id and is taken as the current one's.
-        public static bool BelongsToCommand(int entryCommandId, int currentCommandId)
+        // voids it). An entry with no identity (an old sidecar) is not yet known to be wrong: the runtime
+        // stamps it with the current command on the first delivery pass after the load, then checks it as
+        // any other. With no current command there is nothing to compare with.
+        public static bool BelongsToCommand(string entryCommandKey, string currentCommandKey)
         {
-            return entryCommandId == 0 || entryCommandId == currentCommandId;
+            return string.IsNullOrEmpty(entryCommandKey) || string.IsNullOrEmpty(currentCommandKey)
+                || string.Equals(entryCommandKey, currentCommandKey, StringComparison.Ordinal);
         }
 
         // A Whiskey order (the bridge and #69) leaves a record in the dispatch history when it is shown.
@@ -106,9 +109,24 @@ namespace WhiskeyRealism.Strategic
                 Origin = e.Origin.ToString(),
                 Issuer = e.IssuerCommanderId,
                 ShowZone = e.ShowZone,
+                PlayerCommand = e.PlayerCommandKey,
                 IssuedAt = e.IssuedAt,
                 DueAt = e.DueAt,
             };
+        }
+
+        // The pending entries that go into the sidecar: those queued for the command the player has now (an
+        // order for a command he has left would reach the wrong one after the reload), an unkeyed one with
+        // the current command.
+        public static void Select(CourierEntry[] pending, int count, string currentCommandKey, List<CampaignCourierDto> into)
+        {
+            for (int i = 0; i < count && i < pending.Length; i++)
+            {
+                CourierEntry e = pending[i];
+                if (!WlCampaignCourierPolicy.BelongsToCommand(e.PlayerCommandKey, currentCommandKey)) continue;
+                if (string.IsNullOrEmpty(e.PlayerCommandKey)) e.PlayerCommandKey = currentCommandKey;
+                into.Add(ToDto(in e));
+            }
         }
 
         public static bool TryFromDto(CampaignCourierDto dto, out CourierEntry entry)
@@ -135,6 +153,7 @@ namespace WhiskeyRealism.Strategic
                 Origin = origin,
                 IssuerCommanderId = dto.Issuer,
                 ShowZone = dto.ShowZone,
+                PlayerCommandKey = string.IsNullOrEmpty(dto.PlayerCommand) ? null : dto.PlayerCommand,
                 IssuedAt = dto.IssuedAt,
                 DueAt = dto.DueAt,
             };

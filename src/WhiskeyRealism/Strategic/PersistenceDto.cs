@@ -45,6 +45,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("origin")] public string Origin;
         [JsonProperty("issuer")] public int Issuer;
         [JsonProperty("showZone")] public bool ShowZone;
+        // The player's command the order was queued for (unit GameObject name + "#" + chosen commander id);
+        // null in a sidecar written before the identity existed.
+        [JsonProperty("playerCommand")] public string PlayerCommand;
         [JsonProperty("issuedAt")] public double IssuedAt;
         [JsonProperty("dueAt")] public double DueAt;
     }

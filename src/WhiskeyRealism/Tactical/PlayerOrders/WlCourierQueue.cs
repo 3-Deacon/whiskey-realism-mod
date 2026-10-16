@@ -31,9 +31,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public int UnitCommanderId;
         public int IssuerCommanderId;
         public bool ShowZone;
-        // Campaign entries: the player's command (instance id) the order was queued for; 0 = unknown (restored
-        // from a save). An order never rides on to a different command.
-        public int PlayerCommandId;
+        // Campaign entries: the player's command the order was queued for, as a key that survives a reload (the
+        // command unit's GameObject name and the chosen commander id); null = not known (an old sidecar). An
+        // order never rides on to a different command.
+        public string PlayerCommandKey;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture
@@ -197,6 +198,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
             _nextSeq++;
             _pending[_count++] = stored;
+        }
+
+        // Gives every pending entry that has no identity the command the player has now (the first delivery
+        // pass after an old sidecar was loaded); an entry that has one keeps it.
+        public void StampPlayerCommand(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            for (int i = 0; i < _count; i++)
+                if (string.IsNullOrEmpty(_pending[i].PlayerCommandKey)) _pending[i].PlayerCommandKey = key;
         }
 
         // The pending entries, in no particular order, for the sidecar. Returns how many were copied.

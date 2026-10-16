@@ -98,6 +98,7 @@ internal static partial class WlOrderFlowTests
             ("wl order followup hold lets other orders follow the normal rules", FollowUpHoldLeavesOtherOrdersToTheNormalRules),
             ("wl order followup hold ends with the follow-up", FollowUpHoldEndsWithTheFollowUp),
             ("wl order followup hold also voids a queued repeat", FollowUpHoldVoidsAQueuedRepeat),
+            ("wl order pin hold wiring is pinned by whole lines", HoldWiringIsPinnedByWholeLines),
             ("wl order pin reserve refresh from an emitter goes to vanilla", ReserveRefreshFromAnEmitterGoesToVanilla),
             ("wl order pin derived retreat needs macroai three", DerivedRetreatNeedsMacroAiThree),
             ("wl order pin prestige delta row is sampled per session", PrestigeDeltaRowIsSampledPerSession),

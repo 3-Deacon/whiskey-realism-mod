@@ -220,4 +220,16 @@ internal static partial class WlOrderFlowTests
         string body = BodyOf(flow, "public bool TryBuildRetreat(");
         AssertTrue(body.Contains("_playerBattle.macroai != 3) return false;"), "the army must be retreating");
     }
+
+    // verify r2 N2: the hold is read at capture and cleared with the battle; whole-line pins, so a
+    // commented-out or altered line fails.
+    private static void HoldWiringIsPinnedByWholeLines()
+    {
+        string flow = Code(FlowRuntime);
+        string route = BodyOf(flow, "private static CaptureVerdict Route(");
+        AssertTrue(TestFixtures.HasLine(route, "input.Hold = Flow.Hold();"), "the capture reads the hold");
+        AssertTrue(route.IndexOf("input.Hold = Flow.Hold();", StringComparison.Ordinal) < route.IndexOf("WlOrderFlow.DecideCapture(", StringComparison.Ordinal), "before the decision");
+        string reset = BodyOf(flow, "private static void ResetBattle(");
+        AssertTrue(TestFixtures.HasLine(reset, "Flow.ResetHold();"), "a battle reset clears the hold");
+    }
 }
