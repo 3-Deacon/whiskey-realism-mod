@@ -25,6 +25,7 @@ internal static class ConstructionSteeringTests
             ("RailSteeringStartsTheHighestScoredEligibleLine", RailSteeringStartsTheHighestScoredEligibleLine),
             ("RailBestLineStartedBeforeItsOwnRollStillCountsItsSuccess", RailBestLineStartedBeforeItsOwnRollStillCountsItsSuccess),
             ("RailTiesKeepTheRolledLineThenTheLowestIndex", RailTiesKeepTheRolledLineThenTheLowestIndex),
+            ("RailTakenRolledLineFallsBackToTheLowestIndexAmongTies", RailTakenRolledLineFallsBackToTheLowestIndexAmongTies),
             ("RailRolledLinesPairWithStartsInOrder", RailRolledLinesPairWithStartsInOrder),
             ("RailRollEqualToTheChanceSucceedsAsInVanilla", RailRollEqualToTheChanceSucceedsAsInVanilla),
             ("RailSteeringStandsDownForPlayerAndEurope", RailSteeringStandsDownForPlayerAndEurope),
@@ -243,6 +244,17 @@ internal static class ConstructionSteeringTests
         AssertEqual(1, started[1], "the second success: line 2 is taken, so the best of what remains");
     }
 
+    // When the rolled line is already taken, the best of the rest is the highest score and, among equal scores, the lowest index.
+    private static void RailTakenRolledLineFallsBackToTheLowestIndexAmongTies()
+    {
+        var eligible = new[] { true, true, true, true };
+        var scores = new[] { 0.1f, 0.5f, 0.5f, 0.9f };
+        var started = RailLineSteering.Choose(eligible, new[] { 0f, 1f, 1f, 0f }, 0.5f, scores);
+        AssertEqual(2, started.Length, "two successes, two starts");
+        AssertEqual(3, started[0], "the first success starts the strictly better line 3");
+        AssertEqual(1, started[1], "line 3 is taken; lines 1 and 2 tie: the lowest index");
+    }
+
     private static void RailTiesKeepTheRolledLineThenTheLowestIndex()
     {
         var eligible = new[] { true, true, true };
@@ -282,6 +294,11 @@ internal static class ConstructionSteeringTests
         var offAxis = Line(1, 500f, 0f, 505, 500f, 200f, 911);
         float a = RailLineScorer.Score(onAxis, s, plan, sectors), b = RailLineScorer.Score(offAxis, s, plan, sectors);
         AssertTrue(a > b, "two lines from the same own source: the one running along the main axis scores higher (" + a + " vs " + b + ")");
+        // The axis term alone (no own supply, no reach gain, no threat): both ends near the axis beat one end near it.
+        var bothEnds = Line(2, 300f, 0f, 930, 250f, 0f, 931);
+        var oneEnd = Line(3, 300f, 0f, 932, 300f, 200f, 933);
+        AssertTrue(RailLineScorer.Score(bothEnds, s, plan, sectors) > RailLineScorer.Score(oneEnd, s, plan, sectors) + 0.05f,
+            "the closeness of the ends is averaged: a line along the axis beats a line that touches it");
     }
 
     // Two lines with one average point (200, 0): the one that links own supply to the axis wins; an average-point scorer could
@@ -324,6 +341,8 @@ internal static class ConstructionSteeringTests
         AssertTrue(RailLineScorer.Score(inThreat, s, plan, sectors) > RailLineScorer.Score(quiet, s, plan, sectors), "an end in a Hold sector scores");
         plan.Sectors[plan.Sectors.Count - 1].Posture = TheaterPosture.Screen;
         AssertTrue(RailLineScorer.Score(inThreat, s, plan, sectors) > RailLineScorer.Score(quiet, s, plan, sectors), "and a Screen sector");
+        var secondEndOnly = Line(2, 0f, 300f, 924, 600f, 300f, 925);
+        AssertTrue(RailLineScorer.Score(secondEndOnly, s, plan, sectors) > RailLineScorer.Score(quiet, s, plan, sectors), "either end in the threatened sector scores, not the first alone");
         plan.Sectors[plan.Sectors.Count - 1].Posture = TheaterPosture.EconomyOfForce;
         AssertNear(RailLineScorer.Score(quiet, s, plan, sectors), RailLineScorer.Score(inThreat, s, plan, sectors), 1e-4f, "a sector that is neither threatened nor on the axis adds nothing");
     }
@@ -334,6 +353,14 @@ internal static class ConstructionSteeringTests
         var toward = Line(0, 500f, 0f, 505, 200f, 0f, 930);
         var away = Line(1, 500f, 0f, 505, 590f, 0f, 931);
         AssertTrue(RailLineScorer.Score(toward, s, plan, sectors) > RailLineScorer.Score(away, s, plan, sectors), "a line that carries supply from own source toward the main target scores above one that points away");
+        // The reach term alone: an own source far off the axis (axis closeness 0 at both ends) and one end nearer the target or not.
+        s.Supply.Add(ExecutorFixtures.Iip(507, 600f, 0));
+        s.Supply[s.Supply.Count - 1] = new SupplySourceRecord { Id = 507, Kind = SupplySourceKind.Iip, Owner = 0, X = 600f, Z = 400f, Built = true };
+        var nearer = Line(2, 600f, 400f, 507, 300f, 400f, 934);
+        var farther = Line(3, 600f, 400f, 507, 700f, 400f, 935);
+        float n = RailLineScorer.Score(nearer, s, plan, sectors), f = RailLineScorer.Score(farther, s, plan, sectors);
+        AssertTrue(n > f + 0.03f, "with nothing else to tell them apart, the line whose far end is nearer the target scores higher (" + n + " vs " + f + ")");
+        AssertNear(f, RailLineScorer.OwnSupplyWeight * 0.5f, 1e-4f, "a line pointing away gains no reach: its score is the own-supply share alone");
     }
 
     private static void RailScoreWithoutAMainEffortKeepsTheSupplyAndThreatTerms()
@@ -881,12 +908,13 @@ internal static class ConstructionSteeringTests
         var s = RailWorld(out var plan, out var sectors);
         int east = sectors.SectorAt(550f, 0f);
         plan.Sectors.Add(new SectorPlan { SectorId = east, Posture = TheaterPosture.Hold, TargetObjectiveId = -1, TargetX = 550f, TargetZ = 0f, HoldNeed = 9000f });
-        var fortX = new[] { 300f, 300f, 560f, 0f };
-        var fortZ = new[] { 40f, 300f, 0f, 400f };
+        var fortX = new[] { 300f, 300f, 600f, 0f };
+        var fortZ = new[] { 40f, 300f, 300f, 400f };
         var board = ConstructionSteeringBoard.Build(s, plan, sectors, null, fortX, fortZ, 60f);
         AssertTrue(board.FortPreferred[0], "40 from the axis, range 60: on the axis");
         AssertFalse(board.FortPreferred[1], "300 from the axis, in a quiet sector: neither");
-        AssertTrue(board.FortPreferred[2], "in the Hold sector, off the axis");
+        AssertTrue(sectors.SectorAt(600f, 300f) == east, "fixture: site 2 stands in the Hold sector");
+        AssertTrue(board.FortPreferred[2], "in the Hold sector, 300 off the axis");
         AssertFalse(board.FortPreferred[3], "far from both");
         var noPlan = ConstructionSteeringBoard.Build(s, new TheaterPlan { Alliance = 0, DaySerial = s.DaySerial }, sectors, null, fortX, fortZ, 60f);
         for (int i = 0; i < 4; i++) AssertFalse(noPlan.FortPreferred[i], "no main effort and no threatened sector: nothing is preferred (" + i + ")");
@@ -1009,8 +1037,12 @@ internal static class ConstructionSteeringTests
         AssertTrue(ConstructionSteeringBoard.TryRead(0, out var read) && ReferenceEquals(read, board), "the published board is read whole");
         AssertFalse(ConstructionSteeringBoard.TryRead(1, out _), "per alliance");
         AssertFalse(ConstructionSteeringBoard.TryRead(2, out _) || ConstructionSteeringBoard.TryRead(-1, out _), "alliances 0 and 1 only");
-        ConstructionSteeringBoard.Publish(2, board);
+        var other = ConstructionSteeringBoard.Build(s, plan, sectors, null, null, null, 0f);
+        ConstructionSteeringBoard.Publish(2, other);
+        ConstructionSteeringBoard.Publish(-1, other);
         AssertFalse(ConstructionSteeringBoard.TryRead(2, out _), "publishing for alliance 2 stores nothing");
+        AssertTrue(ConstructionSteeringBoard.TryRead(0, out var still) && ReferenceEquals(still, board), "...and does not replace alliance 0's board");
+        AssertFalse(ConstructionSteeringBoard.TryRead(1, out _), "...nor alliance 1's");
         PlanFreshness.NoteToday(s.DaySerial + PlanFreshness.MaxAgeDays);
         AssertTrue(ConstructionSteeringBoard.TryRead(0, out _), "two days old: still read");
         PlanFreshness.NoteToday(s.DaySerial + PlanFreshness.MaxAgeDays + 1);
@@ -1115,6 +1147,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(prepare, "bool fresh = ConstructionSteeringBoard.TryRead(alliance, out var board);"), "the fresh board");
         AssertTrue(HasLine(prepare, "eligible[j] = RailLineSteering.Eligible(line.constructionprogress, line.StartConstruction(alliance, checkonly: true));"), "eligibility is vanilla's (progress, then StartConstruction checkonly 77818-77831)");
         AssertTrue(prepare.Contains("GamePrefs.probrailroadconstructionperyear, GamePrefs.probrailroadconstructionperyearperindustr,"), "vanilla's chance (16058-16066)");
+        AssertTrue(HasLine(prepare, "IndustryPoliciesHeld(alliance), timediff);"), "...with the alliance's industry policies and the elapsed time");
         AssertTrue(HasLine(BodyOf(src, "private static int IndustryPoliciesHeld("), "int first = alliance != 0 ? 107 : 7;"), "policies 7..10 / 107..110 (16059)");
         AssertTrue(BodyOf(src, "private static int IndustryPoliciesHeld(").Contains("Policy.GetStatusByPolicyID(first + i)"), "...asked of vanilla's Policy");
         AssertTrue(src.Contains("if (!TryPrepare(alliance, timediff, out eligible, out score, out perCall, out lines)) return true;"), "any reason not to steer: vanilla runs");
