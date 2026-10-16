@@ -1,30 +1,35 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
     // v0.2.2 concrete steering for vanilla AICampaign.AssignUnitToDefendCapital
-    // (decompile 11668). Vanilla computes num2 (capital defense need), drops
+    // (decompile 11668). Vanilla computes num2 (capital defense need, 11712-11741), drops
     // invalid defenders, removes the FARTHEST defender when num2 <= 0 (~11778),
-    // adds the closest eligible unit when num2 > 0, then moves every
+    // adds the closest eligible unit when num2 > 0 (11786-11817), then moves every
     // groupstodefendcapital entry toward the capital (~11829).
     //
-    // 2026-10-14 (C-DefOps): this used to be a Postfix that added a candidate
-    // AFTER vanilla's move loop, whenever the personality gate was stricter than
-    // vanilla's. The unit never moved, vanilla stripped it as "farthest" the
-    // next call (num2 <= 0), the Postfix re-added it and stripped it from its
-    // other operations again: permanent churn. Now a Prefix pre-pledges the
-    // personality-chosen candidate only when vanilla's own num2 > 0 as well
-    // (CampaignMilitaryGates.ShouldPrePledgeCapitalDefender), so vanilla keeps
-    // it and its move loop moves it this call. Units the coastal-defense runner
-    // has custom-ordered are never pledged.
+    // 2026-10-14 (C-DefOps): this used to be a Postfix that added a candidate AFTER vanilla's
+    // move loop; the unit never moved, vanilla stripped it as "farthest" the next call and the
+    // Postfix re-added it: permanent churn. A Prefix pre-pledges only while vanilla's own num2 > 0
+    // so vanilla keeps the pledge and its move loop moves it this call.
+    //
+    // 2026-10-15 (stage G, G5b): the pick comes from the live campaign plan. The need (num2) is
+    // CapitalFloorPolicy.VanillaNeed: the 11712-11741 formula on the side's beliefs, not on
+    // vanilla's omniscient list of every enemy. The pledged unit is the allocation's CapitalGuard nearest the
+    // capital among the units vanilla's own filters (11791-11817) admit (CapitalFloorPolicy.PickPledge);
+    // the excess floor stays CapitalGuard, held by the planner's mover and withheld from vanilla's
+    // offensive pool, never pledged. The CIC personality, era and director modifiers are gone with the
+    // CIC input. Units the coastal-defense runner has custom-ordered are never pledged.
     //
     // W&L (stage F, C4): vanilla's own pick excludes only DLC_WL.IsMovedByPlayer
     // (11791); a player-owned unit can be pledged (its move loop then skips the
@@ -33,9 +38,9 @@ namespace WhiskeyRealism.Patches
     // pick follows WlChainRules.MayMove: the carrying group may be pledged (vanilla
     // moves it, #69 dispatches the march); the player's own command, his map group
     // (an unreliable executor is never pledged) and a CIC side are not. The need
-    // itself (CalculateRequiredDefense) counts every own group at its last waypoint,
-    // the player's map group included, exactly as vanilla's num2 does, so a player
-    // standing at the capital already satisfies it and nothing is pledged.
+    // counts every own group at its last waypoint, the player's map group included,
+    // exactly as vanilla's num2 does, so a player standing at the capital already
+    // satisfies it and nothing is pledged.
     [HarmonyPatch(typeof(AICampaign), "AssignUnitToDefendCapital")]
     [HarmonyPriority(Priority.High)]
     internal static class DefensiveOpsPatch
@@ -51,21 +56,39 @@ namespace WhiskeyRealism.Patches
         private static bool _removeUnitResolved;
         private static MethodInfo _removeUnitMethod;
 
+        // Pooled per call (main thread); cleared on entry.
+        private static readonly List<FormationRecord> OwnPool = new List<FormationRecord>();
+        private static readonly List<PledgeCandidate> CandidatePool = new List<PledgeCandidate>();
+        private static readonly List<Regiment> CandidateUnits = new List<Regiment>();
+        // The [CapitalFloor] row's last signature per alliance (rows on change).
+        private static readonly string[] LastRowSignature = new string[2];
+
+        static DefensiveOpsPatch()
+        {
+            CampaignScope.Register("defensive-ops-capital-floor-row", ResetRows);
+        }
+
+        private static void ResetRows()
+        {
+            LastRowSignature[0] = LastRowSignature[1] = null;
+        }
+
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.defensive-ops");
-                OnceLog.Info("defensiveops", "DefensiveOpsPatch wired (capital-defense strength gate)");
+                OnceLog.Info("defensiveops", "DefensiveOpsPatch wired (capital floor pre-pledge)");
 
                 try
                 {
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                    if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;
                     if (StrategicCoordinator.Instance == null) return;
 
                     int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                    if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.CICs.Length) return;
+                    if (allianceId < 0 || allianceId >= LastRowSignature.Length) return;
 
                     int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                     if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
@@ -74,73 +97,63 @@ namespace WhiskeyRealism.Patches
                     // can be resolved so this patch never touches non-capital state.
                     // The defense intent ledger (Slice 2) owns all non-capital coastal
                     // assets; this guard makes the spec's coexistence invariant explicit.
-                    if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
-                    var capitalTown = ResolveMapTown(capitalName);
+                    if (!TryResolveCapital(allianceId, out var capitalPosition)) return;
 
-                    var cic = StrategicCoordinator.Instance.CICs[allianceId];
-                    if (cic == null) return;
-
-                    var era = StrategicCoordinator.Instance.Eras[allianceId] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
-                    var personality = cic.Effective(era);
+                    if (!CampaignPlanStore.TryGetPlan(allianceId, out var plan) || !CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)) return;
 
                     var faction = AICampaignReflect.GetFaction(_aifaction);
                     if (faction == null) return;
 
                     var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
-                    var enemyUnits = ReadList(faction, "enemyunits", "defensiveops:field:enemyunits");
                     var capitalDefenders = ReadList(faction, "groupstodefendcapital", "defensiveops:field:capitaldefenders");
-                    if (ownUnits == null || enemyUnits == null || capitalDefenders == null) return;
+                    if (ownUnits == null || capitalDefenders == null) return;
 
-                    float vanillaNeed = CalculateRequiredDefense(ownUnits, enemyUnits, null, capitalPosition, default(PersonalityVector), null, vanillaOnly: true);
-                    float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown, vanillaOnly: false);
+                    LiveFormationReader.Read(ownUnits, allianceId, true, OwnPool);
+                    float vanillaNeed = CapitalFloorPolicy.VanillaNeed(
+                        GamePrefs.aiminimumstrengthformovement,
+                        EnemyDetectionRuntime.BeliefsFor(allianceId),
+                        1f,
+                        capitalPosition.x,
+                        capitalPosition.z,
+                        GamePrefs.aimaximumdistancetosearchforunitrelocations,
+                        OwnPool);
 
-                    // Scale the personality need by the director's CapitalDefenseBudgetModifier.
-                    // A positive modifier (e.g., TooFastCollapse → +0.10) raises the need. It can
-                    // only add a defender alongside vanilla's own (vanillaNeed > 0), never against it.
-                    // Default preserved when coordinator or posture is absent.
-                    try
+                    Regiment pledged = null;
+                    if (vanillaNeed > 0f)
                     {
-                        var directorMemories = StrategicCoordinator.Instance?.DirectorMemories;
-                        if (directorMemories != null && allianceId < directorMemories.Length)
-                        {
-                            float capitalMod = directorMemories[allianceId]?.LastPosture?.CapitalDefenseBudgetModifier ?? 0f;
-                            float capitalFraction = Clamp(1f + capitalMod, 0.90f, 1.30f);
-                            if (required > 0f) required *= capitalFraction;
-                        }
+                        FillCandidates(
+                            allianceId,
+                            ownUnits,
+                            capitalDefenders,
+                            ReadList(faction, "unitsindefensiveoperations", "defensiveops:field:defensiveops"),
+                            ReadList(faction, "unitsconstructingsupplydepots", "defensiveops:field:supplyops"),
+                            capitalPosition);
+                        int pick = CapitalFloorPolicy.PickPledge(allocation, vanillaNeed, CandidatePool);
+                        if (pick >= 0) pledged = UnitOf(pick);
                     }
-                    catch { }
 
-                    if (!CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(vanillaNeed, required)) return;
+                    if (pledged != null)
+                    {
+                        capitalDefenders.Add(pledged);
+                        RemoveFromList(faction, "unitsindefensiveoperations", pledged);
+                        RemoveFromDefensiveOperation(pledged);
+                        RemoveFromList(faction, "unitsinoffensiveoperations", pledged);
+                        RemoveFromList(faction, "unitsconstructingsupplydepots", pledged);
+                    }
 
-                    var candidate = FindCandidate(
-                        allianceId,
-                        _aifaction,
-                        ownUnits,
-                        capitalDefenders,
-                        ReadList(faction, "unitsindefensiveoperations", "defensiveops:field:defensiveops"),
-                        ReadList(faction, "unitsinoffensiveoperations", "defensiveops:field:offensiveops"),
-                        ReadList(faction, "unitsconstructingsupplydepots", "defensiveops:field:supplyops"),
-                        capitalPosition,
-                        required,
-                        personality);
-                    if (candidate == null) return;
-
-                    capitalDefenders.Add(candidate);
-                    RemoveFromList(faction, "unitsindefensiveoperations", candidate);
-                    RemoveFromDefensiveOperation(candidate);
-                    RemoveFromList(faction, "unitsinoffensiveoperations", candidate);
-                    RemoveFromList(faction, "unitsconstructingsupplydepots", candidate);
-
-                    TelemetryRouter.LegacyInfo(
-                        $"[DefenseIntent] alliance={allianceId} capital={capitalName} " +
-                        $"pre-pledged=1 need={required:F0} vanillaNeed={vanillaNeed:F0} caution={personality.Caution:F2}",
-                        TelemetryLayer.Campaign);
+                    EmitCapitalFloor(allianceId, vanillaNeed, plan.CapitalFloorStrength, pledged);
                 }
                 catch (Exception ex)
                 {
                     OnceLog.Warning("defensiveops:prefix", "[Patch:DefensiveOps] prefix failed: " + ex.Message);
                 }
             }
+        }
+
+        private static bool FlagOn(BepInEx.Configuration.ConfigEntry<bool> entry)
+        {
+            try { return entry != null && entry.Value; }
+            catch { return false; }
         }
 
         private static IList ReadList(object faction, string fieldName, string warningKey)
@@ -159,10 +172,9 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool TryResolveCapital(int allianceId, out Vector3 position, out string cityName)
+        private static bool TryResolveCapital(int allianceId, out Vector3 position)
         {
             position = default(Vector3);
-            cityName = "<capital>";
 
             try
             {
@@ -170,7 +182,6 @@ namespace WhiskeyRealism.Patches
                 var capital = GameVars.alliance[allianceId].capital;
                 if (capital == null) return false;
                 position = ((Component)capital).transform.position;
-                cityName = capital.CityName ?? cityName;
                 return true;
             }
             catch (Exception ex)
@@ -180,157 +191,64 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static CampaignMapTown ResolveMapTown(string cityName)
-        {
-            try
-            {
-                var ledger = StrategicCoordinator.Instance?.CampaignMap;
-                if (ledger != null && ledger.TryGetTown(cityName, out var town))
-                    return town;
-            }
-            catch { }
-            return null;
-        }
-
-        // Builds the CampaignMilitaryGates inputs from live lists. vanillaOnly
-        // reproduces vanilla num2 exactly (11700-11740); otherwise the personality
-        // multipliers and search radius apply and pledged defenders that vanilla
-        // keeps (its own validity filter, 11745) count while still marching.
-        private static float CalculateRequiredDefense(
-            IList ownUnits,
-            IList enemyUnits,
-            IList capitalDefenders,
-            Vector3 capitalPosition,
-            PersonalityVector personality,
-            CampaignMapTown capitalTown,
-            bool vanillaOnly)
-        {
-            var enemies = new List<CapitalForce>(enemyUnits.Count);
-            for (int i = 0; i < enemyUnits.Count; i++)
-            {
-                var enemy = enemyUnits[i] as Regiment;
-                if (enemy == null) continue;
-                enemies.Add(new CapitalForce(
-                    Tools.GetXZDistance(((Component)enemy).transform.position, capitalPosition),
-                    enemy.groupstrengthactive,
-                    enemy.groupmorale));
-            }
-
-            var own = new List<CapitalForce>(ownUnits.Count);
-            for (int i = 0; i < ownUnits.Count; i++)
-            {
-                var unit = ownUnits[i] as Regiment;
-                if (unit == null) continue;
-                own.Add(new CapitalForce(
-                    Tools.GetXZDistance(unit.GetLastWaypointPos(), capitalPosition),
-                    unit.groupstrengthactive,
-                    unit.groupmorale));
-            }
-
-            float baseMinimum = GamePrefs.aiminimumstrengthformovement;
-            if (vanillaOnly)
-            {
-                return CampaignMilitaryGates.VanillaCapitalDefenseNeed(
-                    baseMinimum, GamePrefs.aimaximumdistancetosearchforunitrelocations, enemies, own);
-            }
-
-            var pledged = new List<CapitalForce>();
-            if (capitalDefenders != null)
-            {
-                for (int i = 0; i < capitalDefenders.Count; i++)
-                {
-                    var defender = capitalDefenders[i] as Regiment;
-                    if (defender == null || !VanillaKeepsDefender(defender)) continue;
-                    pledged.Add(new CapitalForce(
-                        Tools.GetXZDistance(defender.GetLastWaypointPos(), capitalPosition),
-                        defender.groupstrengthactive,
-                        defender.groupmorale));
-                }
-            }
-
-            return CampaignMilitaryGates.PersonalityCapitalDefenseNeed(
-                baseMinimum,
-                GamePrefs.aimaximumdistancetosearchforunitrelocations * SearchRadiusMultiplier(personality),
-                enemies,
-                own,
-                pledged,
-                StrengthGateMultiplier(personality),
-                CapitalValueMultiplier(capitalTown));
-        }
-
-        // Vanilla drops a defender when groupstrength < min, morale < min,
-        // onretreat, or moved by the W&L player (11745).
-        private static bool VanillaKeepsDefender(Regiment defender)
-        {
-            if ((float)defender.groupstrength < GamePrefs.aiminimumstrengthformovement) return false;
-            if (defender.groupmorale < GamePrefs.aiminimummoraleformovement) return false;
-            if (defender.onretreat) return false;
-            try { if (DLC_WL.IsMovedByPlayer(defender)) return false; }
-            catch { }
-            return true;
-        }
-
-        private static float CapitalValueMultiplier(CampaignMapTown capitalTown)
-        {
-            if (capitalTown == null) return 1f;
-
-            float multiplier = 1f;
-            if ((capitalTown.Roles & CampaignTownRole.MajorCity) != 0) multiplier += 0.08f;
-            if ((capitalTown.Roles & CampaignTownRole.Workforce) != 0) multiplier += 0.04f;
-            if ((capitalTown.Roles & CampaignTownRole.Economic) != 0) multiplier += 0.04f;
-            multiplier += Mathf.Clamp01(capitalTown.CitySize) * 0.08f;
-            return Clamp(multiplier, 1f, 1.25f);
-        }
-
-        private static Regiment FindCandidate(
+        // The pool CapitalFloorPolicy.PickPledge chooses from: every own unit with its chain class,
+        // its distance to the capital, whether vanilla's own filters admit it (11791-11817) and
+        // whether the coastal-defense runner has it on a custom order.
+        private static void FillCandidates(
             int allianceId,
-            int aifactionIndex,
             IList ownUnits,
             IList capitalDefenders,
             IList defensiveOps,
-            IList offensiveOps,
             IList supplyOps,
-            Vector3 capitalPosition,
-            float requiredStrength,
-            PersonalityVector personality)
+            Vector3 capitalPosition)
         {
-            float maxDistance = GamePrefs.maxdistancedefensiveoperations * SearchRadiusMultiplier(personality);
-            float desiredStrength = Math.Max(GamePrefs.aiminimumstrengthformovement, requiredStrength);
-            float bestScore = float.MaxValue;
-            Regiment best = null;
+            CandidatePool.Clear();
+            CandidateUnits.Clear();
+            float maxDistance = GamePrefs.maxdistancedefensiveoperations;
             var chain = WlChainContext.Capture();
 
             for (int i = 0; i < ownUnits.Count; i++)
             {
                 var unit = ownUnits[i] as Regiment;
-                if (!EligibleForCapitalDefense(aifactionIndex, unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance)) continue;
-                if (CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, ((UnityEngine.Object)unit).GetInstanceID())) continue;
-                if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;
-
+                if (unit == null) continue;
+                int instanceId = ((UnityEngine.Object)unit).GetInstanceID();
                 float distance = Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition);
-                float readiness = ReadinessStep(unit);
-                float score = DefenseForceSizer.ScoreCandidate(
-                    unit.groupstrengthactive,
-                    unit.groupmorale,
-                    readiness,
-                    distance,
-                    desiredStrength,
-                    offensiveOps != null && offensiveOps.Contains(unit),
-                    personality.Caution,
-                    personality.Aggression);
-
-                if (score < bestScore)
+                CandidatePool.Add(new PledgeCandidate
                 {
-                    bestScore = score;
-                    best = unit;
-                }
+                    InstanceId = instanceId,
+                    DistanceToCapital = distance,
+                    Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit),
+                    PassesVanillaFilters = EligibleForCapitalDefense(unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance),
+                    CustomOrdered = CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, instanceId)
+                });
+                CandidateUnits.Add(unit);
             }
+        }
 
-            return best;
+        private static Regiment UnitOf(int instanceId)
+        {
+            for (int i = 0; i < CandidatePool.Count; i++)
+                if (CandidatePool[i].InstanceId == instanceId) return CandidateUnits[i];
+            return null;
+        }
+
+        // [CapitalFloor] on change of (floor, pledged unit, whether vanilla's need is positive): the need
+        // moves continuously, so the signature buckets it.
+        private static void EmitCapitalFloor(int allianceId, float vanillaNeed, float floor, Regiment pledged)
+        {
+            string unit = pledged == null ? "none" : ((UnityEngine.Object)pledged).name;
+            string signature = floor.ToString("0", CultureInfo.InvariantCulture) + "|" + unit + "|" + (vanillaNeed > 0f ? "short" : "met");
+            if (string.Equals(LastRowSignature[allianceId], signature, StringComparison.Ordinal)) return;
+            LastRowSignature[allianceId] = signature;
+            TelemetryRouter.LegacyInfo(
+                "[CapitalFloor] alliance=" + allianceId +
+                " vanillaNeed=" + vanillaNeed.ToString("0", CultureInfo.InvariantCulture) +
+                " floor=" + floor.ToString("0", CultureInfo.InvariantCulture) +
+                " pledged=" + unit,
+                TelemetryLayer.Campaign);
         }
 
         private static bool EligibleForCapitalDefense(
-            int aifactionIndex,
             Regiment unit,
             IList capitalDefenders,
             IList defensiveOps,
@@ -552,23 +470,6 @@ namespace WhiskeyRealism.Patches
             return AccessTools.Inner(typeof(AICampaign), typeName)
                 ?? AccessTools.TypeByName("AICampaign+" + typeName)
                 ?? AccessTools.TypeByName(typeName);
-        }
-
-        private static float StrengthGateMultiplier(PersonalityVector personality)
-        {
-            return Clamp(1f + 0.35f * personality.Caution - 0.20f * personality.Aggression, 0.70f, 1.45f);
-        }
-
-        private static float SearchRadiusMultiplier(PersonalityVector personality)
-        {
-            return Clamp(1f + 0.25f * personality.Caution - 0.10f * personality.Aggression, 0.80f, 1.30f);
-        }
-
-        private static float Clamp(float value, float min, float max)
-        {
-            if (value < min) return min;
-            if (value > max) return max;
-            return value;
         }
     }
 }

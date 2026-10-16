@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using static TestFixtures;
 using static TestHarness;
 
@@ -172,7 +173,14 @@ internal static class PlayerPositionTests
         float needWith = CampaignMilitaryGates.VanillaCapitalDefenseNeed(500f, 650f, enemies, withPlayer);
         AssertTrue(needWithout > 0f, "AI alone leaves the capital short: " + needWithout);
         AssertTrue(needWith <= 0f, "the player's group at the capital covers it: " + needWith);
-        AssertFalse(CampaignMilitaryGates.ShouldPrePledgeCapitalDefender(needWith, needWith), "no pledge when the player covers");
+
+        // The pledge follows the need: a guard is pledged while the AI alone leaves the capital short, none
+        // when the player's group covers it.
+        var allocation = new Allocation();
+        allocation.Assignments.Add(new Assignment { InstanceId = AiId, Role = FormationRole.CapitalGuard });
+        var pool = new[] { new PledgeCandidate { InstanceId = AiId, DistanceToCapital = 10f, Chain = WlChainClass.None, PassesVanillaFilters = true } };
+        AssertEqual(AiId, CapitalFloorPolicy.PickPledge(allocation, needWithout, pool), "the AI guard is pledged while the capital is short");
+        AssertEqual(-1, CapitalFloorPolicy.PickPledge(allocation, needWith, pool), "no pledge when the player covers");
 
         // And when it does not cover, the pick still never takes him.
         AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerMapGroup), "pre-pledge uses may-commit: never the map-group player");
@@ -181,8 +189,11 @@ internal static class PlayerPositionTests
     private static void RuntimeWiring()
     {
         string pledge = ReadRepoFile("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs");
-        AssertTrue(HasLine(pledge, "if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;"),
-            "#4 pre-pledge asks may-commit");
+        AssertTrue(HasLine(pledge, "Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit),"),
+            "#4 hands every candidate's chain class to the pick");
+        string policy = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CapitalFloorPolicy.cs");
+        AssertTrue(HasLine(policy, "if (!c.PassesVanillaFilters || c.CustomOrdered || !WlChainRules.MayMove(c.Chain)) continue;"),
+            "the pick asks may-commit");
         AssertFalse(pledge.Contains("CountsTowardCoverage"), "#4 pre-pledge never asks the coverage question");
         AssertFalse(pledge.Contains("CountsAsCommittedDefender"), "the ambiguous name is gone");
 
