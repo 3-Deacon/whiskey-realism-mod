@@ -50,7 +50,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // relocation range), threat = floor / own sum of min(str, str x morale) within relocation range of
     // the capital, clamped to [0, 1]. (Vanilla instead subtracts str x morale of its own units whose
     // last waypoint is nearer the capital than the nearest enemy, 11744-11749; Whiskey reads current
-    // positions, never a unit's destination.)
+    // positions, except the W&L map-group player's group, which counts where its last waypoint lies
+    // as vanilla counts it: ReserveRules.HoldPoint, decision 2026-10-15.)
     //
     // River lines are judged through ReviewTerrain (G3 verify F3): a review uses them only when every
     // line and river point it asks about is already known; otherwise it is scored with none (straight
@@ -626,13 +627,13 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                int sector = SectorOf(c.Sectors, f);
+                // The sector this formation counts in, for every fact below: where it stands, except the
+                // map-group player, who counts where his last waypoint lies (ReserveRules.HoldSectorOf),
+                // so Own and Count agree on whether a sector has a holder and a player bound for an empty
+                // threatened sector makes it Hold, even when he now stands off the sector map.
+                int sector = ReserveRules.HoldSectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
-                if (WlChainRules.CountsTowardHold(f.Chain))
-                {
-                    int holdSector = ReserveRules.HoldSectorOf(c.Sectors, f); // the map-group player holds where his last waypoint lies
-                    if (holdSector >= 0 && holdSector < n) x.Own[holdSector] += ReserveRules.HoldStrength(f);
-                }
+                if (WlChainRules.CountsTowardHold(f.Chain)) x.Own[sector] += ReserveRules.HoldStrength(f);
                 x.Count[sector]++;
                 x.Supply[sector] += f.Supply01;
                 x.Morale[sector] += f.Morale;

@@ -299,7 +299,7 @@ internal static class ReconPlannerTests
         s.Own.RemoveAt(1);
         AssertEqual(-1, Pick(s, sectors, plan, ScreenTask(600f, 0f, 600f, 200f, 1)), "and never the sole screen");
         var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
-        AssertEqual(2, Pick(s, sectors, plan, picket), "a town picket may fall to it (order-only, last tier)");
+        AssertEqual(-1, Pick(s, sectors, plan, picket), "nor a town picket: a picket is a pre-pledge, and his own vision already reaches the side");
     }
 
     private static void CarryingGroupUsableAsScreen()
@@ -818,7 +818,7 @@ internal static class ReconPlannerTests
         var (s, sectors, plan, picket) = ReserveFixture(WlChainClass.PlayerMapGroup);
         int got = Pick(s, sectors, plan, picket);
         AssertTrue(got != 1, "the AI corps is the sector's final reserve, got " + got);
-        AssertEqual(2, got, "the map-group player may picket (order-only); the AI corps keeps the hold");
+        AssertEqual(-1, got, "the map-group player is never picked (G4 verify r3 F1); the AI corps keeps the hold");
     }
 
     private static (CampaignSnapshot, SectorModel, TheaterPlan, ReconTask) ReserveFixture(WlChainClass otherChain)
