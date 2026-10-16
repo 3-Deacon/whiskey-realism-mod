@@ -46,6 +46,7 @@ internal static class ReconExecutorTests
             ("RowMemoryIsPrunedWhenMissionsLeaveTheLedger", RowMemoryIsPrunedWhenMissionsLeaveTheLedger),
             ("ReconGaveUpFeedsTheAllocator", ReconGaveUpFeedsTheAllocator),
             ("CavalryModeIsTheCodeMinusOneTwenty", CavalryModeIsTheCodeMinusOneTwenty),
+            ("QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals", QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals),
             ("ReconFormationStandsDownFromAreaMoves", ReconFormationStandsDownFromAreaMoves),
             ("ReconExecutorFilesHoldNoUnityTypes", ReconExecutorFilesHoldNoUnityTypes),
             ("ReconExecutorRuntimeStatementsPinned", ReconExecutorRuntimeStatementsPinned),
@@ -579,6 +580,30 @@ internal static class ReconExecutorTests
         AssertEqual(1, ReconOrders.ModeOf(ReconOrders.ScoutingOrder), "121 is mode 1 (Scouting)");
     }
 
+    // A 121 waits in the group's queue (cavalryorders 0, ordered 1) and 120 is wanted: ChangeCampaignOrders returns at 90738
+    // because cavalryorders already is 0, and no call cancels a queued entry, so the call is not made and not counted; once the
+    // 121 applies (both fields 1) the same wish sends 120. The mirror case (applied 1, queued 0, wanted 1) is the same.
+    private static void QueuedOrderOfAnotherModeIsNeitherRepeatedNorCountedAndSelfHeals()
+    {
+        AssertEqual(ReconOrders.CavalryCall.QueuedOther, ReconOrders.CallFor(mode: 0, current: 0, ordered: 1), "wanted 0, 1 queued, 0 applied: vanilla would return at 90738");
+        AssertEqual(ReconOrders.CavalryCall.QueuedOther, ReconOrders.CallFor(mode: 1, current: 1, ordered: 0), "the mirror case");
+        AssertEqual(ReconOrders.CavalryCall.Send, ReconOrders.CallFor(mode: 0, current: 1, ordered: 1), "the queued order has applied: the wanted mode is sent");
+        AssertEqual(ReconOrders.CavalryCall.Send, ReconOrders.CallFor(mode: 1, current: 0, ordered: 0), "nothing ordered: sent");
+        AssertEqual(ReconOrders.CavalryCall.AlreadySet, ReconOrders.CallFor(mode: 1, current: 0, ordered: 1), "the wanted mode is queued: not queued again");
+        AssertEqual(ReconOrders.CavalryCall.AlreadySet, ReconOrders.CallFor(mode: 1, current: 1, ordered: 1), "applied");
+        AssertEqual(ReconOrders.CavalryCall.Send, ReconOrders.CallFor(mode: 0, current: 1, ordered: 0 + 1), "applied 1, ordered 1, wanted 0");
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
+        string send = BodyOf(src, "public bool SendCavalryOrder(");
+        AssertTrue(HasLine(send, "var call = ReconOrders.CallFor(mode, unit.cavalryorders, unit.cavalryordersordered);"), "the host asks the pure rule with vanilla's two fields");
+        AssertTrue(HasLine(send, "NoteQueuedOther(unit, mode);"), "the queued-other case is logged");
+        int noted = send.IndexOf("NoteQueuedOther(unit, mode);", StringComparison.Ordinal);
+        int already = send.IndexOf("if (call == ReconOrders.CavalryCall.AlreadySet)", StringComparison.Ordinal);
+        AssertTrue(noted >= 0 && already > noted && send.Substring(noted, already - noted).Contains("return false;"), "and makes no call: vanilla would return at 90738 and the case would count as an order");
+        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return false;"), "and an order already set is not repeated");
+        AssertTrue(HasLine(BodyOf(src, "private void NoteQueuedOther("), "if (!Noted.Add(unit.GetInstanceID())) return;"), "once per formation");
+        AssertTrue(HasLine(BodyOf(src, "private static void Reset()"), "Noted.Clear();"), "and forgotten with the campaign");
+    }
+
     // ---- #15 and the old probe ----
 
     private static void ReconFormationStandsDownFromAreaMoves()
@@ -629,7 +654,7 @@ internal static class ReconExecutorTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
         string send = BodyOf(src, "public bool SendCavalryOrder(");
         AssertTrue(HasLine(send, "int mode = ReconOrders.ModeOf(orderCode);"), "the mode comes from the pure helper");
-        AssertTrue(HasLine(send, "if (unit.cavalryordersordered == mode) return false;"), "ChangeCampaignOrders tests cavalryorders only (90738), so a queued order would be queued again every review: the host compares what was ordered");
+        AssertTrue(HasLine(send, "if (call == ReconOrders.CavalryCall.AlreadySet) return false;"), "ChangeCampaignOrders tests cavalryorders only (90738), so a queued order would be queued again every review: the host compares what was ordered");
         AssertTrue(HasLine(send, "battleUnits.ChangeCampaignOrders(unit, orderCode);"), "the player's own order path (90720-90770)");
         AssertTrue(HasLine(src, "if ((UnityEngine.Object)battleUnits == null || !battleUnits.IsCampaign) return null;"), "BattleUnits comes from the campaign map's GameController, never AICampaign's private bunits");
         AssertTrue(src.Contains("113960"), "the readiness reset that makes a repeat each review right is named");

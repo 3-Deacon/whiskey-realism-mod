@@ -37,6 +37,20 @@ namespace WhiskeyRealism.Strategic.Planner
             return orderCode - NoCavalryOrder;
         }
 
+        internal enum CavalryCall { Send = 0, AlreadySet = 1, QueuedOther = 2 }
+
+        // What to do about wanted cavalry mode `mode` for a group whose applied mode is `current` (Regiment.cavalryorders) and
+        // whose last ordered mode is `ordered` (cavalryordersordered, set at the call, 90748). ChangeCampaignOrders returns at
+        // once when `current` equals the mode (90738), before the queue path, so it cannot replace an order still waiting in the
+        // group's queue (the queue is Regiment.orderqueue, applied at 125409-125412; nothing cancels an entry): QueuedOther is
+        // that case, current == wanted with a different mode ordered. The queued order applies, `ordered` then equals what it
+        // set, and the next review's call (Send) puts the wanted mode right. AlreadySet: the wanted mode is applied or queued.
+        internal static CavalryCall CallFor(int mode, int current, int ordered)
+        {
+            if (ordered == mode) return CavalryCall.AlreadySet;
+            return current == mode ? CavalryCall.QueuedOther : CavalryCall.Send;
+        }
+
         internal static bool MayAct(WlChainClass chain)
         {
             return chain != WlChainClass.PlayerCommand && chain != WlChainClass.CicSide;

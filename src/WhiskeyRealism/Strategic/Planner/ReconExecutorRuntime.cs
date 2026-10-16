@@ -22,6 +22,7 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         private static readonly ReconExecutor[] Executors = { new ReconExecutor(), new ReconExecutor() };
         private static readonly VanillaReconHost Host = new VanillaReconHost();
+        private static readonly System.Collections.Generic.HashSet<int> Noted = new System.Collections.Generic.HashSet<int>();
 
         static ReconExecutorRuntime()
         {
@@ -31,6 +32,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private static void Reset()
         {
             for (int a = 0; a < Executors.Length; a++) Executors[a] = new ReconExecutor();
+            Noted.Clear();
         }
 
         internal static void Execute(int alliance, CampaignSnapshot snapshot, ReconMissionLedger ledger)
@@ -77,18 +79,34 @@ namespace WhiskeyRealism.Strategic.Planner
                 return WlStrategicOrderBridge.ChainClassOf(in _chain, Alliance, unit);
             }
 
-            // ChangeCampaignOrders tests cavalryorders only (90738), so with order delays on an order still in the queue would be
-            // queued again every review: compare what was ordered (cavalryordersordered, set by the call at 90748) first.
+            // ChangeCampaignOrders tests cavalryorders only (90738): with order delays on, an order still in the queue would be
+            // queued again every review, and one that differs from the wanted mode cannot be replaced. ReconOrders.CallFor decides
+            // from cavalryorders and cavalryordersordered (set by the call at 90748).
             public bool SendCavalryOrder(int instanceId, int orderCode)
             {
                 var unit = UnitOf(instanceId);
                 if (unit == null) return false;
                 int mode = ReconOrders.ModeOf(orderCode);
-                if (unit.cavalryordersordered == mode) return false;
+                var call = ReconOrders.CallFor(mode, unit.cavalryorders, unit.cavalryordersordered);
+                if (call == ReconOrders.CavalryCall.QueuedOther)
+                {
+                    NoteQueuedOther(unit, mode);
+                    return false;
+                }
+                if (call == ReconOrders.CavalryCall.AlreadySet) return false;
                 var battleUnits = ResolveBattleUnits();
                 if ((UnityEngine.Object)battleUnits == null) return false;
                 battleUnits.ChangeCampaignOrders(unit, orderCode);
                 return true;
+            }
+
+            // vanilla cannot replace the order that is waiting (ReconOrders.CallFor): say so once per formation. Bounded by the
+            // formation count; reset with the campaign.
+            private void NoteQueuedOther(Regiment unit, int wantedMode)
+            {
+                if (!Noted.Add(unit.GetInstanceID())) return;
+                TelemetryRouter.LegacyInfo("[ReconMission] alliance=" + Alliance + " unit=" + unit.name + " note=cavalry-order-queued wanted=" + wantedMode
+                    + " ordered=" + unit.cavalryordersordered + " (applies first; the next review sends the wanted mode)", TelemetryLayer.Campaign);
             }
 
             // The campaign map's own GameController (as AICampaign finds it, 11143-11144), null on a battle map; AICampaign's
