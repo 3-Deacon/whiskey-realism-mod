@@ -81,6 +81,30 @@ namespace WhiskeyRealism.Strategic.Construction
         }
     }
 
+    // The planner's fort site preference (plan G5c, spec "construction steering"). Vanilla's CheckFortConstruction (16347-16405) walks
+    // fortconstructionsites in list order and orders the visiting unit onto the FIRST site that passes its tests (16383-16392), so
+    // the order of the list is the only preference it has. When a site on a planned axis or in a threatened sector is one vanilla
+    // would take for this unit, the fort patch (#27) hides every other site for the call, and vanilla takes it. When none is, the
+    // list stays as the saturation governor left it.
+    //   preferred[i]  the board marks site i as on a MainEffort axis or in a Hold / Screen sector;
+    //   eligible[i]   site i passes every test vanilla applies to this unit (range, other forts, frontline, ability) and the governor;
+    //   rank[i]       the construction ledger's Fort candidate score for site i (the TopFort carries a small bonus).
+    public static class FortSitePreference
+    {
+        // The index of the one preferred eligible site to leave visible (highest rank, lowest index among equals), -1 for none.
+        public static int Choose(bool[] preferred, bool[] eligible, float[] rank)
+        {
+            int best = -1;
+            for (int i = 0; i < preferred.Length && i < eligible.Length; i++)
+            {
+                if (!preferred[i] || !eligible[i]) continue;
+                float r = i < rank.Length ? rank[i] : 0f;
+                if (best < 0 || r > (best < rank.Length ? rank[best] : 0f)) best = i;
+            }
+            return best;
+        }
+    }
+
     public static class FortConstructionGovernor
     {
         public static bool ShouldEvaluateSites(FortConstructionCallGate gate)

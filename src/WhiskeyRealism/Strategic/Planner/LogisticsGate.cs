@@ -114,7 +114,8 @@ namespace WhiskeyRealism.Strategic.Planner
             return Math.Max(0f, formationCommandRange) * (1f + Math.Max(0f, supplySlack));
         }
 
-        private static bool Supplies(int alliance, in SupplySourceRecord source)
+        // Also RailLineScorer's test for a line end that is an own supply source (G5c): one rule for "supplies".
+        internal static bool Supplies(int alliance, in SupplySourceRecord source)
         {
             if (source.Kind == SupplySourceKind.Iip)
                 return source.Owner == alliance && !source.Invisible;

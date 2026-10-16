@@ -79,6 +79,9 @@ namespace WhiskeyRealism.Strategic.Construction
 
         public ConstructionCandidateKind Kind;
         public int BuildingTypeId;
+        // Railroad and Fort candidates: the index into BattleUnits.railroad / AICampaign.fortconstructionsites, both fixed for the
+        // campaign (81898-81942), so the planner's steering reads a verdict per line or site (G5c). 0 for other kinds.
+        public int SiteIndex;
         public string Name;
         public Theater Theater;
         public float SupplyPressure;
@@ -101,6 +104,7 @@ namespace WhiskeyRealism.Strategic.Construction
 
         public ConstructionCandidateKind Kind;
         public int BuildingTypeId;
+        public int SiteIndex; // the suppressed candidate's SiteIndex
         public string Name;
         public ConstructionSuppressionReason Reason;
     }
@@ -114,6 +118,9 @@ namespace WhiskeyRealism.Strategic.Construction
         public ConstructionCandidate TopFort = ConstructionCandidate.None;
         public ConstructionCandidate TopTelegraph = ConstructionCandidate.None;
         public ConstructionCandidate TopRailroad = ConstructionCandidate.None;
+        // Every scored Railroad and Fort candidate (not only the top of each kind): the planner's steering reads the ledger's
+        // verdict per line and per site by SiteIndex (G5c).
+        public ConstructionCandidate[] SiteCandidates = new ConstructionCandidate[0];
         public ConstructionSuppression[] Suppressions = new ConstructionSuppression[0];
         public string Signature = "";
     }
