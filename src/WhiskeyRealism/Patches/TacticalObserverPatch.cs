@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.PlayerOrders;
 using BattleCore = WhiskeyRealism.Tactical.Battle.BattleCore;
 using BattleSnapshot = WhiskeyRealism.Tactical.Battle.BattleSnapshot;
 using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
@@ -623,6 +624,9 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("tactical.patch.observer.current-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("tactical.patch.observer.current-order");
+                // WlOrderCapturePatch took this call onto a courier: the order slot did not move, which
+                // is not a vanilla drop (the flow rows tell the order's story).
+                if (WlOrderFlowRuntime.CapturedThisCall) return;
                 try
                 {
                     var next = ReadGivenOrderSignature();

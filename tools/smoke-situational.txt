@@ -71,3 +71,9 @@ tactical.patch.arrival-guard.*                   # BattleUnits.SetInitialPathFor
 tactical.patch.observer.battle-units-destroy       # BattleUnits.OnDestroy: only when the battle scene is left
 tactical.patch.perk-ids.hq.cover.*                # Regiment.GetCoverValueFromID: only when a unit stands at a cover object (fence, wall, building)
 campaign.patch.battle-result-observer              # BattleMonument.UpdateAllianceWon: only when a finished battle is imported back to the campaign
+
+# W&L order flow (plan 2026-10-15-wl-order-flow.md). The delivery Postfix and the capital-defense speed fix mark in any session
+# (their vanilla methods always run); these mark only in a W&L career or a rare situation.
+tactical.patch.wl-order-capture*                   # AIBattle.CheckCurrentOrderUpdate: its callers call it only in a W&L career (dlc_scenarioactive)
+tactical.patch.wl-removal-source.*                 # AIBattle.CheckRemovalOfOrders: UpdateDLCPlayerOrders (6747) calls it only in a W&L career
+campaign.patch.lost-orders-fow                     # DLC_WL.LaunchIncident: W&L career, when an incident is launched

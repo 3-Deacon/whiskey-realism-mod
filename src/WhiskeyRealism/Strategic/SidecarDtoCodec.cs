@@ -34,6 +34,8 @@ namespace WhiskeyRealism.Strategic
         public ProbeHysteresisDto[] ProbeHysteresis = new ProbeHysteresisDto[2];
         // W&L player compliance (PlayerComplianceRuntime); null when none.
         public PlayerComplianceDto PlayerCompliance;
+        // W&L campaign courier queue (order flow); null or empty when none.
+        public List<CampaignCourierDto> CampaignCouriers;
         // Stage E: smoothed policy needs (null = none yet) and the policy ledger pick (-1 = none).
         public float[][] PolicyNeeds = new float[2][];
         public int[] PolicyPicks = { -1, -1 };
@@ -153,7 +155,8 @@ namespace WhiskeyRealism.Strategic
                 SaveSequence = snap.SaveSequence,
                 LastSeenMonth = snap.LastSeenMonth,
                 LastSeenYear = snap.LastSeenYear,
-                PlayerCompliance = snap.PlayerCompliance
+                PlayerCompliance = snap.PlayerCompliance,
+                CampaignCouriers = snap.CampaignCouriers != null && snap.CampaignCouriers.Count > 0 ? snap.CampaignCouriers : null
             };
             for (int alliance = 0; alliance < 2; alliance++)
             {
@@ -254,6 +257,7 @@ namespace WhiskeyRealism.Strategic
                 result.LastSeenMonth = dto.LastSeenMonth ?? -1;
                 result.LastSeenYear = dto.LastSeenYear ?? -1;
                 result.PlayerCompliance = dto.PlayerCompliance;
+                result.CampaignCouriers = dto.CampaignCouriers;
                 snap = result;
                 reason = "ok";
                 return true;

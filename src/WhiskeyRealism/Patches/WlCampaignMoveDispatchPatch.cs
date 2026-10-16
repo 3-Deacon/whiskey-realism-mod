@@ -125,6 +125,8 @@ namespace WhiskeyRealism.Patches
                     try
                     {
                         WlCampaignDispatchRuntime.Flush();
+                        WlCampaignCourierRuntime.DeliverDue();
+                        WlCampaignCourierRuntime.AcknowledgeReached();
                         PlayerComplianceRuntime.ObserveCampaign();
                     }
                     catch (Exception ex)

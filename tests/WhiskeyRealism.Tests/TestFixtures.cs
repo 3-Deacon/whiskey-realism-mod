@@ -172,7 +172,8 @@ internal static class TestFixtures
         float rotation = 45f,
         bool battleEnded = false,
         bool stale = false,
-        PlayerOrderIntent activeIntent = PlayerOrderIntent.None)
+        PlayerOrderIntent activeIntent = PlayerOrderIntent.None,
+        double ageHours = 0.0)
     {
         var point = targetPoint ?? new PlayerOrderPoint(100f, 200f);
         return new PlayerOrderActiveSnapshot(
@@ -191,7 +192,8 @@ internal static class TestFixtures
             campaignGroupFlag: scope == PlayerOrderScope.Campaign,
             provenance: provenance,
             battleEnded: battleEnded,
-            stale: stale);
+            stale: stale,
+            ageHours: ageHours);
     }
 
     internal static FormationSnapshot Snapshot(

@@ -35,6 +35,13 @@ internal static class PlayerComplianceTests
             ("player compliance same order needs the same group, type and target", SameOrderIdentity),
             ("player compliance first look sets the baseline", FirstLookSetsBaseline),
             ("player compliance runtime keys the career on the campaign scenario", RuntimeKeysOnCampaignScenario),
+            ("player compliance no sample when inside the zone at issue", NoSampleWhenInsideZoneAtIssue),
+            ("player compliance sample when outside the zone", SampleWhenOutsideZone),
+            ("player compliance rotated zone box test", RotatedZoneBoxTest),
+            ("player compliance oblique zone follows the order mark's rotation", ObliqueZoneFollowsTheOrderMarkRotation),
+            ("player compliance a hold at the player's position starts no sample", NonPayingSessionStartsNoSample),
+            ("player compliance gate is a battle-only skip with a row", RuntimeSkipsInsideAtIssueInBattleOnly),
+            ("player compliance adds no penalty path", NoPenaltyPathAdded),
         });
     }
 
@@ -329,5 +336,103 @@ internal static class PlayerComplianceTests
         string runtime = System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs"));
         AssertTrue(runtime.Contains("_careers.Ensure(DLC_WL.dlc_chosencommander, SceneManagement.currentcampaignscenario)"), "key source");
         AssertFalse(runtime.Contains("leveltoload"), "never the level to load");
+    }
+
+    // The zone vanilla draws for an order (OrderMark.Initialize, decompile 199995-200005): centred on the
+    // order point, yawed arearotation + 180, `width` along its local x and `depth` along its local z.
+    // The order's given rotation is arearotation = rotation + 180, so arearotation 180 faces +z.
+    private static bool Starts(float px, float pz, float rotation = 180f, float width = 100f, float depth = 50f, float zx = 0f, float zz = 0f)
+        => ComplianceSampleGate.StartsSample(px, pz, zx, zz, rotation, width, depth);
+
+    private static void NoSampleWhenInsideZoneAtIssue()
+    {
+        // The order's zone already holds the player's command: reaching it is instant, not compliance.
+        AssertFalse(Starts(0f, 0f), "at the centre");
+        AssertFalse(Starts(40f, 20f), "inside the box");
+        AssertFalse(Starts(50f, 25f), "on the corner counts as inside (vanilla's ClosestPoint test)");
+        AssertFalse(Starts(100f, 100f, zx: 100f, zz: 100f), "a zone that is not at the origin");
+    }
+
+    private static void SampleWhenOutsideZone()
+    {
+        AssertTrue(Starts(60f, 0f), "beside the box");
+        AssertTrue(Starts(0f, 30f), "past the depth");
+        AssertTrue(Starts(1500f, 1500f), "far away");
+        AssertTrue(Starts(float.NaN, 0f), "a position that cannot be read keeps the old behaviour (a sample)");
+        AssertTrue(Starts(0f, 0f, width: 0f, depth: 0f), "an empty zone holds nobody");
+        AssertTrue(Starts(0f, 0f, rotation: float.PositiveInfinity), "a rotation that cannot be read keeps the old behaviour");
+    }
+
+    private static void RotatedZoneBoxTest()
+    {
+        // arearotation 270: yaw 450 = 90 degrees, so the local z (depth, 50) lies along world x and the
+        // local x (width, 100) along world -z.
+        AssertTrue(Starts(30f, 0f, rotation: 270f), "30 along the depth axis is past the half depth of 25");
+        AssertFalse(Starts(20f, 0f, rotation: 270f), "20 along the depth axis is inside");
+        AssertFalse(Starts(0f, 40f, rotation: 270f), "40 along the width axis is inside the half width of 50");
+        AssertTrue(Starts(0f, 60f, rotation: 270f), "60 along the width axis is outside");
+        // 45 degrees: the box's corner points along the diagonal; a point on the world axis at the same
+        // distance is outside where the unrotated box would hold it.
+        AssertTrue(Starts(0f, 49f, rotation: 225f, width: 100f, depth: 20f), "rotated 45 degrees, depth 20: 49 along the world z axis is outside");
+        AssertFalse(Starts(0f, 49f, rotation: 180f, width: 100f, depth: 100f), "the same point in an unrotated 100 x 100 box is inside");
+    }
+
+    // OrderMark.Initialize (200005): Euler(0, rotation + 180, 0), width along local x, depth along local z.
+    // Unity's yaw theta turns +z to (sin theta, cos theta) and +x to (cos theta, -sin theta). At yaw 30 degrees
+    // (arearotation -150) a point 45 along local x and one 8 along local z has both world components non-zero;
+    // a mirrored rotation direction puts it somewhere else.
+    private static void ObliqueZoneFollowsTheOrderMarkRotation()
+    {
+        double yaw = 30.0 * Math.PI / 180.0;
+        double sx = Math.Sin(yaw), cx = Math.Cos(yaw);
+        float RotationFor30 = -150f;
+        // local x = (cos, -sin), local z = (sin, cos)
+        float Wx(double lx, double lz) => (float)(lx * cx + lz * sx);
+        float Wz(double lx, double lz) => (float)(-lx * sx + lz * cx);
+        // width 60 (half 30), depth 20 (half 10)
+        AssertTrue(Starts(Wx(45, 0), Wz(45, 0), rotation: RotationFor30, width: 60f, depth: 20f), "45 along the width axis is outside half 30");
+        AssertFalse(Starts(Wx(25, 8), Wz(25, 8), rotation: RotationFor30, width: 60f, depth: 20f), "25 along x and 8 along z is inside");
+        AssertTrue(Starts(Wx(25, 14), Wz(25, 14), rotation: RotationFor30, width: 60f, depth: 20f), "14 along z is outside half 10");
+        AssertTrue(Starts(Wx(0, 12), Wz(0, 12), rotation: RotationFor30, width: 60f, depth: 20f), "12 along the depth axis is outside");
+        // The mirrored direction (yaw -30) would hold the first of these and not the second.
+        AssertTrue(Starts(Wx(-45, 0), Wz(-45, 0), rotation: RotationFor30, width: 60f, depth: 20f), "the other side of the width axis");
+        AssertFalse(Starts(Wx(-29, -9), Wz(-29, -9), rotation: RotationFor30, width: 60f, depth: 20f), "inside at the far corner");
+    }
+
+    private static void NonPayingSessionStartsNoSample()
+    {
+        // A release or follow-up hold is issued at the player's own position (a 100 x 50 zone on him):
+        // by the gate it is never a sample, whatever its rotation.
+        foreach (float rotation in new[] { 0f, 90f, 180f, 270f })
+            AssertFalse(Starts(1234f, 567f, rotation: rotation, zx: 1234f, zz: 567f), "a hold on the player at rotation " + rotation);
+    }
+
+    private static void RuntimeSkipsInsideAtIssueInBattleOnly()
+    {
+        string runtime = System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs"));
+        AssertTrue(runtime.Contains("ComplianceSampleGate.StartsSample("), "the runtime asks the gate");
+        int gate = runtime.IndexOf("StartsBattleSample(order)", StringComparison.Ordinal);
+        int dispatch = runtime.IndexOf("ledger.OnDispatch(scope, session, nowHours)", StringComparison.Ordinal);
+        AssertTrue(gate >= 0 && dispatch > gate, "the gate decides before a sample is started");
+        AssertTrue(runtime.Contains("scope == ComplianceScope.Battle && !StartsBattleSample(order)"), "only the battle scope is gated");
+        AssertTrue(runtime.Contains("skip reason=inside-at-issue"), "the skip is written as a row");
+    }
+
+    private static void NoPenaltyPathAdded()
+    {
+        // Reliability is a quiet estimate only the AI reads; no new call takes prestige or relations away.
+        foreach (string path in new[]
+        {
+            "src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs",
+            "src/WhiskeyRealism/Strategic/PlayerComplianceLedger.cs",
+            "src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs",
+            "src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderFlowRuntime.cs",
+            "src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderFlow.cs",
+        })
+        {
+            string code = System.Text.RegularExpressions.Regex.Replace(System.IO.File.ReadAllText(TestFixtures.FindRepoPath(path)), @"//[^\n]*", string.Empty);
+            foreach (string call in new[] { "EarnPrestige(", "LosePrestige(", "DLC_WL.prestige =", "DLC_WL.prestige -=", "ChangeRelation", "AddRelation", "relationship" })
+                AssertFalse(code.Contains(call), path + " never calls " + call);
+        }
     }
 }

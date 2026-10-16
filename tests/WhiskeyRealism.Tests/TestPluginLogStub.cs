@@ -8,6 +8,10 @@ namespace WhiskeyRealism
         internal static TestConfig<string> TacticalRegimentDiagnosticNames = new TestConfig<string>(string.Empty);
         internal static TestConfig<float> OpportunityHysteresisMinHoldSeconds = new TestConfig<float>(6.0f);
         internal static TestConfig<bool> EnableCampaignChainDispatches = new TestConfig<bool>(true);
+        internal static TestConfig<bool> EnableWlOrderCouriers = new TestConfig<bool>(true);
+        internal static TestConfig<bool> EnableWlOrderText = new TestConfig<bool>(true);
+        internal static TestConfig<bool> FixCapitalDefensePlayerOrder = new TestConfig<bool>(true);
+        internal static TestConfig<bool> EnableWlOrderFollowUp = new TestConfig<bool>(true);
         internal static TestPluginInstance Instance = new TestPluginInstance();
         internal static bool FlankResponse = true;
         internal static bool FlankResponseEnabled() => FlankResponse;
