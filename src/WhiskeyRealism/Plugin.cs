@@ -1406,12 +1406,17 @@ namespace WhiskeyRealism
                 return;
             }
 
-            // Heuristic Community Hotfix detection — best-effort sentinel check.
+            // Heuristic Community Hotfix detection — best-effort sentinel check. A direct
+            // per-assembly lookup: AccessTools.TypeByName logs a HarmonyX warning on every
+            // launch when the type is absent, which is the normal case.
             try
             {
-                var hotfixType = AccessTools.TypeByName("CommunityHotfix");
-                if (hotfixType != null)
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (assembly.GetType("CommunityHotfix", false) == null) continue;
                     Log.LogWarning("Community Hotfix detected — Whiskey Realism is INCOMPATIBLE. Strategic patches may not behave as expected.");
+                    break;
+                }
             }
             catch { /* ignore — best-effort only */ }
 
