@@ -88,6 +88,12 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float OddsDeadband = 0.10f;          // ratio units below RequiredRatio (F1)
         public const float CapitalThreatRelease = 0.4f;   // the latch re-arms below this (F2)
         public const int MaxTraceCandidates = 12;
+        // Vanilla refuses to march a formation of readiness step 0 or 1 onto enemy ground: SetWaypoint returns without a waypoint and
+        // without a message for the AI (91336-91355: readiness step <= 1, target on enemy soil outside regroupment range), and the
+        // AI's own offensive availability gate asks step >= 2 (IsUnitAvailableForOffensiveOperations 14091). The smoke of 2026-10-16
+        // sent such formations anyway: 4 of the Union's 6 moves "failed", were retried and given up (the mover's P8 tracker), and
+        // each give-up flipped the main effort to the other objective, whose mass still counted them.
+        public const int MinReadinessStep = 2;
         private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
         // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
         // InDefensiveOps (G5a, chapters decision 5): vanilla's defensive operations may take a deferred
@@ -560,6 +566,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool MassEligible(in FormationRecord f, float minMorale)
         {
             return Movable(f) && WlChainRules.MayMove(f.Chain)
+                && f.ReadinessStep >= MinReadinessStep
                 && f.Supply01 >= RecoverSupplyBelow && f.Morale >= minMorale;
         }
 
