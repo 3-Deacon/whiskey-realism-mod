@@ -29,6 +29,7 @@ internal static class PlannerSidecarTests
             ("PlannerFieldsAbsentFromAV3FileDecodeToTheirDefaults", PlannerFieldsAbsentFromAV3FileDecodeToTheirDefaults),
             ("DepotTasksKeepEndedDayAndWishPosition", DepotTasksKeepEndedDayAndWishPosition),
             ("ReconMissionsKeepStandDownDueAndClearedDay", ReconMissionsKeepStandDownDueAndClearedDay),
+            ("V3ReloadReboundsBeliefsByStableKey", V3ReloadReboundsBeliefsByStableKey),
             ("RecordWithoutAUnitKeyIsNotPersistedOrRestored", RecordWithoutAUnitKeyIsNotPersistedOrRestored),
             ("UnknownEnumNamesDecodeToTheDefault", UnknownEnumNamesDecodeToTheDefault),
             ("PlannerIsPerAlliance", PlannerIsPerAlliance),
@@ -297,6 +298,27 @@ internal static class PlannerSidecarTests
         AssertEqual(-1, old.ObservedObjectiveId, "no objective seen");
     }
 
+    // A restored belief has no instance id; the next detection under its unit key rebinds it: one belief, not two, and the
+    // strength within reach is counted once.
+    private static void V3ReloadReboundsBeliefsByStableKey()
+    {
+        var saved = Decoded(SamplePlanner());
+        var model = new EnemyArmyModel();
+        model.Restore(saved.Beliefs);
+        float before = EnemyBeliefQuery.StrengthWithin(model.Beliefs, 120.5f, -40.25f, 100f);
+        AssertEqual(1, model.Beliefs.Count, "the saved belief is restored");
+        AssertEqual(-1, model.Beliefs[0].InstanceId, "with no instance id");
+        var seen = new List<EnemyDetection>
+        {
+            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Guns = 40f, Source = DetectionSource.FogGrid }
+        };
+        model.Update(seen, 806, _ => 1f, _ => 0f);
+        AssertEqual(1, model.Beliefs.Count, "the next detection under that key is the same army, not a second one");
+        AssertEqual(4242, model.Beliefs[0].InstanceId, "rebound to this session's instance id");
+        AssertNear(13500f, before, 1e-2f, "before the sighting the saved belief counts at its saved confidence (18000 x 0.75)");
+        AssertNear(18000f, EnemyBeliefQuery.StrengthWithin(model.Beliefs, 120.5f, -40.25f, 100f), 1e-2f, "re-seen it counts once, at full confidence: no double count (not 31500)");
+    }
+
     private static void RecordWithoutAUnitKeyIsNotPersistedOrRestored()
     {
         var p = new PlannerSnapshot();
@@ -396,6 +418,7 @@ internal static class PlannerSidecarTests
         AssertEqual(1, moves[0].Retries, "retries");
         AssertEqual(1, depots.Count, "the depot task is kept");
         AssertEqual("1st Corps:7", depots[0].BuilderUnitKey, "its builder's key");
+        AssertEqual(11, depots[0].BuilderInstanceId, "and the builder is bound to this session's instance at once (the allocation pins a held builder before the ledger's Sync)");
         AssertEqual(1, missions.Count, "the mission is kept");
         AssertEqual(13, missions[0].InstanceId, "bound to the cavalry's instance id");
         AssertTrue(missions[0].StandDownDue && missions[0].ClearedDay == 6, "with its stand-down debt");
@@ -415,6 +438,8 @@ internal static class PlannerSidecarTests
         AssertEqual(21, moves[0].InstanceId, "bound to the one 1st Corps");
         AssertEqual("1st Corps:99", moves[0].UnitKey, "under the key it has now");
         AssertEqual("2nd Corps:8", depots[0].BuilderUnitKey, "the depot builder is rekeyed too");
+        AssertEqual(22, depots[0].BuilderInstanceId, "and bound");
+        AssertTrue(session.IndexOfKey(depots[0].BuilderUnitKey) >= 0, "the depot ledger's Sync, which finds a builder by the exact key, finds it");
         AssertEqual("1st Corps:99", missions[0].UnitKey, "and the mission");
     }
 
@@ -437,6 +462,7 @@ internal static class PlannerSidecarTests
         var result = Rebind(saved, session, out _, out var depots, out _);
         AssertEqual(1, depots.Count, "the record stays: the depot ledger's own sync abandons an active one whose builder is gone, so the site cools down");
         AssertEqual("Pioneers:41", depots[0].BuilderUnitKey, "under the saved key");
+        AssertEqual(-1, depots[0].BuilderInstanceId, "unbound: the ledger's Sync abandons it");
         AssertEqual(0, result.DepotTasksRebound, "it was not rebound");
     }
 
@@ -524,6 +550,8 @@ internal static class PlannerSidecarTests
         AssertTrue(json.Contains("\"unitKey\": \"1st Corps:7\""), "a move is its unit key");
         AssertTrue(json.Contains("\"unitKey\": \"Cavalry Corps:3\""), "a mission is its unit key");
         AssertTrue(json.Contains("\"builderUnitKey\": \"Pioneers:41\""), "a depot task's builder is its unit key");
+        AssertFalse(json.Contains("minorOfficerProfiles") || json.Contains("\"cic\"") || json.Contains("probeState") || json.Contains("probeHysteresis") || json.Contains("recentReplans"),
+            "the retired layers' state is no longer written (dead officer profiles, the CIC, the old probe)");
     }
 
     // ---- versions ----

@@ -23,8 +23,9 @@ namespace WhiskeyRealism.Strategic.Planner
     // The first review after a load: the saved formation references (unit keys) become this session's formations.
     // Resolution is the snapshot's IndexOfKeyOrName (the exact key, else the one formation of that name when the commander
     // part no longer matches). A move or a recon mission whose formation is gone is dropped (the scout's stand-down debt
-    // with it: there is no screen left to stand down); a depot task keeps its record, and the depot ledger's own Sync
-    // abandons an active one whose builder is gone, so the site still cools down.
+    // with it: there is no screen left to stand down); a depot task keeps its record, with its builder bound at once (the
+    // allocation pins a held builder before the ledger's Sync runs), and the depot ledger's own Sync abandons an active
+    // one whose builder is gone, so the site still cools down.
     public static class PlannerRebind
     {
         public struct Result
@@ -58,6 +59,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int own = s.IndexOfKeyOrName(task.BuilderUnitKey);
                 if (own >= 0)
                 {
+                    task.BuilderInstanceId = s.Own[own].InstanceId; // pinned from this review on: the allocation reads it before the ledger's Sync
                     task.BuilderUnitKey = s.Own[own].UnitKey;
                     result.DepotTasksRebound++;
                 }

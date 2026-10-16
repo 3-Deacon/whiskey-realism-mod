@@ -35,8 +35,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // Fog-honest: beliefs and the battles this review judges only, never an enemy destination.
     internal static class ReconStep
     {
-        // What OperationalProbeOptions carried for a probe's withdraw ratio and reaction multiplier (G6
-        // deletes that class); the escalate ratio is the plan's own required ratio for the main effort.
+        // A probe's withdraw ratio and reaction multiplier (the retired phased-plan probe carried the same values);
+        // the escalate ratio is the plan's own required ratio for the main effort.
         internal const float ProbeWithdrawRatio = 0.55f;
         internal const float ProbeReactionMultiplier = 1.45f;
         internal const string ReleasedReason = "main-moved"; // the mission's reason when its probe is released
