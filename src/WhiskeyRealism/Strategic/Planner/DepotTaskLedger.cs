@@ -41,13 +41,16 @@ namespace WhiskeyRealism.Strategic.Planner
         public float AdoptX, AdoptZ;    // that depot's position, read when OwnUnbuiltDepotAtSite
     }
 
-    // A builder the allocator must keep as it is (plan G5c, verify r3 F7): the formation of a Wished task, pinned to the wish
-    // position until the task is Built or lost. See DepotTaskLedger.CollectPinnedBuilders.
-    public struct PinnedBuilder
+    // A builder the depot ledger holds (plan G5c, verify r3 F7 and the G3 ruling): the one published set both the planner and the
+    // allocator read. Every held builder is out of the mass G3 judges. A Wished one (the wish is paid, the depot rises only while the
+    // builder stays near) is also pinned by the allocator to its target, the wish position; a Marching one still follows the
+    // allocation, its target the site. See DepotTaskLedger.CollectHeldBuilders.
+    public struct HeldBuilder
     {
         public int InstanceId;
         public int SectorId;
         public float TargetX, TargetZ;
+        public bool Wished;
     }
 
     // The depot task executor's state machine (plan G5c, spec C10): Marching -> Wished -> Built | Abandoned, one active task per
@@ -278,19 +281,26 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // The builders the allocator must not re-task (plan G5c, verify r3 F7): the formation of every Wished task, at the wish
-        // position (the site for an Ahead wish, whose builder may still be marching to it). A wish is paid at once and the depot rises
-        // only while the builder stays within its bugle range (96626-96648), so from the wish until Built or wish-lost the formation is
-        // the depot's, whatever the plan does with the task. Only a bound builder is listed, and Sync binds none the planner may not
-        // move (BindBuilder abandons a task whose formation is the W&L player's), so the set never holds one.
-        public void CollectPinnedBuilders(List<PinnedBuilder> into)
+        // The builders the depot ledger holds, for the planner and the allocator (plan G5c, verify r3 F7 and the G3 ruling): the bound
+        // builder of every active task. A Wished task's builder is listed at the wish position (the site for an Ahead wish, whose builder
+        // may still be marching to it): the wish is paid at once and the depot rises only while the builder stays within its bugle range
+        // (96626-96648), so from the wish until Built or wish-lost the allocator keeps it there, whatever the plan does with the task. A
+        // Marching task's builder is listed at the site (not Wished): the allocator still re-picks it, but G3 counts it in no mass. Only
+        // a bound builder is listed, and Sync binds none the planner may not move (BindBuilder abandons a task whose formation is the W&L
+        // player's), so the set never holds one.
+        public void CollectHeldBuilders(List<HeldBuilder> into)
         {
             into.Clear();
             for (int t = 0; t < _tasks.Count; t++)
             {
                 var task = _tasks[t];
-                if (task.State != DepotTaskState.Wished || task.BuilderInstanceId < 0) continue;
-                into.Add(new PinnedBuilder { InstanceId = task.BuilderInstanceId, SectorId = task.SectorId, TargetX = task.WishX, TargetZ = task.WishZ });
+                if (!Active(task) || task.BuilderInstanceId < 0) continue;
+                bool wished = task.State == DepotTaskState.Wished;
+                into.Add(new HeldBuilder
+                {
+                    InstanceId = task.BuilderInstanceId, SectorId = task.SectorId, Wished = wished,
+                    TargetX = wished ? task.WishX : task.X, TargetZ = wished ? task.WishZ : task.Z
+                });
             }
         }
 

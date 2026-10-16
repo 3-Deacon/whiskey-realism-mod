@@ -14,7 +14,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // snapshot's flags, never from vanilla.
     //
     // Roles, in the order they are handed out:
-    //   pinned        the builder of a Wished depot task (DepotTaskLedger.CollectPinnedBuilders, the Pinned input): DepotBuilder at the
+    //   pinned        the builder of a Wished depot task (DepotTaskLedger.CollectHeldBuilders, the Pinned input): DepotBuilder at the
     //                 wish position, withheld, until the task is Built or lost, whatever the plan does with the task (G5c verify r3 F7).
     //                 Handed out before everything else; never a formation the planner may not move.
     //   immobile      Hold in place, never moved: a formation that is busy (battle, retreat, raid,
@@ -95,12 +95,12 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeTheater,
                                           IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null,
-                                          IReadOnlyList<PinnedBuilder> pinnedBuilders = null)
+                                          IReadOnlyList<HeldBuilder> heldBuilders = null)
         {
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
-            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp, pinnedBuilders).Run(allocation);
+            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp, heldBuilders).Run(allocation);
             return allocation;
         }
 
@@ -187,7 +187,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly int _n;
             private readonly int _sectorCount;
             private readonly IReadOnlyList<GaveUpMove> _gaveUp;
-            private readonly IReadOnlyList<PinnedBuilder> _pinned;
+            private readonly IReadOnlyList<HeldBuilder> _pinned;
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -202,7 +202,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
                           Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp,
-                          IReadOnlyList<PinnedBuilder> pinned)
+                          IReadOnlyList<HeldBuilder> pinned)
             {
                 _gaveUp = gaveUp;
                 _pinned = pinned;
@@ -348,14 +348,13 @@ namespace WhiskeyRealism.Strategic.Planner
             // as a guard it can raise; the hold reserve needs none, a pinned builder counts at its strength there either way.
             private bool[] AssignPinnedBuilders()
             {
-                if (_pinned == null || _pinned.Count == 0) return null;
-                var mask = new bool[_n];
+                var mask = ReserveRules.WishedBuilders(_s, _pinned);   // the one rule for who is pinned: G3's plan reads it too
+                if (mask == null) return null;
                 for (int k = 0; k < _pinned.Count; k++)
                 {
                     int i = _s.IndexOfOwn(_pinned[k].InstanceId);
-                    if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain)) continue;
+                    if (i < 0 || !mask[i] || _done[i]) continue;
                     Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);
-                    mask[i] = true;
                 }
                 return mask;
             }

@@ -66,6 +66,7 @@ internal static class ConstructionSteeringTests
             ("AheadBuilderStaysOnItsMarchToTheSite", AheadBuilderStaysOnItsMarchToTheSite),
             ("PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve", PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve),
             ("AllocatorAndPlannerWiringPinsTheWishedBuilders", AllocatorAndPlannerWiringPinsTheWishedBuilders),
+            ("HeldBuilderIsNotInTheMassG3Judges", HeldBuilderIsNotInTheMassG3Judges),
             ("AdoptNeedsTheDepotWithinTheBuildersBugleRange", AdoptNeedsTheDepotWithinTheBuildersBugleRange),
             ("APendingPlacementIsNotALostWish", APendingPlacementIsNotALostWish),
             ("DepotHoldReachesTheFortJobOnlyUnderAFreshPlan", DepotHoldReachesTheFortJobOnlyUnderAFreshPlan),
@@ -1048,23 +1049,23 @@ internal static class ConstructionSteeringTests
     {
         var s = DepotWorld(out var plan, out var a);
         var ledger = new DepotTaskLedger();
-        var pinned = new List<PinnedBuilder>();
+        var pinned = new List<HeldBuilder>();
         ledger.Sync(plan, a, s, null);
-        ledger.CollectPinnedBuilders(pinned);
-        AssertEqual(0, pinned.Count, "a Marching task's builder follows the allocation: not pinned");
+        ledger.CollectHeldBuilders(pinned);
+        AssertTrue(pinned.Count == 1 && !pinned[0].Wished && pinned[0].InstanceId == 1 && pinned[0].TargetX == 250f && pinned[0].TargetZ == 0f, "a Marching task's builder is held (out of G3's mass) but not Wished: the allocator does not pin it; its target is the site");
         ledger.RecordWished(0, s.DaySerial, 250f, 70f);
-        ledger.CollectPinnedBuilders(pinned);
-        AssertEqual(1, pinned.Count, "a Wished task's builder is pinned");
-        AssertTrue(pinned[0].InstanceId == 1 && pinned[0].TargetX == 250f && pinned[0].TargetZ == 70f && pinned[0].SectorId == 3, "...at the wish position, in the task's sector");
+        ledger.CollectHeldBuilders(pinned);
+        AssertEqual(1, pinned.Count, "a Wished task's builder is held");
+        AssertTrue(pinned[0].Wished && pinned[0].InstanceId == 1 && pinned[0].TargetX == 250f && pinned[0].TargetZ == 70f && pinned[0].SectorId == 3, "...at the wish position, in the task's sector");
         ledger.Abandon(0, "timeout", s.DaySerial + 1);
-        ledger.CollectPinnedBuilders(pinned);
+        ledger.CollectHeldBuilders(pinned);
         AssertEqual(0, pinned.Count, "released when the task ends");
         var built = new DepotTaskLedger();
         var s2 = DepotWorld(out var p2, out var a2);
         built.Sync(p2, a2, s2, null);
         built.RecordWished(0, s2.DaySerial, 250f, 0f);
         built.RecordBuilt(0, s2.DaySerial + 1);
-        built.CollectPinnedBuilders(pinned);
+        built.CollectHeldBuilders(pinned);
         AssertEqual(0, pinned.Count, "and when the depot stands");
         // A builder the planner may not move never keeps a task, so it is never listed.
         var player = new DepotTaskLedger();
@@ -1075,8 +1076,8 @@ internal static class ConstructionSteeringTests
         own.Chain = WlChainClass.PlayerMapGroup;
         s3.Own[s3.IndexOfOwn(1)] = own;
         player.Sync(p3, a3, s3, null);
-        player.CollectPinnedBuilders(pinned);
-        AssertEqual(0, pinned.Count, "the W&L map-group player's formation is dropped from the task, so never pinned");
+        player.CollectHeldBuilders(pinned);
+        AssertFalse(pinned.Exists(h => h.InstanceId == 1), "the W&L map-group player's formation is dropped from the task, so never held (the next task, if any, has another builder)");
     }
 
     // The pin, through the real allocator and the real mover review.
@@ -1088,7 +1089,7 @@ internal static class ConstructionSteeringTests
         var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });    // no DepotTasks: the plan dropped the task
         var sectors = ExecutorFixtures.Sectors(s);
         int sector = sectors.SectorAt(250f, 70f);
-        var pin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sector, TargetX = 250f, TargetZ = 70f } };
+        var pin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector, TargetX = 250f, TargetZ = 70f } };
 
         var free = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
         AssertTrue(free.TryGet(1, out var loose) && loose.Role != FormationRole.DepotBuilder, "control: with no pin the dropped task leaves the builder to the allocation (" + loose.Role + ")");
@@ -1114,7 +1115,7 @@ internal static class ConstructionSteeringTests
         var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
         int sector2 = ExecutorFixtures.Sectors(s2).SectorAt(230f, 70f);
         plan2.DepotTasks.Add(new DepotTask { X = 235f, Z = 70f, SectorId = sector2, Priority = 1f });
-        var pin2 = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sector2, TargetX = 230f, TargetZ = 70f } };
+        var pin2 = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector2, TargetX = 230f, TargetZ = 70f } };
         var a2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, null, null, null, pin2);
         AssertTrue(a2.TryGet(1, out var still) && still.Role == FormationRole.DepotBuilder && still.TargetX == 230f && still.TargetZ == 70f, "a smaller formation in the sector does not take its role or move its target");
         AssertTrue(a2.TryGet(3, out var other) && other.Role == FormationRole.DepotBuilder, "the plan's own task gets the smaller formation (" + other.Role + ")");
@@ -1127,7 +1128,7 @@ internal static class ConstructionSteeringTests
         s.Own.Add(ExecutorFixtures.Corps(2, 330f, 15000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
         var sectors = ExecutorFixtures.Sectors(s);
-        var pin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sectors.SectorAt(250f, 0f), TargetX = 250f, TargetZ = 0f } };
+        var pin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sectors.SectorAt(250f, 0f), TargetX = 250f, TargetZ = 0f } };
         var tracker = new MoveTracker();
         tracker.RecordIssued(1, 400f, 0f, 250f, 0f, s.DaySerial - 1, false);
 
@@ -1152,7 +1153,7 @@ internal static class ConstructionSteeringTests
         s.Own.Add(player);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
         var sectors = ExecutorFixtures.Sectors(s);
-        var pinPlayer = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sectors.SectorAt(550f, 0f), TargetX = 550f, TargetZ = 0f } };
+        var pinPlayer = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sectors.SectorAt(550f, 0f), TargetX = 550f, TargetZ = 0f } };
         var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pinPlayer);
         AssertTrue(a.TryGet(1, out var x) && x.Role != FormationRole.DepotBuilder, "the map-group player is never made a builder by a pin");
         var cic = ExecutorFixtures.Wide(1);
@@ -1160,9 +1161,9 @@ internal static class ConstructionSteeringTests
         own.Chain = WlChainClass.PlayerCommand;
         cic.Own.Add(own);
         var plan2 = ExecutorFixtures.HandPlan(cic, new int[0]);
-        var a2 = ForceAllocator.Allocate(plan2, cic, ExecutorFixtures.Sectors(cic), null, null, null, null, new[] { new PinnedBuilder { InstanceId = 1, SectorId = 0, TargetX = 300f, TargetZ = 0f } });
+        var a2 = ForceAllocator.Allocate(plan2, cic, ExecutorFixtures.Sectors(cic), null, null, null, null, new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = 0, TargetX = 300f, TargetZ = 0f } });
         AssertTrue(a2.TryGet(1, out var y) && y.Role != FormationRole.DepotBuilder, "nor the player's own command");
-        AssertEqual(s.Own.Count, ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, new[] { new PinnedBuilder { InstanceId = 99, SectorId = 0, TargetX = 0f, TargetZ = 0f } }).Assignments.Count, "a pin naming no formation changes nothing");
+        AssertEqual(s.Own.Count, ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, new[] { new HeldBuilder { Wished = true, InstanceId = 99, SectorId = 0, TargetX = 0f, TargetZ = 0f } }).Assignments.Count, "a pin naming no formation changes nothing");
 
         // A pinned builder is no capital reserve: the guard is raised from the others.
         var c = ExecutorFixtures.Wide(1);
@@ -1172,7 +1173,7 @@ internal static class ConstructionSteeringTests
         var cp = ExecutorFixtures.HandPlan(c, new[] { 2 });
         cp.CapitalFloorStrength = 5000f;
         var csectors = ExecutorFixtures.Sectors(c);
-        var cpin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = csectors.SectorAt(20f, 70f), TargetX = 20f, TargetZ = 70f } };
+        var cpin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = csectors.SectorAt(20f, 70f), TargetX = 20f, TargetZ = 70f } };
         var unpinned = ForceAllocator.Allocate(cp, c, csectors, null, null, null);
         AssertTrue(unpinned.TryGet(1, out var u) && u.Role == FormationRole.CapitalGuard, "control: unpinned, the formation nearest the capital is the capital guard");
         var guarded = ForceAllocator.Allocate(cp, c, csectors, null, null, null, null, cpin);
@@ -1183,17 +1184,80 @@ internal static class ConstructionSteeringTests
     private static void AllocatorAndPlannerWiringPinsTheWishedBuilders()
     {
         string planner = Src("Strategic/Planner/CampaignPlannerRuntime.cs");
-        AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectPinnedBuilders(pinnedBuilders);"), "the review reads the ledger's pins");
-        AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, pinnedBuilders);"), "and hands them to the allocator");
+        AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);"), "the review reads the ledger's held set once");
+        AssertEqual(1, CountOccurrences(planner, "CollectHeldBuilders("), "from one source");
+        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "and hands it to G3's plan");
+        AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
         string allocator = Src("Strategic/Planner/ForceAllocator.cs");
         string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
         AssertTrue(run.IndexOf("AssignPinnedBuilders()", StringComparison.Ordinal) < run.IndexOf("AssignImmobile()", StringComparison.Ordinal), "the pinned builders are handed out first");
         AssertTrue(HasLine(run, "ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);"), "the capital reserve does not count them");
         string pin = BodyOf(allocator, "private bool[] AssignPinnedBuilders()");
-        AssertTrue(HasLine(pin, "if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain)) continue;"), "only a formation the planner may move");
+        AssertTrue(HasLine(pin, "var mask = ReserveRules.WishedBuilders(_s, _pinned);   // the one rule for who is pinned: G3's plan reads it too"), "who is pinned is ReserveRules.WishedBuilders, the rule G3's capital reserve reads too");
+        AssertTrue(HasLine(pin, "if (i < 0 || !mask[i] || _done[i]) continue;"), "only a formation that rule names (Wished, and one the planner may move)");
+        string rule = BodyOf(Src("Strategic/Planner/ReserveRules.cs"), "internal static bool[] WishedBuilders(");
+        AssertTrue(HasLine(rule, "if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;"), "and only a formation the planner may move");
+        AssertTrue(HasLine(rule, "if (!held[k].Wished) continue;"), "only a Wished builder is pinned");
+        string theater = Src("Strategic/Planner/TheaterPlanner.cs");
+        AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass");
+        AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));"), "and raises no capital guard from a Wished one, as the allocator");
         AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);"), "as DepotBuilder at the pinned position, withheld");
         string mover = Src("Strategic/Planner/CampaignMover.cs");
-        AssertFalse(mover.Contains("DepotTask") || mover.Contains("PinnedBuilder"), "the mover reads no depot state: the allocator's assignment is the one rule");
+        AssertFalse(mover.Contains("DepotTask") || mover.Contains("HeldBuilder"), "the mover reads no depot state: the allocator's assignment is the one rule");
+    }
+
+    // The G3 ruling: a formation the depot ledger holds, Marching or Wished, is in no mass G3 judges. Through the real Plan.
+    private static void HeldBuilderIsNotInTheMassG3Judges()
+    {
+        CampaignSnapshot World()
+        {
+            var w = ExecutorFixtures.Wide();
+            w.Own.Add(ExecutorFixtures.Corps(4, 10f, 40000f));    // the capital's reserve
+            w.Own.Add(ExecutorFixtures.Corps(1, 200f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(2, 210f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(3, 220f, 25000f));   // the builder
+            w.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 40000f));
+            return w;
+        }
+        TheaterPlan PlanWith(IReadOnlyList<HeldBuilder> held)
+        {
+            var w = World();
+            return TheaterPlanner.Plan(w, ExecutorFixtures.Sectors(w), null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _, null, held);
+        }
+        var none = PlanWith(null);
+        AssertEqual("1,2,3", string.Join(",", none.MassInstanceIds), "control: with no held builder the formation is in the mass");
+        AssertNear(75000f, none.MassStrength, 0.01f, "...at its strength");
+        var marching = PlanWith(new[] { new HeldBuilder { InstanceId = 3, SectorId = 1, TargetX = 100f, TargetZ = 0f } });
+        AssertEqual("1,2", string.Join(",", marching.MassInstanceIds), "a Marching task's builder is out of the mass");
+        AssertNear(50000f, marching.MassStrength, 0.01f, "the mass differs by exactly the builder's strength");
+        var wished = PlanWith(new[] { new HeldBuilder { Wished = true, InstanceId = 3, SectorId = 1, TargetX = 100f, TargetZ = 0f } });
+        AssertEqual("1,2", string.Join(",", wished.MassInstanceIds), "a Wished task's builder too");
+        AssertNear(50000f, wished.MassStrength, 0.01f, "by the same amount");
+        AssertEqual(none.MainObjectiveId, wished.MainObjectiveId, "the odds still carry the main objective");
+        AssertEqual(none.MassInstanceIds.Count - 1, marching.MassInstanceIds.Count, "exactly one formation fewer");
+        var stranger = PlanWith(new[] { new HeldBuilder { Wished = true, InstanceId = 999, SectorId = 1 } });
+        AssertEqual("1,2,3", string.Join(",", stranger.MassInstanceIds), "a held id no formation carries changes nothing");
+
+        // The one rule for who is pinned (the allocator's pin and G3's capital reserve): Wished builders the planner may move.
+        var rw = World();
+        var mgp = ExecutorFixtures.Corps(5, 300f, 9000f);
+        mgp.Chain = WlChainClass.PlayerMapGroup;
+        rw.Own.Add(mgp);
+        AssertTrue(ReserveRules.WishedBuilders(rw, null) == null && ReserveRules.WishedBuilders(rw, new HeldBuilder[0]) == null, "no held builders: no mask");
+        AssertTrue(ReserveRules.WishedBuilders(rw, new[] { new HeldBuilder { InstanceId = 3 } }) == null, "a Marching builder is not pinned");
+        var mask = ReserveRules.WishedBuilders(rw, new[] { new HeldBuilder { Wished = true, InstanceId = 3 }, new HeldBuilder { Wished = true, InstanceId = 5 }, new HeldBuilder { Wished = true, InstanceId = 999 } });
+        AssertTrue(mask != null && mask[rw.IndexOfOwn(3)] && !mask[rw.IndexOfOwn(5)], "a Wished builder is; the map-group player and an unknown id are not");
+
+        // The same published set feeds the allocator: the pinned builder is DepotBuilder and the mass G3 judged is what MainEffort gets.
+        var w2 = World();
+        var held2 = new[] { new HeldBuilder { Wished = true, InstanceId = 3, SectorId = ExecutorFixtures.Sectors(w2).SectorAt(220f, 0f), TargetX = 220f, TargetZ = 0f } };
+        var plan2 = TheaterPlanner.Plan(w2, ExecutorFixtures.Sectors(w2), null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _, null, held2);
+        var alloc2 = ForceAllocator.Allocate(plan2, w2, ExecutorFixtures.Sectors(w2), null, null, null, null, held2);
+        var main = new List<int>();
+        for (int i = 0; i < alloc2.Assignments.Count; i++) if (alloc2.Assignments[i].Role == FormationRole.MainEffort) main.Add(alloc2.Assignments[i].InstanceId);
+        main.Sort();
+        AssertEqual("1,2", string.Join(",", main), "the main effort is exactly the planned mass");
+        AssertTrue(alloc2.TryGet(3, out var b) && b.Role == FormationRole.DepotBuilder, "and the held builder is the depot's");
     }
 
     // F8: a depot rises only while an own unit stands within that unit's bugle range of it (96626-96655).
