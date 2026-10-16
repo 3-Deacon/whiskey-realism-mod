@@ -35,10 +35,70 @@ namespace WhiskeyRealism.Strategic.Planner
         // The decision whose undispatchable-main-effort row was emitted (one row when a kept main effort first has no formation
         // the mover can send; cleared when it has one again). Telemetry only, not persisted.
         public int UndispatchableRowDecision = -1;
+        // D6 (smoke amendments 2026-10-16): the one formation from outside the main effort's theater that may join this decision's mass
+        // (the Longstreet-to-Chickamauga reinforcement), by unit key, and the decision it was picked for. A later decision picks afresh.
+        // Persisted (PlannerStateDto.reinforcementKey / reinforcementDecision).
+        public string ReinforcementKey;
+        public int ReinforcementDecision = -1;
+
+        // D6 detail (smoke amendments 2026-10-16): each top formation's home department, a Theater, by unit key. A formation is given the
+        // theater of the sector it stands in the first time a review sees it and keeps it until a deliberate cross-department transfer
+        // (Transfer); the main effort draws from its own department first. Persisted (PlannerStateDto.departments). A commander change
+        // re-keys a formation (name:commander): Observe carries the department over by instance id within a session.
+        private readonly Dictionary<string, Theater> _departments = new Dictionary<string, Theater>(StringComparer.Ordinal);
+        private readonly Dictionary<int, string> _keyOfInstance = new Dictionary<int, string>();
+
+        public IReadOnlyDictionary<string, Theater> Departments => _departments;
+
+        // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.
+        public Theater Observe(int instanceId, string unitKey, Theater standing)
+        {
+            if (string.IsNullOrEmpty(unitKey)) return standing;
+            if (_departments.TryGetValue(unitKey, out var known))
+            {
+                _keyOfInstance[instanceId] = unitKey;
+                return known;
+            }
+            if (_keyOfInstance.TryGetValue(instanceId, out var previousKey) && !string.Equals(previousKey, unitKey, StringComparison.Ordinal)
+                && _departments.TryGetValue(previousKey, out var carried))
+            {
+                _departments.Remove(previousKey);
+                _departments[unitKey] = carried;
+                _keyOfInstance[instanceId] = unitKey;
+                return carried;
+            }
+            _keyOfInstance[instanceId] = unitKey;
+            if (standing == Theater.Unknown) return standing;
+            _departments[unitKey] = standing;
+            return standing;
+        }
+
+        public Theater DepartmentOf(string unitKey)
+        {
+            return unitKey != null && _departments.TryGetValue(unitKey, out var known) ? known : Theater.Unknown;
+        }
+
+        // A deliberate transfer (the one reinforcement of a main-effort decision, TheaterPlanner.NoteReinforcement): the formation's department changes.
+        public void Transfer(string unitKey, Theater to)
+        {
+            if (!string.IsNullOrEmpty(unitKey) && to != Theater.Unknown) _departments[unitKey] = to;
+        }
+
+        public void RestoreDepartments(IEnumerable<KeyValuePair<string, Theater>> saved)
+        {
+            _departments.Clear();
+            _keyOfInstance.Clear();
+            if (saved == null) return;
+            foreach (var pair in saved)
+                if (!string.IsNullOrEmpty(pair.Key) && pair.Value != Theater.Unknown) _departments[pair.Key] = pair.Value;
+        }
 
         public void Restore(int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
-                            int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1)
+                            int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1,
+                            string reinforcementKey = null, int reinforcementDecision = -1)
         {
+            ReinforcementKey = reinforcementKey;
+            ReinforcementDecision = reinforcementDecision;
             BelowOddsDays = belowOddsDays;
             CapitalThreatLatched = capitalThreatLatched;
             TempoReleasedDecision = tempoReleasedDecision;

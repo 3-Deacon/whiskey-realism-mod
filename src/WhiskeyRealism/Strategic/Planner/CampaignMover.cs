@@ -14,8 +14,6 @@ namespace WhiskeyRealism.Strategic.Planner
         int StateAllianceAt(float x, float z);
         // GameVars.alliance[reviewing alliance].IsAtWarWith(other) (63127).
         bool AtWar(int otherAlliance);
-        // The map-group player's order: a W&L Redeploy dispatch (WlStrategicOrderBridge.TryIssue), true when issued.
-        bool IssuePlayerOrder(int instanceId, float x, float z);
         // Adds to / removes from AIFaction.unitsinoffensiveoperations.
         void ListOffensive(int instanceId, bool listed);
     }
@@ -45,7 +43,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
     internal sealed class MoverTally
     {
-        public int Issued, Confirmed, Failed, Retried, GaveUp, Queued, SkippedPlayer, SkippedBusy, Deferred, Ordered;
+        public int Issued, Confirmed, Failed, Retried, GaveUp, Queued, SkippedPlayer, SkippedBusy, Deferred;
         // The tempo roll of this review, when one was evaluated (a new decision's launch).
         public LaunchVerdict Tempo;
         public bool TempoFirstRow, TempoReleaseRow;
@@ -54,7 +52,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool MainUndispatchableRow;
         public int TempoDecision, TempoMainObjective, TempoChapter;
 
-        public bool Any => Issued + Confirmed + Failed + Retried + GaveUp + Queued + SkippedPlayer + SkippedBusy + Deferred + Ordered > 0;
+        public bool Any => Issued + Confirmed + Failed + Retried + GaveUp + Queued + SkippedPlayer + SkippedBusy + Deferred > 0;
 
         // [CampaignMover] once per review when any count > 0.
         public string Row(int alliance)
@@ -62,7 +60,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!Any) return "";
             return "[CampaignMover] alliance=" + alliance + " issued=" + Issued + " confirmed=" + Confirmed + " failed=" + Failed + " retried=" + Retried
                 + " gaveUp=" + GaveUp + " queued=" + Queued + " skippedPlayer=" + SkippedPlayer
-                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred + " ordered=" + Ordered;
+                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred;
         }
 
         // [CampaignTempo] undispatchable=true, once per decision per entry into the state.
@@ -90,12 +88,16 @@ namespace WhiskeyRealism.Strategic.Planner
     // Recover formation from vanilla's offensive list, and applies the chapter tempo gate:
     //   - the first MainEffort dispatch of a decision waits for vanilla's tempo roll (CampaignTempoGate), once per decision;
     //     a decision whose launch needs no roll is released before its first dispatch (TempoReleasedDecision ==
-    //     DecisionSerial is the one release predicate);
-    //   - a Support move or order into enemy-held ground waits for that release; in own or neutral ground it is never held;
+    //     DecisionSerial is the one release predicate); a STAGED main effort (TheaterPlan.MainStaged: the objective is unscouted)
+    //     only gathers at its start line, which is not a march while the line is in own or neutral ground, and its roll is evaluated
+    //     when the picture is scouted and the target is the objective;
+    //   - a Support move (the one reinforcement from another theater) into enemy-held ground waits for that release; in own or
+    //     neutral ground it is never held;
     //   - a decision whose mass has no dispatchable MainEffort formation dispatches nothing and is never released.
-    // The W&L player: the player's own command and a CIC side are never moved or ordered; the map-group player gets his Support
-    // order (a dispatch, never a move) by exactly the rule an AI Support formation's move follows; the AI group above a player
-    // below map level is moved as any AI formation (stage F's MoveUnitTo Postfix dispatches the march).
+    // The W&L player: the player's own command, a CIC side and the map-group player's group are never moved or ordered (the
+    // allocator gives the map-group player's group no role the mover sends: it is never mass, and outside the mass a formation holds,
+    // smoke amendments 2026-10-16 D3); the AI group above a player below map level is moved as any AI formation (stage F's
+    // MoveUnitTo Postfix dispatches the march).
     internal static class CampaignMover
     {
         // Within this of the target, or a final waypoint this close to it, the formation is there or already underway.
@@ -126,7 +128,9 @@ namespace WhiskeyRealism.Strategic.Planner
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
             bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
             NoteUndispatchable(inputs, state, tally, dispatchable);
-            if (!released && dispatchable) released = EvaluateLaunch(inputs, host, state, tally);
+            // D1: a staged (unscouted) main effort is only gathering at its start line; the tempo roll is the march's, so it waits
+            // until the picture is scouted and the target is the objective.
+            if (!released && dispatchable && !plan.MainStaged) released = EvaluateLaunch(inputs, host, state, tally);
             foreach (var role in Priority)
                 for (int k = 0; k < allocation.Assignments.Count; k++)
                     if (allocation.Assignments[k].Role == role)
@@ -298,12 +302,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var f = s.Own[i];
             float tx = a.TargetX, tz = a.TargetZ;
 
-            if (WlChainRules.OrderOnly(f.Chain))
-            {
-                if (a.Role != FormationRole.Support) tally.SkippedPlayer++;
-                else OrderPlayerSupport(s, host, released, f, tx, tz, tally);
-                return;
-            }
+            // The player's own command, a CIC side and the map-group player (an order-only formation, never mass, D3) are not moved.
             if (!WlChainRules.MayMove(f.Chain))
             {
                 tally.SkippedPlayer++;
@@ -315,7 +314,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 return;
             }
             if (Distance(f.WaypointX, f.WaypointZ, tx, tz) <= ArrivalRadius) return;
-            if (!released && (a.Role == FormationRole.MainEffort || (a.Role == FormationRole.Support && EnemyHeld(s, host, tx, tz))))
+            // The launch gates a march into enemy-held ground. The main effort's gathering at a staged start line is not one while
+            // the line is in own or neutral ground; a start line that happens to lie in enemy ground still waits for the release.
+            bool marches = a.Role == FormationRole.MainEffort ? !inputs.Plan.MainStaged || EnemyHeld(s, host, tx, tz)
+                : a.Role == FormationRole.Support && EnemyHeld(s, host, tx, tz);
+            if (!released && marches)
             {
                 tally.Deferred++;
                 return;
@@ -347,19 +350,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 case MoveOutcome.Queued: tally.Queued++; break;
                 case MoveOutcome.Failed: tally.Failed++; break;
             }
-        }
-
-        // The map-group player's Support order follows the AI Support rule: it waits into enemy-held ground until the launch
-        // is released and goes out in own or neutral ground. F's dispatcher dedupes it.
-        private static void OrderPlayerSupport(CampaignSnapshot s, IMoverHost host, bool released, FormationRecord f, float tx, float tz, MoverTally tally)
-        {
-            if (Distance(f.WaypointX, f.WaypointZ, tx, tz) <= ArrivalRadius) return;
-            if (!released && EnemyHeld(s, host, tx, tz))
-            {
-                tally.Deferred++;
-                return;
-            }
-            if (host.IssuePlayerOrder(f.InstanceId, tx, tz)) tally.Ordered++;
         }
 
         // 25714 as at 14335-14336: the state at the point belongs to an alliance at war with this one.

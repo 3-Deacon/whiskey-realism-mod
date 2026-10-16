@@ -46,8 +46,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Support       the remainder in a Support (or the main) sector: toward the main target.
     //   Hold (rest)   the remainder anywhere else, Hold in place (EconomyOfForce garrison).
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
-    //                 believed land enemy (centroid when none), with a HomeTheaterTieBreak discount for
-    //                 a formation whose home theater is the sector's; the shortest prefix whose
+    //                 believed land enemy (centroid when none), with a HomeDepartmentDiscount for
+    //                 a formation whose home department (PlannerState, D6 detail) is the sector's theater; the shortest prefix whose
     //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
     //   Gave up       a formation the move tracker gave up on at the target its role would send it to (P8: two misses,
@@ -76,7 +76,9 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public const float MinGarrisonStrength = 5000f;
         public const float UnreliableBelow = 0.5f; // telemetry: the [Allocation] row's run of unreliable days
-        public const float HomeTheaterTieBreak = 0.05f;
+        // D6 detail (c): a formation whose home department is the sector's theater is treated as this much closer to the sector's army
+        // (0.05 when the home was only a historical hint; the department is now the planner's own stable assignment).
+        public const float HomeDepartmentDiscount = 0.25f;
         public const float ReserveSurplusMargin = 1.3f;
 
         internal const string ReasonBusy = "busy";
@@ -88,19 +90,19 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonDepotTask = "depot-task";
         internal const string ReasonMass = "mass";
         internal const string ReasonReserve = "reserve-surplus";
-        internal const string ReasonSupport = "support";
+        internal const string ReasonReinforcement = "reinforcement";
         internal const string ReasonGarrison = "garrison";
         internal const string ReasonPlayerMapGroup = "player-map-group";
         internal const string ReasonGaveUp = "gave-up";
 
-        public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeTheater,
+        public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeDepartment,
                                           IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null,
                                           IReadOnlyList<HeldBuilder> heldBuilders = null)
         {
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
-            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp, heldBuilders).Run(allocation);
+            new Pass(plan, s, sectors, homeDepartment, reconTasks, missions, gaveUp, heldBuilders).Run(allocation);
             return allocation;
         }
 
@@ -176,6 +178,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " reliability=" + reliability01.ToString("0.00", CultureInfo.InvariantCulture)
                 + " unreliableDays=" + unreliableDays
                 + " mass=" + (plan != null ? plan.MassStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
+                + " need=" + (plan != null ? plan.MainNeedStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
+                + " cap=" + (plan != null ? plan.MainCapacityStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
+                + " staged=" + (plan != null && plan.MainStaged ? "yes" : "no")
                 + " short=" + a.Shortfalls.Count + " surplus=" + a.Surpluses.Count;
         }
 
@@ -570,21 +575,27 @@ namespace WhiskeyRealism.Strategic.Planner
                 return null;
             }
 
+            // D1: an unscouted main effort (TheaterPlan.MainStaged) gathers at the plan's start line, the forward-most mass member's
+            // position; the march on the objective starts when the picture is scouted. The mass and its reinforcement share the point.
+            private void MainTarget(SectorPlan sp, out float x, out float z)
+            {
+                x = _plan.MainStaged ? _plan.StartLineX : sp.TargetX;
+                z = _plan.MainStaged ? _plan.StartLineZ : sp.TargetZ;
+            }
+
             private void AssignMainEffort()
             {
                 var sp = MainSector();
                 if (sp == null) return;
+                MainTarget(sp, out float tx, out float tz);
+                // D6: the one formation from another theater is the push's Support: the mover waits for the launch with it into
+                // enemy ground, as with any Support move. Its role sector is the main sector (the objective it was brought for).
+                int reinforcement = _plan.ReinforcementInstanceId >= 0 ? _s.IndexOfOwn(_plan.ReinforcementInstanceId) : -1;
+                if (reinforcement >= 0 && _inMass[reinforcement] && !_done[reinforcement])
+                    Assign(reinforcement, FormationRole.Support, sp.SectorId, tx, tz, ReasonReinforcement, false);
                 for (int i = 0; i < _n; i++)
                     if (_inMass[i] && !_done[i])
-                        Assign(i, FormationRole.MainEffort, sp.SectorId, sp.TargetX, sp.TargetZ, ReasonMass, false);
-            }
-
-            private SectorPlan PlanOf(int sector)
-            {
-                if (sector < 0) return null;
-                for (int k = 0; k < _plan.Sectors.Count; k++)
-                    if (_plan.Sectors[k] != null && _plan.Sectors[k].SectorId == sector) return _plan.Sectors[k];
-                return null;
+                        Assign(i, FormationRole.MainEffort, sp.SectorId, tx, tz, ReasonMass, false);
             }
 
             private void AssignRemainder()
@@ -592,13 +603,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < _n; i++)
                 {
                     if (_done[i]) continue;
+                    // D3: a formation outside the mass keeps its own front's role, in the main and Support sectors too; it is not "the
+                    // remainder to the main effort".
                     var f = _s.Own[i];
-                    var sp = PlanOf(_sector[i]);
-                    if (sp != null && (sp.Posture == TheaterPosture.Support || sp.Posture == TheaterPosture.MainEffort))
-                    {
-                        Assign(i, FormationRole.Support, sp.SectorId, sp.TargetX, sp.TargetZ, ReasonSupport, false);
-                        continue;
-                    }
                     string reason = f.Chain == WlChainClass.PlayerMapGroup ? ReasonPlayerMapGroup : ReasonGarrison;
                     Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, reason, false);
                 }
@@ -628,7 +635,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
 
             // Distance to the sector's nearest believed land enemy (centroid when none), the home
-            // theater of the formation discounting it by HomeTheaterTieBreak.
+            // department of the formation discounting it by HomeDepartmentDiscount.
             private float HoldKey(int i, int sector)
             {
                 float dx = _s.Own[i].X - _nearX[sector];
@@ -636,8 +643,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 float d = (float)Math.Sqrt(dx * dx + dz * dz);
                 if (_home != null && sector >= 0 && sector < _sectorCount)
                 {
-                    var home = _home(_s.Own[i].Name);
-                    if (home != Theater.Unknown && home == _sectors.TheaterOf(sector)) d *= 1f - HomeTheaterTieBreak;
+                    var home = _home(_s.Own[i].UnitKey);
+                    if (home != Theater.Unknown && home == _sectors.TheaterOf(sector)) d *= 1f - HomeDepartmentDiscount;
                 }
                 return d;
             }

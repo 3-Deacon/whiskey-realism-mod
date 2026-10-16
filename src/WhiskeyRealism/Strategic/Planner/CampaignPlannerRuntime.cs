@@ -56,6 +56,9 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly List<MoveRecord> ReboundMoves = new List<MoveRecord>();
         private static readonly List<DepotTaskRecord> ReboundDepotTasks = new List<DepotTaskRecord>();
         private static readonly List<ReconMission> ReboundMissions = new List<ReconMission>();
+        // D6 detail: the allocator's home-department lookup, one delegate per alliance (no closure per review); States[a] is replaced on a
+        // campaign reset or a load, so the delegate reads it at call time.
+        private static readonly Func<string, Theater>[] DepartmentLookups = { key => States[0].DepartmentOf(key), key => States[1].DepartmentOf(key) };
         private static readonly Func<string, bool>[] ReconFilters = { unitKey => IsReconUnit(0, unitKey), unitKey => IsReconUnit(1, unitKey) };
 
         static CampaignPlannerRuntime()
@@ -145,7 +148,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);

@@ -112,22 +112,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 return GameVars.alliance[Alliance].IsAtWarWith(otherAlliance);
             }
 
-            // The map-group player: his Support order is a W&L Redeploy dispatch (order type 5) through the campaign
-            // dispatcher with stage F's dedupe, never a move.
-            public bool IssuePlayerOrder(int instanceId, float x, float z)
-            {
-                var unit = UnitOf(instanceId);
-                if (unit == null) return false;
-                var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
-                {
-                    AllianceId = Alliance,
-                    Unit = unit,
-                    TargetPosition = new Vector3(x, unit.GetPosition().y, z),
-                    Intent = WlStrategicIntent.Redeploy
-                });
-                return decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder;
-            }
-
             public void ListOffensive(int instanceId, bool listed)
             {
                 var unit = UnitOf(instanceId);

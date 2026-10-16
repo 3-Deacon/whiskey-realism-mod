@@ -25,7 +25,7 @@ internal static class CampaignExecutorTests
             ("MoveRecordsKeyedByUnitKey", MoveRecordsKeyedByUnitKey),
             ("MoveTrackersArePerAllianceAndPerCampaign", MoveTrackersArePerAllianceAndPerCampaign),
             ("PlayerCommandChainNeverMoved", PlayerCommandChainNeverMoved),
-            ("MapGroupPlayerGetsOrderNotMove", MapGroupPlayerGetsOrderNotMove),
+            ("MapGroupPlayerIsNeverMovedOrOrdered", MapGroupPlayerIsNeverMovedOrOrdered),
             ("CarryingGroupMovedNormally", CarryingGroupMovedNormally),
             ("GaveUpMainEffortLosesTheRoleAtThatTarget", GaveUpMainEffortLosesTheRoleAtThatTarget),
             ("GaveUpDepotBuilderIsReplacedByTheNextFormation", GaveUpDepotBuilderIsReplacedByTheNextFormation),
@@ -228,14 +228,13 @@ internal static class CampaignExecutorTests
             var host = new FakeMoverHost();
             var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
             AssertEqual(0, host.Moves.Count, chain + " is never moved");
-            AssertEqual(0, host.Orders.Count, chain + " gets no order either");
             AssertEqual(1, tally.SkippedPlayer, chain + " counted as skipped");
         }
     }
 
-    // His Support order is a W&L dispatch (the host's IssuePlayerOrder, intent Redeploy in the runtime, pinned below); he is
-    // never MainEffort, CapitalGuard or DepotBuilder (G4), and if such an assignment ever reached the mover it is skipped.
-    private static void MapGroupPlayerGetsOrderNotMove()
+    // The map-group player's group is never mass (G3), so the allocator never gives it a role the mover sends (D3: outside the mass it
+    // keeps its own front's role, Hold). Were such an assignment to reach the mover it is skipped: he is neither moved nor ordered.
+    private static void MapGroupPlayerIsNeverMovedOrOrdered()
     {
         var s = ExecutorFixtures.Wide();
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
@@ -243,27 +242,17 @@ internal static class CampaignExecutorTests
         player.Chain = WlChainClass.PlayerMapGroup;
         s.Own.Add(player);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        int support = ExecutorFixtures.Sectors(s).SectorAt(550f, 0f);
-        plan.Sectors.Add(new SectorPlan { SectorId = support, Posture = TheaterPosture.Support, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
+        int sector = ExecutorFixtures.Sectors(s).SectorAt(550f, 0f);
         var a = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
-        AssertEqual(FormationRole.Support, a.TryGet(2, out var x) ? x.Role : FormationRole.Hold, "the allocator gave him a Support order");
+        AssertEqual(FormationRole.Hold, a.TryGet(2, out var x) ? x.Role : FormationRole.MainEffort, "the allocator leaves him in place");
 
-        var host = new FakeMoverHost();
-        var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
-        AssertFalse(host.Moves.Exists(m => m.id == 2), "an order, never a move, for the map-group player");
-        AssertEqual(1, host.Orders.Count, "one order");
-        AssertEqual(2, host.Orders[0].id, "to him");
-        AssertNear(100f, host.Orders[0].x, 0.01f, "toward the Support target");
-        AssertEqual(1, tally.Ordered, "counted as ordered");
-        AssertTrue(host.Moves.Exists(m => m.id == 1), "the AI corps is moved");
-
-        foreach (var role in new[] { FormationRole.MainEffort, FormationRole.CapitalGuard, FormationRole.DepotBuilder, FormationRole.Recover })
+        foreach (var role in new[] { FormationRole.MainEffort, FormationRole.Support, FormationRole.CapitalGuard, FormationRole.DepotBuilder, FormationRole.Recover })
         {
             var forced = new Allocation { Alliance = 0 };
-            forced.Assignments.Add(ExecutorFixtures.Assign(2, role, support, 100f, 0f));
+            forced.Assignments.Add(ExecutorFixtures.Assign(2, role, sector, 100f, 0f));
             var other = new FakeMoverHost();
             var t2 = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, forced, ExecutorFixtures.OpenTempo()), other, new MoveTracker(), ExecutorFixtures.State());
-            AssertEqual(0, other.Moves.Count + other.Orders.Count, role + " is neither moved nor ordered for him");
+            AssertEqual(0, other.Moves.Count, role + " is not a move for him");
             AssertEqual(1, t2.SkippedPlayer, role + " skipped");
         }
     }
@@ -429,7 +418,7 @@ internal static class CampaignExecutorTests
         AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
         AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "G3 reads the moves with their objectives (and G5c's held builders)");
-        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
+        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
     // F1 (verify g5a): the verifier's repro through the real Plan, Allocate and Review. Every mass member gives up on the main
@@ -645,7 +634,6 @@ internal static class CampaignExecutorTests
         var host = new FakeMoverHost();
         CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
         AssertEqual(1, host.Moves.Count, "the AI map group above a player below map level is moved as any AI corps");
-        AssertEqual(0, host.Orders.Count, "...by MoveUnitTo (stage F's Postfix dispatches it), not by an order");
     }
 
     private static void MoverDispatchesTheRolesInPriorityOrder()
@@ -1207,7 +1195,6 @@ internal static class CampaignExecutorTests
     {
         // The host's move half is VanillaMoveHost (G5d shares it with the recon executor): the pins follow it.
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
-        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
         AssertTrue(HasLine(src, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
         AssertFalse(src.Contains("EnterMoveSource"), "G5a does not call EnterMoveSource: stage F's Postfix types the march by list membership");
@@ -1684,7 +1671,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public Func<float, float, bool> Restricted = (x, z) => false;
     public bool MoveResult = true;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
-    public readonly List<(int id, float x, float z)> Orders = new List<(int id, float x, float z)>();
     public readonly List<(int id, bool listed)> Listed = new List<(int id, bool listed)>();
     public readonly List<int> Raised = new List<int>();
 
@@ -1692,7 +1678,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public int StateAllianceAt(float x, float z) { return State(x, z); }
     public bool AtWar(int otherAlliance) { return otherAlliance != Own && otherAlliance >= 0 && otherAlliance <= 1; }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
-    public bool IssuePlayerOrder(int instanceId, float x, float z) { Orders.Add((instanceId, x, z)); return true; }
     public void ListOffensive(int instanceId, bool listed) { Listed.Add((instanceId, listed)); }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
 }

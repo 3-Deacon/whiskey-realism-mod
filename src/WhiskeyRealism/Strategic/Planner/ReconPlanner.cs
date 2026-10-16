@@ -127,7 +127,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (taken != null && taken.Contains(f.InstanceId)) continue;
-                if (!CanMove(s, f) || IsRecalling(missions, f.InstanceId)) continue;
+                if (!CanMove(s, f, IsDetachment(task.Kind)) || IsRecalling(missions, f.InstanceId)) continue;
                 if (!WlChainRules.MayMove(f.Chain)) continue;
                 bool cavalry = f.CavalryShare >= MinCavalryShare;
 
@@ -199,7 +199,9 @@ namespace WhiskeyRealism.Strategic.Planner
             if (ctx.Unwatched(m.FrontX, m.FrontZ, m.TargetX, m.TargetZ))
                 TryAdd(ctx, into, ReconKind.Screen, m.Sector, m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, PriorityMainAxis, ReasonMainAxis);
 
-            if (ProbeWanted(ctx))
+            // D1/D7: a probe asks one question, whether the main objective is held; once the plan reads the objective as scouted (a fresh
+            // belief near it, or a viewer's sight on it) the question is answered, the task is gone and the mission stands down.
+            if (ProbeWanted(ctx) && !ctx.Plan.MainScouted)
             {
                 PointShort(m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, ctx.Standoff, out float px, out float pz);
                 TryAdd(ctx, into, ReconKind.Probe, m.Sector, m.FrontX, m.FrontZ, px, pz, PriorityProbe, "probe");
@@ -470,13 +472,32 @@ namespace WhiskeyRealism.Strategic.Planner
             return alliance == 0 || alliance == 1;
         }
 
-        private static bool CanMove(CampaignSnapshot s, in FormationRecord f)
+        // Vanilla's offensive-availability minima (IsUnitAvailableForOffensiveOperations 14091-14106) for a screen or picket. D7 (smoke
+        // amendments 2026-10-16): an advance guard or a probe is a detachment of the main body, not an offensive operation, so it needs
+        // readiness (SetWaypoint refuses a march onto enemy ground below step 2, 91336-91355) and morale but not the 5000-man minimum of
+        // a whole operation (14099): a brigade or a division detached forward leads the advance, as many 1861 advances were led.
+        private static bool CanMove(CampaignSnapshot s, in FormationRecord f, bool detachment = false)
         {
             if ((f.Flags & Busy) != 0) return false;
             if (f.ReadinessStep < 2) return false;                  // 14091
-            if (f.Strength <= s.MinStrengthForMovement) return false; // 14099
+            if (detachment ? f.Strength <= 0f : f.Strength <= s.MinStrengthForMovement) return false; // 14099
             if (f.Morale <= s.MinMoraleForMovement) return false;     // 14103
             return f.CavalryShare >= MinCavalryShare || (f.Flags & FormationFlags.FightingForce) != 0;
+        }
+
+        private static bool IsDetachment(ReconKind kind)
+        {
+            return kind == ReconKind.AdvanceGuard || kind == ReconKind.Probe;
+        }
+
+        // How many formations the planner could send on a reconnaissance task at all (the [Recon] row's pool=): the AI-orderable, ready,
+        // unbusy formations, a detachment's standard being the widest. 0 explains a day of unwatched approaches and no mission.
+        internal static int ScoutPool(CampaignSnapshot s)
+        {
+            int n = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+                if (WlChainRules.MayMove(s.Own[i].Chain) && CanMove(s, s.Own[i], detachment: true)) n++;
+            return n;
         }
 
         // Smallest sight radius and command range over the AI formations that could take a task.
@@ -487,7 +508,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!CanMove(s, f) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
+                if (!CanMove(s, f, detachment: true) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
                 if (f.SightRadius <= 0f || f.CommandRange <= 0f) continue;
                 sight = Math.Min(sight, f.SightRadius);
                 commandRange = Math.Min(commandRange, f.CommandRange);

@@ -332,6 +332,24 @@ namespace WhiskeyRealism.Strategic.Planner
         // weighted, within the relocation range of the objective itself, not of the clamped frontier point
         // in SectorPlan.TargetX/Z): G4's reserve split keeps the odds it judged.
         public float MainEnemyStrength;
+        // Scout first (smoke amendments 2026-10-16, D1): whether the main objective is scouted, i.e. a fresh land belief lies within
+        // the relocation range of it or an own formation's sight covers it. Unscouted, MainEnemyStrength is the presumed threat
+        // (TheaterPlanner.PresumedAt), not a reading, and the main effort is Staged: its mass assembles at (StartLineX, StartLineZ),
+        // the forward-most mass member's position, and does not march on the objective until the picture is scouted and the odds hold.
+        public bool MainScouted;
+        public bool MainStaged;
+        public float StartLineX, StartLineZ;
+        // Push only what it needs (D3): the force the main objective needs (MainEnemyStrength x MainRequiredRatio x (1 + margin)),
+        // and what the planner could concentrate for it (the capacity the odds were judged on). MassStrength is the selected mass.
+        public float MainNeedStrength, MainCapacityStrength;
+        // D6: the one formation from another theater that joins the mass (instance id), -1 none. It is the Support formation of the push.
+        public int ReinforcementInstanceId = -1;
+        // The reinforcement's name and cross-department move (telemetry): From is the department it left on the day of the transfer
+        // (Unknown on later days), To the main objective's department.
+        public string ReinforcementName;
+        // Telemetry: the count of top formations per home department ("East:9,West:5"), empty with none.
+        public string DepartmentCounts = "";
+        public Theater ReinforcementFrom, ReinforcementTo;
 
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
