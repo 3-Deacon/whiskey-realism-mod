@@ -34,6 +34,7 @@ internal static partial class TerrainPictureTests
             // lines
             ("bc12 BestLinePicksCrestAcrossAxis", BestLinePicksCrestAcrossAxis),
             ("bc12 LineRejectedOver30DegreesOff", LineRejectedOver30DegreesOff),
+            ("bc12 CrestRunsDoNotJoinAcrossAxes", CrestRunsDoNotJoinAcrossAxes),
             ("bc12 ReverseSlopeLineSetBack80m", ReverseSlopeLineSetBack80m),
             ("bc12 TerrainAnchorReplacesPreservedNone", TerrainAnchorReplacesPreservedNone),
             ("bc12 FlankAnchoredByRiverWithin80m", FlankAnchoredByRiverWithin80m),
@@ -153,8 +154,7 @@ internal static partial class TerrainPictureTests
         TerrainPicture p = CrestWithWall(30f, 5f, wall: true);
         float s = p.TerrainStrength(400f, -390f, 0f, 1f);
         AssertNear(0.5667f, s, 0.005f, "wall 0.35 on a 10 m crest (h 0.333): 1 - 0.65 x 0.667");
-        AssertTrue(s >= TerrainPicture.AnchorStrength - 0.0001f || Math.Abs(s - 0.57f) < 0.01f, "a wall on a 10 m crest clears the planners' 0.55");
-        AssertTrue(s >= 0.55f, "0.57 >= 0.55");
+        AssertTrue(s >= TerrainPicture.AnchorStrength, "a wall on a 10 m crest clears the planners' anchor strength 0.55");
     }
 
     private static void WallOnThreeMetreCrestIsNotAnchor()
@@ -162,7 +162,7 @@ internal static partial class TerrainPictureTests
         TerrainPicture p = CrestWithWall(20f, 1.5f, wall: true);
         float s = p.TerrainStrength(400f, -390f, 0f, 1f);
         AssertNear(0.415f, s, 0.005f, "wall 0.35 on a 3 m crest (h 0.10): 1 - 0.65 x 0.9");
-        AssertTrue(s < 0.55f, "not an anchor");
+        AssertTrue(s < TerrainPicture.AnchorStrength, "not an anchor");
         TerrainPicture crestOnly = CrestWithWall(30f, 5f, wall: false);
         AssertNear(0.3333f, crestOnly.TerrainStrength(400f, -390f, 0f, 1f), 0.005f, "a 10 m crest alone is 0.33 (a crest alone is at most 0.5)");
         TerrainPicture tall = CrestWithWall(120f, 30f, wall: false);
@@ -302,6 +302,22 @@ internal static partial class TerrainPictureTests
         AssertTrue(TacticalTerrainLinePlanner.BestLine(ahead100, ObjX, ObjZ, 0f, 1f, 600f).Has, "a wall 90 m in front of the objective");
         TerrainPicture ahead200 = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -160f) });
         AssertFalse(TacticalTerrainLinePlanner.BestLine(ahead200, ObjX, ObjZ, 0f, 1f, 600f).Has, "a wall 200 m in front is the enemy's side");
+    }
+
+    private static void CrestRunsDoNotJoinAcrossAxes()
+    {
+        // Two 10 m ridges that cross: one along x at world z -390 (across the +z threat axis), one along z at x 410. Joined into one
+        // blob they would have no direction; by profile axis they are two runs and the cross-axis one is the line.
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        Func<float, float, float> alongX = RidgeAlongX(30f, 5f, Map), alongZ = RidgeAlongZ(30f, 5f);
+        TerrainPicture p = Build(grid, Map, (x, z) => Math.Max(alongX(x, z), alongZ(x, z)));
+        TerrainLine line = TacticalTerrainLinePlanner.BestCrest(p, ObjX, ObjZ, 0f, 1f, 600f);
+        AssertTrue(line.Has, "the ridge across the axis is found among the crossing ridges");
+        AssertTrue(line.Length >= 500f, "a long run, not a fragment: " + line.Length);
+        AssertTrue(Math.Abs(line.CenterZ - (-390f)) < 15f, "it is the ridge along x, z " + line.CenterZ);
+        // Along-z only: no line across a +z axis.
+        TerrainPicture alongOnly = Build(grid, Map, alongZ);
+        AssertFalse(TacticalTerrainLinePlanner.BestCrest(alongOnly, ObjX, ObjZ, 0f, 1f, 600f).Has, "a ridge along the threat axis is no line");
     }
 
     private static void ReverseSlopeLineSetBack80m()

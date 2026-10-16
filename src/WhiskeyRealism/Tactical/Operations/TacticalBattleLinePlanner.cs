@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -470,7 +471,7 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return objective.Type == TacticalObjectiveType.Ridge ||
                     objective.Type == TacticalObjectiveType.Town ||
-                    objective.TerrainStrength >= 0.55f;
+                    objective.TerrainStrength >= TerrainPicture.AnchorStrength;
             }
 
             private static bool IsChokeObjective(BattlefieldObjectiveEstimate objective)

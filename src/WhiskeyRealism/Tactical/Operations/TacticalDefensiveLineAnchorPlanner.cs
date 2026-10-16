@@ -72,7 +72,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 objective.Value,
                 Center.X,
                 Center.Z,
-                CorridorAnchor ? Math.Max(objective.TerrainStrength, 0.55f) : objective.TerrainStrength,
+                CorridorAnchor ? Math.Max(objective.TerrainStrength, TerrainPicture.AnchorStrength) : objective.TerrainStrength,
                 objective.ApproachDifficulty,
                 TacticalApproachAvenueEstimate.Create(
                     ApproachAvenue.Origin,
@@ -237,7 +237,7 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             return objective.Type == TacticalObjectiveType.Ridge ||
                 objective.Type == TacticalObjectiveType.Town ||
-                objective.TerrainStrength >= 0.55f;
+                objective.TerrainStrength >= TerrainPicture.AnchorStrength;
         }
 
         private static bool IsExplicitChokeObjective(BattlefieldObjectiveEstimate objective)

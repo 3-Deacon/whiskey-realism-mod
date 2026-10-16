@@ -139,12 +139,13 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public float CrestProminenceAt(float x, float z) => CrestProminence(CellX(x), CellZ(z));
 
-        public int CoverAt(float x, float z) => Cover(CellX(x), CellZ(z));
-
         public float HeightAt(float x, float z) => Height(CellX(x), CellZ(z));
 
-        /// <summary>The nearest listed ford or bridge within the radius (BC10's crossing list), in world coordinates.</summary>
-        public bool TryNearestCrossing(float x, float z, float radius, out float cxW, out float czW, out int id)
+        /// <summary>
+        /// The nearest listed crossing within the radius (BC10's crossing list), in world coordinates. <paramref name="wantedId"/>
+        /// restricts it to one id (ford 5, bridge 6); 0 takes either.
+        /// </summary>
+        public bool TryNearestCrossing(float x, float z, float radius, out float cxW, out float czW, out int id, int wantedId = 0)
         {
             cxW = czW = 0f;
             id = 0;
@@ -154,6 +155,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int k = 0; k < _grid.CrossingCount; k++)
             {
                 _grid.Crossing(k, out float kx, out float kz, out int kid);
+                if (wantedId != 0 && kid != wantedId) continue;
                 float dx = kx - x, dz = kz - z;
                 float d2 = dx * dx + dz * dz;
                 if (d2 > best) continue;
@@ -164,21 +166,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 found = true;
             }
             return found;
-        }
-
-        /// <summary>Whether a listed crossing of exactly this id (ford 5, bridge 6) lies within the radius.</summary>
-        public bool CrossingNear(float x, float z, float radius, int wantedId)
-        {
-            if (!Ready || _grid == null) return false;
-            float r2 = radius * radius;
-            for (int k = 0; k < _grid.CrossingCount; k++)
-            {
-                _grid.Crossing(k, out float kx, out float kz, out int kid);
-                if (kid != wantedId) continue;
-                float dx = kx - x, dz = kz - z;
-                if (dx * dx + dz * dz <= r2) return true;
-            }
-            return false;
         }
 
         /// <summary>Whether a crest cell of at least <paramref name="minProminence"/> meters lies within the radius.</summary>

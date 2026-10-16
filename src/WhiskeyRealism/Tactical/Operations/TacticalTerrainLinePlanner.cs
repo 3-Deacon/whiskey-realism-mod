@@ -214,6 +214,13 @@ namespace WhiskeyRealism.Tactical.Operations
             return best;
         }
 
+        // Axes are 0-3 for 0/45/90/135 degrees, so they wrap at 4: 0 and 3 are 45 degrees apart.
+        private static bool AxesJoin(int a, int b)
+        {
+            int d = Math.Abs(a - b);
+            return Math.Min(d, 4 - d) <= 1;
+        }
+
         private static bool InWindow(TerrainPicture p, int cx, int cz, float objX, float objZ)
         {
             float dx = p.CenterX(cx) - objX, dz = p.CenterZ(cz) - objZ;
@@ -258,6 +265,9 @@ namespace WhiskeyRealism.Tactical.Operations
                         if (nx < 0 || nx >= p.Columns) continue;
                         int n = nz * p.Columns + nx;
                         if (_stamp[n] == _generation || !InWindow(p, nx, nz, objX, objZ) || !IsMember(p, kind, nx, nz)) continue;
+                        // Crest cells join only along one ridge: neighbouring profile axes within 45 degrees, so two ridges that meet
+                        // are two runs, not one blob with no direction.
+                        if (kind == TerrainLineKind.Crest && !AxesJoin(p.CrestAxis(cx, cz), p.CrestAxis(nx, nz))) continue;
                         _stamp[n] = _generation;
                         _stack[top++] = n;
                     }

@@ -30,8 +30,8 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             verified = true;
             float r = TerrainPicture.ClassifyRadiusMeters;
-            if (picture.CrossingNear(x, z, r, BattleTerrainGrid.BridgeId)) return TacticalObjectiveType.Bridge;
-            if (picture.CrossingNear(x, z, r, BattleTerrainGrid.FordId)) return TacticalObjectiveType.Ford;
+            if (picture.TryNearestCrossing(x, z, r, out _, out _, out _, BattleTerrainGrid.BridgeId)) return TacticalObjectiveType.Bridge;
+            if (picture.TryNearestCrossing(x, z, r, out _, out _, out _, BattleTerrainGrid.FordId)) return TacticalObjectiveType.Ford;
             if (picture.TownNear(x, z, r)) return TacticalObjectiveType.Town;
             if (picture.RoadJunctionNear(x, z, r)) return TacticalObjectiveType.RoadJunction;
             if (picture.CrestNear(x, z, r, TerrainShapeRulesMinimum)) return TacticalObjectiveType.Ridge;

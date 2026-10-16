@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Telemetry;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -155,9 +157,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength).WithStance(stance));
 
             _currentOperation = decision.Operation;
-            StoreDoctrine(
-                picture,
-                CommandDoctrineAssignment.Build(
+            CommandDoctrineOrder[] orders;
+            // BC12: the doctrine build plans the terrain line (TacticalTerrainLinePlanner) once per assignment.
+            using (TelemetryPerf.Scope("tactical.terrain-line", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1.0))
+            {
+                orders = CommandDoctrineAssignment.Build(
                     commandStates ?? Array.Empty<CommandNodeOperationalState>(),
                     _currentOperation,
                     picture,
@@ -166,7 +170,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _currentForce.ReserveFraction,
                     stance,
                     maneuvers,
-                    reverseSlope));
+                    reverseSlope);
+            }
+            NoteFirstTerrainLine(orders);
+            StoreDoctrine(picture, orders);
+        }
+
+        // First-fire marker for BC12's terrain lines (smoke item 2.31): the first order whose line reason names a terrain line.
+        private static void NoteFirstTerrainLine(CommandDoctrineOrder[] orders)
+        {
+            if (orders == null) return;
+            for (int i = 0; i < orders.Length; i++)
+            {
+                string reason = orders[i].Reason;
+                int at = reason.IndexOf("terrain-line:", StringComparison.Ordinal);
+                if (at < 0) continue;
+                OnceLog.Info("tactical-battle-core:terrain-line", "[BattleTerrain] first terrain-line anchor: " + reason.Substring(at));
+                return;
+            }
         }
 
         private static IReadOnlyList<ObjectiveRecord> CopyObjectives(IReadOnlyList<ObjectiveRecord> objectives)
