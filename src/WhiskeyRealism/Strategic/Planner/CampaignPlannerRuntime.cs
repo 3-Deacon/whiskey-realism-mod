@@ -13,7 +13,9 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 G1 detection and beliefs -> G1b recon mission aging -> (G2 profiles, G3 plan, G1b recon
     //                 tasks, G4 allocation, G1b recon mission sync) -> CampaignPlanStore.Publish.
     //   ReviewExecute the Execute job, after the defense job: G2 appointments (CommanderAppointmentRuntime, on
-    //                 this review's snapshot and plan), then the G5b, G5a, G5c, G5d executors.
+    //                 this review's snapshot and plan), then the G5b, G5a, G5c, G5d executors. G5a's two run
+    //                 behind the pre-war gate (PlannerChapterRules, decision 8): the steering executors
+    //                 (objective, theater boxes) and the mover.
     //                 Executors write vanilla state only from here.
     // Both return for alliances other than 0 and 1 and before AICampaign.aifaction holds the
     // alliance's faction. For the W&L CIC player's own alliance (vanilla job 36 skips it,
@@ -84,8 +86,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     var mode = PlayerCommandClassifier.ReviewMode(player, GameVars.playeralliance, alliance, jobMachinePaused);
                     int faction = FactionIndexOf(alliance);
                     if (faction < 0) return;
+                    int daySerial = ReviewCadenceCatchUp.DaySerial(day, month, year);
+                    // The clock the patches test a published plan's age against (PlanFreshness): noted in every mode, so a
+                    // paused alliance's plan ages out (spec C5).
+                    PlanFreshness.NoteToday(daySerial);
 
-                    var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),
+                    var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, daySerial,
                         player, in chain, tempo, Snapshots[alliance]);
 
                     // G1: fog-honest detection and the belief update. Bookkeeping: it runs in every
@@ -127,6 +133,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
+                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
@@ -144,7 +151,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 try
                 {
-                    if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;
+                    if (!ExecutorsEnabled()) return;
                     if (alliance < 0 || alliance >= Snapshots.Length) return;
                     var chain = WlChainContext.Capture();
                     // The day's captured pause decides; the live predicate is read again as defence in depth, so an
@@ -155,6 +162,24 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (FactionIndexOf(alliance) < 0) return;
                     // Executors in plan order: G2 appointments, then G5b, G5a, G5c, G5d.
                     CommanderAppointmentRuntime.Execute(alliance, Snapshots[alliance]);
+                    // G5a pre-war gate (decision 8): vanilla refuses every campaign move before scenario 001's war starts
+                    // (SetWaypoint 91366), so no move, order or steering executor runs, and the withhold view and the pointer
+                    // redirect read the same rule. Appointments move no unit and ran above.
+                    if (!PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter))
+                    {
+                        OnceLog.Info("campaign-planner:pre-war-idle", "[CampaignPlanner] scenario 001 pre-war (chapter " + Policy.CurrentChapter + "): executors idle until the war starts");
+                        return;
+                    }
+                    // Today's plan and today's snapshot only: a Plan job that failed before publishing leaves yesterday's.
+                    if (!CampaignPlanStore.TryGetPlan(alliance, out var todaysPlan) || !PlanFreshness.IsToday(todaysPlan.DaySerial) || !PlanFreshness.IsToday(Snapshots[alliance].DaySerial))
+                    {
+                        OnceLog.Warning("campaign-planner:execute-no-todays-plan", "[CampaignPlanner] no plan was built today: executors idle for this review");
+                        return;
+                    }
+                    CampaignSteeringRuntime.Execute(alliance, Snapshots[alliance]);
+                    CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);
+                    // The mover may have released the decision's launch: the patches read it with the plan.
+                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));
                 }
                 catch (Exception ex)
                 {
@@ -310,6 +335,23 @@ namespace WhiskeyRealism.Strategic.Planner
                 " crossings=" + s.Crossings.Count +
                 " useRails=" + rails + " useRivers=" + rivers +
                 " player=" + s.Player);
+        }
+
+        // Both planner flags: the planner runs and its executors may write. PickCampaignObjectivePatch (P10) and the
+        // availability and importance patches stand down or read the plan only while this holds.
+        internal static bool ExecutorsEnabled()
+        {
+            return FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors);
+        }
+
+        // What the executors' patches read with the plan (G5a): the decision and its release, the pre-war gate and the map-group
+        // player's formation (the deferred-Support clause never withholds him).
+        private static ExecutorContext ExecutorContextOf(int alliance, CampaignSnapshot snapshot)
+        {
+            int mapGroup = -1;
+            for (int i = 0; i < snapshot.Own.Count; i++)
+                if (snapshot.Own[i].Chain == WlChainClass.PlayerMapGroup) mapGroup = snapshot.Own[i].InstanceId;
+            return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter), mapGroup);
         }
 
         private static bool FlagOn(BepInEx.Configuration.ConfigEntry<bool> entry)

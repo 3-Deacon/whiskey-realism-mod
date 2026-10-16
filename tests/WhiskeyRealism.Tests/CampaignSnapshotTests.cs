@@ -856,7 +856,8 @@ internal static class CampaignSnapshotTests
         AssertTrue(bookkeeping >= 0 && publish > bookkeeping, "bookkeeping returns before anything is published");
 
         string execute = MethodBody(src, "internal static void ReviewExecute(");
-        AssertContains(execute, "!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)", "executors gated on both flags");
+        AssertContains(execute, "if (!ExecutorsEnabled()) return;", "executors gated on both flags (G5a: one helper, also read by the patches)");
+        AssertContains(MethodBody(src, "internal static bool ExecutorsEnabled("), "FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors)", "...which is both flags");
         AssertContains(execute, "!= PlannerReviewMode.Full) return;", "executors run only in a full review");
     }
 
