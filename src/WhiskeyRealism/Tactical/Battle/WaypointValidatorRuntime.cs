@@ -156,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _mapSizeKnown = false;
         }
 
-        private static BattlefieldSetup Bfs()
+        internal static BattlefieldSetup Bfs()
         {
             try
             {

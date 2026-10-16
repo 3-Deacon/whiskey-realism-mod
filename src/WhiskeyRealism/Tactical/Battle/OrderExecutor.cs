@@ -96,9 +96,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Shipped #61 TryQueueBlockedMovingOrder: an objective-type group move
         // farther than 150 m avoids the crossings the enemy covers, as vanilla's
-        // own line-group move does. Whether the side has crossing data is the
-        // executor runtime's check (blockedcrossings stays null on a map without
-        // river crossings, UpdateBlockedCrossings 7919-7920).
+        // own line-group move does. Whether the side perceives a covered point is the
+        // executor runtime's check (CoveredCrossings; an empty list is a plain SetWaypoint).
         public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType task, float distance)
         {
             if (!IsFinite(distance) || distance <= BlockedMoveDistanceMeters) return false;
@@ -297,6 +296,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Z;
         public bool UseOrderDelay;
         public int DispatchType;
+        // BC10: the intent's via points after validation (a point that cannot be made safe is dropped).
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
     }
 
     // The single write-path pipeline (plan BC4 steps 1-6, 8; step 7 is
@@ -377,15 +379,37 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// A flagged move goes through vanilla BlockedMovingOrder only without heading
         /// or double-quick (UpdateOrders' SetWaypoint carries neither, 3139) and when
-        /// the side's blockedcrossings lists at least one crossing: the order carves
-        /// obstacles only over listed crossings (3071-3083), so with none it would only
-        /// drop the courier delay. An empty or missing list (7919-7949) is a plain
+        /// the side's perceived covered-point list (CoveredCrossings) holds at least one
+        /// point: the order carves obstacles only over listed points (3071-3083), so with
+        /// none it would only drop the courier delay. An empty list is a plain
         /// SetWaypoint.
         /// </summary>
         public static bool TakesBlockedMovingOrder(in BattleOrderIntent w, int crossingCount)
         {
             return (w.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && w.Heading < 0f &&
                 (w.Flags & IntentFlags.DoubleQuick) == 0 && crossingCount > 0;
+        }
+
+        /// <summary>
+        /// How many via legs a Move issues: none when it goes through BlockedMovingOrder (it has no
+        /// via points: safety before speed) or has no validated via point, else the planned count.
+        /// </summary>
+        public static int ViaLegs(in BattleOrderIntent w, int coveredPoints, int planned)
+        {
+            if (planned <= 0 || TakesBlockedMovingOrder(w, coveredPoints)) return 0;
+            return Math.Min(planned, RoadRoutePlanner.MaxVia);
+        }
+
+        /// <summary>
+        /// manualfinalrotation of a via leg: the bearing from the leg's end to the next point
+        /// (0 = +z, 90 = +x, [0, 360)), so the leg's SetGroupFormation (91559) lays the column's
+        /// frontage across the road it follows. The final leg carries the intent's own heading.
+        /// </summary>
+        public static float LegHeading(float fromX, float fromZ, float toX, float toZ)
+        {
+            double degrees = Math.Atan2(toX - fromX, toZ - fromZ) * (180.0 / Math.PI);
+            if (degrees < 0.0) degrees += 360.0;
+            return (float)(degrees >= 360.0 ? 0.0 : degrees);
         }
 
         /// <summary>SetGroupFormation's refuseflank: -1 none, 0 left, 1 right.</summary>
@@ -398,6 +422,36 @@ namespace WhiskeyRealism.Tactical.Battle
                 default: return -1;
             }
         }
+
+        /// <summary>
+        /// The formation policy's verdict for a group Formation intent (R8, CommandFormationWritePolicy)
+        /// over the group's live fields; OrderExecutorRuntime.IssueFormation issues what it decides.
+        /// </summary>
+        public static FormationWriteDecision DecideFormation(in BattleOrderIntent w, int groupFormation, float combatStatusSubordinates,
+            float groupSubordinatesMoving, int regimentPaths, float coverValueSubordinates, float nowHours, float lastShapeWriteHours,
+            float groupEnemiesInRange)
+        {
+            return CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                needsFormation: groupFormation != w.Value,
+                needsFacing: false,
+                needsRefuse: w.Refuse != RefuseFlank.None,
+                combatStatusSubordinates, groupSubordinatesMoving, regimentPaths, coverValueSubordinates,
+                nowHours, lastShapeWriteHours, groupEnemiesInRange));
+        }
+
+        /// <summary>The same verdict for a group Facing intent (a rotation, with the intent's refused flank if it carries one).</summary>
+        public static FormationWriteDecision DecideFacing(in BattleOrderIntent w, float combatStatusSubordinates,
+            float groupSubordinatesMoving, int regimentPaths, float coverValueSubordinates, float nowHours, float lastShapeWriteHours,
+            float groupEnemiesInRange)
+        {
+            return CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                needsFormation: false,
+                needsFacing: true,
+                needsRefuse: w.Refuse != RefuseFlank.None,
+                combatStatusSubordinates, groupSubordinatesMoving, regimentPaths, coverValueSubordinates,
+                nowHours, lastShapeWriteHours, groupEnemiesInRange));
+        }
+
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
         public const float RetryBearingDegrees = 30f;
@@ -601,14 +655,21 @@ namespace WhiskeyRealism.Tactical.Battle
             SkipReason exit = SilentExitPrecheck.Check(rec, w.Channel);
             if (exit != SkipReason.None) return Skip(plan, exit);
 
-            // 5. Dedupe. 6. Cooldown.
-            if (IsDuplicate(s, idx, rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
-            if (!retry && InCooldown(rec, w, nowHours)) return Skip(plan, SkipReason.Cooldown);
+            // 5. Dedupe. 6. Cooldown. Neither applies to an immediate placement: the snapshot
+            //    is stale after the pass's first re-placement and a corrective re-placement of
+            //    the same group is a new write, not a repeat (BC10 decision 9).
+            bool immediate = IsImmediatePlacement(w);
+            if (!immediate)
+            {
+                if (IsDuplicate(s, idx, rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
+                if (!retry && InCooldown(rec, w, nowHours)) return Skip(plan, SkipReason.Cooldown);
+            }
 
             plan.Execute = true;
             plan.Skip = SkipReason.None;
             plan.X = x;
             plan.Z = z;
+            if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
             plan.UseOrderDelay = UsesOrderDelay(w);
             // 9. The player's share of an ancestor's move goes out as one W&L
             //    dispatch per executed plan. Move only: the dispatch carries the
@@ -616,7 +677,7 @@ namespace WhiskeyRealism.Tactical.Battle
             //    hold, courier cadence, dedupe; a retry skips the first two once)
             //    are its throttle; Emit's 110 m record and vanilla's own repeat
             //    check (8643) sit behind it.
-            if (w.Channel == OrderChannel.Move && plan.Targets.PlayerShareNeedsDispatch)
+            if (w.Channel == OrderChannel.Move && !immediate && plan.Targets.PlayerShareNeedsDispatch)
                 plan.DispatchType = TacticalDispatchTypeMapper.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
             return plan;
         }
@@ -718,6 +779,16 @@ namespace WhiskeyRealism.Tactical.Battle
                     continue;
 
                 IssuedTarget[] targets = _pendingTargets[p];
+                if (IsImmediatePlacement(pm.Intent))
+                {
+                    // The placed tree's lastsetwaypointposition is cleared again (85873-85883), so
+                    // the placement is judged by where the group stands. No retry and no backoff:
+                    // the arbiter is not running at deployment.
+                    bool placed = StandsNearTarget(s, targets, pm.TargetCount);
+                    Emit(outcomes, ref count, pm, placed ? OrderOutcomeKind.Moved : OrderOutcomeKind.Failed, SkipReason.None, nowHours, 0);
+                    RemovePending(p);
+                    continue;
+                }
                 if (pm.MovedAtCall ||
                     MovingUnits(s, targets, pm.TargetCount) > pm.PathsBefore ||
                     TargetTaken(s, targets, pm.TargetCount, _pendingAlreadyThere[p], pm.AlreadyThereCount))
@@ -839,6 +910,24 @@ namespace WhiskeyRealism.Tactical.Battle
             VanillaMapBounds.ClampXZ(x + child.X - group.X, z + child.Z - group.Z, sizeX, sizeZ, out childX, out childZ);
         }
 
+        // Each via point is validated like the target (map clamp, river pull-back, water and
+        // fence step-back) as a pass-through point, so the friendly-footprint rule does not apply;
+        // one that cannot be made safe is dropped and the others stay in order.
+        private void ValidateVia(IBattleUnitView s, int idx, in BattleOrderIntent w, ref ExecutionPlan plan)
+        {
+            for (int k = 0; k < w.ViaCount && k < RoadRoutePlanner.MaxVia; k++)
+            {
+                BattleOrderIntent via = w;
+                via.TargetX = k == 0 ? w.ViaX0 : w.ViaX1;
+                via.TargetZ = k == 0 ? w.ViaZ0 : w.ViaZ1;
+                via.Flags = (w.Flags | IntentFlags.ReliefOrSupport) & ~IntentFlags.ArtilleryFirePosition;
+                if (WaypointValidator.Validate(s, idx, via, _sizeX, _sizeZ, _terrain, out float vx, out float vz) != SkipReason.None) continue;
+                if (plan.ViaCount == 0) { plan.ViaX0 = vx; plan.ViaZ0 = vz; }
+                else { plan.ViaX1 = vx; plan.ViaZ1 = vz; }
+                plan.ViaCount++;
+            }
+        }
+
         private bool IsDuplicate(IBattleUnitView s, int idx, in UnitRecord rec, in BattleOrderIntent w, float x, float z)
         {
             switch (w.Channel)
@@ -932,6 +1021,20 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             x = 0f;
             z = 0f;
+            return false;
+        }
+
+        // An immediate placement took when a target group stands within DedupeMeters of the
+        // position the runtime recorded for it (the placed headquarters).
+        private static bool StandsNearTarget(IBattleUnitView s, IssuedTarget[] targets, int count)
+        {
+            float r2 = OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
+            UnitRecord[] own = s.Own;
+            for (int t = 0; t < count; t++)
+            {
+                int idx = s.IndexOfOwn(targets[t].InstanceId);
+                if (idx >= 0 && DistSq(own[idx].X, own[idx].Z, targets[t].X, targets[t].Z) <= r2) return true;
+            }
             return false;
         }
 
@@ -1106,7 +1209,13 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static bool UsesOrderDelay(in BattleOrderIntent i)
         {
-            return (i.Flags & IntentFlags.UseOrderDelay) != 0 && (i.Flags & IntentFlags.InContactWithdrawal) == 0;
+            return (i.Flags & IntentFlags.UseOrderDelay) != 0 && (i.Flags & IntentFlags.InContactWithdrawal) == 0 && !IsImmediatePlacement(i);
+        }
+
+        /// <summary>A deployment placement (SetGroupFormation with immediateplacement), not a march order.</summary>
+        public static bool IsImmediatePlacement(in BattleOrderIntent i)
+        {
+            return i.Channel == OrderChannel.Move && (i.Flags & IntentFlags.ImmediatePlacement) != 0;
         }
 
         private static bool DescendantMoving(IBattleUnitView s, int idx)

@@ -692,7 +692,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         // Gated: the side's snapshot for this Tick (heavy gate evaluated once).
                         var snap = EnsureSideSnapshot(side, battle);
-                        int intentsHash = CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents);
+                        int intentsHash = unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash);
                         bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
                             || intentsHash != _lastLedgerIntentsHash[s];
                         if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))
@@ -1437,6 +1437,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return string.IsNullOrWhiteSpace(value) ? "<unresolved>" : value.Trim().Replace(' ', '_');
         }
 
+        // BC10: which direct children the executor placed as a deployment reserve and has not moved
+        // since (DeploymentDoctrine.IsDeployedReserve over the executor's last Move outcomes). The
+        // outcome table is executor bookkeeping, so the allocator reads it without any patch-written state.
+        private static bool[] DeployedReserveFlags(int alliance, int[] childInstanceIds)
+        {
+            var flags = new bool[childInstanceIds.Length];
+            Battle.OrderExecutor executor = Battle.OrderExecutor.ForAlliance(alliance);
+            if (executor == null || !Battle.BattleCore.TryGetSnapshot(alliance, out Battle.BattleSnapshot snapshot) || snapshot == null)
+                return flags;
+            for (int i = 0; i < flags.Length; i++)
+            {
+                int index = snapshot.IndexOfOwn(childInstanceIds[i]);
+                flags[i] = Battle.DeploymentDoctrine.IsDeployedReserve(snapshot, executor, index);
+            }
+            return flags;
+        }
+
         private static void DriveDirectChildCycle(TacticalBattleOrchestrator side, AIBattle battle)
         {
             try
@@ -1517,7 +1534,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         active: true);
                 }
 
-                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren);
+                bool[] deployedReserve = DeployedReserveFlags(side.AllianceId, childInstanceIds);
+                DeployedReserveMemory.Shared.Apply(deployedReserve, childInstanceIds);
+                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren, deployedReserve);
                 // Stage 2 / G: geometric play layer. Compute corps→rect
                 // assignments from the current plan's template. When zone
                 // assignments are available, the allocator uses them in
@@ -1535,10 +1554,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var ex = side.Army.CurrentDirectChildIntents[0];
                         shift = ex.RawUnitTyp - ex.EffectiveCommandLevel;
                     }
+                    // BC11: a deployed reserve keeps its role (BC10), so it is not offered a rect: the Center goes to a child that acts.
+                    var childIds = new string[childCount];
+                    for (int c = 0; c < childCount; c++)
+                        childIds[c] = deployedReserve[c] ? string.Empty : side.Army.CurrentDirectChildIntents[c].ChildId;
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
-                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis);
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
+                // BC11 decision 4: the enveloping children's state machines (the doctrine build overrides their nodes).
+                side.Army.SetManeuvers(zoneAssignments == null || !side.Army.HasPlan
+                    ? null
+                    : WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime.StepManeuvers(
+                        side.AllianceId, side.Army.CurrentPlan.PlanId, side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance));
+                var allocatedRoles = new DirectChildRole[side.Army.CurrentDirectChildIntents.Count];
+                for (int r = 0; r < allocatedRoles.Length; r++) allocatedRoles[r] = side.Army.CurrentDirectChildIntents[r].Role;
+                DeployedReserveMemory.Shared.NoteRoles(deployedReserve, childInstanceIds, allocatedRoles);
 
                 for (int i = 0; i < side.Army.CurrentDirectChildIntents.Count; i++)
                 {

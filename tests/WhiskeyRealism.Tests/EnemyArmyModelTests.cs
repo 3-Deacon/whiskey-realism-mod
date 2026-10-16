@@ -1122,7 +1122,7 @@ internal static class EnemyArmyModelTests
         AssertContains(core, "a.LegacySerial = legacySerial;", "the CIC job hands the legacy serial on");
         AssertContains(core, "_frontChangedDay[alliance] = a.LegacySerial;", "front change day: legacy");
         AssertContains(core, "CalendarDay = calendarDay,", "the day's calendar day");
-        AssertEqual(2, core.Split(new[] { "UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay)" }, StringSplitOptions.None).Length - 1, "CIC player and AI policy steps: calendar");
+        AssertEqual(2, core.Split(new[] { "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay)" }, StringSplitOptions.None).Length - 1, "CIC player and AI policy steps: calendar");
         AssertContains(core, "ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewCalendarDay, calendarDay)", "cadence: calendar");
         AssertContains(core, "ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewCalendarDay, calendarDay)", "cadence: calendar");
         AssertContains(MethodBody(coordinator, "private void UpdatePolicyPlanCore("),

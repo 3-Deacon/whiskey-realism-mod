@@ -144,7 +144,13 @@ namespace WhiskeyRealism.Tactical.Operations
         WheelGroup,
         // BattleUnits.SetFormation (90971): courier-delivered formation change,
         // the way AdjustGroupFormations does it (5927).
-        VanillaFormation
+        VanillaFormation,
+        // BC11, appended. A refused flank of a group in combat: the wing regiments
+        // whose SkewedPosition setback is at least FlankFacing.RefuseWingShare of the
+        // refuse depth rotate in place (Regiment.RotateRegiment) to the skewed-line
+        // rotation (78155-78167), only where vanilla's micro turn (4560-4608) would
+        // not turn them back. No re-lay, no position change.
+        RefuseInPlace
     }
 
     public readonly struct FormationWriteInput
@@ -232,6 +238,9 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (inCombat)
             {
+                // BC11: a refused flank in combat rotates the wing in place (RotateInPlace would
+                // drop the refuse); a facing-only write keeps the shipped rotation.
+                if (input.NeedsRefuse) return new FormationWriteDecision(FormationWriteKind.RefuseInPlace, "combat-refuse-in-place");
                 return input.NeedsFacing
                     ? new FormationWriteDecision(FormationWriteKind.RotateInPlace, "combat-rotate-in-place")
                     : new FormationWriteDecision(FormationWriteKind.None, "combat-no-relay");
@@ -240,7 +249,14 @@ namespace WhiskeyRealism.Tactical.Operations
             if (input.NeedsFormation && input.CoverValueSubordinates <= 0f)
                 return new FormationWriteDecision(FormationWriteKind.VanillaFormation, "vanilla-set-formation");
 
-            if (input.NeedsFacing || input.NeedsRefuse)
+            // BC11 (bug fix): vanilla re-forms a group only when it is out of combat, and combatstatussubordinates
+            // is that gate (AdjustGroupFormations 5886). A refused flank is that wheel whatever the enemies in
+            // reach: a visible enemy within 250 m is always "in range", which kept refuseflank at -1. A
+            // facing-only wheel keeps the shipped enemies-in-range refusal.
+            if (input.NeedsRefuse)
+                return new FormationWriteDecision(FormationWriteKind.WheelGroup, "refuse-wheel");
+
+            if (input.NeedsFacing)
             {
                 return input.GroupEnemiesInRange > 0f
                     ? new FormationWriteDecision(FormationWriteKind.None, "enemies-in-range")
@@ -898,29 +914,59 @@ namespace WhiskeyRealism.Tactical.Operations
             });
         }
 
+        public const string RefusePromotedReason = "refuse-flank";
+
         /// <summary>
-        /// #61 ResolveRefusedFlank: a close-engaged group with flank risk on a
-        /// holding/guarding task refuses the flank its closest visible threat
-        /// is on (CommandFormationCorrection.RefuseDecisionForThreatFacing, 45-150
-        /// degrees off its facing); vanilla skews the slots (SetGroupFormation
-        /// refuseflank, 92095-92097).
+        /// BC11 decision 2: which posture NoWrite verdicts a due refused flank may override. A group that is already
+        /// doing its task (formation right, idle where idle is the task) has nothing else to write; every other NoWrite
+        /// (moving, order pending, routed, protected) keeps its verdict.
+        /// </summary>
+        public static bool RefusePromotesNoWrite(string reason)
+        {
+            return string.Equals(reason, "already-correct", StringComparison.Ordinal) ||
+                string.Equals(reason, "already-valid", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// #61 ResolveRefusedFlank, BC11 decision 2: a group with flank risk on a holding/guarding task refuses
+        /// the flank that is under threat; vanilla skews the slots (SetGroupFormation refuseflank, 92095-92097).
+        /// It needs close engagement (melee, or a visible enemy within CloseContactMeters) or perceived flank
+        /// pressure on one side (BattleSnapshot.FlankPressure left / right above 0). The side is the flank with more
+        /// pressure (FlankFacing.PressuredSide); on a tie, or with no pressure, the closest visible enemy decides as
+        /// before (CommandFormationCorrection.RefuseDecisionForThreatFacing, 45-150 degrees off the facing). On a
+        /// pressured side the geometry test runs on that side's pressure bearing (FlankFacing.SideBearing), and a
+        /// closest-enemy fallback must agree with the side.
         /// </summary>
         public static RefuseFlank RefuseFor(BattleSnapshot s, int index, CommandTaskType task, bool closeEngaged, bool flankRisk)
         {
-            if (s == null || index < 0 || index >= s.OwnCount || !closeEngaged || !flankRisk) return RefuseFlank.None;
-            if (CommandFormationCorrection.RefuseFlankParameter(TacticalRefuseFlankIntent.Decision.RefuseLeft, task, closeEngaged) < 0)
+            if (s == null || index < 0 || index >= s.OwnCount || !flankRisk) return RefuseFlank.None;
+            RefuseFlank pressured = FlankFacing.PressuredSide(s, index);
+            bool pressure = s.FlankPressure(index, 0) > 0f || s.FlankPressure(index, 1) > 0f;
+            if (!closeEngaged && !pressure) return RefuseFlank.None;
+            if (CommandFormationCorrection.RefuseFlankParameter(TacticalRefuseFlankIntent.Decision.RefuseLeft, task, true) < 0)
                 return RefuseFlank.None;
-            int k = s.ClosestVisibleEnemy(index, out _);
-            if (k < 0) return RefuseFlank.None;
             ref UnitRecord rec = ref s.Own[index];
-            float threatRotation = CommandFormationCorrection.ThreatFacingRotationDegrees(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
-            TacticalRefuseFlankIntent.Decision decision = CommandFormationCorrection.RefuseDecisionForThreatFacing(rec.RotationY, threatRotation);
-            switch (CommandFormationCorrection.RefuseFlankParameter(decision, task, closeEngaged))
+
+            float threatRotation;
+            if (pressured != RefuseFlank.None && FlankFacing.SideBearing(s, index, rec.RotationY, pressured, out float sideBearing))
             {
-                case 0: return RefuseFlank.Left;
-                case 1: return RefuseFlank.Right;
+                threatRotation = sideBearing;
+            }
+            else
+            {
+                int k = s.ClosestVisibleEnemy(index, out _);
+                if (k < 0) return RefuseFlank.None;
+                threatRotation = CommandFormationCorrection.ThreatFacingRotationDegrees(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+            }
+            TacticalRefuseFlankIntent.Decision decision = CommandFormationCorrection.RefuseDecisionForThreatFacing(rec.RotationY, threatRotation);
+            RefuseFlank side;
+            switch (CommandFormationCorrection.RefuseFlankParameter(decision, task, true))
+            {
+                case 0: side = RefuseFlank.Left; break;
+                case 1: side = RefuseFlank.Right; break;
                 default: return RefuseFlank.None;
             }
+            return pressured != RefuseFlank.None && pressured != side ? RefuseFlank.None : side;
         }
 
         /// <summary>
@@ -1090,6 +1136,12 @@ namespace WhiskeyRealism.Tactical.Operations
         public IntentPriority Priority;
         public IntentSource Source;
         public string Reason; // static literal
+        // BC10 road march: the planned via points ride on the Move (the executor sends the group
+        // through them); ColumnWait holds the Move back while group formation 4 (march column,
+        // TargetFormation) is ordered: the formation intent goes out alone.
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
+        public bool ColumnWait;
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
@@ -1144,12 +1196,14 @@ namespace WhiskeyRealism.Tactical.Operations
                     return SubmitFormation(sink, r);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!r.HasTarget) return 0;
+                    if (r.ColumnWait) return SubmitStance(sink, r) + SubmitFormation(sink, r);
                     return SubmitStance(sink, r) + SubmitMove(sink, r) + SubmitFormation(sink, r);
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
                 case PostureExecutionAction.RecoverInterruptedOrder:
                     if (!r.HasTarget) return 0;
+                    if (r.ColumnWait) return SubmitStance(sink, r) + SubmitFormation(sink, r);
                     return SubmitStance(sink, r) + SubmitMove(sink, r);
                 default:
                     return 0;
@@ -1293,8 +1347,17 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static int SubmitMove(IIntentSink sink, in PostureIntentRequest r)
         {
-            sink.Submit(MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
-                r.Priority, r.Source, r.Reason));
+            BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
+                r.Priority, r.Source, r.Reason);
+            if (r.ViaCount > 0)
+            {
+                move.ViaCount = Math.Min(r.ViaCount, 2);
+                move.ViaX0 = r.ViaX0;
+                move.ViaZ0 = r.ViaZ0;
+                move.ViaX1 = r.ViaX1;
+                move.ViaZ1 = r.ViaZ1;
+            }
+            sink.Submit(move);
             return 1;
         }
 
@@ -1470,9 +1533,9 @@ namespace WhiskeyRealism.Tactical.Operations
 
     // R5: NavMesh area costs are global and Regiment.AddPath rewrites them for
     // every path (130364-130394), so the posture producer's path-quality probe
-    // sets AddPath's battle costs (roads allowed, path not interrupted) before
-    // every NavMesh.CalculatePath instead of running on whatever the last
-    // AddPath left.
+    // puts AddPath's battle costs (roads allowed, path not interrupted) on its own
+    // NavMeshQueryFilter for NavMesh.CalculatePath instead of running on whatever
+    // the last AddPath left, and instead of writing the global costs itself (BC10).
     public static class PostureNavAreaCosts
     {
         public static readonly string[] AreaNames =

@@ -89,6 +89,9 @@ namespace WhiskeyRealism.Strategic
         private string _campaignMapDynamicSignature;
         private DailyCadence _operationalCadence = new DailyCadence();
         private bool _erasSeededFromSave;
+        // Armed by ApplySnapshot, consumed by the first NotifyDateAdvanced after a load: a sidecar era
+        // written under the old calendar rule may say TotalWar1864 while vanilla's chapter is below 3.
+        private bool _eraMigrationPending;
         internal static readonly CampaignEpochTracker Epoch = new CampaignEpochTracker();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
@@ -208,6 +211,7 @@ namespace WhiskeyRealism.Strategic
             _dailyOpsAnnounced = false;
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
+            _eraMigrationPending = false;
             _lastReviewCalendarDay = -1;
             _saveSequence = 0;
             _lastSnapshot = default(WarStateObserver.Snapshot);
@@ -243,13 +247,25 @@ namespace WhiskeyRealism.Strategic
             DrainDailyReview();
             if (!Initialized) InitializeFromGameState();
 
+            // Sidecar migration. A loaded save restores LastSeenMonth, so firstCall below is false for
+            // every save written after its first review: the migration is its own one-shot. The chapter
+            // is known here (MonthlyTickHookPatch waits for vanilla's update) except when that wait
+            // expired at frame 200: the chapter can then be -1, ResetStaleLateWar does nothing, and an
+            // old sidecar's TotalWar1864 survives that load. The wait should never expire.
+            if (_eraMigrationPending)
+            {
+                _eraMigrationPending = false;
+                for (int a = 0; a < _work.Eras.Length; a++)
+                    _work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());
+            }
+
             bool firstCall = (LastSeenMonth < 0);
             bool rollover  = !firstCall && ((gameMonth != LastSeenMonth) || (gameYear != LastSeenYear));
             if (firstCall && !_erasSeededFromSave)
             {
                 // Fresh campaign state (reset or no sidecar era): derive the era from the date.
                 for (int a = 0; a < _work.Eras.Length; a++)
-                    (_work.Eras[a] ?? (_work.Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear);
+                    (_work.Eras[a] ?? (_work.Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear, SafePolicyChapter());
             }
 
             // Fire on first valid call (campaign just started / save just loaded)
@@ -291,18 +307,6 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static void ForceChapterUpdate()
-        {
-            try
-            {
-                var policyType = AccessTools.TypeByName("Policy");
-                if (policyType == null) return;
-                var m = AccessTools.Method(policyType, "CheckForChapterUpdate");
-                m?.Invoke(null, null);
-            }
-            catch { /* tolerate — CIC.diag will surface CurrentChapter if still wrong */ }
-        }
-
         private static int SafePolicyChapter()
         {
             try { return Policy.CurrentChapter; }
@@ -313,16 +317,6 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                // Vanilla's Policy.CheckForChapterUpdate() runs from a per-day cycle
-                // and sets Policy.CurrentChapter (initial value -1). For scenario "002"
-                // (Whiskey & Lemons) it unconditionally sets CurrentChapter = 1. Our
-                // OnMonthlyTick can fire BEFORE vanilla's per-day cycle has run on a
-                // fresh campaign, so CurrentChapter is still -1 — which deactivates
-                // every CampaignObjective (their ObjectiveChapters lists don't contain
-                // -1). Call it ourselves to make the chapter current before we read
-                // objective state.
-                ForceChapterUpdate();
-
                 // Test-mode: bypass gates and fire every event on first tick.
                 if (Plugin.Instance.ForceAllSuccessionEvents.Value && !_forcedAllSuccession)
                 {
@@ -597,7 +591,7 @@ namespace WhiskeyRealism.Strategic
                 if (job.Kind == DailyReviewJobKind.Fiscal)
                     d.FiscalMs += Measure(() => UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false));
                 else if (job.Kind == DailyReviewJobKind.Policy)
-                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay));
+                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay));
                 // G1: detection is bookkeeping; the planner itself stands down for this alliance.
                 else if (job.Kind == DailyReviewJobKind.Plan)
                     d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused));
@@ -615,7 +609,7 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Policy:
                     if (ready)
-                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay));
+                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay));
                     break;
 
                 case DailyReviewJobKind.Plan:
@@ -733,7 +727,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     var cicEra = _work.Eras[alliance];
                     var cicWs = ObserveWarStateCached(day, month, year);
-                    cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, cicWs.AtlantaThreatened);
+                    cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, SafePolicyChapter());
                     a.Era = cicEra;
                     a.Mode = AllianceReviewMode.PlayerCic;
                 }
@@ -743,7 +737,7 @@ namespace WhiskeyRealism.Strategic
 
             var era = _work.Eras[alliance];
             var ws = ObserveWarStateCached(day, month, year);
-            era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
+            era.CheckTransition(month, year, ws.VicksburgFallen, SafePolicyChapter());
 
             if (!d.JobMachinePaused)
             {
@@ -1381,16 +1375,20 @@ namespace WhiskeyRealism.Strategic
         // and posture it reuses, and only once AICampaign.aifaction exists (vanilla
         // GetAIPersonality 62716 can reach GetStrengthRatio, which indexes it). Spec
         // docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
-        private void UpdatePolicyPlan(int alliance, EraStage era, int calendarDay)
+        private void UpdatePolicyPlan(int alliance, EraStage era, int day, int month, int year, int calendarDay)
         {
             using (TelemetryPerf.Scope("campaign.policy-plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdatePolicyPlanCore(alliance, era, calendarDay);
+                UpdatePolicyPlanCore(alliance, era, day, month, year, calendarDay);
         }
 
-        private void UpdatePolicyPlanCore(int alliance, EraStage era, int calendarDay)
+        private void UpdatePolicyPlanCore(int alliance, EraStage era, int day, int month, int year, int calendarDay)
         {
             int[] personality = PolicyRuntime.ReadPersonalityList(alliance, out bool emergencyCredit, out bool emergencyManpower);
-            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
+            var snapshot = CampaignNeedRuntime.Read(alliance, era, day, month, year, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
+            float electionBoost = CampaignNeedBuilder.ElectionBoost(snapshot);
+            if (electionBoost > 0f)
+                OnceLog.Info("campaign-need:election-pressure",
+                    $"[CampaignNeed] election pressure alliance={alliance} daysToVerdict={snapshot.ElectionDaysToVerdict} morale={snapshot.NationalMorale:F2} line={snapshot.ElectionMoraleThreshold:F2} boost={electionBoost:F2}");
             int days = _needCalendarDay[alliance] >= 0 ? calendarDay - _needCalendarDay[alliance] : 1;
             var previous = _work.Needs[alliance];
             var need = CampaignNeedBuilder.Next(previous, snapshot, days);
@@ -1670,7 +1668,7 @@ namespace WhiskeyRealism.Strategic
         // so that a reflection gap silently degrades rather than crashing.
         private CampaignPaceInput BuildCampaignPaceInput(int alliance, int day, int month, int year)
         {
-            float ownMorale = 50f, enemyMorale = 50f;
+            float ownMorale = 50f;
             float breakTrigger = 30f, minSurrender = 18f;
             try
             {
@@ -1679,19 +1677,13 @@ namespace WhiskeyRealism.Strategic
                 var allianceArray = _allianceArrayField?.GetValue(null) as System.Array;
                 if (allianceArray != null)
                 {
-                    int enemyAlliance = 1 - alliance;
-                    var ownEntry   = allianceArray.GetValue(alliance);
-                    var enemyEntry = enemyAlliance < allianceArray.Length ? allianceArray.GetValue(enemyAlliance) : null;
+                    var ownEntry = allianceArray.GetValue(alliance);
                     if (ownEntry != null)
                     {
                         if (_nationalMoraleField == null)
                             _nationalMoraleField = AccessTools.Field(ownEntry.GetType(), "nationalmorale");
                         if (_nationalMoraleField != null)
-                        {
                             ownMorale = (float)_nationalMoraleField.GetValue(ownEntry);
-                            if (enemyEntry != null)
-                                enemyMorale = (float)_nationalMoraleField.GetValue(enemyEntry);
-                        }
                     }
                 }
                 if (_gamePrefsType == null) _gamePrefsType = AccessTools.TypeByName("GamePrefs");
@@ -1727,7 +1719,6 @@ namespace WhiskeyRealism.Strategic
                 Month                        = month,
                 PolicyChapter                = SafePolicyChapter(),
                 OwnNationalMorale            = ownMorale,
-                EnemyNationalMorale          = enemyMorale,
                 BreakMoraleTrigger           = breakTrigger,
                 MinNationalMoraleSurrender   = minSurrender,
                 BattlesIn14Days              = battles,
@@ -2280,7 +2271,7 @@ namespace WhiskeyRealism.Strategic
             {
                 _work.CICs[alliance] = snap.Cics[alliance];
                 _work.Eras[alliance] = new EraStageManager { Stage = snap.Eras[alliance] ?? EraStage.Amateur1861 };
-                if (snap.Eras[alliance].HasValue) _erasSeededFromSave = true;
+                if (snap.Eras[alliance].HasValue) { _erasSeededFromSave = true; _eraMigrationPending = true; }
                 _work.DirectorMemories[alliance] = snap.DirectorMemories[alliance] ?? new DirectorMemory();
                 OperationMemories[alliance] = new OperationDecisionMemory();
                 OperationMemories[alliance].RestoreRecentReplans(snap.RecentReplans[alliance]);

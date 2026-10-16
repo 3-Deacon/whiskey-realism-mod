@@ -41,6 +41,11 @@
 //   flankpositionshift (unitprefs, 53300), read once per battle; the slice count is the
 //   snapshot's (aidefensiveslices, set by the builder).
 //
+// - Perceived outflanking (BC10): after the pressure build, PerceivedFlanking.Apply fills
+//   UnitRecord.Outflanked from the regiments the side sees (UpdateFlanking 122959-123175 with
+//   its sectors and range from GamePrefs.fireangles / distancetoenemyforoutflank, read once
+//   per battle); the snapshot builder no longer copies vanilla's unfogged value.
+//
 // - Troop quality (BC8): each enemy row carries its record's Experience() and morale; only a
 //   visible row's star experience and morale reach memory (BattlePerception.Update; the
 //   player sees a visible regiment's stars, UpdateUnitIcon 121832-121852). Reinforcement
@@ -83,6 +88,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static double _battleStartHours = double.NaN;
         private static bool _geometryRead;
         private static SliceGeometry _geometry;
+        private static FlankGeometry _flank;
         private static readonly PaintedGridLatch _paintedGrids = new PaintedGridLatch(2);
 
         private static FieldInfo _firstRunField;
@@ -161,6 +167,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
             BattlePerception.Publish(s, mode, reason, side.Memory, side.MemoryCount, in side.Result);
             SlicePressureBuilder.Build(s, in _geometry);
+            using (TelemetryPerf.Scope("tactical.perceived-flanking", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
+                PerceivedFlanking.Apply(s, in _flank);
             BattleSnapshotBuilder.RefitFrontAxis(s);
             ReportModeChange(side, alliance, mode, reason);
         }
@@ -180,7 +188,9 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (enemies[i].UnitTyp > 13 || enemies[i].UnitTyp == 5) continue;
                     AddRow(ref side.Result, enemies[i].InstanceId, IsEnemyVisible(mode, grid, s, i), enemies[i].X, enemies[i].Z,
                         enemies[i].Strength, enemies[i].UnitTyp, (enemies[i].Flags & UnitFlags.Routed) != 0,
-                        reinforcement: false, arrivalHours: 0f, experience: enemies[i].Experience, morale: enemies[i].Morale);
+                        reinforcement: false, arrivalHours: 0f, experience: enemies[i].Experience, morale: enemies[i].Morale,
+                        heading: enemies[i].RotationY, fireRange: enemies[i].FireRange, coverValue: enemies[i].CoverValue,
+                        coverObject: enemies[i].CoverObject, standing: enemies[i].RegimentPaths <= 0);
                 }
                 AddReinforcements(side, battle, s.Alliance, mode, grid);
                 return true;
@@ -281,7 +291,8 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         private static void AddRow(ref PerceptionProbeResult result, int id, bool visible, float x, float z, float strength,
-            int unitTyp, bool routed, bool reinforcement, float arrivalHours, float experience, float morale)
+            int unitTyp, bool routed, bool reinforcement, float arrivalHours, float experience, float morale,
+            float heading = 0f, float fireRange = 0f, float coverValue = 0f, int coverObject = 0, bool standing = false)
         {
             int i = result.Count;
             PerceptionProbeResult.EnsureCapacity(ref result, i + 1);
@@ -296,6 +307,12 @@ namespace WhiskeyRealism.Tactical.Battle
             result.ArrivalHours[i] = arrivalHours;
             result.Experience[i] = experience; // true values; BattlePerception.Update keeps the star value of a visible row
             result.Morale[i] = morale;
+            // BC10: the covered-crossings inputs of a unit row (a reinforcement column has none).
+            result.Heading[i] = heading;
+            result.FireRange[i] = fireRange;
+            result.CoverValue[i] = coverValue;
+            result.CoverObject[i] = coverObject;
+            result.Standing[i] = standing;
             result.Count = i + 1;
         }
 
@@ -391,6 +408,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 MaxRangeMeters = GamePrefs.aidefensivemaxrange,
                 FlankShiftMeters = GamePrefs.flankpositionshift,
             };
+            // UpdateFlanking's sectors and range (122993-123010, unitprefs "Fireangle front/back").
+            float[] fire = GamePrefs.fireangles;
+            _flank = fire != null && fire.Length >= 4
+                ? new FlankGeometry
+                {
+                    FrontFrom = fire[0], FrontTo = fire[1], LeftFrom = fire[2], RightTo = fire[3],
+                    RangeMeters = GamePrefs.distancetoenemyforoutflank,
+                }
+                : default(FlankGeometry); // RangeMeters 0: every code reads 0
         }
 
         // True once the side's grid has finished its first full pass. The reflected read

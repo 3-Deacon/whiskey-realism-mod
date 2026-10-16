@@ -19,7 +19,7 @@ Verified against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 | `AICampaign.IsUnitAvailableForOffensiveOperations(...)` | 14080 | Gates operation candidates by readiness, strength, morale, existing operations, capital-defense duty, supply-depot construction, and related availability checks. |
 | `AICampaign.CheckOffensiveMovements(int, Regiment, float)` | 14166 | Builds local offensive packages and commits them through `MoveUnitTo(...)` plus `unitsinoffensiveoperations`. |
 | `GamePrefs.aiagressiveness[Policy.CurrentChapter]` in `CheckOffensiveMovements` | 14339 | Vanilla's offensive-operation probability is chapter-weighted and also depends on `timediff`, faction aggression, campaign aggression, winter modifier, and `timeofnotmoving`. |
-| `Policy.CheckForChapterUpdate()` | 211604 | Sets vanilla `Policy.CurrentChapter`; W&L scenario `002` starts at chapter 1, advances to chapter 2 after 1862-11-05, and can advance to chapter 3 after 1864-11-09 when objective 26 is accomplished and objective 27 is not. |
+| `Policy.CheckForChapterUpdate()` | 211606-211714 | Recomputes vanilla `Policy.CurrentChapter` at campaign frame 50 (30146-30149) and every `updatetimeforcampaigndata` (79305-79323), not once a day; Whiskey never calls it and the first review waits for the chapter to be 0 or more. Scenario `001` starts at chapter 0 (pre-war; no campaign movement, 91366) and reaches chapter 1 at the war start; W&L scenario `002` is forced to chapter 1 (211671). Both advance to chapter 2 after 1862-11-05 and to chapter 3 after 1864-11-09 when objective 26 (Union morale at least 0.50 on the verdict day) is accomplished and objective 27 is not. |
 
 Vanilla therefore has a useful tempo substrate, but it does not have Whiskey's limited-contact doctrine that separates a probe from a mass commitment.
 
@@ -44,11 +44,11 @@ Runtime flow:
 
 ## Tempo Policy
 
-`OperationalTempoDoctrine` combines vanilla chapter with Whiskey era instead of replacing either system:
+`OperationalTempoDoctrine` combines vanilla chapter with Whiskey era instead of replacing either system. The late-war era is vanilla's chapter 3, not the calendar: `EraStage.TotalWar1864` starts with chapter 3 (Lincoln re-elected, 9 Nov 1864), so a lost election keeps the era at `Decisive1863` and the chapter-3 clause below is the era's own condition (`EraStageManager.IsLateWar`). The earlier eras keep their calendar years: no chapter boundary coincides with them (chapter 1 starts at the war, chapter 2 on 6 Nov 1862). A save written under the old calendar rule has its `TotalWar1864` pulled back to the chapter-derived era on the first review after load.
 
 - Chapter 1 / `Amateur1861`: longer minimum probe time, smaller probe packages, higher escalation odds requirement.
 - Chapter 2 / 1862-63: normal sustained operations.
-- Chapter 3+ / `TotalWar1864`: faster escalation and larger probes, especially for Union.
+- Chapter 3+ / `TotalWar1864` (from 9 Nov 1864): faster escalation and larger probes, especially for Union.
 - Late Union: sustains pressure earlier after favorable contact.
 - Late CSA: requires better odds and uses smaller probes.
 - Winter months: extend probe time and reduce probe size.

@@ -39,7 +39,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Row("union-coastal-pressure", 0, new[] { 37 }, 1, 1862, 12, 1862, 20),
             Row("union-western-pressure", 0, new[] { 29 }, 1, 1862, 12, 1862, 10),
             Row("csa-western-depth", 1, new[] { 30 }, 1, 1862, 12, 1862, 10),
-            Row("union-late-pressure", 0, new[] { 3 }, 1, 1864, 12, 1865, 10)
+            Row("union-late-pressure", 0, new[] { 3 }, 5, 1864, 12, 1865, 10)
         };
 
         public static IReadOnlyList<Entry> Entries => Table;

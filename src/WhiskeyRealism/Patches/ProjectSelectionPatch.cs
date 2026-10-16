@@ -67,6 +67,7 @@ namespace WhiskeyRealism.Patches
                     lanes = Math.Min(lanes, allianceState.subsidyfunding.Length);
 
                 var era = StrategicCoordinator.Instance.Eras[alliance]?.Stage ?? EraStage.Amateur1861;
+                int campaignYear = ReadCampaignYear();
                 var profile = GrandStrategyRegistry.Resolve(alliance, era);
                 var fiscalIntent = StrategicCoordinator.Instance.FiscalIntents != null && alliance < StrategicCoordinator.Instance.FiscalIntents.Length
                     ? StrategicCoordinator.Instance.FiscalIntents[alliance]
@@ -104,7 +105,7 @@ namespace WhiskeyRealism.Patches
                         vanillaWeight,
                         candidates,
                         projectId => FiscalPolicyScorer.ProjectWeight(fiscalIntent, alliance, projectId, subsidyType),
-                        projectId => BuildRuntimeFacts(projectId, subsidyType, alliance),
+                        projectId => BuildRuntimeFacts(projectId, subsidyType, alliance, campaignYear),
                         fundingAvailable,
                         netFundingPerDay: 0f,
                         constructionCurrentlyWins: constructionCurrentlyWins);
@@ -241,7 +242,18 @@ namespace WhiskeyRealism.Patches
                 .WithField("criticalDoctrineProject", intent.CriticalDoctrineProject));
         }
 
-        private static ProjectRuntimeFacts BuildRuntimeFacts(int projectId, int subsidyType, int alliance)
+        // The campaign date's year (0 when vanilla cannot say), read once per selection.
+        private static int ReadCampaignYear()
+        {
+            try { return GameVars.GetCampaignFloatingDateSep().year; }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("project-selection:campaign-year", "[Patch:ProjectSelection] campaign year read failed: " + ex.Message);
+                return 0;
+            }
+        }
+
+        private static ProjectRuntimeFacts BuildRuntimeFacts(int projectId, int subsidyType, int alliance, int campaignYear)
         {
             var project = ResolveProject(projectId);
             if (project == null)
@@ -250,7 +262,8 @@ namespace WhiskeyRealism.Patches
             var facts = new ProjectRuntimeFacts
             {
                 ProjectId = projectId,
-                SubsidyLane = project.subsidytype
+                SubsidyLane = project.subsidytype,
+                CampaignYear = campaignYear
             };
 
             try

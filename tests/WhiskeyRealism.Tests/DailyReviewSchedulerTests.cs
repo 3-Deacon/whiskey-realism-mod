@@ -633,7 +633,7 @@ internal static class DailyReviewSchedulerTests
                     plan.Phases[plan.CurrentPhaseIndex].PhaseStartedDaySerial = _day;
 
                     Work.Eras[a] = Work.Eras[a] ?? new EraStageManager();
-                    View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, false);
+                    View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, 1);
 
                     // Posture from yesterday's front (the front job runs later today).
                     var memory = View.DirectorMemories[a];
@@ -1016,7 +1016,7 @@ internal static class DailyReviewSchedulerTests
             "UpdateCampaignMapLedger(d.Day, d.LogHeartbeat, d.WeeklyCatchUp)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false)",
             "UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: true)",
-            "UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay)",
+            "UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay)",
             "CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused)",
             "case DailyReviewJobKind.Execute: if (ready && !paused) d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused));",
             "case DailyReviewJobKind.Front: { a.FrontChanged = false; if (paused) break;",

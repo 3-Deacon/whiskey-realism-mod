@@ -95,7 +95,15 @@ namespace WhiskeyRealism.Strategic
         public string OperationName;
         public int AllianceId;
         public Theater Theater;
-        public EraStage Era;
+        public EraStage Era;     // lowest era that matches
+        private EraStage? _maxEra;
+        // Highest era that matches. Unset means Era (a single-era profile), so a profile built
+        // without it matches exactly its own era instead of silently matching nothing.
+        public EraStage MaxEra
+        {
+            get { return _maxEra ?? Era; }
+            set { _maxEra = value; }
+        }
         public int MinChapter;
         public int MaxChapter;
         public int StartMonth;

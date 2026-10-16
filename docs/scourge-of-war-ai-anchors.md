@@ -383,6 +383,10 @@ Corps assignment (`offai.cpp:1289`): VP-override (corps tracking major VP gets t
 
 Per-corps internal slots (`offai.cpp:1030`): `PSTATL*` (left side) and `PSTATR*` (right side) indexed by `eSpotBot/Mid/Top × Left/Right`. Divisions fill slots as they become ready.
 
+### Whiskey execution of the rects (BC11, 2026-10-15)
+
+Until BC11 a rect only relabelled the corps assigned to it (`PlayCorpsAssignment.RoleForRectKind`); `FlankMarch`, `LeftWing`, `RightWing` and `DeepRaid` all mapped to `Main`, and `StartTimeOffsetSeconds` was carried and dropped. Now six rects execute (`PlayRect.Envelops`): the assigned child holds until the rect's offset after the Center child's first contact (the later of that and the play's activation), marches to the rect anchor (a `DeepRaid` first to an outflank point 300 m beyond the less pressured end of the perceived enemy line), turns to face the perceived line end and attacks it (`EnvelopmentManeuver`), with vanilla's `FlankMove` checks (river id 4 on a leg, an enemy 5 m above the turn point) deciding whether the move is made. The other wing rects keep the offset as a start delay only. Scourge's `PLAYFTime` is the same idea (a rect's corps waits for its time); Scourge does not check rivers or ground heights on the way, Whiskey reuses vanilla's.
+
 ### Battle-type stance gate (`offai.cpp:1151-1159`)
 
 The "am I attacking or defending" decision is set ONCE by the scenario, then STAYS STABLE. Force balance does NOT flip a side from defend to attack mid-battle. Personality + force balance influence the SECONDARY pick (which OF several defend or attack plays) but never cross the attack/defend boundary.
@@ -430,6 +434,6 @@ The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetyp
 #44 `BattleMacroStrategyPatch` (Postfix on `AIBattle.CheckGlobalAIStrategy`, line 6314, plus a value-restoring Prefix) is the single owner of the AIBattle instance `macroai`. Vanilla's `AdjustGroupAIStance` (4221) then drives per-group `ai_stance` for brigades Whiskey has no explicit role for, so the line of battle forms through vanilla's own cascade. The 2026-05-23 `BattleMacroAIOverridePatch` Prefix that wrote the persisted `sideinformation[side].macroai` was removed on 2026-10-15; its reinforcement-opportunity opinion is now #44's fallback when the operations ledger has none.
 
 Reinforcement-opportunity mapping (`TacticalVanillaMacroAiMapping`):
-- `AttackNow` + ratio ≥ envelopment threshold → macroai 0 (flank attack); below it → 1 (frontal attack)
+- `AttackNow` + ratio ≥ envelopment threshold → macroai 0 (assault: by the battleprefs parse order 54685-54700, index 0 is assault, the macro stance with the lowest flank-order trigger 1.0, not a separate flank mode); below it → 1 (frontal attack)
 - `WaitAndConsolidate` / `DelayingDefense` / `WithdrawalToFightLater` → 2 (defend). Whiskey never writes 3: a Whiskey-written retreat with `startoffallback == 0` ends the battle on the next cycle (6362).
 - `DefensiveHold` / `NoOpportunity` → no opinion (vanilla's own value stands)

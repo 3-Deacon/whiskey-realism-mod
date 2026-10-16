@@ -33,14 +33,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //     OrderExecutorRuntime, never here.
     //   GetAttachedUnitsReg(excludedechainedunits) 119865: group orders skip a
     //     detached subtree; PostureSense.CollectRotatableRegiments follows it.
-    //   Regiment.AddPath area costs 130364-130394 (R5): PostureNavAreaCosts,
-    //     applied before every NavMesh.CalculatePath of the path probe.
+    //   Regiment.AddPath area costs 130364-130394 (R5): PostureNavAreaCosts, set on a
+    //     NavMeshQueryFilter the path probe passes to NavMesh.CalculatePath (BC10): the
+    //     global area costs, which every AddPath rewrites, are never written.
     //
     //   AIBattle.BlockedMovingOrder 3054-3150 (UpdateOrders 3382): an
     //     objective-type group move over 150 m carries
     //     IntentFlags.AvoidCoveredCrossings, as shipped #61 sent it (vanilla's own
     //     line-group moves, 6953-6956); OrderExecutorRuntime issues it.
-    //     UpdateBlockedCrossings (7917-7973) only lists the covered crossings.
+    //     The covered crossings it avoids are the perceived ones (CoveredCrossings, vanilla's
+    //     UpdateBlockedCrossings rules 7917-7973 over the snapshot's observations).
     //
     // Deleted with #61, not ported (the executor owns them): the recent-order
     // stamps, failed-write backoff, brigade task hold, courier cadence, outbound
@@ -77,8 +79,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public readonly Dictionary<int, int> EnemyIndexById = new Dictionary<int, int>(256);
             public readonly TacticalFriendlySpatialGrid Friendly = new TacticalFriendlySpatialGrid();
             // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side,
-            // shared by the posture and division-play producers.
+            // consumed only by this producer (TryNavPlan).
             public readonly NavPlanBudget Nav = new NavPlanBudget(4);
+            // BC10 decision 4: the NavMesh query filter of the path probe, built once per
+            // snapshot from the live area costs plus AddPath's battle costs.
+            public NavMeshQueryFilter NavFilter;
+            public bool NavFilterReady;
+            // BC10 decision 6: one road-route plan (a NavMesh path and an A*) per side and snapshot.
+            public readonly NavPlanBudget RouteBudget = new NavPlanBudget(1);
+            public readonly RoadRouteScratch RouteScratch = new RoadRouteScratch();
             public int LastOwnCount;
             public bool NavDeferred;
             public readonly List<float> SupportMainX = new List<float>(8);
@@ -134,6 +143,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             t.Nav.NextApply(t.LastOwnCount);
+            t.NavFilterReady = false;
+            t.RouteBudget.NextApply(0);
             t.LastOwnCount = n;
             t.SupportMainBuilt = false;
             t.TickId = s.TickId;
@@ -416,6 +427,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     internal static class PosturePipeline
     {
         internal const string ProbeReason = "probe-nomination";
+        internal const string ManeuverFacingReason = "envelopment-turn";
 
         internal static bool Run(
             BattleSnapshot s,
@@ -532,10 +544,27 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 g.FlankRisk = flankRisk;
             }
 
+            // BC11 decision 2: the refused flank. A group already doing its task (idle, formation right) used to
+            // return here, so a refused flank never left the posture executor; a flank that is due is its own write.
+            // A refuse already ordered on that side is not re-ordered (the executor keeps the last issued refuse).
+            RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
+            OrderExecutor refuseExecutor = OrderExecutor.ForAlliance(s.Alliance);
+            bool refuseDue = refuse != RefuseFlank.None && rec.UnitTyp > TacticalUnitType.MaxCombat &&
+                (refuseExecutor == null || refuseExecutor.LastIssuedRefuse(rec.InstanceId) != refuse);
+
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
-                PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
-                return false;
+                if (refuseDue && PostureSense.RefusePromotesNoWrite(decision.Reason))
+                {
+                    decision = new PostureExecutionDecision(PostureExecutionAction.SetFormation, PostureSense.RefusePromotedReason,
+                        PostureExecutionTarget.CurrentPosition);
+                }
+                else
+                {
+                    PostureRoutes.Forget(rec.InstanceId);
+                    PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
+                    return false;
+                }
             }
 
             bool hasTarget = PostureTargets.TryResolve(s, t, i, side, state, order, decision.Target, out float x, out float z);
@@ -552,15 +581,34 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 targetReason = BattleRecon.HoldReason;
             }
 
+            // BC10 road march: a long move through woods or swamp goes over a road when that is
+            // clearly faster, after the group takes march column; the route and the group's
+            // formation target are this pipeline's, so the arbiter sees one Formation intent.
+            RoadRoute roadRoute = default(RoadRoute);
+            bool columnWait = false;
+            if (hasTarget && rec.UnitTyp > TacticalUnitType.MaxCombat && !closeEngaged && PostureRoutes.Applies(state.Task, decision.Action))
+            {
+                bool avoidCovered = PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z);
+                if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
+                {
+                    PostureTelemetry.Group(s, i, reason, state, decision, 0, "road-route-deferred");
+                    return false;
+                }
+                if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
+                if (columnWait) targetReason = "road-column-wait";
+                else if (roadRoute.Use) targetReason = "road-route";
+            }
+
             // #61 SetFormation: threat facing for holding tasks and the refused
-            // flank in contact, on the formation channels.
-            RefuseFlank refuse = PostureSense.RefuseFor(s, i, state.Task, closeEngaged, flankRisk);
+            // flank in contact, on the formation channels. BC11 decision 1: the facing is the strongest
+            // perceived pressure on the front (FlankFacing), the closest visible enemy as before without it.
             float heading = -1f;
             bool hasThreatHeading = false;
             bool needsFacing = false;
-            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) && PostureTargets.TryThreat(s, i, out float threatX, out float threatZ))
+            string facingSource = PostureTargets.NoFacingSource;
+            if (CommandFormationCorrection.ShouldFaceThreat(state.Task) &&
+                PostureTargets.TryFacingBearing(s, i, rec.RotationY, out heading, out facingSource))
             {
-                heading = PostureSense.HeadingTo(rec.X, rec.Z, threatX, threatZ);
                 hasThreatHeading = heading >= 0f;
                 needsFacing = CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, heading, PostureSense.FacingToleranceDegrees);
             }
@@ -577,7 +625,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
                 InContactWithdrawal = closeEngaged || flankRisk,
                 AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
-                Refuse = refuse,
+                Refuse = refuseDue ? refuse : RefuseFlank.None,
                 // #61 wheeled with the threat heading whenever it had one (not only
                 // when the facing was off): a refuse-only wheel faces the threat.
                 HasThreatHeading = hasThreatHeading,
@@ -585,14 +633,28 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Priority = priority,
                 Source = source,
                 Reason = reason,
+                ViaCount = roadRoute.Use ? roadRoute.ViaCount : 0,
+                ViaX0 = roadRoute.ViaX0,
+                ViaZ0 = roadRoute.ViaZ0,
+                ViaX1 = roadRoute.ViaX1,
+                ViaZ1 = roadRoute.ViaZ1,
+                ColumnWait = columnWait,
             };
             int submitted = PostureIntentPlan.Submit(sink, request);
+            // BC11 decision 4: an EnvelopmentManeuver Turn faces the group at the enemy line end (the executor
+            // wheels it out of combat, rotates its regiments in place in combat).
+            if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&
+                CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, order.ManeuverHeading, PostureSense.FacingToleranceDegrees))
+                submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, order.ManeuverHeading, state.Task, RefuseFlank.None,
+                    priority, source, ManeuverFacingReason, t.RegimentQueue, t.Regiments);
             bool shapes = decision.Action == PostureExecutionAction.SetFormation ||
                 (decision.Action == PostureExecutionAction.SetFormationAndWaypoint && hasTarget);
+            // The facing keeps the refuse that is in force (not only a due one): a facing wheel re-lays every child, and a
+            // wheel without the skew would undo the refused flank the formation intent just ordered or that is already issued.
             if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
-            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason);
+            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason, facingSource);
             return submitted > 0;
         }
 
@@ -706,6 +768,203 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
     }
 
+    // Road march routing glue (BC10 decision 6): plans a route for a posture Move, caches it,
+    // and decides between the routed move, the column wait and the unrouted move
+    // (RoadRoutePlanner.DecideColumn). The planner is pure; this holds the NavMesh path of
+    // vanilla's own route, the per-side budget and the per-group latches.
+    internal static class PostureRoutes
+    {
+        static PostureRoutes()
+        {
+            BattleScope.Register("posture-routes", Reset);
+        }
+
+        internal enum Outcome { NoRoute, Routed, ColumnWait, Deferred }
+
+        private const float TargetBucketMeters = 50f;
+
+        private static readonly RoutePlanCache _cache = new RoutePlanCache();
+        // The doctrine hour each group first waited for march column.
+        private static readonly Dictionary<int, double> _columnSince = new Dictionary<int, double>(64);
+        private static float[] _pathX = new float[64];
+        private static float[] _pathZ = new float[64];
+        private static bool _firstLogged;
+
+        // Movement tasks that march a long way to an objective (plan decision 6); fallbacks,
+        // probes and scouts keep vanilla's pathing.
+        internal static bool Applies(CommandTaskType task, PostureExecutionAction action)
+        {
+            if (Plugin.EnableDeploymentAndMarchDoctrine == null || !Plugin.EnableDeploymentAndMarchDoctrine.Value) return false;
+            switch (action)
+            {
+                case PostureExecutionAction.SetWaypoint:
+                case PostureExecutionAction.SetFormationAndWaypoint:
+                case PostureExecutionAction.ReleaseReserve:
+                    break;
+                default:
+                    return false;
+            }
+            switch (task)
+            {
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.ReleaseReserve:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // The move (x, z) of group i: its route (Use only when the group is in march column) and
+        // whether it waits for the column. Deferred when a plan is wanted but this side's budget
+        // for the snapshot is spent: the move is held one tick rather than sent unrouted.
+        internal static Outcome Resolve(BattleSnapshot s, PostureTick.State t, int i, float x, float z, bool avoidCovered,
+            out RoadRoute route, out bool columnWait)
+        {
+            route = default(RoadRoute);
+            columnWait = false;
+            ref UnitRecord rec = ref s.Own[i];
+            // Safety before speed: a move around covered crossings takes BlockedMovingOrder, which has no via points.
+            if (avoidCovered && OrderExecutorRuntime.CoveredPointCount(s) > 0)
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+            if (!RoadRoutePlanner.Wanted(grid, rec.X, rec.Z, x, z))
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+            if (!TryPlan(s, t, grid, i, x, z, out RoadRoute planned)) return Outcome.Deferred;
+            if (!planned.Use)
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+
+            double waited = 0.0;
+            if (rec.Formation != RoadRoutePlanner.ColumnGroupFormation)
+            {
+                if (!_columnSince.TryGetValue(rec.InstanceId, out double since)) _columnSince[rec.InstanceId] = since = s.DoctrineHours;
+                waited = Math.Max(0.0, s.DoctrineHours - since);
+            }
+            else
+            {
+                _columnSince.Remove(rec.InstanceId);
+            }
+
+            switch (RoadRoutePlanner.DecideColumn(true, rec.Formation, waited))
+            {
+                case ColumnDecision.Routed:
+                    route = planned;
+                    LogFirst(planned);
+                    return Outcome.Routed;
+                case ColumnDecision.Wait:
+                    columnWait = true;
+                    return Outcome.ColumnWait;
+                default:
+                    return Outcome.NoRoute; // TimedOutUnrouted: the latch stays so the wait is not restarted
+            }
+        }
+
+        // A reserve release is a short courier move: it takes via points only when the group is
+        // already in march column (the posture pipeline owns the group's formation).
+        internal static void AttachIfInColumn(BattleSnapshot s, int i, ref BattleOrderIntent move)
+        {
+            if (Plugin.EnableDeploymentAndMarchDoctrine == null || !Plugin.EnableDeploymentAndMarchDoctrine.Value) return;
+            if (s.Own[i].Formation != RoadRoutePlanner.ColumnGroupFormation) return;
+            PostureTick.State t = PostureTick.For(s);
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+            if (t == null || !RoadRoutePlanner.Wanted(grid, s.Own[i].X, s.Own[i].Z, move.TargetX, move.TargetZ)) return;
+            if (!TryPlan(s, t, grid, i, move.TargetX, move.TargetZ, out RoadRoute planned) || !planned.Use) return;
+            move.ViaCount = planned.ViaCount;
+            move.ViaX0 = planned.ViaX0;
+            move.ViaZ0 = planned.ViaZ0;
+            move.ViaX1 = planned.ViaX1;
+            move.ViaZ1 = planned.ViaZ1;
+            LogFirst(planned);
+        }
+
+        internal static void Forget(int groupId)
+        {
+            _columnSince.Remove(groupId);
+        }
+
+        // The cached plan for (group, 50 m target bucket) while it is under 0.25 doctrine-h old, else a
+        // new one if this side's budget allows. False = deferred.
+        private static bool TryPlan(BattleSnapshot s, PostureTick.State t, BattleTerrainGrid grid, int i, float x, float z, out RoadRoute route)
+        {
+            ref UnitRecord rec = ref s.Own[i];
+            int bx = (int)Math.Floor(x / TargetBucketMeters);
+            int bz = (int)Math.Floor(z / TargetBucketMeters);
+            long key = ((long)rec.InstanceId << 32) ^ (uint)(((bx & 0xFFFF) << 16) | (bz & 0xFFFF));
+            double now = s.DoctrineHours;
+            if (_cache.TryGet(key, now, out route)) return true;
+            if (!t.RouteBudget.TryConsume())
+            {
+                route = default(RoadRoute);
+                return false;
+            }
+
+            route = default(RoadRoute);
+            using (TelemetryPerf.Scope("tactical.producer.posture.road-route", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    PostureTargets.EnsureNavFilter(t);
+                    NavMeshPath path = PostureTargets.SharedPath();
+                    var from = new Vector3(rec.X, rec.Y, rec.Z);
+                    Vector3 to = PostureTargets.AtTerrain(x, z);
+                    if (NavMesh.CalculatePath(from, to, t.NavFilter, path) && path.status == NavMeshPathStatus.PathComplete)
+                    {
+                        int count = PostureTargets.ReadCorners(path, out Vector3[] corners);
+                        if (_pathX.Length < count)
+                        {
+                            _pathX = new float[count * 2];
+                            _pathZ = new float[count * 2];
+                        }
+                        for (int c = 0; c < count; c++)
+                        {
+                            _pathX[c] = corners[c].x;
+                            _pathZ[c] = corners[c].z;
+                        }
+                        route = RoadRoutePlanner.Plan(grid, rec.X, rec.Z, x, z, _pathX, _pathZ, count, t.RouteScratch);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    route = default(RoadRoute);
+                    OnceLog.Warning("tactical-producer-posture:road-route-failed",
+                        "[PostureProducer] road route plan failed, the move goes unrouted: " + ex.GetType().Name + " " + ex.Message);
+                }
+            }
+            _cache.Put(key, in route, now);
+            return true;
+        }
+
+        private static void LogFirst(in RoadRoute route)
+        {
+            if (_firstLogged) return;
+            _firstLogged = true;
+            float ratio = route.VanillaCost > 0f ? route.RouteCost / route.VanillaCost : 0f;
+            OnceLog.Info("tactical-battle-core:road-route-first-fire",
+                "[OrderExecutor] first road march: via=" + route.ViaCount + " costRatio=" + ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " column=true");
+        }
+
+        private static void Reset()
+        {
+            _cache.Clear();
+            _columnSince.Clear();
+            _firstLogged = false;
+        }
+    }
+
     // #61 TryResolveTarget and the NavMesh plan, over the snapshot.
     internal static class PostureTargets
     {
@@ -722,6 +981,26 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // TacticalNavMeshPlanner.Plan reads during the call (it keeps none), and the area
         // indices, which are fixed project settings, resolved once.
         private static NavMeshPath _navPath;
+
+        // One reused path for every probe and every route plan (single-threaded, consumed at once).
+        internal static NavMeshPath SharedPath()
+        {
+            return _navPath ?? (_navPath = new NavMeshPath());
+        }
+
+        // Every corner of the path into one reused buffer: a full buffer may have cut the list short,
+        // so grow and read again.
+        internal static int ReadCorners(NavMeshPath path, out Vector3[] corners)
+        {
+            int count = path.GetCornersNonAlloc(_corners);
+            while (count == _corners.Length)
+            {
+                _corners = new Vector3[_corners.Length * 2];
+                count = path.GetCornersNonAlloc(_corners);
+            }
+            corners = _corners;
+            return count;
+        }
         private static Vector3[] _corners = new Vector3[32];
         private static readonly TacticalPathQualitySample[] _samples = new TacticalPathQualitySample[3];
         private static int[] _areaIndex;
@@ -732,6 +1011,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             t.NavDeferred = false;
+            // BC11 decision 4: an EnvelopmentManeuver hold stands where the child is; no target to plan a route to,
+            // so it burns no nav plan.
+            if (kind == PostureExecutionTarget.DoctrinePrimaryTarget && order.ManeuverHold) return false;
             // BC9: a Scout or Probe task's forward target is where the recon planner looks
             // (its probe nomination, else BattleRecon.LookPoint), not an objective
             // stand-off; a break-off or recovery keeps its own target.
@@ -776,6 +1058,32 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 !TryNavPlan(s, t, i, state, order, kind, ref x, ref z))
                 return false;
             return PostureSense.IsMoveAway(s.Own[i], x, z);
+        }
+
+        internal const string NoFacingSource = "none";
+        internal const string PressureFacingSource = "pressure";
+        internal const string ClosestFacingSource = "closest";
+
+        /// <summary>
+        /// BC11 decision 1: the bearing a holding group faces. The strongest perceived pressure within the slice
+        /// range (FlankFacing.MostPressuredBearing, hysteresis on the group's current facing) with Enable Flank
+        /// Response And Envelopment on, else the closest visible enemy (PostureTargets.TryThreat, as before).
+        /// <paramref name="source"/> is the telemetry facingSource: pressure, closest or none.
+        /// </summary>
+        internal static bool TryFacingBearing(BattleSnapshot s, int i, float currentFacing, out float bearing, out string source)
+        {
+            bearing = -1f;
+            source = NoFacingSource;
+            if (s == null || i < 0 || i >= s.OwnCount) return false;
+            if (Plugin.FlankResponseEnabled() && FlankFacing.MostPressuredBearing(s, i, currentFacing, out bearing, out _))
+            {
+                source = PressureFacingSource;
+                return true;
+            }
+            if (!TryThreat(s, i, out float x, out float z)) return false;
+            bearing = PostureSense.HeadingTo(s.Own[i].X, s.Own[i].Z, x, z);
+            source = ClosestFacingSource;
+            return true;
         }
 
         internal static bool TryThreat(BattleSnapshot s, int i, out float x, out float z)
@@ -941,19 +1249,33 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             var lateral = new Vector3(-direction.z, 0f, direction.x);
             var threat = new Vector3(threatX, 0f, threatZ);
             var waypoint = new Vector3(rec.LastWaypointX, 0f, rec.LastWaypointZ);
-            ApplyVanillaPathAreaCosts();
-            _samples[0] = Sample(t, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint);
-            _samples[1] = Sample(t, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
-            _samples[2] = Sample(t, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
+            EnsureNavFilter(t);
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+            _samples[0] = Sample(t, grid, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint);
+            _samples[1] = Sample(t, grid, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
+            _samples[2] = Sample(t, grid, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
             return _samples;
         }
 
-        // R5: AddPath's battle area costs before probing; every AddPath sets them again.
-        private static void ApplyVanillaPathAreaCosts()
+        // R5 / BC10 decision 4: AddPath's battle costs (roads, bridges, fences, rivers) for the
+        // probe's pathfinding, on a query filter instead of the global NavMesh area costs. A
+        // fresh filter prices every area at 1, so every area's live cost is copied first
+        // (areaMask all areas, agent type 0: the overload vanilla's CalculatePath uses).
+        internal static void EnsureNavFilter(PostureTick.State t)
         {
+            if (t.NavFilterReady) return;
+            t.NavFilterReady = true;
+            t.NavFilter = CreateNavFilter();
+        }
+
+        // The query filter itself, for the probe above and for the envelopment march-leg route (PlayExecutorRuntime).
+        internal static NavMeshQueryFilter CreateNavFilter()
+        {
+            var filter = new NavMeshQueryFilter { areaMask = NavMesh.AllAreas, agentTypeID = 0 };
             try
             {
                 bool frozen = GameVars.isfrozen();
+                for (int a = 0; a < NavAreaCount; a++) filter.SetAreaCost(a, NavMesh.GetAreaCost(a));
                 if (_areaIndex == null)
                 {
                     var areas = new int[PostureNavAreaCosts.AreaNames.Length];
@@ -963,17 +1285,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 for (int a = 0; a < _areaIndex.Length; a++)
                 {
                     int area = _areaIndex[a];
-                    if (area >= 0) NavMesh.SetAreaCost(area, PostureNavAreaCosts.Cost(a, frozen));
+                    if (area >= 0 && area < NavAreaCount) filter.SetAreaCost(area, PostureNavAreaCosts.Cost(a, frozen));
                 }
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("tactical-producer-posture:area-cost-failed",
-                    "[PostureProducer] NavMesh area costs failed: " + ex.Message);
+                OnceLog.Warning("tactical-producer-posture:nav-filter-failed",
+                    "[PostureProducer] NavMesh query filter costs failed, the probe prices every area at 1: " + ex.GetType().Name + " " + ex.Message);
             }
+            return filter;
         }
 
-        private static TacticalPathQualitySample Sample(PostureTick.State t, int selfId, Vector3 own, Vector3 candidate,
+        private const int NavAreaCount = 32; // NavMeshQueryFilter's cost table size
+
+        private static TacticalPathQualitySample Sample(PostureTick.State t, BattleTerrainGrid grid, int selfId, Vector3 own, Vector3 candidate,
             CommandTaskType task, bool hasThreat, Vector3 threat, bool hasWaypoint, Vector3 waypoint)
         {
             float slopeCost = 0f, terrainRisk = 0f, bridgeRisk = 0f, congestion = 0f, roadPreference = 0f;
@@ -981,24 +1306,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             float fallbackLaneConflict = 0f, artilleryDanger = 0f;
             try
             {
-                NavMeshPath path = _navPath ?? (_navPath = new NavMeshPath());
-                bool found = NavMesh.CalculatePath(own, candidate, NavMesh.AllAreas, path);
-                // Every corner, as path.corners returns them: a full buffer may have cut
-                // the list short, so grow and read again.
-                int count = path.GetCornersNonAlloc(_corners);
-                while (count == _corners.Length)
-                {
-                    _corners = new Vector3[_corners.Length * 2];
-                    count = path.GetCornersNonAlloc(_corners);
-                }
-                Vector3[] corners = _corners;
+                NavMeshPath path = SharedPath();
+                bool found = NavMesh.CalculatePath(own, AtTerrain(candidate.x, candidate.z), t.NavFilter, path);
+                int count = ReadCorners(path, out Vector3[] corners);
                 if (!found || path.status != NavMeshPathStatus.PathComplete || count <= 0)
                 {
                     terrainRisk = 1f;
                 }
                 else
                 {
-                    roadPreference = count <= 3 ? 0.65f : 0.25f;
                     congestion = Math.Min(1f, Math.Max(0f, (count - 4) * 0.12f));
                     float previousHeight = SampleHeight(own);
                     for (int c = 0; c < count; c++)
@@ -1006,20 +1322,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         float height = SampleHeight(corners[c]);
                         slopeCost = Math.Max(slopeCost, Math.Min(1f, Math.Abs(height - previousHeight) / 35f));
                         previousHeight = height;
-                        int terrain = TerrainAt(corners[c]);
-                        if (terrain == 4 || terrain == 8 || terrain == 6)
-                        {
-                            terrainRisk = Math.Max(terrainRisk, 0.85f);
-                            bridgeRisk = Math.Max(bridgeRisk, 0.70f);
-                        }
-                        if (NearCrossingTerrain(corners[c])) bridgeRisk = Math.Max(bridgeRisk, 0.55f);
                     }
+                    // BC10 decision 5: what the polyline walks on, sampled every 10 m on the grid.
+                    PathTerrainScore terrain = ScoreCorners(grid, corners, count);
+                    roadPreference = terrain.RoadShare;
+                    terrainRisk = terrain.TerrainRisk;
+                    bridgeRisk = terrain.BridgeRisk;
                 }
 
                 if (hasThreat)
                 {
                     float distance = Flat(candidate, threat);
-                    deadGround = distance >= 250f ? 0.70f : Math.Max(0f, distance / 250f * 0.45f);
+                    deadGround = PathTerrainScorer.DeadGround(hasThreat, TerrainBlocksSight(threat, candidate));
                     threatExposure = distance <= 100f ? 1f : Math.Max(0f, 1f - ((distance - 100f) / 350f));
                     artilleryDanger = threatExposure * (1f - deadGround) * 0.40f;
                     if (task == CommandTaskType.FallBackToLine)
@@ -1044,6 +1358,55 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 threatExposure, routeContinuity, reservationPressure, fallbackLaneConflict, artilleryDanger);
         }
 
+        private static float[] _cornerX = new float[64];
+        private static float[] _cornerZ = new float[64];
+
+        private static PathTerrainScore ScoreCorners(BattleTerrainGrid grid, Vector3[] corners, int count)
+        {
+            if (grid == null) return default(PathTerrainScore);
+            if (_cornerX.Length < count)
+            {
+                _cornerX = new float[count * 2];
+                _cornerZ = new float[count * 2];
+            }
+            for (int c = 0; c < count; c++)
+            {
+                _cornerX[c] = corners[c].x;
+                _cornerZ[c] = corners[c].z;
+            }
+            return PathTerrainScorer.Score(grid, _cornerX, _cornerZ, count);
+        }
+
+        // Dead ground: a Map-layer raycast from the threat's eye to the candidate's eye, +4 m
+        // each, as vanilla's own visibility paint casts (FogOfWar.DrawVisibility 101061-101063,
+        // Physics.Raycast(startpos + 4 m, direction, range, LayerMask "Map")).
+        private const float EyeHeightMeters = 4f;
+        private static int _mapLayerMask;
+        private static bool _mapLayerResolved;
+
+        private static bool TerrainBlocksSight(Vector3 threat, Vector3 candidate)
+        {
+            if (!_mapLayerResolved)
+            {
+                _mapLayerResolved = true;
+                try { _mapLayerMask = LayerMask.GetMask("Map"); }
+                catch { _mapLayerMask = 0; }
+            }
+            if (_mapLayerMask == 0) return false;
+            try
+            {
+                var from = new Vector3(threat.x, SampleHeight(threat) + EyeHeightMeters, threat.z);
+                var to = new Vector3(candidate.x, SampleHeight(candidate) + EyeHeightMeters, candidate.z);
+                Vector3 ray = to - from;
+                float distance = ray.magnitude;
+                return distance > 1f && Physics.Raycast(from, ray, distance, _mapLayerMask);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static float Flat(Vector3 a, Vector3 b)
         {
             return PostureSense.Distance(a.x, a.z, b.x, b.z);
@@ -1058,6 +1421,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return PostureSense.Distance(point.x, point.z, start.x + u * vx, start.z + u * vz);
         }
 
+        // A NavMesh query target at the terrain's height. CalculatePath snaps each end to the mesh within a small extent, so a
+        // target built with y = 0 misses the mesh on any map with relief; vanilla paths from GetPosition() + (0, 1.5, 0) to waypoint
+        // positions that carry the terrain height (AddPath 130259, GetTerrainHeight 27002).
+        internal static Vector3 AtTerrain(float x, float z)
+        {
+            return new Vector3(x, SampleHeight(new Vector3(x, 0f, z)), z);
+        }
+
         private static float SampleHeight(Vector3 point)
         {
             try
@@ -1069,20 +1440,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 return point.y;
             }
-        }
-
-        private static int TerrainAt(Vector3 point)
-        {
-            try { return BattlefieldSetup.GetCurrentTerrainOnPos(point); }
-            catch { return -1; }
-        }
-
-        private static readonly int[] CrossingTerrain = { 4, 8 };
-
-        private static bool NearCrossingTerrain(Vector3 point)
-        {
-            try { return BattlefieldSetup.SearchTerrainInRangePos(point, CrossingTerrain, 2) != null; }
-            catch { return false; }
         }
 
         // BattleUnits keeps the scene's BattlefieldSetup in a private static (set at
@@ -1111,6 +1468,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         private const float TelemetrySeconds = 30f;
         private static readonly Dictionary<string, float> _lastAt = new Dictionary<string, float>();
+        private static readonly RefuseRowThrottle _refuseRows = new RefuseRowThrottle();
 
         internal static string NameOf(BattleSnapshot s, int i)
         {
@@ -1120,7 +1478,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         internal static void Group(BattleSnapshot s, int i, string source, CommandNodeOperationalState state,
-            PostureExecutionDecision decision, int submitted, string reason)
+            PostureExecutionDecision decision, int submitted, string reason, string facingSource = null)
         {
             try
             {
@@ -1143,6 +1501,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         .WithField("task", state.Task.ToString())
                         .WithField("selectedTarget", decision.Target.ToString())
                         .WithField("intents", submitted)
+                        .WithField("facingSource", facingSource ?? PostureTargets.NoFacingSource)
                         .WithField("writeResult", submitted > 0 ? "submitted" : "none"));
             }
             catch (Exception ex)
@@ -1181,7 +1540,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         internal static void Facing(BattleSnapshot s, int i, TacticalFacingPulseScope scope, CommandTaskType task,
-            TacticalFacingPulseDecision decision, bool submitted)
+            TacticalFacingPulseDecision decision, bool submitted, string facingSource = null)
         {
             try
             {
@@ -1203,7 +1562,33 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         .WithField("task", task.ToString())
                         .WithField("targetFormation", decision.TargetFormation)
                         .WithField("targetFacing", decision.TargetFacingDegrees)
+                        .WithField("facingSource", facingSource ?? PostureTargets.NoFacingSource)
                         .WithField("writeResult", submitted ? "submitted" : "none"));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-producer-posture:telemetry-failed", "[PostureProducer] telemetry threw: " + ex.Message);
+            }
+        }
+
+        // BC11 decision 2: a refused flank of a group in combat, rotated in place (limited by vanilla's micro turn).
+        internal static void RefuseInPlace(BattleSnapshot s, int i, RefuseFlank side, int rotated, int skipped)
+        {
+            try
+            {
+                int id = s.Own[i].InstanceId;
+                // The repeat test is numeric: no string is built unless a row is due.
+                if (!_refuseRows.ShouldEmit(s.Alliance, id, side, rotated, skipped, Time.realtimeSinceStartup, TelemetrySeconds)) return;
+                string signature = s.Alliance + "|" + id + "|" + side + "|" + rotated + "|" + skipped;
+                string unit = NameOf(s, i);
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalRefuseInPlace", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(s.Alliance)
+                        .WithUnit(unit)
+                        .WithDecision("RefuseInPlace", side.ToString(), signature)
+                        .WithField("side", side.ToString())
+                        .WithField("rotated", rotated)
+                        .WithField("skippedByMicroTurn", skipped));
             }
             catch (Exception ex)
             {
@@ -1214,6 +1599,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static void Reset()
         {
             _lastAt.Clear();
+            _refuseRows.Clear();
         }
     }
 
@@ -1248,9 +1634,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     TacticalFacingPulseScope scope = ScopeFor(g.State.Echelon);
                     if (scope == TacticalFacingPulseScope.Division)
                     {
-                        TacticalFacingPulseDecision axis = TacticalFacingPulseDoctrine.Decide(
-                            Input(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk, -1f));
-                        PostureTelemetry.Facing(s, i, scope, g.State.Task, axis, false);
+                        TacticalFacingPulseInput axisInput = Input(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk, -1f);
+                        TacticalFacingPulseDecision axis = TacticalFacingPulseDoctrine.Decide(axisInput);
+                        PostureTelemetry.Facing(s, i, scope, g.State.Task, axis, false, FacingSourceOf(s, i, scope, axisInput));
                         continue;
                     }
                     if (scope != TacticalFacingPulseScope.Brigade) continue;
@@ -1267,7 +1653,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     // per-regiment pulses below.
                     bool cleanSubtree = PostureSense.SubtreeAcceptsGroupFacing(t.Descendants[i]);
                     bool submitted = PostureIntentPlan.SubmitBrigadePulse(sink, rec.InstanceId, brigadeInput, brigade, cleanSubtree) > 0;
-                    PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted);
+                    PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted, FacingSourceOf(s, i, scope, brigadeInput));
                     // BC9: regiments of a brigade turning to an entry point take the
                     // brigade's bearing; on a clean subtree the group facing turns them.
                     bool entry = brigade.ShouldWrite && brigadeInput.ThreatSource == TacticalFacingThreatSource.Entry;
@@ -1286,12 +1672,23 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                             TacticalFacingPulseScope.Regiment, s.Own[u].Formation, engaged, flank, entry ? entryHeading : -2f));
                         if (d.Action != TacticalFacingPulseAction.CorrectFacing) continue;
                         sink.Submit(PostureIntentPlan.FacingPulse(s.Own[u].InstanceId, d.TargetFacingDegrees));
-                        PostureTelemetry.Facing(s, u, TacticalFacingPulseScope.Regiment, g.State.Task, d, true);
+                        PostureTelemetry.Facing(s, u, TacticalFacingPulseScope.Regiment, g.State.Task, d, true, PostureTargets.ClosestFacingSource);
                         pulses++;
                     }
                     g.FacingSubmitted = submitted || pulses > 0;
                 }
             }
+        }
+
+        // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).
+        private static string FacingSourceOf(BattleSnapshot s, int u, TacticalFacingPulseScope scope, in TacticalFacingPulseInput input)
+        {
+            if (input.ThreatSource == TacticalFacingThreatSource.Entry) return "entry";
+            if (input.ThreatSource == TacticalFacingThreatSource.None) return PostureTargets.NoFacingSource;
+            return scope != TacticalFacingPulseScope.Regiment && Plugin.FlankResponseEnabled() &&
+                FlankFacing.MostPressuredBearing(s, u, s.Own[u].RotationY, out _, out _)
+                ? PostureTargets.PressureFacingSource
+                : PostureTargets.ClosestFacingSource;
         }
 
         // entryHeading: >= 0 a bearing handed down by the brigade (regiments of an
@@ -1303,6 +1700,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             int k = s.ClosestVisibleEnemy(u, out float distance);
             bool hasThreat = k >= 0;
             float heading = hasThreat ? PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z) : -1f;
+            // BC11 decision 1: a brigade or division faces the strongest pressure on its front; the regiment pulse
+            // stays on the closest visible enemy (vanilla's per-regiment rule, StopMicroUnitsCloseToEnemyAndRotateTowards 4539).
+            if (hasThreat && scope != TacticalFacingPulseScope.Regiment && Plugin.FlankResponseEnabled() &&
+                FlankFacing.MostPressuredBearing(s, u, rec.RotationY, out float pressureBearing, out _))
+                heading = pressureBearing;
             TacticalFacingThreatSource source = hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
             // BC9: with nothing visible, a screen, probe or flank guard faces where
             // unseen enemies come from (the doctrine refuses the source for other tasks).

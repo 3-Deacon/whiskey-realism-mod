@@ -9,6 +9,8 @@ namespace WhiskeyRealism
         internal static TestConfig<float> OpportunityHysteresisMinHoldSeconds = new TestConfig<float>(6.0f);
         internal static TestConfig<bool> EnableCampaignChainDispatches = new TestConfig<bool>(true);
         internal static TestPluginInstance Instance = new TestPluginInstance();
+        internal static bool FlankResponse = true;
+        internal static bool FlankResponseEnabled() => FlankResponse;
     }
 
     // Stands in for the BepInEx plugin instance's master switch.

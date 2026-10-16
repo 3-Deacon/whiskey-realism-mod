@@ -31,6 +31,7 @@ namespace WhiskeyRealism.Strategic.Projects
         public int DateFromYear;
         public int DateFromMonth;
         public int DateFromDay;
+        public int CampaignYear;      // the campaign date's year when the facts were read; 0 = unread
         public float Cost;
         public bool DateFromKnown;
     }

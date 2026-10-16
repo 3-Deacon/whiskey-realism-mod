@@ -294,6 +294,21 @@ namespace WhiskeyRealism.Tactical
             AnglePointXYXZ(hqX, hqZ, facingDegrees, 0f, -(groupDepth + groupUnitDistanceToBack), out frontX, out frontZ);
         }
 
+        // The inverse of DeploymentLineFrontFromHq: where SetGroupFormation puts the group's
+        // headquarters for a line front (BC10: the executor judges an immediate placement by
+        // the group's position, so it compares against this point).
+        public static void DeploymentHqFromLineFront(
+            float frontX,
+            float frontZ,
+            float facingDegrees,
+            float groupDepth,
+            float groupUnitDistanceToBack,
+            out float hqX,
+            out float hqZ)
+        {
+            AnglePointXYXZ(frontX, frontZ, facingDegrees, 0f, groupDepth + groupUnitDistanceToBack, out hqX, out hqZ);
+        }
+
         // #53 pathfinder discipline (Regiment.AddPath Postfix, 130259).
         // Vanilla increments regimentpaths for a PathPartial/PathInvalid result
         // only once iterations >= 15 (130511) - a deliberate last resort - and

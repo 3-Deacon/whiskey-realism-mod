@@ -1433,7 +1433,7 @@ internal static class BattleReconTests
         AssertPinned(Source("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
             "side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);", "posture fallback node");
         AssertPinned(Source("Tactical", "Orchestrator", "ArmyOrchestrator.cs"),
-            "ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance);", "director and doctrine assignment");
+            "ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,", "director and doctrine assignment");
         AssertPinned(Source("Tactical", "Orchestrator", "ArmyOrchestrator.cs"),
             "public BattleStance CurrentBattleStance => _currentForceBalanceStance;", "one stance field");
         AssertPinned(Source("Patches", "TacticalObserverPatch.cs"),
