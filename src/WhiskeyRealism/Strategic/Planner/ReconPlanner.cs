@@ -199,9 +199,10 @@ namespace WhiskeyRealism.Strategic.Planner
             if (ctx.Unwatched(m.FrontX, m.FrontZ, m.TargetX, m.TargetZ))
                 TryAdd(ctx, into, ReconKind.Screen, m.Sector, m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, PriorityMainAxis, ReasonMainAxis);
 
-            // D1/D7: a probe asks one question, whether the main objective is held; once the plan reads the objective as scouted (a fresh
-            // belief near it, or a viewer's sight on it) the question is answered, the task is gone and the mission stands down.
-            if (ProbeWanted(ctx) && !ctx.Plan.MainScouted)
+            // D1/D7: a probe asks one question, whether the main objective is held; ProbeWanted is false once a fresh belief lies near it or a
+            // viewer's sight covers it (the two facts TheaterPlanner.IsScouted reads, an afloat belief included), so the question is
+            // answered, the task is gone and the mission stands down.
+            if (ProbeWanted(ctx))
             {
                 PointShort(m.FrontX, m.FrontZ, m.TargetX, m.TargetZ, ctx.Standoff, out float px, out float pz);
                 TryAdd(ctx, into, ReconKind.Probe, m.Sector, m.FrontX, m.FrontZ, px, pz, PriorityProbe, "probe");

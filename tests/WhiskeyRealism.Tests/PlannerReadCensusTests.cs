@@ -631,7 +631,7 @@ internal static class CensusRows
         "TheaterPlan.MassInstanceIds | P/ForceAllocator.cs, P/CampaignMover.cs | G4 ForceAllocator.Allocate (MainEffort set); G5a mover",
         "TheaterPlan.MassStrength | P/ForceAllocator.cs | G4 ForceAllocator.Allocate (reserve split; [Allocation] mass=)",
         "TheaterPlan.MainEnemyStrength | P/ForceAllocator.cs | G4 ForceAllocator.Allocate (reserve split; [Allocation] mass=)",
-        "TheaterPlan.MainScouted | P/ReconPlanner.cs, P/TheaterPlanner.cs | D7 ReconPlanner.AddMainEffortTasks (no probe once the objective is scouted); [CampaignPlan] scouted=",
+        "TheaterPlan.MainScouted | P/TheaterPlanner.cs | D1 [CampaignPlan] scouted=",
         "TheaterPlan.MainStaged | P/ForceAllocator.cs, P/CampaignMover.cs | D1 ForceAllocator.MainTarget (the start line); CampaignMover (a gathering is not a march)",
         "TheaterPlan.StartLineX | P/ForceAllocator.cs | D1 ForceAllocator.MainTarget",
         "TheaterPlan.StartLineZ | P/ForceAllocator.cs | D1 ForceAllocator.MainTarget",
