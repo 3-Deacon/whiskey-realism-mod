@@ -22,6 +22,9 @@ namespace WhiskeyRealism.Strategic.Planner
             internal readonly TheaterPlan[] Plans = new TheaterPlan[Alliances];
             internal readonly Allocation[] Allocations = new Allocation[Alliances];
             internal readonly SectorModel[] Sectors = new SectorModel[Alliances];
+            // G5a: what the executors' patches read besides the plan (the tempo release, the pre-war gate), published with it.
+            internal readonly ExecutorContext[] Contexts = new ExecutorContext[Alliances];
+            internal readonly bool[] HasContext = new bool[Alliances];
         }
 
         private static readonly PlanDay Working = new PlanDay();
@@ -55,6 +58,23 @@ namespace WhiskeyRealism.Strategic.Planner
             return sectors != null;
         }
 
+        // The executor context of the plan (G5a): written by ReviewPlan with the plan and again by ReviewExecute once the
+        // mover has settled the tempo release, always inside the day's review, so it joins the atomic day publish.
+        internal static bool TryGetExecutorContext(int alliance, out ExecutorContext context)
+        {
+            context = default(ExecutorContext);
+            if (!InRange(alliance) || !View.HasContext[alliance]) return false;
+            context = View.Contexts[alliance];
+            return true;
+        }
+
+        internal static void PublishExecutorContext(int alliance, in ExecutorContext context)
+        {
+            if (!InRange(alliance)) return;
+            Working.Contexts[alliance] = context;
+            Working.HasContext[alliance] = true;
+        }
+
         internal static void Publish(int alliance, TheaterPlan plan, Allocation allocation, SectorModel sectors)
         {
             if (!InRange(alliance)) return;
@@ -81,6 +101,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 copy.Plans[a] = Working.Plans[a];
                 copy.Allocations[a] = Working.Allocations[a];
                 copy.Sectors[a] = Working.Sectors[a];
+                copy.Contexts[a] = Working.Contexts[a];
+                copy.HasContext[a] = Working.HasContext[a];
             }
         }
 
@@ -91,6 +113,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 day.Plans[a] = null;
                 day.Allocations[a] = null;
                 day.Sectors[a] = null;
+                day.Contexts[a] = default(ExecutorContext);
+                day.HasContext[a] = false;
             }
         }
 

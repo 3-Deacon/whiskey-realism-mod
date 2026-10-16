@@ -92,6 +92,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HomeTheaterPrior.cs" Link="Planner\HomeTheaterPrior.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerChapterRules.cs" Link="Planner\PlannerChapterRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignTempoGate.cs" Link="Planner\CampaignTempoGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignMover.cs" Link="Planner\CampaignMover.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />
@@ -415,7 +421,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\PatchFirstFire.cs" Link="Util\PatchFirstFire.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\ScopedState.cs" Link="Util\ScopedState.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Util\KeyedResolveCache.cs" Link="Util\KeyedResolveCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalRegimentDiagnosticsPatch.cs" Link="Patches\TacticalRegimentDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\BattleWriterPolicy.cs" Link="Tactical\BattleWriterPolicy.cs" />
