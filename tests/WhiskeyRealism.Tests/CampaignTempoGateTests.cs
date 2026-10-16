@@ -34,6 +34,7 @@ internal static class CampaignTempoGateTests
             ("NoRollMainEffortReleasesDecision", NoRollMainEffortReleasesDecision),
             ("GateOnlyFirstMoveOfADecision", GateOnlyFirstMoveOfADecision),
             ("OwnTerritoryMoveNeverGated", OwnTerritoryMoveNeverGated),
+            ("DecisionWithNoDispatchableMainEffortIsNeverReleased", DecisionWithNoDispatchableMainEffortIsNeverReleased),
             ("NonMainRolesNeverGated", NonMainRolesNeverGated),
             ("DeferredMoveLeavesPlanPublished", DeferredMoveLeavesPlanPublished),
             ("SupportWaitsForMainEffortLaunchIntoEnemyGround", SupportWaitsForMainEffortLaunchIntoEnemyGround),
@@ -402,6 +403,25 @@ internal static class CampaignTempoGateTests
         AssertEqual(g.State.DecisionSerial, g.State.TempoReleasedDecision, "released without a roll");
         AssertEqual(3, g.Host.Moves.Count, "and every move goes out");
         AssertEqual(0, tally.Deferred, "nothing deferred");
+    }
+
+    // A decision whose mass cannot be dispatched (every member busy) dispatches nothing, so it is never released: its Support
+    // stays deferred (and withheld from vanilla's offense) until the plan changes.
+    private static void DecisionWithNoDispatchableMainEffortIsNeverReleased()
+    {
+        var g = GateWith(believedEnemy: false);       // would be a no-roll release if anything could be dispatched
+        for (int i = 0; i < 2; i++)
+        {
+            var f = g.S.Own[i];
+            f.Flags |= i == 0 ? FormationFlags.InDefensiveOps : FormationFlags.InBattle;
+            g.S.Own[i] = f;
+        }
+        var tally = Run(g, ExecutorFixtures.OpenTempo());
+        AssertEqual(-1, g.State.TempoReleasedDecision, "never released");
+        AssertFalse(tally.Tempo.Released, "no launch was evaluated");
+        AssertEqual(0, g.Host.Moves.Count, "no MainEffort dispatch, and Support into enemy ground waits");
+        AssertEqual(1, tally.Deferred, "the Support formation is deferred");
+        AssertEqual(2, tally.SkippedBusy, "the two busy mass members are skipped");
     }
 
     private static void NonMainRolesNeverGated()

@@ -81,8 +81,10 @@ internal static class CampaignExecutorTests
         AssertEqual(6, MoveTracker.MaxMovesPerDay, "P8: six moves per review");
         AssertFalse(t.ShouldIssue(7, 100f, 0f, day), "the seventh waits");
         AssertTrue(t.ShouldIssue(7, 100f, 0f, day + 1), "the next review day has a fresh budget");
-        t.RecordIssued(8, 500f, 0f, 100f, 0f, day + 1, queued: true);
-        for (int i = 9; i < 20; i++) AssertTrue(t.ShouldIssue(i, 100f, 0f, day + 1), "a queued move spent none of the budget");
+        for (int i = 8; i < 16; i++) t.RecordIssued(i, 500f, 0f, 100f, 0f, day + 1, queued: true);
+        AssertTrue(t.ShouldIssue(20, 100f, 0f, day + 1), "eight queued moves spent none of the budget");
+        for (int i = 21; i < 27; i++) t.RecordIssued(i, 500f, 0f, 100f, 0f, day + 1, queued: false);
+        AssertFalse(t.ShouldIssue(30, 100f, 0f, day + 1), "six issued ones did");
     }
 
     private static void MoveConfirmedWhenWaypointChangesTowardTarget()
@@ -342,6 +344,7 @@ internal static class CampaignExecutorTests
             var a = new Allocation { Alliance = 0 };
             a.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
             tallies.Add(CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, tracker, state));
+            AssertFalse(tracker.InTransit(1), "a refused target leaves nothing in transit, review " + day);
         }
         AssertEqual(0, host.Moves.Count, "a restricted target is skipped (CheckIfFinalWaypointIsPassable semantics): MoveUnitTo is never called");
         AssertEqual(1, tallies[0].Failed, "the first refusal counts as failed");
@@ -569,6 +572,7 @@ internal static class CampaignExecutorTests
         AssertFalse(PlanFreshness.IsToday(ExecutorFixtures.Day - 1), "yesterday's plan is not acted on");
         PlanFreshness.NoteToday(-1);
         AssertFalse(PlanFreshness.IsToday(ExecutorFixtures.Day), "no clock noted: nothing is today");
+        AssertFalse(PlanFreshness.IsToday(-1), "and the unnoted clock is not a day either");
         PlanFreshness.NoteToday(ExecutorFixtures.Day + PlanFreshness.MaxAgeDays + 1);
         AssertTrue(PlanFreshness.IsFresh(10, 5), "a plan from the future (the clock went back after a load) is fresh");
         PlanFreshness.NoteToday(-1);
@@ -692,6 +696,9 @@ internal static class CampaignExecutorTests
         player.Chain = WlChainClass.PlayerCommand;
         s.Own.Add(player);
         s.Own.Add(ExecutorFixtures.Corps(7, 350f, 9000f));    // Support assigned to a sector it has not reached
+        var mapGroup = ExecutorFixtures.Corps(8, 355f, 9000f);
+        mapGroup.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(mapGroup);
         var sectors = ExecutorFixtures.Sectors(s);
         int main = sectors.SectorAt(120f, 0f), hold = sectors.SectorAt(350f, 0f), east = sectors.SectorAt(550f, 0f);
         var a = new Allocation { Alliance = 0 };
@@ -702,6 +709,7 @@ internal static class CampaignExecutorTests
         a.Assignments.Add(ExecutorFixtures.Assign(5, FormationRole.MainEffort, main, 100f, 0f));
         a.Assignments.Add(ExecutorFixtures.Assign(6, FormationRole.Hold, main, 125f, 0f));
         a.Assignments.Add(ExecutorFixtures.Assign(7, FormationRole.Support, east, 100f, 0f));
+        a.Assignments.Add(ExecutorFixtures.Assign(8, FormationRole.Hold, hold, 355f, 0f));
         var writes = new List<TheaterWrite>();
         var limiter = new TheaterWriteLimiter();
         SteeringRules.PlanTheaterWrites(s, a, sectors, limiter, writes);
@@ -718,6 +726,7 @@ internal static class CampaignExecutorTests
         AssertFalse(byId.ContainsKey(4), "Reserve gets no theater");
         AssertFalse(byId.ContainsKey(5), "a formation whose centre already serves it is left alone (idempotent)");
         AssertFalse(byId.ContainsKey(6), "the player's command is never written");
+        AssertFalse(byId.ContainsKey(8), "nor the map-group player's group: his theater is his");
         AssertEqual(3, writes.Count, "nothing else");
 
         var again = new List<TheaterWrite>();
@@ -768,6 +777,8 @@ internal static class CampaignExecutorTests
         AssertNear(0f, tz, 0.001f, "z");
         AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 13, out tx, out _) && Math.Abs(tx - 100f) < 0.001f, "an area of a Support sector points at the main target too");
         AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector's area keeps vanilla's pick");
+        plan.Sectors[2].TargetObjectiveId = 98;     // a target alone does not steer: the posture decides
+        AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector with a target is still vanilla's");
         foreach (var posture in new[] { TheaterPosture.Screen, TheaterPosture.EconomyOfForce, TheaterPosture.Recover })
         {
             plan.Sectors[2].Posture = posture;
@@ -795,6 +806,14 @@ internal static class CampaignExecutorTests
     }
 
     // ---- source pins ----
+
+    private static int CountLines(string body, string line)
+    {
+        int n = 0;
+        foreach (var raw in body.Split('\n'))
+            if (raw.Trim() == line) n++;
+        return n;
+    }
 
     private static void ExecutorFilesHoldNoUnityTypes()
     {
@@ -833,12 +852,13 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "PatchFirstFire.Mark(\"campaign.patch.planner-availability.defensive\");"), "first-fire id, defensive");
         AssertTrue(HasLine(src, "using (TelemetryPerf.Scope(\"campaign.patch.planner-availability.offensive\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))"), "scope, offensive");
         AssertTrue(HasLine(src, "using (TelemetryPerf.Scope(\"campaign.patch.planner-availability.defensive\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))"), "scope, defensive");
-        AssertTrue(HasLine(src, "__result = false;"), "the Postfix only ever sets false");
         AssertFalse(src.Contains("__result = true"), "never sets true");
-        AssertTrue(HasLine(src, "if (!__result) return;"), "a unit vanilla already refused is left alone");
         AssertTrue(HasLine(src, "CampaignWithholdView.WithheldFromOffense(alliance, unit.GetInstanceID())") || src.Contains("CampaignWithholdView.WithheldFromOffense(alliance"), "the offensive view");
         AssertTrue(src.Contains("CampaignWithholdView.WithheldFromDefense(alliance"), "the defensive view");
-        AssertTrue(src.Contains("typeof(int), typeof(Regiment), typeof(Vector3)"), "the private defensive test is targeted by name and its full parameter list (13460)");
+        AssertTrue(HasLine(src, "new[] { typeof(int), typeof(Regiment), typeof(Vector3) });"), "the private defensive test is targeted by name and its full parameter list (13460)");
+        AssertTrue(HasLine(src, "new[] { typeof(int), typeof(Regiment), typeof(Vector3), typeof(bool), typeof(bool) });"), "and the public offensive one by its five (14080)");
+        AssertEqual(2, CountLines(src, "if (!__result) return;"), "both Postfixes leave a unit vanilla already refused alone");
+        AssertEqual(2, CountLines(src, "__result = false;"), "and only ever set false");
         AssertTrue(src.Contains("IsUnitAvailableForDefensiveOperation") && src.Contains("IsUnitAvailableForOffensiveOperations"), "both vanilla tests");
         AssertTrue(src.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "rollback: Enable Campaign Planner Executors (with Enable Campaign Planner)");
         AssertTrue(src.Contains("[HarmonyFinalizer]") == false && !src.Contains("HarmonyPrefix"), "Postfix only: no Prefix, no Transpiler");
@@ -850,9 +870,10 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "PatchFirstFire.Mark(\"campaign.patch.importance-values\");"), "first-fire id kept");
         AssertTrue(src.Contains("CampaignWithholdView.TrySteering("), "reads the published plan through the view");
         AssertTrue(src.Contains("SteeringRules.ImportanceSteers("), "only a main or Support sector steers");
-        AssertTrue(src.Contains("CampaignMilitaryGates.ShouldRedirectToPlanTarget("), "vanilla's own candidate gates");
+        AssertTrue(HasLine(src, "return CampaignMilitaryGates.ShouldRedirectToPlanTarget("), "vanilla's own candidate gates decide");
         AssertTrue(HasLine(src, "__instance.mostvalueableaiareaclose[aifaction] = target;") || HasLine(src, "picks[aifaction] = targetArea;"), "the close pointer");
-        AssertTrue(src.Contains("mostvaluealbeaiareaclosedistanceonly"), "and the distance-only pointer (14243-14248 reads it when the source area has no enemy)");
+        AssertTrue(HasLine(src, "var distanceOnly = __instance.mostvaluealbeaiareaclosedistanceonly;"), "the distance-only pointer (14243-14248 reads it when the source area has no enemy)");
+        AssertTrue(HasLine(src, "if (distanceOnly != null && aifaction < distanceOnly.Length) distanceOnly[aifaction] = targetArea;"), "...is set too, bound-checked");
         AssertFalse(src.Contains("ActivePlan") || src.Contains("CICs"), "the phased-plan CIC is no longer read");
         AssertTrue(src.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "rollback: Enable Campaign Planner Executors (with Enable Campaign Planner)");
     }
