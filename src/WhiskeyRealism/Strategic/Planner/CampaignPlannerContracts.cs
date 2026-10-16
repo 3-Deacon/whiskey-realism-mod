@@ -86,6 +86,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // Regiment.timeofnotmoving (110614): the campaign date (GameVars.GetCampaignFloatingDate, years)
         // the group last moved. G5a's tempo roll takes the mass's idle time from it (vanilla 14321-14327).
         public float TimeOfNotMoving;
+        // The state the formation stands in (BattlefieldSetup.GetStateOfField(position), the test vanilla's alliancetroops uses, 81654-81660),
+        // -1 unknown. Stored plus one so an unset record reads -1.
+        private int _state;
+        public int StateId { get => _state - 1; set => _state = value + 1; }
     }
 
     // No enemy aggregate (spec C25): points, distancepoints, enemycampaignunitsstrength* and
@@ -119,6 +123,20 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Accomplished;      // IDAccomplished
         public ObjectiveRole Roles;
         public float Importance01;
+        // The state the target lies in (GetStateOfField), -1 unknown; stored plus one so an unset record reads -1.
+        private int _state;
+        public int StateId { get => _state - 1; set => _state = value + 1; }
+    }
+
+    // A state the CSA can win by secession (Kentucky, Missouri: SecessionRules). Read live from vanilla each review, never cached.
+    public struct SecessionRecord
+    {
+        public int ObjectiveId;     // 15 Kentucky, 16 Missouri
+        public int StateId;
+        public int StateAlliance;   // GameVars.nation[state].alliance
+        public bool Live;           // SecessionRules.IsLive(owner, GameVars.nation[state].support[1]): vanilla's IsDeactivated is false
+        public bool HasTown;
+        public float TownX, TownZ;  // the objective's town (Louisville, St.Louis), from its objective record
     }
 
     public enum SupplySourceKind
@@ -267,7 +285,10 @@ namespace WhiskeyRealism.Strategic.Planner
         CapitalGuard = 4,
         DepotBuilder = 5,
         Recover = 6,
-        Recon = 7
+        Recon = 7,
+        // D8 (smoke amendments 2026-10-16): a formation sent to stand in a secession state (a live objective 15/16 the CSA could win) until
+        // it is in it; once inside it is Hold in place, withheld, with the secession reason.
+        Garrison = 8
     }
 
     public enum ReconKind
@@ -351,6 +372,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public string DepartmentCounts = "";
         public Theater ReinforcementFrom, ReinforcementTo;
 
+        // D8: the secession garrisons of this review (Union side: one post per live secession state it owns).
+        public List<GarrisonPost> Garrisons = new List<GarrisonPost>();
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {
@@ -359,6 +383,17 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
             return null;
         }
+    }
+
+    // One secession state's garrison (D8): the post (the objective's town), the formations that hold it and whether one already stands in the state.
+    public sealed class GarrisonPost
+    {
+        public string StateName;
+        public float X, Z;
+        public bool InState;                       // an own formation already stands in the state
+        public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)
+        public List<int> InstanceIds = new List<int>(); // the garrison: in-state formations nearest the post up to the need, else the one posted
+        public string Name;                        // the first member's name (telemetry)
     }
 
     public struct CommanderProfile

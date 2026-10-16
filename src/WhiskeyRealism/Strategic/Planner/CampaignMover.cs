@@ -105,7 +105,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The order the roles are served in under the daily cap.
         private static readonly FormationRole[] Priority =
-            { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support };
+            { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Garrison, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support };
 
         // Does the mover send a formation of this role? (The roles G4 can give a formation that G5d's recon executor must then leave
         // to the mover: one owner per formation per review.)

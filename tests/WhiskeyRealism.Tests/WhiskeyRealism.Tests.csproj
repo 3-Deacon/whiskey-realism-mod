@@ -87,6 +87,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarchTime.cs" Link="Planner\MarchTime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HistoricalPriorTable.cs" Link="Planner\HistoricalPriorTable.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ObjectiveGround.cs" Link="Planner\ObjectiveGround.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SecessionRules.cs" Link="Planner\SecessionRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerState.cs" Link="Planner\PlannerState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReserveRules.cs" Link="Planner\ReserveRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />

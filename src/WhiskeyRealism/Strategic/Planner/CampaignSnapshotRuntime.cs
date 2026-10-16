@@ -134,6 +134,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadAreas(s, factionIndex);
                 ReadFormations(s, alliance, faction, in chain);
                 ReadObjectives(s, alliance, faction);
+                ReadSecessions(s);
                 ReadSupply(s, alliance);
                 ReadRails(s, alliance);
                 ReadCrossings(s);
@@ -302,6 +303,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         UseRails = reg.userails,
                         UseRivers = reg.userivers,
                         GroupSpeed = reg.groupspeed,
+                        StateId = StateOf(position),
                         TimeOfNotMoving = reg.timeofnotmoving
                     });
                     OwnById[reg.GetInstanceID()] = reg;
@@ -378,6 +380,41 @@ namespace WhiskeyRealism.Strategic.Planner
                     record.ParentInstanceId = s.Own[groupIndex].InstanceId;
                     s.Own[childIndex] = record;
                 }
+            }
+        }
+
+        // The state a map point lies in (the test vanilla's alliancetroops uses, 81654-81660), -1 when the map has none there.
+        private static int StateOf(Vector3 position)
+        {
+            int state = BattlefieldSetup.GetStateOfField(position);
+            return GameVars.nation != null && state >= 0 && state < GameVars.nation.Length ? state : -1;
+        }
+
+        // D8: Kentucky and Missouri, read live from vanilla each review (never cached): the owner, the CSA's support, and vanilla's own
+        // IsDeactivated rule over them (SecessionRules.IsLive). The town is the objective's own target record.
+        private static void ReadSecessions(CampaignSnapshot s)
+        {
+            var nations = GameVars.nation;
+            if (nations == null) return;
+            for (int r = 0; r < SecessionRules.Rules.Length; r++)
+            {
+                var rule = SecessionRules.Rules[r];
+                if (rule.StateId < 0 || rule.StateId >= nations.Length) continue;
+                var nation = nations[rule.StateId];
+                float support = nation.support != null && nation.support.Length > SecessionRules.CsaAlliance ? nation.support[SecessionRules.CsaAlliance] : 0f;
+                var record = new SecessionRecord
+                {
+                    ObjectiveId = rule.ObjectiveId, StateId = rule.StateId, StateAlliance = nation.alliance,
+                    Live = SecessionRules.IsLive(nation.alliance, support)
+                };
+                for (int i = 0; i < s.Objectives.Count && !record.HasTown; i++)
+                {
+                    if (s.Objectives[i].ObjectiveId != rule.ObjectiveId) continue;
+                    record.HasTown = true;
+                    record.TownX = s.Objectives[i].X;
+                    record.TownZ = s.Objectives[i].Z;
+                }
+                s.Secessions.Add(record);
             }
         }
 
@@ -459,6 +496,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var record = s.Objectives[i];
                 record.Importance01 = maxImportance > 0f ? RawImportance[i] / maxImportance : 0f;
+                record.StateId = StateOf(new Vector3(record.X, 0f, record.Z));
                 s.Objectives[i] = record;
             }
         }

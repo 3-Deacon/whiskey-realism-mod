@@ -107,6 +107,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // D6: a formation from outside the main effort's theater joins only if it can be at the target within this many days
         // (MarchTime.EstimateDays, which credits a rail leg where userails and a train allow it): a reinforcement, not a gather.
         public const float ReinforcementMaxDays = 10f;
+        // D8 (smoke amendments 2026-10-16): the CSA's value for a live secession objective (Louisville, St.Louis: the Union takes a national
+        // morale hit, the CSA a state at secedecsasupport) and for the other targets in that state (clearing the Union presence out of it, which
+        // is what the objective's accomplishment needs). Added to the target's value term (weight 0.30), so 0.25 is worth 0.075 of a score:
+        // under the 0.12 switch margin and near the history prior's cap, a weight and never a must.
+        public const float SecessionValueBonus = 0.25f, SecessionStateBonus = 0.10f;
         private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
         // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
         // InDefensiveOps (G5a, chapters decision 5): vanilla's defensive operations may take a deferred
@@ -155,6 +160,9 @@ namespace WhiskeyRealism.Strategic.Planner
             // D6 detail: each own formation's home department (PlannerState.Observe), by index into s.Own; null in a bare Evaluate, where
             // the theater of the sector a formation stands in stands in for it.
             internal Theater[] Department;
+            // D8: the formations a secession garrison keeps (index into s.Own) and the posts they keep; written by Reserve, read by MassFor.
+            internal bool[] GarrisonReserved;
+            internal readonly List<GarrisonPost> Posts = new List<GarrisonPost>();
             // MassFor's foreign pick of its last call (index into s.Own), -1 none; the capacity list holds natives and then this one.
             internal int Foreign = -1;
             internal readonly List<int> ForeignScratch = new List<int>();
@@ -195,6 +203,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 Evaluate(inputs, candidates);
             }
             plan.CapitalFloorStrength = inputs.CapitalFloor;
+            for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
 
             int main = Decide(inputs, candidates, state, battles, out string reason);
             plan.SwitchReason = reason;
@@ -311,7 +320,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 float balance = own + believed > 0f ? own / (own + believed) : 0f;
                 cand.Balance = SnapshotRules.Clamp01(balance * (1f + AttackBiasBalanceScale * profile.AttackBias));
                 float area01 = area >= 0 && maxAreaImportance > 0f ? SnapshotRules.Clamp01(s.Areas[area].Importance / maxAreaImportance) : 0f;
-                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * area01 + 0.25f * Role01(o.Roles));
+                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * area01 + 0.25f * Role01(o.Roles) + SecessionValue(s, o));
                 cand.Capital = CapitalTerm(c, o);
 
                 if (cand.Force >= 0)
@@ -634,6 +643,96 @@ namespace WhiskeyRealism.Strategic.Planner
                 && f.Supply01 >= RecoverSupplyBelow && f.Morale >= minMorale;
         }
 
+        // D8, the CSA side: a live secession objective (vanilla's IsDeactivated is false: the state is not the CSA's and the CSA's support there is at
+        // least 0.45) is worth more as a candidate, and so is every other target in its state (clearing the Union presence out of it, which the
+        // objective's accomplishment needs). Read from this review's snapshot, never cached: the next review reads vanilla again.
+        internal static float SecessionValue(CampaignSnapshot s, in ObjectiveRecord o)
+        {
+            if (s.Alliance != SecessionRules.CsaAlliance) return 0f;
+            float bonus = 0f;
+            for (int i = 0; i < s.Secessions.Count; i++)
+            {
+                var rec = s.Secessions[i];
+                if (!rec.Live) continue;
+                if (o.ObjectiveId == rec.ObjectiveId) return SecessionValueBonus;
+                if (o.StateId == rec.StateId) bonus = SecessionStateBonus;
+            }
+            return bonus;
+        }
+
+        // D2's hold need at a point (x, z) whose reach is `reach`: max(HoldRatio' x the believed land threat, MinGarrisonStrength, and while nothing
+        // fresh is believed within that reach the presumed threat). The sector facts and the D8 garrison post size their hold with this one function.
+        private static float HoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
+        {
+            presumed = FreshLandBeliefWithin(c.S, x, z, reach) ? 0f : PresumedAt(c, x, z, reach);
+            return Math.Max(Math.Max(holdRatio * threat, ForceAllocator.MinGarrisonStrength), presumed);
+        }
+
+        private static float HoldRatioNow(CampaignSnapshot s)
+        {
+            return HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
+        }
+
+        // D8, the Union side (the state's owner): while a secession objective is live a visible campaign group of ours standing in the state denies
+        // it (nation.alliancetroops[0], 81654-81660, 179266 / 179281), so a garrison is kept inside the state. The formations already standing in it,
+        // nearest the post (the objective's town) first, are the garrison until their strength meets the D2 hold need at the post (a small force when
+        // nothing is believed near: the floor, or the presumption); the first of them always counts, since presence is what denies. With none inside,
+        // the nearest ready formation not already kept for the capital or a hold is posted there. Every member is kept out of the mass.
+        private static void Garrisons(Inputs c)
+        {
+            var s = c.S;
+            c.Posts.Clear();
+            c.GarrisonReserved = new bool[s.Own.Count];
+            for (int r = 0; r < s.Secessions.Count; r++)
+            {
+                var rec = s.Secessions[r];
+                if (!rec.Live || !rec.HasTown || rec.StateAlliance != s.Alliance) continue;
+                var post = new GarrisonPost { StateName = SecessionRules.NameOf(rec.StateId), X = rec.TownX, Z = rec.TownZ };
+                float threat = LandThreatNear(c, post.X, post.Z, s.RelocationRange);
+                post.Need = HoldNeedAt(c, post.X, post.Z, s.RelocationRange, threat, HoldRatioNow(s), out _);
+
+                var inside = new List<int>();
+                for (int i = 0; i < s.Own.Count; i++)
+                    if (s.Own[i].StateId == rec.StateId && s.Own[i].UnitTyp > 13) inside.Add(i);
+                post.InState = inside.Count > 0;
+                inside.Sort((a, b) =>
+                {
+                    int d = DistanceSq(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
+                    return d != 0 ? d : s.Own[a].InstanceId.CompareTo(s.Own[b].InstanceId);
+                });
+                float held = 0f;
+                for (int k = 0; k < inside.Count && (k == 0 || held < post.Need); k++)
+                {
+                    int i = inside[k];
+                    c.GarrisonReserved[i] = true;
+                    if (WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) held += ReserveRules.HoldStrength(s.Own[i]);
+                    if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
+                }
+                if (!post.InState)
+                {
+                    int best = -1;
+                    float bestDistance = float.MaxValue;
+                    for (int i = 0; i < s.Own.Count; i++)
+                    {
+                        var f = s.Own[i];
+                        if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || c.HoldReserved[i] >= 0 || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
+                        if (f.UnitTyp <= 13 || !WithinHorizon(c, i, post.X, post.Z)) continue;
+                        float d = DistanceSq(f.X, f.Z, post.X, post.Z);
+                        if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
+                        bestDistance = d;
+                        best = i;
+                    }
+                    if (best >= 0)
+                    {
+                        c.GarrisonReserved[best] = true;
+                        post.InstanceIds.Add(s.Own[best].InstanceId);
+                    }
+                }
+                if (post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
+                c.Posts.Add(post);
+            }
+        }
+
         // D6 detail: every own formation has a home department from its first review on (PlannerState.Observe: the theater of the sector it
         // stands in then, kept until a deliberate transfer).
         private static void AssignDepartments(Inputs c, PlannerState state)
@@ -714,6 +813,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
+                if (c.GarrisonReserved != null && c.GarrisonReserved[i]) continue;   // D8: kept in (or sent to) a secession state
                 int holds = c.HoldReserved[i];
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 // The main effort draws from its own department: the target's theater. A formation of another department is a
@@ -951,9 +1051,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 // believed army keeps a hold of max(HoldRatio x believed, MinGarrison, presumed), the presumption only while nothing
                 // there is scouted (no fresh land belief within that reach).
                 x.Facing[k] = x.Threat[k] > 0f || EnemyGroundWithin(s, x.CX[k], x.CZ[k], reach);
-                x.Presumed[k] = x.Facing[k] && !FreshLandBeliefWithin(s, x.CX[k], x.CZ[k], reach) ? PresumedAt(c, x.CX[k], x.CZ[k], reach) : 0f;
                 x.Need[k] = x.Facing[k]
-                    ? Math.Max(Math.Max(holdRatio * x.Threat[k], ForceAllocator.MinGarrisonStrength), x.Presumed[k])
+                    ? HoldNeedAt(c, x.CX[k], x.CZ[k], reach, x.Threat[k], holdRatio, out x.Presumed[k])
                     : holdRatio * x.Threat[k];
                 int near = NearestLandBelief(s, x.CX[k], x.CZ[k]);
                 x.NearX[k] = near >= 0 ? s.Beliefs[near].X : x.CX[k];
@@ -981,6 +1080,7 @@ namespace WhiskeyRealism.Strategic.Planner
             c.HoldReserved = new int[n];
             ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));
             ReserveRules.Hold(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalReserved, c.HoldReserved);
+            Garrisons(c);
         }
 
         private static CommanderProfile ProfileOf(Inputs c, int formation)

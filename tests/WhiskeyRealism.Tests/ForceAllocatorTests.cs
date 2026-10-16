@@ -1711,7 +1711,7 @@ internal static class ForceAllocatorTests
         plan.MassStrength = 24000f;
         var a = Alloc(plan, s);
         string row = ForceAllocator.Summary(a, plan, PlayerCommandClass.MapGroup, 0.756f, 3);
-        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 need=0 cap=0 staged=no short=0 surplus=1", row,
+        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 need=0 cap=0 staged=no garrison=none short=0 surplus=1", row,
             "the [Allocation] row");
     }
 

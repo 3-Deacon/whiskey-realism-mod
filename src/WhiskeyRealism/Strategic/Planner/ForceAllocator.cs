@@ -92,6 +92,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonReserve = "reserve-surplus";
         internal const string ReasonReinforcement = "reinforcement";
         internal const string ReasonGarrison = "garrison";
+        internal const string ReasonSecession = "secession-garrison";
         internal const string ReasonPlayerMapGroup = "player-map-group";
         internal const string ReasonGaveUp = "gave-up";
 
@@ -181,7 +182,24 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " need=" + (plan != null ? plan.MainNeedStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
                 + " cap=" + (plan != null ? plan.MainCapacityStrength : 0f).ToString("0", CultureInfo.InvariantCulture)
                 + " staged=" + (plan != null && plan.MainStaged ? "yes" : "no")
+                + " garrison=" + GarrisonText(plan)
                 + " short=" + a.Shortfalls.Count + " surplus=" + a.Surpluses.Count;
+        }
+
+        // D8: the secession garrisons, "<unit>@<State>:<in|moving>[+n]" joined by ';', or "none" while no live secession state of ours has one.
+        internal static string GarrisonText(TheaterPlan plan)
+        {
+            if (plan == null || plan.Garrisons.Count == 0) return "none";
+            var sb = new System.Text.StringBuilder();
+            for (int k = 0; k < plan.Garrisons.Count; k++)
+            {
+                var g = plan.Garrisons[k];
+                if (k > 0) sb.Append(';');
+                sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : "nobody").Append('@').Append(g.StateName)
+                  .Append(g.InState ? ":in/" : ":moving/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
+                if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
+            }
+            return sb.ToString();
         }
 
         private static bool IsImmobileReason(string reason)
@@ -264,6 +282,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 AssignCapitalGuards(capitalReserved);
                 AssignHoldReserve(holdReserved);
                 AssignRecover();
+                AssignGarrisons();
                 AssignDepotBuilders();
                 AssignRecon();
                 SplitReserve(out float mainRequired, out float mainStrength);
@@ -330,7 +349,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private static bool Marches(FormationRole role)
             {
                 return role == FormationRole.MainEffort || role == FormationRole.Support || role == FormationRole.CapitalGuard
-                    || role == FormationRole.Recover || role == FormationRole.DepotBuilder || role == FormationRole.Recon;
+                    || role == FormationRole.Recover || role == FormationRole.DepotBuilder || role == FormationRole.Recon || role == FormationRole.Garrison;
             }
 
             private void Assign(int i, FormationRole role, int roleSector, float tx, float tz, string reason, bool withheld)
@@ -401,6 +420,30 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < _n; i++)
                     if (holdReserved[i] >= 0 && !_done[i] && !_inMass[i])
                         Assign(i, FormationRole.Hold, holdReserved[i], _s.Own[i].X, _s.Own[i].Z, ReasonHoldReserve, false);
+            }
+
+            // D8: the secession garrison the plan names (TheaterPlan.Garrisons, picked by TheaterPlanner.Garrisons from the very same snapshot):
+            // a member already standing in the state holds there, withheld from vanilla's offence and defence pools so the state keeps a
+            // visible group of ours (vanilla's alliancetroops, 81654-81660); a member from outside marches to the post, the objective's
+            // town. A formation another role already took (the capital guard, a hold reserve, a recover) keeps that role: the post still
+            // names it, since a hold reserve inside the state denies it just the same.
+            private void AssignGarrisons()
+            {
+                for (int g = 0; g < _plan.Garrisons.Count; g++)
+                {
+                    var post = _plan.Garrisons[g];
+                    int postSector = _sectors.SectorAt(post.X, post.Z);
+                    for (int k = 0; k < post.InstanceIds.Count; k++)
+                    {
+                        int i = _s.IndexOfOwn(post.InstanceIds[k]);
+                        if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain) || !TheaterPlanner.Movable(_s.Own[i])) continue;
+                        var f = _s.Own[i];
+                        if (post.InState)
+                            Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, ReasonSecession, true);
+                        else
+                            Assign(i, FormationRole.Garrison, postSector, post.X, post.Z, ReasonSecession, true);
+                    }
+                }
             }
 
             // Spec C21: the supply threshold is the raw metric.
