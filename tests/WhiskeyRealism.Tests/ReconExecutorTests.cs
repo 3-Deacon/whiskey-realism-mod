@@ -54,6 +54,7 @@ internal static class ReconExecutorTests
             ("ClearedScreenWaitsForItsStandDownAcrossDaysTheExecutorsMiss", ClearedScreenWaitsForItsStandDownAcrossDaysTheExecutorsMiss),
             ("PendingStandDownIsBoundedAtMaxMissionDays", PendingStandDownIsBoundedAtMaxMissionDays),
             ("PendingStandDownIsLetGoWhenItCanNeverBeSent", PendingStandDownIsLetGoWhenItCanNeverBeSent),
+            ("StandDownIsPaidForTheNamedFormationOnly", StandDownIsPaidForTheNamedFormationOnly),
             ("QueuedStandDownIsKeptUntilItIsDelivered", QueuedStandDownIsKeptUntilItIsDelivered),
             ("RetaskedScreenSupersedesTheDebtOfItsClearedMission", RetaskedScreenSupersedesTheDebtOfItsClearedMission),
             ("StandDownDebtRoundTripsThroughRestore", StandDownDebtRoundTripsThroughRestore),
@@ -596,6 +597,14 @@ internal static class ReconExecutorTests
         planner.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 1);
         planner.CollectGaveUp(gaveUp, Day);
         AssertEqual(1, gaveUp.Count, "control: the same refusals on the planner budget are listed");
+        // The same through an issued move that missed twice (Judge), the path the executor's own moves take.
+        var issued = new MoveTracker();
+        issued.RecordIssued(31, 500f, 0f, s.CapitalX, s.CapitalZ, Day - 4, queued: false, budget: MoveBudget.Recon);
+        issued.Judge(31, 500f, 0f, 500f, 0f, Day - 3);
+        issued.RecordIssued(31, 500f, 0f, s.CapitalX, s.CapitalZ, Day - 3, queued: false, budget: MoveBudget.Recon);
+        AssertEqual(MoveOutcome.GaveUp, issued.Judge(31, 500f, 0f, 500f, 0f, Day - 2), "fixture: the second miss gives up");
+        issued.CollectGaveUp(gaveUp, Day);
+        AssertEqual(0, gaveUp.Count, "an issued recon move that gave up is not listed either");
         var records = new List<MoveRecord>(tracker.Records);
         AssertEqual(0, records.Count, "recon records are not persisted (a load restarts the scouts)");
         AssertEqual(1, new List<MoveRecord>(planner.Records).Count, "planner records are");
@@ -849,6 +858,17 @@ internal static class ReconExecutorTests
         AssertEqual(0, ledger2.Missions.Count, "so the mission is dropped");
     }
 
+    private static void StandDownIsPaidForTheNamedFormationOnly()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 300f, 0f, cavalry: 0.8f));
+        s.Own.Add(Unit(2, 300f, 40f, cavalry: 0.8f));
+        var ledger = Ledger(s, (ReconKind.Screen, 1, 300f, 0f), (ReconKind.Screen, 2, 300f, 40f));
+        new ReconExecutor().Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        ledger.NoteStoodDown(1);
+        foreach (var m in ledger.Missions) AssertEqual(m.InstanceId == 2, m.StandDownDue, "unit " + m.InstanceId + " owes only if it is unit 2");
+    }
+
     private static void QueuedStandDownIsKeptUntilItIsDelivered()
     {
         var s = World();
@@ -882,17 +902,24 @@ internal static class ReconExecutorTests
         ledger.OnReview(s, null);
         AssertEqual(1, ledger.Missions.Count, "only the picket remains");
 
-        // Screen again after a picket: the debt moves to the new active mission and the old cleared one stops owing.
+        // A cleared screen (Scouting given) and a new screen mission for the same unit in one review: the new mission carries the
+        // debt, the cleared one stops owing and is dropped at the next review.
         var s2 = World();
         s2.Own.Add(Unit(1, 0f, 0f, cavalry: 0.8f));
         var l2 = Ledger(s2, (ReconKind.Screen, 1, 300f, 0f));
         var e2 = new ReconExecutor();
         e2.Review(s2, l2, new FakeReconHost(), new MoveTracker(), false);
-        Resync(l2, s2, (ReconKind.Screen, 1, 500f, 0f), (ReconKind.Picket, 2, 400f, 0f));
-        // (the same-kind Screen keeps its mission; a second formation's picket is unrelated)
+        l2.Sync(s2, new List<ReconTask>(), new Allocation { Alliance = 0 });             // A: Cleared "unassigned", still owing
+        Resync(l2, s2, (ReconKind.Screen, 1, 500f, 0f));                                 // B: a new screen mission
+        AssertEqual(2, l2.Missions.Count, "fixture: the cleared and the new mission");
+        var host2 = new FakeReconHost();
+        e2.Review(s2, l2, host2, new MoveTracker(), false);
+        AssertEqual(ReconOrders.ScoutingOrder, host2.Orders[0].code, "the active screen keeps Scouting");
         int owing = 0;
         foreach (var m in l2.Missions) if (m.InstanceId == 1 && m.StandDownDue) owing++;
         AssertEqual(1, owing, "one mission owes the stand-down of unit 1");
+        l2.OnReview(s2, null);
+        AssertEqual(1, l2.Missions.Count, "the cleared one is gone");
     }
 
     private static void StandDownDebtRoundTripsThroughRestore()
@@ -956,6 +983,8 @@ internal static class ReconExecutorTests
         AssertEqual(ReconOrders.CavalryCall.Send, ReconOrders.CallFor(mode: 0, current: 1, ordered: 0 + 1), "applied 1, ordered 1, wanted 0");
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutorRuntime.cs");
         string send = BodyOf(src, "public CavalrySend SendCavalryOrder(");
+        AssertTrue(HasLine(send, "if (unit == null) return CavalrySend.NoUnit;"), "no such unit: the pass lets its debt go");
+        AssertTrue(HasLine(send, "return CavalrySend.Sent;"), "a call made is reported as made");
         AssertTrue(HasLine(send, "var call = ReconOrders.CallFor(mode, unit.cavalryorders, unit.cavalryordersordered);"), "the host asks the pure rule with vanilla's two fields");
         AssertTrue(HasLine(send, "NoteQueuedOther(unit, mode);"), "the queued-other case is logged");
         int noted = send.IndexOf("NoteQueuedOther(unit, mode);", StringComparison.Ordinal);
