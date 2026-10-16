@@ -90,19 +90,25 @@ internal static class ManeuverFeasibilityFixtures
         private readonly List<int> _parents = new List<int>();
         private int _id = 100;
 
-        public int Add(int unitTyp, float x, float z, int parent, UnitFlags extra = 0, float strength = 0f, float morale = 0.9f)
+        public int Add(int unitTyp, float x, float z, int parent, UnitFlags extra = 0, float strength = 0f, float morale = 0.9f,
+            float fireRange = 0f, float rotationY = 0f, float fatigue = 0f, bool active = true)
         {
             bool group = unitTyp >= TacticalUnitType.BattleGroupBrigade;
             _own.Add(new UnitRecord
             {
                 InstanceId = _id++, UnitTyp = unitTyp, X = x, Z = z, Strength = (int)strength, Morale = morale, GroupMorale = morale,
-                Flags = UnitFlags.Alive | UnitFlags.Active | (group ? UnitFlags.IsGroup : 0) | extra, UnitWidth = 100f,
+                Flags = UnitFlags.Alive | (active ? UnitFlags.Active : 0) | (group ? UnitFlags.IsGroup : 0) | extra, UnitWidth = 100f,
+                FireRange = fireRange, RotationY = rotationY, Fatigue = fatigue,
             });
             _parents.Add(parent);
             return _own.Count - 1;
         }
 
         public int InstanceId(int index) => _own[index].InstanceId;
+
+        public int Count => _own.Count;
+
+        public UnitRecord this[int index] => _own[index];
 
         public BattleSnapshot Build(double hours = 10.0, params EnemyObservation[] observations)
         {
@@ -122,5 +128,184 @@ internal static class ManeuverFeasibilityFixtures
             }
             return s;
         }
+    }
+
+    // The shipped line-of-sight reach by unit type: infantry and cavalry 200, artillery 400 (the spec's scenario fixtures).
+    internal static readonly float[] ShippedReachByType = ReachTable();
+
+    private static float[] ReachTable()
+    {
+        var reach = new float[14];
+        for (int i = 0; i < reach.Length; i++) reach[i] = 200f;
+        reach[TacticalUnitType.Artillery] = 400f;
+        return reach;
+    }
+
+    /// <summary>
+    /// A scenario field in the spec's own frame (spec § 6): lateral is the right of the army's heading and depth is forward toward the
+    /// enemy. The map is a 2,400-unit square, so world x = lateral + 1,200 and z = depth - 1,200; forward is +z, which makes +x the
+    /// right axis. The own side stands on three corps of four regiments (the army headquarters, which is not an active unit of the
+    /// layout's centroid, stands behind them), the enemy as Visible infantry samples.
+    /// </summary>
+    internal sealed class FeasField
+    {
+        public const int Size = 2400;
+        public static float X(float lateral) => lateral + Size * 0.5f;
+        public static float Z(float depth) => depth - Size * 0.5f;
+
+        public BattleTerrainGrid Grid;
+        public TerrainPicture Picture;
+        public RiverRegions Regions;
+        public CrossingWatch Crossings = new CrossingWatch();
+        public IConfirmedLegs Legs;
+        public IExploitLookup Exploits;
+        public MarchRules Rules = ShippedRules();
+        public readonly TreeFixture Tree = new TreeFixture();
+        public readonly List<string> ChildIds = new List<string>();
+        public readonly List<bool> DeployedReserve = new List<bool>();
+        public readonly List<EnemyObservation> Enemies = new List<EnemyObservation>();
+        public BattleStance Stance = BattleStance.Attacker;
+        public OpportunityPersonality Army = Personality(0.5f, 0.5f, 0.5f);
+        public double Now = 10.0;
+        public float DaylightHours = 10f;
+        public float Confidence = 0.8f;
+        public float? EnemyEstimate;
+        public TacticalIntentModel EnemyIntent;
+        /// <summary>Probe answer for BC13's perceived ground: everything perceived means every unheld crossing reads Clear.</summary>
+        public Func<float, float, bool> Perceived = (x, z) => true;
+        public readonly int ArmyIndex;
+
+        private static FeasField _flat;
+
+        public FeasField(BattleTerrainGrid grid = null)
+        {
+            if (grid == null)
+            {
+                _flat = _flat ?? new FeasField(GridOf(Size, Size, (x, zi) => Grass));
+                Grid = _flat.Grid;
+                Picture = _flat.Picture;
+                Regions = _flat.Regions;
+            }
+            else
+            {
+                // A river map needs the real picture: the regions are labelled over its cell ids.
+                Grid = grid;
+                Picture = TerrainPictureTests.Build(grid, Size, TerrainPictureTests.Flat());
+                Regions = new RiverRegions();
+                if (!Regions.Step(Picture, grid, long.MaxValue, () => 0L)) throw new Exception("the river regions did not build");
+            }
+            ArmyIndex = Tree.Add(TacticalUnitType.BattleGroupArmy, X(0f), Z(-700f), -1, active: false);
+        }
+
+        public static OpportunityPersonality Personality(float agg, float caution, float audacity)
+            => new OpportunityPersonality { Agg01 = agg, Caution01 = caution, Audacity01 = audacity, CasualtyTolerance01 = 0.5f, Duty = 1f };
+
+        /// <summary>
+        /// A corps (a division group) of <paramref name="regiments"/> equal regiments, its brigade within bugle range of the corps. The
+        /// regiments stand at the corps and face the enemy. Returns the corps' index in the tree; its child id is appended.
+        /// </summary>
+        public int AddCorps(float lateral, float depth, float strength, int regiments = 4, UnitFlags regimentFlags = 0, bool deployedReserve = false,
+            float fireRange = 100f, float fatigue = 0f)
+        {
+            float x = X(lateral), z = Z(depth);
+            int corps = Tree.Add(TacticalUnitType.BattleGroupDivision, x, z, ArmyIndex);
+            int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
+            for (int r = 0; r < regiments; r++)
+                Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
+                    strength / regiments, fireRange: fireRange, rotationY: 0f, fatigue: fatigue);
+            ChildIds.Add("child-" + Tree.InstanceId(corps));
+            DeployedReserve.Add(deployedReserve);
+            return corps;
+        }
+
+        public EnemyObservation AddEnemy(float lateral, float depth, float strength, float heading = 180f, float fireRange = 100f,
+            int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f)
+        {
+            var o = new EnemyObservation
+            {
+                InstanceId = 5000 + Enemies.Count, UnitTyp = unitTyp, X = X(lateral), Z = Z(depth), Strength = strength, State = state,
+                Confidence01 = confidence, Heading = heading, FireRange = fireRange, Morale = 1f,
+            };
+            Enemies.Add(o);
+            return o;
+        }
+
+        /// <summary>Three equal Visible clusters at lateral -450, 0 and +450 (the scenarios 1-3 enemy) at the given depth.</summary>
+        public void AddEnemyLine(float totalStrength, float depth = 600f)
+        {
+            AddEnemy(-450f, depth, totalStrength / 3f);
+            AddEnemy(0f, depth, totalStrength / 3f);
+            AddEnemy(450f, depth, totalStrength / 3f);
+        }
+
+        public BattleSnapshot Snapshot() => Tree.Build(Now, Enemies.ToArray());
+
+        public FeasibilityInput Build(params BattlePlanId[] plans)
+        {
+            BattleSnapshot s = Snapshot();
+            // The own centroid and lateral extent of every active own unit; the enemy anchor of the Visible samples.
+            float sx = 0f, sz = 0f;
+            int n = 0;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((s.Own[i].Flags & UnitFlags.Active) == 0) continue;
+                sx += s.Own[i].X;
+                sz += s.Own[i].Z;
+                n++;
+            }
+            float cx = n > 0 ? sx / n : X(0f), cz = n > 0 ? sz / n : Z(0f);
+            float wx = 0f, wz = 0f, w = 0f, total = 0f;
+            for (int i = 0; i < s.ObservationCount; i++)
+            {
+                total += s.Observations[i].Strength;
+                if (s.Observations[i].State != ObservationState.Visible || s.Observations[i].IsReinforcement) continue;
+                wx += s.Observations[i].X * s.Observations[i].Strength;
+                wz += s.Observations[i].Z * s.Observations[i].Strength;
+                w += s.Observations[i].Strength;
+            }
+            float ex = w > 0f ? wx / w : cx, ez = w > 0f ? wz / w : cz + 600f;
+            TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(cx, cz, ex, ez);
+            float lmin = float.MaxValue, lmax = float.MinValue, emin = float.MaxValue, emax = float.MinValue;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((s.Own[i].Flags & UnitFlags.Active) == 0) continue;
+                float lat = axis.LateralOf(s.Own[i].X, s.Own[i].Z);
+                if (lat < lmin) lmin = lat;
+                if (lat > lmax) lmax = lat;
+            }
+            for (int i = 0; i < s.ObservationCount; i++)
+            {
+                float lat = axis.LateralOf(s.Observations[i].X, s.Observations[i].Z);
+                if (lat < emin) emin = lat;
+                if (lat > emax) emax = lat;
+            }
+            if (lmin <= lmax) axis = axis.WithOwnExtent(lmin, lmax);
+            if (emin <= emax) axis = axis.WithEnemyExtent(emin, emax);
+
+            Crossings.Classify(s, Regions, Grid, new FnProbe(Perceived), ShippedReachByType, Now);
+            return new FeasibilityInput
+            {
+                Snapshot = s, Axis = axis, Stance = Stance, Grid = Grid, Picture = Picture, Regions = Regions, Crossings = Crossings,
+                Rules = Rules, Army = Army, EnemyEstimate = EnemyEstimate ?? total, Confidence = Confidence, EnemyIntent = EnemyIntent,
+                NowHours = Now, DaylightHours = DaylightHours, Exploits = Exploits, Legs = Legs,
+                ChildIds = ChildIds.ToArray(), ChildCount = ChildIds.Count, DeployedReserve = DeployedReserve.ToArray(),
+                Candidates = plans, CandidateCount = plans.Length,
+                Cache = new LegCostCache(),
+            };
+        }
+
+        public FeasibilityLedger Evaluate(params BattlePlanId[] plans)
+        {
+            var ledger = new FeasibilityLedger();
+            ManeuverFeasibility.Evaluate(Build(plans), ledger);
+            return ledger;
+        }
+    }
+
+    internal sealed class FnProbe : IPerceivedGround
+    {
+        private readonly Func<float, float, bool> _fn;
+        public FnProbe(Func<float, float, bool> fn) { _fn = fn; }
+        public bool IsPerceived(float x, float z) => _fn(x, z);
     }
 }

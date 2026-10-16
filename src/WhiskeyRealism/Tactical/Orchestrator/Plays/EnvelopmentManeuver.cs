@@ -33,9 +33,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// <summary>The plan of a zone assignment that carries a maneuver (DirectChildIntent.Maneuver).</summary>
     public readonly struct ManeuverSpec
     {
-        public ManeuverSpec(PlayRectKind kind, float anchorX, float anchorZ, float startOffsetSeconds, bool envelops)
+        public ManeuverSpec(PlayRectKind kind, float anchorX, float anchorZ, float startOffsetSeconds, bool envelops,
+            bool projectedMirrored = false, float authoredAnchorX = 0f, float authoredAnchorZ = 0f)
         {
             HasValue = true;
+            ProjectedMirrored = projectedMirrored;
+            AuthoredAnchorX = authoredAnchorX;
+            AuthoredAnchorZ = authoredAnchorZ;
             Kind = kind;
             AnchorX = anchorX;
             AnchorZ = anchorZ;
@@ -49,6 +53,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float AnchorZ { get; }
         public float StartOffsetSeconds { get; }
         public bool Envelops { get; }
+
+        /// <summary>
+        /// BC14 requirement-selected-side: the plan was projected mirrored (the feasibility evaluation chose that side). BC11's one
+        /// mirrored try then goes to <see cref="AuthoredAnchorX"/>/<see cref="AuthoredAnchorZ"/>, the rect's un-mirrored anchor, and not to
+        /// MirrorAcrossAxis: the projection frame and the front axis need not coincide.
+        /// </summary>
+        public bool ProjectedMirrored { get; }
+        public float AuthoredAnchorX { get; }
+        public float AuthoredAnchorZ { get; }
     }
 
     public struct ManeuverInput

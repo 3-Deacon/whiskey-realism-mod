@@ -55,9 +55,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool Found;
         public bool Unknown;
         public bool NoRoute;
+        /// <summary>With <see cref="NoRoute"/>: a NavMesh result refused a leg next to an end point (no-route), as opposed to no chain of crossings at all (no-crossing).</summary>
+        public bool Refused;
         public bool SameRegion;
         /// <summary>Some leg is a sampled estimate (it skirts a bend of the river).</summary>
         public bool Estimated;
+        /// <summary>Some leg is a NavMesh result (<see cref="IConfirmedLegs"/>) in place of the sampled estimate.</summary>
+        public bool Confirmed;
         /// <summary>Hours of the legs alone, at the mover's speed.</summary>
         public float LegHours;
         /// <summary>HeldCrossingHours for each crossing that costs the mover time (a Held one for the side, an own-covered one for the enemy).</summary>
@@ -89,8 +93,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public IConfirmedLegs Legs;
         public MarchRules Rules;
 
-        /// <summary>Per link: an own regiment covers it (CoveredCrossings.Covers, the own-side form); the enemy's shift pays HeldCrossingHours there.</summary>
-        public readonly bool[] OwnCovered = new bool[RiverRegions.MaxCrossings];
+        /// <summary>The side's own snapshot: an own regiment covering a crossing (CoveredCrossings.Covers, the own-side form) costs the enemy's shift HeldCrossingHours there.</summary>
+        public BattleSnapshot OwnSnapshot;
+
+        // Per link, read lazily: 0 not asked, 1 uncovered, 2 covered. Cleared by ResetOwnCovered when an evaluation starts.
+        private readonly sbyte[] _ownCovered = new sbyte[RiverRegions.MaxCrossings];
+
+        public void ResetOwnCovered() => Array.Clear(_ownCovered, 0, _ownCovered.Length);
+
+        /// <summary>True when a live own regiment covers the link's crossing by the own-side form of rule (a).</summary>
+        public bool IsOwnCovered(int link)
+        {
+            if (link < 0 || link >= _ownCovered.Length || OwnSnapshot == null || Regions == null) return false;
+            if (_ownCovered[link] != 0) return _ownCovered[link] == 2;
+            Regions.LinkCrossing(link, out float x, out float z, out _, out _);
+            bool covered = false;
+            UnitRecord[] own = OwnSnapshot.Own;
+            for (int i = 0; i < OwnSnapshot.OwnCount && !covered; i++)
+                covered = CoveredCrossings.Covers(in own[i], x, z);
+            _ownCovered[link] = (sbyte)(covered ? 2 : 1);
+            return covered;
+        }
 
         /// <summary>Legs sampled and path searches made (FEAS-TIME's counted bounds).</summary>
         public int LegsSampled, Searches;
@@ -101,6 +124,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private readonly bool[] _entryEstimated = new bool[MaxNodes];
         private readonly int[] _prev = new int[MaxNodes];
         private readonly bool[] _done = new bool[MaxNodes];
+        private bool _refused, _confirmed;
 
         /// <summary>The links of the last successful route, first crossing first; valid until the next <see cref="Route"/> call.</summary>
         public readonly int[] PathLinks = new int[MaxNodes];
@@ -119,6 +143,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             var result = new RouteResult { FirstLink = -1 };
             PathCount = 0;
+            _refused = false;
+            _confirmed = false;
             if (!Ready)
             {
                 result.Unknown = true;
@@ -146,10 +172,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (!PointLeg(x0, z0, x1, z1, out float cost, out bool est, out bool noPath))
                 {
                     result.NoRoute = noPath;
+                    result.Refused = noPath;
                     return result;
                 }
                 result.Found = true;
                 result.Estimated = est;
+                result.Confirmed = _confirmed;
                 result.CostUnits = cost;
                 result.LegHours = cost / divisor;
                 return result;
@@ -208,6 +236,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (last < 0)
             {
                 result.NoRoute = true;
+                result.Refused = _refused;
                 return result;
             }
 
@@ -234,6 +263,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             result.Found = true;
             result.Estimated = estimated;
+            result.Confirmed = _confirmed;
             result.CostUnits = cost0;
             result.LegHours = cost0 / divisor;
             result.HeldCount = held;
@@ -261,7 +291,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // own regiment (the enemy's).
         private float CrossingExtra(int link, bool enemy)
         {
-            bool costs = enemy ? OwnCovered[link] : (Crossings != null && Crossings.StateOf(link) == CrossingState.Held);
+            bool costs = enemy ? IsOwnCovered(link) : (Crossings != null && Crossings.StateOf(link) == CrossingState.Held);
             return costs ? ManeuverFeasibility.HeldCrossingHours : 0f;
         }
 
@@ -280,6 +310,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
                 cost = confirmed;
                 estimated = false;
+                _confirmed = true;
                 return true;
             }
             int a = LegCostCache.BucketKey(x0, z0), b = LegCostCache.BucketKey(x1, z1);
@@ -299,6 +330,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 cost = confirmed;
                 estimated = false;
+                if (refused) _refused = true;
+                else _confirmed = true;
                 return !refused;
             }
             int a = LegCostCache.BucketKey(px, pz), b = LegCostCache.LinkKey(link);
@@ -358,12 +391,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ReadOnlySpan<bool> inContact, Span<float> desiredStrike, Span<float> release, Span<bool> hasRelease)
         {
             int n = strikeHours.Length;
+            // A main body already in contact (any fixing member in it) has T_main 0: it makes contact as soon as it likes, and C* is the
+            // wings' own pace.
+            bool mainInContact = false;
+            for (int i = 0; i < n; i++) if (kind[i] == MemberFix && inContact[i]) mainInContact = true;
             float cStar = 0f;
             for (int i = 0; i < n; i++)
             {
-                float t = kind[i] == MemberFix && inContact[i] ? 0f : strikeHours[i];
-                if (kind[i] == MemberFix) cStar = Math.Max(cStar, t);
-                else if (kind[i] == MemberEnvelops) cStar = Math.Max(cStar, t - offsetHours[i]);
+                if (kind[i] == MemberFix && !mainInContact) cStar = Math.Max(cStar, strikeHours[i]);
+                else if (kind[i] == MemberEnvelops) cStar = Math.Max(cStar, strikeHours[i] - offsetHours[i]);
             }
             for (int i = 0; i < n; i++)
             {

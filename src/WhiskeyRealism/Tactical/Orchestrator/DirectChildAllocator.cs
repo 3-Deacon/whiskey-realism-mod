@@ -659,10 +659,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static ManeuverSpec ManeuverOf(in CorpsAssignment zone)
         {
             if (zone.Envelops)
-                return new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: true);
+                return new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: true,
+                    zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ);
             bool wing = zone.RectKind == PlayRectKind.LeftWing || zone.RectKind == PlayRectKind.RightWing;
             return wing && zone.StartTimeOffsetSeconds > 0f
-                ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false)
+                ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false,
+                    zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ)
                 : default(ManeuverSpec);
         }
 
