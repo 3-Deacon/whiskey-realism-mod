@@ -21,6 +21,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Diagnostics for the flow row: the courier path the delay was computed over.
         public int Legs;
         public float Meters;
+        // Origin == P62 only: the candidate #62 composed, for its accept/attempt bookkeeping.
+        public PlayerOrderCandidate P62Candidate;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture
@@ -106,6 +108,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void Discard(in CourierEntry e, string reason)
         {
             _sink?.Discarded(in e, reason);
+        }
+
+        // True when an entry from this origin is waiting.
+        public bool HasPendingOrigin(OrderOrigin origin)
+        {
+            for (int i = 0; i < _count; i++)
+                if (_pending[i].Origin == origin) return true;
+            return false;
         }
 
         // True when an entry of this type is waiting.

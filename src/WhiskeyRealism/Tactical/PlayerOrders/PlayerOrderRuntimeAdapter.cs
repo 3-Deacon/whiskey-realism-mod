@@ -23,14 +23,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 string currentCommandKey,
                 bool isCommanderInChief,
                 PlayerOrderActiveSnapshot activeOrder,
-                long tick)
+                double nowHours)
             {
                 WlActive = wlActive;
                 BattleIdentity = battleIdentity ?? string.Empty;
                 CurrentCommandKey = currentCommandKey ?? string.Empty;
                 IsCommanderInChief = isCommanderInChief;
                 ActiveOrder = activeOrder;
-                Tick = tick;
+                NowHours = nowHours;
             }
 
             public bool WlActive { get; }
@@ -38,7 +38,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public string CurrentCommandKey { get; }
             public bool IsCommanderInChief { get; }
             public PlayerOrderActiveSnapshot ActiveOrder { get; }
-            public long Tick { get; }
+            public double NowHours { get; }
         }
 
         internal readonly struct RuntimeEvaluation
@@ -49,14 +49,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 Regiment currentCommand,
                 PlayerOrderActiveSnapshot activeOrder,
                 PlayerOrderCandidate candidate,
-                long tick)
+                double nowHours)
             {
                 CanEvaluate = canEvaluate;
                 SkipReason = skipReason ?? string.Empty;
                 CurrentCommand = currentCommand;
                 ActiveOrder = activeOrder;
                 Candidate = candidate;
-                Tick = tick;
+                NowHours = nowHours;
             }
 
             public bool CanEvaluate { get; }
@@ -64,7 +64,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public Regiment CurrentCommand { get; }
             public PlayerOrderActiveSnapshot ActiveOrder { get; }
             public PlayerOrderCandidate Candidate { get; }
-            public long Tick { get; }
+            public double NowHours { get; }
         }
 
         private readonly PlayerOrderDedupeState _dedupeState;
@@ -84,12 +84,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 string battleIdentity = BattleIdentity(battle);
                 string currentKey = UnitKey(current);
                 var active = ReadActiveOrder(battleIdentity, forceVanillaProvenance);
-                return new RuntimeSnapshot(wlActive, battleIdentity, currentKey, isCic, active, Tick());
+                return new RuntimeSnapshot(wlActive, battleIdentity, currentKey, isCic, active, NowHours());
             }
             catch (Exception ex)
             {
                 Warn("snapshot", ex);
-                return new RuntimeSnapshot(false, string.Empty, string.Empty, true, default(PlayerOrderActiveSnapshot), Tick());
+                return new RuntimeSnapshot(false, string.Empty, string.Empty, true, default(PlayerOrderActiveSnapshot), NowHours());
             }
         }
 
@@ -150,13 +150,54 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     hasValidExitPoint: hasExit);
 
                 PlayerOrderCandidate candidate = PlayerOrderComposer.Compose(input);
-                return new RuntimeEvaluation(true, string.Empty, current, snapshot.ActiveOrder, candidate, snapshot.Tick);
+                return new RuntimeEvaluation(true, string.Empty, current, snapshot.ActiveOrder, candidate, snapshot.NowHours);
             }
             catch (Exception ex)
             {
                 Warn("evaluate", ex);
                 return Skip(snapshot, "runtime-error:" + ex.GetType().Name);
             }
+        }
+
+        // The candidate as the dedupe should remember it once vanilla accepted it: the session vanilla
+        // bumped, so the next evaluation's identical candidate is a signature match, not a new order.
+        public PlayerOrderCandidate WithSession(PlayerOrderCandidate candidate, int givenOrderSession)
+        {
+            return new PlayerOrderCandidate(
+                candidate.Scope,
+                candidate.Intent,
+                candidate.VanillaType,
+                candidate.Priority,
+                candidate.UnitKey,
+                candidate.BattleIdentity,
+                givenOrderSession,
+                candidate.TargetPoint,
+                candidate.Rotation,
+                candidate.ObjectiveKey,
+                candidate.Reason,
+                candidate.ActiveCampaignActionable,
+                candidate.CampaignGroupFlag,
+                candidate.ValidExitPoint);
+        }
+
+        // The candidate described by what vanilla actually stored (the parent unit, the widened zone).
+        public PlayerOrderCandidate WithAcceptedOrder(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
+        {
+            return new PlayerOrderCandidate(
+                candidate.Scope,
+                candidate.Intent,
+                candidate.VanillaType,
+                candidate.Priority,
+                active.UnitKey,
+                candidate.BattleIdentity,
+                active.GivenOrderSession,
+                active.TargetPoint,
+                active.Rotation,
+                active.ObjectiveKey,
+                candidate.Reason,
+                candidate.ActiveCampaignActionable,
+                candidate.CampaignGroupFlag,
+                candidate.ValidExitPoint || active.TargetPoint.ValidExitPoint);
         }
 
         private RuntimeEvaluation Skip(RuntimeSnapshot snapshot, string reason)
@@ -167,7 +208,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 null,
                 snapshot.ActiveOrder,
                 default(PlayerOrderCandidate),
-                snapshot.Tick);
+                snapshot.NowHours);
         }
 
         private PlayerOrderActiveSnapshot ReadActiveOrder(string battleIdentity, bool forceVanillaProvenance)
@@ -215,7 +256,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     false,
                     PlayerOrderProvenance.Unknown,
                     battleEnded: !activeForScene,
-                    stale: !activeForScene);
+                    stale: !activeForScene,
+                    ageHours: WlOrderFlowRuntime.ActiveOrderAgeHours());
                 var provenance = forceVanillaProvenance
                     ? PlayerOrderProvenance.Vanilla
                     : ClassifyProvenance(provisional);
@@ -235,7 +277,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     false,
                     provenance,
                     battleEnded: !activeForScene,
-                    stale: !activeForScene);
+                    stale: !activeForScene,
+                    ageHours: WlOrderFlowRuntime.ActiveOrderAgeHours());
             }
             catch (Exception ex)
             {
@@ -659,10 +702,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return value.Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).Trim().ToLowerInvariant();
         }
 
-        private static long Tick()
+        // The doctrine clock (battle game-hours, frozen overnight): the throttle and the order age run on it.
+        private static double NowHours()
         {
-            try { return Time.frameCount; }
-            catch { return Environment.TickCount; }
+            try { return TacticalDoctrineTime.NowBattleHours; }
+            catch { return 0.0; }
         }
 
         private static void Warn(string key, Exception ex)

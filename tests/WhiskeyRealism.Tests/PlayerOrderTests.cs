@@ -33,7 +33,7 @@ internal static class PlayerOrderTests
             ("player order active priority is conservative for ambiguous vanilla types", PlayerOrderActivePriorityIsConservativeForAmbiguousVanillaTypes),
             ("player order dedupe blocks tactical over active type fifteen", PlayerOrderDedupeBlocksTacticalOverActiveTypeFifteen),
             ("player order dedupe protects vanilla transition orders", PlayerOrderDedupeProtectsVanillaTransitionOrders),
-            ("player order dedupe blocks hold over active attack per vanilla", PlayerOrderDedupeBlocksHoldOverActiveAttackPerVanilla),
+            ("player order dedupe leaves hold over active attack to the capture policy", PlayerOrderDedupeLeavesHoldOverActiveAttackToTheCapturePolicy),
             ("player order dedupe protects higher same scope priority", PlayerOrderDedupeProtectsHigherSameScopePriority),
             ("player order dedupe preserves vanilla type eleven unless higher priority", PlayerOrderDedupePreservesVanillaTypeElevenUnlessHigherPriority),
             ("player order dedupe blocks ambiguous unknown type seven", PlayerOrderDedupeBlocksAmbiguousUnknownTypeSeven),
@@ -49,8 +49,6 @@ internal static class PlayerOrderTests
             ("player order dedupe enforces campaign tactical scope gap", PlayerOrderDedupeEnforcesCampaignTacticalScopeGap),
             ("player order dedupe allows emergency retreat over invalid campaign order", PlayerOrderDedupeAllowsEmergencyRetreatOverInvalidCampaignOrder),
             ("player order dedupe allows emergency retreat over actionable campaign order", PlayerOrderDedupeAllowsEmergencyRetreatOverActionableCampaignOrder),
-            ("player order dedupe blocks type fourteen unless active hold", PlayerOrderDedupeBlocksTypeFourteenUnlessActiveHold),
-            ("player order dedupe allows type fourteen past vanilla preflight on active hold", PlayerOrderDedupeAllowsTypeFourteenPastVanillaPreflightOnActiveHold),
             ("player order dedupe type fourteen does not permanently yield", PlayerOrderDedupeTypeFourteenDoesNotPermanentlyYield),
             ("player order cache clears by battle identity", PlayerOrderCacheClearsByBattleIdentity),
             ("player order cache clears old battle at new boundary", PlayerOrderCacheClearsOldBattleAtNewBoundary),
@@ -61,6 +59,11 @@ internal static class PlayerOrderTests
             ("player order signature cache suppresses repeated material match", PlayerOrderSignatureCacheSuppressesRepeatedMaterialMatch),
             ("player order issuance throttle suppresses rapid changed candidates", PlayerOrderIssuanceThrottleSuppressesRapidChangedCandidates),
             ("player order failed bridge attempt throttles rejected candidate", PlayerOrderFailedBridgeAttemptThrottlesRejectedCandidate),
+            ("player order ratchet blocks only inside the hold", PlayerOrderRatchetBlocksOnlyInsideHold),
+            ("player order retreat passes the ratchet", PlayerOrderRetreatPassesRatchet),
+            ("player order engage at will is live not stale", PlayerOrderEngageAtWillIsLiveNotStale),
+            ("player order throttle is on the doctrine clock", PlayerOrderThrottleOnDoctrineClock),
+            ("player order pending candidate is suppressed by signature until cleared", PlayerOrderPendingCandidateSuppressedBySignature),
             ("player order diagnostics signatures cap repeated logs", PlayerOrderDiagnosticsSignaturesCapRepeatedLogs),
             ("player order composer returns none without orchestrator", PlayerOrderComposerReturnsNoneWithoutOrchestrator),
             ("player order composer returns none for player cic", PlayerOrderComposerReturnsNoneForPlayerCic),
@@ -124,33 +127,40 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 15, provenance: PlayerOrderProvenance.WhiskeyTactical);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective);
-        AssertTrue(PlayerOrderDedupe.VanillaWouldBlock(active, candidate, campaignGroupFlag: false), "vanilla retreat blocks tactical");
         AssertEqual(
             PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe,
-            PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind);
+            PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind);
     }
 
     private static void PlayerOrderDedupeProtectsVanillaTransitionOrders()
     {
         var active = PlayerOrderActive("u1", 13, provenance: PlayerOrderProvenance.Vanilla);
-        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var attack = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
+        var decision = PlayerOrderDedupe.Decide(attack, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.YieldVanillaTransition, decision.Kind, "transition protection");
+        // A retreat is the one order that goes through engage-at-will (rule 1 of the capture policy).
+        var retreat = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
+            PlayerOrderDedupe.Decide(retreat, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
+            "a retreat is not held back by vanilla's engage-at-will");
     }
 
-    private static void PlayerOrderDedupeBlocksHoldOverActiveAttackPerVanilla()
+    private static void PlayerOrderDedupeLeavesHoldOverActiveAttackToTheCapturePolicy()
     {
+        // #62 carries no model of vanilla's dedupe any more: whether a defend may replace an attack is
+        // PlayerOrderReadmitPolicy's rule 3 (DefendOverAttackOnlyWhenHeldOrDefensive), decided where the
+        // order is captured. The candidate is issued and the capture policy answers for it.
         var active = PlayerOrderActive("u1", 1);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.HoldObjective);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe, decision.Kind, "hold over attack");
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "hold over attack is the capture policy's call");
     }
 
     private static void PlayerOrderDedupeProtectsHigherSameScopePriority()
     {
         var active = PlayerOrderActive("u1", 12, provenance: PlayerOrderProvenance.WhiskeyTactical);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, decision.Kind, "higher same-scope active order blocks lower candidate");
     }
 
@@ -161,12 +171,12 @@ internal static class PlayerOrderTests
         var higher = PlayerOrderCandidateFor("u1", PlayerOrderIntent.HoldObjective);
 
         AssertEqual(
-            PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe,
-            PlayerOrderDedupe.Decide(equal, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind,
+            PlayerOrderDedupeDecisionKind.BlockedByScopePriority,
+            PlayerOrderDedupe.Decide(equal, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
             "equal priority support must preserve vanilla type eleven");
         AssertEqual(
             PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(higher, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind,
+            PlayerOrderDedupe.Decide(higher, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
             "higher priority candidate may replace vanilla type eleven after preflight");
     }
 
@@ -174,7 +184,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 7, provenance: PlayerOrderProvenance.Unknown);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, decision.Kind, "unknown type 7 is ambiguous without shadow");
     }
 
@@ -182,7 +192,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 12, provenance: PlayerOrderProvenance.Unknown);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, decision.Kind, "unknown type 12 is ambiguous without shadow");
     }
 
@@ -194,11 +204,11 @@ internal static class PlayerOrderTests
 
         AssertEqual(
             PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, activeHold, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind,
+            PlayerOrderDedupe.Decide(candidate, activeHold, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
             "valid emergency retreat can override ambiguous tactical hold");
         AssertEqual(
             PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, activeEngage, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind,
+            PlayerOrderDedupe.Decide(candidate, activeEngage, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
             "valid emergency retreat can override ambiguous tactical engage");
     }
 
@@ -206,7 +216,7 @@ internal static class PlayerOrderTests
     {
         var state = new PlayerOrderDedupeState();
         var shadow = PlayerOrderCandidateFor("u1", PlayerOrderIntent.HoldObjective, objectiveKey: "ridge-a", givenOrderSession: 1);
-        state.Record(shadow, tick: 10);
+        state.Record(shadow, nowHours: 10.0);
         var active = PlayerOrderActive(
             "u1",
             12,
@@ -214,7 +224,7 @@ internal static class PlayerOrderTests
             givenOrderSession: 2,
             objectiveKey: "ridge-a");
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, decision.Kind, "stale session shadow must not prove active intent");
     }
 
@@ -227,7 +237,7 @@ internal static class PlayerOrderTests
             objectiveKey: "ridge-a",
             targetPoint: new PlayerOrderPoint(100f, 200f),
             rotation: 45f);
-        state.Record(shadow, tick: 10);
+        state.Record(shadow, nowHours: 10.0);
         var active = PlayerOrderActive(
             "u1",
             12,
@@ -236,7 +246,7 @@ internal static class PlayerOrderTests
             targetPoint: new PlayerOrderPoint(180f, 260f),
             rotation: 45f);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-c");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, decision.Kind, "mismatched target shadow must not prove active intent");
     }
 
@@ -249,7 +259,7 @@ internal static class PlayerOrderTests
             objectiveKey: "ridge-a",
             targetPoint: new PlayerOrderPoint(100f, 200f),
             rotation: 45f);
-        state.Record(shadow, tick: 10);
+        state.Record(shadow, nowHours: 10.0);
         var active = PlayerOrderActive(
             "u1",
             12,
@@ -259,7 +269,7 @@ internal static class PlayerOrderTests
             targetPoint: new PlayerOrderPoint(100f, 200f),
             rotation: 45f);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByUnknownActiveOrder, decision.Kind, "mismatched intent shadow must not prove active intent");
     }
 
@@ -267,7 +277,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 15, stale: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "stale active type 15 should not block next tactical order");
     }
 
@@ -275,7 +285,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 15, battleEnded: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "battle-ended active type 15 should not block next tactical order");
     }
 
@@ -283,7 +293,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 13, stale: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true, objectiveKey: "exit-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "stale active transition must not vanilla-block retreat");
     }
 
@@ -291,7 +301,7 @@ internal static class PlayerOrderTests
     {
         var active = PlayerOrderActive("u1", 1, provenance: PlayerOrderProvenance.WhiskeyTactical, stale: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "stale same-type active order must not vanilla-block");
     }
 
@@ -304,7 +314,7 @@ internal static class PlayerOrderTests
             provenance: PlayerOrderProvenance.WhiskeyCampaign,
             activeCampaignActionable: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, decision.Kind, "active actionable campaign blocks tactical");
     }
 
@@ -317,7 +327,7 @@ internal static class PlayerOrderTests
             provenance: PlayerOrderProvenance.WhiskeyCampaign,
             activeCampaignActionable: false);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "emergency retreat can replace invalid campaign order");
     }
 
@@ -330,24 +340,8 @@ internal static class PlayerOrderTests
             provenance: PlayerOrderProvenance.WhiskeyCampaign,
             activeCampaignActionable: true);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "valid tactical emergency retreat can replace actionable campaign order");
-    }
-
-    private static void PlayerOrderDedupeBlocksTypeFourteenUnlessActiveHold()
-    {
-        var active = PlayerOrderActive("u1", 1, provenance: PlayerOrderProvenance.WhiskeyTactical);
-        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.ClearHoldTransition, objectiveKey: "clear-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByVanillaDedupe, decision.Kind, "type 14 is blocked unless active type is 12");
-    }
-
-    private static void PlayerOrderDedupeAllowsTypeFourteenPastVanillaPreflightOnActiveHold()
-    {
-        var active = PlayerOrderActive("u1", 12, provenance: PlayerOrderProvenance.WhiskeyTactical);
-        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.ClearHoldTransition, objectiveKey: "clear-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "type 14 may clear active type 12");
     }
 
     private static void PlayerOrderDedupeTypeFourteenDoesNotPermanentlyYield()
@@ -358,11 +352,11 @@ internal static class PlayerOrderTests
 
         AssertEqual(
             PlayerOrderDedupeDecisionKind.YieldVanillaTransition,
-            PlayerOrderDedupe.Decide(candidate, sameCycle, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1).Kind,
+            PlayerOrderDedupe.Decide(candidate, sameCycle, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
             "same-cycle vanilla type 14 should get one transition yield");
         AssertEqual(
             PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, laterCycle, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 2).Kind,
+            PlayerOrderDedupe.Decide(candidate, laterCycle, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 2.0).Kind,
             "later unknown type 14 must not permanently freeze Whiskey candidates");
     }
 
@@ -371,13 +365,13 @@ internal static class PlayerOrderTests
         var state = new PlayerOrderDedupeState();
         var active = PlayerOrderActive("u1", -1, battleIdentity: "battle-a");
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, battleIdentity: "battle-a", objectiveKey: "ridge-a");
-        AssertPlayerOrderIssueAndRecord(candidate, active, state, tick: 10, "first issue");
+        AssertPlayerOrderIssueAndRecord(candidate, active, state, nowHours: 10.0, "first issue");
         AssertEqual(PlayerOrderDedupeDecisionKind.SuppressSignature,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "same battle cached");
         state.ClearForBattleBoundary("battle-a");
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 201).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.001).Kind,
             "battle boundary clears cached signature");
     }
 
@@ -386,10 +380,10 @@ internal static class PlayerOrderTests
         var state = new PlayerOrderDedupeState();
         var active = PlayerOrderActive("u1", -1, battleIdentity: "battle-a");
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, battleIdentity: "battle-a", objectiveKey: "ridge-a");
-        AssertPlayerOrderIssueAndRecord(candidate, active, state, tick: 10, "first issue");
+        AssertPlayerOrderIssueAndRecord(candidate, active, state, nowHours: 10.0, "first issue");
         state.ClearForBattleBoundary("battle-b");
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "new battle boundary clears old battle signature");
     }
 
@@ -400,14 +394,14 @@ internal static class PlayerOrderTests
         var active2 = PlayerOrderActive("u2", -1);
         var candidate1 = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
         var candidate2 = PlayerOrderCandidateFor("u2", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
-        AssertPlayerOrderIssueAndRecord(candidate1, active1, state, tick: 10, "unit one first issue");
-        AssertPlayerOrderIssueAndRecord(candidate2, active2, state, tick: 11, "unit two first issue");
+        AssertPlayerOrderIssueAndRecord(candidate1, active1, state, nowHours: 10.0, "unit one first issue");
+        AssertPlayerOrderIssueAndRecord(candidate2, active2, state, nowHours: 11.0, "unit two first issue");
         state.ClearForPlayerCommandChange();
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate1, active1, state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(candidate1, active1, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "command change clears unit one");
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate2, active2, state, PlayerOrderDedupeOptions.Default, tick: 201).Kind,
+            PlayerOrderDedupe.Decide(candidate2, active2, state, PlayerOrderDedupeOptions.Default, nowHours: 11.001).Kind,
             "command change clears unit two");
     }
 
@@ -417,7 +411,7 @@ internal static class PlayerOrderTests
         var active = PlayerOrderActive("u1", -1);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
 
-        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 1);
+        var decision = PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 1.0);
 
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "preflight should allow issue");
         AssertTrue(!state.TryGetShadow("u1", out _), "preflight decision must not record Whiskey provenance");
@@ -426,15 +420,15 @@ internal static class PlayerOrderTests
     private static void PlayerOrderDedupePreviewClassifiesWhileWritesDisabled()
     {
         var active = PlayerOrderActive("u1", 13, provenance: PlayerOrderProvenance.Vanilla);
-        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
+        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
 
         var disabled = PlayerOrderDedupe.Decide(
             candidate,
             active,
             new PlayerOrderDedupeState(),
-            new PlayerOrderDedupeOptions(writesEnabled: false, throttleTicks: 120),
-            tick: 1);
-        var preview = PlayerOrderDedupe.Preview(candidate, active, new PlayerOrderDedupeState(), throttleTicks: 120, tick: 1);
+            new PlayerOrderDedupeOptions(writesEnabled: false, throttleHours: PlayerOrderReadmitPolicy.RetryThrottleBattleHours),
+            nowHours: 1.0);
+        var preview = PlayerOrderDedupe.Preview(candidate, active, new PlayerOrderDedupeState(), throttleHours: PlayerOrderReadmitPolicy.RetryThrottleBattleHours, nowHours: 1.0);
 
         AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByDisabledWrites, disabled.Kind, "write gate still blocks issue path");
         AssertEqual(PlayerOrderDedupeDecisionKind.YieldVanillaTransition, preview.Kind, "diagnostic preview should classify the real suppression reason");
@@ -456,11 +450,11 @@ internal static class PlayerOrderTests
             givenOrderSession: 2,
             rotation: 225f);
 
-        state.RecordAccepted(request, accepted, tick: 10);
+        state.RecordAccepted(request, accepted, nowHours: 10.0);
 
         AssertEqual(
             PlayerOrderDedupeDecisionKind.SuppressSignature,
-            PlayerOrderDedupe.Decide(request, PlayerOrderActive("u1", -1), state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(request, PlayerOrderActive("u1", -1), state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "request signature should suppress repeated Whiskey candidate");
 
         var active = PlayerOrderActive(
@@ -478,7 +472,7 @@ internal static class PlayerOrderTests
         AssertTrue(shadow.ActiveSignature.MatchesActiveOrder(active), "accepted signature should match vanilla active order");
         AssertEqual(
             PlayerOrderDedupeDecisionKind.BlockedByScopePriority,
-            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "accepted shadow should prove active provenance before priority comparison");
     }
 
@@ -487,9 +481,9 @@ internal static class PlayerOrderTests
         var state = new PlayerOrderDedupeState();
         var active = PlayerOrderActive("u1", -1);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
-        AssertPlayerOrderIssueAndRecord(candidate, active, state, tick: 1, "first issue");
+        AssertPlayerOrderIssueAndRecord(candidate, active, state, nowHours: 1.0, "first issue");
         AssertEqual(PlayerOrderDedupeDecisionKind.SuppressSignature,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 200).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 11.0).Kind,
             "material match suppressed");
     }
 
@@ -499,9 +493,9 @@ internal static class PlayerOrderTests
         var active = PlayerOrderActive("u1", -1);
         var first = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
         var changed = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
-        AssertPlayerOrderIssueAndRecord(first, active, state, tick: 10, "first issue");
+        AssertPlayerOrderIssueAndRecord(first, active, state, nowHours: 10.0, "first issue");
         AssertEqual(PlayerOrderDedupeDecisionKind.SuppressThrottle,
-            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, tick: 20).Kind,
+            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, nowHours: 10.01).Kind,
             "changed candidate throttled");
     }
 
@@ -511,11 +505,11 @@ internal static class PlayerOrderTests
         var active = PlayerOrderActive("u1", -1);
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
 
-        state.RecordAttempt(candidate, tick: 10);
+        state.RecordAttempt(candidate, nowHours: 10.0);
 
         AssertEqual(
             PlayerOrderDedupeDecisionKind.SuppressSignature,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick: 20).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 10.01).Kind,
             "rejected vanilla bridge candidate should be signature-suppressed");
     }
 
@@ -523,14 +517,85 @@ internal static class PlayerOrderTests
         PlayerOrderCandidate candidate,
         PlayerOrderActiveSnapshot active,
         PlayerOrderDedupeState state,
-        long tick,
+        double nowHours,
         string message)
     {
         AssertEqual(
             PlayerOrderDedupeDecisionKind.Issue,
-            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, tick).Kind,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours).Kind,
             message);
-        state.Record(candidate, tick);
+        state.Record(candidate, nowHours);
+    }
+
+    private static void PlayerOrderRatchetBlocksOnlyInsideHold()
+    {
+        // The one-way priority ratchet (an active order of higher priority blocks a lower candidate)
+        // holds for the minimum hold only; afterwards a re-aimed order may replace it (D16).
+        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
+        double hold = PlayerOrderReadmitPolicy.MinHoldBattleHours;
+        PlayerOrderDedupeDecisionKind Kind(double age) => PlayerOrderDedupe.Decide(candidate,
+            PlayerOrderActive("u1", 12, provenance: PlayerOrderProvenance.WhiskeyTactical, ageHours: age),
+            new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind;
+        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, Kind(0.0), "fresh order");
+        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, Kind(hold - 0.01), "just inside the hold");
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, Kind(hold), "at the hold");
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, Kind(double.PositiveInfinity), "an order of unknown age counts as past the hold");
+    }
+
+    private static void PlayerOrderRetreatPassesRatchet()
+    {
+        var retreat = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true, objectiveKey: "exit-a");
+        foreach (int type in new[] { 12, 13, 14, 1, 0 })
+        {
+            var active = PlayerOrderActive("u1", type, provenance: PlayerOrderProvenance.WhiskeyTactical, ageHours: 0.0);
+            AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
+                PlayerOrderDedupe.Decide(retreat, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, nowHours: 1.0).Kind,
+                "a retreat passes a fresh active type " + type);
+        }
+    }
+
+    private static void PlayerOrderEngageAtWillIsLiveNotStale()
+    {
+        // Vanilla's IsActive/IsBattleOrder leave 13/14/15 out (41772-41795); Whiskey's own
+        // classification reads them as live battle orders so the re-admit logic sees them.
+        foreach (int type in new[] { 13, 14, 15 })
+        {
+            AssertEqual(true, PlayerOrderVanillaScene.IsGivenOrderActiveForScene(type, currentOperation: 1), "type " + type + " is live in battle");
+            AssertEqual(PlayerOrderScope.Tactical, PlayerOrderVanillaScene.ScopeForVanillaType(type), "type " + type + " is a tactical order");
+        }
+        AssertEqual(false, PlayerOrderVanillaScene.IsGivenOrderActiveForScene(13, currentOperation: 0), "and not a campaign order");
+        AssertEqual(false, PlayerOrderVanillaScene.IsGivenOrderActiveForScene(8, currentOperation: 1), "campaign types stay stale in battle");
+    }
+
+    private static void PlayerOrderThrottleOnDoctrineClock()
+    {
+        AssertEqual(PlayerOrderReadmitPolicy.RetryThrottleBattleHours, PlayerOrderDedupeOptions.Default.ThrottleHours, "default throttle");
+        AssertEqual(0.02, PlayerOrderReadmitPolicy.RetryThrottleBattleHours, "= processingtimegroupstandard, vanilla's group order processing time");
+        var state = new PlayerOrderDedupeState();
+        var active = PlayerOrderActive("u1", -1);
+        var first = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
+        var changed = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-b");
+        state.RecordAttempt(first, nowHours: 10.0);
+        AssertEqual(PlayerOrderDedupeDecisionKind.SuppressThrottle,
+            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, nowHours: 10.019).Kind, "inside the window");
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
+            PlayerOrderDedupe.Decide(changed, active, state, PlayerOrderDedupeOptions.Default, nowHours: 10.021).Kind, "after the window");
+    }
+
+    private static void PlayerOrderPendingCandidateSuppressedBySignature()
+    {
+        // While #62's order is on a courier its signature suppresses a repeat, however long the courier
+        // takes; the delivery callback clears it (structural discard) or replaces it (accept/attempt).
+        var state = new PlayerOrderDedupeState();
+        var active = PlayerOrderActive("u1", -1);
+        var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.AttackObjective, objectiveKey: "ridge-a");
+        state.RecordAttempt(candidate, nowHours: 10.0);
+        AssertEqual(PlayerOrderDedupeDecisionKind.SuppressSignature,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 12.0).Kind, "pending");
+        state.ClearPending("u1");
+        AssertEqual(PlayerOrderDedupeDecisionKind.Issue,
+            PlayerOrderDedupe.Decide(candidate, active, state, PlayerOrderDedupeOptions.Default, nowHours: 12.0).Kind, "cleared");
+        AssertTrue(!state.TryGetShadow("u1", out _), "no shadow left");
     }
 
     private static void PlayerOrderDiagnosticsSignaturesCapRepeatedLogs()

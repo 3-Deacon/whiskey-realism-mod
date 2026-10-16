@@ -11,15 +11,19 @@ namespace WhiskeyRealism.Patches
     // Vanilla AIBattle.UpdateDLCPlayerOrders runs on tactical micro-AI cycle 28
     // and may self-issue W&L current-order transitions through types 13, 14,
     // and 15 during CheckRemovalOfOrders. Whiskey snapshots before/after that
-    // vanilla cadence, yields to vanilla transitions, and only asks the static
-    // AIBattle.CheckCurrentOrderUpdate bridge for tactical orders; it never
-    // uses the campaign bypass from this patch. The call and the dedupe state go
-    // through TacticalPlayerDispatchRuntime (battle-core D9), the emitter the
-    // executor's ancestor dispatches share, so one dedupe covers both.
+    // vanilla cadence and yields to vanilla transitions (a retreat excepted).
+    // It runs on the player-side AIBattle only (isplayeraiorfeud == 1) and composes
+    // the order the player's superior would give; the order goes to the player's PARENT
+    // unit through TacticalPlayerDispatchRuntime.EmitP62 onto the W&L order flow's courier
+    // queue (plan 2026-10-15-wl-order-flow.md D16): vanilla's gate at 8337 returns for a
+    // subordinate's own command, which is why this patch never reached a subordinate
+    // before. The capture policy (PlayerOrderReadmitPolicy) decides whether vanilla's
+    // dedupe would drop the order and whether Whiskey re-admits it, in one place; the
+    // accept/attempt bookkeeping follows the delivery callback (OnP62Outcome).
     [HarmonyPatch(typeof(AIBattle), "UpdateDLCPlayerOrders")]
     internal static class PlayerSubordinateOrderPatch
     {
-        private static readonly PlayerOrderRuntimeAdapter Runtime = new PlayerOrderRuntimeAdapter(TacticalPlayerDispatchRuntime.Dedupe);
+        private static readonly PlayerOrderRuntimeAdapter Runtime = TacticalPlayerDispatchRuntime.Adapter;
         private static readonly PlayerOrderDiagnostics Diagnostics = new PlayerOrderDiagnostics(128);
         private static string _lastBattleIdentity = string.Empty;
         private static string _lastCurrentCommandKey = string.Empty;
@@ -42,6 +46,7 @@ namespace WhiskeyRealism.Patches
             {
                 PatchFirstFire.Mark("tactical.patch.player-subordinate-order-prefix");
                 __state = default(PatchState);
+                if (__instance == null || __instance.isplayeraiorfeud != 1) return;
                 if (!MasterEnabled()) return;
 
                 try
@@ -62,6 +67,7 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("tactical.patch.player-subordinate-order");
             try
             {
+                if (__instance == null || __instance.isplayeraiorfeud != 1) return;
                 if (!MasterEnabled()) return;
 
                 bool diagnosticsEnabled = Plugin.EnablePlayerOrderDoctrineDiagnostics == null ||
@@ -94,8 +100,8 @@ namespace WhiskeyRealism.Patches
                     candidate,
                     evaluation.ActiveOrder,
                     TacticalPlayerDispatchRuntime.Dedupe,
-                    throttleTicks: 120,
-                    evaluation.Tick);
+                    throttleHours: PlayerOrderReadmitPolicy.RetryThrottleBattleHours,
+                    evaluation.NowHours);
 
                 if (!decision.ShouldIssue)
                 {
@@ -109,17 +115,15 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                bool queued = TacticalPlayerDispatchRuntime.Emit(
-                    evaluation.CurrentCommand,
-                    candidate.VanillaType,
-                    candidate.TargetPoint.X,
-                    candidate.TargetPoint.Z,
-                    candidate.Rotation,
-                    DestinationName(candidate),
-                    OrderOrigin.P62);
+                // The order goes to the player's parent unit, never his own command.
+                bool queued = TacticalPlayerDispatchRuntime.EmitP62(
+                    WlOrderFlowRuntime.PlayerParentUnit(),
+                    candidate,
+                    DestinationName(candidate));
 
-                // The throttle and the signature suppress a repeat while the order is on its way.
-                TacticalPlayerDispatchRuntime.Dedupe.RecordAttempt(candidate, evaluation.Tick);
+                // Queued or refused, the signature suppresses a repeat and the throttle starts; the delivery
+                // callback replaces this with the acceptance, or clears it.
+                TacticalPlayerDispatchRuntime.Dedupe.RecordAttempt(candidate, evaluation.NowHours);
                 if (diagnosticsEnabled)
                     Log(queued ? "issue" : "suppress", queued ? decision.Reason : "queue-refused", candidate, evaluation.ActiveOrder);
             }

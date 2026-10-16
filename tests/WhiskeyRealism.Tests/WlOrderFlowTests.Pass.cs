@@ -35,6 +35,9 @@ internal static partial class WlOrderFlowTests
         public readonly List<int> AcceptedTypes = new List<int>();
         public readonly List<int> CalledTypes = new List<int>();
         public CourierEntry? Retreat;
+        public CourierEntry? Release;
+        public int ReleaseBuilds, NonPayingMarks, Restamps;
+        public int LastNonPayingSession = -1;
         public Func<bool> OnSlotRead; // returns true to swap the slot on this read
         public int SlotReads;
         public bool ObservedRestoredInThrowCallback, ObservedDeliveringOffInThrowCallback;
@@ -113,6 +116,21 @@ internal static partial class WlOrderFlowTests
             entry = Retreat ?? default(CourierEntry);
             return Retreat.HasValue;
         }
+
+        public bool TryBuildRelease(out CourierEntry entry)
+        {
+            ReleaseBuilds++;
+            entry = Release ?? default(CourierEntry);
+            return Release.HasValue;
+        }
+
+        public void MarkNonPayingSession(int session)
+        {
+            NonPayingMarks++;
+            LastNonPayingSession = session;
+        }
+
+        public void RestampNonPayingSession() => Restamps++;
     }
 
     private static WlOrderFlow NewFlow(FakeHost host) => new WlOrderFlow(host);
@@ -460,6 +478,90 @@ internal static partial class WlOrderFlowTests
         flow.RunPass();
         AssertEqual(0, host.Calls, "no derivation without a host entry");
         AssertEqual(0, flow.Queue.Count, "nothing queued");
+    }
+
+    // ------------------------------------------------------------------ release
+
+    private static CourierEntry ReleaseEntry() => QEntry(issuer: 5, type: 12, origin: OrderOrigin.Release, x: 2000f, issuedAt: 10.0, dueAt: 10.0);
+
+    private static void ReleaseDerivedOverEngageAtWillOnly()
+    {
+        var host = new FakeHost { Slot = new FakeOrder { Type = 13 }, Release = ReleaseEntry() };
+        var flow = NewFlow(host);
+        flow.RunPass();
+        AssertEqual("12", string.Join(",", host.CalledTypes), "the hold replaced engage-at-will");
+        AssertEqual(12, host.Slot.Type, "on the panel");
+        AssertTrue(host.Rows.Contains("12:deliver:accepted"), RowsOf(host));
+
+        foreach (int slot in new[] { -1, 0, 12, 14, 15 })
+        {
+            var other = new FakeHost { Slot = slot < 0 ? null : new FakeOrder { Type = slot }, Release = ReleaseEntry() };
+            NewFlow(other).RunPass();
+            AssertEqual(0, other.ReleaseBuilds, "the host is not asked for a release over slot type " + slot);
+        }
+    }
+
+    private static void ReleaseNotDerivedTwiceWhilePending()
+    {
+        var host = new FakeHost { Slot = new FakeOrder { Type = 13 }, Release = ReleaseEntry(), Now = 10.0 };
+        var flow = NewFlow(host);
+        // A release already on its courier (due later): no second one.
+        CourierEntry pending = ReleaseEntry();
+        pending.DueAt = 11.0;
+        flow.Queue.TryEnqueue(in pending, 0.0, out _);
+        flow.RunPass();
+        AssertEqual(0, host.ReleaseBuilds, "no release is derived next to a pending one");
+        AssertEqual(1, flow.Queue.Count, "the pending one waits");
+    }
+
+    private static void ReleaseLatchStartsQuietWhenBothFalse()
+    {
+        var latch = new ReleaseLatch();
+        AssertTrue(double.IsNaN(latch.QuietSince), "not quiet at the start");
+        AssertTrue(double.IsNaN(latch.Update(contact: true, nowHours: 5.0)), "contact: not quiet");
+        AssertEqual(6.0, latch.Update(contact: false, nowHours: 6.0), "quiet since the first look with no contact");
+        AssertEqual(6.0, latch.Update(contact: false, nowHours: 6.5), "the clock keeps running from the start of the quiet");
+        AssertTrue(double.IsNaN(latch.Update(contact: true, nowHours: 6.6)), "contact resets it");
+        AssertEqual(7.0, latch.Update(contact: false, nowHours: 7.0), "and it starts again");
+        latch.Reset();
+        AssertTrue(double.IsNaN(latch.QuietSince), "reset forgets");
+    }
+
+    private static void NonPayingDeliveryStampsTopUnits()
+    {
+        foreach (OrderOrigin origin in new[] { OrderOrigin.Release, OrderOrigin.FollowUp })
+        {
+            var host = new FakeHost { Slot = origin == OrderOrigin.Release ? new FakeOrder { Type = 13 } : null };
+            var flow = NewFlow(host);
+            Put(flow, 12, 9.0, 9.0, origin: origin);
+            flow.RunPass();
+            AssertEqual(1, host.NonPayingMarks, origin + " accepted: the session is marked non-paying once");
+            AssertEqual(1, host.LastNonPayingSession, "for the session vanilla just bumped");
+        }
+        // Every pass re-asserts the stamp while a non-paying session is active.
+        var h = new FakeHost();
+        var f = NewFlow(h);
+        f.RunPass();
+        f.RunPass();
+        AssertEqual(2, h.Restamps, "one restamp call per pass");
+        h.Eod = true;
+        f.RunPass();
+        AssertEqual(2, h.Restamps, "none during the end-of-day cycle");
+    }
+
+    private static void PayingOriginsUntouched()
+    {
+        foreach (OrderOrigin origin in new[] { OrderOrigin.Vanilla, OrderOrigin.P62, OrderOrigin.Executor, OrderOrigin.Retreat })
+        {
+            var host = new FakeHost { Slot = null };
+            var flow = NewFlow(host);
+            Put(flow, 2, 9.0, 9.0, origin: origin);
+            flow.RunPass();
+            AssertEqual(1, host.AcceptedTypes.Count, origin + " was delivered");
+            AssertEqual(0, host.NonPayingMarks, origin + " pays prestige as vanilla does");
+        }
+        AssertFalse(WlOrderFlow.IsNonPaying(OrderOrigin.Vanilla), "vanilla pays");
+        AssertTrue(WlOrderFlow.IsNonPaying(OrderOrigin.Release) && WlOrderFlow.IsNonPaying(OrderOrigin.FollowUp), "the automatic holds do not");
     }
 
     // ------------------------------------------------------------- boundaries

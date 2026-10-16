@@ -35,6 +35,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private const float ZoneDepth = 50f;
         private const float RetreatZone = 50f;     // vanilla's own retreat order, 6798
         private const float ObjectiveMeters = 150f;
+        // The place text for a hold at the player's own position (WlOrderText's phrase for under 150 yards).
+        private const string ReleaseDestination = "your present position";
         private const int MaxChainLegs = 16;
 
         // Set by the delivery transaction around its call into vanilla; the capture Prefix lets a call
@@ -51,6 +53,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static readonly CourierLeg[] Legs = new CourierLeg[MaxChainLegs];
         private static readonly int[] Chain = new int[MaxChainLegs];
         private static readonly PlayerOrderDiagnostics DropLog = new PlayerOrderDiagnostics(128);
+        private static readonly ReleaseLatch Latch = new ReleaseLatch();
+        // Scratch for the routed test and the fire-range scan (grown on demand, never per call).
+        private static float[] _strength = new float[64];
+        private static bool[] _routedFlags = new bool[64];
+        // D21: the order session whose first-entry prestige is suppressed (an automatic hold).
+        private static int _nonPayingSession = int.MinValue;
 
         // The player's command, parent unit and campaign group, read once per frame (vanilla
         // recomputes them per call, 8263-8265, and GetParentUnit allocates, 93883).
@@ -91,6 +99,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _bunits = null;
             _playerBattle = null;
             _lastRetreatBuildHours = double.NegativeInfinity;
+            Latch.Reset();
+            _nonPayingSession = int.MinValue;
             _boundaryBattleId = 0;
             _boundaryCommandId = 0;
             _boundaryBattleKey = string.Empty;
@@ -116,6 +126,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         // ----------------------------------------------------------------- capture
 
+        // One CheckCurrentOrderUpdate call, or one order a Whiskey emitter wants delivered.
+        private struct OrderCall
+        {
+            public Regiment Unit;
+            public int Type;
+            public Vector3 Position;
+            public string Name;
+            public float Rotation, Width, Depth;
+            public OrderOrigin Origin;
+            public bool Campaign;
+            public PlayerOrderCandidate P62;
+        }
+
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
         // Returns true (vanilla runs) on any exception.
         internal static bool Capture(Regiment unit, int type, Vector3 position, string destinationName,
@@ -124,8 +147,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             try
             {
                 if (Delivering) return true;
-                CaptureVerdict verdict = Route(unit, type, position, destinationName, rotation, width, depth,
-                    OrderOrigin.Vanilla, calledFromCampaign, out _);
+                var call = new OrderCall
+                {
+                    Unit = unit, Type = type, Position = position, Name = destinationName,
+                    Rotation = rotation, Width = width, Depth = depth, Origin = OrderOrigin.Vanilla, Campaign = calledFromCampaign,
+                };
+                CaptureVerdict verdict = Route(in call, out _);
                 if (verdict == CaptureVerdict.Pass) return true;
                 CapturedThisCall = true;
                 return false;
@@ -143,39 +170,77 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             CapturedThisCall = false;
         }
 
-        // Whiskey's own emitters (#62 and the executor's ancestor dispatch) enqueue directly. True when
-        // the order went on a courier. With both order-flow switches off the call goes to vanilla as it
-        // always did, and the result is whether vanilla showed a new order.
+        // The unit the order flow gives #62's orders to: the player's parent unit (the unit vanilla's own
+        // gate computes at 8264 and 6463 passes), never his own command, which vanilla's 8337 refuses for
+        // a subordinate. Cached once per frame.
+        internal static Regiment PlayerParentUnit()
+        {
+            RefreshFrame();
+            if (!_hasCommand) return null;
+            return (UnityEngine.Object)_parent != null ? _parent : _command;
+        }
+
+        // Doctrine hours since the order on the panel was accepted (+infinity when Whiskey never saw it issued).
+        internal static double ActiveOrderAgeHours()
+        {
+            return Age.AgeHours(TacticalDoctrineTime.NowBattleHours);
+        }
+
+        // Whiskey's own emitters enqueue directly: the executor's ancestor dispatch (origin Executor).
+        // True when the order went on a courier. With both order-flow switches off the call goes to vanilla
+        // as it always did, and the result is whether vanilla showed a new order.
         internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin)
+        {
+            var call = new OrderCall
+            {
+                Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
+                Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin,
+            };
+            return EnqueueCall(in call);
+        }
+
+        // #62's order, with the candidate its bookkeeping follows through the delivery callback.
+        internal static bool EnqueueP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName)
+        {
+            var call = new OrderCall
+            {
+                Unit = unit, Type = candidate.VanillaType, Position = new Vector3(candidate.TargetPoint.X, 0f, candidate.TargetPoint.Z),
+                Name = destinationName, Rotation = candidate.Rotation, Width = ZoneWidth, Depth = ZoneDepth,
+                Origin = OrderOrigin.P62, P62 = candidate,
+            };
+            return EnqueueCall(in call);
+        }
+
+        private static bool EnqueueCall(in OrderCall call)
         {
             if (!TacticalWriteGuard.ModeAllowsWrites()) return false;
             if (!MasterEnabled()) return false;
-            if (!ReadmitOn() && !CouriersOn()) return CallVanillaDirect(unit, type, x, z, rotation, destinationName);
-            CaptureVerdict verdict = Route(unit, type, new Vector3(x, 0f, z), destinationName, rotation, ZoneWidth, ZoneDepth,
-                origin, calledFromCampaign: false, out bool queued);
+            if (!ReadmitOn() && !CouriersOn()) return CallVanillaDirect(in call);
+            CaptureVerdict verdict = Route(in call, out bool queued);
             return verdict == CaptureVerdict.Queue && queued;
         }
 
-        private static bool CallVanillaDirect(Regiment unit, int type, float x, float z, float rotation, string destinationName)
+        private static bool CallVanillaDirect(in OrderCall call)
         {
             int before = DLC_WL.GivenOrders.givenorderssession;
-            AIBattle.CheckCurrentOrderUpdate(unit, type, new Vector3(x, 0f, z), destinationName ?? string.Empty, rotation, ZoneWidth, ZoneDepth);
+            AIBattle.CheckCurrentOrderUpdate(call.Unit, call.Type, call.Position, call.Name ?? string.Empty, call.Rotation, call.Width, call.Depth);
             return DLC_WL.GivenOrders.givenorderssession != before;
         }
 
         // The capture decision for one call, shared by the Prefix and the Whiskey emitters: gather the
         // facts cheapest first, ask WlOrderFlow, and queue the order when it says so.
-        private static CaptureVerdict Route(Regiment unit, int type, Vector3 position, string destinationName,
-            float rotation, float width, float depth, OrderOrigin origin, bool calledFromCampaign, out bool queued)
+        private static CaptureVerdict Route(in OrderCall call, out bool queued)
         {
             queued = false;
+            Regiment unit = call.Unit;
+            int type = call.Type;
             var input = default(CaptureInput);
             input.Enabled = MasterEnabled();
             input.ReadmitOn = ReadmitOn();
             input.CouriersOn = CouriersOn();
             input.Delivering = Delivering;
-            input.Facts.CampaignCall = calledFromCampaign;
-            if (!input.Enabled || (!input.ReadmitOn && !input.CouriersOn) || input.Delivering || calledFromCampaign)
+            input.Facts.CampaignCall = call.Campaign;
+            if (!input.Enabled || (!input.ReadmitOn && !input.CouriersOn) || input.Delivering || call.Campaign)
                 return CaptureVerdict.Pass;
 
             RefreshFrame();
@@ -199,22 +264,29 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             double now = TacticalDoctrineTime.NowBattleHours;
             Age.Observe(DLC_WL.GivenOrders.givenorderssession, now);
+            bool havePlayerSnapshot = BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) && snapshot != null;
+            // N1: while the player's command is routed vanilla's 13 and 14 are dropped (D6).
+            if ((type == 13 || type == 14) && input.ReadmitOn && havePlayerSnapshot)
+                input.PlayerRouted = IsPlayerRouted(snapshot);
+
             ActiveOrderView active = Host.ReadActive();
+            Vector3 position = call.Position;
             float y = VanillaTerrain.SampleHeight(position, position.y);
-            input.Candidate = new OrderCandidateView(type, position.x, y, position.z, rotation, origin, false);
+            input.Candidate = new OrderCandidateView(type, position.x, y, position.z, call.Rotation, call.Origin, false);
 
             CaptureVerdict verdict = WlOrderFlow.DecideCapture(in input, in active, Flow.Queue.Count > 0, out double deferUntil, out string reason);
             if (verdict == CaptureVerdict.Pass) return verdict;
 
-            if (!BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) || snapshot == null)
+            if (!havePlayerSnapshot)
             {
                 // No battle snapshot: no courier path to measure. Vanilla handles the call as it always did.
                 OnceLog.Warning("wl-order:no-snapshot", "[W&LOrder] no battle snapshot for the player's side; orders reach the panel unqueued");
                 return CaptureVerdict.Pass;
             }
-            if (!TryMakeEntry(snapshot, unit, type, new Vector3(position.x, y, position.z), destinationName, rotation, width, depth,
-                    origin, now, deferUntil, out CourierEntry entry))
+            if (!TryMakeEntry(snapshot, unit, type, new Vector3(position.x, y, position.z), call.Name, call.Rotation, call.Width, call.Depth,
+                    call.Origin, now, deferUntil, out CourierEntry entry))
                 return CaptureVerdict.Pass;
+            entry.P62Candidate = call.P62;
 
             if (verdict == CaptureVerdict.Drop)
             {
@@ -223,7 +295,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
 
             queued = Flow.Enqueue(in entry, PlayerOrderReadmitPolicy.MinHoldBattleHours);
-            if (queued) OnceLog.Info("wl-order:first-capture", "[W&LOrder] first courier queued type=" + type + " origin=" + origin);
+            if (queued) OnceLog.Info("wl-order:first-capture", "[W&LOrder] first courier queued type=" + type + " origin=" + call.Origin);
             return verdict;
         }
 
@@ -347,6 +419,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
             if (_isCic) return;
             Age.Observe(DLC_WL.GivenOrders.givenorderssession, TacticalDoctrineTime.NowBattleHours);
+            DLC_WL.GivenOrders slot = DLC_WL.givenorder;
+            if (slot == null || slot.type != 13) Latch.Reset();
             Flow.RunPass();
         }
 
@@ -426,6 +500,67 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (index < 0) return null;
             Regiment unit = BattleSnapshotBuilder.UnitAt(snapshot, index, enemy: false);
             return (UnityEngine.Object)unit != null ? unit : null;
+        }
+
+        // D6: at least RoutedShare of the strength of the player's command's regiments (its leaf units) is
+        // routed or retreating on the side's snapshot.
+        private static bool IsPlayerRouted(BattleSnapshot snapshot)
+        {
+            int n = 0;
+            for (int i = 0; i < snapshot.OwnCount; i++)
+            {
+                UnitFlags flags = snapshot.Own[i].Flags;
+                if ((flags & UnitFlags.PlayerOwned) == 0 || (flags & UnitFlags.IsGroup) != 0 || (flags & UnitFlags.Alive) == 0) continue;
+                if (n == _strength.Length)
+                {
+                    Array.Resize(ref _strength, n * 2);
+                    Array.Resize(ref _routedFlags, n * 2);
+                }
+                _strength[n] = snapshot.Own[i].Strength;
+                _routedFlags[n] = (flags & (UnitFlags.Routed | UnitFlags.OnRetreat)) != 0;
+                n++;
+            }
+            return PlayerOrderReadmitPolicy.Routed(_strength, _routedFlags, n);
+        }
+
+        // D5: does any regiment of the player's command see a Visible enemy inside its own fire range?
+        // Fog-honest: the side's observations only.
+        private static bool VisibleEnemyInFireRange(BattleSnapshot snapshot)
+        {
+            for (int i = 0; i < snapshot.OwnCount; i++)
+            {
+                UnitFlags flags = snapshot.Own[i].Flags;
+                if ((flags & UnitFlags.PlayerOwned) == 0 || (flags & UnitFlags.IsGroup) != 0 || (flags & UnitFlags.Alive) == 0) continue;
+                if (snapshot.ClosestVisibleEnemy(i, out float distance) >= 0 && distance <= snapshot.Own[i].FireRange) return true;
+            }
+            return false;
+        }
+
+        // Vanilla's own test for issuing engage-at-will (6800): an HQ command is in contact when a
+        // subordinate is engaged, a regiment command when vanilla's unfiltered search finds an enemy in
+        // fire range. Read only to predict vanilla's own panel write; it never feeds an AI decision.
+        private static bool VanillaContactTrigger()
+        {
+            Regiment command = _command;
+            if ((UnityEngine.Object)command == null) return false;
+            if (command.unittyp >= 14) return command.combatstatussubordinates > 0f;
+            return (UnityEngine.Object)command.GetClosestEnemyUnitReg(command.GetFireRange()) != null;
+        }
+
+        // D21: vanilla's first-entry prestige (CheckDLCWLTopics 123484-123492) fires when a player-owned top
+        // unit's lastcombatzonecount is below the order session. For an automatic hold that session's
+        // count is set up front on every such unit (own units from the snapshot), so the branch never
+        // fires. Order bookkeeping that vanilla itself saves (71810), not a movement or combat field.
+        private static void StampTopUnitsAt(int session)
+        {
+            if (!BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) || snapshot == null) return;
+            for (int i = 0; i < snapshot.OwnCount; i++)
+            {
+                UnitRecord record = snapshot.Own[i];
+                if ((record.Flags & UnitFlags.PlayerOwned) == 0 || record.ParentRegimentId != 0) continue;
+                Regiment unit = BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
+                if ((UnityEngine.Object)unit != null) unit.lastcombatzonecount = session;
+            }
         }
 
         // Is the objective nearest the point (within ObjectiveMeters) held by the player's alliance?
@@ -528,7 +663,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public bool UnitGone(in CourierEntry e) => ResolveUnit(e.UnitId) == null;
 
-            public bool ReleaseStillDue(in CourierEntry e) => false; // no release entries exist yet
+            // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
+            // courier rode: the same test that derived it, on fresh facts.
+            public bool ReleaseStillDue(in CourierEntry e)
+            {
+                if (_isCic || !ReadmitOn()) return false;
+                if (!BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) || snapshot == null) return false;
+                return PlayerOrderReadmitPolicy.ReleaseDue(VisibleEnemyInFireRange(snapshot), VanillaContactTrigger(),
+                    Latch.QuietSince, NowHours, IsPlayerRouted(snapshot));
+            }
 
             public void SetDelivering(bool on) => Delivering = on;
 
@@ -559,6 +702,42 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public void NotifyP62(in CourierEntry e, P62Outcome outcome)
             {
+                Tactical.Battle.TacticalPlayerDispatchRuntime.OnP62Outcome(_playerBattle, e.P62Candidate, outcome, NowHours);
+            }
+
+            public void MarkNonPayingSession(int session)
+            {
+                _nonPayingSession = session;
+                StampTopUnitsAt(session);
+            }
+
+            public void RestampNonPayingSession()
+            {
+                if (_nonPayingSession == int.MinValue) return;
+                if (_nonPayingSession != Session) { _nonPayingSession = int.MinValue; return; }
+                StampTopUnitsAt(_nonPayingSession);
+            }
+
+            // D5/D6: the hold at the player's position that releases engage-at-will.
+            public bool TryBuildRelease(out CourierEntry entry)
+            {
+                entry = default(CourierEntry);
+                if (_isCic || (UnityEngine.Object)_command == null || !ReadmitOn()) return false;
+                if (!BattleCore.TryGetSnapshot(GameVars.playeralliance, out BattleSnapshot snapshot) || snapshot == null) return false;
+                double now = NowHours;
+                bool routed = IsPlayerRouted(snapshot);
+                bool visible = VisibleEnemyInFireRange(snapshot);
+                bool trigger = VanillaContactTrigger();
+                double quiet = Latch.Update(visible || trigger, now);
+                if (!PlayerOrderReadmitPolicy.ReleaseDue(visible, trigger, quiet, now, routed)) return false;
+
+                Regiment unit = (UnityEngine.Object)_parent != null ? _parent : _command;
+                Vector3 here = _command.GetPosition();
+                if (!TryMakeEntry(snapshot, unit, 12, new Vector3(here.x, VanillaTerrain.SampleHeight(here, here.y), here.z), ReleaseDestination,
+                        0f, ZoneWidth, ZoneDepth, OrderOrigin.Release, now, double.NaN, out entry))
+                    return false;
+                OnceLog.Info("wl-order:first-release", "[W&LOrder] engage-at-will released reason=" + (routed ? "routed" : "no-contact"));
+                return true;
             }
 
             // D8a step 0: the army is retreating (the player-side AIBattle's macroai is 3) and the player

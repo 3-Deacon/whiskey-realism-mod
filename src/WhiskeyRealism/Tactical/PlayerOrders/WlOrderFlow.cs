@@ -57,6 +57,34 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         void NotifyP62(in CourierEntry e, P62Outcome outcome);
         // A retreat the player should have (D8a step 0), or false when the host's conditions fail.
         bool TryBuildRetreat(out CourierEntry entry);
+        // The hold that releases engage-at-will (D5, D6), or false while contact lasts or the hysteresis
+        // has not passed. Asked only while the slot holds a type 13.
+        bool TryBuildRelease(out CourierEntry entry);
+        // D21: vanilla showed an order that pays no prestige (an automatic hold). The host keeps the
+        // top units' lastcombatzonecount at that session so vanilla's first-entry branch never fires.
+        void MarkNonPayingSession(int session);
+        // Called once at the start of every pass: re-asserts the stamp while a non-paying session is active.
+        void RestampNonPayingSession();
+    }
+
+    // When engage-at-will's contact test has been false (D5): the start of the current quiet spell on the
+    // doctrine clock, NaN while there is contact or none has begun.
+    internal sealed class ReleaseLatch
+    {
+        public double QuietSince { get; private set; } = double.NaN;
+
+        // contact: a Visible enemy in fire range, or vanilla's own 13 trigger. Returns QuietSince.
+        public double Update(bool contact, double nowHours)
+        {
+            if (contact) QuietSince = double.NaN;
+            else if (double.IsNaN(QuietSince)) QuietSince = nowHours;
+            return QuietSince;
+        }
+
+        public void Reset()
+        {
+            QuietSince = double.NaN;
+        }
     }
 
     // When the order on the panel was accepted, on the doctrine clock (D4's age). The order present
@@ -152,6 +180,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _host.Row(in e, "discard", reason);
             if (e.Origin == OrderOrigin.P62)
                 _host.NotifyP62(in e, IsStructural(reason) ? P62Outcome.ClearPending : P62Outcome.Attempt);
+        }
+
+        // The automatic holds (the released engage-at-will, the arrival follow-up) show on the panel but pay
+        // no prestige (user decision, crit round 1); every other origin pays as vanilla does.
+        public static bool IsNonPaying(OrderOrigin origin)
+        {
+            return origin == OrderOrigin.Release || origin == OrderOrigin.FollowUp;
         }
 
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
@@ -256,7 +291,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return;
             }
 
+            _host.RestampNonPayingSession();
             DeriveRetreat();
+            DeriveRelease();
 
             // 1. Everything due goes into a buffer first; deferred and requeued entries return only
             //    after the pass, so the pass never takes one twice.
@@ -290,6 +327,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         {
             if (_host.SlotType == 15 || Queue.HasPending(15)) return;
             if (!_host.TryBuildRetreat(out CourierEntry entry)) return;
+            Enqueue(in entry, 0.0);
+        }
+
+        // D5: engage-at-will is released into a hold at the player's position once contact has ended
+        // (or at once while his command is routed); one release at a time.
+        private void DeriveRelease()
+        {
+            if (_host.SlotType != 13 || Queue.HasPendingOrigin(OrderOrigin.Release)) return;
+            if (!_host.TryBuildRelease(out CourierEntry entry)) return;
             Enqueue(in entry, 0.0);
         }
 
@@ -400,6 +446,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     _host.Accepted(in e);
                     _host.Row(in e, "deliver", "accepted");
                     if (e.Origin == OrderOrigin.P62) _host.NotifyP62(in e, P62Outcome.Accepted);
+                    if (IsNonPaying(e.Origin)) _host.MarkNonPayingSession(sessionAfter);
                     return false;
                 }
                 // Vanilla's nested type-11 relay (8333-8336) took the slot; its order stays.

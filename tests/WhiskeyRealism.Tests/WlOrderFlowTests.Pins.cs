@@ -109,12 +109,91 @@ internal static partial class WlOrderFlowTests
         AssertTrue(Code("src/WhiskeyRealism/Patches/TacticalObserverPatch.cs").Contains("if (WlOrderFlowRuntime.CapturedThisCall) return;"),
             "the observer Postfix skips a captured call");
         AssertTrue(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs").Contains("OrderOrigin.Executor"), "the executor's dispatch is an Executor entry");
-        AssertTrue(Code("src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs").Contains("OrderOrigin.P62"), "#62's dispatch is a P62 entry");
+        AssertTrue(Code("src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs").Contains("TacticalPlayerDispatchRuntime.EmitP62("), "#62 dispatches through EmitP62");
+        AssertTrue(Code(FlowRuntime).Contains("Origin = OrderOrigin.P62"), "and EmitP62 queues a P62 entry");
         string runtime = Code(FlowRuntime);
         AssertTrue(runtime.Contains("Plugin.EnableWlOrderReadmit") && runtime.Contains("Plugin.EnableWlOrderCouriers"), "both order-flow switches are read");
         AssertTrue(runtime.Contains("BattleScope.Register(\"wl-order-flow\""), "the battle-scoped state registers its reset");
         // The delivery transaction is the only place the runtime empties or refills the slot.
         AssertEqual(2, Regex.Matches(runtime, @"DLC_WL\.givenorder\s*=(?!=)").Count, "ClearSlot and RestoreSlot are the two slot writes");
         AssertTrue(Regex.IsMatch(Code(FlowPass), @"_host\.ClearSlot\(\)"), "the pass empties the slot through the host");
+    }
+
+    // #62 (D16): its dispatch goes to the player's parent unit, from the player-side instance only, and
+    // its accept/attempt bookkeeping follows the delivery callback.
+    private const string P62Patch = "src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs";
+
+    private static void P62EntryUnitIsParentNotOwnCommand()
+    {
+        string patch = Code(P62Patch);
+        Match emit = Regex.Match(patch, @"TacticalPlayerDispatchRuntime\.EmitP62\(\s*(?<unit>[^,]+),");
+        AssertTrue(emit.Success, "#62 dispatches through EmitP62");
+        string unit = emit.Groups["unit"].Value.Trim();
+        AssertTrue(unit.Contains("Parent"), "the unit is the player's parent unit: " + unit);
+        AssertFalse(unit.Contains("CurrentCommand"), "never the player's own command (vanilla's 8337 returns for it)");
+    }
+
+    private static void P62RunsOnlyOnPlayerSide()
+    {
+        string patch = Code(P62Patch);
+        string postfix = BodyOf(patch, "private static void Postfix(");
+        string prefix = BodyOf(patch, "private static void Prefix(");
+        AssertTrue(Regex.IsMatch(postfix, @"isplayeraiorfeud\s*!=\s*1"), "the Postfix skips the enemy and feud instances");
+        AssertTrue(Regex.IsMatch(prefix, @"isplayeraiorfeud\s*!=\s*1"), "so does the Prefix");
+    }
+
+    private static void P62CaptureDropRecordsAttempt()
+    {
+        // A refused enqueue (the flow dropped or rate-limited it) records an attempt, so #62's throttle
+        // applies and it does not re-emit every pass.
+        string patch = Code(P62Patch);
+        string postfix = BodyOf(patch, "private static void Postfix(");
+        int emit = postfix.IndexOf("EmitP62(", StringComparison.Ordinal);
+        int attempt = postfix.IndexOf("RecordAttempt(", StringComparison.Ordinal);
+        AssertTrue(emit >= 0 && attempt > emit, "RecordAttempt follows the enqueue");
+    }
+
+    private static void AcceptRecordedOnDeliveryCallback()
+    {
+        string dispatch = Code("src/WhiskeyRealism/Tactical/Battle/TacticalPlayerDispatchRuntime.cs");
+        string body = BodyOf(dispatch, "internal static void OnP62Outcome(");
+        Match accepted = Regex.Match(body, @"case\s+P62Outcome\.Accepted\s*:(?<b>[^;]*;[^;]*;)");
+        AssertTrue(accepted.Success && accepted.Groups["b"].Value.Contains("RecordAccepted("), "an acceptance records the accepted shadow");
+        AssertFalse(Code(P62Patch).Contains("RecordAccepted("), "the patch itself no longer records acceptance");
+        string host = Code(FlowRuntime);
+        AssertTrue(Regex.IsMatch(BodyOf(host, "public void NotifyP62("), @"TacticalPlayerDispatchRuntime\.OnP62Outcome\("), "the host forwards the callback");
+    }
+
+    private static void RefusalRecordedOnDeliveryCallback()
+    {
+        string body = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/TacticalPlayerDispatchRuntime.cs"), "internal static void OnP62Outcome(");
+        Match attempt = Regex.Match(body, @"case\s+P62Outcome\.Attempt\s*:(?<b>[^;]*;)");
+        AssertTrue(attempt.Success && attempt.Groups["b"].Value.Contains("RecordAttempt("), "a refusal records an attempt");
+        Match clear = Regex.Match(body, @"case\s+P62Outcome\.ClearPending\s*:(?<b>[^;]*;)");
+        AssertTrue(clear.Success && clear.Groups["b"].Value.Contains("ClearPending("), "a structural discard clears the pending signature only");
+    }
+
+    // D21: the automatic holds pay no prestige by keeping vanilla's first-entry branch from firing.
+    private static void NonPayingStampWritesOnlyLastCombatZoneCount()
+    {
+        string body = BodyOf(Code(FlowRuntime), "private static void StampTopUnitsAt(");
+        AssertTrue(Regex.IsMatch(body, @"unit\.lastcombatzonecount\s*=\s*session\s*;"), "the stamp is the order session");
+        AssertTrue(body.Contains("UnitFlags.PlayerOwned") && body.Contains("ParentRegimentId != 0"),
+            "only the player's top units (123484-123486: dlcw_isundercommander, no parent regiment), from the snapshot");
+        AssertEqual(1, Regex.Matches(body, @"\.\w+\s*=(?!=)").Count, "one assignment in the stamp");
+    }
+
+    // D5 is fog-honest: the contact test reads the side's observations; vanilla's unfiltered search only
+    // predicts vanilla's own write and is never an input to a Whiskey decision outside the release test.
+    private static void ReleaseContactTestIsFogHonest()
+    {
+        string code = Code(FlowRuntime);
+        string visible = BodyOf(code, "private static bool VisibleEnemyInFireRange(");
+        AssertTrue(visible.Contains("ClosestVisibleEnemy("), "the fire-range test reads the snapshot's Visible enemies");
+        AssertFalse(visible.Contains("GetClosestEnemyUnitReg") || visible.Contains("enemyinrange"), "and never vanilla's unfiltered fields");
+        int uses = Regex.Matches(code, @"VanillaContactTrigger\(\)").Count;
+        AssertEqual(3, uses, "the predicted trigger is read by the release test, its staleness check and its definition only");
+        string routedWiring = BodyOf(code, "private static CaptureVerdict Route(");
+        AssertTrue(Regex.IsMatch(routedWiring, @"type == 13 \|\| type == 14\)\s*&&\s*input\.ReadmitOn[^;]*\s*input\.PlayerRouted = IsPlayerRouted\("), "N1: routed is computed for 13 and 14 only");
     }
 }

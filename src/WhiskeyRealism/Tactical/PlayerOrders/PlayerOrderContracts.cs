@@ -137,7 +137,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             bool campaignGroupFlag,
             PlayerOrderProvenance provenance,
             bool battleEnded = false,
-            bool stale = false)
+            bool stale = false,
+            double ageHours = double.PositiveInfinity)
         {
             Scope = scope;
             Intent = intent;
@@ -155,6 +156,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             Provenance = provenance;
             BattleEnded = battleEnded;
             Stale = stale;
+            AgeHours = ageHours;
         }
 
         public PlayerOrderScope Scope { get; }
@@ -173,6 +175,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public PlayerOrderProvenance Provenance { get; }
         public bool BattleEnded { get; }
         public bool Stale { get; }
+        // Doctrine hours since the order was accepted; +infinity when Whiskey never saw it issued.
+        public double AgeHours { get; }
         public bool HasActiveOrder => VanillaType >= 0;
     }
 
@@ -269,42 +273,44 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
     internal readonly struct PlayerOrderShadow
     {
-        public PlayerOrderShadow(PlayerOrderSignature signature, long tick, string battleIdentity)
-            : this(signature, signature, tick, battleIdentity)
+        public PlayerOrderShadow(PlayerOrderSignature signature, double nowHours, string battleIdentity)
+            : this(signature, signature, nowHours, battleIdentity)
         {
         }
 
         public PlayerOrderShadow(
             PlayerOrderSignature requestSignature,
             PlayerOrderSignature activeSignature,
-            long tick,
+            double nowHours,
             string battleIdentity)
         {
             RequestSignature = requestSignature;
             ActiveSignature = activeSignature;
-            Tick = tick;
+            NowHours = nowHours;
             BattleIdentity = battleIdentity ?? string.Empty;
         }
 
         public PlayerOrderSignature Signature => RequestSignature;
         public PlayerOrderSignature RequestSignature { get; }
         public PlayerOrderSignature ActiveSignature { get; }
-        public long Tick { get; }
+        // The doctrine hour the request was recorded; the throttle window runs from it.
+        public double NowHours { get; }
         public string BattleIdentity { get; }
     }
 
     internal readonly struct PlayerOrderDedupeOptions
     {
-        public PlayerOrderDedupeOptions(bool writesEnabled, long throttleTicks)
+        public PlayerOrderDedupeOptions(bool writesEnabled, double throttleHours)
         {
             WritesEnabled = writesEnabled;
-            ThrottleTicks = throttleTicks < 0 ? 0 : throttleTicks;
+            ThrottleHours = throttleHours < 0.0 ? 0.0 : throttleHours;
         }
 
         public bool WritesEnabled { get; }
-        public long ThrottleTicks { get; }
+        // A changed candidate waits this long after the last attempt, on the doctrine clock.
+        public double ThrottleHours { get; }
 
-        public static PlayerOrderDedupeOptions Default => new PlayerOrderDedupeOptions(true, 120);
+        public static PlayerOrderDedupeOptions Default => new PlayerOrderDedupeOptions(true, PlayerOrderReadmitPolicy.RetryThrottleBattleHours);
     }
 
     internal readonly struct PlayerOrderDedupeDecision
