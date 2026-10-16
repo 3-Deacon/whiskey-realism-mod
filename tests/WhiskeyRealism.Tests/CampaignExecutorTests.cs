@@ -1205,7 +1205,8 @@ internal static class CampaignExecutorTests
 
     private static void MoverRuntimeStatementsPinned()
     {
-        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs");
+        // The host's move half is VanillaMoveHost (G5d shares it with the recon executor): the pins follow it.
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
         AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy,"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
         AssertTrue(HasLine(src, "SourceSystem = \"campaign-planner\""), "the dispatch names its source");
@@ -1307,13 +1308,13 @@ internal static class CampaignExecutorTests
     // The host's vanilla reads: public map facts only (the state's owner, the war, the final waypoint test).
     private static void MoverHostReadsVanillasPublicFacts()
     {
-        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs");
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
         AssertTrue(HasLine(src, "int state = BattlefieldSetup.GetStateOfField(new Vector3(x, 0f, z), usecloseststate: true);"), "the state at the point (25714; as 14486 and 14335)");
         AssertTrue(HasLine(src, "return GameVars.nation[state].alliance;"), "its owner");
-        AssertTrue(HasLine(src, "return GameVars.alliance[_alliance].IsAtWarWith(otherAlliance);"), "at war (63127)");
-        AssertTrue(HasLine(src, "return bfs.IsTerrainPositionRestricted(new Vector3(x, 0f, z), _alliance);"), "the final waypoint's test (25755)");
+        AssertTrue(HasLine(src, "return GameVars.alliance[Alliance].IsAtWarWith(otherAlliance);"), "at war (63127)");
+        AssertTrue(HasLine(src, "return bfs.IsTerrainPositionRestricted(new Vector3(x, 0f, z), Alliance);"), "the final waypoint's test (25755)");
         AssertTrue(HasLine(src, "if (state < 0 || GameVars.nation == null || state >= GameVars.nation.Length) return -1;"), "bound-checked state");
-        AssertTrue(HasLine(src, "return unit != null && unit.alliance == _alliance ? unit : null;"), "only the reviewing alliance's own groups are touched");
+        AssertTrue(HasLine(src, "return unit != null && unit.alliance == Alliance ? unit : null;"), "only the reviewing alliance's own groups are touched");
         AssertTrue(HasLine(src, "if (listed && !present) _offensive.Add(unit);"), "added to unitsinoffensiveoperations");
         AssertTrue(HasLine(src, "else if (!listed && present) _offensive.Remove(unit);"), "removed from it");
         AssertTrue(src.Contains("VanillaFieldCache.List(_factionObject, \"unitsinoffensiveoperations\")"), "the offensive list, by cached field");

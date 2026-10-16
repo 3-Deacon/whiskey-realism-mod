@@ -81,15 +81,15 @@ namespace WhiskeyRealism.Strategic.Planner
             };
         }
 
-        private sealed class VanillaMoverHost : IMoverHost
+        private sealed class VanillaMoverHost : VanillaMoveHost, IMoverHost
         {
-            private int _alliance, _faction, _mainObjective;
+            private int _faction, _mainObjective;
             private object _factionObject;
             private IList _offensive;
 
             internal void Bind(int alliance, int faction, object factionObject, int mainObjective)
             {
-                _alliance = alliance;
+                Alliance = alliance;
                 _faction = faction;
                 _factionObject = factionObject;
                 _mainObjective = mainObjective;
@@ -102,19 +102,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 _offensive = null;
             }
 
-            private Regiment UnitOf(int instanceId)
-            {
-                var unit = CampaignSnapshotRuntime.OwnUnit(instanceId);
-                return unit != null && unit.alliance == _alliance ? unit : null;
-            }
-
-            public bool TargetRestricted(float x, float z)
-            {
-                var bfs = CampaignSnapshotRuntime.ResolveBattlefieldSetup();
-                if ((UnityEngine.Object)bfs == null) return false;
-                return bfs.IsTerrainPositionRestricted(new Vector3(x, 0f, z), _alliance);
-            }
-
             public int StateAllianceAt(float x, float z)
             {
                 int state = BattlefieldSetup.GetStateOfField(new Vector3(x, 0f, z), usecloseststate: true);
@@ -124,23 +111,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
             public bool AtWar(int otherAlliance)
             {
-                if (GameVars.alliance == null || _alliance < 0 || _alliance >= GameVars.alliance.Length) return false;
-                return GameVars.alliance[_alliance].IsAtWarWith(otherAlliance);
-            }
-
-            public bool PackageLocked(int instanceId)
-            {
-                var unit = UnitOf(instanceId);
-                if (unit == null) return true;
-                if (CoordinatedOperationRuntime.IsPackageLocked(unit)) return true;
-                return false;
-            }
-
-            public bool Move(int instanceId, float x, float z)
-            {
-                var unit = UnitOf(instanceId);
-                if (unit == null) return false;
-                return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);
+                if (GameVars.alliance == null || Alliance < 0 || Alliance >= GameVars.alliance.Length) return false;
+                return GameVars.alliance[Alliance].IsAtWarWith(otherAlliance);
             }
 
             // The map-group player: his Support order is a W&L Redeploy dispatch (order type 5) through the campaign
@@ -151,7 +123,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (unit == null) return false;
                 var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
                 {
-                    AllianceId = _alliance,
+                    AllianceId = Alliance,
                     AifactionIndex = _faction,
                     Unit = unit,
                     TargetPosition = new Vector3(x, unit.GetPosition().y, z),
@@ -171,16 +143,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 bool present = _offensive.Contains(unit);
                 if (listed && !present) _offensive.Add(unit);
                 else if (!listed && present) _offensive.Remove(unit);
-            }
-
-            // Vanilla gives userails = userivers = true to units of non-player alliances only (112862-112866); the player's
-            // alliance keeps stored values (default false, 111466-111470; scenario and save data 74178-74180, 71375-71378).
-            public void RaiseTransportModes(int instanceId)
-            {
-                var unit = UnitOf(instanceId);
-                if (unit == null) return;
-                unit.userails = true;
-                unit.userivers = true;
             }
         }
     }
