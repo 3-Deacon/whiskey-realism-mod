@@ -184,6 +184,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);
                     // The mover may have released the decision's launch: the patches read it with the plan.
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));
+                    // G5d: the recon missions the Plan job bound this review. Not gated on the recon flag: with it off the Plan job has
+                    // ended every mission (ReleaseAll, Recalled ones included), so the pass only takes the Scouting order off their
+                    // screens (a rollback must not leave one scouting for good) and moves nothing.
+                    ReconExecutorRuntime.Execute(alliance, Snapshots[alliance], Recon[alliance]);
                 }
                 catch (Exception ex)
                 {
@@ -224,8 +228,17 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
-                if (FlagOn(Plugin.EnableCampaignReconnaissance)) EmitRecon(snapshot);
+                if (FlagOn(Plugin.EnableCampaignReconnaissance))
+                {
+                    Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
+                    EmitRecon(snapshot);
+                }
+                else
+                {
+                    // Every mission ends, a Recalled one included (Sync leaves it alone): the formations are vanilla's again where
+                    // they stand, and the executor only takes Scouting off the screens (G5d, verify F2).
+                    Recon[snapshot.Alliance].ReleaseAll(ReconMissionLedger.ReasonReconOff);
+                }
             }
         }
 
@@ -346,6 +359,13 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool ExecutorsEnabled()
         {
             return FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors);
+        }
+
+        // The reconnaissance executor sends and holds the formations on a mission (G5d): both flags above plus the recon flag.
+        // The old probe's runner stands down and #15 leaves a Screen formation at its post only while this holds.
+        internal static bool ReconExecutorActive()
+        {
+            return ExecutorsEnabled() && FlagOn(Plugin.EnableCampaignReconnaissance);
         }
 
         // What the executors' patches read with the plan (G5a): the decision and its release, the pre-war gate and the map-group

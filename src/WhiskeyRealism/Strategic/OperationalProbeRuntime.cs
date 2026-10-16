@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -147,10 +148,14 @@ namespace WhiskeyRealism.Strategic
             options.EscalateFriendlyRatio = Math.Max(1.10f, Math.Min(2.50f, options.EscalateFriendlyRatio));
         }
 
+        // Transitional (plan G5d, deleted with this file in G6): while the campaign planner's reconnaissance executor runs, its
+        // belief-driven probe missions are the probe, and this omniscient-era runner neither moves, stops nor releases a
+        // formation beside them.
         internal static void Run(int allianceId, OperationalProbeOutput output, Vector3? target)
         {
             try
             {
+                if (CampaignPlannerRuntime.ReconExecutorActive()) return;
                 if (allianceId < 0 || allianceId > 1) return;
                 if (output == null || string.IsNullOrEmpty(output.SelectedUnitKey)) return;
 
