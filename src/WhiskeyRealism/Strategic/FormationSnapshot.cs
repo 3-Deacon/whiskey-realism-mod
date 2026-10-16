@@ -33,7 +33,6 @@ namespace WhiskeyRealism.Strategic
         public bool HasActivePath;
         public FormationLevel VisibleEnemyLevel = FormationLevel.Unknown;
         public float LocalEnemyStrength;
-        public float LocalEnemyExchangePressure;
         public float LocalFriendlySupportStrength;
         public bool SupportCanReach;
         public bool IsPlanTargetArea;

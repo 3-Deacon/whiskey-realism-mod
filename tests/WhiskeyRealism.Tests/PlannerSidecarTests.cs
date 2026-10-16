@@ -92,7 +92,7 @@ internal static class PlannerSidecarTests
             campaignSeed: 0x1234567890ABCDEFL, belowOddsDays: 5, capitalThreatLatched: true, tempoReleasedDecision: 6, lastFullReviewDay: 811);
         p.Beliefs.Add(new EnemyBelief
         {
-            InstanceId = -1, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Guns = 40f,
+            InstanceId = -1, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f,
             LastSeenDay = 805, Confidence01 = 0.75f, UncertaintyRadius = 33f, LastSource = DetectionSource.ObjectiveGarrison,
             Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, LastEmbarkedDay = 790
         });
@@ -219,7 +219,6 @@ internal static class PlannerSidecarTests
         AssertNear(120.5f, b.X, 1e-4f, "x");
         AssertNear(-40.25f, b.Z, 1e-4f, "z");
         AssertNear(18000f, b.Strength, 1e-2f, "strength");
-        AssertNear(40f, b.Guns, 1e-4f, "guns");
         AssertEqual(805, b.LastSeenDay, "last seen day");
         AssertNear(0.75f, b.Confidence01, 1e-4f, "confidence");
         AssertNear(33f, b.UncertaintyRadius, 1e-4f, "uncertainty radius");
@@ -341,7 +340,7 @@ internal static class PlannerSidecarTests
         AssertEqual(-1, model.Beliefs[0].InstanceId, "with no instance id");
         var seen = new List<EnemyDetection>
         {
-            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Guns = 40f, Source = DetectionSource.FogGrid }
+            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Source = DetectionSource.FogGrid }
         };
         model.Update(seen, 806, _ => 1f, _ => 0f);
         AssertEqual(1, model.Beliefs.Count, "the next detection under that key is the same army, not a second one");

@@ -451,7 +451,7 @@ namespace WhiskeyRealism.Strategic
                 if (string.IsNullOrEmpty(b.UnitKey)) continue;
                 dto.Beliefs.Add(new EnemyBeliefDto
                 {
-                    UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength, Guns = b.Guns,
+                    UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                     LastSeenDay = b.LastSeenDay, Confidence = b.Confidence01, Radius = b.UncertaintyRadius,
                     Source = (int)b.LastSource, Traits = (int)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
                 });
@@ -497,7 +497,7 @@ namespace WhiskeyRealism.Strategic
                     if (b == null || string.IsNullOrEmpty(b.UnitKey)) continue;
                     p.Beliefs.Add(new EnemyBelief
                     {
-                        InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength, Guns = b.Guns,
+                        InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                         LastSeenDay = b.LastSeenDay, Confidence01 = b.Confidence, UncertaintyRadius = b.Radius,
                         LastSource = (DetectionSource)b.Source, Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
                     });

@@ -157,7 +157,6 @@ namespace WhiskeyRealism.Strategic.Planner
                     X = detection.X,
                     Z = detection.Z,
                     Strength = detection.Strength,
-                    Guns = detection.Guns,
                     LastSeenDay = daySerial,
                     Confidence01 = 1f,
                     UncertaintyRadius = SeenRadius,

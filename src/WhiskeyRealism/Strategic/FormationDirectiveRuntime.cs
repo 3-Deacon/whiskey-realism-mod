@@ -207,8 +207,8 @@ namespace WhiskeyRealism.Strategic
         }
 
         // Friendly support from the formation's own area bucket; the enemy from the believed
-        // armies within 2 x bugle range (G1: confidence-weighted strength, strength + guns x 65
-        // exchange pressure, the largest believed unit type).
+        // armies within 2 x bugle range (G1: confidence-weighted strength, the largest believed
+        // unit type).
         private static void PopulateLocalPressure(FormationSnapshot snapshot, Regiment unit,
             Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
         {
@@ -233,9 +233,8 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 EnemyBeliefReadings.LocalPressure(beliefs, position.x, position.z, enemyRange,
-                    out float strength, out float exchange, out FormationLevel level);
+                    out float strength, out FormationLevel level);
                 snapshot.LocalEnemyStrength += strength;
-                snapshot.LocalEnemyExchangePressure += exchange;
                 if ((int)level > (int)snapshot.VisibleEnemyLevel)
                     snapshot.VisibleEnemyLevel = level;
             }

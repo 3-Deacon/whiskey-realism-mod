@@ -183,7 +183,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public string UnitKey;
         public int UnitTyp;
-        public float X, Z, Strength, Guns;
+        public float X, Z, Strength;
         public DetectionSource Source;
         public EnemyTraits Traits;
     }
@@ -193,7 +193,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int InstanceId;
         public string UnitKey;
         public int UnitTyp;
-        public float X, Z, Strength, Guns;
+        public float X, Z, Strength;
         public int LastSeenDay;
         public float Confidence01, UncertaintyRadius;
         public DetectionSource LastSource;

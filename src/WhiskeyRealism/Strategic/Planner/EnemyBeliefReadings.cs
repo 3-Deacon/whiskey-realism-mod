@@ -7,11 +7,9 @@ namespace WhiskeyRealism.Strategic.Planner
     // EnemyArmyModel beliefs (spec C13/C25). Every sum is confidence-weighted (Strength x
     // Confidence01) at the belief's last-seen position; an expired belief (Confidence01 <= 0)
     // counts nowhere, as in EnemyBeliefQuery. Beliefs carry no morale: a sighting shows strength,
-    // guns, type and position only.
+    // type and position only.
     internal static class EnemyBeliefReadings
     {
-        // FormationDirectiveRuntime's exchange pressure: strength + guns x 65 (unchanged scale).
-        internal const float GunExchangeWeight = 65f;
         // A force seen ashore within this many days of being seen afloat is a landing.
         internal const int LandingWindowDays = 3;
         // The order-raising threats (a raid, a landed sea invasion) come only from a sighting this
@@ -44,12 +42,11 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // FormationDirectiveRuntime.PopulateLocalPressure: the believed enemy within range of a
-        // formation, its exchange pressure and the highest believed formation level (Unknown none).
+        // formation and the highest believed formation level (Unknown none).
         internal static void LocalPressure(IReadOnlyList<EnemyBelief> beliefs, float x, float z, float range,
-                                           out float strength, out float exchange, out FormationLevel visibleLevel)
+                                           out float strength, out FormationLevel visibleLevel)
         {
             strength = 0f;
-            exchange = 0f;
             visibleLevel = FormationLevel.Unknown;
             if (beliefs == null || range <= 0f) return;
             float rangeSq = range * range;
@@ -62,7 +59,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (dx * dx + dz * dz > rangeSq) continue;
                 float confidence = Math.Min(1f, belief.Confidence01);
                 strength += Math.Max(0f, belief.Strength) * confidence;
-                exchange += (Math.Max(0f, belief.Strength) + Math.Max(0f, belief.Guns) * GunExchangeWeight) * confidence;
                 var level = FormationSnapshot.LevelFromUnitType(belief.UnitTyp);
                 if ((int)level > (int)visibleLevel) visibleLevel = level;
             }

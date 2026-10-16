@@ -657,12 +657,11 @@ internal static class CampaignSnapshotTests
     // every field's shape compiled and round-tripping.
     private static void ContractRecordsCarryCensusFields()
     {
-        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Guns = 60f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
+        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
         AssertEqual("Army of Tennessee:40", detection.UnitKey, "detection key");
-        AssertEqual(60f, detection.Guns, "detection guns");
         AssertEqual(EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, detection.Traits, "detection traits");
 
-        var belief = new EnemyBelief { InstanceId = 1, UnitKey = "k:1", UnitTyp = 15, X = 3f, Z = 4f, Strength = 9000f, Guns = 20f, LastSeenDay = 700, Confidence01 = 0.5f, UncertaintyRadius = 12f, LastSource = DetectionSource.Contact, Traits = EnemyTraits.NearOwnCoast };
+        var belief = new EnemyBelief { InstanceId = 1, UnitKey = "k:1", UnitTyp = 15, X = 3f, Z = 4f, Strength = 9000f, LastSeenDay = 700, Confidence01 = 0.5f, UncertaintyRadius = 12f, LastSource = DetectionSource.Contact, Traits = EnemyTraits.NearOwnCoast };
         AssertEqual(700, belief.LastSeenDay, "belief last seen");
         AssertEqual(12f, belief.UncertaintyRadius, "belief radius");
         AssertEqual(DetectionSource.Contact, belief.LastSource, "belief source");

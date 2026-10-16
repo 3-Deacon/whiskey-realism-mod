@@ -318,18 +318,6 @@ namespace WhiskeyRealism.Strategic.Construction
             catch { return 0f; }
         }
 
-        private static bool SafeRear(Vector3 position, int alliance)
-        {
-            try
-            {
-                var battleUnits = GameObject.Find("GameController")?.GetComponent<BattleUnits>();
-                if (battleUnits == null || battleUnits.frontline2 == null || battleUnits.frontline2.numberofupdates <= 0)
-                    return true;
-                return battleUnits.frontline2.GetSideOnPosition(position) == alliance;
-            }
-            catch { return true; }
-        }
-
         private static bool SupportsActiveCorridor(Vector3 position, ConstructionInput input)
         {
             return input.SupplyProtection ||

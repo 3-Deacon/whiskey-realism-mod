@@ -43,7 +43,6 @@ internal static class EnemyArmyModelTests
             ("TraitsFromWhatASightingShows", TraitsFromWhatASightingShows),
             ("FrontSectorFromBeliefsExcludesUnseen", FrontSectorFromBeliefsExcludesUnseen),
             ("LocalPressureFromBeliefsExcludesUnseenEnemy", LocalPressureFromBeliefsExcludesUnseenEnemy),
-            ("LocalPressureExchangeUsesBeliefGuns", LocalPressureExchangeUsesBeliefGuns),
             ("TelegraphSiteNotBlockedByUnseenEnemy", TelegraphSiteNotBlockedByUnseenEnemy),
             ("SeaInvasionThreatOnlyFromSeenEmbarkedForce", SeaInvasionThreatOnlyFromSeenEmbarkedForce),
             ("LandingInferredFromSeenForceOnOwnCoast", LandingInferredFromSeenForceOnOwnCoast),
@@ -152,12 +151,12 @@ internal static class EnemyArmyModelTests
 
     private static EnemyDetection Seen(string key, int instanceId, float x, float z, float strength,
                                        int unitTyp = 15, DetectionSource source = DetectionSource.FogGrid,
-                                       EnemyTraits traits = EnemyTraits.None, float guns = 0f)
+                                       EnemyTraits traits = EnemyTraits.None)
     {
         return new EnemyDetection
         {
             InstanceId = instanceId, UnitKey = key, UnitTyp = unitTyp, X = x, Z = z,
-            Strength = strength, Guns = guns, Source = source, Traits = traits
+            Strength = strength, Source = source, Traits = traits
         };
     }
 
@@ -641,7 +640,7 @@ internal static class EnemyArmyModelTests
         // never detected, so it is not in the model at all.
         var m = new EnemyArmyModel();
         seenStrength = 30000f;
-        m.Update(List(Seen("Seen Army:1", 1, 10f, 0f, seenStrength, unitTyp: 16, guns: 40f)), 0, Drift(1f), NoMarch);
+        m.Update(List(Seen("Seen Army:1", 1, 10f, 0f, seenStrength, unitTyp: 16)), 0, Drift(1f), NoMarch);
         return m;
     }
 
@@ -668,20 +667,12 @@ internal static class EnemyArmyModelTests
     private static void LocalPressureFromBeliefsExcludesUnseenEnemy()
     {
         var m = SeenAndUnseen(out float seen);
-        EnemyBeliefReadings.LocalPressure(m.Beliefs, 0f, 0f, 50f, out float strength, out _, out FormationLevel level);
+        EnemyBeliefReadings.LocalPressure(m.Beliefs, 0f, 0f, 50f, out float strength, out FormationLevel level);
         AssertNear(seen, strength, 1e-3f, "believed army within range");
         AssertEqual(FormationLevel.Army, level, "visible enemy level from the belief's unit type");
-        EnemyBeliefReadings.LocalPressure(m.Beliefs, 500f, 0f, 50f, out strength, out _, out level);
+        EnemyBeliefReadings.LocalPressure(m.Beliefs, 500f, 0f, 50f, out strength, out level);
         AssertNear(0f, strength, 1e-6f, "nothing believed there (the unseen army is invisible)");
         AssertEqual(FormationLevel.Unknown, level, "no visible enemy");
-    }
-
-    private static void LocalPressureExchangeUsesBeliefGuns()
-    {
-        var m = SeenAndUnseen(out float seen);
-        EnemyBeliefReadings.LocalPressure(m.Beliefs, 0f, 0f, 50f, out _, out float exchange, out _);
-        AssertNear(seen + 40f * EnemyBeliefReadings.GunExchangeWeight, exchange, 1e-2f, "strength + guns x 65 (FormationDirectiveRuntime 402-407)");
-        AssertEqual(65f, EnemyBeliefReadings.GunExchangeWeight, "vanilla-scale gun weight kept");
     }
 
     private static void TelegraphSiteNotBlockedByUnseenEnemy()

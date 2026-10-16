@@ -111,7 +111,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("x")] public float X;
         [JsonProperty("z")] public float Z;
         [JsonProperty("strength")] public float Strength;
-        [JsonProperty("guns")] public float Guns;
         [JsonProperty("lastSeenDay")] public int LastSeenDay;
         [JsonProperty("confidence")] public float Confidence;
         [JsonProperty("radius")] public float Radius;
