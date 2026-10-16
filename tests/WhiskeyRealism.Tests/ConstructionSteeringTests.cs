@@ -67,6 +67,7 @@ internal static class ConstructionSteeringTests
             ("PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve", PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve),
             ("AllocatorAndPlannerWiringPinsTheWishedBuilders", AllocatorAndPlannerWiringPinsTheWishedBuilders),
             ("HeldBuilderIsNotInTheMassG3Judges", HeldBuilderIsNotInTheMassG3Judges),
+            ("WishedBuilderIsNoCapitalGuardInG3sPlan", WishedBuilderIsNoCapitalGuardInG3sPlan),
             ("AdoptNeedsTheDepotWithinTheBuildersBugleRange", AdoptNeedsTheDepotWithinTheBuildersBugleRange),
             ("APendingPlacementIsNotALostWish", APendingPlacementIsNotALostWish),
             ("DepotHoldReachesTheFortJobOnlyUnderAFreshPlan", DepotHoldReachesTheFortJobOnlyUnderAFreshPlan),
@@ -1258,6 +1259,44 @@ internal static class ConstructionSteeringTests
         main.Sort();
         AssertEqual("1,2", string.Join(",", main), "the main effort is exactly the planned mass");
         AssertTrue(alloc2.TryGet(3, out var b) && b.Role == FormationRole.DepotBuilder, "and the held builder is the depot's");
+    }
+
+    // G3's own capital reserve (ReserveRules.Capital over the plan's floor) takes the massable formations nearest the capital; a Wished
+    // builder is the depot's and must not be raised as a guard there, as in the allocator. Seen through the real Plan: the reserved
+    // formation is out of the mass.
+    private static void WishedBuilderIsNoCapitalGuardInG3sPlan()
+    {
+        CampaignSnapshot World()
+        {
+            var w = ExecutorFixtures.Wide();
+            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 40000f));    // the builder, nearest the capital (x 0)
+            w.Own.Add(ExecutorFixtures.Corps(4, 30f, 40000f));    // the next nearest
+            w.Own.Add(ExecutorFixtures.Corps(2, 200f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(3, 210f, 25000f));
+            w.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 40000f));
+            return w;
+        }
+        TheaterPlan PlanWith(IReadOnlyList<HeldBuilder> held)
+        {
+            var w = World();
+            return TheaterPlanner.Plan(w, ExecutorFixtures.Sectors(w), null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _, null, held);
+        }
+        var none = PlanWith(null);
+        AssertTrue(none.CapitalFloorStrength > 0f && none.CapitalFloorStrength <= 40000f, "fixture: the theater has a capital reserve to raise, one corps' worth (" + none.CapitalFloorStrength + ")");
+        AssertFalse(Contains(none.MassInstanceIds, 1), "control: with no held builder the formation nearest the capital is the capital's guard, out of the mass");
+        AssertTrue(Contains(none.MassInstanceIds, 4), "...and the next nearest is massed");
+        var marching = PlanWith(new[] { new HeldBuilder { InstanceId = 1, SectorId = 0, TargetX = 10f, TargetZ = 0f } });
+        AssertFalse(Contains(marching.MassInstanceIds, 1), "a Marching builder is out of every mass");
+        AssertTrue(Contains(marching.MassInstanceIds, 4), "and is still raised as the capital guard (G4 assigns guards before depot builders): the next nearest is massed");
+        var wished = PlanWith(new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = 0, TargetX = 10f, TargetZ = 0f } });
+        AssertFalse(Contains(wished.MassInstanceIds, 1), "a Wished builder is out of the mass");
+        AssertFalse(Contains(wished.MassInstanceIds, 4), "and is not counted in the capital reserve: the next nearest formation is raised as the guard instead, so it is out of the mass too");
+        AssertEqual("2,3", string.Join(",", wished.MassInstanceIds), "the mass is what is left");
+    }
+
+    private static bool Contains(List<int> ids, int id)
+    {
+        return ids.Contains(id);
     }
 
     // F8: a depot rises only while an own unit stands within that unit's bugle range of it (96626-96655).
