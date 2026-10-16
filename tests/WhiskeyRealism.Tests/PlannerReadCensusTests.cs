@@ -67,7 +67,7 @@ internal static class PlannerReadCensusTests
     }
 
     // The code of a source file line by line: line comments, block comments and blank lines removed.
-    private static IEnumerable<string> CodeLines(string text)
+    internal static IEnumerable<string> CodeLines(string text)
     {
         bool inBlock = false;
         foreach (string raw in text.Split('\n'))

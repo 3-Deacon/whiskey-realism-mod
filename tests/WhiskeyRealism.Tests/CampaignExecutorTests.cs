@@ -70,6 +70,8 @@ internal static class CampaignExecutorTests
             ("AvailabilityPatchesPinned", AvailabilityPatchesPinned),
             ("ImportancePatchPinned", ImportancePatchPinned),
             ("ReviewExecuteWiringPinned", ReviewExecuteWiringPinned),
+            ("PipelineOrderPinned", PipelineOrderPinned),
+            ("PlannerPatchesReadOnlyPublishedState", PlannerPatchesReadOnlyPublishedState),
             ("ReviewPlanStampsTheClockAndPublishesTheContext", ReviewPlanStampsTheClockAndPublishesTheContext),
             ("TempoWorldReadsVanillasInputs", TempoWorldReadsVanillasInputs),
             ("MoverHostReadsVanillasPublicFacts", MoverHostReadsVanillasPublicFacts),
@@ -1251,6 +1253,127 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "if (distanceOnly != null && aifaction < distanceOnly.Length) distanceOnly[aifaction] = targetArea;"), "...is set too, bound-checked");
         AssertFalse(src.Contains("ActivePlan") || src.Contains("CICs"), "the phased-plan CIC is gone (G6)");
         AssertTrue(src.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "rollback: Enable Campaign Planner Executors (with Enable Campaign Planner)");
+    }
+
+    // ---- G7 wiring (plan § G7, "Wiring checks") ----
+
+    // The order the pipeline runs in, as built: every anchor is one statement of the source, each appears once, and each comes
+    // after the one before. The plan's prose order predates G1b-rt, G2, G5c and G6 (the sector model is built after the
+    // bookkeeping return; the appointment protection ages before the recon missions; the depot executor rides the steering
+    // executor, ahead of the mover), so this pins what the code does.
+    private static void AssertInOrder(string body, string label, params string[] anchors)
+    {
+        int previous = -1;
+        foreach (string anchor in anchors)
+        {
+            int at = body.IndexOf(anchor, StringComparison.Ordinal);
+            AssertTrue(at >= 0, label + " has the step: " + anchor);
+            AssertEqual(at, body.LastIndexOf(anchor, StringComparison.Ordinal), label + " has the step once: " + anchor);
+            AssertTrue(at > previous, label + " runs this step after the one before it: " + anchor);
+            previous = at;
+        }
+    }
+
+    // The source of `case DailyReviewJobKind.<kind>:` up to the next case label.
+    private static string JobCase(string coordinator, string kind)
+    {
+        int start = coordinator.IndexOf("case DailyReviewJobKind." + kind + ":", StringComparison.Ordinal);
+        AssertTrue(start >= 0, "the coordinator has a case for the " + kind + " job");
+        int next = coordinator.IndexOf("case DailyReviewJobKind.", start + 10, StringComparison.Ordinal);
+        return coordinator.Substring(start, next - start);
+    }
+
+    private static void PipelineOrderPinned()
+    {
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertInOrder(BodyOf(runtime, "internal static void ReviewPlan("), "ReviewPlan",
+            "var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, daySerial,",
+            "RebindSaved(alliance, snapshot);",
+            "EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());",
+            "beliefs.Update(snapshot.Detections, snapshot.DaySerial,",
+            "snapshot.Beliefs.AddRange(beliefs.Beliefs);",
+            "EnemyDetectionRuntime.Report(snapshot, beliefs);",
+            "if (mode == PlannerReviewMode.StandDown) return;",
+            "CommanderAppointmentRuntime.Age(alliance, snapshot.DaySerial);",
+            "TerrainLineRuntime.PrepareDrain(snapshot);",
+            "AgeRecon(snapshot);",
+            "if (mode == PlannerReviewMode.Bookkeeping) return;",
+            "var sectors = SectorModel.Build(snapshot);",
+            "MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);",
+            "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);",
+            "plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,",
+            "PlanRecon(snapshot, sectors, plan, year, month, day);",
+            "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
+            "SyncRecon(snapshot, allocation);",
+            "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));",
+            "EmitPlan(plan, trace, day, month, year);",
+            "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);");
+
+        AssertInOrder(BodyOf(runtime, "internal static void ReviewExecute("), "ReviewExecute",
+            "if (!ExecutorsEnabled()) return;",
+            "CommanderAppointmentRuntime.Execute(alliance, Snapshots[alliance]);",
+            "PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter)",
+            "PlanFreshness.IsToday(todaysPlan.DaySerial)",
+            "CampaignSteeringRuntime.Execute(alliance, Snapshots[alliance]);",
+            "CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));",
+            "ReconExecutorRuntime.Execute(alliance, Snapshots[alliance], Recon[alliance]);");
+
+        // The construction executor (G5c) is the steering executor's first statement, ahead of the objective and theater writes.
+        AssertInOrder(BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSteeringRuntime.cs"), "internal static void Execute("), "CampaignSteeringRuntime.Execute",
+            "DepotSteeringRuntime.Execute(alliance, snapshot);",
+            "int objective = WriteObjective(alliance, snapshot, plan, faction);",
+            "int boxes = WriteTheaters(alliance, snapshot, allocation);");
+
+        // The two calls sit in the daily review's job list: the plan after policy and before the front ledger, the executors
+        // after the defense ledger and before the formation directives (plan P1).
+        string jobs = ReadRepoFile("src/WhiskeyRealism/Strategic/DailyReviewScheduler.cs");
+        AssertInOrder(jobs, "the per-alliance job list",
+            "DailyReviewJobKind.Policy,", "DailyReviewJobKind.Plan,", "DailyReviewJobKind.Front,", "DailyReviewJobKind.Defense,",
+            "DailyReviewJobKind.Execute,", "DailyReviewJobKind.Formation,");
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertContains(JobCase(coordinator, "Plan"), "CampaignPlannerRuntime.ReviewPlan(alliance,", "the Plan job calls ReviewPlan");
+        AssertContains(JobCase(coordinator, "Execute"), "CampaignPlannerRuntime.ReviewExecute(alliance,", "the Execute job calls ReviewExecute");
+        AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(coordinator, @"CampaignPlannerRuntime\.ReviewPlan\(").Count, "ReviewPlan is called from the Plan job (and the CIC player's branch) only");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(coordinator, @"CampaignPlannerRuntime\.ReviewExecute\(").Count, "ReviewExecute is called from the Execute job only");
+    }
+
+    // Planner patches steer vanilla's own inputs and read what the review published; they never read a working picture or call a
+    // review step (plan § G7, "every planner patch reads only CampaignPlanStore/CampaignWithholdView"; the construction board,
+    // the belief accessor and the freshness test are the other published read accessors the stage added).
+    private static void PlannerPatchesReadOnlyPublishedState()
+    {
+        var forbidden = new System.Text.RegularExpressions.Regex(
+            @"\b(CampaignSnapshot|CampaignSnapshotRuntime|TheaterPlanner|ForceAllocator|ReconMissionLedger|ReconStep|ReconExecutor|ReconExecutorRuntime|DepotTaskLedger|"
+            + @"DepotSteeringRuntime|MoveTracker|CampaignMover|CampaignMoverRuntime|CampaignSteeringRuntime|CommanderAppointmentPlanner|EnemyArmyModel|"
+            + @"EnemyBeliefStore|PlannerState|BattleInbox|TerrainLineRuntime)\b");
+        var allowedMembers = new Dictionary<string, string>
+        {
+            { "CampaignPlannerRuntime", "ExecutorsEnabled" },
+            { "EnemyDetectionRuntime", "BeliefsFor" },
+            { "PlanFreshness", "IsFresh" },
+            { "ConstructionSteeringBoard", "TryRead" },
+        };
+        var memberUse = new System.Text.RegularExpressions.Regex(@"\b(CampaignPlannerRuntime|EnemyDetectionRuntime|PlanFreshness|ConstructionSteeringBoard|CampaignPlanStore)\.(\w+)");
+        int files = 0;
+        foreach (string path in System.IO.Directory.GetFiles(FindRepoPath("src/WhiskeyRealism/Patches"), "*.cs"))
+        {
+            string code = string.Join("\n", PlannerReadCensusTests.CodeLines(System.IO.File.ReadAllText(path)));
+            string name = System.IO.Path.GetFileName(path);
+            var bad = forbidden.Match(code);
+            AssertFalse(bad.Success, name + " names the planner's working type " + bad.Value + ": patches read published state only");
+            foreach (System.Text.RegularExpressions.Match use in memberUse.Matches(code))
+            {
+                string owner = use.Groups[1].Value, member = use.Groups[2].Value;
+                if (owner == "CampaignPlanStore")
+                    AssertTrue(member.StartsWith("TryGet", StringComparison.Ordinal), name + " calls CampaignPlanStore." + member + ": patches use the TryGet* readers only");
+                else
+                    AssertEqual(allowedMembers[owner], member, name + " uses " + owner + "." + member + ": the read-only accessor is " + owner + "." + allowedMembers[owner]);
+            }
+            files++;
+        }
+        AssertTrue(files > 100, "the scan covered the Patches folder: " + files);
     }
 
     private static void ReviewPlanStampsTheClockAndPublishesTheContext()
