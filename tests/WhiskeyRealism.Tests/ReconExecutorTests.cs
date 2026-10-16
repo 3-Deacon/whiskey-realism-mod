@@ -36,9 +36,11 @@ internal static class ReconExecutorTests
             ("RestrictedPostIsRefusedThenGivenUp", RestrictedPostIsRefusedThenGivenUp),
             ("RefusedMoveIsAMissNotAnIssue", RefusedMoveIsAMissNotAnIssue),
             ("MoveQueuesBehindARunningOrder", MoveQueuesBehindARunningOrder),
+            ("MoveIssueReportsMovedOnlyWhenVanillaTookTheMove", MoveIssueReportsMovedOnlyWhenVanillaTookTheMove),
             ("WlSideFormationGetsVanillaAiTransportDefault", WlSideFormationGetsVanillaAiTransportDefault),
             ("RowOncePerTransition", RowOncePerTransition),
             ("ClearedAndMissingMissionsLogOnce", ClearedAndMissingMissionsLogOnce),
+            ("RowLoggedWhenOnlyTheReasonChanges", RowLoggedWhenOnlyTheReasonChanges),
             ("ReconTallyCountsWhatTheExecutorDid", ReconTallyCountsWhatTheExecutorDid),
             ("OrderedCountsOnlyCallsTheHostMade", OrderedCountsOnlyCallsTheHostMade),
             ("RowMemoryIsPrunedWhenMissionsLeaveTheLedger", RowMemoryIsPrunedWhenMissionsLeaveTheLedger),
@@ -234,8 +236,12 @@ internal static class ReconExecutorTests
 
     private static void HoldingMissionIsNotMoved()
     {
+        // At its post, though its last waypoint leads elsewhere (a move vanilla gave it): the mission is Holding and recon does
+        // not fight the move today; if the group is really leaving, the ledger's next state is Moving or Assigned and it is sent back.
         var s = World();
-        s.Own.Add(Unit(1, 295f, 0f, cavalry: 0.1f));
+        var u = Unit(1, 295f, 0f, cavalry: 0.1f);
+        u.WaypointX = 100f;
+        s.Own.Add(u);
         var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));
         ledger.OnReview(s, null);
         AssertEqual(ReconState.Holding, ledger.Missions[0].State, "fixture: at its post");
@@ -417,6 +423,25 @@ internal static class ReconExecutorTests
         AssertTrue(tracker.ShouldIssue(2, 1f, 1f, Day, MoveBudget.Recon) && tracker.ShouldIssue(3, 1f, 1f, Day, MoveBudget.Recon), "a queued move spends none of the budget");
     }
 
+    // The shared issue path's contract, which the mover reads to decide whether to list a formation in vanilla's offensive list.
+    private static void MoveIssueReportsMovedOnlyWhenVanillaTookTheMove()
+    {
+        var f = Unit(1, 0f, 0f, cavalry: 0.1f);
+        var took = new FakeReconHost();
+        AssertTrue(MoveIssue.Issue(took, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var issued), "vanilla took it");
+        AssertEqual(MoveOutcome.Issued, issued, "an issue");
+        var refused = new FakeReconHost { MoveResult = false };
+        AssertFalse(MoveIssue.Issue(refused, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var miss), "vanilla refused");
+        AssertEqual(MoveOutcome.Failed, miss, "a miss");
+        var restricted = new FakeReconHost { Restricted = (x, z) => true };
+        AssertFalse(MoveIssue.Issue(restricted, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var blocked), "restricted ground");
+        AssertEqual(MoveOutcome.Failed, blocked, "a miss");
+        AssertEqual(0, restricted.Moves.Count, "and no call");
+        var queuedUnit = Unit(2, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued);
+        AssertFalse(MoveIssue.Issue(took, new MoveTracker(), in queuedUnit, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var queued), "queued behind a running order");
+        AssertEqual(MoveOutcome.Queued, queued, "queued");
+    }
+
     private static void WlSideFormationGetsVanillaAiTransportDefault()
     {
         var s = World();
@@ -472,6 +497,20 @@ internal static class ReconExecutorTests
         next.Own.Add(Unit(2, 0f, 10f, cavalry: 0.1f));
         Resync(ledger, next, (ReconKind.Screen, 2, 300f, 10f), (ReconKind.Picket, 1, 300f, 0f));
         AssertEqual(1, executor.Review(next, ledger, new FakeReconHost(), new MoveTracker(), false).Rows.Count, "a new mission logs its own row");
+    }
+
+    private static void RowLoggedWhenOnlyTheReasonChanges()
+    {
+        // A mission re-targeted in place keeps its state but takes the new task's reason (ReconMissionLedger.Bind): that is a transition.
+        var s = World();
+        s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f));
+        var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));
+        var executor = new ReconExecutor();
+        executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        Resync(ledger, s, "main-axis", (ReconKind.Picket, 1, 300f, 0f));
+        var tally = executor.Review(s, ledger, new FakeReconHost(), new MoveTracker(), false);
+        AssertEqual(1, tally.Rows.Count, "the new reason is a row");
+        AssertContains(tally.Rows[0], "state=Assigned reason=main-axis", "with the state it kept");
     }
 
     private static void ReconTallyCountsWhatTheExecutorDid()
@@ -687,12 +726,17 @@ internal static class ReconExecutorTests
 
     private static void Resync(ReconMissionLedger ledger, CampaignSnapshot s, params (ReconKind kind, int id, float x, float z)[] missions)
     {
+        Resync(ledger, s, "test", missions);
+    }
+
+    private static void Resync(ReconMissionLedger ledger, CampaignSnapshot s, string reason, params (ReconKind kind, int id, float x, float z)[] missions)
+    {
         var tasks = new List<ReconTask>();
         var a = new Allocation { Alliance = 0 };
         int sector = 0;
         foreach (var m in missions)
         {
-            var task = new ReconTask { Kind = m.kind, SectorId = sector++, FromX = m.x, FromZ = m.z, HoldX = m.x, HoldZ = m.z, Priority = 1f, Reason = "test" };
+            var task = new ReconTask { Kind = m.kind, SectorId = sector++, FromX = m.x, FromZ = m.z, HoldX = m.x, HoldZ = m.z, Priority = 1f, Reason = reason };
             tasks.Add(task);
             a.Assignments.Add(new Assignment { InstanceId = m.id, Role = FormationRole.Recon, SectorId = task.SectorId, TargetX = task.HoldX, TargetZ = task.HoldZ, Reason = task.Reason, ReconMissionId = -1 });
         }
