@@ -623,7 +623,7 @@ namespace WhiskeyRealism.Strategic
                     if (paused) break;
                     bool frontChanged = false;
                     if (ready)
-                        d.FrontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, a.Cic));
+                        d.FrontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance));
                     if (frontChanged || _frontChangedDay[alliance] < 0)
                         _frontChangedDay[alliance] = a.LegacySerial;
                     a.FrontChanged = frontChanged;
@@ -644,13 +644,13 @@ namespace WhiskeyRealism.Strategic
                 {
                     a.FormationChanged = false;
                     if (!ready || paused) break;
-                    string formationSource = FormationSourceSignature(alliance, a.Cic);
+                    string formationSource = FormationSourceSignature(alliance);
                     bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) ||
                         StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) ||
                         a.FrontChanged;
                     if (runFormation)
                     {
-                        d.FormationMs += Measure(() => a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Cic, a.Era));
+                        d.FormationMs += Measure(() => a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Era));
                         _formationSourceSignatures[alliance] = formationSource;
                     }
                     break;
@@ -1224,7 +1224,7 @@ namespace WhiskeyRealism.Strategic
 
                 var input = DefenseIntentRuntime.BuildInput(
                     allianceId: alliance,
-                    cic: _work.CICs[alliance],
+                    plannerRuns: ShouldRunPlannerFor(alliance, ResolvePlayerAlliance(), true),
                     era: _work.Eras[alliance],
                     map: _work.CampaignMap,
                     cooldown: _defenseCooldowns[alliance],
@@ -1445,10 +1445,9 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
-        private bool UpdateFrontLedger(int alliance, CIC cic)
+        private bool UpdateFrontLedger(int alliance)
         {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            var ledger = FrontSectorRuntime.BuildForAlliance(alliance, targetObjectiveId);
+            var ledger = FrontSectorRuntime.BuildForAlliance(alliance);
             if (ledger == null)
             {
                 OnceLog.Warning(
@@ -1494,13 +1493,9 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private bool UpdateFormationDirectiveLedger(int alliance, CIC cic, EraStageManager era)
+        private bool UpdateFormationDirectiveLedger(int alliance, EraStageManager era)
         {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            string planTargetAreaKey = null;
-            var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
-            if (targetPosition.HasValue)
-                planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
+            string planTargetAreaKey = PlannerAreaKeys.OfMainTarget(alliance);
 
             var ledger = FormationDirectiveRuntime.BuildForAlliance(alliance, era.Stage, planTargetAreaKey);
             if (ledger == null)
@@ -1623,9 +1618,9 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private string FormationSourceSignature(int alliance, CIC cic)
+        private string FormationSourceSignature(int alliance)
         {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            CampaignPlanStore.TryGetMainTarget(alliance, out int targetObjectiveId, out _, out _);
             return "front=" + (_frontSignatures[alliance] ?? "") +
                 "|target=" + targetObjectiveId +
                 "|defense=" + (_defenseIntentSignatures[alliance] ?? "");

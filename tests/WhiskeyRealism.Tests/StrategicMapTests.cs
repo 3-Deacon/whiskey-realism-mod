@@ -11,6 +11,7 @@ using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -40,7 +41,6 @@ internal static class StrategicMapTests
             ("battle history query rejects outside date window", BattleHistoryQueryRejectsOutsideDateWindow),
             ("theater pressure view sums own and enemy strength per theater", TheaterPressureViewSumsOwnAndEnemyPerTheater),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
-            ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
             ("asset role scorer flags csa blockade port from profile", AssetRoleScorerFlagsCsaBlockadePortFromProfile),
             ("asset role scorer flags union river hub from profile", AssetRoleScorerFlagsUnionRiverHubFromProfile),
@@ -302,54 +302,23 @@ internal static class StrategicMapTests
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()
     {
-        var ledger = ArmyAreaLedger.Build(new[]
-        {
-            new ArmyAreaInput
-            {
-                UnitKey = "anv-main",
-                AllianceId = 1,
-                UnitName = "Army of Northern Virginia",
-                CurrentAreaKey = "VirginiaCapitalCorridor",
-                Strength = 42000f,
-                Readiness = 0.8f
-            },
-            new ArmyAreaInput
-            {
-                UnitKey = "valley",
-                AllianceId = 1,
-                UnitName = "Army of the Valley",
-                CurrentAreaKey = "ShenandoahValley",
-                Strength = 9000f,
-                Readiness = 0.7f
-            },
-            new ArmyAreaInput
-            {
-                UnitKey = "recovering-west",
-                AllianceId = 1,
-                UnitName = "Army of Tennessee",
-                CurrentAreaKey = "VirginiaCapitalCorridor",
-                Strength = 22000f,
-                Readiness = 0.7f
-            }
-        });
+        var allocation = new Allocation { Alliance = 1 };
+        allocation.Assignments.Add(new Assignment { InstanceId = 11, Role = FormationRole.MainEffort, SectorId = 3 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 12, Role = FormationRole.Support, SectorId = 3 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 13, Role = FormationRole.Recover, SectorId = 3 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 14, Role = FormationRole.Hold, SectorId = 5 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 15, Role = FormationRole.Recon, SectorId = 5 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 16, Role = FormationRole.DepotBuilder, SectorId = 5 });
+        allocation.Assignments.Add(new Assignment { InstanceId = 17, Role = FormationRole.Reserve, SectorId = -1 });
 
-        var groups = ArmyGroupDoctrine.PlanGroups(ledger, minimumUnitsPerGroup: 2);
+        var groups = ArmyGroupDoctrine.PlanGroups(allocation, minimumUnitsPerGroup: 2);
 
-        AssertEqual(1, groups.Count);
-        AssertEqual("VirginiaCapitalCorridor", groups[0].AreaKey);
-        AssertEqual(2, groups[0].UnitKeys.Count);
-    }
-
-    private static void ArmyGroupDoctrineExposesHistoricalCommanderPreference()
-    {
-        var preference = ArmyGroupDoctrine.ResolveCommanderPreference(1, "VirginiaCapitalCorridor");
-
-        AssertEqual("Lee", preference.PreferredLastNames[0]);
-        AssertTrue(preference.PreferredLastNames.Contains("Johnston"), "expected Johnston fallback");
-
-        var northwest = ArmyGroupDoctrine.ResolveCommanderPreference(1, "NorthwestVirginia");
-        AssertEqual("Garnett", northwest.PreferredLastNames[0]);
-        AssertTrue(northwest.PreferredLastNames.Contains("Porterfield"), "expected Porterfield fallback");
+        AssertEqual(1, groups.Count, "sector 5 holds one groupable formation (recon and builder are tasked singly), -1 is no sector");
+        AssertEqual(3, groups[0].SectorId);
+        AssertEqual(2, groups[0].InstanceIds.Count, "the recovering formation stays out");
+        AssertTrue(groups[0].InstanceIds.Contains(11) && groups[0].InstanceIds.Contains(12), "main effort and support of the sector");
+        AssertEqual(0, ArmyGroupDoctrine.PlanGroups(null).Count, "no allocation, no groups");
+        AssertEqual(0, ArmyGroupDoctrine.PlanGroups(allocation, minimumUnitsPerGroup: 1).Count, "a group below two is no group");
     }
 
     private static void UnionEarlyProfileFavorsBlockadeAndRiver()

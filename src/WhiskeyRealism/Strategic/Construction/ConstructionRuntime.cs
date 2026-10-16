@@ -95,7 +95,7 @@ namespace WhiskeyRealism.Strategic.Construction
                     input.LowSupplyFormationCount = formation.Pressure.LowSupplyCount;
                     input.LowAmmoFormationCount = formation.Pressure.LowAmmoCount;
                     input.FormationCount = formation.Assignments != null ? formation.Assignments.Count : 0;
-                    // Area key (ArmyAreaClassifier), kept separate from the fiscal Theater name.
+                    // Area key (PlannerAreaKeys), kept separate from the fiscal Theater name.
                     if (!string.IsNullOrEmpty(formation.Pressure.TopSupplyAreaKey))
                         input.TopSupplyAreaKey = formation.Pressure.TopSupplyAreaKey;
                 }
@@ -351,7 +351,7 @@ namespace WhiskeyRealism.Strategic.Construction
                 input.TopSupplyTheater,
                 input.TopSupplyAreaKey,
                 TheaterFromPosition(position),
-                ArmyAreaClassifier.FromPosition(position.x, position.z));
+                PlannerAreaKeys.At(input.AllianceId, position.x, position.z));
         }
 
         private static bool RailroadVanillaValid(object railroad, int alliance)

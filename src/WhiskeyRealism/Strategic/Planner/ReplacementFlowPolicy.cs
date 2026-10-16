@@ -42,16 +42,11 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool TryMainTarget(TheaterPlan plan, out float targetX, out float targetZ)
         {
             targetX = targetZ = 0f;
-            if (plan == null || plan.MainSectorId < 0) return false;
-            for (int k = 0; k < plan.Sectors.Count; k++)
-            {
-                var sector = plan.Sectors[k];
-                if (sector == null || sector.SectorId != plan.MainSectorId) continue;
-                targetX = sector.TargetX;
-                targetZ = sector.TargetZ;
-                return true;
-            }
-            return false;
+            var sector = plan?.SectorById(plan.MainSectorId);
+            if (sector == null) return false;
+            targetX = sector.TargetX;
+            targetZ = sector.TargetZ;
+            return true;
         }
 
         // Steer only for a plan with a main effort, an army believed at its target and a shortfall of at

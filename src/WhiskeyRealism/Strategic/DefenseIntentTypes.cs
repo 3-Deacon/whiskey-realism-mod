@@ -23,7 +23,6 @@ namespace WhiskeyRealism.Strategic
         public int UnitInstanceId;
         public string UnitKey;
         public string UnitName;
-        public string AreaKey;
         public string SectorKey;
         public float X;
         public float Z;

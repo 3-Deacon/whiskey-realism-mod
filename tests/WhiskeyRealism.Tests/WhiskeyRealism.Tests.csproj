@@ -78,6 +78,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerEligibility.cs" Link="Planner\PlannerEligibility.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerSettings.cs" Link="Planner\PlannerSettings.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlanTriggers.cs" Link="Planner\PlanTriggers.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerAreaKeys.cs" Link="Planner\PlannerAreaKeys.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyArmyModel.cs" Link="Planner\EnemyArmyModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefReadings.cs" Link="Planner\EnemyBeliefReadings.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderProfiles.cs" Link="Planner\CommanderProfiles.cs" />

@@ -89,6 +89,22 @@ namespace WhiskeyRealism.Strategic.Planner
             return -1;
         }
 
+        // The unit key of a formation's command parent (the D5 rule's ParentInstanceId), null for a root or an
+        // unknown formation. The one place the command hierarchy is read for the directive ledger.
+        public string ParentKeyOf(int instanceId)
+        {
+            for (int i = 0; i < Own.Count; i++)
+            {
+                if (Own[i].InstanceId != instanceId) continue;
+                int parent = Own[i].ParentInstanceId;
+                if (parent < 0) return null;
+                for (int j = 0; j < Own.Count; j++)
+                    if (Own[j].InstanceId == parent) return Own[j].UnitKey;
+                return null;
+            }
+            return null;
+        }
+
         // Sidecar rebinding (G6): a persisted unitKey back to this session's formation.
         public int IndexOfKey(string unitKey)
         {

@@ -36,7 +36,9 @@ namespace WhiskeyRealism.Strategic
 
                 // Own top formations by area once per call (friendly support), and the side's
                 // fog-honest beliefs (G1) for the enemy pressure.
-                var unitsByArea = BuildAreaIndex(allianceId);
+                CampaignPlanStore.TryGetSectors(allianceId, out var sectors);
+                var unitsByArea = BuildAreaIndex(allianceId, sectors);
+                var commandTree = CampaignPlannerRuntime.SnapshotOf(allianceId);
                 var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
 
                 var snapshots = new List<FormationSnapshot>();
@@ -44,7 +46,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     var unit = ownUnits[i];
                     if (unit == null) continue;
-                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea, beliefs);
+                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea, beliefs, sectors, commandTree);
                     if (snapshot != null)
                     {
                         snapshot.IsPlanTargetArea = !string.IsNullOrEmpty(planTargetAreaKey) &&
@@ -77,7 +79,7 @@ namespace WhiskeyRealism.Strategic
         // Builds a Dictionary<areaKey, List<Regiment>> over this alliance's top-formation top-units
         // only (own side: the enemy enters only as beliefs, G1). Used to turn the O(n²)
         // PopulateLocalPressure friendly-support scan into an O(bucket) scan.
-        private static Dictionary<string, List<Regiment>> BuildAreaIndex(int allianceId)
+        private static Dictionary<string, List<Regiment>> BuildAreaIndex(int allianceId, SectorModel sectors)
         {
             var index = new Dictionary<string, List<Regiment>>(StringComparer.Ordinal);
             try
@@ -88,7 +90,7 @@ namespace WhiskeyRealism.Strategic
                     var u = BattleUnits.campaignunitlist[i];
                     if (u == null || u.alliance != allianceId) continue;
                     if (!IsTopFormation(u)) continue;
-                    string key = ArmyAreaRuntime.AreaKey(u.transform.position);
+                    string key = PlannerAreaKeys.At(sectors, u.transform.position.x, u.transform.position.z);
                     if (!index.TryGetValue(key, out var bucket))
                     {
                         bucket = new List<Regiment>();
@@ -105,7 +107,7 @@ namespace WhiskeyRealism.Strategic
         }
 
         internal static FormationSnapshot SnapshotUnit(int allianceId, Regiment unit, bool grandArmyStructure,
-            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs)
+            Dictionary<string, List<Regiment>> unitsByArea, IReadOnlyList<EnemyBelief> beliefs, SectorModel sectors, CampaignSnapshot commandTree)
         {
             try
             {
@@ -115,7 +117,7 @@ namespace WhiskeyRealism.Strategic
                 var snapshot = new FormationSnapshot
                 {
                     UnitKey = UnitKey(unit),
-                    ParentUnitKey = ParentUnitKey(unit),
+                    ParentUnitKey = commandTree?.ParentKeyOf(((UnityEngine.Object)unit).GetInstanceID()),
                     AllianceId = allianceId,
                     StableUnitId = ((UnityEngine.Object)unit).GetInstanceID(),
                     UnitName = ((UnityEngine.Object)unit).name,
@@ -141,7 +143,7 @@ namespace WhiskeyRealism.Strategic
                     HasActivePath = unit.regimentpaths > 0
                 };
 
-                snapshot.AreaKey = ArmyAreaRuntime.AreaKey(unit.transform.position);
+                snapshot.AreaKey = PlannerAreaKeys.At(sectors, unit.transform.position.x, unit.transform.position.z);
                 snapshot.SectorKey = FrontSectorRuntime.SectorKey(unit.transform.position);
                 PopulateFrontContext(allianceId, snapshot);
 
@@ -297,25 +299,6 @@ namespace WhiskeyRealism.Strategic
                    unit.garrisonreference == null &&
                    unit.unittyp >= 14 &&
                    unit.unittyp <= 16;
-        }
-
-        // Uses Unity hierarchy (canonical) — parentregiment GameObject field is not needed.
-        private static string ParentUnitKey(Regiment unit)
-        {
-            try
-            {
-                if (unit == null) return null;
-                if (unit.transform.parent != null)
-                {
-                    var parent = unit.transform.parent.GetComponent<Regiment>();
-                    if (parent != null) return UnitKey(parent);
-                }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:parent", "[FormationDirective] parent lookup failed: " + ex.Message);
-            }
-            return null;
         }
 
         private static string UnitKey(Regiment unit)

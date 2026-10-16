@@ -175,6 +175,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 var force = s.Own[m.Force];
                 var profile = ProfileOf(inputs, m.Force);
                 plan.MainObjectiveId = m.ObjectiveId;
+                plan.MainObjectiveX = m.X;
+                plan.MainObjectiveZ = m.Z;
                 plan.MainSectorId = m.SectorId;
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;

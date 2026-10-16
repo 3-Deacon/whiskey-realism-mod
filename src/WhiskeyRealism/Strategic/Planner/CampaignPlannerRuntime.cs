@@ -200,6 +200,14 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
+        // The alliance's snapshot of today's review (the directive ledger reads the command hierarchy from it,
+        // ParentKeyOf); null before the first review, with the planner flag off, or when today's Plan job did not build one.
+        internal static CampaignSnapshot SnapshotOf(int alliance)
+        {
+            if (alliance < 0 || alliance >= Snapshots.Length) return null;
+            return PlanFreshness.IsToday(Snapshots[alliance].DaySerial) ? Snapshots[alliance] : null;
+        }
+
         // G1b recon mission aging (plan § G1b, ReconMissionLedger.OnReview): the missions' transitions from
         // today's snapshot, before the plan. Bookkeeping, so it also runs on a paused day and while the flag
         // is off (missions then drain: the sync below clears what no task holds). The recall point reads the

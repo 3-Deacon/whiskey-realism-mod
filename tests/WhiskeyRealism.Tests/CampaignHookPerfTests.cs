@@ -177,7 +177,6 @@ internal static class CampaignHookPerfTests
             AllianceId = seed % 2,
             StableUnitId = id,
             Level = (FormationLevel)(seed % 3),
-            AreaKey = "area-" + seed,
             SectorKey = "sector-" + seed,
             X = seed * 1.5f,
             Z = seed * -2.25f,

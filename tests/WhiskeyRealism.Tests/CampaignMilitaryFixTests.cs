@@ -14,9 +14,8 @@ internal static class CampaignMilitaryFixTests
         ArmyGroupManagementRepeatsVanillaGuard();
         CommanderNameMatchDisambiguatesHistoricalSurnames();
         CommanderNameMatchFallsBackToExactSurname();
-        ArmyGroupCommanderEligibilityMirrorsVanilla();
         ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange();
-        ArmyGroupAppointsOnlyOnGroupHoldingPlanUnits();
+        ArmyGroupFullOwnGroupTakesNoMore();
         StalePreviousCommandIsRefilledNotOrphaned();
         SuccessionReseatsReplacementsOldArmyGroup();
         CapitalNeedMatchesVanillaFormula();
@@ -128,18 +127,6 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a commander name match falls back to exact surname token");
     }
 
-    // FindPreferredCommander must use vanilla Commander.CanBePickedForAIReplacement
-    // (decompile 60748: alliance, IsAvailable, not serving under player, not
-    // staff, not already army-group commander, not CIC) and skip the W&L avatar.
-    private static void ArmyGroupCommanderEligibilityMirrorsVanilla()
-    {
-        TestHarness.AssertTrue(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, true), "vanilla-pickable, commands a member unit");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(false, false, true), "vanilla says not pickable");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, true, true), "W&L chosen commander");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.IsEligibleArmyGroupCommander(true, false, false), "commands an unrelated formation");
-        LogPass("c2a army group commander eligibility mirrors vanilla replacement filter");
-    }
-
     // vanilla GetArmyGroupInRange (75631) skips the W&L player's group; capacity
     // (CanAddFurtherUnits 75770) gates attaching only.
     private static void ArmyGroupAcceptsUnitsMirrorsGetArmyGroupInRange()
@@ -150,25 +137,21 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a army group player exclusion mirrors GetArmyGroupInRange");
     }
 
-    // M3: the group the plan's units attach to and the group whose commander is
-    // changed are different questions. A full own group must not divert the
-    // appointment onto an unrelated group found in range.
-    private static void ArmyGroupAppointsOnlyOnGroupHoldingPlanUnits()
+    // The sector's formations join the army group already holding one of them while it has room; a full own
+    // group takes no more and nothing else is done (the planner's appointment executor owns commanders), and a
+    // group in range of the sector never takes over from a full own group.
+    private static void ArmyGroupFullOwnGroupTakesNoMore()
     {
-        TestHarness.AssertEqual(ArmyGroupPlanAction.AppointOwnOnly,
+        TestHarness.AssertEqual(ArmyGroupPlanAction.None,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(ownGroupFound: true, ownGroupHasRoom: false, areaGroupFound: true),
-            "full own group + unrelated group in range -> appoint on own group only");
+            "full own group + unrelated group in range -> nothing");
         TestHarness.AssertEqual(ArmyGroupPlanAction.AttachToOwn,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(true, true, true), "own group with room");
         TestHarness.AssertEqual(ArmyGroupPlanAction.AttachToArea,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(false, false, true), "no own group -> join area group");
         TestHarness.AssertEqual(ArmyGroupPlanAction.CreateNew,
             ArmyGroupDoctrine.ResolveArmyGroupPlanAction(false, false, false), "nothing in range -> create");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AttachToArea, 0), "area group with none of our units attached -> no appointment");
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AttachToArea, 1), "area group now holds a plan unit");
-        TestHarness.AssertTrue(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.AppointOwnOnly, 0), "own group holds plan units");
-        TestHarness.AssertFalse(ArmyGroupDoctrine.ShouldAppointAfter(ArmyGroupPlanAction.None, 0), "no action");
-        LogPass("c2a army group appoints only on a group holding plan units");
+        LogPass("c2a army group: a full own group takes no more and nothing else");
     }
 
     // CommanderAssignmentPreviousCommandPatch set prior.commander = -1, leaving a

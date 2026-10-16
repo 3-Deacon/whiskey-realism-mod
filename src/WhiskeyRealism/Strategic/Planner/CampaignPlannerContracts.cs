@@ -304,6 +304,10 @@ namespace WhiskeyRealism.Strategic.Planner
         public int DaySerial;
         public int MainSectorId = -1;
         public int MainObjectiveId = -1;
+        // The main candidate's target (ObjectiveRecord.X/Z): the objective's position for readers outside
+        // the planner (the front ledger's target theater, the formation directives' target area). Not the
+        // clamped frontier point of SectorPlan.TargetX/Z.
+        public float MainObjectiveX, MainObjectiveZ;
         public float MainRequiredRatio;
         public List<SectorPlan> Sectors = new List<SectorPlan>();
         public float CapitalFloorStrength;
@@ -319,6 +323,15 @@ namespace WhiskeyRealism.Strategic.Planner
         // weighted, within the relocation range of the objective itself, not of the clamped frontier point
         // in SectorPlan.TargetX/Z): G4's reserve split keeps the odds it judged.
         public float MainEnemyStrength;
+
+        // The plan's sector with this id, null for none (-1 included).
+        public SectorPlan SectorById(int sectorId)
+        {
+            if (sectorId < 0) return null;
+            for (int i = 0; i < Sectors.Count; i++)
+                if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
+            return null;
+        }
     }
 
     public struct CommanderProfile

@@ -157,7 +157,7 @@ namespace WhiskeyRealism.Strategic.Construction
 namespace WhiskeyRealism.Strategic.Construction
 {
     // Fiscal supply priority is a Theater name (FrontSector.Theater); formation
-    // pressure is an ArmyAreaClassifier key. Compare each with its own kind.
+    // pressure is a PlannerAreaKeys key. Compare each with its own kind.
     public static class ConstructionSupplyCorridor
     {
         public static bool Matches(string topTheater, string topAreaKey, Theater siteTheater, string siteAreaKey)

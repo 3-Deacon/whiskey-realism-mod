@@ -1,79 +1,46 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Strategic.Planner;
 
 namespace WhiskeyRealism.Strategic
 {
+    // One planner sector's top formations the patch should hold in one army group.
     public sealed class ArmyGroupPlan
     {
-        public string AreaKey;
-        public List<string> UnitKeys = new List<string>();
+        public int SectorId;
+        public List<int> InstanceIds = new List<int>();
     }
 
-    public sealed class ArmyGroupCommanderPreference
-    {
-        public int AllianceId;
-        public string AreaKey;
-        public List<string> PreferredLastNames = new List<string>();
-    }
-
-    public enum ArmyGroupPlanAction { None, AttachToOwn, AppointOwnOnly, AttachToArea, CreateNew }
+    public enum ArmyGroupPlanAction { None, AttachToOwn, AttachToArea, CreateNew }
 
     public static class ArmyGroupDoctrine
     {
-        public static List<ArmyGroupPlan> PlanGroups(ArmyAreaLedger ledger, int minimumUnitsPerGroup = 2)
+        // The allocation's formations grouped by sector: every assignment with a sector except the ones tasked
+        // singly (Recover, Recon, DepotBuilder), a group of at least minimumUnitsPerGroup, in sector order.
+        public static List<ArmyGroupPlan> PlanGroups(Allocation allocation, int minimumUnitsPerGroup = 2)
         {
             var result = new List<ArmyGroupPlan>();
-            if (ledger == null || minimumUnitsPerGroup < 2) return result;
+            if (allocation == null || minimumUnitsPerGroup < 2) return result;
 
-            var byArea = new Dictionary<string, ArmyGroupPlan>(StringComparer.OrdinalIgnoreCase);
-            foreach (var assignment in ledger.Assignments)
+            var bySector = new Dictionary<int, ArmyGroupPlan>();
+            foreach (var assignment in allocation.Assignments)
             {
-                if (assignment == null || assignment.OutOfArea) continue;
-                if (assignment.Behavior == ArmyAreaBehavior.Recover) continue;
-                string area = assignment.Doctrine?.PrimaryAreaKey;
-                if (string.IsNullOrEmpty(area) || area == "Unassigned") continue;
-
-                if (!byArea.TryGetValue(area, out var plan))
+                if (assignment.SectorId < 0) continue;
+                if (assignment.Role == FormationRole.Recover || assignment.Role == FormationRole.Recon || assignment.Role == FormationRole.DepotBuilder) continue;
+                if (!bySector.TryGetValue(assignment.SectorId, out var plan))
                 {
-                    plan = new ArmyGroupPlan { AreaKey = area };
-                    byArea[area] = plan;
+                    plan = new ArmyGroupPlan { SectorId = assignment.SectorId };
+                    bySector[assignment.SectorId] = plan;
                 }
-                plan.UnitKeys.Add(assignment.UnitKey);
+                plan.InstanceIds.Add(assignment.InstanceId);
             }
 
-            foreach (var plan in byArea.Values)
-                if (plan.UnitKeys.Count >= minimumUnitsPerGroup)
+            foreach (var plan in bySector.Values)
+                if (plan.InstanceIds.Count >= minimumUnitsPerGroup)
                     result.Add(plan);
 
-            result.Sort((a, b) => string.CompareOrdinal(a.AreaKey, b.AreaKey));
+            result.Sort((a, b) => a.SectorId.CompareTo(b.SectorId));
             return result;
-        }
-
-        public static ArmyGroupCommanderPreference ResolveCommanderPreference(int allianceId, string areaKey)
-        {
-            var preference = new ArmyGroupCommanderPreference
-            {
-                AllianceId = allianceId,
-                AreaKey = areaKey
-            };
-
-            switch ((allianceId == 1 ? "csa:" : "union:") + (areaKey ?? string.Empty))
-            {
-                case "csa:VirginiaCapitalCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "Lee", "Johnston", "Beauregard", "Longstreet" });
-                    break;
-                case "csa:NorthwestVirginia":
-                    preference.PreferredLastNames.AddRange(new[] { "Garnett", "Porterfield", "Lee" });
-                    break;
-                case "union:VirginiaCapitalCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "McClellan", "Meade", "Grant", "Hooker" });
-                    break;
-                case "union:OhioValley":
-                    preference.PreferredLastNames.AddRange(new[] { "McClellan", "Rosecrans", "Buell" });
-                    break;
-            }
-
-            return preference;
         }
 
         // Repeat of vanilla CheckArmyGroupManagement's early return (decompile
@@ -143,16 +110,6 @@ namespace WhiskeyRealism.Strategic
             return string.Join(" ", parts);
         }
 
-        // vanillaCanBePicked = Commander.CanBePickedForAIReplacement(alliance,
-        // includeofficerswithcommand: true) (decompile 60748): same alliance,
-        // IsAvailable (alive / not captured / not wounded), not serving under the
-        // W&L player, not on a staff, not already an army-group commander, not
-        // the alliance CIC. The W&L avatar is excluded explicitly too.
-        public static bool IsEligibleArmyGroupCommander(bool vanillaCanBePicked, bool isWlChosenCommander, bool commandsMemberOrNothing)
-        {
-            return vanillaCanBePicked && !isWlChosenCommander && commandsMemberOrNothing;
-        }
-
         // vanilla ArmyGroup.GetArmyGroupInRange (75631) never offers the W&L
         // player's own group; the patch neither attaches to it nor re-commands it.
         public static bool IsPlayerArmyGroup(bool wlScenarioActive, int groupCommanderId, int chosenCommanderId)
@@ -160,31 +117,14 @@ namespace WhiskeyRealism.Strategic
             return wlScenarioActive && groupCommanderId == chosenCommanderId;
         }
 
-        // "Which group do the plan's units attach to" and "which group's commander
-        // changes" are separate: the commander changes only on a group that holds
-        // at least one plan unit. A full own group (CanAddFurtherUnits false,
-        // 75770) gets no new units but keeps the appointment; capacity never
-        // diverts the appointment onto an unrelated group found in range.
+        // Which group the sector's formations join: the army group already holding one of them (while it has room),
+        // else one in range of the sector, else a new one. A full own group takes no more (CanAddFurtherUnits, 75770)
+        // and nothing else is done for the sector: appointing its commander belongs to the appointment executor.
         public static ArmyGroupPlanAction ResolveArmyGroupPlanAction(bool ownGroupFound, bool ownGroupHasRoom, bool areaGroupFound)
         {
             if (ownGroupFound)
-                return ownGroupHasRoom ? ArmyGroupPlanAction.AttachToOwn : ArmyGroupPlanAction.AppointOwnOnly;
+                return ownGroupHasRoom ? ArmyGroupPlanAction.AttachToOwn : ArmyGroupPlanAction.None;
             return areaGroupFound ? ArmyGroupPlanAction.AttachToArea : ArmyGroupPlanAction.CreateNew;
-        }
-
-        public static bool ShouldAppointAfter(ArmyGroupPlanAction action, int attachedCount)
-        {
-            switch (action)
-            {
-                case ArmyGroupPlanAction.AttachToOwn:
-                case ArmyGroupPlanAction.AppointOwnOnly:
-                case ArmyGroupPlanAction.CreateNew:
-                    return true;
-                case ArmyGroupPlanAction.AttachToArea:
-                    return attachedCount > 0;
-                default:
-                    return false;
-            }
         }
     }
 }

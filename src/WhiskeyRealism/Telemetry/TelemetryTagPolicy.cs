@@ -137,6 +137,7 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("FormationDirective", TelemetryCategory.State);
             AddCampaign("FrontLedger", TelemetryCategory.State);
             AddCampaign("ArmyArea", TelemetryCategory.State);
+            AddCampaign("ArmyGroup", TelemetryCategory.Write);
             AddCampaign("CampaignMap", TelemetryCategory.State);
             AddCampaign("CampaignPace", TelemetryCategory.State);
             AddCampaign("CollapseRisk", TelemetryCategory.State);
