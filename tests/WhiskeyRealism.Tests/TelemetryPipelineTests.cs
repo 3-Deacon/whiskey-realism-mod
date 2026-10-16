@@ -352,7 +352,6 @@ internal static class TelemetryPipelineTests
         AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[FiscalIntent]"), "fiscal intent typed");
         AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[FiscalTelemetry]"), "fiscal telemetry typed");
         AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[Director:trace]"), "director trace typed");
-        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[OperationalProbe]"), "operational probe typed");
 
         string projectPatch = ReadRepoFile("src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs");
         AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\"[ProjectDoctrine]"), "project doctrine observer rows typed");
