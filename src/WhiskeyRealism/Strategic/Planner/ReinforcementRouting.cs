@@ -61,10 +61,11 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // CheckTransferOfUnits (17232): the worst shortfall (first of Allocation.Shortfalls whose need
-        // is positive) as the deficit and the largest surplus formation vanilla may take from. A source
-        // is dropped when it is not the planner's to move (!MayMove), is in transit (a marching corps does not donate), is the deficit itself, or is held
-        // as MainEffort or CapitalGuard (the allocator never lists those; the check keeps a stale list
-        // from draining the front).
+        // is positive) as the deficit and the largest surplus formation vanilla may take from. A source is
+        // dropped when it is the deficit itself, has no assignment, or is protected by the donor-reach rule
+        // below, which tests the source by the same predicate as its neighbours (so a source that is held as
+        // the main effort or a capital guard, is in transit or fails WlChainRules.MayMove is dropped: the
+        // allocator never lists those, and the check keeps a stale list from draining the front).
         //
         // The source POINT is what vanilla reads, and vanilla picks its donor from the point, not from our
         // formation: GrabOwnTopUnitsNearPosition (12824, called with no range at 17284) takes every ownunits
@@ -98,11 +99,8 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 int index = IndexOf(own, allocation.Surpluses[k]);
                 if (index < 0 || index == deficit) continue;
-                var f = own[index];
-                if (!WlChainRules.MayMove(f.Chain) || !(f.Strength > 0f)) continue;
-                if ((f.Flags & FormationFlags.InTransfer) != 0) continue; // a marching corps does not donate
-                if (!allocation.TryGet(f.InstanceId, out var assignment)) continue;
-                if (assignment.Role == FormationRole.MainEffort || assignment.Role == FormationRole.CapitalGuard) continue;
+                if (!(own[index].Strength > 0f)) continue;
+                if (!allocation.TryGet(own[index].InstanceId, out _)) continue;
                 if (ProtectedFormationWithinDonorReach(allocation, own, index, donorRadius)) continue;
                 source = index;
             }
@@ -121,23 +119,30 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // True when a formation vanilla's donor pick must not reach stands within donorRadius (XZ) of the
-        // source formation's point (the source itself excluded: it is a listed surplus, movable, not marching and not the
-        // front, all checked before this call, so the exclusion is defence in depth).
+        // source formation's point. The source itself is among the formations tested (distance 0), by the same
+        // predicate as its neighbours: that is what makes a surplus that is itself in transit, held as the main
+        // effort or a capital guard, or failing WlChainRules.MayMove never a source (a marching corps does not
+        // donate), while a withheld Reserve is no obstacle to itself or to another Reserve because
+        // Allocation.Surpluses lists it.
         private static bool ProtectedFormationWithinDonorReach(Allocation allocation, IReadOnlyList<FormationRecord> own, int sourceIndex, float donorRadius)
         {
             float radiusSq = donorRadius * donorRadius;
             var source = own[sourceIndex];
             for (int i = 0; i < own.Count; i++)
             {
-                if (i == sourceIndex) continue;
                 var f = own[i];
                 if (ReserveRules.DistanceSq(f.X, f.Z, source.X, source.Z) > radiusSq) continue;
-                if (!WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.InTransfer) != 0) return true;
-                if (!allocation.TryGet(f.InstanceId, out var assignment)) continue;
-                if (assignment.Role == FormationRole.MainEffort) return true;
-                if (assignment.Withheld && !allocation.Surpluses.Contains(f.InstanceId)) return true;
+                if (IsProtectedFromDonation(allocation, f)) return true;
             }
             return false;
+        }
+
+        private static bool IsProtectedFromDonation(Allocation allocation, in FormationRecord f)
+        {
+            if (!WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.InTransfer) != 0) return true;
+            if (!allocation.TryGet(f.InstanceId, out var assignment)) return false;
+            if (assignment.Role == FormationRole.MainEffort || assignment.Role == FormationRole.CapitalGuard) return true;
+            return assignment.Withheld && !allocation.Surpluses.Contains(f.InstanceId);
         }
 
         // The strength a Shortfall carrier is short of, by the need the allocator reported it for

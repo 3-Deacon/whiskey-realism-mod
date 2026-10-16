@@ -519,12 +519,32 @@ internal static class CapitalAndReplacementTests
 
         // Withheld non-surplus formations (a capital guard), formations in transit, and formations the planner may not move block too.
         var guard = Corps(3, 300f, 5000f);
-        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.CapitalGuard, true)), Own(guard)), "a withheld capital guard in reach blocks");
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.CapitalGuard, true)), Own(guard)), "a capital guard in reach blocks");
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.CapitalGuard, false)), Own(guard)), "...whether or not it is marked withheld");
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Recon, true)), Own(guard)), "a withheld formation of any other role in reach blocks");
         var transit = Corps(3, 300f, 5000f);
         transit.Flags |= FormationFlags.InTransfer;
         AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Support, false)), Own(transit)), "a formation in transit in reach blocks");
         var playerGroup = WithChain(Corps(3, 300f, 5000f), WlChainClass.PlayerMapGroup);
         AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (3, FormationRole.Hold, false)), Own(playerGroup)), "the map-group player's group in reach blocks");
+
+        // A source is judged by the same predicate as its neighbours: a stale surplus list naming the front, a capital guard
+        // (marked withheld or not), an unallocated formation or an empty one yields no pair, with nothing else near.
+        foreach (var role in new[] { FormationRole.MainEffort, FormationRole.CapitalGuard })
+        {
+            var stale = Alloc((7, role, false));
+            stale.Surpluses.Remove(8);
+            AssertEqual(-1, PairSource(plan0, stale, Own()), role + " named as the only surplus is never a source");
+        }
+        var unallocated = Alloc();
+        unallocated.Surpluses.Clear();
+        unallocated.Surpluses.Add(7); // formation 7 has no assignment
+        AssertEqual(-1, PairSource(plan0, unallocated, Own()), "a surplus with no assignment is never a source");
+        var empty = Own();
+        empty[1] = Corps(7, 250f, 0f);
+        var emptyAllocation = Alloc((7, FormationRole.Reserve, true));
+        emptyAllocation.Surpluses.Remove(8);
+        AssertEqual(-1, PairSource(plan0, emptyAllocation, empty), "a surplus with no strength is never a source");
 
         // A withheld Reserve is itself a surplus, and a plain Support corps is no front: neither blocks.
         var otherReserve = Corps(3, 300f, 5000f);
