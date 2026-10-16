@@ -395,47 +395,15 @@ namespace WhiskeyRealism.Strategic
                 }
             }
 
-            // Handle critical-front candidates: suppress normally unless decisive + no
-            // adequate package without them.
-            bool needsCritical = scale == ThreatScale.DecisiveLanding && !pkgResult.Adequate;
+            // Critical-front candidates were set aside only below a decisive landing (a decisive
+            // one admits them to the normal pool above), so each is suppressed here.
             foreach (var cf in criticalFront)
             {
-                if (needsCritical)
+                preSuppressed.Add(new DefenseSuppression
                 {
-                    // Add to normal pool and re-run aggregator.
-                    normalPool.Add(cf);
-                    // We don't add a suppression record for this candidate.
-                }
-                else
-                {
-                    preSuppressed.Add(new DefenseSuppression
-                    {
-                        UnitInstanceId = cf.UnitInstanceId,
-                        Reason = "critical-front"
-                    });
-                }
-            }
-
-            // Re-run aggregator if any critical-front candidates were admitted.
-            if (needsCritical && criticalFront.Count > 0)
-            {
-                pkgResult = DefensePackageAggregator.Select(
-                    normalPool,
-                    desired,
-                    caution,
-                    aggression,
-                    packageCap,
-                    "capital-defense-cap",
-                    heldStrength: held);
-                // Re-check escalation reason.
-                foreach (var c in pkgResult.SelectedPackage)
-                {
-                    if (c.Tier == CandidateTier.AdjacentTheater || c.Tier == CandidateTier.CrossMap)
-                    {
-                        escalationReason = "cross-theater";
-                        break;
-                    }
-                }
+                    UnitInstanceId = cf.UnitInstanceId,
+                    Reason = "critical-front"
+                });
             }
 
             // Determine response radius.

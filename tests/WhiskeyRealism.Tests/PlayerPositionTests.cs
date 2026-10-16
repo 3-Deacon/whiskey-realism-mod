@@ -34,7 +34,7 @@ internal static class PlayerPositionTests
             ("player position: a recovered threat does not take the corps", RecoveredThreatDoesNotTakeCorps),
             ("player position: an asset a threat already answers takes no cover", AssetAnsweredByThreatTakesNoCover),
             ("player position: guard asset covered by position needs no guard budget", GuardCoveredByPositionNeedsNoBudget),
-            ("player position: critical-front rerun keeps the held strength", CriticalFrontRerunKeepsHeld),
+            ("player position: decisive landing counts held strength alongside its critical-front unit", DecisiveLandingCountsHeldWithCriticalFront),
         });
     }
 
@@ -309,12 +309,11 @@ internal static class PlayerPositionTests
         AssertTrue(uncovered.Understrength, "understrength");
     }
 
-    private static void CriticalFrontRerunKeepsHeld()
+    private static void DecisiveLandingCountsHeldWithCriticalFront()
     {
-        // Decisive landing, desired 18000 (adequate at 13500). The corps holds 6000; the normal
-        // pool adds 3000 (short), so the critical-front unit is admitted and the aggregator reruns.
-        // The rerun must still count the held 6000: 6000 + 3000 + the critical unit is adequate;
-        // without it the response would read understrength.
+        // Decisive landing, desired 18000 (adequate at 13500). A decisive landing admits the
+        // critical-front unit to the one aggregator pass. The corps holds 6000, the pool offers
+        // 3000 + 8000: adequate only if the held 6000 counts (11000 alone is short).
         var threat = Threat(30, ThreatX, strength: 8000f);
         var input = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 200000f, HoldCoverRadius = Radius };
         input.Threats.Add(threat);
@@ -327,7 +326,7 @@ internal static class PlayerPositionTests
         AssertEqual(ThreatScale.DecisiveLanding, response.Threat.Scale, "decisive");
         AssertNear(6000f, response.HeldStrength, 0.01f, "held");
         AssertTrue(response.SelectedPackage.Exists(c => c.UnitInstanceId == 3), "the critical-front unit was admitted");
-        AssertTrue(response.Adequate, "held strength still counts after the critical-front rerun");
+        AssertTrue(response.Adequate, "held strength counts toward the decisive landing");
     }
 
     // ------------------------------------------------------------------ fixtures
