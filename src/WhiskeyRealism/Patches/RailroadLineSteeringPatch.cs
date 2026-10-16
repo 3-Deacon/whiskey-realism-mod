@@ -26,7 +26,9 @@ namespace WhiskeyRealism.Patches
     // touches only its own line, so each line's state at its roll equals its state at entry); a success on an eligible line starts
     // exactly one eligible line not yet started in this call, the highest-scored (RailLineSteering.Choose; RailLineScorer by the
     // line's endpoints) and the rolled line itself when none scores higher; a success on an ineligible line starts nothing. Every
-    // started line is one vanilla could have started. StartConstruction draws no random number (77833-77845), so drawing first and
+    // started line is one vanilla could have started. StartConstruction draws no random number: its body (77833-77845) and what it
+    // calls, ConstructionSymbol.UpdateCampaignIcon(forcehiding: true) (188262-188359, which returns at its first statement for a
+    // railroad's symbol) and the panel hide it reaches (HidePanel 207853-207891), were read and none draws one, so drawing first and
     // starting afterwards leaves vanilla's stream and its starts unchanged.
     //
     // Vanilla runs (Prefix returns true) for the player's alliance outside ai_vs_ai, for alliance >= 2, for the W&L commander-in-chief
