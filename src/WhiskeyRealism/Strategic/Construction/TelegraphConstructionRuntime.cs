@@ -274,7 +274,6 @@ namespace WhiskeyRealism.Strategic.Construction
                 TelegraphRange = telegraphRange,
                 ActualSupportRange = actualSupportRange,
                 AnchorPosition = anchor,
-                AnchorDistance = anchorDistance,
                 AnchorToSiteDistance = XzDistance(anchor, site),
                 UnitToSiteDistance = XzDistance(unitPosition, site),
                 PlacementMargin = margin,
@@ -1229,7 +1228,6 @@ namespace WhiskeyRealism.Strategic.Construction
             public float TelegraphRange;
             public float ActualSupportRange;
             public Vector3 AnchorPosition;
-            public float AnchorDistance;
             public float AnchorToSiteDistance;
             public float UnitToSiteDistance;
             public float PlacementMargin;

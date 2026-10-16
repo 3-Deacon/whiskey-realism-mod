@@ -37,15 +37,11 @@ namespace WhiskeyRealism.Strategic
 
     public sealed class CampaignMapState
     {
-        public int StateId = -1;
         public string Name;
-        public string Abbrev;
         public Theater Theater = Theater.Unknown;
         public int TownCount;
-        public int CapitalCount;
         public float X;
         public float Z;
-        public float Population;
     }
 
     public enum CampaignMapAssetKind
@@ -186,21 +182,14 @@ namespace WhiskeyRealism.Strategic
         {
             if (!_stateById.TryGetValue(town.StateId, out var state))
             {
-                state = new CampaignMapState
-                {
-                    StateId = town.StateId,
-                    Name = town.StateName,
-                    Abbrev = town.StateAbbrev
-                };
+                state = new CampaignMapState { Name = town.StateName };
                 _stateById.Add(town.StateId, state);
                 _states.Add(state);
             }
 
             state.TownCount++;
-            if (town.IsCapital) state.CapitalCount++;
             state.X += town.X;
             state.Z += town.Z;
-            state.Population += Math.Max(0f, town.RepresentingPopulation);
         }
 
         private void FinalizeStates()

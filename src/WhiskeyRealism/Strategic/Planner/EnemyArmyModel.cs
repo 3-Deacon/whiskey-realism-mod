@@ -484,14 +484,10 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool TryDecide(bool noFog, bool contact, bool sideIsPlayerAlliance, bool ownSideVisible,
                                        bool viewerCovers, bool gridVisible, out DetectionSource source)
         {
-            if (noFog) { source = DetectionSource.NoFog; return true; }
+            if (noFog) { source = DetectionSource.Seen; return true; }
             if (contact) { source = DetectionSource.Contact; return true; }
-            if (sideIsPlayerAlliance)
-            {
-                source = DetectionSource.OwnSideWithinFog;
-                return ownSideVisible;
-            }
-            source = DetectionSource.FogGrid;
+            source = DetectionSource.Seen;
+            if (sideIsPlayerAlliance) return ownSideVisible;
             return viewerCovers && gridVisible;
         }
 

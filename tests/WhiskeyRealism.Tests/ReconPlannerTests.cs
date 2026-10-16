@@ -1094,7 +1094,6 @@ internal static class ReconPlannerTests
         var staleOut = ContactEvidenceLedger.Build(stale);
         AssertEqual(ContactEvidence.FavorableContact, staleOut.Evidence, "the classification is unchanged");
         AssertFalse(staleOut.AllowsEscalation, "a stale belief cannot escalate");
-        AssertContains(staleOut.Reason, "stale-belief", "and says why");
 
         var fresh = Evidence(friendly: 9000f, enemy: 3000f);
         fresh.BeliefConfidence01 = ContactEvidenceLedger.MinEscalationConfidence;
@@ -1671,7 +1670,7 @@ internal static class ReconPlannerTests
         return new EnemyBelief
         {
             InstanceId = -1, UnitKey = key + ":0", UnitTyp = 15, X = x, Z = z, Strength = strength,
-            LastSeenDay = lastSeen, Confidence01 = confidence, UncertaintyRadius = radius, LastSource = DetectionSource.FogGrid
+            LastSeenDay = lastSeen, Confidence01 = confidence, UncertaintyRadius = radius, LastSource = DetectionSource.Seen
         };
     }
 

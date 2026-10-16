@@ -151,7 +151,7 @@ internal static class EnemyArmyModelTests
     }
 
     private static EnemyDetection Seen(string key, int instanceId, float x, float z, float strength,
-                                       int unitTyp = 15, DetectionSource source = DetectionSource.FogGrid,
+                                       int unitTyp = 15, DetectionSource source = DetectionSource.Seen,
                                        EnemyTraits traits = default(EnemyTraits))
     {
         return new EnemyDetection
@@ -190,7 +190,7 @@ internal static class EnemyArmyModelTests
         bool near = ViewerCoverage.Covers(30f, 0f, vx, vz, vr, 1);
         AssertTrue(DetectionRules.NeedsGridProbe(false, false, false, near), "covered: ask the grid");
         AssertTrue(DetectionRules.TryDecide(false, false, false, false, near, gridVisible: true, out var source), "covered and grid-visible");
-        AssertEqual(DetectionSource.FogGrid, source, "FogGrid");
+        AssertEqual(DetectionSource.Seen, source, "a grid sighting is Seen");
         AssertFalse(DetectionRules.TryDecide(false, false, false, false, near, gridVisible: false, out _), "hidden by concealment");
     }
 
@@ -204,7 +204,7 @@ internal static class EnemyArmyModelTests
         AssertEqual(100, b.LastSeenDay, "last seen today");
         AssertNear(10f, b.X, 1e-6f, "x");
         AssertNear(50000f, b.Strength, 1e-6f, "strength");
-        AssertEqual(DetectionSource.FogGrid, b.LastSource, "source");
+        AssertEqual(DetectionSource.Seen, b.LastSource, "source");
     }
 
     private static void UnseenConfidenceHalvesEverySevenDays()
@@ -337,10 +337,10 @@ internal static class EnemyArmyModelTests
     {
         AssertTrue(DetectionRules.TryDecide(noFog: true, contact: false, sideIsPlayerAlliance: false, ownSideVisible: false,
             viewerCovers: false, gridVisible: false, out var source), "fog off: everything seen");
-        AssertEqual(DetectionSource.NoFog, source, "NoFog");
+        AssertEqual(DetectionSource.Seen, source, "fog off is Seen");
         AssertFalse(DetectionRules.NeedsGridProbe(true, false, false, true), "no grid probe with fog off (usefow NRE, 101188)");
         AssertTrue(DetectionRules.TryDecide(true, true, true, false, false, false, out source), "fog off wins over the other rules");
-        AssertEqual(DetectionSource.NoFog, source, "NoFog even in contact");
+        AssertEqual(DetectionSource.Seen, source, "fog off wins over contact: Seen");
     }
 
     private static void ContactAlwaysReveals()
@@ -355,7 +355,7 @@ internal static class EnemyArmyModelTests
     {
         AssertTrue(DetectionRules.TryDecide(false, false, sideIsPlayerAlliance: true, ownSideVisible: true,
             viewerCovers: false, gridVisible: false, out var source), "W&L player's AI side: !iswithinfog");
-        AssertEqual(DetectionSource.OwnSideWithinFog, source, "OwnSideWithinFog");
+        AssertEqual(DetectionSource.Seen, source, "the player-alliance side is Seen");
         AssertFalse(DetectionRules.TryDecide(false, false, true, ownSideVisible: false, viewerCovers: true, gridVisible: true, out _),
             "the player-alliance side never asks fows[1]");
         AssertFalse(DetectionRules.NeedsGridProbe(false, false, true, true), "no grid probe for the player-alliance side");

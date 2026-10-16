@@ -1338,7 +1338,6 @@ namespace WhiskeyRealism.Strategic
             {
                 AllianceId                   = alliance,
                 Year                         = year,
-                Month                        = month,
                 PolicyChapter                = SafePolicyChapter(),
                 OwnNationalMorale            = ownMorale,
                 BreakMoraleTrigger           = breakTrigger,
@@ -1347,8 +1346,7 @@ namespace WhiskeyRealism.Strategic
                 MajorBattlesIn14Days         = majorBattles,
                 CapitalDangerStreakDays       = _work.DirectorMemories[alliance]?.CapitalDangerStreakDays ?? 0,
                 DaysSinceFrontSignatureChange = CampaignResponsivenessSignals.DaysSince(_frontChangedDay[alliance], legacySerial),
-                IsWinter                     = month == 12 || month == 1 || month == 2,
-                TheaterPressure              = TheaterPressureView.From(_work.Fronts[alliance])
+                IsWinter                     = month == 12 || month == 1 || month == 2
             };
         }
 

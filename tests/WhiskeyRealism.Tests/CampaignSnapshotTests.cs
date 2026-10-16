@@ -618,10 +618,8 @@ internal static class CampaignSnapshotTests
         AssertEqual(0, (int)SupplySourceKind.Iip, "Iip");
         AssertEqual(1, (int)SupplySourceKind.Depot, "Depot");
 
-        AssertEqual(0, (int)DetectionSource.FogGrid, "FogGrid");
-        AssertEqual(1, (int)DetectionSource.OwnSideWithinFog, "OwnSideWithinFog");
+        AssertEqual(0, (int)DetectionSource.Seen, "Seen");
         AssertEqual(2, (int)DetectionSource.Contact, "Contact");
-        AssertEqual(3, (int)DetectionSource.NoFog, "NoFog");
         AssertEqual(4, (int)DetectionSource.ObjectiveGarrison, "ObjectiveGarrison");
         AssertEqual(0, (int)default(EnemyTraits), "traits None");
         AssertEqual(1, (int)EnemyTraits.Embarked, "traits Embarked");
@@ -657,7 +655,7 @@ internal static class CampaignSnapshotTests
     // every field's shape compiled and round-tripping.
     private static void ContractRecordsCarryCensusFields()
     {
-        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
+        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.Seen, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
         AssertEqual("Army of Tennessee:40", detection.UnitKey, "detection key");
         AssertEqual(EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, detection.Traits, "detection traits");
 

@@ -72,6 +72,7 @@ internal static class CampaignExecutorTests
             ("ReviewExecuteWiringPinned", ReviewExecuteWiringPinned),
             ("PipelineOrderPinned", PipelineOrderPinned),
             ("PlannerPatchesReadOnlyPublishedState", PlannerPatchesReadOnlyPublishedState),
+            ("PlannerPatchWriteProbeIsCaught", PlannerPatchWriteProbeIsCaught),
             ("ReviewPlanStampsTheClockAndPublishesTheContext", ReviewPlanStampsTheClockAndPublishesTheContext),
             ("TempoWorldReadsVanillasInputs", TempoWorldReadsVanillasInputs),
             ("MoverHostReadsVanillasPublicFacts", MoverHostReadsVanillasPublicFacts),
@@ -1371,9 +1372,34 @@ internal static class CampaignExecutorTests
                 else
                     AssertEqual(allowedMembers[owner], member, name + " uses " + owner + "." + member + ": the read-only accessor is " + owner + "." + allowedMembers[owner]);
             }
+            // A patch that holds a published TheaterPlan, Allocation, SectorModel or ExecutorContext (or one of their records)
+            // changes nothing in it: no assignment, compound assignment, ++/-- or mutating collection call through it.
+            foreach (string published in PublishedTypes)
+            {
+                string write = CensusReceiverTypes.FindWrite(code, "patch:" + name, published);
+                AssertTrue(write == null, name + " writes into a published " + published + ": " + write);
+            }
             files++;
         }
         AssertTrue(files > 100, "the scan covered the Patches folder: " + files);
+    }
+
+    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "SectorPlan", "SectorModel", "ExecutorContext" };
+
+    // Verify G7 probe P13: a patch that writes the published plan must fail the pin.
+    private static void PlannerPatchWriteProbeIsCaught()
+    {
+        const string write = "if (CampaignPlanStore.TryGetPlan(alliance, out var published)) { published.MainObjectiveId = -1; }";
+        AssertTrue(CensusReceiverTypes.FindWrite(write, "w1", "TheaterPlan") != null, "an assignment through a TryGetPlan result");
+        AssertTrue(CensusReceiverTypes.FindWrite("CampaignPlanStore.TryGetPlan(a, out var p); p.Sectors.Add(x);", "w2", "TheaterPlan") != null, "a mutating collection call");
+        AssertTrue(CensusReceiverTypes.FindWrite("CampaignPlanStore.TryGetPlan(a, out var p); p.Sectors[0].Posture = TheaterPosture.Hold;", "w3", "TheaterPlan") != null, "an element write");
+        AssertTrue(CensusReceiverTypes.FindWrite("CampaignPlanStore.TryGetPlan(a, out var p); p.MassStrength += 1f;", "w4", "TheaterPlan") != null, "a compound assignment");
+        AssertTrue(CensusReceiverTypes.FindWrite("CampaignPlanStore.TryGetPlan(a, out var p); float v = p.MassStrength; if (p.MainObjectiveId == 3) return;", "w5", "TheaterPlan") == null,
+            "reads, and comparisons, are not writes");
+        AssertTrue(CensusReceiverTypes.FindWrite("TheaterPlan plan = null; CampaignPlanStore.TryGetPlan(a, out plan); var z = plan.MainObjectiveId;", "w6", "TheaterPlan") == null,
+            "declaring a variable is not a write into it");
+        AssertTrue(CensusReceiverTypes.FindWrite("var other = new Thing(); other.MainObjectiveId = 4;", "w7", "TheaterPlan") == null,
+            "another object's member of the same name is not the plan");
     }
 
     private static void ReviewPlanStampsTheClockAndPublishesTheContext()

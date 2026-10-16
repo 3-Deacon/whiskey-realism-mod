@@ -30,7 +30,6 @@ internal static class StrategicMapTests
             ("battle history query matches inside spatial and date window", BattleHistoryQueryMatchesInsideSpatialAndDateWindow),
             ("battle history query rejects outside spatial window", BattleHistoryQueryRejectsOutsideSpatialWindow),
             ("battle history query rejects outside date window", BattleHistoryQueryRejectsOutsideDateWindow),
-            ("theater pressure view sums own and enemy strength per theater", TheaterPressureViewSumsOwnAndEnemyPerTheater),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
             ("asset role scorer flags csa blockade port from profile", AssetRoleScorerFlagsCsaBlockadePortFromProfile),
@@ -109,24 +108,6 @@ internal static class StrategicMapTests
         var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
             history, new UnityEngine.Vector3(105f, 0f, 105f), 50f, currentDay, withinDays: 7));
         AssertEqual(0, hits.Count, "expected 0 hits beyond date window");
-    }
-
-    private static void TheaterPressureViewSumsOwnAndEnemyPerTheater()
-    {
-        var inputs = new List<FrontSectorInput>
-        {
-            new FrontSectorInput { SectorKey = "RichmondCorridor", Theater = Theater.East, OwnStrength = 8000f, EnemyStrength = 6000f, StrategicImportance = 1f },
-            new FrontSectorInput { SectorKey = "ShenandoahValley", Theater = Theater.East, OwnStrength = 2000f, EnemyStrength = 1000f, StrategicImportance = 0.5f },
-            new FrontSectorInput { SectorKey = "Vicksburg",        Theater = Theater.West, OwnStrength = 4000f, EnemyStrength = 5000f, StrategicImportance = 1f },
-        };
-        var ledger = FrontSectorLedger.Build(inputs);
-
-        var view = TheaterPressureView.From(ledger);
-
-        AssertEqual(10000f, view.OwnStrengthByTheater[Theater.East], "east own");
-        AssertEqual(7000f,  view.EnemyStrengthByTheater[Theater.East], "east enemy");
-        AssertEqual(4000f,  view.OwnStrengthByTheater[Theater.West], "west own");
-        AssertEqual(5000f,  view.EnemyStrengthByTheater[Theater.West], "west enemy");
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()

@@ -58,6 +58,7 @@ internal static class PlannerSidecarTests
             ("RuntimeRebindsOnTheFirstReviewWithFormations", RuntimeRebindsOnTheFirstReviewWithFormations),
             ("RuntimeExportsThePendingRecordsWhenNoReviewRanSinceTheLoad", RuntimeExportsThePendingRecordsWhenNoReviewRanSinceTheLoad),
             ("MigrationLineIsLoggedOnce", MigrationLineIsLoggedOnce),
+            ("OldDetectionSourceValuesLoadAsSeen", OldDetectionSourceValuesLoadAsSeen),
         });
     }
 
@@ -207,6 +208,29 @@ internal static class PlannerSidecarTests
         AssertEqual(812, back.UnreliableLastDay, "and the last day counted");
     }
 
+    // F1 (verify G7): the three provenances FogGrid 0, OwnSideWithinFog 1 and NoFog 3 became one value, Seen. A v3 file written
+    // before that carries any of them in "source"; each must load, as Seen, and 2 and 4 must keep their meaning.
+    private static void OldDetectionSourceValuesLoadAsSeen()
+    {
+        var planner = SamplePlanner();
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(WithPlanner(planner)));
+        var source = new System.Text.RegularExpressions.Regex("\"source\":\\s*4\\b");
+        AssertEqual(1, source.Matches(json).Count, "the sample belief is written with source 4, once");
+        var expected = new (int saved, DetectionSource loaded)[]
+        {
+            (0, DetectionSource.Seen), (1, DetectionSource.Seen), (3, DetectionSource.Seen),
+            (2, DetectionSource.Contact), (4, DetectionSource.ObjectiveGarrison), (99, DetectionSource.Seen)
+        };
+        foreach (var e in expected)
+        {
+            string edited = source.Replace(json, "\"source\": " + e.saved);
+            AssertTrue(SidecarDtoCodec.TryDeserialize(edited, out var dto, out var reason), "deserialize source " + e.saved + ": " + reason);
+            AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out reason), "decode source " + e.saved + ": " + reason);
+            AssertEqual(1, back.Planner[0].Beliefs.Count, "the belief loads with source " + e.saved);
+            AssertEqual(e.loaded, back.Planner[0].Beliefs[0].LastSource, "saved source " + e.saved);
+        }
+    }
+
     private static void V3RoundTripsBeliefsAndAppointments()
     {
         var back = Decoded(SamplePlanner());
@@ -335,7 +359,7 @@ internal static class PlannerSidecarTests
         AssertEqual(-1, model.Beliefs[0].InstanceId, "with no instance id");
         var seen = new List<EnemyDetection>
         {
-            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Source = DetectionSource.FogGrid }
+            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Source = DetectionSource.Seen }
         };
         model.Update(seen, 806, _ => 1f, _ => 0f);
         AssertEqual(1, model.Beliefs.Count, "the next detection under that key is the same army, not a second one");

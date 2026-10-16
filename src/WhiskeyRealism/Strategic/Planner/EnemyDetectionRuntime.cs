@@ -537,7 +537,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         LastSeenDay = day,
                         Confidence01 = 1f,
                         UncertaintyRadius = EnemyArmyModel.SeenRadius,
-                        LastSource = DetectionSource.NoFog,
+                        LastSource = DetectionSource.Seen,
                         Traits = traits,
                         LastEmbarkedDay = (traits & EnemyTraits.Embarked) != 0 ? day : -1
                     });

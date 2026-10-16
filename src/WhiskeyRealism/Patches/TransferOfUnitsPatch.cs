@@ -182,7 +182,7 @@ namespace WhiskeyRealism.Patches
                     sourceSector = FrontSectorRuntime.SectorKey(new Vector3(sourceX, 0f, sourceZ));
                     float strengthToMove = Math.Min(Math.Max(deficitStrength, 1000f), totalOwn * 0.1f);
                     var ledger = StrategicCoordinator.Instance.Fronts[allianceId];
-                    var decision = ledger?.EvaluateTransfer(sourceSector, destinationSector, strengthToMove);
+                    var decision = ledger?.EvaluateTransfer(sourceSector, strengthToMove);
                     if (decision != null)
                     {
                         budgetAction = decision.Action;

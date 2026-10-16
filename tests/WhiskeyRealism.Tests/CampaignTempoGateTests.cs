@@ -808,7 +808,7 @@ internal static class CampaignTempoGateTests
     {
         CampaignPaceInput Input(int chapter, bool winter) => new CampaignPaceInput
         {
-            AllianceId = 0, Year = 1861, Month = 3, PolicyChapter = chapter, OwnNationalMorale = 95f, BreakMoraleTrigger = 30f, MinNationalMoraleSurrender = 18f,
+            AllianceId = 0, Year = 1861, PolicyChapter = chapter, OwnNationalMorale = 95f, BreakMoraleTrigger = 30f, MinNationalMoraleSurrender = 18f,
             BattlesIn14Days = 0, MajorBattlesIn14Days = 0, CapitalDangerStreakDays = 0, DaysSinceFrontSignatureChange = 30, IsWinter = winter
         };
         AssertTrue(CampaignPaceLedger.Build(Input(0, false)).Pace != CampaignPace.TooQuiet, "no battles are possible before 15 Apr 1861 (211642-211656): chapter 0 is not 'too quiet'");

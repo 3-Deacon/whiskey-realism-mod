@@ -11,10 +11,18 @@ using static TestFixtures;
 // members and flags each have a named reader, and the harness proves it.
 //
 // Why a test and not orphan-sweep: orphan-sweep counts a write as a reference, so a member that is only ever assigned
-// passes it. This census asks for a READ: a line of a named reader file, not a comment, that names `.Member` and is not a
-// plain assignment to it (`.Member = ...`; `==`, `+=`, `|=` and passing it on all count as reads). A member with no such
-// line in any file its row names fails the run; the fix is to delete the member or to name a real reader, never to list a
-// member whose row cannot pass.
+// passes it. This census asks for a READ: a line of a named reader file, not a comment, that names `.Member` on a receiver of
+// the member's own type and is not a plain assignment to it (`.Member = ...`; `==`, `+=`, `|=` and passing it on all count as
+// reads). A member with no such line in any file its row names fails the run; the fix is to delete the member or to name a
+// real reader, never to list a member whose row cannot pass.
+//
+// What "a receiver of its own type" means (CensusReceiverTypes, verify G7 F2): an enum value must be read as `Type.Value`;
+// any other member must be read through the type's name or through a variable, field, parameter, foreach variable, `out var`,
+// lambda parameter or `var` local that the file declares (or infers from a declared return type) as that type, or through a
+// member or method declared to return it. There is no compiler here, so the limit is stated: the check works from declarations
+// in the source, it treats one identifier name as one type across a file (it can over-accept a reused name), and a receiver it
+// cannot resolve (the result of an undeclared call chain) is not credited, so such a row names a reader that does resolve.
+// `CensusReadsAreTypeAware` pins it, including the probe that re-pointed `CrossingRecord.X` at a file reading only `AreaRecord.X`.
 //
 // Scope, parsed from source so a member added later without a row turns the harness red: every instance field, auto-property
 // and enum value that is `public` or `internal` in
@@ -36,6 +44,7 @@ internal static class PlannerReadCensusTests
         TestHarness.RunAll(new (string name, Action run)[]
         {
             ("CensusReadMatchIgnoresWritesAndComments", CensusReadMatchIgnoresWritesAndComments),
+            ("CensusReadsAreTypeAware", CensusReadsAreTypeAware),
             ("CensusParserSeesDataMembersOnly", CensusParserSeesDataMembersOnly),
             ("CensusNamesEveryPlannerMember", CensusNamesEveryPlannerMember),
             ("CensusHasNoStaleOrDuplicateRow", CensusHasNoStaleOrDuplicateRow),
@@ -108,6 +117,35 @@ internal static class PlannerReadCensusTests
         AssertTrue(ReadsFlag("if (Plugin.EnableX != null) return;", "EnableX"), "a flag read");
         AssertFalse(ReadsFlag("// Plugin.EnableX", "EnableX"), "a commented flag read is not one");
         AssertFalse(ReadsFlag("var v = Plugin.EnableXY;", "EnableX"), "a longer flag name is another flag");
+    }
+
+    // F2 (verify G7, probe P12): `.X` of another type must not satisfy a row. The reader has to name the type or reach the
+    // member through a variable the file declares as that type (CensusReceiverTypes).
+    private static void CensusReadsAreTypeAware()
+    {
+        const string areas = "List<AreaRecord> _areas = new List<AreaRecord>();\nfor (int a = 0; a < _areas.Count; a++) { float x = _areas[a].X; }\nforeach (var area in _areas) Use(area.Z);";
+        AssertTrue(CensusReceiverTypes.ReadsMember(areas, "t1", "AreaRecord", "X"), "an indexed element of a List<AreaRecord> is an AreaRecord");
+        AssertTrue(CensusReceiverTypes.ReadsMember(areas, "t1", "AreaRecord", "Z"), "so is a foreach variable over it");
+        AssertFalse(CensusReceiverTypes.ReadsMember(areas, "t1", "CrossingRecord", "X"), "but it is not a CrossingRecord");
+        AssertFalse(CensusReceiverTypes.ReadsMember(areas, "t1", "CrossingRecord", "Z"), "whatever the member name");
+
+        const string crossing = "CrossingRecord c = crossings[0];\nfloat dx = c.X - other.X;";
+        AssertTrue(CensusReceiverTypes.ReadsMember(crossing, "t2", "CrossingRecord", "X"), "a declared CrossingRecord variable");
+        AssertFalse(CensusReceiverTypes.ReadsMember(crossing, "t2", "AreaRecord", "X"), "is not an AreaRecord");
+        AssertFalse(CensusReceiverTypes.ReadsMember("float v = thing.X;", "t3", "CrossingRecord", "X"), "an undeclared receiver is not credited to any type");
+        AssertFalse(CensusReceiverTypes.ReadsMember("CrossingRecord c = d;\nc.X = 4f;", "t4", "CrossingRecord", "X"), "a plain assignment is still a write");
+        AssertTrue(CensusReceiverTypes.ReadsMember("var v = CrossingRecord.X;", "t5", "CrossingRecord", "X"), "the type named in the access");
+
+        AssertTrue(CensusReceiverTypes.ReadsEnumValue("if (role == FormationRole.Hold) return;", "FormationRole", "Hold"), "an enum value is read qualified");
+        AssertFalse(CensusReceiverTypes.ReadsEnumValue("if (posture == TheaterPosture.Hold) return;", "FormationRole", "Hold"), "another enum's value of the same name is not it");
+        AssertFalse(CensusReceiverTypes.ReadsEnumValue("// FormationRole.Hold", "FormationRole", "Hold"), "a comment is not a read");
+
+        // The verifier's probe, on the real files: SectorModel.cs reads AreaRecord's X and Z but no CrossingRecord's.
+        string sector = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/SectorModel.cs");
+        AssertTrue(CensusReceiverTypes.ReadsMember(sector, "SectorModel.cs", "AreaRecord", "X"), "SectorModel reads area X");
+        AssertFalse(CensusReceiverTypes.ReadsMember(sector, "SectorModel.cs", "CrossingRecord", "X"), "and no crossing X: a CrossingRecord.X row naming it fails");
+        string river = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/RiverLines.cs");
+        AssertTrue(CensusReceiverTypes.ReadsMember(river, "RiverLines.cs", "CrossingRecord", "X"), "RiverLines reads the crossing X its row names");
     }
 
     // ---- the parser ----
@@ -245,6 +283,16 @@ namespace N {
             "and so are the state records");
     }
 
+    // The enum types in the census scope: their values are read as `Type.Value`, never as a bare `.Value`.
+    internal static HashSet<string> EnumTypes()
+    {
+        var enums = new HashSet<string>();
+        foreach (var (path, types) in Scope)
+            foreach (Match m in Regex.Matches(string.Join("\n", CodeLines(ReadRepoFile(path))), @"\benum\s+(\w+)"))
+                enums.Add(m.Groups[1].Value);
+        return enums;
+    }
+
     // ---- the table ----
 
     private static readonly Dictionary<string, string> Shorthand = new Dictionary<string, string>
@@ -331,7 +379,11 @@ namespace N {
                     try { path = FindRepoPath(file); } catch (FileNotFoundException) { problems.Add(row.Key + ": " + file + " does not exist"); continue; }
                     cache[file] = text = File.ReadAllText(path);
                 }
-                if (!Reads(text, member)) problems.Add(row.Key + ": no read of ." + member + " in " + file);
+                string type = row.Key.Substring(0, row.Key.IndexOf('.'));
+                bool read = EnumTypes().Contains(type)
+                    ? CensusReceiverTypes.ReadsEnumValue(text, type, member)
+                    : CensusReceiverTypes.ReadsMember(text, file, type, member);
+                if (!read) problems.Add(row.Key + ": no read of " + type + "." + member + " in " + file);
             }
         }
         AssertTrue(problems.Count == 0, problems.Count + " census reader(s) do not read their member (delete the member or name a real reader): " + string.Join("; ", problems));
@@ -402,12 +454,12 @@ internal static class CensusRows
         "FormationFlags.SeaInvasion | P/TheaterPlanner.cs, P/ReconPlanner.cs | G4 TheaterPlanner.Busy; G1b ReconPlanner busy set",
         "FormationFlags.RaidForce | P/TheaterPlanner.cs, P/ReconPlanner.cs | G4 TheaterPlanner.Busy; G1b ReconPlanner busy set",
         "FormationFlags.InTransfer | P/TheaterPlanner.cs, P/ReinforcementRouting.cs | G4 TheaterPlanner.Busy; G5b ReinforcementRouting.IsProtectedFromDonation",
-        "FormationFlags.Embarked | P/TheaterPlanner.cs, P/ReconPlanner.cs, P/ReserveRules.cs | G4 Busy rule; ReserveRules.Capital/Hold exclusions; G1b busy set",
+        "FormationFlags.Embarked | P/TheaterPlanner.cs, P/ReconPlanner.cs | G4 Busy rule (TheaterPlanner busy mask); G1b busy set (ReconPlanner)",
         "FormationFlags.FightingForce | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs | G4 CapitalGuard and DepotBuilder picks; G1b ReconPlanner.PickFormation",
         "FormationFlags.HasPath | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview (Moving); MoveQueued also G5a MoveTracker.ShouldIssue via CampaignMover",
         "FormationFlags.MoveQueued | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview (Moving); MoveQueued also G5a MoveTracker.ShouldIssue via CampaignMover",
         "FormationRecord.InstanceId | P/ForceAllocator.cs, P/CampaignMover.cs, P/ReconExecutor.cs | every executor (live lookup)",
-        "FormationRecord.UnitKey | P/PlannerSnapshot.cs, P/MoveTracker.cs | G6 sidecar rebinding (PlannerRebind, IndexOfKey); G5a MoveTracker records",
+        "FormationRecord.UnitKey | P/PlannerSnapshot.cs | G6 sidecar rebinding (PlannerRebind, IndexOfKey); G5a MoveTracker records",
         "FormationRecord.UnitTyp | P/CommanderAppointmentPlanner.cs, P/MarchTime.cs | G2 TryPlan target commands; G3 MarchTime.EstimateDays",
         "FormationRecord.X | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs | G3 TheaterPlanner.Plan, G4 ForceAllocator.Allocate, G1b ReconPlanner, G5b, G8",
         "FormationRecord.Z | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs | G3 TheaterPlanner.Plan, G4 ForceAllocator.Allocate, G1b ReconPlanner, G5b, G8",
@@ -419,13 +471,13 @@ internal static class CensusRows
         "FormationRecord.ReadinessStep | P/ReconPlanner.cs | G1b ReconPlanner.PickFormation (movement minima)",
         "FormationRecord.CommandRange | P/TheaterPlanner.cs, P/ReconPlanner.cs | G3/G0 LogisticsGate.Evaluate callers (reach per formation)",
         "FormationRecord.BugleRange | P/ReconMissionLedger.cs, P/ReconPlanner.cs, P/DepotSteeringRuntime.cs | G1b ReconMissionLedger.OnReview (contact, arrival), ReconPlanner probe contact; G5c DepotTaskLedger.ShouldWish",
-        "FormationRecord.CommanderId | P/CommanderAppointmentPlanner.cs, P/CommanderAppointmentRuntime.cs, P/TheaterPlanner.cs | G3 sector profile lookup; G2 CommanderAppointmentPlanner.TryPlan (sitting commander)",
+        "FormationRecord.CommanderId | P/CommanderAppointmentPlanner.cs, P/TheaterPlanner.cs | G3 sector profile lookup; G2 CommanderAppointmentPlanner.TryPlan (sitting commander)",
         "FormationRecord.HasTheater | P/SteeringRules.cs | G5a theater-box writer (write only when it differs)",
         "FormationRecord.TheaterX | P/SteeringRules.cs | G5a theater-box writer (write only when it differs)",
         "FormationRecord.TheaterZ | P/SteeringRules.cs | G5a theater-box writer (write only when it differs)",
         "FormationRecord.AreaIndex | P/ReserveRules.cs, P/ReconPlanner.cs, P/CommanderAppointmentPlanner.cs | G0 SectorModel.SectorOfArea callers (G3, G4, G1b; G2 main-effort targets)",
         "FormationRecord.Flags | P/TheaterPlanner.cs, P/ForceAllocator.cs, P/ReconPlanner.cs, P/CampaignMover.cs | G3/G4 busy rule, G1b busy set, G5a MoveQueued test",
-        "FormationRecord.Name | P/DepotTaskLedger.cs, P/ReconExecutor.cs | G5a [CampaignMover], G5c [DepotTask], G5d [ReconMission] rows",
+        "FormationRecord.Name | P/ReconExecutor.cs | G5a [CampaignMover], G5c [DepotTask], G5d [ReconMission] rows",
         "FormationRecord.Chain | P/ForceAllocator.cs, P/CampaignMover.cs, P/ReconPlanner.cs, P/TheaterPlanner.cs, P/ReserveRules.cs | G4 busy and player rules; G5a mover; G1b recon (all via WlChainRules)",
         "FormationRecord.CavalryShare | P/ReconPlanner.cs | G1b ReconPlanner.PickFormation / standoff (SightRadius also G1 viewer coverage via the snapshot)",
         "FormationRecord.SightRadius | P/ReconPlanner.cs | G1b ReconPlanner.PickFormation / standoff (SightRadius also G1 viewer coverage via the snapshot)",
@@ -475,9 +527,7 @@ internal static class CensusRows
         "RailLineRecord.BIipId | P/RailLineScorer.cs, P/MarchTime.cs | G5c RailLineScorer.Score; G3 MarchTime.RailLeg",
         "CrossingRecord.X | P/RiverLines.cs | G3 RiverLines.EffectiveDistance (detour through the nearest crossing)",
         "CrossingRecord.Z | P/RiverLines.cs | G3 RiverLines.EffectiveDistance (detour through the nearest crossing)",
-        "DetectionSource.FogGrid | P/EnemyArmyModel.cs | G1 DetectionRules.TryDecide (the detection's provenance, persisted as EnemyBelief.LastSource)",
-        "DetectionSource.NoFog | P/EnemyArmyModel.cs | G1 DetectionRules.TryDecide (the detection's provenance, persisted as EnemyBelief.LastSource)",
-        "DetectionSource.OwnSideWithinFog | P/EnemyArmyModel.cs | G1 DetectionRules.TryDecide (the W&L player's AI side; provenance)",
+        "DetectionSource.Seen | P/EnemyArmyModel.cs | G1 DetectionRules.TryDecide (any fog, own-side or fog-off sighting; the persisted default)",
         "DetectionSource.Contact | P/EnemyArmyModel.cs, P/EnemyDetectionRuntime.cs | G1 EnemyDetectionRuntime.Report ([EnemyBeliefs] contact count)",
         "DetectionSource.ObjectiveGarrison | P/EnemyArmyModel.cs | G1 EnemyArmyModel (a garrison belief keeps its radius)",
         "EnemyTraits.Embarked | P/EnemyBeliefReadings.cs | G1 EnemyBeliefReadings (sea-invasion and raid inference)",
@@ -492,7 +542,7 @@ internal static class CensusRows
         "EnemyDetection.Strength | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update",
         "EnemyDetection.Source | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update",
         "EnemyDetection.Traits | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update",
-        "EnemyBelief.InstanceId | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update (identity and garrison provenance)",
+        "EnemyBelief.InstanceId | S/DefenseIntentRuntime.cs | G1 DefenseIntentRuntime.BuildInput (the believed enemy group is a threat source by its in-session instance id)",
         "EnemyBelief.UnitKey | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update (identity and garrison provenance)",
         "EnemyBelief.UnitTyp | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update (identity and garrison provenance)",
         "EnemyBelief.LastSource | P/EnemyArmyModel.cs | G1 EnemyArmyModel.Update (identity and garrison provenance)",
@@ -540,7 +590,7 @@ internal static class CensusRows
         "FormationRole.Recover | P/CampaignMover.cs | G5a CampaignMover (MovesRole), CampaignWithholdView (withheld roles)",
         "FormationRole.CapitalGuard | P/CampaignMover.cs, P/CapitalFloorPolicy.cs | G5a mover; G5b CapitalFloorPolicy.PickPledge",
         "FormationRole.DepotBuilder | P/CampaignMover.cs, P/DepotTaskLedger.cs | G5a mover; G5c DepotTaskLedger.Sync",
-        "FormationRole.Recon | P/ReconExecutor.cs, P/ReconMissionLedger.cs | G5d ReconExecutor; G1b ReconMissionLedger.Sync",
+        "FormationRole.Recon | P/ReconMissionLedger.cs | G5d ReconExecutor; G1b ReconMissionLedger.Sync",
         "ReconKind.Screen | P/ReconPlanner.cs | G1b ReconPlanner.PlanTasks / PickFormation",
         "ReconKind.Picket | P/ReconPlanner.cs | G1b ReconPlanner.PlanTasks / PickFormation",
         "ReconKind.AdvanceGuard | P/ReconPlanner.cs | G1b ReconPlanner.PlanTasks / PickFormation",
@@ -602,7 +652,7 @@ internal static class CensusRows
         "CampaignSnapshot.FactionIndex | P/CampaignSnapshotRuntime.cs, P/CampaignMoverRuntime.cs | G5a executor host (the faction the executor writes through)",
         "CampaignSnapshot.Player | P/CommanderAppointmentPlanner.cs, P/ForceAllocator.cs | G0 gates; G4; G2 no-vertical-swap check",
         "CampaignSnapshot.PlayerCommandInstanceId | P/CommanderAppointmentPlanner.cs | G2 no-vertical-swap check",
-        "CampaignSnapshot.Tempo | P/TheaterPlanner.cs, P/ReconPlanner.cs, P/CampaignMover.cs | G3 required ratio (MassRatioModifier); G4 hold need (MinimumHoldRatioModifier)",
+        "CampaignSnapshot.Tempo | P/TheaterPlanner.cs, P/ReconPlanner.cs | G3 required ratio (MassRatioModifier); G4 hold need (MinimumHoldRatioModifier)",
         "CampaignSnapshot.CapitalX | P/TheaterPlanner.cs, P/ReconPlanner.cs, P/ForceAllocator.cs | G3 capital-threat term; G1b capital approaches; G4",
         "CampaignSnapshot.CapitalZ | P/TheaterPlanner.cs, P/ReconPlanner.cs, P/ForceAllocator.cs | G3 capital-threat term; G1b capital approaches; G4",
         "CampaignSnapshot.HasCapital | P/TheaterPlanner.cs, P/ReconPlanner.cs, P/ForceAllocator.cs | G3 capital-threat term; G1b capital approaches; G4",
@@ -640,14 +690,14 @@ internal static class CensusRows
         "ReconState.Holding | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview / Sync; G5d ReconOrders.CavalryOrderFor",
         "ReconState.Recalled | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview / Sync; G5d ReconOrders.CavalryOrderFor",
         "ReconState.Cleared | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview / Sync; G5d ReconOrders.CavalryOrderFor",
-        "ReconMission.MissionId | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
+        "ReconMission.MissionId | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor ([ReconMission] rows, change detection)",
         "ReconMission.Kind | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.InstanceId | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.UnitKey | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.HoldX | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.HoldZ | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.State | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
-        "ReconMission.Reason | P/ReconMissionLedger.cs, P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
+        "ReconMission.Reason | P/ReconExecutor.cs | G5d ReconExecutor and [ReconMission] rows; G1b ReconMissionLedger",
         "ReconMission.SectorId | P/ReconStep.cs | G1b ReconStep.ProbeVerdicts (a probe serves the main sector)",
         "ReconMission.IssuedDay | P/ReconMissionLedger.cs | G1b ReconMissionLedger.OnReview (MaxMissionDays expiry)",
         "ReconMission.ObservedEnemyStrength | P/ReconStep.cs | G1b ReconStep.ProbeVerdicts (the enemy-reaction reference)",

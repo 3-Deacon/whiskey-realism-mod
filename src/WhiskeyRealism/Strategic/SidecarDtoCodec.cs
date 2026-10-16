@@ -498,7 +498,7 @@ namespace WhiskeyRealism.Strategic
                     {
                         InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                         LastSeenDay = b.LastSeenDay, Confidence01 = b.Confidence, UncertaintyRadius = b.Radius,
-                        LastSource = (DetectionSource)b.Source, Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
+                        LastSource = DetectionSources.FromSaved(b.Source), Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
                     });
                 }
             if (dto.Appointments != null)
