@@ -31,14 +31,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // #62's order for the player: `unit` is the player's parent unit (never his own command, which
         // vanilla's gate at 8337 refuses for a subordinate). True when it went onto a courier.
-        internal static bool EmitP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName)
+        internal static bool EmitP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName, OrderIntentKind kind)
         {
             using (TelemetryPerf.Scope("tactical.dispatch.emit-p62", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 try
                 {
                     if ((UnityEngine.Object)unit == null || !candidate.HasCandidate || !TacticalWriteGuard.ModeAllowsWrites()) return false;
-                    return WlOrderFlowRuntime.EnqueueP62(unit, in candidate, destinationName);
+                    return WlOrderFlowRuntime.EnqueueP62(unit, in candidate, destinationName, kind);
                 }
                 catch (Exception ex)
                 {
@@ -77,7 +77,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // True when the order went onto a courier (or, with the flow off, vanilla showed a new order).
         // Deduped, refused and dropped orders return false.
-        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin)
+        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind)
         {
             using (TelemetryPerf.Scope("tactical.dispatch.emit", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
@@ -85,7 +85,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0
                         || !TacticalWriteGuard.ModeAllowsWrites()) return false;
-                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin);
+                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind);
                 }
                 catch (Exception ex)
                 {

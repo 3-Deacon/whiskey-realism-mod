@@ -196,4 +196,44 @@ internal static partial class WlOrderFlowTests
         string routedWiring = BodyOf(code, "private static CaptureVerdict Route(");
         AssertTrue(Regex.IsMatch(routedWiring, @"type == 13 \|\| type == 14\)\s*&&\s*input\.ReadmitOn[^;]*\s*input\.PlayerRouted = IsPlayerRouted\("), "N1: routed is computed for 13 and 14 only");
     }
+
+    // Text (D10, D19, N4): one builder; every place and line comes from it.
+    private static void NoInternalKeyReachesDestination()
+    {
+        string p62 = TestFixtures.ReadRepoFile(P62Patch);
+        AssertTrue(Regex.IsMatch(p62, @"EmitP62\(\s*[^;]*WlOrderTextRuntime\.DestinationFor\("), "#62 names its place with the builder");
+        AssertFalse(p62.Contains("DestinationName("), "the old key-passing DestinationName is gone");
+        AssertFalse(p62.Contains("\"Objective\""), "and so is the 'Objective' fallback");
+        string exec = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs");
+        Match emit = Regex.Match(exec, @"TacticalPlayerDispatchRuntime\.Emit\((?<args>[^;]*)\);");
+        AssertTrue(emit.Success, "the executor's ancestor dispatch");
+        AssertTrue(emit.Groups["args"].Value.Contains("WlOrderTextRuntime.DestinationFor("), "names its place with the builder");
+        AssertFalse(emit.Groups["args"].Value.Contains("winner.Reason"), "never the arbiter's internal reason");
+        string runtime = Code(FlowRuntime);
+        AssertFalse(runtime.Contains("ReleaseDestination"), "the release's place is built, not a constant");
+        AssertTrue(BodyOf(runtime, "public bool TryBuildRelease(").Contains("WlOrderTextRuntime.DestinationFor("), "the release names its place with the builder");
+        AssertTrue(Regex.IsMatch(runtime, @"string\.Empty,\s*-1f,\s*RetreatZone"), "vanilla's retreat order keeps its empty destination");
+    }
+
+    private static void ReplaceMyEchelonOnVanillaOrigin()
+    {
+        // N4: vanilla's own composed texts get the real formation name, whatever the order's origin.
+        string text = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderTextRuntime.cs");
+        string flow = Code(FlowRuntime);
+        AssertTrue(flow.Contains("WlOrderTextRuntime.OnAccepted("), "the accepted-order hook calls the text runtime");
+        string body = BodyOf(text, "internal static void OnAccepted(");
+        int replace = body.IndexOf("WlOrderText.ReplaceMyEchelon(", StringComparison.Ordinal);
+        AssertTrue(replace >= 0, "the replacement is applied");
+        AssertFalse(Regex.IsMatch(body.Substring(0, replace), @"Origin\s*[!=]=\s*OrderOrigin\.Vanilla"), "and it is not conditional on a Whiskey origin");
+        AssertTrue(body.Contains("WlOrderText.ContentLines("), "Whiskey-origin lines are added separately");
+    }
+
+    private static void ContentLinesOwnUnitsAndVisibleOnly()
+    {
+        // The neighbour lines read the side's own units from the battle snapshot; nothing reads vanilla's
+        // unfiltered enemy fields (fog-honest).
+        string code = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderTextRuntime.cs");
+        AssertTrue(code.Contains("BattleCore.TryGetSnapshot("), "from the side's snapshot");
+        AssertFalse(Regex.IsMatch(code, @"enemyinrange|GetClosestEnemyUnit|closestenemyunit|unitrange\.closest"), "no unfiltered enemy field");
+    }
 }

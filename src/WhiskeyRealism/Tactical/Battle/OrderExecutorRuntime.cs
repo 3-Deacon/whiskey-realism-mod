@@ -230,7 +230,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 Regiment ancestor = BattleSnapshotBuilder.UnitAt(view, groupIndex, enemy: false);
                 if ((UnityEngine.Object)ancestor != null)
-                    TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading, winner.Reason, OrderOrigin.Executor);
+                    TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading,
+                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task));
             }
 
             return executed;

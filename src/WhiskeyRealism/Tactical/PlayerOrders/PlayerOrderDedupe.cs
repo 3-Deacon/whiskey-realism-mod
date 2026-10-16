@@ -137,7 +137,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 !active.Stale &&
                 !active.BattleEnded &&
                 !retreat &&
-                !IsClearHoldTransition(candidate, active) &&
                 active.AgeHours < PlayerOrderReadmitPolicy.MinHoldBattleHours)
             {
                 return new PlayerOrderDedupeDecision(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, "same-scope-priority");
@@ -221,11 +220,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return state.TryGetShadow(active.UnitKey, out var shadow) &&
                 shadow.BattleIdentity == active.BattleIdentity &&
                 shadow.ActiveSignature.MatchesActiveOrder(active);
-        }
-
-        private static bool IsClearHoldTransition(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
-        {
-            return candidate.VanillaType == 14 && active.VanillaType == 12;
         }
 
         private static bool IsValidEmergencyRetreat(PlayerOrderCandidate candidate)

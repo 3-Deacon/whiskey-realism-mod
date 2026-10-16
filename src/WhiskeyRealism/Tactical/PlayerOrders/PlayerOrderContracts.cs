@@ -24,8 +24,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         HoldObjective,
         FallBackToLine,
         RetreatToExit,
-        RecoverFromCombat,
-        ClearHoldTransition,
     }
 
     internal enum PlayerOrderDedupeDecisionKind

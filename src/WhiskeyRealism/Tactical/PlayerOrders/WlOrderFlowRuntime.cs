@@ -35,8 +35,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private const float ZoneDepth = 50f;
         private const float RetreatZone = 50f;     // vanilla's own retreat order, 6798
         private const float ObjectiveMeters = 150f;
-        // The place text for a hold at the player's own position (WlOrderText's phrase for under 150 yards).
-        private const string ReleaseDestination = "your present position";
         private const int MaxChainLegs = 16;
 
         // Set by the delivery transaction around its call into vanilla; the capture Prefix lets a call
@@ -137,6 +135,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public OrderOrigin Origin;
             public bool Campaign;
             public PlayerOrderCandidate P62;
+            public OrderIntentKind Kind;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -189,24 +188,24 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Whiskey's own emitters enqueue directly: the executor's ancestor dispatch (origin Executor).
         // True when the order went on a courier. With both order-flow switches off the call goes to vanilla
         // as it always did, and the result is whether vanilla showed a new order.
-        internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin)
+        internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind)
         {
             var call = new OrderCall
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
-                Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin,
+                Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
             };
             return EnqueueCall(in call);
         }
 
         // #62's order, with the candidate its bookkeeping follows through the delivery callback.
-        internal static bool EnqueueP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName)
+        internal static bool EnqueueP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName, OrderIntentKind kind)
         {
             var call = new OrderCall
             {
                 Unit = unit, Type = candidate.VanillaType, Position = new Vector3(candidate.TargetPoint.X, 0f, candidate.TargetPoint.Z),
                 Name = destinationName, Rotation = candidate.Rotation, Width = ZoneWidth, Depth = ZoneDepth,
-                Origin = OrderOrigin.P62, P62 = candidate,
+                Origin = OrderOrigin.P62, P62 = candidate, Kind = kind,
             };
             return EnqueueCall(in call);
         }
@@ -287,6 +286,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     call.Origin, now, deferUntil, out CourierEntry entry))
                 return CaptureVerdict.Pass;
             entry.P62Candidate = call.P62;
+            entry.Kind = call.Kind;
 
             if (verdict == CaptureVerdict.Drop)
             {
@@ -566,22 +566,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Is the objective nearest the point (within ObjectiveMeters) held by the player's alliance?
         private static bool ObjectiveHeld(Vector3 point)
         {
-            Objectives[] all = BattleUnits.objectives;
-            if (all == null) return false;
-            Objectives nearest = null;
-            float best = ObjectiveMeters * ObjectiveMeters;
-            for (int i = 0; i < all.Length; i++)
-            {
-                if ((UnityEngine.Object)all[i] == null) continue;
-                Vector3 p = all[i].transform.position;
-                float dx = p.x - point.x;
-                float dz = p.z - point.z;
-                float d2 = dx * dx + dz * dz;
-                if (d2 > best) continue;
-                best = d2;
-                nearest = all[i];
-            }
-            return nearest != null && nearest.owner == GameVars.playeralliance;
+            Objectives nearest = WlOrderTextRuntime.NearestObjective(point, out _, out float meters);
+            return nearest != null && meters <= ObjectiveMeters && nearest.owner == GameVars.playeralliance;
         }
 
         // One flow row (TacticalPlayerOrderFlow). Capture-time drops come from continuous vanilla callers
@@ -695,6 +681,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public void Accepted(in CourierEntry e)
             {
                 Age.Accepted(Session, NowHours);
+                WlOrderTextRuntime.OnAccepted(in e);
                 OnceLog.Info("wl-order:first-delivery", "[W&LOrder] first order delivered type=" + e.Type + " origin=" + e.Origin);
             }
 
@@ -733,9 +720,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
                 Regiment unit = (UnityEngine.Object)_parent != null ? _parent : _command;
                 Vector3 here = _command.GetPosition();
-                if (!TryMakeEntry(snapshot, unit, 12, new Vector3(here.x, VanillaTerrain.SampleHeight(here, here.y), here.z), ReleaseDestination,
+                if (!TryMakeEntry(snapshot, unit, 12, new Vector3(here.x, VanillaTerrain.SampleHeight(here, here.y), here.z),
+                        WlOrderTextRuntime.DestinationFor(here.x, here.z, null),
                         0f, ZoneWidth, ZoneDepth, OrderOrigin.Release, now, double.NaN, out entry))
                     return false;
+                entry.Kind = OrderIntentKind.Release;
                 OnceLog.Info("wl-order:first-release", "[W&LOrder] engage-at-will released reason=" + (routed ? "routed" : "no-contact"));
                 return true;
             }

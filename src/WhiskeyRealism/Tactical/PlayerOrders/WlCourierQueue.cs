@@ -23,6 +23,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public float Meters;
         // Origin == P62 only: the candidate #62 composed, for its accept/attempt bookkeeping.
         public PlayerOrderCandidate P62Candidate;
+        // What the order is for, for the condition lines under vanilla's text (Whiskey origins).
+        public OrderIntentKind Kind;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture

@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.PlayerOrders
 {
@@ -232,11 +233,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             string objectiveKey,
             string reason)
         {
-            var mapped = PlayerOrderVanillaMapper.Map(intent, PlayerOrderScope.Tactical);
             return new PlayerOrderCandidate(
                 scope: PlayerOrderScope.Tactical,
                 intent: intent,
-                vanillaType: mapped.Type,
+                vanillaType: TacticalDispatchTypeMapper.Map(intent, targetEnemyHeld: true),
                 priority: PlayerOrderPriority.ForIntent(intent),
                 unitKey: input.UnitKey,
                 battleIdentity: input.BattleIdentity,

@@ -119,7 +119,10 @@ namespace WhiskeyRealism.Patches
                 bool queued = TacticalPlayerDispatchRuntime.EmitP62(
                     WlOrderFlowRuntime.PlayerParentUnit(),
                     candidate,
-                    DestinationName(candidate));
+                    candidate.Intent == PlayerOrderIntent.RetreatToExit
+                        ? string.Empty
+                        : WlOrderTextRuntime.DestinationFor(candidate.TargetPoint.X, candidate.TargetPoint.Z, null),
+                    TacticalDispatchTypeMapper.IntentKind(candidate.Intent));
 
                 // Queued or refused, the signature suppresses a repeat and the throttle starts; the delivery
                 // callback replaces this with the acceptance, or clears it.
@@ -171,12 +174,6 @@ namespace WhiskeyRealism.Patches
             if (!string.Equals(before.UnitKey, after.UnitKey, StringComparison.Ordinal)) return true;
             if (Math.Abs(before.TargetPoint.X - after.TargetPoint.X) > 0.1f) return true;
             return Math.Abs(before.TargetPoint.Z - after.TargetPoint.Z) > 0.1f;
-        }
-
-        private static string DestinationName(PlayerOrderCandidate candidate)
-        {
-            if (candidate.Intent == PlayerOrderIntent.RetreatToExit) return string.Empty;
-            return string.IsNullOrWhiteSpace(candidate.ObjectiveKey) ? "Objective" : candidate.ObjectiveKey;
         }
 
         private static void Log(

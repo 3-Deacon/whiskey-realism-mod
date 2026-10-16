@@ -12,6 +12,7 @@ using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.PlayerOrders;
@@ -90,25 +91,21 @@ internal static class PlayerOrderTests
 
     private static void PlayerOrderMapperKeepsTypeFifteenRetreatOnly()
     {
-        AssertEqual(15, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.RetreatToExit).Type, "retreat type");
-        AssertTrue(PlayerOrderVanillaMapper.Map(PlayerOrderIntent.FallBackToLine).Type != 15, "fallback is not retreat type");
-        AssertTrue(PlayerOrderVanillaMapper.Map(PlayerOrderIntent.HoldObjective).Type != 15, "hold is not retreat type");
-        AssertTrue(PlayerOrderVanillaMapper.Map(PlayerOrderIntent.RecoverFromCombat).Type != 15, "recover is not retreat type");
+        AssertEqual(15, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.RetreatToExit, true), "retreat type");
+        AssertTrue(TacticalDispatchTypeMapper.Map(PlayerOrderIntent.FallBackToLine, true) != 15, "fallback is not retreat type");
+        AssertTrue(TacticalDispatchTypeMapper.Map(PlayerOrderIntent.HoldObjective, true) != 15, "hold is not retreat type");
     }
 
     private static void PlayerOrderMapperMapsFallbackToTypeTwelve()
     {
-        var mapped = PlayerOrderVanillaMapper.Map(PlayerOrderIntent.FallBackToLine);
-        AssertEqual(12, mapped.Type, "fallback type");
-        AssertEqual(PlayerOrderIntent.FallBackToLine, mapped.Intent, "fallback intent");
+        AssertEqual(12, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.FallBackToLine, true), "fallback type");
     }
 
     private static void PlayerOrderMapperMapsTacticalSupportAttackAndMovementLanes()
     {
-        AssertEqual(11, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.SupportMainEffort).Type, "support main effort tactical type");
-        AssertEqual(11, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.SupportMainEffort, PlayerOrderScope.Campaign).Type, "support main effort campaign type");
-        AssertEqual(0, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.AttackObjective).Type, "attack objective tactical type");
-        AssertEqual(1, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.AdvanceToAssemblyArea).Type, "advance movement tactical type");
+        AssertEqual(2, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.SupportMainEffort, true), "support main effort tactical type");
+        AssertEqual(0, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.AttackObjective, true), "attack objective tactical type");
+        AssertEqual(1, TacticalDispatchTypeMapper.Map(PlayerOrderIntent.AdvanceToAssemblyArea, true), "advance movement tactical type");
         AssertEqual(50, PlayerOrderPriority.ForIntent(PlayerOrderIntent.AdvanceToAssemblyArea), "advance movement priority");
     }
 
@@ -709,7 +706,7 @@ internal static class PlayerOrderTests
         var candidate = PlayerOrderComposer.Compose(input);
 
         AssertEqual(PlayerOrderIntent.SupportMainEffort, candidate.Intent, "support role should map to support main effort");
-        AssertEqual(11, candidate.VanillaType, "support vanilla type");
+        AssertEqual(2, candidate.VanillaType, "support is a type 2 (D15), not the reserve 11 it was");
         AssertEqual("ridge-a", candidate.ObjectiveKey, "objective key");
         AssertTrue(candidate.Priority > 0, "support candidate should have priority");
     }
@@ -721,7 +718,7 @@ internal static class PlayerOrderTests
         var candidate = PlayerOrderComposer.Compose(input);
 
         AssertEqual(PlayerOrderIntent.ProbeObjective, candidate.Intent, "probe task should map to probe objective");
-        AssertEqual(5, candidate.VanillaType, "probe vanilla type");
+        AssertEqual(1, candidate.VanillaType, "probe is deploy-to-engage (1), not the campaign Redeploy 5 it was");
     }
 
     private static void PlayerOrderComposerReturnsNoneWithoutConcreteTarget()
@@ -869,7 +866,7 @@ internal static class PlayerOrderTests
         return new PlayerOrderCandidate(
             scope: scope,
             intent: intent,
-            vanillaType: PlayerOrderVanillaMapper.Map(intent, scope).Type,
+            vanillaType: TacticalDispatchTypeMapper.Map(intent, true),
             priority: PlayerOrderPriority.ForIntent(intent),
             unitKey: unitKey,
             battleIdentity: battleIdentity,

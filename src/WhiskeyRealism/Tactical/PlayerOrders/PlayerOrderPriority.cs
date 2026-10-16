@@ -19,9 +19,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 case PlayerOrderIntent.AdvanceToAssemblyArea:
                 case PlayerOrderIntent.ProbeObjective:
                     return 50;
-                case PlayerOrderIntent.RecoverFromCombat:
-                case PlayerOrderIntent.ClearHoldTransition:
-                    return 20;
                 default:
                     return 0;
             }

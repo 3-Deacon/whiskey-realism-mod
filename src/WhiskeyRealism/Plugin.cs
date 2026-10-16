@@ -82,6 +82,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderReadmit { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -554,6 +555,15 @@ namespace WhiskeyRealism
                 "delay from the issuing headquarters, using vanilla's own order-delay settings (bugle within range, a mounted courier " +
                 "beyond it, relays down the chain), instead of appearing the instant they are given. Needs Tactical Commander Mode = " +
                 "Active. Off: orders are delivered at the next order pass.");
+            EnableWlOrderText = Config.Bind(
+                "W&L",
+                "Enable W&L Order Text",
+                true,
+                "Default ON. W&L career: order texts name real places and formations. Whiskey's orders name the nearest named objective " +
+                "or say where the point lies from your command (\"about 1,200 yards ahead and to the right of your position\") instead of " +
+                "an internal key, vanilla's \"My Division\" becomes the formation's name (\"Hood's Division\"), and Whiskey's orders carry " +
+                "a short condition line and your neighbours. Also corrects the portrait of an issuer who has been replaced. Off: vanilla texts " +
+                "(Whiskey's orders name the objective or \"Objective\").");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",
                 "Enable CIC Faction AI Bug Guard",
