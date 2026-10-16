@@ -294,6 +294,8 @@ namespace WhiskeyRealism.Tactical.Operations
             private readonly double _laneScale;
             private readonly bool _defensiveSideTargets;
             private readonly double _assemblyStandOff;
+            // BC12: the terrain line's own direction (unit, T.L >= cos 30), half length and cos; _lineHalf 0 = no line, lanes run along L.
+            private readonly double _lineX, _lineZ, _lineHalf, _lineCos;
 
             private FrontageGeometry(
                 BattlefieldObjectiveEstimate objective,
@@ -302,6 +304,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 double laneScale,
                 bool defensiveSideTargets,
                 double assemblyStandOff,
+                double lineX, double lineZ, double lineHalf, double lineCos,
                 DoctrineTargetPoint left,
                 DoctrineTargetPoint right,
                 DoctrineTargetPoint artillery,
@@ -313,6 +316,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 _laneScale = laneScale;
                 _defensiveSideTargets = defensiveSideTargets;
                 _assemblyStandOff = assemblyStandOff;
+                _lineX = lineX;
+                _lineZ = lineZ;
+                _lineHalf = lineHalf;
+                _lineCos = lineCos;
                 Left = left;
                 Right = right;
                 Artillery = artillery;
@@ -328,8 +335,55 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 double lateral = _halfWidth > 0d ? fallbackLateral * _laneScale : fallbackLateral;
                 return _defensiveSideTargets
-                    ? BehindObjective(_objective, _direction, standOff, lateral)
+                    ? BehindLine(standOff, lateral)
                     : Approach(_objective, _direction, standOff, lateral);
+            }
+
+            // A point `standOff` behind the anchor along the approach axis and `lateral` along the line. A terrain line is laid along
+            // its own direction (a wall up to 30 degrees off perpendicular bends the lanes with it, so each slot stays on the wall's
+            // cover); past the line's ends the lane falls back to the perpendicular through the nearest end, never an extension of the
+            // wall into the enemy. Without a terrain line the lane is the perpendicular (a corridor intercept).
+            private DoctrineTargetPoint BehindLine(double standOff, double lateral)
+            {
+                if (!(_lineHalf > 0d))
+                    return BehindObjective(_objective, _direction, standOff, lateral);
+                double along = lateral / _lineCos;
+                double ox, oz;
+                if (Math.Abs(along) <= _lineHalf)
+                {
+                    ox = _lineX * along;
+                    oz = _lineZ * along;
+                }
+                else
+                {
+                    double sign = along < 0d ? -1d : 1d;
+                    double rest = lateral - sign * _lineHalf * _lineCos;
+                    ox = _lineX * sign * _lineHalf + _direction.LateralX * rest;
+                    oz = _lineZ * sign * _lineHalf + _direction.LateralZ * rest;
+                }
+                return DoctrineTargetPoint.From(
+                    ClampToFloat(_objective.X + _direction.X * standOff + ox),
+                    ClampToFloat(_objective.Z + _direction.Z * standOff + oz));
+            }
+
+            // The anchor's line direction turned to lie across the approach axis (T.L > 0) and clamped to the line planner's angle limit.
+            private static void LineFrame(in TacticalDefensiveLineAnchor anchor, Direction direction, out double lx, out double lz, out double half, out double cos)
+            {
+                lx = lz = half = cos = 0d;
+                if (!(anchor.LineHalfLength > 0f)) return;
+                double a = anchor.LineDirX * direction.LateralX + anchor.LineDirZ * direction.LateralZ;
+                double b = anchor.LineDirX * direction.X + anchor.LineDirZ * direction.Z;
+                if (a < 0d) { a = -a; b = -b; }
+                double limit = Math.Tan(TacticalTerrainLinePlanner.MaxAngleDegreesOffPerpendicular * Math.PI / 180d);
+                if (Math.Abs(b) > a * limit) b = (b < 0d ? -1d : 1d) * a * limit;
+                if (a <= 1e-6d) return;
+                double norm = Math.Sqrt(a * a + b * b);
+                a /= norm;
+                b /= norm;
+                lx = a * direction.LateralX + b * direction.X;
+                lz = a * direction.LateralZ + b * direction.Z;
+                half = anchor.LineHalfLength;
+                cos = a;
             }
 
             public double SupportLane(int side)
@@ -361,7 +415,7 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 if (IsDepthSlot(commandIndex, nodeCount))
                 {
-                    return BehindObjective(_objective, _direction, DepthSlotDistance, DepthLane(commandIndex, nodeCount));
+                    return BehindLine(DepthSlotDistance, DepthLane(commandIndex, nodeCount));
                 }
 
                 return Target(_assemblyStandOff, AssemblyLane(commandIndex, nodeCount));
@@ -456,11 +510,14 @@ namespace WhiskeyRealism.Tactical.Operations
                 // line slots take the anchor itself, which already sits at the crest's forward edge, 80 m behind the crest under
                 // ReverseSlopeDefense, or on the wall / river line (inside vanilla's cover snap). Depth slots keep their distance.
                 double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;
+                LineFrame(in defensiveAnchor, direction, out double lineX, out double lineZ, out double lineHalf, out double lineCos);
+                var frame = new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos,
+                    DoctrineTargetPoint.None, DoctrineTargetPoint.None, DoctrineTargetPoint.None, string.Empty);
                 DoctrineTargetPoint left = defensiveSideTargets
-                    ? BehindObjective(objective, direction, MainApproachDistance, half)
+                    ? frame.BehindLine(MainApproachDistance, half)
                     : Approach(objective, direction, MainApproachDistance, half);
                 DoctrineTargetPoint right = defensiveSideTargets
-                    ? BehindObjective(objective, direction, MainApproachDistance, -half)
+                    ? frame.BehindLine(MainApproachDistance, -half)
                     : Approach(objective, direction, MainApproachDistance, -half);
                 DoctrineTargetPoint artillery = defensiveAnchor.HasAnchor && defensiveAnchor.DefensiveArtilleryDepth > 0f
                     ? BehindObjective(objective, direction, defensiveAnchor.DefensiveArtilleryDepth, 0d)
@@ -471,7 +528,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : ":defensive-side-corridor";
                 if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
-                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, left, right, artillery, suffix);
+                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos, left, right, artillery, suffix);
             }
 
             private static bool IsTerrainAnchor(BattlefieldObjectiveEstimate objective)

@@ -40,6 +40,9 @@ internal static partial class TerrainPictureTests
             ("bc12 FlankAnchoredByRiverWithin80m", FlankAnchoredByRiverWithin80m),
             ("bc12 AnchoredSideGetsNoGuardFlankSlot", AnchoredSideGetsNoGuardFlankSlot),
             ("bc12 DefenderLineSlotsStandOnTheTerrainLine", DefenderLineSlotsStandOnTheTerrainLine),
+            ("bc12 TiltedWallSlotsStayOnTheWall", TiltedWallSlotsStayOnTheWall),
+            ("bc12 ShortWallEndsFallBackToThePerpendicular", ShortWallEndsFallBackToThePerpendicular),
+            ("bc12 LineDirectionIsClampedToTheAngleLimit", LineDirectionIsClampedToTheAngleLimit),
             ("bc12 OnlyARiverAnchorsAFlank", OnlyARiverAnchorsAFlank),
             ("bc12 EnemyHeldObjectiveWaterIsOnOurSide", EnemyHeldObjectiveWaterIsOnOurSide),
             ("bc12 EnemyHeldObjectiveApproachIsOnOurSide", EnemyHeldObjectiveApproachIsOnOurSide),
@@ -664,18 +667,18 @@ internal static partial class TerrainPictureTests
 
     // ------------------------------------------------------------------ verify r1: a terrain line is stood on
 
-    private static CommandNodeOperationalState[] SixDefenderNodes()
+    private static CommandNodeOperationalState[] SixDefenderNodes(int count = 6)
     {
-        var nodes = new CommandNodeOperationalState[6];
+        var nodes = new CommandNodeOperationalState[count];
         for (int i = 0; i < nodes.Length; i++)
             nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp,
-                150f + 100f * i, -150f, 0f);
+                150f + 60f * i, -150f, 0f);
         return nodes;
     }
 
-    private static CommandDoctrineOrder[] DefenderOrders(TerrainPicture picture, bool reverseSlope, out TacticalDefensiveLineAnchor anchor)
+    private static CommandDoctrineOrder[] DefenderOrders(TerrainPicture picture, bool reverseSlope, out TacticalDefensiveLineAnchor anchor, int nodeCount = 6)
     {
-        CommandNodeOperationalState[] nodes = SixDefenderNodes();
+        CommandNodeOperationalState[] nodes = SixDefenderNodes(nodeCount);
         BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
         var operation = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, objective.ObjectiveId, 900f);
         var snapshot = new BattlefieldPictureSnapshot(new[] { objective });
@@ -750,6 +753,104 @@ internal static partial class TerrainPictureTests
         // A corridor intercept is still a line to form up behind: its line slots keep the assembly distance.
         string planner = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalBattleLinePlanner.cs");
         FlankResponseTests.AssertPinned(planner, "double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;", "only a terrain line has a zero line stand-off");
+    }
+
+    // Distance from a point to the segment (ax, az)-(bx, bz).
+    private static float DistanceToSegment(float px, float pz, float ax, float az, float bx, float bz)
+    {
+        float dx = bx - ax, dz = bz - az;
+        float t = Math.Max(0f, Math.Min(1f, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz)));
+        float ex = ax + dx * t - px, ez = az + dz * t - pz;
+        return (float)Math.Sqrt(ex * ex + ez * ez);
+    }
+
+    private static CoverSegment TiltedWall(float cx, float cz, float halfLength, float degrees)
+    {
+        float r = degrees * (float)Math.PI / 180f;
+        float dx = (float)Math.Cos(r) * halfLength, dz = (float)Math.Sin(r) * halfLength;
+        return new CoverSegment { X0 = cx - dx, Z0 = cz - dz, X1 = cx + dx, Z1 = cz + dz, CoverId = CoverWall };
+    }
+
+    // A wall 28 degrees off the perpendicular to the approach: the line slots follow the wall, not the perpendicular through its centre.
+    private static void TiltedWallSlotsStayOnTheWall()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        foreach (float tilt in new[] { 28f, -28f })
+        {
+            CoverSegment w = TiltedWall(400f, -390f, 300f, tilt);
+            TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { w });
+            CommandDoctrineOrder[] orders = DefenderOrders(p, reverseSlope: false, out TacticalDefensiveLineAnchor anchor, nodeCount: 10);
+            AssertTrue(anchor.OnTerrainLine && anchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), tilt + ": a wall anchor, " + anchor.Reason);
+            AssertTrue(anchor.LineHalfLength >= 250f, "the anchor carries the wall's own half length, " + anchor.LineHalfLength);
+            int slots = 0;
+            float zSpread = 0f, zMin = float.MaxValue, zMax = float.MinValue;
+            for (int i = 0; i < orders.Length; i++)
+            {
+                if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+                slots++;
+                DoctrineTargetPoint t = orders[i].PrimaryTarget;
+                float d = DistanceToSegment(t.X, t.Z, w.X0, w.Z0, w.X1, w.Z1);
+                AssertTrue(d <= 20f, tilt + ": line slot " + i + " at (" + t.X + ", " + t.Z + ") is " + d + " m from the wall");
+                AssertTrue(p.TerrainStrength(t.X, t.Z, 0f, -1f) >= 0.34f, tilt + ": line slot " + i + " has the wall's cover within the cover radius");
+                zMin = Math.Min(zMin, t.Z);
+                zMax = Math.Max(zMax, t.Z);
+            }
+            zSpread = zMax - zMin;
+            AssertEqual(6, slots, "ten nodes: six line slots");
+            AssertTrue(zSpread > 60f, tilt + ": the slots climb the wall (z spread " + zSpread + "), they are not on one perpendicular");
+        }
+    }
+
+    // A wall shorter than the frontage: slots past its ends fall back to the perpendicular through the nearest end.
+    private static void ShortWallEndsFallBackToThePerpendicular()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+        CoverSegment w = TiltedWall(400f, -390f, 120f, 25f);
+        TerrainPicture p = Build(grid, Map, Flat(), cover: new[] { w });
+        CommandDoctrineOrder[] orders = DefenderOrders(p, reverseSlope: false, out TacticalDefensiveLineAnchor anchor, nodeCount: 10);
+        AssertTrue(anchor.OnTerrainLine && anchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), "a wall anchor, " + anchor.Reason);
+        AssertTrue(anchor.FrontageWidth > 2f * anchor.LineHalfLength + 50f, "the wall is shorter than the frontage: " + anchor.FrontageWidth + " vs " + 2f * anchor.LineHalfLength);
+        float endAZ = w.Z0, endAX = w.X0, endBZ = w.Z1, endBX = w.X1;
+        int slots = 0, guards = 0;
+        for (int i = 0; i < orders.Length; i++)
+        {
+            DoctrineTargetPoint t = orders[i].PrimaryTarget;
+            if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) >= 0)
+            {
+                slots++;
+                AssertTrue(DistanceToSegment(t.X, t.Z, w.X0, w.Z0, w.X1, w.Z1) <= 40f, "line slot " + i + " stays on the short wall (" + t.X + ", " + t.Z + ")");
+            }
+            else if (orders[i].Reason.IndexOf("scourge-slot-flank-guard", StringComparison.Ordinal) >= 0)
+            {
+                guards++;
+                // The guard stands FlankGuardDistance (155 m) behind the line, along the approach axis (+z): taking that off, it must sit
+                // on the perpendicular through the nearest wall end (same z as that end), not on the wall extended toward the enemy.
+                float lineZ = t.Z - 155f;
+                float nearEndX = Math.Abs(t.X - endAX) < Math.Abs(t.X - endBX) ? endAX : endBX;
+                float nearEndZ = nearEndX == endAX ? endAZ : endBZ;
+                AssertTrue(Math.Abs(lineZ - nearEndZ) <= 25f, "guard slot " + i + " at z " + t.Z + " falls back to the perpendicular through the nearest wall end (z " + nearEndZ + ")");
+            }
+        }
+        AssertEqual(6, slots, "six line slots");
+        AssertEqual(2, guards, "two flank guards");
+    }
+
+    // An anchor whose line direction lies 50 degrees off perpendicular (the planner never makes one) is laid at the 30 degree limit.
+    private static void LineDirectionIsClampedToTheAngleLimit()
+    {
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        foreach (float sign in new[] { 1f, -1f })
+        {
+            float r = 50f * (float)Math.PI / 180f;
+            var anchor = new TacticalDefensiveLineAnchor(true, DoctrineTargetPoint.From(400f, -400f), objective.ApproachAvenue, 600f, 260f, false,
+                "terrain-line:wall", terrainLine: true, lineDirX: -(float)Math.Cos(r), lineDirZ: sign * (float)Math.Sin(r), lineHalfLength: 400f);
+            CommandNodeOperationalState[] nodes = SixDefenderNodes(10);
+            // Command index 7 of 10 on the assembly line stands at lane 0.8 x 600 x (7 / 9 - 0.5) = 133 m.
+            TacticalBattleLinePlan plan = TacticalBattleLinePlanner.PlanNode(nodes[7], CommandTaskType.FormUp, objective, true, 7, default(TacticalBattlefrontSnapshot), 10, anchor);
+            float lane = 0.8f * 600f * (7f / 9f - 0.5f);
+            float along = plan.PrimaryTarget.Z - (-400f);
+            AssertNear(Math.Abs(lane) * (float)Math.Tan(30.0 * Math.PI / 180.0), Math.Abs(along), 4f, "sign " + sign + ": the lane climbs at the 30 degree limit, not 50");
+        }
     }
 
     private static void OnlyARiverAnchorsAFlank()

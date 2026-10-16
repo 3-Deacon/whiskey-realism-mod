@@ -15,7 +15,10 @@ namespace WhiskeyRealism.Tactical.Operations
             string reason,
             bool terrainLine = false,
             bool anchoredLeft = false,
-            bool anchoredRight = false)
+            bool anchoredRight = false,
+            float lineDirX = 0f,
+            float lineDirZ = 0f,
+            float lineHalfLength = 0f)
         {
             HasAnchor = hasAnchor && center.HasValue && approachAvenue.HasAvenue;
             Center = HasAnchor ? center : DoctrineTargetPoint.None;
@@ -26,6 +29,10 @@ namespace WhiskeyRealism.Tactical.Operations
             OnTerrainLine = HasAnchor && terrainLine && !corridorAnchor;
             AnchoredLeft = OnTerrainLine && anchoredLeft;
             AnchoredRight = OnTerrainLine && anchoredRight;
+            bool hasDirection = OnTerrainLine && lineHalfLength > 0f && (lineDirX != 0f || lineDirZ != 0f);
+            LineDirX = hasDirection ? lineDirX : 0f;
+            LineDirZ = hasDirection ? lineDirZ : 0f;
+            LineHalfLength = hasDirection ? lineHalfLength : 0f;
             Reason = string.IsNullOrWhiteSpace(reason) ? "defensive-line-none" : reason;
         }
 
@@ -41,6 +48,11 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool AnchoredLeft { get; }
         /// <summary>BC12: the -L end of the line (command index n-1) rests on a river or crest.</summary>
         public bool AnchoredRight { get; }
+        /// <summary>BC12: unit direction of the terrain line itself (a wall's cover segment, a crest or river run); 0 when the anchor is not a terrain line.</summary>
+        public float LineDirX { get; }
+        public float LineDirZ { get; }
+        /// <summary>BC12: half the terrain line's own length (m), which can be less than half the frontage; 0 when not a terrain line.</summary>
+        public float LineHalfLength { get; }
         public string Reason { get; }
 
         public static TacticalDefensiveLineAnchor None(string reason)
@@ -216,7 +228,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 reason,
                 terrainLine: true,
                 anchoredLeft: left,
-                anchoredRight: right);
+                anchoredRight: right,
+                lineDirX: (line.X1 - line.X0) / Math.Max(0.001f, line.Length),
+                lineDirZ: (line.Z1 - line.Z0) / Math.Max(0.001f, line.Length),
+                lineHalfLength: line.Length * 0.5f);
         }
 
         private static string KindName(TerrainLineKind kind)
