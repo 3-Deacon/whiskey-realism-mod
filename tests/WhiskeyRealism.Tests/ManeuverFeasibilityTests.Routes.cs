@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using static TestHarness;
 using static BattleMovementHonestyTests;
@@ -179,6 +180,11 @@ internal static partial class ManeuverFeasibilityTests
         // Without a footprint at all, even the leg to the crossing is a bend.
         float none = LegSampler.Cost(grid, 100f, -300f, 200f, -300f, false, 0f, 0f, 0, false, 0f, 0f, 0, out bool noneEstimated);
         AssertTrue(noneEstimated && none > cost, "no footprint: bends");
+        // The start of a leg is a footprint too (the link table's leg between two crossings): east from the bridge, the samples x = 200, 190
+        // are the crossing's, the grass after them costs 2.
+        float fromBridge = LegSampler.Cost(grid, 200f, -300f, 100f, -300f, true, 200f, -300f, Bridge, false, 0f, 0f, 0, out bool fromEstimated);
+        AssertNear(2f * 10f * 1f + 8f * 10f * 2f, fromBridge, 1e-3f, "a leg that starts at the crossing prices its river samples as the crossing");
+        AssertFalse(fromEstimated, "and is no estimate");
     }
 
     static void TargetSnap()
@@ -407,6 +413,19 @@ internal static partial class ManeuverFeasibilityTests
         AssertNear(1.0f, held, 1e-4f, "a Held crossing on the route: an hour more");
         // The main body's strike leg through a Held crossing adds nothing to T: T has no strike term (the evaluation prices it as 'contested').
         AssertNear(0f, onLine, 1e-6f, "(the main body never calls this)");
+        // The evaluation puts the surplus into the wing's T (the call site, not only the function): T = courier + march + deploy + surplus.
+        FeasField field = ThreeCorps(HorizontalBand(470f, 490f, (-225f, 480f)));
+        FeasibilityLedger ledger = field.Evaluate(BattlePlanId.DoubleEnvelopment);
+        CandidateResult result = Result(ledger, BattlePlanId.DoubleEnvelopment);
+        ReadOnlySpan<MemberEstimate> members = ledger.Members(in result);
+        ReadOnlySpan<BodyEstimate> bodies = ledger.Bodies(in result);
+        AssertTrue(bodies[0].InwardSurplusHours > 0.05f, "the evaluated wing detours to the ford, surplus " + bodies[0].InwardSurplusHours);
+        for (int m = 0; m < members.Length; m++)
+        {
+            if (members[m].Kind != ManeuverFeasibility.MemberEnvelops || members[m].Body != 0) continue;
+            float expected = members[m].CourierHours + members[m].MarchHours + ManeuverFeasibility.DeployHours(in rules) + bodies[0].InwardSurplusHours;
+            AssertNear(expected, members[m].StrikeHours, 1e-4f, "the member's strike time carries the inward surplus");
+        }
     }
 
     static void MultiRiver()

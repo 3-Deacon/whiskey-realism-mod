@@ -180,6 +180,10 @@ internal static partial class ManeuverFeasibilityTests
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.evaluate\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the evaluate scope at 2.0 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.monitor\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))", "the monitor scope at 0.5 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.navmesh\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the navmesh scope at 2.0 ms");
+        FlankResponseTests.AssertPinned(runtime, "if (!army.HasPlan || !ledger.HasSelection || !ledger.HasEvaluation) return;", "the monitor needs a standing plan and a published evaluation");
+        FlankResponseTests.AssertPinned(runtime, "now - st.LastStartHours < ManeuverFeasibility.EvaluateIntervalHours", "a new evaluation waits out the interval after the last one's start");
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "ManeuverFeasibility.Candidates.cs"),
+            "EvaluateIntervalHours = 0.05f, EvaluateSliceMs = 1.5f", "the spec's evaluation interval (0.05 h) and slice (1.5 ms)");
         FlankResponseTests.AssertPinned(runtime, "army.SetFeasibility(Plugin.ManeuverFeasibilityEnabled() ? st.Ledger : null);", "the ledger is pushed, null with the flag off");
         FlankResponseTests.AssertPinned(runtime, "OnceLog.Warning(\"tactical-battle-core:feasibility-nav-failed\"", "a failed confirmation leaves the leg an estimate and says so once");
         FlankResponseTests.AssertPinned(runtime, "OnceLog.Warning(\"tactical-battle-core:feasibility-daylight-missing\"", "a missing storm system means no daylight term and says so once");
@@ -200,6 +204,12 @@ internal static partial class ManeuverFeasibilityTests
         string telemetry = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityTelemetry.cs");
         foreach (string row in new[] { "TacticalPlanSelection", "TacticalManeuverFeasibility", "TacticalManeuverBody", "TacticalReplan", "TacticalCrossingWatch" })
             AssertTrue(telemetry.Contains("\"" + row + "\""), row + " is emitted");
+        // The spec's row fields (telemetry § Rows): a body row carries each risk term and the times that feed them, a candidate row its verdict.
+        foreach (string field in new[] { "doctrineHours", "plan", "body", "child", "kind", "strength", "routeUnits", "routeSource", "marchVia", "attackVia", "marchViaState",
+            "attackViaState", "strikeContested", "courierHours", "marchHours", "inwardSurplusHours", "strikeHours", "desiredStrikeHours", "releaseHours", "enemyShiftHours",
+            "windowHours", "pin", "enemyAgainst", "isolatedOdds", "bar", "ownRatio", "daylight", "detail", "contested", "approach", "exposure", "turn", "penalty", "assumption",
+            "suppression", "mirrored", "verdict", "reason", "candidates", "impossible", "risky", "selected", "slices", "forced", "queries", "legsSampled", "legOverflow", "confirmQueued" })
+            AssertTrue(telemetry.Contains("WithField(\"" + field + "\""), "the feasibility rows carry " + field);
         foreach (string key in new[] { "feasibility-first", "feasibility-filtered", "feasibility-replan", "feasibility-via" })
             AssertTrue(telemetry.Contains("tactical-battle-core:" + key), "the once-log " + key + " exists");
         foreach (string suppression in new[] { "SuppressedByCooldown", "SuppressedByMargin", "SuppressedByPreemption", "SuppressedByCommitment" })

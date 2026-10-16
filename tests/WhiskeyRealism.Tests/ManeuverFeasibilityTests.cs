@@ -51,6 +51,7 @@ internal static partial class ManeuverFeasibilityTests
     static (string, Action)[] StanceTests() => new (string, Action)[]
     {
         ("bc14 FEAS-STANCE-INITIAL a Defender's initial pick refreshes the pick inputs first and is not offensive", FeasStanceInitial),
+        ("bc14 FEAS-NIGHT-EVAL the night replan runs the forced evaluation once, with the plan standing, before it re-plans", FeasNightEvaluation),
     };
 
     // The pick inputs are refreshed before the first pick, so a Defender's first plan comes out of the stance-filtered catalog.
@@ -82,5 +83,27 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(army.HasPlan, "a plan is picked");
         AssertTrue(TacticalPlaybookCatalog.StanceOf(army.CurrentPlan.PlanId) != TacticalPlaybookCatalog.PlaybookStance.Offensive,
             "a Defender's initial pick is not offensive, got " + army.CurrentPlan.PlanId);
+    }
+
+    // The new battle day's replan reads a ledger of the morning's ground: the forced evaluation runs first, with the plan still standing,
+    // then the replan restarts the plan's age. A side with no plan evaluates nothing (its first pick does).
+    static void FeasNightEvaluation()
+    {
+        var evidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var visible = new EnemyVisibleState(new[] { new EnemyVisibleSector(0, 5000f, 9000f, true) }, 0.5f, anyContactSpotted: true, anyContactBroken: false);
+        var army = new ArmyOrchestrator(1, BuiltInPlaybooks.SeedCatalog(), default);
+        army.PickInitialPlan(evidence);
+        army.AdvancePlanAge(100f);
+        int calls = 0;
+        float ageAtEvaluate = -1f;
+        TacticalBattleCoordinator.ReplanForNewBattleDay(army, evidence, visible, () => { calls++; ageAtEvaluate = army.PlanAgeSeconds; });
+        AssertEqual(1, calls, "the evaluation runs once");
+        AssertNear(100f, ageAtEvaluate, 1e-4f, "before the replan (the plan was still 100 s old)");
+        AssertNear(0f, army.PlanAgeSeconds, 1e-6f, "and the replan followed");
+
+        var idle = new ArmyOrchestrator(1, BuiltInPlaybooks.SeedCatalog(), default);
+        int idleCalls = 0;
+        TacticalBattleCoordinator.ReplanForNewBattleDay(idle, evidence, visible, () => idleCalls++);
+        AssertEqual(0, idleCalls, "a side with no plan evaluates nothing");
     }
 }

@@ -23,7 +23,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 DEF-ARRIVALS the threat list carries the earliest arrival, the arrival at the flank end, the reserve sources' time and the per-child times", DefArrivals),
         ("bc14 DEF-PENALTY a Defender candidate's penalty is 0.6 x turn alone", DefPenalty),
         ("bc14 ENEMY-BODIES the Defender run builds its own bodies by single-link clustering and the earliest triggers", EnemyBodies),
-        ("bc14 SHIFT-COVERED-DEF the enemy's shift through a crossing an own regiment covers costs an hour; through any other nothing", ShiftCoveredDefender),
+        ("bc14 SHIFT-COVERED-DEF the enemy's shift through a crossing an own regiment covers costs an hour; through any other nothing; a bound guard does not cover it", ShiftCoveredDefender),
         ("bc14 FEAS-PLAYER player-owned strength is not counted, a wholly player-owned child is not offered and has no time to a crossing", FeasPlayer),
         ("bc14 RELEASE-CROSSING one release per crossing, the soonest eligible reserve, only when the enemy gets there first", ReleaseCrossing),
         ("bc14 RELEASE-ORDER the crossing release takes what the crisis and the stagger leave", ReleaseOrder),
@@ -234,32 +234,45 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(0, noneLedger.ThreatCount, "and no crossing threat for a guard to answer");
     }
 
+    // The enemy's route hours across the ford at x = -600 with an optional own corps standing at the ford. A bound guard (the child the
+    // previous allocation sent to guard a crossing) stays out of the cover test: its regiments stand there because of the threat.
+    static float EnemyFordHours(Action<FeasField> own, BattleStance stance, bool coverIsBoundGuard = false)
+    {
+        var f = new FeasField(BandWithCrossings(240f, 260f, (-600f, 250f, Ford)));
+        f.Stance = stance;
+        f.AddCorps(0f, 0f, 12000f);
+        f.AddEnemy(-600f, 556f, 11000f);
+        own?.Invoke(f);
+        f.Legs = StraightLegs(f, BattlePlanId.PreparedDefense, BattlePlanId.ManeuverAndFix);
+        var ledger = new FeasibilityLedger();
+        FeasibilityInput input = f.Build(BattlePlanId.PreparedDefense);
+        if (coverIsBoundGuard)
+        {
+            input.BoundGuardChildIds = new[] { f.ChildIds[f.ChildIds.Count - 1] };
+            input.BoundGuardCount = 1;
+        }
+        ManeuverFeasibility.Evaluate(input, ledger);
+        CrossingGraphView graph = ledger.Job.Graph;
+        RouteResult r = graph.Route(FeasField.X(-600f), FeasField.Z(450f), FeasField.X(-600f), FeasField.Z(0f), 1f, 0f, true);
+        AssertTrue(r.Found && !r.SameRegion, "the enemy's route crosses the ford");
+        return r.Hours;
+    }
+
     static void ShiftCoveredDefender()
     {
         // The enemy crosses at a ford; an own regiment facing it within 1.5 x its fire range covers it.
-        float Hours(Action<FeasField> own, BattleStance stance)
-        {
-            var f = new FeasField(BandWithCrossings(240f, 260f, (-600f, 250f, Ford)));
-            f.Stance = stance;
-            f.AddCorps(0f, 0f, 12000f);
-            f.AddEnemy(-600f, 556f, 11000f);
-            own?.Invoke(f);
-            f.Legs = StraightLegs(f, BattlePlanId.PreparedDefense, BattlePlanId.ManeuverAndFix);
-            var ledger = new FeasibilityLedger();
-            ManeuverFeasibility.Evaluate(f.Build(BattlePlanId.PreparedDefense), ledger);
-            CrossingGraphView graph = ledger.Job.Graph;
-            RouteResult r = graph.Route(FeasField.X(-600f), FeasField.Z(450f), FeasField.X(-600f), FeasField.Z(0f), 1f, 0f, true);
-            AssertTrue(r.Found && !r.SameRegion, "the enemy's route crosses the ford");
-            return r.Hours;
-        }
-        float uncovered = Hours(null, BattleStance.Defender);
-        float covered = Hours(f => f.AddCorps(-600f, 100f, 6000f, fireRange: 200f), BattleStance.Defender);
+        float uncovered = EnemyFordHours(null, BattleStance.Defender);
+        float covered = EnemyFordHours(f => f.AddCorps(-600f, 100f, 6000f, fireRange: 200f), BattleStance.Defender);
         AssertNear(ManeuverFeasibility.HeldCrossingHours, covered - uncovered, 0.02f, "an own-covered crossing costs the enemy an hour");
-        float attacker = Hours(f => f.AddCorps(-600f, 100f, 6000f, fireRange: 200f), BattleStance.Attacker);
+        float attacker = EnemyFordHours(f => f.AddCorps(-600f, 100f, 6000f, fireRange: 200f), BattleStance.Attacker);
         AssertNear(covered, attacker, 1e-4f, "the same rule in the attacker's run");
         // A crossing the enemy itself holds (a brigade standing on it) is Held to the side but costs the enemy nothing extra.
-        float held = Hours(f => f.AddEnemy(-600f, 250f, 1500f, heading: 180f, fireRange: 100f), BattleStance.Defender);
+        float held = EnemyFordHours(f => f.AddEnemy(-600f, 250f, 1500f, heading: 180f, fireRange: 100f), BattleStance.Defender);
         AssertNear(uncovered, held, 0.02f, "a crossing the enemy holds is no cost to it");
+        // RELEASE-LATCH: the cover is the guard the last allocation bound to the crossing: its regiments are left out of the cover test, so the
+        // crossing it guards does not read covered by the guard itself (the latch would otherwise flip the threat away and back).
+        float guard = EnemyFordHours(f => f.AddCorps(-600f, 100f, 6000f, fireRange: 200f), BattleStance.Defender, coverIsBoundGuard: true);
+        AssertNear(uncovered, guard, 0.02f, "a bound guard's regiments do not count in the crossing's cover test");
     }
 
     static void FeasPlayer()
