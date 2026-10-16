@@ -184,29 +184,43 @@ internal static class ObjectiveGroundTests
         AssertTrue(list[0].PriorTerm > 0f, "and contributes");
     }
 
-    // The runtime adapter is outside the test project, so the mapped branch is pinned on its text.
+    // The runtime adapter is outside the test project, so the mapped branch is pinned on its text:
+    // whole statement lines (HasLine: trimmed, exact), so a changed argument or a commented-out copy fails.
     private static void ReadObjectivesMappedBranchPinned()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
         string read = MethodBody(src, "private static void ReadObjectives(");
-        int deactivated = read.IndexOf("o.IsDeactivated()", StringComparison.Ordinal);
-        int empty = read.IndexOf("if (o.objectives.Count == 0)", StringComparison.Ordinal);
-        int mapped = read.IndexOf("ReadMappedGround(", StringComparison.Ordinal);
-        AssertTrue(deactivated >= 0 && empty > deactivated && mapped > empty,
+        string gate = "if (o.ObjectiveScenario == null || !o.ObjectiveScenario.Contains(scenario) || o.IsDeactivated()) continue;";
+        string empty = "if (o.objectives.Count == 0)";
+        string call = "ReadMappedGround(s, o, scenario, accomplished, alliance, followed, townRadius);";
+        AssertTrue(HasLine(read, gate), "the shared gate skips other scenarios and deactivated objectives");
+        AssertTrue(HasLine(read, empty), "the mapped branch is for an empty target list only");
+        AssertTrue(HasLine(read, call), "the branch hands ReadMappedGround the scenario and vanilla's accomplished flag");
+        int gateAt = read.IndexOf(gate, StringComparison.Ordinal);
+        int emptyAt = read.IndexOf(empty, StringComparison.Ordinal);
+        int callAt = read.IndexOf(call, StringComparison.Ordinal);
+        AssertTrue(gateAt >= 0 && emptyAt > gateAt && callAt > emptyAt,
             "the scenario/IsDeactivated gate precedes the empty-target-list branch that calls ReadMappedGround");
-        AssertContains(read, "!o.ObjectiveScenario.Contains(scenario) || o.IsDeactivated()) continue;", "the shared gate skips other scenarios and deactivated objectives");
         AssertEqual(2, Count(src, "ReadMappedGround("), "the definition and one call");
+
         string ground = MethodBody(src, "private static void ReadMappedGround(");
-        AssertContains(ground, "ObjectiveGround.TownsFor(scenario, GamePrefs.subleveltoload, objectiveId)", "the table is asked with the scenario and the sub-scenario");
-        AssertContains(ground, "ObjectiveGround.Available(alliance, o.ObjectiveAlliance,", "availability is the pure rule");
-        AssertContains(ground, "AtWar(town.Owner, alliance)", "the at-war count uses the bounds-checked helper");
+        AssertTrue(HasLine(ground, "var ground = ObjectiveGround.TownsFor(scenario, GamePrefs.subleveltoload, objectiveId);"), "the table is asked with the scenario and the sub-scenario");
+        AssertTrue(HasLine(ground, "if (AtWar(town.Owner, alliance)) heldByEnemy++;"), "the at-war count uses the bounds-checked helper, counting enemy-held towns");
+        AssertTrue(HasLine(ground, "bool available = ObjectiveGround.Available(alliance, o.ObjectiveAlliance, false, accomplished, heldByEnemy);"),
+            "availability is the pure rule: the objective's own alliance, vanilla's accomplished flag, the enemy-held count");
+        AssertTrue(HasLine(ground, "var seed = new ObjectiveRecord { ObjectiveId = objectiveId, Available = available, Accomplished = accomplished };"), "each record carries the pure rule's availability");
+        AssertTrue(HasLine(ground, "RawImportance.Add(Math.Max(0f, importance));"), "each mapped record's importance is normalised with the rest");
+        AssertTrue(HasLine(ground, "s.MappedObjectiveCount++;"), "the mapped records are counted");
+        AssertFalse(ground.Contains("allcampaignobjectives") || ground.Contains("GetAvailableObjectives") || ground.Contains("AvailableObjectives"),
+            "vanilla's availability is not consulted for empty target lists");
+
         string resolve = MethodBody(src, "private static Town ResolveGroundTown(");
-        AssertContains(resolve, "Town.GetTownFromName(ground.Names[n], ground.State)", "towns resolve through vanilla's own lookup, every name in order");
-        AssertContains(resolve, "GroundTownCache[key] = found;", "the result, a miss included, is cached for the campaign");
+        AssertTrue(HasLine(resolve, "for (int n = 0; n < ground.Names.Length && found == null; n++)"), "every name of the row is tried in order");
+        AssertTrue(HasLine(resolve, "Town town = Town.GetTownFromName(ground.Names[n], ground.State);"), "towns resolve through vanilla's own lookup");
+        AssertTrue(HasLine(resolve, "if ((UnityEngine.Object)cached != null) return cached; // else destroyed: resolve again"), "a destroyed cached town is resolved again");
+        AssertTrue(HasLine(resolve, "GroundTownCache[key] = found;"), "the result, a miss included, is cached for the campaign");
         AssertContains(resolve, "campaign-planner:objective-ground-missing:", "a town that does not resolve is logged once per objective and name");
-        AssertContains(MethodBody(src, "private static void ResetCaches("), "GroundTownCache.Clear();", "the town cache is reset with the campaign");
-        AssertContains(ground, "MappedObjectiveCount++", "the mapped records are counted");
-        AssertFalse(ground.Contains("allcampaignobjectives") || ground.Contains("GetAvailableObjectives"), "vanilla's availability is not consulted for empty target lists");
+        AssertTrue(HasLine(MethodBody(src, "private static void ResetCaches("), "GroundTownCache.Clear();"), "the town cache is reset with the campaign");
         // One town-record builder for both branches (a mapped town is built exactly as a 002 town target).
         AssertEqual(3, Count(src, "TownRecord("), "the builder and its two callers");
     }

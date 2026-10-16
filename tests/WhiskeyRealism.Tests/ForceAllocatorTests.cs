@@ -1062,25 +1062,25 @@ internal static class ForceAllocatorTests
             {
                 lone.Supply01 = 0.1f;
                 lone.Morale = 0.1f;
-        }
-        s.Own.Add(lone);
-        s.Beliefs.Add(Belief(600f, 0f, 10000f));
-        var sectors = Sectors(s);
-        int k = sectors.SectorAt(550f, 0f);
-        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
-        AssertEqual(TheaterPosture.Screen, PostureOfSector(plan, k), "his strength x morale does not hold the sector, and his supply does not make it Recover");
-        var missions = new ReconMissionLedger();
-        var tasks = new List<ReconTask>();
-        ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
-        ReconTask screen = default;
-        bool found = false;
-        foreach (var task in tasks)
-            if (task.SectorId == k && task.Reason == "screen-posture") { screen = task; found = true; }
-        AssertTrue(found, "the Screen sector keeps its screen task");
-        int holder = ReconPlanner.PickFormation(s, sectors, plan, missions, screen, null, false);
-        AssertEqual(1, holder, "an AI formation takes it, never the player");
-        var a = Alloc(plan, s, null, tasks, missions);
-        AssertTrue(Of(a, 9).Role != FormationRole.Recon && !Of(a, 9).Withheld, "and he stays out of the allocation's recon posts");
+            }
+            s.Own.Add(lone);
+            s.Beliefs.Add(Belief(600f, 0f, 10000f));
+            var sectors = Sectors(s);
+            int k = sectors.SectorAt(550f, 0f);
+            var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+            AssertEqual(TheaterPosture.Screen, PostureOfSector(plan, k), "his strength x morale does not hold the sector, and his supply does not make it Recover");
+            var missions = new ReconMissionLedger();
+            var tasks = new List<ReconTask>();
+            ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
+            ReconTask screen = default;
+            bool found = false;
+            foreach (var task in tasks)
+                if (task.SectorId == k && task.Reason == "screen-posture") { screen = task; found = true; }
+            AssertTrue(found, "the Screen sector keeps its screen task");
+            int holder = ReconPlanner.PickFormation(s, sectors, plan, missions, screen, null, false);
+            AssertEqual(1, holder, "an AI formation takes it, never the player");
+            var a = Alloc(plan, s, null, tasks, missions);
+            AssertTrue(Of(a, 9).Role != FormationRole.Recon && !Of(a, 9).Withheld, "and he stays out of the allocation's recon posts");
         }
     }
 
