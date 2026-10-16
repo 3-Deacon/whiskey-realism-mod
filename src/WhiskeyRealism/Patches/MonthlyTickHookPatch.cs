@@ -21,7 +21,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.monthly-tick-hook", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.monthly-tick-hook");
-            OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + weekly CIC review)");
+            OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + daily planner review)");
             try
             {
                 // R15: a campaign scene whose AICampaign instance was never loaded from a save
@@ -59,7 +59,9 @@ namespace WhiskeyRealism.Patches
                 }
 
                 bool dateChanged = day != _lastNotifiedDay || month != _lastNotifiedMonth || year != _lastNotifiedYear;
-                bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerStartPending();
+                // Spec C5: notify the review once a W&L commander is chosen, also between commands
+                // (the review narrows itself while vanilla's job machine is paused, 11368).
+                bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerNotStarted();
                 if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
                 {
                     // Continue a time-sliced daily review started on an earlier frame.

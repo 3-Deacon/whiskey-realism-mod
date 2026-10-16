@@ -312,9 +312,9 @@ internal static class BattleReconSearchTests
         var sink = new Sink();
         var executor = new OrderExecutor();
         for (int i = 0; i < 4; i++) BattleRecon.Plan(s, Settings(), p, m, executor, sink);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 50; i++) BattleRecon.Plan(s, Settings(), p, m, executor, sink);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "failed searches allocated bytes");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "failed searches allocated bytes");
         AssertEqual(0, sink.Count, "nothing submitted");
     }
 

@@ -6,14 +6,14 @@ namespace WhiskeyRealism.Strategic
     internal enum DailyReviewJobKind
     {
         Map,
-        Cic,
+        Head,
         Fiscal,
         Policy,
+        Plan,
         Front,
         Defense,
+        Execute,
         Formation,
-        Probe,
-        ArmyArea,
         Construction,
         Report
     }
@@ -31,8 +31,10 @@ namespace WhiskeyRealism.Strategic
     }
 
     // The daily strategic review as an explicit ordered job list: the campaign map, then for
-    // alliance 0 and then alliance 1 the CIC review, fiscal, policy, front, defense,
-    // formation directives, operational probe, army areas, construction and the report lines.
+    // alliance 0 and then alliance 1 the head (who runs today, era, succession, capital threat,
+    // director posture), fiscal, policy, the campaign planner's review (Plan: snapshot,
+    // beliefs, plan), front, defense, the planner's executors (Execute), formation
+    // directives, construction and the report lines.
     // This is the order StrategicCoordinator ran them in one frame before the review was
     // time-sliced. Each job decides inside itself whether it has work today (the cadence and
     // source-signature gates read signatures that earlier jobs of the same day write).
@@ -40,14 +42,14 @@ namespace WhiskeyRealism.Strategic
     {
         private static readonly DailyReviewJobKind[] PerAlliance =
         {
-            DailyReviewJobKind.Cic,
+            DailyReviewJobKind.Head,
             DailyReviewJobKind.Fiscal,
             DailyReviewJobKind.Policy,
+            DailyReviewJobKind.Plan,
             DailyReviewJobKind.Front,
             DailyReviewJobKind.Defense,
+            DailyReviewJobKind.Execute,
             DailyReviewJobKind.Formation,
-            DailyReviewJobKind.Probe,
-            DailyReviewJobKind.ArmyArea,
             DailyReviewJobKind.Construction,
             DailyReviewJobKind.Report
         };
@@ -158,6 +160,88 @@ namespace WhiskeyRealism.Strategic
             _next = 0;
             InFlight = false;
             Faulted = false;
+        }
+    }
+
+    // Which copy a reader of the campaign planner's stores (EnemyBeliefStore, CampaignPlanStore)
+    // gets: inside a review job the working copy, outside it the copy published at the last
+    // commit, the rule StrategicCoordinator.View applies to StrategicLedgerSet. The coordinator
+    // attaches its scheduler's RunningJob at bootstrap; with nothing attached (the harness, menus
+    // before the coordinator exists) every read is a working read, as before the review was sliced.
+    internal static class DailyReviewView
+    {
+        private static Func<bool> _inJob;
+
+        internal static void Attach(Func<bool> inJob)
+        {
+            _inJob = inJob;
+        }
+
+        internal static bool ReadsWorking => _inJob == null || _inJob();
+    }
+
+    // Review work and the campaign planner's terrain memo drain never share a frame: any slice of the
+    // review (a pump, a drain before a new day or before a save) marks the frame, and the drain runs
+    // only on a frame without review work. Vanilla's SaveAll (#111 DailyReviewSaveDrainPatch) can finish
+    // a review earlier in the same frame than the AICampaign.Update Postfix that pumps, which would
+    // otherwise put the drain's 0.9 ms after the save drain's work.
+    internal sealed class ReviewFrameGate
+    {
+        private int _workFrame = -1;
+
+        internal void MarkWork(int frame)
+        {
+            _workFrame = frame;
+        }
+
+        internal bool MayDrain(int frame)
+        {
+            return frame != _workFrame;
+        }
+    }
+
+    // One reader-facing copy of review state outside StrategicLedgerSet, published with it: the
+    // day's commit fills the spare copy from the working state (Prepare) and, once every copy of
+    // the day is complete, swaps it in (Swap). A fill that throws leaves the previous day
+    // published and nothing is swapped. The two copies alternate, so after warm-up a commit
+    // allocates nothing; the review runs on the main thread, so no reader holds a copy across
+    // the commit that refills it.
+    internal sealed class PublishedDay<T> where T : class
+    {
+        private T _published;
+        private T _spare;
+        private bool _prepared;
+
+        internal PublishedDay(T first, T second)
+        {
+            _published = first;
+            _spare = second;
+        }
+
+        internal T Published => _published;
+
+        internal void Prepare(Action<T> fill)
+        {
+            _prepared = false;
+            fill(_spare);
+            _prepared = true;
+        }
+
+        internal void Swap()
+        {
+            if (!_prepared) return;
+            T previous = _published;
+            _published = _spare;
+            _spare = previous;
+            _prepared = false;
+        }
+
+        // Clears both copies (a campaign reset).
+        internal void Reset(Action<T> clear)
+        {
+            clear(_published);
+            clear(_spare);
+            _prepared = false;
         }
     }
 

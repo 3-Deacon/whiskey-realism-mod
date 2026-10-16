@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -94,14 +95,9 @@ namespace WhiskeyRealism.Patches
             var available = AvailablePerks(unit, perkCount);
             if (available.Count == 0) return;
 
-            var cic = StrategicCoordinator.Instance.CICs[alliance];
-            var meta = CurrentObjectiveMetadata(cic);
-            var era = StrategicCoordinator.Instance.Eras[alliance];
-            var personality = cic != null && era != null
-                ? cic.Effective(era)
-                : default(PersonalityVector);
-            var role = ResolveArmyRole(alliance, unit, meta);
-            int selected = PerkSelectionScorer.SelectArmyPerk(alliance, meta.Theater, role, personality, available, UnityEngine.Random.value);
+            var personality = PersonalityVector.ForAlliance(alliance, StrategicCoordinator.Instance.Eras[alliance]);
+            var role = ResolveArmyRole(alliance, unit, out Theater theater);
+            int selected = PerkSelectionScorer.SelectArmyPerk(alliance, theater, role, personality, available, UnityEngine.Random.value);
             if (selected < 0) return;
 
             unit.ChoosePerk(selected);
@@ -113,9 +109,7 @@ namespace WhiskeyRealism.Patches
             var available = AvailablePerks(fleet, perkCount);
             if (available.Count == 0) return;
 
-            var cic = StrategicCoordinator.Instance.CICs[alliance];
-            var meta = CurrentObjectiveMetadata(cic);
-            var role = ResolveFleetRole(alliance, meta);
+            var role = ResolveFleetRole(alliance);
             int selected = PerkSelectionScorer.SelectFleetPerk(alliance, role, available, UnityEngine.Random.value);
             if (selected < 0) return;
 
@@ -123,61 +117,35 @@ namespace WhiskeyRealism.Patches
             LogChoice("fleet", alliance, role.ToString(), selected);
         }
 
-        private static ObjectiveMetadata CurrentObjectiveMetadata(CIC cic)
+        // The role comes from the formation directive when it names one (PerkSelectionScorer.TryDirectiveRole),
+        // else from the formation's role in the published allocation (RoleOfFormation); the theater is the one of
+        // the sector the allocation gave the formation. No fresh plan or no assignment: General, theater Unknown.
+        private static ArmyPerkRole ResolveArmyRole(int alliance, Regiment unit, out Theater theater)
         {
-            int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            if (ObjectiveCatalog.TryResolve(objectiveId, out var meta))
-                return meta;
+            theater = Theater.Unknown;
+            bool assigned = false;
+            Assignment assignment = default(Assignment);
+            if (CampaignPlanStore.TryGetPlan(alliance, out var plan) && PlanFreshness.IsFresh(plan.DaySerial)
+                && CampaignPlanStore.TryGetAllocation(alliance, out var allocation)
+                && allocation.TryGet(((UnityEngine.Object)unit).GetInstanceID(), out assignment))
+            {
+                assigned = true;
+                theater = plan.SectorById(assignment.SectorId)?.Theater ?? Theater.Unknown;
+            }
 
-            return ObjectiveMetadata.DefaultDerived(Theater.Unknown, 0f, 0f);
-        }
-
-        private static ArmyPerkRole ResolveArmyRole(int alliance, Regiment unit, ObjectiveMetadata meta)
-        {
             var directive = CurrentDirective(alliance, unit);
-            if (directive != null)
-            {
-                switch (directive.Directive)
-                {
-                    case FormationDirective.RaidSupport:
-                        return ArmyPerkRole.Raid;
-                    case FormationDirective.Recover:
-                        return ArmyPerkRole.Recovery;
-                    case FormationDirective.Guard:
-                    case FormationDirective.Hold:
-                    case FormationDirective.CoordinateHold:
-                        return ArmyPerkRole.CapitalDefense;
-                    case FormationDirective.Probe:
-                    case FormationDirective.Mass:
-                    case FormationDirective.Counterstroke:
-                    case FormationDirective.Reinforce:
-                    case FormationDirective.CoordinateMass:
-                        return ArmyPerkRole.Maneuver;
-                }
-            }
+            if (directive != null && PerkSelectionScorer.TryDirectiveRole(directive.Directive, directive.Reason, out var directiveRole))
+                return directiveRole;
 
-            if (meta.Category == Category.RiverControl || meta.Theater == Theater.River) return ArmyPerkRole.River;
-            if (meta.Category == Category.CapitalThreat) return alliance == 1 ? ArmyPerkRole.CapitalDefense : ArmyPerkRole.Siege;
-            if (meta.Category == Category.RailroadCut || meta.Category == Category.SupplyHub) return ArmyPerkRole.Maneuver;
-            if (meta.Category == Category.ForeignRecognition) return ArmyPerkRole.Raid;
-            return ArmyPerkRole.General;
+            return assigned ? PerkSelectionScorer.RoleOfFormation(assignment.Role, alliance) : ArmyPerkRole.General;
         }
 
-        private static FleetPerkRole ResolveFleetRole(int alliance, ObjectiveMetadata meta)
+        private static FleetPerkRole ResolveFleetRole(int alliance)
         {
-            if (meta.Category == Category.RiverControl || meta.Theater == Theater.River)
-                return FleetPerkRole.River;
-
-            if (alliance == 0)
-            {
-                if (meta.Theater == Theater.Coast) return FleetPerkRole.Blockade;
-                return FleetPerkRole.Blockade;
-            }
-
-            if (meta.Theater == Theater.Coast || meta.Category == Category.CapitalThreat)
-                return FleetPerkRole.PortDefense;
-
-            return FleetPerkRole.Raid;
+            if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !PlanFreshness.IsFresh(plan.DaySerial))
+                return PerkSelectionScorer.FleetRole(alliance, Theater.Unknown, false);
+            var main = plan.SectorById(plan.MainSectorId);
+            return PerkSelectionScorer.FleetRole(alliance, main != null ? main.Theater : Theater.Unknown, plan.CapitalFloorStrength > 0f);
         }
 
         private static FormationDirectiveAssignment CurrentDirective(int alliance, Regiment unit)

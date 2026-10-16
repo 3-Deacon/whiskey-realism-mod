@@ -51,7 +51,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length, anchor.AnchoredLeft, anchor.AnchoredRight);
                 // BC11 decision 4: a node of a maneuvering child carries the maneuver's task (never for a Defender).
                 ManeuverNodeEntry maneuver = default(ManeuverNodeEntry);
-                bool maneuvering = stance != BattleStance.Defender && maneuvers != null && maneuvers.TryGet(node.NodeId, out maneuver);
+                bool maneuvering = maneuvers != null && maneuvers.TryGet(node.NodeId, out maneuver) && (stance != BattleStance.Defender || maneuver.IsGuard);
                 if (maneuvering) task = maneuver.Task;
                 // BC9 stance guard, whatever the shape or phase: a Defender gets no
                 // Probe and no attack-stance task.
@@ -94,6 +94,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     order = order.WithManeuver(
                         maneuver.HasTarget ? DoctrineTargetPoint.From(maneuver.TargetX, maneuver.TargetZ) : DoctrineTargetPoint.None,
                         idle, maneuver.Heading, maneuver.Holds, "maneuver-" + maneuver.Reason);
+                    // BC14: the maneuver's crossing via rides on the node's order (every lane node passes the same crossing).
+                    if (maneuver.HasVia) order = order.WithVia(maneuver.ViaX, maneuver.ViaZ);
                 }
                 orders.Add(order);
             }

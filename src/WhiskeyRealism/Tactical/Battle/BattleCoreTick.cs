@@ -137,7 +137,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // BC13: a gated-off side ends every live exploit (stand-down) and the posture producer finds an empty table; the
             // staggered reserve release starts over.
             OpportunityIntentProducer.StandDown(alliance);
-            TacticalBattleCoordinator.GetSideOrchestrator(alliance)?.Army?.ReserveRelease.Clear();
+            ReserveReleaseState.ForAlliance(alliance)?.Clear();
         }
 
         /// <summary>The side's vanilla macroai as of its last arbiter tick (0 before one).</summary>

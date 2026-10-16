@@ -5,35 +5,47 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
     // v0.2.2 concrete steering for vanilla AICampaign.CheckTransferOfUnits.
-    // Vanilla (decompile 17232) transfers troops from positionsurplus toward
-    // positiondeficit, sized by deficit.enemystrength - deficit.ownstrength
-    // (num4, 17275). We temporarily replace the deficit with the active CIC
-    // plan target, then restore vanilla state after the method runs. The
-    // actual MoveUnit call and all vanilla safety gates remain vanilla-owned.
+    // Vanilla (decompile 17232) moves strength from AIFaction.positionsurplus toward
+    // AIFaction.positiondeficit: the amount is min(surplus.own - surplus.enemy, deficit.enemy -
+    // deficit.own) (17275-17290), one brigade-sized grab from a unit near the surplus point that is
+    // not already within command range of the deficit point, attached below a division found at the
+    // deficit point (GrabExistingGroup 17319; MoveUnit 17328). Both TransferData records come from
+    // ZoneRecruiting's painted heatmaps, which paint every enemy on the map.
     //
-    // 2026-10-14 (C-Transfer): steer only when the plan target's local
-    // shortfall is worse than the deficit vanilla found (or vanilla found none),
-    // both read from vanilla's painted recruitment heatmaps (ZoneRecruiting
-    // 12470-12507 builds positiondeficit from the same grids),
-    // so a genuinely threatened zone keeps its transfer; the plan requirement
-    // is local (CampaignMilitaryGates.PlanTransferRequiredAtTarget) instead of
-    // a share of the whole army. The deficit restore runs in a Finalizer so a
-    // vanilla exception cannot leave the plan target stored as positiondeficit.
+    // 2026-10-15 (stage G, G5b): the Prefix swaps both records for what the live campaign plan says,
+    // and vanilla's Finalizer-restored fields run its own gates and its own move.
+    //   1. The allocation names the worst shortfall formation and the largest surplus formation
+    //      (ReinforcementRouting.TryTransferPair): the deficit is that formation's hold point, sized by
+    //      the need its role reported it for, the surplus is the surplus formation's position and strength.
+    //      A player formation can be a shortfall's position marker (spec C4): it contributes its hold
+    //      point only, and a source the planner may not move (WlChainRules.MayMove) is never drawn from.
+    //      Vanilla picks its donor from the source POINT, the first top group within
+    //      aimaximumdistancetosearchforunitrelocations of it (GrabOwnTopUnitsNearPosition 12824, called at
+    //      17284; the donor loop is 17291-17300), so a surplus is used only where no MainEffort, withheld,
+    //      in-transit or unmovable formation stands inside that radius and is not itself in transit
+    //      (ReinforcementRouting.TryTransferPair); with none, no pair is written and the main-target steer
+    //      below (2) may still replace the deficit; otherwise vanilla's records stay.
+    //   2. Otherwise, when the main target is under-supplied against the army believed there
+    //      (ReplacementFlowPolicy), only the deficit is swapped for the main target; vanilla's own
+    //      surplus stays.
+    // Nothing here reads the heatmaps: the amounts are the plan's, built from fog-honest beliefs. The
+    // front ledger's transfer budget (FrontSectorLedger.EvaluateTransfer) still vetoes a transfer that
+    // would strip a sector below its minimum hold. In a W&L career the move itself is vanilla's, which
+    // refused every AI transfer until WlCareerTransferFixPatch (BUG-WL-013) let the AI's own through.
     //
     // 2026-10-15 (BUG-WL-010): the Postfix reports what vanilla actually did with
     // the unit it appended (DC:17327). Vanilla first drops every entry whose
     // transfertime <= 0 (DC:17255-17262), so the new entry is counted after that
     // purge, and it is reported as transfer-queued only when SetTransfer started a
-    // transit (transfertime > 0, DC:93147). In a W&L career BattleUnits.MoveUnit
-    // returns unless both units are player-owned (DC:93099; CheckTransferOfUnits
-    // passes no skipdlccheck, DC:17328), so the row is transfer-blocked with
-    // reason wl-career-moveunit-guard (the career-transfer bug, fixed by stage G C1).
+    // transit (transfertime > 0, DC:93147). A career move that the (fixed or off) vanilla guard
+    // refused (DC:93099) is reported transfer-blocked with reason wl-career-moveunit-guard.
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {
@@ -48,6 +60,7 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<int, string> LastLoggedSteer = new Dictionary<int, string>();
         // Non-queued rows (transfer-blocked repeats every vanilla pass in a career) are emitted only when the alliance's signature changes.
         private static readonly Dictionary<int, string> LastLoggedBlocked = new Dictionary<int, string>();
+        private static readonly List<FormationRecord> Own = new List<FormationRecord>();
 
         internal static void ResetForNewCampaign()
         {
@@ -60,7 +73,9 @@ namespace WhiskeyRealism.Patches
         {
             public object Faction;
             public FieldInfo DeficitField;
+            public FieldInfo SurplusField;
             public object OriginalDeficit;
+            public object OriginalSurplus;
             public int AllianceId;
             public int ObjectiveId;
             public int BeforeTransferCount;
@@ -77,31 +92,27 @@ namespace WhiskeyRealism.Patches
             {
                 PatchFirstFire.Mark("campaign.patch.transfer-of-units.prefix");
             _pending.Remove(_aifaction);
-            OnceLog.Info("transfer", "TransferOfUnitsPatch wired (concrete plan-target steering)");
+            OnceLog.Info("transfer", "TransferOfUnitsPatch wired (allocation-driven replacement flow)");
 
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                if (!FlagOn(Plugin.EnableCampaignPlanner) || !FlagOn(Plugin.EnableCampaignPlannerExecutors)) return;
                 if (StrategicCoordinator.Instance == null) return;
 
                 int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.CICs.Length) return;
+                if (allianceId < 0 || allianceId > 1) return;
 
                 int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                 if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
 
-                var cic = StrategicCoordinator.Instance.CICs[allianceId];
-                var phase = cic?.ActivePlan?.CurrentPhase;
-                if (phase == null || phase.TargetObjectiveId < 0) return;
-
-                var target = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
-                if (!target.HasValue) return;
+                if (!CampaignPlanStore.TryGetPlan(allianceId, out var plan)) return;
 
                 var faction = AICampaignReflect.GetFaction(_aifaction);
                 if (faction == null) return;
 
                 var factionType = faction.GetType();
-                var deficitField = VanillaFieldCache.Field(factionType, "positiondeficit");
+                var deficitField = VanillaFieldCache.Field(factionType, "positiondeficit"); // the holder is swapped for the plan's pair and restored; its enemy figures are never read
                 var surplusField = VanillaFieldCache.Field(factionType, "positionsurplus");
                 if (deficitField == null || surplusField == null)
                 {
@@ -109,51 +120,69 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                var surplus = surplusField.GetValue(faction);
-                if (surplus == null) return;
-
                 var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                 if (ownUnits == null)
                 {
                     OnceLog.Warning("transfer:field:unit-lists", "TransferOfUnitsPatch missing AIFaction.ownunits list");
                     return;
                 }
-
-                // Same scale vanilla's positiondeficit uses: read the painted
-                // recruitment heatmaps at the target (Heatmap.GetValueOnPos(world
-                // position, usearrayvalues: false), 33840).
-                var ownHeat = VanillaFieldCache.Get(faction, CampaignMilitaryGates.TransferHeatmapFields[0]) as Heatmap;
-                var enemyHeat = VanillaFieldCache.Get(faction, CampaignMilitaryGates.TransferHeatmapFields[1]) as Heatmap;
-                if (ownHeat == null || enemyHeat == null) return;
-                float ownNear = ownHeat.GetValueOnPos(target.Value, usearrayvalues: false);
-                float enemyNear = enemyHeat.GetValueOnPos(target.Value, usearrayvalues: false);
-                float totalOwn = SumStrength(ownUnits);
+                LiveFormationReader.Read(ownUnits, allianceId, false, Own);
+                float totalOwn = SumStrength(Own);
                 if (totalOwn <= 0f) return;
 
-                float requiredAtTarget = CampaignMilitaryGates.PlanTransferRequiredAtTarget(totalOwn, phase.ForceFractionRequired, enemyNear);
-                if (ownNear >= requiredAtTarget && ownNear >= enemyNear) return;
-
-                // The injected TransferData makes vanilla compute num4 = enemyProxy - ownNear;
-                // compare that with the deficit vanilla already found.
-                float enemyProxy = Math.Max(enemyNear, requiredAtTarget);
-                float planShortfall = enemyProxy - ownNear;
                 var vanillaDeficit = deficitField.GetValue(faction);
-                bool vanillaPresent = vanillaDeficit != null;
-                float vanillaEnemy = vanillaPresent ? ReadTransferFloat(vanillaDeficit, "enemystrength") : 0f;
-                float vanillaOwn = vanillaPresent ? ReadTransferFloat(vanillaDeficit, "ownstrength") : 0f;
-                if (!CampaignMilitaryGates.ShouldSteerTransfer(vanillaPresent, vanillaEnemy, vanillaOwn, planShortfall))
-                    return;
+                var vanillaSurplus = surplusField.GetValue(faction);
+                object deficitData;
+                object surplusData = null;
+                float deficitX, deficitZ, deficitStrength;
+                float sourceX, sourceZ;
+                bool haveSource;
+                string toName;
+                string fromName;
+
+                if (CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)
+                    && ReinforcementRouting.TryTransferPair(plan, allocation, Own, GamePrefs.aimaximumdistancetosearchforunitrelocations, out var pair))
+                {
+                    deficitX = pair.DeficitX;
+                    deficitZ = pair.DeficitZ;
+                    deficitStrength = pair.DeficitStrength;
+                    sourceX = pair.SurplusX;
+                    sourceZ = pair.SurplusZ;
+                    haveSource = true;
+                    deficitData = CreateTransferData(factionType, new Vector3(deficitX, 0f, deficitZ), 0f, deficitStrength);
+                    surplusData = CreateTransferData(factionType, new Vector3(sourceX, 0f, sourceZ), pair.SurplusStrength, 0f);
+                    if (deficitData == null || surplusData == null) return;
+                    toName = pair.DeficitInstanceId >= 0 ? LiveFormationReader.NameOf(ownUnits, pair.DeficitInstanceId) : "position-marker";
+                    fromName = LiveFormationReader.NameOf(ownUnits, pair.SurplusInstanceId);
+                }
+                else
+                {
+                    if (vanillaSurplus == null) return;
+                    if (!ReplacementFlowPolicy.TryMainTarget(plan, out float targetX, out float targetZ)) return;
+                    float range = GamePrefs.aimaximumdistancetosearchforunitrelocations;
+                    float believed = EnemyBeliefQuery.StrengthWithin(EnemyDetectionRuntime.BeliefsFor(allianceId), targetX, targetZ, range);
+                    float shortfall = ReplacementFlowPolicy.PlanShortfall(plan, believed, Own, targetX, targetZ, range);
+                    if (!ReplacementFlowPolicy.ShouldSteer(plan, believed, shortfall, out deficitX, out deficitZ)) return;
+                    deficitStrength = shortfall;
+                    var sourcePosition = ReadTransferPosition(vanillaSurplus);
+                    haveSource = sourcePosition.HasValue;
+                    sourceX = haveSource ? sourcePosition.Value.x : 0f;
+                    sourceZ = haveSource ? sourcePosition.Value.z : 0f;
+                    deficitData = CreateTransferData(factionType, new Vector3(deficitX, 0f, deficitZ), 0f, deficitStrength);
+                    if (deficitData == null) return;
+                    toName = "main-target";
+                    fromName = "vanilla-surplus";
+                }
 
                 string sourceSector = null;
-                string destinationSector = FrontSectorRuntime.SectorKey(target.Value);
+                string destinationSector = FrontSectorRuntime.SectorKey(new Vector3(deficitX, 0f, deficitZ));
                 TransferBudgetAction budgetAction = TransferBudgetAction.Allowed;
-                var sourcePosition = ReadTransferPosition(surplus);
-                if (sourcePosition.HasValue)
+                if (haveSource)
                 {
-                    sourceSector = FrontSectorRuntime.SectorKey(sourcePosition.Value);
-                    float strengthToMove = Math.Min(Math.Max(requiredAtTarget - ownNear, 1000f), totalOwn * 0.1f);
+                    sourceSector = FrontSectorRuntime.SectorKey(new Vector3(sourceX, 0f, sourceZ));
+                    float strengthToMove = Math.Min(Math.Max(deficitStrength, 1000f), totalOwn * 0.1f);
                     var ledger = StrategicCoordinator.Instance.Fronts[allianceId];
-                    var decision = ledger?.EvaluateTransfer(sourceSector, destinationSector, strengthToMove);
+                    var decision = ledger?.EvaluateTransfer(sourceSector, strengthToMove);
                     if (decision != null)
                     {
                         budgetAction = decision.Action;
@@ -180,16 +209,15 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("transfer-budget:source-position", "[Patch:TransferBudget] could not read vanilla surplus position; front-budget gate skipped");
                 }
 
-                var transferData = CreateTransferData(factionType, target.Value, ownNear, enemyProxy);
-                if (transferData == null) return;
-
                 _pending[_aifaction] = new TransferSteerState
                 {
                     Faction = faction,
                     DeficitField = deficitField,
+                    SurplusField = surplusData != null ? surplusField : null,
                     OriginalDeficit = vanillaDeficit,
+                    OriginalSurplus = vanillaSurplus,
                     AllianceId = allianceId,
-                    ObjectiveId = phase.TargetObjectiveId,
+                    ObjectiveId = plan.MainObjectiveId,
                     BeforeTransferCount = TransferCount(faction),
                     StaleBeforeCount = StaleTransferCount(faction),
                     SourceSector = sourceSector,
@@ -197,18 +225,12 @@ namespace WhiskeyRealism.Patches
                     BudgetAction = budgetAction
                 };
 
-                deficitField.SetValue(faction, transferData);
+                deficitField.SetValue(faction, deficitData);
+                if (surplusData != null) surplusField.SetValue(faction, surplusData);
 
+                ReplacementFlowRow.Emit(allianceId, ReplacementFlowRow.KindTransfer, toName, fromName);
                 if (Plugin.Instance.VerboseLogging.Value)
-                    EmitPlanTransferSteer(
-                        allianceId,
-                        phase.TargetObjectiveId,
-                        ownNear,
-                        requiredAtTarget,
-                        enemyNear,
-                        sourceSector,
-                        destinationSector,
-                        budgetAction);
+                    EmitPlanTransferSteer(allianceId, plan.MainObjectiveId, deficitStrength, sourceSector, destinationSector, budgetAction);
             }
             catch (Exception ex)
             {
@@ -250,7 +272,7 @@ namespace WhiskeyRealism.Patches
         }
 
         // Runs after Postfix and also when vanilla threw; restores vanilla's own
-        // positiondeficit. A void Finalizer leaves any exception untouched.
+        // positiondeficit and positionsurplus. A void Finalizer leaves any exception untouched.
         [HarmonyFinalizer]
         internal static void Finalizer(int _aifaction)
         {
@@ -263,22 +285,13 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     state.DeficitField?.SetValue(state.Faction, state.OriginalDeficit);
+                    state.SurplusField?.SetValue(state.Faction, state.OriginalSurplus);
                 }
                 catch (Exception ex)
                 {
                     OnceLog.Warning("transfer:restore", "[Patch:Transfer] restore failed: " + ex.Message);
                 }
             }
-        }
-
-        private static float ReadTransferFloat(object transferData, string fieldName)
-        {
-            try
-            {
-                var field = VanillaFieldCache.Field(transferData.GetType(), fieldName);
-                return field != null ? Convert.ToSingle(field.GetValue(transferData)) : 0f;
-            }
-            catch { return 0f; }
         }
 
         private static ConstructorInfo _transferDataCtor;
@@ -335,28 +348,26 @@ namespace WhiskeyRealism.Patches
             return null;
         }
 
-        // Whole-army total on the heatmap's strength field: UpdateHeatmaps paints
-        // groupstrengthdirect (12332), and vanilla's own army total
-        // (GetStrengthRatio, 12377) sums groupstrengthdirect over ownunits.
-        private static float SumStrength(IList units)
+        // The side's whole-army total: vanilla's own army total (GetStrengthRatio, 12377) sums
+        // groupstrengthdirect over ownunits, which is what the live records carry.
+        private static float SumStrength(List<FormationRecord> units)
         {
             float total = 0f;
-            if (units == null) return total;
             for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                if ((UnityEngine.Object)(object)unit != (UnityEngine.Object)null)
-                    total += Math.Max(0, unit.groupstrengthdirect);
-            }
+                total += Math.Max(0f, units[i].Strength);
             return total;
+        }
+
+        private static bool FlagOn(BepInEx.Configuration.ConfigEntry<bool> entry)
+        {
+            try { return entry != null && entry.Value; }
+            catch { return false; }
         }
 
         private static void EmitPlanTransferSteer(
             int allianceId,
             int objectiveId,
-            float ownNear,
-            float requiredAtTarget,
-            float enemyNear,
+            float deficitStrength,
             string sourceSector,
             string destinationSector,
             TransferBudgetAction budgetAction)
@@ -375,9 +386,7 @@ namespace WhiskeyRealism.Patches
                 .WithAlliance(allianceId)
                 .WithDecision("transfer-steer", budgetAction.ToString(), signature)
                 .WithField("objective", objectiveId)
-                .WithField("ownNear", ownNear)
-                .WithField("required", requiredAtTarget)
-                .WithField("enemyNear", enemyNear)
+                .WithField("deficit", deficitStrength)
                 .WithField("sourceSector", safeSource)
                 .WithField("destinationSector", safeDestination)
                 .WithField("budgetAction", budgetAction.ToString()));

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -18,7 +17,7 @@ namespace WhiskeyRealism.Strategic
     internal sealed class ContactEvidenceInput
     {
         public int ObservingAllianceId;
-        public Vector3 TargetPosition;
+        public float TargetX, TargetZ;
         public float CurrentEnemyStrength;
         public float CurrentFriendlyStrength;
         public float PreviousObservedEnemyStrength;
@@ -29,21 +28,36 @@ namespace WhiskeyRealism.Strategic
         public float SpatialMaxDistance;
         public int CurrentDaySerial;
         public int WithinDays = 7;
+        // How current the beliefs behind CurrentEnemyStrength are (EnemyBeliefQuery.ConfidenceWithin).
+        public float BeliefConfidence01 = 1f;
     }
 
     internal sealed class ContactEvidenceOutput
     {
         public ContactEvidence Evidence;
         public bool AllowsEscalation;
-        public string Reason;
     }
 
     internal static class ContactEvidenceLedger
     {
+        // Below this a stale picture cannot clear a probe: the enemy strength is a confidence-weighted
+        // belief, so a decayed army reads smaller than it was. Withdrawing is never gated.
+        internal const float MinEscalationConfidence = 0.5f;
+
         internal static ContactEvidenceOutput Build(ContactEvidenceInput input)
         {
+            var output = Classify(input);
+            if (input != null && output.AllowsEscalation && !(input.BeliefConfidence01 >= MinEscalationConfidence))
+            {
+                output.AllowsEscalation = false;
+            }
+            return output;
+        }
+
+        private static ContactEvidenceOutput Classify(ContactEvidenceInput input)
+        {
             var output = new ContactEvidenceOutput();
-            if (input == null) return Reject(output, ContactEvidence.NoContact, "missing-input");
+            if (input == null) return Reject(output, ContactEvidence.NoContact);
 
             float ratio = input.CurrentFriendlyStrength /
                           Math.Max(1f, input.CurrentEnemyStrength);
@@ -54,7 +68,8 @@ namespace WhiskeyRealism.Strategic
             {
                 foreach (var record in BattleHistoryQuery.Near(
                     input.BattleHistory,
-                    input.TargetPosition,
+                    input.TargetX,
+                    input.TargetZ,
                     input.SpatialMaxDistance,
                     input.CurrentDaySerial,
                     input.WithinDays))
@@ -65,24 +80,23 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (ratio <= input.WithdrawFriendlyRatio)
-                return Reject(output, ContactEvidence.OvermatchedContact, "ratio-overmatched");
+                return Reject(output, ContactEvidence.OvermatchedContact);
 
             if (majorNearby != null && majorNearby.AllianceWon != input.ObservingAllianceId)
-                return Reject(output, ContactEvidence.OvermatchedContact, "battle-lost");
+                return Reject(output, ContactEvidence.OvermatchedContact);
 
             if (input.CurrentEnemyStrength <= 0f && majorNearby == null && minorNearby == null)
-                return Reject(output, ContactEvidence.NoContact, "no-enemy-no-battles");
+                return Reject(output, ContactEvidence.NoContact);
 
             float prior = Math.Max(1f, input.PreviousObservedEnemyStrength);
             if (input.CurrentEnemyStrength >= prior * input.EnemyReactionMultiplier &&
                 ratio < input.EscalateFriendlyRatio)
-                return Reject(output, ContactEvidence.EnemyReacted, "enemy-reaction");
+                return Reject(output, ContactEvidence.EnemyReacted);
 
             if (majorNearby != null && majorNearby.AllianceWon == input.ObservingAllianceId)
             {
                 output.Evidence = ContactEvidence.BattleObserved;
                 output.AllowsEscalation = ratio >= input.EscalateFriendlyRatio;
-                output.Reason = output.AllowsEscalation ? "battle-won-favorable" : "battle-won-need-ratio";
                 return output;
             }
 
@@ -91,7 +105,6 @@ namespace WhiskeyRealism.Strategic
             {
                 output.Evidence = ContactEvidence.FavorableContact;
                 output.AllowsEscalation = true;
-                output.Reason = "favorable-presence";
                 return output;
             }
 
@@ -99,7 +112,6 @@ namespace WhiskeyRealism.Strategic
             {
                 output.Evidence = ContactEvidence.SkirmishObserved;
                 output.AllowsEscalation = ratio >= input.EscalateFriendlyRatio;
-                output.Reason = output.AllowsEscalation ? "skirmish-favorable" : "skirmish-need-ratio";
                 return output;
             }
 
@@ -107,19 +119,16 @@ namespace WhiskeyRealism.Strategic
             {
                 output.Evidence = ContactEvidence.EnemyPresent;
                 output.AllowsEscalation = false;
-                output.Reason = "enemy-present-need-ratio-or-skirmish";
                 return output;
             }
 
-            return Reject(output, ContactEvidence.NoContact, "fallthrough");
+            return Reject(output, ContactEvidence.NoContact);
         }
 
-        private static ContactEvidenceOutput Reject(
-            ContactEvidenceOutput output, ContactEvidence evidence, string reason)
+        private static ContactEvidenceOutput Reject(ContactEvidenceOutput output, ContactEvidence evidence)
         {
             output.Evidence = evidence;
             output.AllowsEscalation = false;
-            output.Reason = reason;
             return output;
         }
     }

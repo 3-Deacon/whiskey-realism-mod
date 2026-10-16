@@ -17,6 +17,7 @@ internal static class BattleReconTests
         RunAll(new (string, Action)[]
         {
             ("recon scout is a standing AI cavalry regiment", ScoutIsStandingAiCavalryRegiment),
+            ("bc14 LOOK-RECON a crossing look is taken after stale entry points and bands, from the stand-off, inside the mission cap, never toward a superior enemy", CrossingLookRecon),
             ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
             ("recon scout's brigade must be settled and not moved by posture this tick", ScoutParentMustBeSettled),
             ("recon stale entry point beats stale band and forward", StaleEntryPointPickedFirst),
@@ -420,6 +421,135 @@ internal static class BattleReconTests
         AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "after the hour");
     }
 
+    // BC14 requirement-crossing-look: the feasibility ledger's look requests become a Crossing target of the same mission machinery.
+    private static void CrossingLookRecon()
+    {
+        // Alone, a look at (0, -200) is the mission, ridden to the stand-off on the scout's own side of it.
+        var s = Field(3.0);
+        var p = Picture(s);
+        p.AddLook(0f, -200f);
+        var rig = new Rig();
+        rig.Plan(s, p);
+        AssertEqual(ReconTargetKind.Crossing, rig.Memory.Kind, "the crossing is the target");
+        AssertEqual(ReconTargetKind.Crossing, rig.Last.StartedKind, "and the result names it");
+        AssertTrue(rig.Sink.TryFind(CavA, OrderChannel.Move, out BattleOrderIntent move) || rig.Sink.TryFind(CavB, OrderChannel.Move, out move), "a scout rides");
+        AssertNear(0f, move.TargetX, 60f, "toward the crossing");
+        AssertNear(-350f, move.TargetZ, 1f, "150 units short of it on the own side");
+        AssertEqual(IntentSource.Recon, move.Source, "recon source");
+
+        // A stale entry point comes first, then a stale band, then the crossing.
+        var both = Field(3.0);
+        var withEntry = WithEntry(Picture(both), 400f, -200f, -1.0);
+        withEntry.HasStaleBand = true; withEntry.StaleBandLateral = -150f; withEntry.StaleBandRecency = 0.1f; withEntry.FrameHeading = 0f;
+        withEntry.AddLook(0f, -200f);
+        var first = new Rig();
+        first.Plan(both, withEntry);
+        AssertEqual(ReconTargetKind.EntryPoint, first.Memory.Kind, "a stale entry point before the crossing");
+
+        var band = Field(3.0);
+        var withBand = WithEntry(Picture(band), 400f, -200f, 2.9);
+        withBand.HasStaleBand = true; withBand.StaleBandLateral = -150f; withBand.StaleBandRecency = 0.1f; withBand.FrameHeading = 0f;
+        withBand.AddLook(0f, -200f);
+        var second = new Rig();
+        second.Plan(band, withBand);
+        AssertEqual(ReconTargetKind.StaleBand, second.Memory.Kind, "a stale band before the crossing");
+
+        // Above the action gate, with nothing stale, the crossing is still looked at: the plan depends on it.
+        var gate = Field(3.0);
+        var confident = Picture(gate, confidence: 0.6f);
+        confident.AddLook(0f, -200f);
+        var third = new Rig();
+        third.Plan(gate, confident);
+        AssertEqual(ReconTargetKind.Crossing, third.Memory.Kind, "a confident side still looks at the crossing the plan depends on");
+
+        // No look, no mission; a picture's looks do not outlive its tick.
+        var none = Field(3.0);
+        var stale = Picture(none, confidence: 0.6f);
+        stale.AddLook(0f, -200f);
+        stale.BeginTick(none.OwnCount);
+        AssertEqual(0, stale.LookCount, "BeginTick clears the looks");
+        var idle = new Rig();
+        idle.Plan(none, stale);
+        AssertEqual(ReconLeg.None, idle.Memory.Leg, "nothing to look at");
+
+        // The cap is the shared one: four starts per hour, entry points and crossings together.
+        var capped = new Rig();
+        double h = 3.0;
+        for (int k = 0; k < ReconSettings.MaxMissionStartsPerHour; k++)
+        {
+            var t = Field(h);
+            var q = k < 2 ? WithEntry(Picture(t), -400f + 200f * k, -200f, -1.0) : Picture(t);
+            if (k >= 2) q.AddLook(-400f + 200f * k, -200f);
+            capped.Plan(t, q);
+            AssertEqual(k < 2 ? ReconTargetKind.EntryPoint : ReconTargetKind.Crossing, capped.Memory.Kind, "start " + k);
+            EndMission(capped, h + 0.01);
+            h += 0.05;
+        }
+        var over = Field(h);
+        var overPicture = Picture(over);
+        overPicture.AddLook(600f, -200f);
+        capped.Plan(over, overPicture);
+        AssertEqual(ReconLeg.None, capped.Memory.Leg, "the fifth start inside the hour is refused for a crossing too");
+        var later = Field(4.01);
+        var laterPicture = Picture(later);
+        laterPicture.AddLook(600f, -200f);
+        capped.Plan(later, laterPicture);
+        AssertEqual(ReconTargetKind.Crossing, capped.Memory.Kind, "allowed again an hour after the first start");
+
+        // The same crossing is not ridden to twice inside the hour.
+        var again = new Rig();
+        var a1 = Field(3.0);
+        var look1 = Picture(a1);
+        look1.AddLook(0f, -200f);
+        again.Plan(a1, look1);
+        EndMission(again, 3.01);
+        var a2 = Field(3.2);
+        var look2 = Picture(a2);
+        look2.AddLook(30f, -200f);
+        again.Plan(a2, look2);
+        AssertEqual(ReconLeg.None, again.Memory.Leg, "the same crossing inside the hour");
+
+        // Never toward a visible enemy at least as strong: not at the stand point, and not past one on the way.
+        var near = Field(3.0);
+        SeeEnemy(near, 0f, -260f, 2000f, 3.0);
+        var nearPicture = Picture(near);
+        nearPicture.AddLook(0f, -200f);
+        var refused = new Rig();
+        refused.Plan(near, nearPicture);
+        AssertEqual(ReconLeg.None, refused.Memory.Leg, "a superior enemy at the stand point");
+        var path = Field(3.0);
+        SeeEnemy(path, 60f, -700f, 2000f, 3.0);
+        var pathPicture = Picture(path);
+        pathPicture.AddLook(0f, -200f);
+        var blocked = new Rig();
+        blocked.Plan(path, pathPicture);
+        AssertEqual(ReconLeg.None, blocked.Memory.Leg, "a superior enemy on the way");
+        var weak = Field(3.0);
+        SeeEnemy(weak, 60f, -700f, 100f, 3.0);
+        var weakPicture = Picture(weak);
+        weakPicture.AddLook(0f, -200f);
+        var passes = new Rig();
+        passes.Plan(weak, weakPicture);
+        AssertEqual(ReconTargetKind.Crossing, passes.Memory.Kind, "a weaker picket does not block");
+
+        // The nearest of two looks first; the other when the nearest has no safe stand point.
+        var pair = Field(3.0);
+        SeeEnemy(pair, 0f, -260f, 2000f, 3.0);
+        var pairPicture = Picture(pair);
+        pairPicture.AddLook(0f, -200f);
+        pairPicture.AddLook(800f, -200f);
+        var chose = new Rig();
+        chose.Plan(pair, pairPicture);
+        AssertEqual(ReconTargetKind.Crossing, chose.Memory.Kind, "the look without a superior enemy at its stand point");
+        float dx = chose.Memory.TargetX - 800f, dz = chose.Memory.TargetZ + 200f;
+        AssertNear(150f, (float)Math.Sqrt(dx * dx + dz * dz), 1f, "is the one ridden to, to the stand-off short of it");
+
+        // The runtime half reads the army's ledger every tick.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReconIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "int looks = army.Feasibility.LookRequests(lookX, lookZ);", "the producer fills the picture's looks from the army's ledger");
+        FlankResponseTests.AssertPinned(producer, "p.AddLook(lookX[k], lookZ[k]);", "one look point per request");
+    }
+
     private static Rig Outbound(out int scout)
     {
         var rig = new Rig();
@@ -640,11 +770,10 @@ internal static class BattleReconTests
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
         rig.Sink.Clear();
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         rig.Sink.Clear();
         BattleRecon.Plan(s, settings, p, rig.Memory, rig.Executor, rig.Sink);
-        long after = GC.GetAllocatedBytesForCurrentThread();
-        AssertEqual(0L, after - before, "zero allocation after warm-up");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "zero allocation after warm-up");
     }
 
     // ------------------------------------------------------------------ ledger

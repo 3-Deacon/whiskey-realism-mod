@@ -4,13 +4,15 @@ using Newtonsoft.Json;
 namespace WhiskeyRealism.Strategic
 {
     // Version history: 1 = v0.2.x; 2 = adds lastSeenMonth/Year, per-faction probe state and
-    // fiscal memory, nullable director posture. Readers accept 1..CurrentVersion.
+    // fiscal memory, nullable director posture; 3 = campaign planner: plan state, beliefs, task ledgers;
+    // CIC plans dropped. Readers accept 1..CurrentVersion; a v1/v2 file decodes with no planner state
+    // (the removed members are ignored) and its saved plans are counted in PlansDropped.
     // Optional fields added without a version bump (older readers ignore them, a
     // missing field decodes to null): playerCompliance (stage F, 2026-10-15; W&L order
     // reliability {careerKey, reliability, samples}, PlayerComplianceRuntime).
     internal class SidecarDto
     {
-        internal const int CurrentVersion = 2;
+        internal const int CurrentVersion = 3;
         [JsonProperty("version")] public int Version = CurrentVersion;
         // Monotonic per campaign line: each save writes (last loaded/saved sequence + 1). Used
         // to choose the newest of .bak/.tmp after a crash, never file mtimes.
@@ -18,7 +20,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("lastSeenMonth")] public int? LastSeenMonth;
         [JsonProperty("lastSeenYear")] public int? LastSeenYear;
         [JsonProperty("factions")] public List<FactionDto> Factions = new List<FactionDto>();
-        [JsonProperty("minorOfficerProfiles")] public List<MinorOfficerDto> MinorOfficerProfiles = new List<MinorOfficerDto>();
         [JsonProperty("succession")] public SuccessionDto Succession = new SuccessionDto();
         [JsonProperty("battleHistory")] public List<BattleHistoryDto> BattleHistory = new List<BattleHistoryDto>();
         // W&L player-compliance estimate (stage F); null when none. Older readers ignore it.
@@ -26,6 +27,8 @@ namespace WhiskeyRealism.Strategic
         // W&L campaign courier queue (order flow, 2026-10-15): campaign orders still on their way to the
         // player's panel, so a save inside the delay loses none; null when none. Older readers ignore it.
         [JsonProperty("campaignCouriers")] public List<CampaignCourierDto> CampaignCouriers;
+        // A v1/v2 file's saved operational plans (CIC activePlan), counted at read: the planner starts fresh. Not serialized.
+        [JsonIgnore] public int PlansDropped;
     }
 
     // One pending campaign order. The unit is the GameObject name plus its commander id (instance ids do
@@ -44,7 +47,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("depth")] public float Depth;
         [JsonProperty("origin")] public string Origin;
         [JsonProperty("issuer")] public int Issuer;
-        [JsonProperty("showZone")] public bool ShowZone;
         // The player's command the order was queued for (unit GameObject name + "#" + chosen commander id);
         // null in a sidecar written before the identity existed.
         [JsonProperty("playerCommand")] public string PlayerCommand;
@@ -64,35 +66,104 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("factionId")]   public int FactionId;
         [JsonProperty("factionName")] public string FactionName;
         [JsonProperty("currentEra")]  public string CurrentEra;
-        [JsonProperty("cic")]         public CICDto Cic;
         [JsonProperty("directorMemory")] public DirectorMemoryDto DirectorMemory;
-        [JsonProperty("probeState")] public OperationalProbeStateDto ProbeState;
         [JsonProperty("fiscalMemory")] public FiscalMemoryDto FiscalMemory;
         [JsonProperty("modWrittenObjective")] public int? ModWrittenObjective;
         [JsonProperty("frontChangedDay")] public int? FrontChangedDay;
         [JsonProperty("capitalStreakDay")] public int? CapitalStreakDay;
-        [JsonProperty("probeHysteresis")] public ProbeHysteresisDto ProbeHysteresis;
         // Stage E need-driven policy: smoothed needs (NeedKind order) and the ledger's pick.
         [JsonProperty("policyNeeds")] public float[] PolicyNeeds;
         [JsonProperty("policyPick")] public int? PolicyPick;
+        // v3: the campaign planner's state; null in a v1/v2 file.
+        [JsonProperty("planner")] public PlannerStateDto Planner;
     }
 
-    internal class OperationalProbeStateDto
+    // One alliance's planner state (PlannerSnapshot). No field is a Unity instance id: a formation is its unitKey
+    // (name:commander) and is rebound to this session's formation on the first review after a load (PlannerRebind).
+    internal class PlannerStateDto
     {
-        [JsonProperty("probeId")] public string ProbeId;
+        [JsonProperty("currentMainObjective")] public int CurrentMainObjective = -1;
+        [JsonProperty("challengerObjective")] public int ChallengerObjective = -1;
+        [JsonProperty("challengerDays")] public int ChallengerDays;
+        [JsonProperty("decisionSerial")] public int DecisionSerial;
+        [JsonProperty("campaignSeed")] public long CampaignSeed;
+        [JsonProperty("belowOddsDays")] public int BelowOddsDays;
+        [JsonProperty("capitalThreatLatched")] public bool CapitalThreatLatched;
+        // The decision whose main-effort launch the chapter tempo gate released, and the day serial of the previous
+        // executors-allowed Full review (the tempo clock). Absent in a file written before the field: -1.
+        [JsonProperty("tempoReleasedDecision")] public int TempoReleasedDecision = -1;
+        [JsonProperty("lastFullReviewDay")] public int LastFullReviewDay = -1;
+        [JsonProperty("unreliableDays")] public int UnreliableDays;
+        [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
+        [JsonProperty("beliefs")] public List<EnemyBeliefDto> Beliefs = new List<EnemyBeliefDto>();
+        [JsonProperty("appointments")] public List<AppointmentDto> Appointments = new List<AppointmentDto>();
+        [JsonProperty("depotTasks")] public List<DepotTaskDto> DepotTasks = new List<DepotTaskDto>();
+        [JsonProperty("moves")] public List<MoveDto> Moves = new List<MoveDto>();
+        [JsonProperty("reconMissions")] public List<ReconMissionDto> ReconMissions = new List<ReconMissionDto>();
+    }
+
+    internal class EnemyBeliefDto
+    {
         [JsonProperty("unitKey")] public string UnitKey;
-        [JsonProperty("targetAreaKey")] public string TargetAreaKey;
-        [JsonProperty("sourceSectorKey")] public string SourceSectorKey;
-        [JsonProperty("startedDaySerial")] public int StartedDaySerial;
-        [JsonProperty("lastEnemy")] public float LastObservedEnemyStrength;
-        [JsonProperty("lastFriendly")] public float LastObservedFriendlyStrength;
+        [JsonProperty("unitTyp")] public int UnitTyp;
+        [JsonProperty("x")] public float X;
+        [JsonProperty("z")] public float Z;
+        [JsonProperty("strength")] public float Strength;
+        [JsonProperty("lastSeenDay")] public int LastSeenDay;
+        [JsonProperty("confidence")] public float Confidence;
+        [JsonProperty("radius")] public float Radius;
+        [JsonProperty("source")] public int Source;
+        [JsonProperty("traits")] public int Traits;
+        [JsonProperty("lastEmbarkedDay")] public int LastEmbarkedDay = -1;
     }
 
-    internal class ProbeHysteresisDto
+    internal class AppointmentDto
     {
-        [JsonProperty("withdrawStreak")] public int WithdrawStreak;
-        [JsonProperty("cooldownUntilDay")] public int CooldownUntilDay = int.MinValue;
-        [JsonProperty("cooldownTargetKey")] public string CooldownTargetKey;
+        [JsonProperty("commanderId")] public int CommanderId;
+        [JsonProperty("protectedUntilDay")] public int ProtectedUntilDay;
+    }
+
+    internal class DepotTaskDto
+    {
+        [JsonProperty("x")] public float X;
+        [JsonProperty("z")] public float Z;
+        [JsonProperty("sectorId")] public int SectorId;
+        [JsonProperty("builderUnitKey")] public string BuilderUnitKey;
+        [JsonProperty("state")] public string State;
+        [JsonProperty("startedDay")] public int StartedDay;
+        [JsonProperty("endedDay")] public int EndedDay = -1;
+        [JsonProperty("wishX")] public float WishX;
+        [JsonProperty("wishZ")] public float WishZ;
+    }
+
+    internal class MoveDto
+    {
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("tx")] public float TargetX;
+        [JsonProperty("tz")] public float TargetZ;
+        [JsonProperty("issuedDay")] public int IssuedDay;
+        [JsonProperty("retries")] public int Retries;
+        // The objective the move went toward, -1 for a move toward none.
+        [JsonProperty("objectiveId")] public int ObjectiveId = -1;
+    }
+
+    internal class ReconMissionDto
+    {
+        [JsonProperty("missionId")] public int MissionId;
+        [JsonProperty("kind")] public string Kind;
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("holdX")] public float HoldX;
+        [JsonProperty("holdZ")] public float HoldZ;
+        [JsonProperty("sectorId")] public int SectorId;
+        [JsonProperty("state")] public string State;
+        [JsonProperty("issuedDay")] public int IssuedDay;
+        [JsonProperty("reason")] public string Reason;
+        // A probe's remembered enemy reaction (-1 before its first look) and the objective it was seen at.
+        [JsonProperty("observedEnemyStrength")] public float ObservedEnemyStrength = -1f;
+        [JsonProperty("observedObjectiveId")] public int ObservedObjectiveId = -1;
+        // The executor's stand-down debt (Scouting taken off the screen) and the day the mission was seen Cleared.
+        [JsonProperty("standDownDue")] public bool StandDownDue;
+        [JsonProperty("clearedDay")] public int ClearedDay = -1;
     }
 
     internal class FiscalMemoryDto
@@ -100,74 +171,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("previousPosture")] public string PreviousPosture;
         [JsonProperty("stableTicksAboveEmergency")] public int StableTicksAboveEmergency;
         [JsonProperty("emergencyResidue")] public bool EmergencyResidue;
-    }
-
-    internal class CICDto
-    {
-        [JsonProperty("officerName")] public string OfficerName;
-        [JsonProperty("personality")] public PersonalityDto Personality;
-        [JsonProperty("activePlan")]  public OperationalPlanDto ActivePlan;
-    }
-
-    internal class OperationalPlanDto
-    {
-        [JsonProperty("operationId")] public string OperationId;
-        [JsonProperty("operationName")] public string OperationName;
-        [JsonProperty("operationTempo")] public string OperationTempo;
-        [JsonProperty("operationPosture")] public string OperationPosture;
-        [JsonProperty("operationStartedDaySerial")] public int OperationStartedDaySerial;
-        [JsonProperty("operationLastDecisionDaySerial")] public int OperationLastDecisionDaySerial;
-        [JsonProperty("pendingRetarget")] public bool PendingRetarget;
-        [JsonProperty("pendingRetargetReason")] public string PendingRetargetReason;
-        [JsonProperty("assignedTheaterId")] public int AssignedTheaterId;
-        [JsonProperty("phases")] public List<PhaseDto> Phases = new List<PhaseDto>();
-        [JsonProperty("currentPhaseIndex")] public int CurrentPhaseIndex;
-        [JsonProperty("planDeadlineMonth")] public int PlanDeadlineMonth;
-        [JsonProperty("planDeadlineYear")]  public int PlanDeadlineYear;
-        [JsonProperty("rationale")] public string Rationale;
-        [JsonProperty("isDirty")]   public bool   IsDirty;
-    }
-
-    internal class PhaseDto
-    {
-        [JsonProperty("phaseId")]               public string PhaseId;
-        [JsonProperty("phaseName")]             public string PhaseName;
-        [JsonProperty("targetAreaId")]          public int    TargetAreaId;
-        [JsonProperty("targetObjectiveId")]     public int    TargetObjectiveId;
-        [JsonProperty("targetAreaKey")]         public string TargetAreaKey;
-        [JsonProperty("targetSectorKey")]       public string TargetSectorKey;
-        [JsonProperty("forceFractionRequired")] public float  ForceFractionRequired;
-        [JsonProperty("transition")]            public string Transition;
-        [JsonProperty("deadlineMonth")]         public int    DeadlineMonth;
-        [JsonProperty("deadlineYear")]          public int    DeadlineYear;
-        [JsonProperty("operationPosture")]      public string OperationPosture;
-        [JsonProperty("allowCoordinatedAttack")] public bool  AllowCoordinatedAttack;
-        [JsonProperty("allowReinforcementPackage")] public bool AllowReinforcementPackage;
-        [JsonProperty("allowProbeOnly")]        public bool   AllowProbeOnly;
-        [JsonProperty("phaseStartedDaySerial")] public int    PhaseStartedDaySerial;
-    }
-
-    internal class PersonalityDto
-    {
-        [JsonProperty("agg")]  public float Aggression;
-        [JsonProperty("caut")] public float Caution;
-        [JsonProperty("aud")]  public float Audacity;
-        [JsonProperty("cas")]  public float CasualtyTolerance;
-        [JsonProperty("pol")]  public float PoliticalResponsiveness;
-
-        public PersonalityVector ToVector() => new PersonalityVector(Aggression, Caution, Audacity, CasualtyTolerance, PoliticalResponsiveness);
-
-        public static PersonalityDto FromVector(PersonalityVector v) => new PersonalityDto
-        {
-            Aggression = v.Aggression, Caution = v.Caution, Audacity = v.Audacity,
-            CasualtyTolerance = v.CasualtyTolerance, PoliticalResponsiveness = v.PoliticalResponsiveness
-        };
-    }
-
-    internal class MinorOfficerDto
-    {
-        [JsonProperty("commanderId")] public int CommanderId;
-        [JsonProperty("personality")] public PersonalityDto Personality;
     }
 
     internal class SuccessionDto
@@ -208,6 +211,5 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("daysSinceBattle")] public int DaysSinceLastBattle;
         [JsonProperty("sourceSig")]       public string LastSourceSignature;
         [JsonProperty("recentEvents")]    public List<string> RecentEventSummaries = new List<string>();
-        [JsonProperty("recentOperationReplanDaySerials")] public int[] RecentOperationReplanDaySerials;
     }
 }

@@ -599,9 +599,9 @@ internal static class BattlePerceptionTests
 
         Tick(0);
         Tick(1);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int t = 2; t < 6; t++) Tick(t);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         AssertTrue(s.ObservationCount > 0, "observations filled");
         AssertEqual(0L, allocated, "perception tick allocated bytes after warm-up");
     }

@@ -156,13 +156,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// DoPlacementAIUnitsWithinDeploymentzoneNew 85524) and pick a plan on it. The
         /// orchestrator and its plan memory are kept.
         /// </summary>
-        internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible)
+        internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible, Action evaluate = null)
         {
             unchecked { BattleDayEpoch++; }
+            // The reserve release starts over on a new day, plan or no plan.
+            if (army != null) ReserveReleaseState.ForAlliance(army.AllianceId)?.Clear();
             if (army == null || !army.HasPlan) return;
             var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);
-            army.Replan(ownEvidence, intent);
+            // BC14: the feasibility evaluation runs, forced to completion, so the night's pick reads a ledger of the morning's ground.
+            evaluate?.Invoke();
+            army.Replan(ownEvidence, intent, "new-day");
+        }
+
+        /// <summary>
+        /// The side's first plan pick, with its order written in one place (BC14 requirement-stance-before-pick). The pick inputs
+        /// (the battle stance, the live commander initiative, the reinforcement opportunity) are refreshed first so the stance filter
+        /// applies to the first pick; the feasibility evaluation then runs, forced to completion, so the pick reads a ledger.
+        /// </summary>
+        internal static void PickInitialPlanInOrder(ArmyOrchestrator army, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)
+        {
+            refreshPickInputs();
+            evaluate();
+            army.PickInitialPlan(evidence);
         }
 
         /// <summary>

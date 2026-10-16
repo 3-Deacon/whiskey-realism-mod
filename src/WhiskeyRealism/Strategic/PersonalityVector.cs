@@ -32,6 +32,15 @@ namespace WhiskeyRealism.Strategic
                 Clamp(officer.PoliticalResponsiveness + era.PoliticalResponsiveness + faction.PoliticalResponsiveness));
         }
 
+        // The alliance's standing disposition: its era stage and its faction profile. The retired CIC added a
+        // hardcoded officer vector and the locked-difficulty modifier on top; the planner takes its commanders from
+        // the vanilla records instead (CommanderProfiles), so this is what the defence ledger and the perk
+        // scorer read.
+        internal static PersonalityVector ForAlliance(int allianceId, EraStageManager era)
+        {
+            return Compose(default(PersonalityVector), era != null ? era.StageVector : default(PersonalityVector), FactionProfiles.For(allianceId));
+        }
+
         public static PersonalityVector Add(PersonalityVector a, PersonalityVector b)
         {
             return new PersonalityVector(

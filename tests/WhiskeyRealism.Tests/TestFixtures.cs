@@ -208,8 +208,6 @@ internal static class TestFixtures
         return new FormationSnapshot
         {
             UnitKey = key,
-            AllianceId = alliance,
-            UnitName = key,
             UnitType = unitType,
             IsTopUnit = true,
             GroupStrengthActive = strength,
@@ -218,7 +216,6 @@ internal static class TestFixtures
             RifleAmmo = 0.8f,
             ArtilleryAmmo = 0.8f,
             Supply = 0.8f,
-            WeaponFirepower = 1.0f,
             AreaKey = "VirginiaCapitalCorridor",
             SectorKey = "Richmond",
             LocalEnemyStrength = enemy,
@@ -346,6 +343,36 @@ internal static class TestFixtures
             commanderCasualtyTolerance01: casualtyTolerance ?? aggression);
     }
 
+    // The one way an allocation test measures a window. GC.GetAllocatedBytesForCurrentThread()
+    // reads alloc_bytes - (alloc_limit - alloc_ptr): the bytes of every allocation-context
+    // quantum the thread took, less the part it has not used yet. When a background GC ends
+    // its mark phase the runtime voids every thread's context (alloc_ptr = alloc_limit = 0,
+    // gc.cpp repair_allocation_contexts(FALSE)) without taking the unused part back off
+    // alloc_bytes, so a thread that allocated nothing reads up to one quantum (~8 KB) more
+    // than before. Any test run after a background GC thread exists (the first gen2 does it)
+    // can land in that window, and the result is a random 0.2-8 KB "allocation".
+    //
+    // The unused part is the only thing the void can add, so the window opens on an empty
+    // context: a blocking gen0 GC resets the calling thread's context to alloc_ptr = 0 (and
+    // takes its unused part off alloc_bytes properly), and nothing is allocated between that
+    // GC and the first read. A path that really allocates still takes a quantum and reads
+    // nonzero; one that allocates nothing reads exactly zero whatever the GC does.
+    // Pinned by AllocationMeasurementTests.
+    internal static long BeginAllocationWindow()
+    {
+        GC.Collect(0, GCCollectionMode.Forced, blocking: true);
+        return GC.GetAllocatedBytesForCurrentThread();
+    }
+
+    // Bytes the calling thread allocated since BeginAllocationWindow returned `begin`.
+    internal static long AllocatedSince(long begin)
+        => GC.GetAllocatedBytesForCurrentThread() - begin;
+
+    // The unguarded counter. Only AllocationMeasurementTests reads it, to show the artifact
+    // the window above removes; a test that measures a path uses BeginAllocationWindow.
+    internal static long UnguardedThreadAllocatedBytes()
+        => GC.GetAllocatedBytesForCurrentThread();
+
     // Walks up from the working directory to the first ancestor holding relativePath.
     internal static string FindRepoPath(string relativePath)
     {
@@ -366,6 +393,32 @@ internal static class TestFixtures
 
     internal static string ReadRepoFile(string relativePath)
         => File.ReadAllText(FindRepoPath(relativePath));
+
+    // Every field of every assignment and both reinforcement lists, in order: two allocations are equal iff their signatures are.
+    internal static string AllocationSignature(WhiskeyRealism.Strategic.Planner.Allocation a)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var x in a.Assignments)
+            sb.Append(x.InstanceId).Append(':').Append(x.Role).Append('@').Append(x.SectorId).Append(':').Append(x.TargetX.ToString("0.###")).Append(',')
+              .Append(x.TargetZ.ToString("0.###")).Append(x.Withheld ? "w" : "-").Append(x.Reason).Append('|');
+        sb.Append("short=").Append(string.Join(",", a.Shortfalls)).Append("|surplus=").Append(string.Join(",", a.Surpluses));
+        return sb.ToString();
+    }
+
+    // The text of the method whose declaration starts with `signature` (braces balanced), for source pins.
+    internal static string BodyOf(string src, string signature)
+    {
+        int start = src.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) throw new Exception("method not found: " + signature);
+        int open = src.IndexOf('{', start);
+        int depth = 0;
+        for (int i = open; i < src.Length; i++)
+        {
+            if (src[i] == '{') depth++;
+            else if (src[i] == '}' && --depth == 0) return src.Substring(start, i - start + 1);
+        }
+        throw new Exception("unbalanced body: " + signature);
+    }
 
     // True when one line of the body, trimmed, is exactly `line`: a commented-out or prefixed
     // copy of the statement does not match.

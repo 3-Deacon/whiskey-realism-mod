@@ -156,10 +156,10 @@ internal static class OrderArbiterTests
         var arbiter = new OrderArbiter();
         var winners = new BattleOrderIntent[1024];
         for (int warm = 0; warm < 3; warm++) SubmitTick(arbiter, winners);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int resolved = 0;
         for (int tick = 0; tick < 5; tick++) resolved += SubmitTick(arbiter, winners);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         AssertEqual(5 * 600, resolved, "winners per tick");
         AssertEqual(0L, allocated, "arbiter BeginTick/Submit/Resolve allocated bytes after warm-up");
     }

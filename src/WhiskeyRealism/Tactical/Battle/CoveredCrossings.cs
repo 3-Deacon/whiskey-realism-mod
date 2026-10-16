@@ -23,7 +23,7 @@ namespace WhiskeyRealism.Tactical.Battle
     // Reinforcement columns and groups are not regiments in the field and are skipped.
     public static class CoveredCrossings
     {
-        public const float RememberedMinConfidence = 0.5f;
+        public const float RememberedMinConfidence = EnemySamples.RememberedMinConfidence;
         public const float ArcDegrees = 45f;
         public const float RangeFactor = 1.5f;
         public const float MinCoverValue = 0.15f;
@@ -93,17 +93,45 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static void AddCoveredCrossings(in EnemyObservation o, BattleTerrainGrid grid, float[] xs, float[] zs, ref int count, int capacity)
         {
-            float reach = o.FireRange * RangeFactor;
             for (int c = 0; c < grid.CrossingCount && count < capacity; c++)
             {
                 grid.Crossing(c, out float cx, out float cz, out _);
-                float dx = cx - o.X;
-                float dz = cz - o.Z;
-                if (Math.Sqrt(dx * dx + dz * dz) >= reach) continue;
-                float bearing = (float)(Math.Atan2(dx, dz) * 180.0 / Math.PI);
-                if (AbsAngleDifference(bearing, o.Heading) > ArcDegrees) continue;
+                if (!CoversPoint(o.X, o.Z, o.Heading, o.FireRange, cx, cz)) continue;
                 AddOnce(xs, zs, ref count, cx, cz);
             }
+        }
+
+        /// <summary>
+        /// Rule (a) for one perceived enemy observation and one crossing point (BC14, shared by <see cref="BuildPoints"/> and
+        /// CrossingWatch): a perceived, non-artillery regiment covers the point when it lies within 1.5 x its fire range and the
+        /// bearing from the regiment to the point is within 45 degrees of its facing.
+        /// </summary>
+        public static bool Covers(in EnemyObservation o, float cx, float cz)
+        {
+            return Perceived(o) && CoversPoint(o.X, o.Z, o.Heading, o.FireRange, cx, cz);
+        }
+
+        /// <summary>
+        /// The own-side form of rule (a) (BC14: the feasibility evaluation prices the enemy's shift through a crossing an own regiment
+        /// covers, and a Defender's turning exposure counts only uncovered crossings): a live, formed, non-artillery own regiment
+        /// covers the point by its <c>RotationY</c> and <c>FireRange</c>.
+        /// </summary>
+        public static bool Covers(in UnitRecord u, float cx, float cz)
+        {
+            const UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
+            if ((u.Flags & live) != live || (u.Flags & (UnitFlags.Routed | UnitFlags.IsGroup)) != 0) return false;
+            if (u.UnitTyp == TacticalUnitType.Artillery || u.UnitTyp < 0 || u.UnitTyp > TacticalUnitType.MaxCombat) return false;
+            return CoversPoint(u.X, u.Z, u.RotationY, u.FireRange, cx, cz);
+        }
+
+        private static bool CoversPoint(float x, float z, float facing, float fireRange, float cx, float cz)
+        {
+            float reach = fireRange * RangeFactor;
+            float dx = cx - x;
+            float dz = cz - z;
+            if (Math.Sqrt(dx * dx + dz * dz) >= reach) return false;
+            float bearing = (float)(Math.Atan2(dx, dz) * 180.0 / Math.PI);
+            return AbsAngleDifference(bearing, facing) <= ArcDegrees;
         }
 
         // Tools.GetAbsAngleDifference (151779): the wrapped, absolute difference.

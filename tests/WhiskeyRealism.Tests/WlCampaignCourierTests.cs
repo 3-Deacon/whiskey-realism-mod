@@ -44,7 +44,7 @@ internal static class WlCampaignCourierTests
             ("wl campaign courier acknowledgement only after a reached clear", AcknowledgementOnlyAfterAReachedClear),
             ("wl campaign courier pin acknowledgement is information only", AcknowledgementIsInfoOnly),
             ("wl campaign courier pin capture branch runs vanilla's gate first", CaptureBranchRunsGateFirst),
-            ("wl campaign courier pin delivery runs after flush on the campaign map", DeliveryRunsAfterFlush),
+            ("wl campaign courier pin delivery runs in the campaign order pass after the stale-order clear", DeliveryRunsInOrderPass),
             ("wl campaign courier pin delivery restores the bypass in a finally", DeliveryRestoresBypass),
             ("wl campaign courier pin writes no player unit order", NoPlayerUnitWriter),
             ("wl campaign courier pin sidecar export and restore are wired", SidecarWired),
@@ -62,7 +62,7 @@ internal static class WlCampaignCourierTests
         {
             UnitId = 11, UnitName = unit, UnitCommanderId = 3, Type = type, X = x, Y = 10f, Z = z, Name = "Richmond",
             Rotation = -1f, Width = 20f, Depth = 20f, CampaignCall = true, Origin = origin, IssuerKey = 77,
-            IssuerCommanderId = 4, ShowZone = true, IssuedAt = issued, DueAt = due,
+            IssuerCommanderId = 4, IssuedAt = issued, DueAt = due,
         };
     }
 
@@ -123,12 +123,12 @@ internal static class WlCampaignCourierTests
     {
         var queue = new WlCourierQueue(new NullSink());
         double window = WlCampaignDispatchPolicy.RateLimitYears;
-        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.C69, 5, 1000f, 1000f, issued: 1.0), window, out _), "first order");
+        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f, issued: 1.0), window, out _), "first order");
         AssertTrue(queue.TryTakeDue(2.0, out _, out _), "delivered");
-        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.C69, 5, 3000f, 3000f, issued: 1.0 + window / 4), window, out string other) , "another target inside the window is not rate-limited: " + other);
-        AssertFalse(queue.TryEnqueue(Entry(OrderOrigin.C69, 5, 1050f, 1000f, issued: 1.0 + window / 2), window, out string same), "the same target again");
+        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.CampaignBridge, 5, 3000f, 3000f, issued: 1.0 + window / 4), window, out string other) , "another target inside the window is not rate-limited: " + other);
+        AssertFalse(queue.TryEnqueue(Entry(OrderOrigin.CampaignBridge, 5, 1050f, 1000f, issued: 1.0 + window / 2), window, out string same), "the same target again");
         AssertEqual(WlCourierQueue.RateLimited, same, "rate-limited by issuer, type and target");
-        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.C69, 5, 1050f, 1000f, issued: 1.0 + window * 1.5), window, out string later), "after the window it arrives again: " + later);
+        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.CampaignBridge, 5, 1050f, 1000f, issued: 1.0 + window * 1.5), window, out string later), "after the window it arrives again: " + later);
     }
 
     private static void CampaignWindowIsOneDayInYears()
@@ -153,7 +153,7 @@ internal static class WlCampaignCourierTests
 
     private static CourierEntry Keyed(string key)
     {
-        CourierEntry e = Entry(OrderOrigin.C69, 5, 1000f, 1000f);
+        CourierEntry e = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f);
         e.PlayerCommandKey = key;
         return e;
     }
@@ -166,7 +166,7 @@ internal static class WlCampaignCourierTests
         AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(CommandA, null), "no command to compare with: nothing to void");
         string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
         AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(runtime, @"PlayerCommandKey = CurrentCommandKey\(\)").Count, "both enqueue paths stamp the command");
-        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey)"), "delivery checks it");
+        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.PreDeliveryDropReason(in entry, commandKey, ownMapGroup)"), "delivery checks it, through the pure rule that applies BelongsToCommand");
         int deliver = runtime.IndexOf("internal static void DeliverDue()", StringComparison.Ordinal);
         string body = runtime.Substring(deliver, runtime.IndexOf("internal static void AcknowledgeReached(", deliver, StringComparison.Ordinal) - deliver);
         AssertFalse(body.Contains("_boundary"), "no baseline that an empty queue could reset");
@@ -274,7 +274,7 @@ internal static class WlCampaignCourierTests
     private static void CampaignDeliveryReDecides()
     {
         var history = new WlDispatchHistory();
-        CourierEntry e = Entry(OrderOrigin.C69, 5, 1000f, 1000f);
+        CourierEntry e = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f);
         AssertEqual(null, WlCampaignCourierPolicy.DeliveryDropReason(in e, NoOrder, history, 100.0, true, true), "fresh: delivers (it is not rate-limited against its own target)");
         AssertEqual("active-duplicate", WlCampaignCourierPolicy.DeliveryDropReason(in e, Active(5, 1050f, 1000f), history, 100.0, true, true), "the order is already on the panel");
         history.Record(1000f, 1000f, 99.5);
@@ -291,8 +291,7 @@ internal static class WlCampaignCourierTests
 
     private static void HistoryRecordedOnlyOnAcceptedDelivery()
     {
-        AssertTrue(WlCampaignCourierPolicy.RecordsHistory(OrderOrigin.CampaignBridge), "bridge");
-        AssertTrue(WlCampaignCourierPolicy.RecordsHistory(OrderOrigin.C69), "#69");
+        AssertTrue(WlCampaignCourierPolicy.RecordsHistory(OrderOrigin.CampaignBridge), "the strategic order bridge");
         AssertFalse(WlCampaignCourierPolicy.RecordsHistory(OrderOrigin.Vanilla), "a vanilla order has no dispatch history");
         // Emission queues; the history is written only after an order has been shown (the immediate path
         // with couriers off, or ShowQueued when a courier arrives), never when it is queued.
@@ -321,7 +320,7 @@ internal static class WlCampaignCourierTests
 
     private static void RestoredEntryWithMissingUnitDiscarded()
     {
-        CourierEntry e = Entry(OrderOrigin.C69, 5, 1000f, 1000f);
+        CourierEntry e = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f);
         AssertEqual("unit-gone", WlCampaignCourierPolicy.DeliveryDropReason(in e, NoOrder, null, 100.0, true, unitResolved: false), "the unit does not resolve after the load");
         CourierEntry noUnit = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f, unit: null);
         AssertEqual(null, WlCampaignCourierPolicy.DeliveryDropReason(in noUnit, NoOrder, null, 100.0, true, unitResolved: false), "an order with no issuer unit arrives from the player's group");
@@ -332,7 +331,7 @@ internal static class WlCampaignCourierTests
     private static void CampaignQueueSidecarRoundTrip()
     {
         var snap = SidecarSnapshot.Empty();
-        CourierEntry a = Entry(OrderOrigin.C69, 5, 1000f, 1500f, issued: 3.25, due: 3.2502);
+        CourierEntry a = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1500f, issued: 3.25, due: 3.2502);
         CourierEntry b = Entry(OrderOrigin.Vanilla, 8, 2000f, 2500f, unit: "II Corps", issued: 3.26, due: 3.2603);
         b.Name = "Washington";
         snap.CampaignCouriers = new List<CampaignCourierDto> { WlCampaignCourierSidecar.ToDto(in a), WlCampaignCourierSidecar.ToDto(in b) };
@@ -347,9 +346,8 @@ internal static class WlCampaignCourierTests
         AssertEqual(5, a2.Type);
         AssertNear(1000f, a2.X, 1e-3f, "x");
         AssertNear(1500f, a2.Z, 1e-3f, "z");
-        AssertEqual(OrderOrigin.C69, a2.Origin);
+        AssertEqual(OrderOrigin.CampaignBridge, a2.Origin);
         AssertEqual(4, a2.IssuerCommanderId);
-        AssertTrue(a2.ShowZone, "show zone");
         AssertTrue(a2.CampaignCall, "a campaign entry");
         AssertEqual(3.25, a2.IssuedAt);
         AssertEqual(3.2502, a2.DueAt);
@@ -368,7 +366,7 @@ internal static class WlCampaignCourierTests
 
     private static void SidecarRejectsBadEntries()
     {
-        CourierEntry good = Entry(OrderOrigin.C69, 5, 1000f, 1500f);
+        CourierEntry good = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1500f);
         CampaignCourierDto dto = WlCampaignCourierSidecar.ToDto(in good);
         AssertTrue(WlCampaignCourierSidecar.TryFromDto(dto, out _), "the good one");
         dto = WlCampaignCourierSidecar.ToDto(in good); dto.X = float.NaN;
@@ -393,7 +391,7 @@ internal static class WlCampaignCourierTests
     {
         var sink = new NullSink();
         var queue = new WlCourierQueue(sink);
-        CourierEntry early = Entry(OrderOrigin.C69, 5, 1000f, 1000f, issued: 3.0, due: 3.5);
+        CourierEntry early = Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f, issued: 3.0, due: 3.5);
         CourierEntry late = Entry(OrderOrigin.Vanilla, 6, 4000f, 4000f, issued: 3.1, due: 3.2);
         queue.Restore(in early);
         queue.Restore(in late);
@@ -407,7 +405,7 @@ internal static class WlCampaignCourierTests
         AssertEqual(3.1, first.IssuedAt);
         AssertEqual(0, sink.Reasons.Count);
         // A restored entry forgets nothing it was told: the cadence history is not persisted.
-        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.C69, 5, 1000f, 1000f, issued: 3.01), WlCampaignDispatchPolicy.RateLimitYears, out string drop) == false && drop == WlCourierQueue.EnRoute, "the restored entry is still riding to that point");
+        AssertTrue(queue.TryEnqueue(Entry(OrderOrigin.CampaignBridge, 5, 1000f, 1000f, issued: 3.01), WlCampaignDispatchPolicy.RateLimitYears, out string drop) == false && drop == WlCourierQueue.EnRoute, "the restored entry is still riding to that point");
     }
 
     // ------------------------------------------------------------ capital speed
@@ -473,7 +471,7 @@ internal static class WlCampaignCourierTests
         AssertFalse(body.Contains("ShowNewOrder(") || body.Contains("givenorder ="), "it is never an order");
         AssertTrue(body.Contains("FollowUpOn()"), "behind the follow-up switch");
         AssertTrue(body.Contains("AcknowledgesClear("), "the pure rule decides");
-        string patch = Code("src/WhiskeyRealism/Patches/WlCampaignMoveDispatchPatch.cs");
+        string patch = Code("src/WhiskeyRealism/Patches/WlCampaignOrderPassPatch.cs");
         AssertTrue(patch.Contains("WlCampaignCourierRuntime.AcknowledgeReached();"), "driven by the campaign pass");
     }
 
@@ -499,12 +497,12 @@ internal static class WlCampaignCourierTests
         AssertTrue(flow.Contains("if (Delivering) return true;"), "a delivered order is never captured twice");
     }
 
-    private static void DeliveryRunsAfterFlush()
+    private static void DeliveryRunsInOrderPass()
     {
-        string patch = Code("src/WhiskeyRealism/Patches/WlCampaignMoveDispatchPatch.cs");
-        int flush = patch.IndexOf("WlCampaignDispatchRuntime.Flush();", StringComparison.Ordinal);
+        string patch = Code("src/WhiskeyRealism/Patches/WlCampaignOrderPassPatch.cs");
+        int clear = patch.IndexOf("WlCampaignCourierRuntime.ClearStaleCarriedOrder();", StringComparison.Ordinal);
         int deliver = patch.IndexOf("WlCampaignCourierRuntime.DeliverDue();", StringComparison.Ordinal);
-        AssertTrue(flush >= 0 && deliver > flush, "the courier delivery follows the dispatcher's flush in UpdateUnitAI's Postfix");
+        AssertTrue(clear >= 0 && deliver > clear, "a carried player's leftover order is cleared before any courier is delivered, in UpdateUnitAI's Postfix");
         string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
         AssertTrue(runtime.Contains("onCampaignMap: true"), "delivery is a campaign-map pass");
         AssertFalse(runtime.Contains("Time.realtimeSinceStartup") || runtime.Contains("DateTime"), "the campaign clock only");

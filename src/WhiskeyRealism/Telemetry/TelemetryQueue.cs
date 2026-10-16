@@ -212,7 +212,7 @@ namespace WhiskeyRealism.Telemetry
 
         // Eviction rank: higher rank is evicted first. Shedding order under load: Trace rows
         // first, then Info rows (State, then Decision, then Gate/Write); Performance rows
-        // and Warning/Error rows of any category are never evicted by another detail row
+        // and Warning rows of any category are never evicted by another detail row
         // (an incoming row evicts only a strictly lower-priority rank). Health/Failure use
         // their own reserve. Debug severity sheds like Info.
         internal static int Rank(TelemetryCategory category, TelemetrySeverity severity = TelemetrySeverity.Info)

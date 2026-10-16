@@ -69,9 +69,9 @@ internal static partial class FlankResponseTests
         long worst = 0L;
         for (int window = 0; window < windows; window++)
         {
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = TestFixtures.BeginAllocationWindow();
             for (int k = 0; k < calls; k++) work();
-            long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            long bytes = TestFixtures.AllocatedSince(before);
             if (bytes == 0L) clean++;
             else if (bytes > worst) worst = bytes;
         }
@@ -704,7 +704,7 @@ internal static partial class FlankResponseTests
         return System.IO.File.ReadAllText(System.IO.Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), System.IO.Path.Combine(parts)));
     }
 
-    private static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+    internal static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
 
     internal static void AssertPinned(string body, string expected, string label)
     {

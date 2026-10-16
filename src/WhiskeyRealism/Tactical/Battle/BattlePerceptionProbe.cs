@@ -249,18 +249,18 @@ namespace WhiskeyRealism.Tactical.Battle
         // UnitIsHidden calls and restored in FillProbe's finally (BUG-TAC-020).
         private static readonly WhiskeyRealism.Patches.FieldMask<DLC_WL.Incident, float> _incidentMask =
             new WhiskeyRealism.Patches.FieldMask<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v,
-                BattlePerception.IncidentNotLaunched);
-        private static readonly DLC_WL.Incident[] _intelIncidents = new DLC_WL.Incident[BattlePerception.PlayerIntelIncidents.Length];
+                PlayerIntelIncidents.NotLaunched);
+        private static readonly DLC_WL.Incident[] _intelIncidents = new DLC_WL.Incident[PlayerIntelIncidents.Ids.Length];
 
         private static void MaskPlayerIntelIncidents(PerceptionMode mode)
         {
             if (!BattlePerception.MasksPlayerIntelIncidents(mode, DLC_WL.dlc_scenarioactive)) return;
             List<DLC_WL.Incident> incidents = DLC_WL.incidents;
             if (incidents == null) return;
-            int[] ids = BattlePerception.PlayerIntelIncidents;
+            int[] ids = PlayerIntelIncidents.Ids;
             for (int i = 0; i < ids.Length; i++)
                 _intelIncidents[i] = ids[i] >= 0 && ids[i] < incidents.Count ? incidents[ids[i]] : null;
-            int masked = _incidentMask.Mask(_intelIncidents, incident => BattlePerception.IncidentLaunched(incident.launchedtime));
+            int masked = _incidentMask.Mask(_intelIncidents, incident => PlayerIntelIncidents.Launched(incident.launchedtime));
             Array.Clear(_intelIncidents, 0, _intelIncidents.Length);
             if (masked > 0)
                 OnceLog.Info("tactical.battle-perception:incident-mask",

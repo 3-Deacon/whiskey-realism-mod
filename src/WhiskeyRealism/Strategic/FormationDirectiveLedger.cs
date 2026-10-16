@@ -15,34 +15,20 @@ namespace WhiskeyRealism.Strategic
     public sealed class FormationDirectiveAssignment
     {
         public string UnitKey;
-        public int AllianceId;
         public int StableUnitId;
         public FormationLevel Level;
         public string AreaKey;
-        public string SectorKey;
         public float X;
         public float Z;
         public FormationDirective Directive;
         public string Reason;
         public float CombatAvailability;
-        public float ExchangePressure;
-        public float LocalFriendlySupport;
         public float LocalEnemyStrength;
-        public float Readiness;
-        public float Morale;
         public float Ammo;
         public float Supply;
-        public float Fatigue;
-        public float WeaponFirepower;
-        public bool OffensiveAllowed;
         public bool DefensiveAllowed;
         public bool TransferDonorAllowed;
         public bool DirectMovementAllowed;
-        public bool RaidAllowed;
-        public bool InheritsFromParent;
-        public string ParentUnitKey;
-
-        internal FormationDirectiveAssignment Copy() => (FormationDirectiveAssignment)MemberwiseClone();
     }
 
     public sealed class FormationPressureSummary
@@ -50,11 +36,8 @@ namespace WhiskeyRealism.Strategic
         public int LowSupplyCount;
         public int LowAmmoCount;
         public int RecoverCount;
-        public int GuardCount;
         public int MassCount;
         public string TopSupplyAreaKey;
-
-        internal FormationPressureSummary Copy() => (FormationPressureSummary)MemberwiseClone();
     }
 
     public sealed class FormationDirectiveLedger
@@ -64,10 +47,20 @@ namespace WhiskeyRealism.Strategic
         private readonly List<FormationDirectiveAssignment> _ordered =
             new List<FormationDirectiveAssignment>();
 
+        // The fallback directive (G1b; it was Screen "default-screen" before Screen meant a recon
+        // mission). Its perk path stays the old fallback's (integrator decision, G1b verify r1 F2).
+        public const string DefaultHoldReason = "default-hold";
+
+        public static bool IsDefaultHold(string reason)
+        {
+            return string.Equals(reason, DefaultHoldReason, StringComparison.Ordinal);
+        }
+
         public IReadOnlyList<FormationDirectiveAssignment> Assignments => _ordered;
         public FormationPressureSummary Pressure = new FormationPressureSummary();
 
-        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options = null)
+        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options = null,
+                                                     Func<string, bool> onReconMission = null)
         {
             options = options ?? new FormationDirectiveOptions();
             var ledger = new FormationDirectiveLedger();
@@ -85,7 +78,7 @@ namespace WhiskeyRealism.Strategic
                 if (!snapshot.CanReceiveDirectDirective) continue;
                 if (!snapshot.IsTopStrategicFormation) continue;
 
-                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey, options);
+                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey, options, onReconMission);
                 ledger.Add(assignment);
             }
 
@@ -97,12 +90,12 @@ namespace WhiskeyRealism.Strategic
                     parent = ledger.GetAssignment(child.ParentUnitKey);
 
                 var assignment = BaseAssignment(child);
-                assignment.InheritsFromParent = true;
-                assignment.ParentUnitKey = child.ParentUnitKey;
                 assignment.DirectMovementAllowed = false;
                 assignment.Directive = parent != null ? parent.Directive : FormationDirective.Hold;
-                assignment.Reason = parent != null ? "attached-inherits-parent" : "attached-parent-missing";
-                assignment.OffensiveAllowed = false;
+                // A child of a default-hold parent keeps that reason, so its perks fall through to the
+                // objective role as the parent's do (PerkSelectionScorer.TryDirectiveRole).
+                assignment.Reason = parent == null ? "attached-parent-missing"
+                    : IsDefaultHold(parent.Reason) ? DefaultHoldReason : "attached-inherits-parent";
                 assignment.DefensiveAllowed = parent == null || parent.DefensiveAllowed;
                 assignment.TransferDonorAllowed = false;
                 ledger.Add(assignment);
@@ -110,18 +103,6 @@ namespace WhiskeyRealism.Strategic
 
             ledger.RecomputePressure();
             return ledger;
-        }
-
-        // Copy for StrategicLedgerSet.PublishFrom: the assignments and the pressure summary are
-        // copied, so the probe overlay (ApplyOperationalProbe) on the working ledger never
-        // reaches the published one.
-        public FormationDirectiveLedger Clone()
-        {
-            var copy = new FormationDirectiveLedger();
-            for (int i = 0; i < _ordered.Count; i++)
-                copy.Add(_ordered[i].Copy());
-            copy.Pressure = Pressure?.Copy();
-            return copy;
         }
 
         public FormationDirectiveAssignment GetAssignment(string unitKey)
@@ -140,131 +121,66 @@ namespace WhiskeyRealism.Strategic
             return string.Join(",", parts);
         }
 
-        public bool ApplyOperationalProbe(OperationalProbeOutput probe)
-        {
-            if (probe == null || string.IsNullOrEmpty(probe.SelectedUnitKey)) return false;
-            var assignment = GetAssignment(probe.SelectedUnitKey);
-            if (assignment == null) return false;
-
-            switch (probe.Decision)
-            {
-                case OperationalProbeDecision.Probe:
-                    assignment.Directive = FormationDirective.Probe;
-                    assignment.Reason = probe.Reason ?? "operational-probe";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Pause:
-                    assignment.Directive = FormationDirective.Delay;
-                    assignment.Reason = probe.Reason ?? "probe-pause";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Withdraw:
-                    assignment.Directive = FormationDirective.Recover;
-                    assignment.Reason = probe.Reason ?? "probe-withdraw";
-                    assignment.OffensiveAllowed = false;
-                    assignment.DefensiveAllowed = false;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                case OperationalProbeDecision.Escalate:
-                    assignment.Directive = assignment.Level == FormationLevel.Army
-                        ? FormationDirective.Mass
-                        : FormationDirective.Counterstroke;
-                    assignment.Reason = probe.Reason ?? "probe-escalate";
-                    assignment.OffensiveAllowed = true;
-                    assignment.DefensiveAllowed = true;
-                    assignment.TransferDonorAllowed = false;
-                    break;
-
-                default:
-                    return false;
-            }
-
-            if (probe.Package != null)
-            {
-                foreach (var supportKey in probe.Package.SupportDisplayUnitKeys)
-                {
-                    var support = GetAssignment(supportKey);
-                    if (support == null) continue;
-                    support.Directive = probe.Package.Decision == CoordinatedOperationDecision.Reinforce
-                        ? FormationDirective.Reinforce
-                        : FormationDirective.Counterstroke;
-                    support.Reason = "probe-support:" + (probe.Package.Reason ?? probe.Reason ?? "package");
-                    support.OffensiveAllowed = probe.Package.Decision == CoordinatedOperationDecision.CoordinateAttack;
-                    support.DefensiveAllowed = true;
-                    support.TransferDonorAllowed = false;
-                }
-            }
-
-            RecomputePressure();
-            return true;
-        }
-
         private void Add(FormationDirectiveAssignment assignment)
         {
             _assignments[assignment.UnitKey] = assignment;
             _ordered.Add(assignment);
         }
 
-        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options)
+        // Screen means "on a campaign-planner recon mission" (Screen/Picket/AdvanceGuard/Probe; plan
+        // § G1b): onReconMission is ReconMissionLedger.IsRecon by unit key, null for none. Supply
+        // raiding is vanilla's raid forces' (CheckCreationOfRaidForces 17568-17612), so there is no
+        // raid directive.
+        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options,
+                                                                        Func<string, bool> onReconMission)
         {
             var assignment = BaseAssignment(snapshot);
 
             if (snapshot.Morale < options.RecoverMoraleFloor || snapshot.Readiness < options.RecoverReadinessFloor)
-                return Set(assignment, FormationDirective.Recover, "low-morale-readiness", false, false, false);
+                return Set(assignment, FormationDirective.Recover, "low-morale-readiness", false, false);
 
             if (snapshot.MinimumAmmo < 0.25f || snapshot.Supply < 0.25f)
-                return Set(assignment, FormationDirective.Recover, "low-ammo-supply", false, false, false);
+                return Set(assignment, FormationDirective.Recover, "low-ammo-supply", false, false);
 
             if (snapshot.OnRetreat && snapshot.HasActivePath)
-                return Set(assignment, FormationDirective.Delay, "retreat-skirmish-risk", false, true, false);
+                return Set(assignment, FormationDirective.Delay, "retreat-skirmish-risk", true, false);
 
-            if (snapshot.IsCavalryCapable && snapshot.Readiness >= 0.65f && snapshot.Supply >= 0.65f &&
-                snapshot.FrontPosture == FrontPosture.EconomyOfForce && snapshot.LocalEnemyStrength <= snapshot.GroupStrengthActive)
-            {
-                assignment.RaidAllowed = true;
-                return Set(assignment, FormationDirective.RaidSupport, "cavalry-raid-support", false, false, true);
-            }
+            if (onReconMission != null && onReconMission(snapshot.UnitKey))
+                return Set(assignment, FormationDirective.Screen, "recon-mission", true, false);
 
             if (snapshot.Level == FormationLevel.Division &&
                 snapshot.VisibleEnemyLevel == FormationLevel.Army &&
                 !HasReachableSupport(snapshot))
-                return Set(assignment, FormationDirective.Screen, "division-vs-army-no-support", false, true, false);
+                return Set(assignment, FormationDirective.Delay, "division-vs-army-no-support", true, false);
 
             if (snapshot.Level == FormationLevel.Division &&
                 snapshot.VisibleEnemyLevel == FormationLevel.Corps &&
                 !DivisionCanCounterstroke(snapshot))
-                return Set(assignment, FormationDirective.Delay, "division-vs-corps-delay", false, true, false);
+                return Set(assignment, FormationDirective.Delay, "division-vs-corps-delay", true, false);
 
             if (snapshot.FrontPosture == FrontPosture.Concede)
-                return Set(assignment, FormationDirective.Concede, "front-concede", false, false, true);
+                return Set(assignment, FormationDirective.Concede, "front-concede", false, true);
 
             if (snapshot.FrontPosture == FrontPosture.EconomyOfForce)
-                return Set(assignment, FormationDirective.Reserve, "economy-of-force", false, true, true);
+                return Set(assignment, FormationDirective.Reserve, "economy-of-force", true, true);
 
             if (snapshot.IsPlanTargetArea && snapshot.Level == FormationLevel.Army && snapshot.GrandArmyStructureAvailable)
-                return Set(assignment, FormationDirective.Mass, "army-plan-target", true, true, false);
+                return Set(assignment, FormationDirective.Mass, "army-plan-target", true, false);
 
             if ((snapshot.FrontPosture == FrontPosture.Counterstroke || snapshot.FrontPosture == FrontPosture.Exploit) &&
                 AttackRiskPasses(snapshot, options))
             {
                 var directive = snapshot.FrontPosture == FrontPosture.Exploit ? FormationDirective.Mass : FormationDirective.Counterstroke;
-                return Set(assignment, directive, "risk-gate-passed", true, true, false);
+                return Set(assignment, directive, "risk-gate-passed", true, false);
             }
 
             if (snapshot.IsCriticalSector)
-                return Set(assignment, FormationDirective.Guard, "critical-sector", false, true, false);
+                return Set(assignment, FormationDirective.Guard, "critical-sector", true, false);
 
             if (snapshot.Level == FormationLevel.Army)
-                return Set(assignment, FormationDirective.Hold, "army-hold", false, true, false);
+                return Set(assignment, FormationDirective.Hold, "army-hold", true, false);
 
-            return Set(assignment, FormationDirective.Screen, "default-screen", false, true, false);
+            return Set(assignment, FormationDirective.Hold, DefaultHoldReason, true, false);
         }
 
         private static FormationDirectiveAssignment BaseAssignment(FormationSnapshot snapshot)
@@ -273,32 +189,23 @@ namespace WhiskeyRealism.Strategic
             return new FormationDirectiveAssignment
             {
                 UnitKey = snapshot.UnitKey,
-                AllianceId = snapshot.AllianceId,
                 StableUnitId = snapshot.StableUnitId,
                 Level = snapshot.Level,
                 AreaKey = snapshot.AreaKey,
-                SectorKey = snapshot.SectorKey,
                 X = snapshot.X,
                 Z = snapshot.Z,
                 CombatAvailability = availability,
-                ExchangePressure = ExchangePressure(snapshot),
-                LocalFriendlySupport = snapshot.LocalFriendlySupportStrength,
                 LocalEnemyStrength = snapshot.LocalEnemyStrength,
-                Readiness = FormationSnapshot.Clamp01(snapshot.Readiness),
-                Morale = FormationSnapshot.Clamp01(snapshot.Morale),
                 Ammo = snapshot.MinimumAmmo,
                 Supply = FormationSnapshot.Clamp01(snapshot.Supply),
-                Fatigue = FormationSnapshot.Clamp01(snapshot.Fatigue),
-                WeaponFirepower = Math.Max(0f, snapshot.WeaponFirepower),
                 DirectMovementAllowed = snapshot.CanReceiveDirectMovement
             };
         }
 
-        private static FormationDirectiveAssignment Set(FormationDirectiveAssignment assignment, FormationDirective directive, string reason, bool offensive, bool defensive, bool donor)
+        private static FormationDirectiveAssignment Set(FormationDirectiveAssignment assignment, FormationDirective directive, string reason, bool defensive, bool donor)
         {
             assignment.Directive = directive;
             assignment.Reason = reason;
-            assignment.OffensiveAllowed = offensive;
             assignment.DefensiveAllowed = defensive;
             assignment.TransferDonorAllowed = donor;
             return assignment;
@@ -311,17 +218,6 @@ namespace WhiskeyRealism.Strategic
                    Gate(snapshot.Readiness, 0.35f) *
                    Gate(snapshot.MinimumAmmo, 0.25f) *
                    Gate(snapshot.Supply, 0.25f) *
-                   (1f - 0.5f * FormationSnapshot.Clamp01(snapshot.Fatigue));
-        }
-
-        public static float ExchangePressure(FormationSnapshot snapshot)
-        {
-            return Sqrt(Math.Max(1f, snapshot.GroupStrengthActive)) *
-                   Sqrt(Math.Max(1f, snapshot.WeaponFirepower)) *
-                   FormationSnapshot.Clamp01(snapshot.Morale) *
-                   FormationSnapshot.Clamp01(snapshot.Readiness) *
-                   FormationSnapshot.Clamp01(snapshot.MinimumAmmo) *
-                   FormationSnapshot.Clamp01(snapshot.Supply) *
                    (1f - 0.5f * FormationSnapshot.Clamp01(snapshot.Fatigue));
         }
 
@@ -363,7 +259,6 @@ namespace WhiskeyRealism.Strategic
                     AddAreaPressure(areaScores, assignment.AreaKey);
                 }
                 if (assignment.Directive == FormationDirective.Recover) Pressure.RecoverCount++;
-                if (assignment.Directive == FormationDirective.Guard) Pressure.GuardCount++;
                 if (assignment.Directive == FormationDirective.Mass) Pressure.MassCount++;
             }
 
@@ -390,11 +285,6 @@ namespace WhiskeyRealism.Strategic
             value = FormationSnapshot.Clamp01(value);
             if (value < floor) return 0f;
             return value;
-        }
-
-        private static float Sqrt(float value)
-        {
-            return (float)Math.Sqrt(value);
         }
     }
 }

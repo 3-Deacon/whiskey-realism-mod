@@ -34,7 +34,7 @@ namespace WhiskeyRealism.Strategic
 
             if (candidate.Tier >= CandidateTier.AdjacentTheater)
             {
-                var budgetDecision = EvaluateFrontBudget(input?.FrontLedger, source, candidate);
+                var budgetDecision = EvaluateFrontBudget(input?.FrontLedger, candidate);
                 if (budgetDecision != null && !budgetDecision.Allowed)
                     return Suppress(candidate, budgetDecision.Reason);
             }
@@ -55,55 +55,14 @@ namespace WhiskeyRealism.Strategic
             return allianceStrength * fraction;
         }
 
-        public static TransferBudgetDecision EvaluateAreaMovement(
-            FrontSectorLedger frontLedger,
-            string sourceSectorKey,
-            string destinationSectorKey,
-            float strengthToMove)
-        {
-            if (frontLedger == null ||
-                string.IsNullOrEmpty(sourceSectorKey) ||
-                string.IsNullOrEmpty(destinationSectorKey) ||
-                string.Equals(sourceSectorKey, destinationSectorKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return new TransferBudgetDecision
-                {
-                    Allowed = true,
-                    Action = TransferBudgetAction.Allowed,
-                    Reason = "local-area"
-                };
-            }
-
-            return frontLedger.EvaluateTransfer(sourceSectorKey, destinationSectorKey, strengthToMove);
-        }
-
         private static TransferBudgetDecision EvaluateFrontBudget(
             FrontSectorLedger frontLedger,
-            DefenseThreatSource source,
             DefenseCandidate candidate)
         {
             if (frontLedger == null || candidate == null || string.IsNullOrEmpty(candidate.SectorKey))
                 return null;
 
-            string destination = FindDestinationSector(frontLedger, source);
-            return frontLedger.EvaluateTransfer(
-                candidate.SectorKey,
-                destination,
-                Math.Max(0f, candidate.ActiveStrength));
-        }
-
-        private static string FindDestinationSector(FrontSectorLedger frontLedger, DefenseThreatSource source)
-        {
-            if (frontLedger == null || source == null) return null;
-
-            Theater theater = TheaterClassifier.FromPosition(source.X, source.Z);
-            foreach (var sector in frontLedger.Sectors)
-            {
-                if (sector != null && sector.Theater == theater)
-                    return sector.SectorKey;
-            }
-
-            return null;
+            return frontLedger.EvaluateTransfer(candidate.SectorKey, Math.Max(0f, candidate.ActiveStrength));
         }
 
         private static bool IsNationalEmergency(DefenseThreatSource source, DefensePosture posture, ThreatScale scale)

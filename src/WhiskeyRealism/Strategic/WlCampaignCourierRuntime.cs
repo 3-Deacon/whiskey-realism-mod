@@ -14,15 +14,15 @@ namespace WhiskeyRealism.Strategic
     // calledfromcampaign: true; the capital defense, offensive and engage callers) is taken by the
     // capture Prefix (WlOrderCapturePatch -> WlOrderFlowRuntime.Capture) after vanilla's own gate
     // (8366) says it would reach the panel; it is delivered by calling vanilla again with the bypass
-    // (WlOrderBypass). A Whiskey order (the strategic order bridge, #69) is enqueued by
+    // (WlOrderBypass). A Whiskey order (the strategic order bridge) is enqueued by
     // WlCampaignDispatchRuntime.Emit and shown by WlCampaignDispatchRuntime.ShowQueued once it
     // arrives, which re-decides it and then records the dispatch history.
     //
     // The delay is vanilla's campaign order delay, WlCourierDelay.CampaignYears (decompile 125033-125128),
     // from the senior commander's command to the player's group, with the issuing headquarters' own
     // factors. Time is campaign years since 1860 (GameVars.currenttimefromstart; the campaign clock
-    // stops while the game is paused). Delivery runs in the UpdateUnitAI Postfix right after
-    // WlCampaignDispatchRuntime.Flush, only on the campaign map. Vanilla's campaign calls never dedupe
+    // stops while the game is paused). Delivery runs in the UpdateUnitAI Postfix (#69), only on the
+    // campaign map. Vanilla's campaign calls never dedupe
     // (8640), so the battle re-admit policy is never consulted here.
     //
     // State: the queue, a last-drop signature and the command boundary, all campaign-scoped
@@ -143,7 +143,6 @@ namespace WhiskeyRealism.Strategic
                     Origin = OrderOrigin.Vanilla,
                     IssuerKey = (UnityEngine.Object)hq != null ? hq.GetInstanceID() : unit.GetInstanceID(),
                     IssuerCommanderId = -1,
-                    ShowZone = true,
                     IssuedAt = now,
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
@@ -169,14 +168,14 @@ namespace WhiskeyRealism.Strategic
         // Whiskey's order (WlCampaignDispatchRuntime.Emit, after its own Decide said Issue). Returns
         // Queued, a drop reason (the order is not issued), or null when no courier is used (couriers
         // off, or no entry could be built): the caller shows the order at once, as it always did.
-        internal static string EnqueueWhiskey(OrderOrigin origin, Regiment issuerUnit, int issuerCommanderId, int type,
-            Vector3 target, string destinationName, float width, float depth, bool showZone)
+        internal static string EnqueueWhiskey(Regiment issuerUnit, int issuerCommanderId, int type,
+            Vector3 target, string destinationName, float width, float depth)
         {
             if (!MasterEnabled() || !CouriersOn()) return null;
             try
             {
                 double now = GameVars.currenttimefromstart;
-                Regiment hq = origin == OrderOrigin.C69 && (UnityEngine.Object)issuerUnit != null ? issuerUnit : SeniorHeadquarters();
+                Regiment hq = SeniorHeadquarters();
                 float meters = DistanceToPlayerGroup(hq);
                 double delay = WlCourierDelay.CampaignYears(meters, CampaignPrefs(), FactorsOf(hq));
                 bool hasUnit = (UnityEngine.Object)issuerUnit != null;
@@ -194,10 +193,9 @@ namespace WhiskeyRealism.Strategic
                     Width = width,
                     Depth = depth,
                     CampaignCall = true,
-                    Origin = origin,
+                    Origin = OrderOrigin.CampaignBridge,
                     IssuerKey = (UnityEngine.Object)hq != null ? hq.GetInstanceID() : (hasUnit ? issuerUnit.GetInstanceID() : 0),
                     IssuerCommanderId = issuerCommanderId,
-                    ShowZone = showZone,
                     IssuedAt = now,
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
@@ -206,11 +204,11 @@ namespace WhiskeyRealism.Strategic
                 };
                 if (!Queue.TryEnqueue(in entry, WlCampaignDispatchPolicy.RateLimitYears, out string reason))
                 {
-                    Row("drop", reason, type, target.x, target.z, issuerUnit, entry.Name, origin, now, entry.DueAt, meters);
+                    Row("drop", reason, type, target.x, target.z, issuerUnit, entry.Name, OrderOrigin.CampaignBridge, now, entry.DueAt, meters);
                     return reason;
                 }
                 Row("capture", Queued, in entry);
-                OnceLog.Info("wl-campaign-courier:first-capture", "[W&LCourier] first campaign courier queued type=" + type + " origin=" + origin);
+                OnceLog.Info("wl-campaign-courier:first-capture", "[W&LCourier] first campaign courier queued type=" + type + " origin=" + OrderOrigin.CampaignBridge);
                 return Queued;
             }
             catch (Exception ex)
@@ -240,15 +238,22 @@ namespace WhiskeyRealism.Strategic
                 double now = GameVars.currenttimefromstart;
                 string commandKey = CurrentCommandKey();
                 Queue.StampPlayerCommand(commandKey);   // an entry from an old sidecar has no identity yet
+                bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;
                 for (int pass = 0; pass < MaxDeliveriesPerPass; pass++)
                 {
                     if (!Queue.TryTakeDue(now, out CourierEntry entry, out bool superseded)) break;
                     if (superseded) continue;
                     // An order queued for another command (a promotion since) is void, however empty the
-                    // queue was in between.
-                    if (!WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey))
+                    // queue was in between; a Whiskey order never reaches a player transferred under a corps.
+                    string preDrop = WlCampaignCourierPolicy.PreDeliveryDropReason(in entry, commandKey, ownMapGroup);
+                    if (preDrop == WlCampaignCourierPolicy.CarriedPlayer)
                     {
-                        Queue.Discard(in entry, "command-change");
+                        Row("drop", preDrop, in entry);
+                        continue;
+                    }
+                    if (preDrop != null)
+                    {
+                        Queue.Discard(in entry, preDrop);
                         continue;
                     }
                     DeliverOne(in entry);
@@ -257,6 +262,34 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex)
             {
                 OnceLog.Warning("wl-campaign-courier:deliver-failed", "[W&LCourier] campaign delivery failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // A player carried by an AI corps (his command is not its own campaign-map group) is sent no campaign
+        // order by vanilla (8366) or by Whiskey (2026-10-16). One still on his panel is a leftover of the removed
+        // #69 dispatch, from a save made before: it is cleared by setting the slot to null, as vanilla does
+        // for a reached or end-of-day order (HoldsStaleCarriedOrder), so he is not left holding an order no
+        // one can reach. Runs on every pass of the UpdateUnitAI Postfix (no latch: it also covers a player later attached under a corps), before delivery,
+        // behind the master switch only, not Enable Campaign Chain Dispatches: it undoes what the removed dispatch left behind.
+        internal static void ClearStaleCarriedOrder()
+        {
+            try
+            {
+                if (!MasterEnabled() || !DLC_WL.dlc_scenarioactive) return;
+                DLC_WL.GivenOrders order = DLC_WL.givenorder;
+                if (order == null) return;
+                Regiment command = PlayerCommand();
+                if ((UnityEngine.Object)command == null) return;
+                bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;
+                if (!WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, DLC_WL.IsCommanderInChief(), ownMapGroup, true, order.IsBattleOrder())) return;
+                DLC_WL.givenorder = null;
+                _watched = null;
+                Row("clear", "carried-player-order", order.type, order.position.x, order.position.z, null, order.destinationname, OrderOrigin.Vanilla, 0.0, 0.0, 0f);
+                OnceLog.Info("wl-campaign-courier:cleared-carried-order", "[W&LCourier] cleared a campaign order held by a player carried by his corps type=" + order.type);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-campaign-courier:clear-carried", "[W&LCourier] clearing a carried player's campaign order failed: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 

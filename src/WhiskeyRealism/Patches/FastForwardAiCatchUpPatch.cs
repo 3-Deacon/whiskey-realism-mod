@@ -144,7 +144,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (BattleUnits.completeunitlist == null) return false;
+                if (BattleUnits.completeunitlist == null) return false; // readiness check, not a decision
                 if (_aifactionField == null) _aifactionField = AccessTools.Field(typeof(AICampaign), "aifaction");
                 var list = _aifactionField?.GetValue(null) as System.Collections.IList;
                 return list != null && list.Count > 0;

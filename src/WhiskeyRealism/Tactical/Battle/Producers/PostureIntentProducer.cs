@@ -659,7 +659,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // formation target are this pipeline's, so the arbiter sees one Formation intent.
             RoadRoute roadRoute = default(RoadRoute);
             bool columnWait = false;
-            if (hasTarget && rec.UnitTyp > TacticalUnitType.MaxCombat && !closeEngaged && PostureRoutes.Applies(state.Task, decision.Action))
+            // BC14: a maneuvering wing's order carries the crossing it is routed through; that via replaces the road route and the
+            // covered-crossing avoidance, neither of which can carry it.
+            float maneuverViaX = 0f, maneuverViaZ = 0f;
+            bool maneuverVia = hasTarget && hasOrder &&
+                PostureIntentPlan.TryManeuverVia(in order, state.Task, exploit, decision.Target, out maneuverViaX, out maneuverViaZ);
+            PostureIntentPlan.RouteFlagsFor(state.Task, maneuverVia, out bool roadRouteAllowed, out bool coveredAvoidanceAllowed);
+            if (hasTarget && roadRouteAllowed && rec.UnitTyp > TacticalUnitType.MaxCombat && !closeEngaged && PostureRoutes.Applies(state.Task, decision.Action))
             {
                 bool avoidCovered = PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z);
                 if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
@@ -697,7 +703,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 TargetFormation = targetFormation,
                 NeedsFormation = CommandFormationCorrection.NeedsCorrection(-1, -1, rec.Formation, targetFormation),
                 InContactWithdrawal = closeEngaged || flankRisk,
-                AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
+                AvoidCoveredCrossings = hasTarget && coveredAvoidanceAllowed && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
                 Exploit = exploit,
                 ExploitId = ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId),
                 Refuse = refuseDue ? refuse : RefuseFlank.None,
@@ -708,9 +714,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Priority = priority,
                 Source = source,
                 Reason = reason,
-                ViaCount = roadRoute.Use ? roadRoute.ViaCount : 0,
-                ViaX0 = roadRoute.ViaX0,
-                ViaZ0 = roadRoute.ViaZ0,
+                ViaCount = roadRoute.Use ? roadRoute.ViaCount : (maneuverVia ? 1 : 0),
+                ViaX0 = roadRoute.Use ? roadRoute.ViaX0 : maneuverViaX,
+                ViaZ0 = roadRoute.Use ? roadRoute.ViaZ0 : maneuverViaZ,
                 ViaX1 = roadRoute.ViaX1,
                 ViaZ1 = roadRoute.ViaZ1,
                 ColumnWait = columnWait,

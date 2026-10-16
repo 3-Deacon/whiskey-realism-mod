@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Strategic.Planner;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -30,6 +31,75 @@ namespace WhiskeyRealism.Strategic
         // Candidates within this score margin of the best are drawn weighted-random, so a
         // faction's armies do not all take the same perk sequence.
         internal const float NearTieMargin = 0.35f;
+
+        // A formation directive's army perk role (PerkSelectionPatch.ResolveArmyRole); false = the
+        // directive names none and the objective's role decides. Screen = on a campaign-planner recon
+        // mission (G1b). The fallback Hold ("default-hold") keeps the perk path of the fallback it
+        // replaced ("default-screen", which had no case here): only an explicit Hold takes the
+        // capital-defence perks (integrator decision, G1b verify r1 F2).
+        internal static bool TryDirectiveRole(FormationDirective directive, string reason, out ArmyPerkRole role)
+        {
+            role = ArmyPerkRole.General;
+            switch (directive)
+            {
+                case FormationDirective.Screen:
+                    role = ArmyPerkRole.Scouting;
+                    return true;
+                case FormationDirective.Recover:
+                    role = ArmyPerkRole.Recovery;
+                    return true;
+                case FormationDirective.Hold:
+                    if (FormationDirectiveLedger.IsDefaultHold(reason)) return false;
+                    role = ArmyPerkRole.CapitalDefense;
+                    return true;
+                case FormationDirective.Guard:
+                case FormationDirective.CoordinateHold:
+                    role = ArmyPerkRole.CapitalDefense;
+                    return true;
+                case FormationDirective.Probe:
+                case FormationDirective.Mass:
+                case FormationDirective.Counterstroke:
+                case FormationDirective.Reinforce:
+                case FormationDirective.CoordinateMass:
+                    role = ArmyPerkRole.Maneuver;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // The army perk role of a formation the directive names none for: its role in the published allocation. Defensive
+        // roles (the capital guard, a hold, the reserve) take the capital-defence perks; the main effort sieges for the
+        // alliance that attacks (Union, the old capital-objective role) and raids for the one that invades (CSA, the old
+        // foreign-recognition role); support marches (Maneuver); the rest follow their task.
+        internal static ArmyPerkRole RoleOfFormation(FormationRole role, int allianceId)
+        {
+            switch (role)
+            {
+                case FormationRole.CapitalGuard:
+                case FormationRole.Hold:
+                case FormationRole.Reserve:
+                    return ArmyPerkRole.CapitalDefense;
+                case FormationRole.MainEffort:
+                    return allianceId == 1 ? ArmyPerkRole.Raid : ArmyPerkRole.Siege;
+                case FormationRole.Support:
+                    return ArmyPerkRole.Maneuver;
+                case FormationRole.Recover:
+                    return ArmyPerkRole.Recovery;
+                case FormationRole.Recon:
+                    return ArmyPerkRole.Scouting;
+                default:
+                    return ArmyPerkRole.General;
+            }
+        }
+
+        // The fleet perk role from the main effort's theater and whether the plan holds a capital floor. The Union
+        // blockades; the CSA defends its ports on the coast or with the capital threatened and raids otherwise.
+        internal static FleetPerkRole FleetRole(int allianceId, Theater mainTheater, bool capitalThreatened)
+        {
+            if (allianceId == 0) return FleetPerkRole.Blockade;
+            return mainTheater == Theater.Coast || capitalThreatened ? FleetPerkRole.PortDefense : FleetPerkRole.Raid;
+        }
 
         // Vanilla AICampaign.CheckPerkSelection (decompile 11881/11888) draws
         // Random.Range(0, Length / LevelsPerPerk - 1): the int overload excludes its upper

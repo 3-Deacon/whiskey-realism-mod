@@ -9,6 +9,7 @@ using UnityEngine;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Strategic.Policies;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -31,10 +32,8 @@ namespace WhiskeyRealism.Strategic
         private StrategicLedgerSet _published = new StrategicLedgerSet();
         private StrategicLedgerSet View => _review.RunningJob ? _work : _published;
 
-        public CIC[] CICs => View.CICs;
         public EraStageManager[] Eras => View.Eras;
         public FrontSectorLedger[] Fronts => View.Fronts;
-        public ArmyAreaLedger[] ArmyAreas => View.ArmyAreas;
         public FormationDirectiveLedger[] FormationDirectives => View.FormationDirectives;
         public FiscalOutput[] FiscalIntents => View.FiscalIntents;
         public ConstructionOutput[] ConstructionIntents => View.ConstructionIntents;
@@ -44,10 +43,8 @@ namespace WhiskeyRealism.Strategic
         public PolicyPlanLedger[] PolicyPlans => View.PolicyPlans;
         internal DirectorMemory[] DirectorMemories => View.DirectorMemories;
         public CampaignMapLedger CampaignMap => View.CampaignMap;
-        // Read only inside the review (no published copy).
-        public OperationalProbeOutput[] OperationalProbes = new OperationalProbeOutput[2];
         public ConstructionTelemetry ConstructionTelemetry = new ConstructionTelemetry();
-        private readonly int[] _needDaySerial = { -1, -1 };
+        private readonly int[] _needCalendarDay = { -1, -1 };
         private readonly FiscalInput[] _fiscalInputs = new FiscalInput[2];
         private readonly FiscalOutput[] _fiscalOutputs = new FiscalOutput[2];
         private readonly DefenseCooldownTable[] _defenseCooldowns = new DefenseCooldownTable[2]
@@ -56,15 +53,8 @@ namespace WhiskeyRealism.Strategic
             new DefenseCooldownTable()
         };
         private readonly string[] _defenseIntentSignatures = new string[2];
-        private readonly HashSet<string>[] _previousSifSignatures = new HashSet<string>[2]
-        {
-            new HashSet<string>(),
-            new HashSet<string>()
-        };
         internal SuccessionScheduler Succession = new SuccessionScheduler();
-        public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
-        private readonly OperationDecisionMemory[] OperationMemories = new OperationDecisionMemory[2] { new OperationDecisionMemory(), new OperationDecisionMemory() };
         private DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
         private readonly string[] _directorPostureSignatures = new string[2];
         private readonly CollapseRisk[] _directorRiskLevels = new CollapseRisk[2] { CollapseRisk.Low, CollapseRisk.Low };
@@ -74,20 +64,15 @@ namespace WhiskeyRealism.Strategic
             new FiscalStateMemory()
         };
         private readonly string[] _frontSignatures = new string[2];
-        private readonly string[] _armyAreaSignatures = new string[2];
         private readonly string[] _formationDirectiveSignatures = new string[2];
-        private readonly string[] _operationalProbeSignatures = new string[2];
-        private readonly OperationalProbeState[] _operationalProbeStates = new OperationalProbeState[2];
-        private readonly ProbeHysteresis[] _probeHysteresis = { new ProbeHysteresis(), new ProbeHysteresis() };
         private readonly bool[] _capitalThreatened = new bool[2];
         private readonly int[] _capitalStreakDay = { -1, -1 };
         private readonly int[] _frontChangedDay = { -1, -1 };
-        private int _lastReviewSerial = -1;
+        private int _lastReviewCalendarDay = -1;
         private long _saveSequence;
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
-        private readonly string[] _armyAreaSourceSignatures = new string[2];
         private readonly string[] _constructionSourceSignatures = new string[2];
         private string _campaignMapSignature;
         private string _campaignMapDynamicSignature;
@@ -99,6 +84,7 @@ namespace WhiskeyRealism.Strategic
         internal static readonly CampaignEpochTracker Epoch = new CampaignEpochTracker();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
+        private bool _wlJobMachinePauseLogged;
         private bool _dailyOpsAnnounced;
         private readonly bool[] _playerCicAnnounced = new bool[2];
 
@@ -112,6 +98,8 @@ namespace WhiskeyRealism.Strategic
             if (Instance != null) return;
             var go = new GameObject("WhiskeyRealismStrategicCoordinator");
             Instance = go.AddComponent<StrategicCoordinator>();
+            // The planner's stores serve the working copy inside a review job, the published one outside.
+            DailyReviewView.Attach(Instance.InReviewJob);
             DontDestroyOnLoad(go);
             EmitCampaignInfoToMainLogIfAllowed("[Coordinator] bootstrapped");
         }
@@ -125,17 +113,6 @@ namespace WhiskeyRealism.Strategic
                 _work.Eras[1] = _work.Eras[1] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
 
                 int playerAlliance = ResolvePlayerAlliance();
-                bool factionListReady = OperationalRuntimeReady();
-                for (int alliance = 0; alliance < 2; alliance++)
-                {
-                    if (!ShouldRunCicFor(alliance, playerAlliance, factionListReady))
-                    {
-                        _work.CICs[alliance] = null;
-                        continue;
-                    }
-                    if (_work.CICs[alliance] == null)
-                        _work.CICs[alliance] = BuildCICForAlliance(alliance);
-                }
                 Initialized = true;
                 PublishStrategicState();
                 EmitCampaignInfoToMainLogIfAllowed($"[Coordinator] initialized (playerAlliance={playerAlliance})");
@@ -159,49 +136,38 @@ namespace WhiskeyRealism.Strategic
             _deferredBattleOutcomes.Clear();
             for (int a = 0; a < 2; a++)
             {
-                _work.CICs[a] = null;
                 _work.Eras[a] = new EraStageManager { Stage = EraStage.Amateur1861 };
                 _work.Fronts[a] = null;
-                _work.ArmyAreas[a] = null;
                 _work.FormationDirectives[a] = null;
-                OperationalProbes[a] = null;
                 _work.FiscalIntents[a] = null;
                 _work.Needs[a] = null;
                 _work.NeedSnapshots[a] = null;
                 _work.PolicyPlans[a] = new PolicyPlanLedger();
-                _needDaySerial[a] = -1;
+                _needCalendarDay[a] = -1;
                 _fiscalInputs[a] = null;
                 _fiscalOutputs[a] = null;
                 _work.ConstructionIntents[a] = null;
                 _work.DefenseIntents[a] = null;
                 _defenseCooldowns[a] = new DefenseCooldownTable();
                 _defenseIntentSignatures[a] = null;
-                _previousSifSignatures[a] = new HashSet<string>();
                 _work.DirectorMemories[a] = new DirectorMemory();
-                OperationMemories[a] = new OperationDecisionMemory();
                 _directorPostureSignatures[a] = null;
                 _directorRiskLevels[a] = CollapseRisk.Low;
                 _fiscalMemory[a] = new FiscalStateMemory();
                 _frontSignatures[a] = null;
-                _armyAreaSignatures[a] = null;
                 _formationDirectiveSignatures[a] = null;
-                _operationalProbeSignatures[a] = null;
-                _operationalProbeStates[a] = null;
-                _probeHysteresis[a] = new ProbeHysteresis();
                 _capitalThreatened[a] = false;
                 _capitalStreakDay[a] = -1;
                 _frontChangedDay[a] = -1;
                 _fiscalSignatures[a] = null;
                 _constructionSignatures[a] = null;
                 _formationSourceSignatures[a] = null;
-                _armyAreaSourceSignatures[a] = null;
                 _constructionSourceSignatures[a] = null;
                 _playerCicAnnounced[a] = false;
             }
             _work.CampaignMap = CampaignMapLedger.Build(null);
             ConstructionTelemetry = new ConstructionTelemetry();
             Succession = new SuccessionScheduler();
-            MinorOfficerProfiles.Clear();
             BattleHistory.Clear();
             _directorClamp = new DirectorPublishClamp();
             _campaignMapSignature = null;
@@ -209,11 +175,12 @@ namespace WhiskeyRealism.Strategic
             _operationalCadence = new DailyCadence();
             _operationalRuntimeDeferredLogged = false;
             _wlCareerStartDeferredLogged = false;
+            _wlJobMachinePauseLogged = false;
             _dailyOpsAnnounced = false;
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
             _eraMigrationPending = false;
-            _lastReviewSerial = -1;
+            _lastReviewCalendarDay = -1;
             _saveSequence = 0;
             _lastSnapshot = default(WarStateObserver.Snapshot);
             _lastSnapshotDay = _lastSnapshotMonth = _lastSnapshotYear = -1;
@@ -224,22 +191,6 @@ namespace WhiskeyRealism.Strategic
             PublishStrategicState();
             CampaignScope.ResetAll();
             EmitCampaignInfoToMainLogIfAllowed("[Coordinator] strategic state reset (" + reason + ")");
-        }
-
-        private CIC BuildCICForAlliance(int allianceId)
-        {
-            var cic = new CIC { AllianceId = allianceId };
-            if (allianceId == 1)
-            {
-                cic.OfficerName = "Davis";
-                cic.OfficerPersonality = new PersonalityVector(-0.1f, +0.3f, -0.3f, -0.3f, +0.5f);
-            }
-            else
-            {
-                cic.OfficerName = "Lincoln";
-                cic.OfficerPersonality = new PersonalityVector(+0.3f, +0.1f, +0.1f, +0.4f, +0.7f);
-            }
-            return cic;
         }
 
         public void NotifyDateAdvanced(int gameDay, int gameMonth, int gameYear)
@@ -336,7 +287,7 @@ namespace WhiskeyRealism.Strategic
 
         // ---- Daily strategic review ------------------------------------------------------
         // The review is the ordered job list in DailyReviewJobList (map, then per alliance the
-        // CIC review and each ledger), run by DailyReviewScheduler. With "Time-Slice Daily
+        // head job and each ledger), run by DailyReviewScheduler. With "Time-Slice Daily
         // Review" on, the date-change frame captures the day's inputs that are ours (date,
         // cadence catch-up, player alliance, runtime readiness, heartbeat) and runs jobs until
         // the per-frame budget is used; MonthlyTickHookPatch pumps the rest on the next
@@ -371,10 +322,8 @@ namespace WhiskeyRealism.Strategic
         {
             internal AllianceReviewMode Mode;
             internal EraStageManager Era;
-            internal CIC Cic;
-            internal int DaySerial;
+            internal int LegacySerial; // year*372 + month*31 + day (persisted scale: director, front day)
             internal bool FrontChanged;
-            internal bool FormationChanged;
         }
 
         private sealed class ReviewDay
@@ -383,7 +332,8 @@ namespace WhiskeyRealism.Strategic
             internal int Month;
             internal int Year;
             internal bool LogHeartbeat;
-            internal int ReviewSerial;
+            internal int CalendarDay;
+            internal bool JobMachinePaused;
             internal bool WeeklyCatchUp;
             internal bool AlternatingCatchUp;
             internal int PlayerAlliance;
@@ -392,13 +342,12 @@ namespace WhiskeyRealism.Strategic
             internal long TotalTicks;
             internal double MapMs;
             internal double FrontMs;
-            internal double ArmyAreaMs;
             internal double FormationMs;
-            internal double ProbeMs;
             internal double FiscalMs;
             internal double PolicyMs;
             internal double ConstructionMs;
             internal double DefenseMs;
+            internal double PlannerMs;
         }
 
         // Date-change frame: capture the day's inputs and run the first slice (the whole day
@@ -414,10 +363,18 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Every campaign frame (MonthlyTickHookPatch): continue an in-flight review.
+        // Every campaign frame (MonthlyTickHookPatch): continue an in-flight review. A frame with
+        // no review day in flight goes to the campaign planner's terrain memo drain instead
+        // (TerrainLineRuntime.DrainTick, its own 0.9 ms budget), so the two never share a frame
+        // (ReviewFrameGate also covers a review finished earlier in the frame by the save drain)
+        // and the drain stops while a day is being reviewed.
         internal void PumpDailyReview()
         {
-            if (!_review.InFlight) return;
+            if (!_review.InFlight)
+            {
+                if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick();
+                return;
+            }
             try
             {
                 using (TelemetryPerf.Scope("campaign.daily-review", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
@@ -467,22 +424,42 @@ namespace WhiskeyRealism.Strategic
 
         private bool BeginReviewDay(int day, int month, int year, bool logHeartbeat)
         {
-            if (WlCareerStartPending())
+            // Stage G spec C5: only a career whose commander is not chosen yet defers the whole
+            // review. Between commands vanilla's job machine is paused (UpdateUnitAI 11368) and the
+            // review narrows in its jobs instead (ReviewDay.JobMachinePaused).
+            if (WlCareerNotStarted())
             {
                 if (!_wlCareerStartDeferredLogged)
                 {
                     _wlCareerStartDeferredLogged = true;
-                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L career start selection pending; strategic review deferred until player has a command");
+                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L career start selection pending; strategic review deferred until the player picks a commander");
                 }
                 return false;
             }
             _wlCareerStartDeferredLogged = false;
 
+            // While vanilla's 11368 return freezes every faction's job machine, the ledgers that
+            // issue moves or mirror job-machine work (succession swaps, front, formation
+            // directives, defense intent) and the planner's executors
+            // pause for both alliances; the state-only ledgers (era, capital threat, director
+            // posture, fiscal, policy, construction) and the planner's bookkeeping keep running.
+            // Captured with the day's other inputs on the date-change frame.
+            bool jobMachinePaused = WlVanillaJobMachinePaused();
+            if (jobMachinePaused && !_wlJobMachinePauseLogged)
+            {
+                _wlJobMachinePauseLogged = true;
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L player has no command (hierarchy -1): planner executors and order-issuing ledgers paused for every alliance, as vanilla's job machine");
+            }
+            else if (!jobMachinePaused)
+            {
+                _wlJobMachinePauseLogged = false;
+            }
+
             RefreshStrategicSettings();
-            int reviewSerial = ReviewCadenceCatchUp.DaySerial(day, month, year);
-            bool weeklyCatchUp = ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewSerial, reviewSerial);
-            bool alternatingCatchUp = ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewSerial, reviewSerial);
-            _lastReviewSerial = reviewSerial;
+            int calendarDay = ReviewCadenceCatchUp.DaySerial(day, month, year);
+            bool weeklyCatchUp = ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewCalendarDay, calendarDay);
+            bool alternatingCatchUp = ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewCalendarDay, calendarDay);
+            _lastReviewCalendarDay = calendarDay;
             int playerAlliance = ResolvePlayerAlliance();
             bool operationalRuntimeReady = OperationalRuntimeReady();
             if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
@@ -497,7 +474,8 @@ namespace WhiskeyRealism.Strategic
                 Month = month,
                 Year = year,
                 LogHeartbeat = logHeartbeat,
-                ReviewSerial = reviewSerial,
+                CalendarDay = calendarDay,
+                JobMachinePaused = jobMachinePaused,
                 WeeklyCatchUp = weeklyCatchUp,
                 AlternatingCatchUp = alternatingCatchUp,
                 PlayerAlliance = playerAlliance,
@@ -507,8 +485,12 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
+        // Frames that ran review work (RunReviewSlice); the terrain drain skips them.
+        private readonly ReviewFrameGate _reviewFrames = new ReviewFrameGate();
+
         private void RunReviewSlice(long budgetTicks)
         {
+            _reviewFrames.MarkWork(Time.frameCount);
             var day = _day;
             long start = ReviewClock();
             if (_runReviewJob == null) _runReviewJob = RunReviewJob;
@@ -533,6 +515,9 @@ namespace WhiskeyRealism.Strategic
             var job = DailyReviewJobList.Ordered[jobIndex];
             if (job.Kind == DailyReviewJobKind.Map)
             {
+                // G1: the calendar day the belief readers of this review key on (the omniscient
+                // rollback's per-day cache); stamped by the first job, before any reader.
+                EnemyDetectionRuntime.StampReviewDay(d.CalendarDay);
                 if (d.OperationalRuntimeReady)
                     d.MapMs += Measure(() => UpdateCampaignMapLedger(d.Day, d.LogHeartbeat, d.WeeklyCatchUp));
                 return;
@@ -540,9 +525,9 @@ namespace WhiskeyRealism.Strategic
 
             int alliance = job.Alliance;
             var a = d.Alliances[alliance];
-            if (job.Kind == DailyReviewJobKind.Cic)
+            if (job.Kind == DailyReviewJobKind.Head)
             {
-                RunCicReviewJob(d, alliance, a);
+                RunHeadReviewJob(d, alliance, a);
                 return;
             }
 
@@ -554,12 +539,16 @@ namespace WhiskeyRealism.Strategic
                 if (job.Kind == DailyReviewJobKind.Fiscal)
                     d.FiscalMs += Measure(() => UpdateFiscalIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.LogHeartbeat, publish: false));
                 else if (job.Kind == DailyReviewJobKind.Policy)
-                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial));
+                    d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay));
+                // G1: detection is bookkeeping; the planner itself stands down for this alliance.
+                else if (job.Kind == DailyReviewJobKind.Plan)
+                    d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused));
                 return;
             }
             if (a.Mode != AllianceReviewMode.Ai) return;
 
             bool ready = d.OperationalRuntimeReady;
+            bool paused = d.JobMachinePaused;
             switch (job.Kind)
             {
                 case DailyReviewJobKind.Fiscal:
@@ -568,69 +557,58 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Policy:
                     if (ready)
-                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.ReviewSerial));
+                        d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.Day, d.Month, d.Year, d.CalendarDay));
+                    break;
+
+                case DailyReviewJobKind.Plan:
+                    if (ready)
+                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused));
                     break;
 
                 case DailyReviewJobKind.Front:
                 {
+                    a.FrontChanged = false;
+                    if (paused) break;
                     bool frontChanged = false;
                     if (ready)
-                        d.FrontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, a.Cic));
+                        d.FrontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance));
                     if (frontChanged || _frontChangedDay[alliance] < 0)
-                        _frontChangedDay[alliance] = a.DaySerial;
+                        _frontChangedDay[alliance] = a.LegacySerial;
                     a.FrontChanged = frontChanged;
                     break;
                 }
 
                 case DailyReviewJobKind.Defense:
-                    d.DefenseMs += Measure(() => UpdateDefenseIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year));
+                    if (!paused)
+                        d.DefenseMs += Measure(() => UpdateDefenseIntent(alliance, a.Era.Stage, d.Day, d.Month, d.Year));
+                    break;
+
+                case DailyReviewJobKind.Execute:
+                    if (ready && !paused)
+                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused));
                     break;
 
                 case DailyReviewJobKind.Formation:
                 {
-                    a.FormationChanged = false;
-                    if (!ready) break;
-                    string formationSource = FormationSourceSignature(alliance, a.Cic);
+                    if (!ready || paused) break;
+                    string formationSource = FormationSourceSignature(alliance);
                     bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) ||
                         StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) ||
                         a.FrontChanged;
                     if (runFormation)
                     {
-                        d.FormationMs += Measure(() => a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Cic, a.Era));
+                        d.FormationMs += Measure(() => UpdateFormationDirectiveLedger(alliance, a.Era));
                         _formationSourceSignatures[alliance] = formationSource;
                     }
                     break;
                 }
-
-                case DailyReviewJobKind.Probe:
-                    if (ready)
-                    {
-                        d.ProbeMs += Measure(() =>
-                        {
-                            if (UpdateOperationalProbe(alliance, a.Cic, d.Day, d.Month, d.Year))
-                                a.FormationChanged = true;
-                        });
-                    }
-                    break;
-
-                case DailyReviewJobKind.ArmyArea:
-                    if (ready)
-                    {
-                        string armyAreaSource = ArmyAreaSourceSignature(alliance, a.Cic);
-                        if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, armyAreaSource, _armyAreaSourceSignatures[alliance], a.FormationChanged || d.WeeklyCatchUp))
-                        {
-                            d.ArmyAreaMs += Measure(() => UpdateArmyAreaLedger(alliance, a.Cic));
-                            _armyAreaSourceSignatures[alliance] = armyAreaSource;
-                        }
-                    }
-                    break;
 
                 case DailyReviewJobKind.Construction:
                 {
                     string constructionSource = ConstructionSourceSignature(alliance);
                     if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(d.Day, constructionSource, _constructionSourceSignatures[alliance], d.WeeklyCatchUp))
                     {
-                        d.ConstructionMs += Measure(() => UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat));
+                        d.ConstructionMs += Measure(() => UpdateConstructionIntent(alliance, a.Era.Stage, d.LogHeartbeat, paused));
                         _constructionSourceSignatures[alliance] = constructionSource;
                     }
                     break;
@@ -642,24 +620,23 @@ namespace WhiskeyRealism.Strategic
 
                     if (d.LogHeartbeat)
                     {
-                        var cic = a.Cic;
+                        string main = CampaignPlanStore.TryGetPlan(alliance, out var published) ? TheaterPlanner.MainLabel(published) : "none";
                         EmitCampaignInfo(
                             $"[Heartbeat] {d.Year}-{d.Month:D2} alliance={alliance} " +
-                            $"era={a.Era.Stage} cic={cic.OfficerName ?? "<none>"} " +
-                            $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
+                            $"era={a.Era.Stage} main={main} " +
                             $"succession_fired={Succession.FiredEventIds.Count}");
                     }
                     break;
             }
         }
 
-        // The head of the single-frame review's alliance loop: who runs this alliance today,
-        // era, succession, capital threat, director posture and the CIC plan review.
-        private void RunCicReviewJob(ReviewDay d, int alliance, AllianceReview a)
+        // The head of the single-frame review's alliance loop: who runs this alliance today, era, succession, capital
+        // threat and director posture. The campaign plan itself is the Plan job's.
+        private void RunHeadReviewJob(ReviewDay d, int alliance, AllianceReview a)
         {
             int day = d.Day, month = d.Month, year = d.Year;
             bool operationalRuntimeReady = d.OperationalRuntimeReady;
-            if (!ShouldRunCicFor(alliance, d.PlayerAlliance, operationalRuntimeReady))
+            if (!ShouldRunPlannerFor(alliance, d.PlayerAlliance, operationalRuntimeReady))
             {
                 if (!_playerCicAnnounced[alliance])
                 {
@@ -667,7 +644,6 @@ namespace WhiskeyRealism.Strategic
                     EmitCampaignInfoToMainLogIfAllowed(
                         $"alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) is not run by vanilla campaign AI (player-controlled) — mod stands down for that faction");
                 }
-                _work.CICs[alliance] = null;
                 a.Mode = AllianceReviewMode.Skipped;
                 if (operationalRuntimeReady && IsPlayerCICOf(alliance, d.PlayerAlliance))
                 {
@@ -679,50 +655,31 @@ namespace WhiskeyRealism.Strategic
                 }
                 return;
             }
-            if (_work.CICs[alliance] == null) _work.CICs[alliance] = BuildCICForAlliance(alliance);
 
             var era = _work.Eras[alliance];
             var ws = ObserveWarStateCached(day, month, year);
             era.CheckTransition(month, year, ws.VicksburgFallen, SafePolicyChapter());
 
-            var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
-            foreach (var e in fired)
+            if (!d.JobMachinePaused)
             {
-                if (e.AllianceId != alliance) continue;
-                SwapOfficer(alliance, e);
-                if (_work.CICs[alliance].ActivePlan != null)
-                    _work.CICs[alliance].ActivePlan.IsDirty = true;
+                var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
+                foreach (var e in fired)
+                {
+                    if (e.AllianceId != alliance) continue;
+                    SwapOfficer(alliance, e);
+                }
             }
 
-            var cic = _work.CICs[alliance];
-            int daySerial = year * 372 + month * 31 + day;
+            int legacySerial = year * 372 + month * 31 + day;
             if (operationalRuntimeReady)
             {
-                UpdateCapitalThreat(alliance, daySerial);
-                PublishDirectorPosture(alliance, cic, era, day, month, year, daySerial);
-            }
-
-            var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
-            if (!cic.ReviewPlanWithTruth(day, month, year, phaseTruth))
-            {
-                string beforeOperation = cic.ActivePlan?.OperationId;
-                cic.Replan(
-                    era,
-                    month,
-                    year,
-                    daySerial,
-                    SafePolicyChapter(),
-                    alliance < _work.DirectorMemories.Length ? _work.DirectorMemories[alliance].LastPosture : null,
-                    null);
-                string afterOperation = cic.ActivePlan?.OperationId;
-                if (!string.IsNullOrEmpty(afterOperation) && afterOperation != beforeOperation)
-                    OperationMemories[alliance].RecordReplan(daySerial);
+                UpdateCapitalThreat(alliance, legacySerial);
+                PublishDirectorPosture(alliance, day, month, year, legacySerial);
             }
 
             a.Mode = AllianceReviewMode.Ai;
             a.Era = era;
-            a.Cic = cic;
-            a.DaySerial = daySerial;
+            a.LegacySerial = legacySerial;
         }
 
         // The day is complete: publish it in one step, report its cost, then apply the battle
@@ -745,9 +702,9 @@ namespace WhiskeyRealism.Strategic
                     EmitCampaignInfo(
                         $"[DailyOps:Perf] {d.Year}-{d.Month:D2}-{d.Day:D2} " +
                         $"totalMs={totalMs:F2} slices={_review.Slices} maxSliceMs={maxSliceMs:F2} " +
-                        $"mapMs={d.MapMs:F2} frontMs={d.FrontMs:F2} armyAreaMs={d.ArmyAreaMs:F2} " +
-                        $"formationMs={d.FormationMs:F2} probeMs={d.ProbeMs:F2} fiscalMs={d.FiscalMs:F2} policyMs={d.PolicyMs:F2} " +
-                        $"constructionMs={d.ConstructionMs:F2} defenseMs={d.DefenseMs:F2}");
+                        $"mapMs={d.MapMs:F2} frontMs={d.FrontMs:F2} " +
+                        $"formationMs={d.FormationMs:F2} fiscalMs={d.FiscalMs:F2} policyMs={d.PolicyMs:F2} " +
+                        $"constructionMs={d.ConstructionMs:F2} defenseMs={d.DefenseMs:F2} plannerMs={d.PlannerMs:F2}");
                 }
             }
         }
@@ -761,25 +718,42 @@ namespace WhiskeyRealism.Strategic
                 RecordBattleOutcome(deferred[i]);
         }
 
+        // The day's one publish: the ledger set and the campaign planner's reader-facing copies
+        // (beliefs, plan store) are all copied first (PrepareDay) and swapped in only once every copy
+        // is complete, so a copy that throws leaves the whole previous day published and a reader
+        // outside the review never sees two days mixed.
         private void PublishStrategicState()
         {
-            ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);
-            Succession.PublishFired();
+            ReviewDayCommit.Publish(ref _published, _work, PrepareDay);
+            EnemyBeliefStore.SwapPublished();
+            CampaignPlanStore.SwapPublished();
         }
 
-        private void PublishDirectorPosture(int alliance, CIC cic, EraStageManager era, int day, int month, int year, int daySerial)
+        private static StrategicLedgerSet PrepareDay(StrategicLedgerSet work)
+        {
+            var ledgers = StrategicLedgerSet.PublishedCopyOf(work);
+            EnemyBeliefStore.PreparePublish();
+            CampaignPlanStore.PreparePublish();
+            return ledgers;
+        }
+
+        private bool InReviewJob()
+        {
+            return _review.RunningJob;
+        }
+
+        private void PublishDirectorPosture(int alliance, int day, int month, int year, int legacySerial)
         {
             var paceInput  = BuildCampaignPaceInput(alliance, day, month, year);
             var paceOutput = CampaignPaceLedger.Build(paceInput);
-            var personality = cic.Effective(era);
-            var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput, personality);
+            var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput);
             newPosture.SourceSignature = DirectorSourceSignature(alliance);
 
             // At most one full refresh per alliance per game day (R16).
-            if (_directorClamp.TryPublish(alliance, daySerial))
+            if (_directorClamp.TryPublish(alliance, legacySerial))
             {
                 _work.DirectorMemories[alliance].LastPosture          = newPosture;
-                _work.DirectorMemories[alliance].LastFullRefreshDay   = daySerial;
+                _work.DirectorMemories[alliance].LastFullRefreshDay   = legacySerial;
                 _work.DirectorMemories[alliance].LastSourceSignature  = newPosture.SourceSignature;
 
                 string previousSig = _directorPostureSignatures[alliance];
@@ -811,7 +785,7 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Copies the Plugin config values pure strategic types read (CIC, SuccessionScheduler)
+        // Copies the Plugin config values pure strategic types read (the planner, SuccessionScheduler)
         // into their BepInEx-free settings holders.
         private static void RefreshStrategicSettings()
         {
@@ -819,12 +793,7 @@ namespace WhiskeyRealism.Strategic
             if (plugin == null) return;
             try
             {
-                CicSettings.OverrideVanillaSettings = ConfigValue(plugin.OverrideVanillaSettings);
-                CicSettings.LockedDifficulty = plugin.LockedDifficulty != null
-                    ? plugin.LockedDifficulty.Value
-                    : DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
-                CicSettings.HistoricalOperationDoctrine = ConfigValue(plugin.EnableHistoricalOperationDoctrine, defaultValue: true);
-                CicSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
+                PlannerSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
                 SuccessionScheduler.TraceEnabled = ConfigValue(plugin.SuccessionTrace);
             }
             catch (Exception ex)
@@ -841,84 +810,10 @@ namespace WhiskeyRealism.Strategic
             return watch.Elapsed.TotalMilliseconds;
         }
 
-        // Builds a PhaseTruthInput from live game state and evaluates it.
-        // Returns null when the plan or phase is absent (ReviewPlanWithTruth falls back to
-        // the deadline-only baseline on null).
-        // Force inputs are LOCAL (R3): own/enemy campaign strength within the near-target
-        // radius around the phase objective, not the whole-theater sector totals.
-        private PhaseTruthOutput BuildPhaseTruth(CIC cic, int alliance, int day, int month, int year)
-        {
-            if (cic?.ActivePlan?.CurrentPhase == null) return null;
-            var phase = cic.ActivePlan.CurrentPhase;
-            var fronts = alliance < _work.Fronts.Length ? _work.Fronts[alliance] : null;
-            var targetPos = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
-            int daySerial = year * 372 + month * 31 + day;
-
-            HistoricalOperationProfile profile = null;
-            if (!string.IsNullOrEmpty(cic.ActivePlan.OperationId))
-                HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out profile);
-            float radius = HistoricalOperationContextBuilder.NearTargetRadius(profile);
-
-            bool engagedRecently = false;
-            int lastEngagementDay = -1;
-            float localOwn = 0f, localEnemy = 0f;
-            if (targetPos.HasValue)
-            {
-                foreach (var battle in BattleHistoryQuery.Near(BattleHistory, targetPos.Value, radius, daySerial, 14))
-                {
-                    if (battle == null || !battle.IsLandBattle) continue;
-                    engagedRecently = true;
-                    int battleDay = battle.Year * 372 + battle.Month * 31 + battle.Day;
-                    if (battleDay > lastEngagementDay) lastEngagementDay = battleDay;
-                }
-                ReadLocalForceBalance(alliance, targetPos.Value, radius, out localOwn, out localEnemy);
-            }
-
-            var input = new PhaseTruthInput
-            {
-                Plan                          = cic.ActivePlan,
-                AllianceId                    = alliance,
-                DaySerial                     = daySerial,
-                TargetAccomplished            = ObjectiveAdapter.IsAccomplished(phase.TargetObjectiveId),
-                ObjectiveAvailable            = ObjectiveAdapter.IsAvailable(phase.TargetObjectiveId, alliance),
-                TargetPositionResolves        = targetPos.HasValue,
-                TargetEngagedRecently         = engagedRecently,
-                LastTargetEngagementDaySerial = lastEngagementDay,
-                TargetLocalOwnStrength       = localOwn,
-                TargetLocalEnemyStrength     = localEnemy,
-                CurrentMonth                  = month,
-                CurrentYear                   = year
-            };
-            if (profile != null)
-            {
-                input.OperationProfile = profile;
-                input.OperationContext = HistoricalOperationContextBuilder.Build(
-                    alliance,
-                    daySerial,
-                    phase.TargetObjectiveId,
-                    cic.ActivePlan,
-                    fronts,
-                    fronts != null ? TheaterPressureView.From(fronts) : null,
-                    alliance < _work.DirectorMemories.Length ? _work.DirectorMemories[alliance].LastPosture : null,
-                    alliance < OperationMemories.Length ? OperationMemories[alliance] : null,
-                    BattleHistory,
-                    new HistoricalOperationLocalSignals
-                    {
-                        HasTarget = targetPos.HasValue,
-                        TargetX = targetPos.HasValue ? targetPos.Value.x : 0f,
-                        TargetZ = targetPos.HasValue ? targetPos.Value.z : 0f,
-                        TargetTheater = targetPos.HasValue ? CampaignMapTheaterRuntime.FromPosition(targetPos.Value) : Theater.Unknown,
-                        LocalOwnStrength = localOwn,
-                        LocalEnemyStrength = localEnemy,
-                        EnemyThreatensCapital = alliance < _capitalThreatened.Length && _capitalThreatened[alliance]
-                    });
-            }
-            return PhaseTruthLedger.Evaluate(input);
-        }
-
         // C-HardWired: capital threat per vanilla AssignUnitToDefendCapital's need score
-        // (decompile 11668-11760) and the consecutive-day streak the pace ledger reads.
-        private void UpdateCapitalThreat(int alliance, int daySerial)
+        // (decompile 11668-11760) and the consecutive-day streak the pace ledger reads. The enemy
+        // side is the fog-honest belief picture (G1; read before today's ReviewPlan: P1's one-day lag).
+        private void UpdateCapitalThreat(int alliance, int legacySerial)
         {
             bool threatened = false;
             try
@@ -930,25 +825,11 @@ namespace WhiskeyRealism.Strategic
                 var faction = index >= 0 ? AICampaignReflect.GetFaction(index) : null;
                 if (capital != null && faction != null)
                 {
-                    var factionType = faction.GetType();
-                    if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
-                    {
-                        _ownUnitsField = AccessTools.Field(factionType, "ownunits");
-                        _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
-                    }
                     Vector3 center = capital.transform.position;
                     var enemies = new List<CapitalForceSample>();
                     var own = new List<CapitalForceSample>();
-                    var enemyUnits = _enemyUnitsField?.GetValue(faction) as IList;
-                    var ownUnits = _ownUnitsField?.GetValue(faction) as IList;
-                    if (enemyUnits != null)
-                    {
-                        for (int i = 0; i < enemyUnits.Count; i++)
-                        {
-                            if (!(enemyUnits[i] is Regiment r) || r == null) continue;
-                            enemies.Add(new CapitalForceSample { Distance = XZDistance(r.transform.position, center), Strength = r.groupstrengthactive, Morale = r.groupmorale });
-                        }
-                    }
+                    EnemyBeliefReadings.CapitalSamples(EnemyDetectionRuntime.BeliefsFor(alliance), center.x, center.z, enemies);
+                    var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                     if (ownUnits != null)
                     {
                         for (int i = 0; i < ownUnits.Count; i++)
@@ -976,7 +857,7 @@ namespace WhiskeyRealism.Strategic
                 memory.CapitalDangerStreakDays,
                 threatened,
                 _capitalStreakDay[alliance],
-                daySerial,
+                legacySerial,
                 out _capitalStreakDay[alliance]);
         }
 
@@ -986,57 +867,6 @@ namespace WhiskeyRealism.Strategic
             float dz = a.z - b.z;
             return (float)Math.Sqrt(dx * dx + dz * dz);
         }
-
-        // Sums own / enemy campaign strength (groupstrengthactive, same field FrontSectorRuntime
-        // reads) for units of this alliance's AIFaction ownunits/enemyunits lists within
-        // `radius` of `center`. Zeroes on any reflection failure.
-        private static void ReadLocalForceBalance(int alliance, Vector3 center, float radius, out float own, out float enemy)
-        {
-            own = 0f;
-            enemy = 0f;
-            try
-            {
-                int index = ResolveAifactionIndexForAlliance(alliance);
-                if (index < 0) return;
-                var faction = AICampaignReflect.GetFaction(index);
-                if (faction == null) return;
-                var factionType = faction.GetType();
-                if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
-                {
-                    _ownUnitsField = AccessTools.Field(factionType, "ownunits");
-                    _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
-                }
-                own = SumStrengthWithin(_ownUnitsField?.GetValue(faction) as IList, center, radius);
-                enemy = SumStrengthWithin(_enemyUnitsField?.GetValue(faction) as IList, center, radius);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("coordinator:local-force", "[Coordinator] local force read failed: " + ex.Message);
-                own = 0f;
-                enemy = 0f;
-            }
-        }
-
-        private static float SumStrengthWithin(IList units, Vector3 center, float radius)
-        {
-            if (units == null) return 0f;
-            float radiusSq = radius * radius;
-            float total = 0f;
-            for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                if (unit == null) continue;
-                var pos = unit.transform.position;
-                float dx = pos.x - center.x;
-                float dz = pos.z - center.z;
-                if (dx * dx + dz * dz > radiusSq) continue;
-                total += Math.Max(0f, unit.groupstrengthactive);
-            }
-            return total;
-        }
-
-        private static FieldInfo _ownUnitsField;
-        private static FieldInfo _enemyUnitsField;
 
         private static bool ShouldLogStrategicPerf(double elapsedMs)
         {
@@ -1082,13 +912,13 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat)
+        private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat, bool jobMachinePaused)
         {
             using (TelemetryPerf.Scope("campaign.construction", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdateConstructionIntentCore(alliance, era, logHeartbeat);
+                UpdateConstructionIntentCore(alliance, era, logHeartbeat, jobMachinePaused);
         }
 
-        private void UpdateConstructionIntentCore(int alliance, EraStage era, bool logHeartbeat)
+        private void UpdateConstructionIntentCore(int alliance, EraStage era, bool logHeartbeat, bool jobMachinePaused)
         {
             try
             {
@@ -1101,7 +931,7 @@ namespace WhiskeyRealism.Strategic
                 var fiscal = alliance < _work.FiscalIntents.Length ? _work.FiscalIntents[alliance] : null;
                 var front = alliance < _work.Fronts.Length ? _work.Fronts[alliance] : null;
                 var formation = alliance < _work.FormationDirectives.Length ? _work.FormationDirectives[alliance] : null;
-                var input = ConstructionRuntime.BuildInput(alliance, era, fiscal, front, formation);
+                var input = ConstructionRuntime.BuildInput(alliance, fiscal, front, formation);
                 var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
                 _work.ConstructionIntents[alliance] = output;
 
@@ -1119,7 +949,10 @@ namespace WhiskeyRealism.Strategic
                     EmitConstructionTelemetry(alliance, output, telemetry.Summary(alliance));
                 }
 
-                if (ConfigValue(plugin.EnableTelegraphAI))
+                // A telegraph start places a vanilla construction wish (TelegraphConstructionRuntime,
+                // CBuilding.AddConstructionWish 97479): an executor write, so it waits while vanilla's
+                // job machine is paused (11368, spec C5). The ledger above keeps its bookkeeping.
+                if (!jobMachinePaused && ConfigValue(plugin.EnableTelegraphAI))
                     TelegraphConstructionRuntime.TryStartTelegraph(alliance, output);
             }
             catch (Exception ex)
@@ -1152,24 +985,15 @@ namespace WhiskeyRealism.Strategic
 
                 var input = DefenseIntentRuntime.BuildInput(
                     allianceId: alliance,
-                    cic: _work.CICs[alliance],
+                    plannerRuns: ShouldRunPlannerFor(alliance, ResolvePlayerAlliance(), true),
                     era: _work.Eras[alliance],
                     map: _work.CampaignMap,
                     cooldown: _defenseCooldowns[alliance],
                     totalAllianceEffectiveStrength: total,
-                    profile: profile,
-                    previousSifSignatures: _previousSifSignatures[alliance]);
+                    profile: profile);
 
                 var output = DefenseIntentLedger.Build(input);
                 _work.DefenseIntents[alliance] = output;
-
-                // Refresh the per-alliance "seen this tick" SIF set so the NEXT
-                // tick can detect collapsed entries via VanillaCollapsed. Source
-                // from input.Threats — the runtime's observation of vanilla
-                // seainvasionforce is the ground truth, not the builder output
-                // (which may filter Recovered/expired entries before they reach
-                // output.Responses).
-                _previousSifSignatures[alliance] = CollectSifSignatures(input);
 
                 bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
                 if (verbose)
@@ -1257,21 +1081,6 @@ namespace WhiskeyRealism.Strategic
             catch { return null; }
         }
 
-        private static HashSet<string> CollectSifSignatures(DefenseIntentInput input)
-        {
-            var set = new HashSet<string>();
-            if (input == null || input.Threats == null) return set;
-            foreach (var t in input.Threats)
-            {
-                if (t == null) continue;
-                if (t.Kind != DefenseThreatSourceKind.SeaInvasion) continue;
-                string sig = DefenseThreatSignature.ForSeaInvasion(
-                    t.InvasionForceInstanceId, t.SpotName, t.SourcePortName);
-                set.Add(sig);
-            }
-            return set;
-        }
-
         // publish = false (a W&L CIC player's alliance): the posture feeds the policy needs
         // only; FiscalIntents (read by the fiscal, recruitment and construction patches) and the
         // fiscal telemetry stay untouched.
@@ -1327,13 +1136,13 @@ namespace WhiskeyRealism.Strategic
         // and posture it reuses, and only once AICampaign.aifaction exists (vanilla
         // GetAIPersonality 62716 can reach GetStrengthRatio, which indexes it). Spec
         // docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
-        private void UpdatePolicyPlan(int alliance, EraStage era, int day, int month, int year, int reviewSerial)
+        private void UpdatePolicyPlan(int alliance, EraStage era, int day, int month, int year, int calendarDay)
         {
             using (TelemetryPerf.Scope("campaign.policy-plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdatePolicyPlanCore(alliance, era, day, month, year, reviewSerial);
+                UpdatePolicyPlanCore(alliance, era, day, month, year, calendarDay);
         }
 
-        private void UpdatePolicyPlanCore(int alliance, EraStage era, int day, int month, int year, int reviewSerial)
+        private void UpdatePolicyPlanCore(int alliance, EraStage era, int day, int month, int year, int calendarDay)
         {
             int[] personality = PolicyRuntime.ReadPersonalityList(alliance, out bool emergencyCredit, out bool emergencyManpower);
             var snapshot = CampaignNeedRuntime.Read(alliance, era, day, month, year, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
@@ -1341,12 +1150,12 @@ namespace WhiskeyRealism.Strategic
             if (electionBoost > 0f)
                 OnceLog.Info("campaign-need:election-pressure",
                     $"[CampaignNeed] election pressure alliance={alliance} daysToVerdict={snapshot.ElectionDaysToVerdict} morale={snapshot.NationalMorale:F2} line={snapshot.ElectionMoraleThreshold:F2} boost={electionBoost:F2}");
-            int days = _needDaySerial[alliance] >= 0 ? reviewSerial - _needDaySerial[alliance] : 1;
+            int days = _needCalendarDay[alliance] >= 0 ? calendarDay - _needCalendarDay[alliance] : 1;
             var previous = _work.Needs[alliance];
             var need = CampaignNeedBuilder.Next(previous, snapshot, days);
             _work.Needs[alliance] = need;
             _work.NeedSnapshots[alliance] = snapshot;
-            _needDaySerial[alliance] = reviewSerial;
+            _needCalendarDay[alliance] = calendarDay;
 
             var candidates = PolicyRuntime.ReadCandidates(alliance);
             var profile = GrandStrategyRegistry.Resolve(alliance, era);
@@ -1397,10 +1206,9 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
-        private bool UpdateFrontLedger(int alliance, CIC cic)
+        private bool UpdateFrontLedger(int alliance)
         {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            var ledger = FrontSectorRuntime.BuildForAlliance(alliance, targetObjectiveId);
+            var ledger = FrontSectorRuntime.BuildForAlliance(alliance);
             if (ledger == null)
             {
                 OnceLog.Warning(
@@ -1420,39 +1228,9 @@ namespace WhiskeyRealism.Strategic
             return changed;
         }
 
-        private void UpdateArmyAreaLedger(int alliance, CIC cic)
+        private void UpdateFormationDirectiveLedger(int alliance, EraStageManager era)
         {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            string planTargetAreaKey = null;
-            var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
-            if (targetPosition.HasValue)
-                planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
-
-            var ledger = ArmyAreaRuntime.BuildForAlliance(alliance, planTargetAreaKey);
-            if (ledger == null)
-            {
-                OnceLog.Warning(
-                    "army-area:null:" + alliance,
-                    $"[ArmyArea] update skipped: build returned null for alliance={alliance}");
-                return;
-            }
-
-            _work.ArmyAreas[alliance] = ledger;
-            string signature = ledger.Summary();
-            if (Plugin.Instance.VerboseLogging.Value || _armyAreaSignatures[alliance] != signature)
-            {
-                EmitCampaignInfo($"[ArmyArea] alliance={alliance} {signature}");
-                _armyAreaSignatures[alliance] = signature;
-            }
-        }
-
-        private bool UpdateFormationDirectiveLedger(int alliance, CIC cic, EraStageManager era)
-        {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            string planTargetAreaKey = null;
-            var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
-            if (targetPosition.HasValue)
-                planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
+            string planTargetAreaKey = PlannerAreaKeys.OfMainTarget(alliance);
 
             var ledger = FormationDirectiveRuntime.BuildForAlliance(alliance, era.Stage, planTargetAreaKey);
             if (ledger == null)
@@ -1460,12 +1238,11 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning(
                     "formation-directive:null:" + alliance,
                     $"[FormationDirective] update skipped: build returned null for alliance={alliance}");
-                return false;
+                return;
             }
 
             _work.FormationDirectives[alliance] = ledger;
             string signature = ledger.Summary();
-            bool changed = StrategicCadencePolicy.SourceChanged(signature, _formationDirectiveSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _formationDirectiveSignatures[alliance] != signature)
             {
                 EmitCampaignInfo(
@@ -1475,119 +1252,14 @@ namespace WhiskeyRealism.Strategic
                     $"supplyArea={ledger.Pressure.TopSupplyAreaKey ?? "<none>"}");
                 _formationDirectiveSignatures[alliance] = signature;
             }
-            return changed;
         }
 
-        private bool UpdateOperationalProbe(int alliance, CIC cic, int day, int month, int year)
+        private string FormationSourceSignature(int alliance)
         {
-            try
-            {
-                if (alliance < 0 || alliance >= OperationalProbes.Length) return false;
-                var fronts = alliance < _work.Fronts.Length ? _work.Fronts[alliance] : null;
-                var formation = alliance < _work.FormationDirectives.Length ? _work.FormationDirectives[alliance] : null;
-                if (fronts == null || formation == null) return false;
-
-                int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-                var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
-                int daySerial = year * 372 + month * 31 + day;
-                float localOwn = 0f, localEnemy = 0f;
-                if (targetPosition.HasValue)
-                {
-                    HistoricalOperationProfile profile = null;
-                    if (!string.IsNullOrEmpty(cic?.ActivePlan?.OperationId))
-                        HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out profile);
-                    ReadLocalForceBalance(alliance, targetPosition.Value, HistoricalOperationContextBuilder.NearTargetRadius(profile), out localOwn, out localEnemy);
-                }
-                var eraManager = alliance < _work.Eras.Length ? _work.Eras[alliance] : null;
-                EraStage era = eraManager != null ? eraManager.Stage : EraStage.Amateur1861;
-                PersonalityVector personality = cic != null && eraManager != null
-                    ? cic.Effective(eraManager)
-                    : new PersonalityVector();
-                var input = OperationalProbeRuntime.BuildInput(
-                    alliance,
-                    cic,
-                    fronts,
-                    formation,
-                    _operationalProbeStates[alliance],
-                    daySerial,
-                    era,
-                    SafePolicyChapter(),
-                    month,
-                    personality,
-                    BattleHistory,
-                    localOwn,
-                    localEnemy);
-
-                var posture = _work.DirectorMemories[alliance]?.LastPosture;
-                if (posture != null)
-                    StrategicResilienceDirector.ApplyTo(input.Options, posture);
-                input.PackageOptions = CoordinatedOperationOptions.FromDirector(
-                    OperationalProbeLedger.ResolvePackageDesiredStrength(input),
-                    posture);
-
-                var output = OperationalProbeLedger.Build(input);
-                var filtered = _probeHysteresis[alliance].Filter(
-                    output.Decision,
-                    continuingProbe: input.Previous != null,
-                    targetAreaKey: output.TargetAreaKey ?? input.PlanTargetAreaKey,
-                    daySerial: daySerial);
-                if (filtered != output.Decision)
-                {
-                    output.Reason = filtered == OperationalProbeDecision.Pause ? "withdraw-confirming" : "reprobe-cooldown";
-                    output.Decision = filtered;
-                    if (filtered == OperationalProbeDecision.None) output.Package = null;
-                }
-                OperationalProbes[alliance] = output;
-
-                bool clearState =
-                    output.Decision == OperationalProbeDecision.None ||
-                    output.Decision == OperationalProbeDecision.Withdraw ||
-                    output.Decision == OperationalProbeDecision.Escalate;
-
-                _operationalProbeStates[alliance] = clearState ? null : output.State;
-                output.State = _operationalProbeStates[alliance];
-
-                bool overlayChanged = formation.ApplyOperationalProbe(output);
-                string signature = output.Signature();
-                bool changed = StrategicCadencePolicy.SourceChanged(signature, _operationalProbeSignatures[alliance]);
-                if (Plugin.Instance.VerboseLogging.Value || changed)
-                {
-                    EmitOperationalProbe(alliance, day, month, year, output, signature);
-                    _operationalProbeSignatures[alliance] = signature;
-                }
-
-                if (overlayChanged)
-                {
-                    string formationSignature = formation.Summary();
-                    _formationDirectiveSignatures[alliance] = formationSignature;
-                    EmitCampaignInfo($"[FormationDirective] alliance={alliance} operationalProbe={formationSignature}");
-                }
-
-                OperationalProbeRuntime.Run(alliance, output, targetPosition);
-                return changed || overlayChanged;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("operational-probe:update:" + alliance,
-                    "[OperationalProbe] update failed: " + ex.Message);
-                return false;
-            }
-        }
-
-        private string FormationSourceSignature(int alliance, CIC cic)
-        {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            CampaignPlanStore.TryGetMainTarget(alliance, out int targetObjectiveId, out _, out _);
             return "front=" + (_frontSignatures[alliance] ?? "") +
                 "|target=" + targetObjectiveId +
                 "|defense=" + (_defenseIntentSignatures[alliance] ?? "");
-        }
-
-        private string ArmyAreaSourceSignature(int alliance, CIC cic)
-        {
-            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
-            return "target=" + targetObjectiveId +
-                "|formation=" + (_formationDirectiveSignatures[alliance] ?? "") +
-                "|probe=" + (_operationalProbeSignatures[alliance] ?? "");
         }
 
         private string ConstructionSourceSignature(int alliance)
@@ -1609,7 +1281,6 @@ namespace WhiskeyRealism.Strategic
                 "|defense="      + (_defenseIntentSignatures[alliance]      ?? "") +
                 "|fiscal="       + (_fiscalSignatures[alliance]             ?? "") +
                 "|construction=" + (_constructionSignatures[alliance]       ?? "") +
-                "|probe="        + (_operationalProbeSignatures[alliance]   ?? "") +
                 "|era="          + (_work.Eras[alliance]?.Stage.ToString()        ?? "") +
                 "|chapter="      + SafePolicyChapter();
         }
@@ -1651,12 +1322,12 @@ namespace WhiskeyRealism.Strategic
                     "[Director] nationalmorale/GamePrefs reflection failed; using defaults");
             }
 
-            int daySerial = year * 372 + month * 31 + day;
+            int legacySerial = year * 372 + month * 31 + day;
             int battles = 0, majorBattles = 0;
             foreach (var b in BattleHistory)
             {
                 int bDay = b.Year * 372 + b.Month * 31 + b.Day;
-                if (bDay <= daySerial && daySerial - bDay <= 14 && b.IsLandBattle)
+                if (bDay <= legacySerial && legacySerial - bDay <= 14 && b.IsLandBattle)
                 {
                     battles++;
                     if (b.IsMajorResult) majorBattles++;
@@ -1667,7 +1338,6 @@ namespace WhiskeyRealism.Strategic
             {
                 AllianceId                   = alliance,
                 Year                         = year,
-                Month                        = month,
                 PolicyChapter                = SafePolicyChapter(),
                 OwnNationalMorale            = ownMorale,
                 BreakMoraleTrigger           = breakTrigger,
@@ -1675,20 +1345,9 @@ namespace WhiskeyRealism.Strategic
                 BattlesIn14Days              = battles,
                 MajorBattlesIn14Days         = majorBattles,
                 CapitalDangerStreakDays       = _work.DirectorMemories[alliance]?.CapitalDangerStreakDays ?? 0,
-                DaysSinceFrontSignatureChange = CampaignResponsivenessSignals.DaysSince(_frontChangedDay[alliance], daySerial),
-                IsWinter                     = month == 12 || month == 1 || month == 2,
-                TheaterPressure              = TheaterPressureView.From(_work.Fronts[alliance])
+                DaysSinceFrontSignatureChange = CampaignResponsivenessSignals.DaysSince(_frontChangedDay[alliance], legacySerial),
+                IsWinter                     = month == 12 || month == 1 || month == 2
             };
-        }
-
-        public void OnEventTrigger(int allianceId, string eventType)
-        {
-            if (allianceId < 0 || allianceId >= _work.CICs.Length) return;
-            var cic = _work.CICs[allianceId];
-            if (cic?.ActivePlan == null) return;
-
-            cic.ActivePlan.IsDirty = true;
-            EmitCampaignInfoToMainLogIfAllowed($"[Coordinator] event '{eventType}' for alliance {allianceId} — plan marked dirty");
         }
 
         internal void RecordBattleOutcome(BattleHistoryRecord record)
@@ -1706,6 +1365,7 @@ namespace WhiskeyRealism.Strategic
                 if (existing.SameBattleKey(record)) return;
 
             BattleHistory.Add(record);
+            CampaignPlannerRuntime.OnBattleRecorded(record);
             while (BattleHistory.Count > 64) BattleHistory.RemoveAt(0);
 
             string scale = record.IsMajorResult ? "major" : "minor";
@@ -1713,36 +1373,6 @@ namespace WhiskeyRealism.Strategic
                 $"[BattleHistory] {record.Year}-{record.Month:D2}-{record.Day:D2} " +
                 $"{record.BattleName} winner={record.AllianceWon} loser={record.LosingAlliance} " +
                 $"result={scale} theater={record.Theater}");
-
-            DirtyPlanIfBattleInvalidates(record.AllianceWon, record);
-            if (record.LosingAlliance != record.AllianceWon)
-                DirtyPlanIfBattleInvalidates(record.LosingAlliance, record);
-        }
-
-        // R4: only a decisive land battle in the plan's target theater / near its target
-        // re-plans an operation; any other battle is recorded in BattleHistory only.
-        private void DirtyPlanIfBattleInvalidates(int allianceId, BattleHistoryRecord record)
-        {
-            if (allianceId < 0 || allianceId >= _work.CICs.Length) return;
-            var plan = _work.CICs[allianceId]?.ActivePlan;
-            var phase = plan?.CurrentPhase;
-            if (phase == null) return;
-
-            var target = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
-            HistoricalOperationProfile profile = null;
-            if (!string.IsNullOrEmpty(plan.OperationId))
-                HistoricalOperationCatalog.TryGetById(plan.OperationId, out profile);
-            var query = new BattleReplanQuery
-            {
-                HasTarget = target.HasValue,
-                TargetX = target.HasValue ? target.Value.x : 0f,
-                TargetZ = target.HasValue ? target.Value.z : 0f,
-                TargetTheater = target.HasValue ? CampaignMapTheaterRuntime.FromPosition(target.Value) : Theater.Unknown,
-                BattleTheater = CampaignMapTheaterRuntime.FromPosition(new Vector3(record.PositionX, 0f, record.PositionZ)),
-                Radius = HistoricalOperationContextBuilder.NearTargetRadius(profile)
-            };
-            if (CicReviewRouter.BattleInvalidatesPlan(record, query))
-                OnEventTrigger(allianceId, "battle_result");
         }
 
         internal void RecordConstructionStart(ConstructionStartEvent start)
@@ -1828,6 +1458,8 @@ namespace WhiskeyRealism.Strategic
                 .WithDecision("select-package", reason, "alliance=" + alliance + "|threat=" + threatSignature + "|response=" + responseSignature)
                 .WithField("posture", threat != null ? threat.Posture.ToString() : "-")
                 .WithField("sourceKind", threat != null ? threat.SourceKind.ToString() : "-")
+                .WithField("scale", threat != null ? threat.Scale.ToString() : "-")
+                .WithField("assetRole", threat != null ? threat.AssetRole.ToString() : "-")
                 .WithField("threat", threatSignature)
                 .WithField("enemy", threat != null ? threat.EnemyStrength : 0.0)
                 .WithField("desired", threat != null ? threat.DesiredStrength : 0.0)
@@ -1886,26 +1518,6 @@ namespace WhiskeyRealism.Strategic
                 .WithField("theater", output.TheaterSupplyPriority ?? "-"));
         }
 
-        private static void EmitOperationalProbe(int alliance, int day, int month, int year, OperationalProbeOutput output, string signature)
-        {
-            if (output == null) return;
-            string inputSignature = string.IsNullOrWhiteSpace(signature)
-                ? output.Signature()
-                : signature;
-            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "OperationalProbe", TelemetrySeverity.Info, ev => ev
-                .WithAlliance(alliance)
-                .WithCampaignDate(CampaignDate(year, month, day))
-                .WithUnit(output.SelectedUnitKey ?? "-")
-                .WithDecision(output.Decision.ToString(), output.Reason ?? "-", inputSignature)
-                .WithField("objective", output.ObjectiveId)
-                .WithField("probeId", output.ProbeId ?? "-")
-                .WithField("unit", output.SelectedUnitKey ?? "-")
-                .WithField("target", output.TargetAreaKey ?? "-")
-                .WithField("sourceSector", output.SourceSectorKey ?? "-")
-                .WithField("mass", output.RequiresMassCommitment)
-                .WithField("packageSignature", output.Package != null ? output.Package.Signature() : "-"));
-        }
-
         private static string CampaignDate(int year, int month, int day)
         {
             return year + "-" + month.ToString("D2") + "-" + day.ToString("D2");
@@ -1950,11 +1562,11 @@ namespace WhiskeyRealism.Strategic
             catch { return -1; }
         }
 
-        private static bool ShouldRunCicFor(int alliance, int playerAlliance, bool factionListReady)
+        private static bool ShouldRunPlannerFor(int alliance, int playerAlliance, bool factionListReady)
         {
             bool aiVsAi = false;
             try { aiVsAi = GameVars.ai_vs_ai; } catch { }
-            return CicEligibility.ShouldRunCic(
+            return PlannerEligibility.ShouldRun(
                 alliance,
                 factionListReady,
                 factionListReady && ResolveAifactionIndexForAlliance(alliance) >= 0,
@@ -1976,6 +1588,35 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex)
             {
                 Plugin.Log.LogWarning("[Coordinator] IsPlayerCICOf failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // WlCareerStartGate.CareerNotStarted on vanilla state (direct reads, as IsPlayerCICOf).
+        public static bool WlCareerNotStarted()
+        {
+            try
+            {
+                return WlCareerStartGate.CareerNotStarted(DLC_WL.dlc_scenarioactive, DLC_WL.dlc_chosencommander);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-career-not-started-gate", "[Coordinator] W&L career start gate failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Vanilla's job-machine pause predicate (AICampaign.UpdateUnitAI 11368).
+        public static bool WlVanillaJobMachinePaused()
+        {
+            try
+            {
+                bool active = DLC_WL.dlc_scenarioactive;
+                return active && WlCareerStartGate.VanillaJobMachinePaused(active, DLC_WL.GetPlayerCommandHierarchy(), DLC_WL.IsCommanderInChief());
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-job-machine-pause-gate", "[Coordinator] W&L job-machine pause gate failed: " + ex.Message);
                 return false;
             }
         }
@@ -2127,6 +1768,8 @@ namespace WhiskeyRealism.Strategic
                 ApplySnapshot(snapshot);
                 Initialized = true;
                 EmitCampaignInfoToMainLogIfAllowed("[Coordinator] sidecar loaded: " + source);
+                if (snapshot.SourceVersion < SidecarDto.CurrentVersion)
+                    EmitCampaignInfoToMainLogIfAllowed($"[Coordinator] sidecar v{snapshot.SourceVersion} migrated to v{SidecarDto.CurrentVersion}: plans dropped={snapshot.PlansDropped}");
                 return;
             }
             if (reason == "no-sidecar")
@@ -2136,43 +1779,21 @@ namespace WhiskeyRealism.Strategic
             InitializeFromGameState();
         }
 
-        // Vanilla AICampaign.Load restores AIFaction.followedcampaignobjective from AICampaign.dat
-        // (decompile 16549) before our Load Postfix applies the sidecar. -1 when unavailable.
-        private static int ReadFollowedCampaignObjective(int alliance)
-        {
-            try
-            {
-                int index = ResolveAifactionIndexForAlliance(alliance);
-                var faction = index >= 0 ? AICampaignReflect.GetFaction(index) : null;
-                if (faction == null) return -1;
-                var field = AccessTools.Field(faction.GetType(), "followedcampaignobjective");
-                return field != null ? Convert.ToInt32(field.GetValue(faction)) : -1;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("coordinator:followed-objective", "[Coordinator] followedcampaignobjective read failed: " + ex.Message);
-                return -1;
-            }
-        }
-
         private SidecarSnapshot BuildSnapshot()
         {
             var snap = SidecarSnapshot.Empty();
             for (int alliance = 0; alliance < 2; alliance++)
             {
-                snap.Cics[alliance] = _work.CICs[alliance];
                 snap.Eras[alliance] = _work.Eras[alliance]?.Stage;
                 snap.DirectorMemories[alliance] = _work.DirectorMemories[alliance] ?? new DirectorMemory();
-                snap.RecentReplans[alliance] = OperationMemories[alliance]?.SnapshotRecentReplans();
-                snap.ProbeStates[alliance] = _operationalProbeStates[alliance];
                 snap.FiscalMemories[alliance] = _fiscalMemory[alliance];
                 snap.PolicyNeeds[alliance] = _work.Needs[alliance]?.ToArray();
                 snap.PolicyPicks[alliance] = _work.PolicyPlans[alliance].CurrentPick;
                 snap.FrontChangedDay[alliance] = _frontChangedDay[alliance];
                 snap.CapitalStreakDay[alliance] = _capitalStreakDay[alliance];
-                snap.ProbeHysteresis[alliance] = _probeHysteresis[alliance].Snapshot();
+                snap.Planner[alliance] = CampaignPlannerRuntime.Export(alliance);
+                snap.ModWrittenObjective[alliance] = ModWrittenObjective.Get(alliance);
             }
-            foreach (var kv in MinorOfficerProfiles) snap.MinorOfficers[kv.Key] = kv.Value;
             snap.FiredEvents.UnionWith(Succession.FiredEventIds);
             snap.AppliedEvents.UnionWith(Succession.AppliedEventIds);
             snap.ForcedEvents.UnionWith(Succession.ForcedEventIds);
@@ -2182,9 +1803,6 @@ namespace WhiskeyRealism.Strategic
             snap.SaveSequence = ++_saveSequence;
             snap.PlayerCompliance = PlayerComplianceRuntime.Export();
             snap.CampaignCouriers = WlCampaignCourierRuntime.Export();
-            var written = PickCampaignObjectivePatch.SnapshotWrittenByMod();
-            for (int a = 0; a < written.Length && a < snap.ModWrittenObjective.Length; a++)
-                snap.ModWrittenObjective[a] = written[a];
             return snap;
         }
 
@@ -2192,23 +1810,17 @@ namespace WhiskeyRealism.Strategic
         {
             for (int alliance = 0; alliance < 2; alliance++)
             {
-                _work.CICs[alliance] = snap.Cics[alliance];
                 _work.Eras[alliance] = new EraStageManager { Stage = snap.Eras[alliance] ?? EraStage.Amateur1861 };
                 if (snap.Eras[alliance].HasValue) { _erasSeededFromSave = true; _eraMigrationPending = true; }
                 _work.DirectorMemories[alliance] = snap.DirectorMemories[alliance] ?? new DirectorMemory();
-                OperationMemories[alliance] = new OperationDecisionMemory();
-                OperationMemories[alliance].RestoreRecentReplans(snap.RecentReplans[alliance]);
-                _operationalProbeStates[alliance] = snap.ProbeStates[alliance];
                 _fiscalMemory[alliance] = snap.FiscalMemories[alliance] ?? new FiscalStateMemory();
                 _work.Needs[alliance] = snap.PolicyNeeds[alliance] != null ? NeedVector.FromArray(snap.PolicyNeeds[alliance]) : null;
                 _work.PolicyPlans[alliance] = new PolicyPlanLedger();
                 _work.PolicyPlans[alliance].Restore(snap.PolicyPicks[alliance]);
                 _frontChangedDay[alliance] = snap.FrontChangedDay[alliance];
                 _capitalStreakDay[alliance] = snap.CapitalStreakDay[alliance];
-                _probeHysteresis[alliance] = ProbeHysteresis.FromSnapshot(snap.ProbeHysteresis[alliance]);
+                CampaignPlannerRuntime.Restore(alliance, snap.Planner[alliance]);
             }
-            MinorOfficerProfiles.Clear();
-            foreach (var kv in snap.MinorOfficers) MinorOfficerProfiles[kv.Key] = kv.Value;
             Succession = new SuccessionScheduler
             {
                 FiredEventIds = new HashSet<int>(snap.FiredEvents),
@@ -2221,15 +1833,7 @@ namespace WhiskeyRealism.Strategic
             _saveSequence = snap.SaveSequence;
             PlayerComplianceRuntime.Restore(snap.PlayerCompliance);
             WlCampaignCourierRuntime.Restore(snap.CampaignCouriers);
-            var written = new int[2];
-            for (int a = 0; a < written.Length; a++)
-            {
-                written[a] = CampaignObjectiveSteering.InferModWritten(
-                    snap.ModWrittenObjective[a],
-                    ReadFollowedCampaignObjective(a),
-                    _work.CICs[a]?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1);
-            }
-            PickCampaignObjectivePatch.RestoreWrittenByMod(written);
+            ModWrittenObjective.Restore(snap.ModWrittenObjective);
             PublishStrategicState();
         }
     }

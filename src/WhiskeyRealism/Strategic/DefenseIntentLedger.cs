@@ -30,7 +30,6 @@ namespace WhiskeyRealism.Strategic
             var output = new DefenseIntentLedgerOutput();
             if (input == null) return output;
 
-            output.AllianceId = input.AllianceId;
 
             // 1. Short-circuit for player-controlled alliances.
             if (input.PlayerIsCIC) return output;
@@ -221,16 +220,14 @@ namespace WhiskeyRealism.Strategic
         // Private helpers
         // ---------------------------------------------------------------------------
 
-        private static string BuildSignature(DefenseThreatSource src)
+        internal static string BuildSignature(DefenseThreatSource src)
         {
             switch (src.Kind)
             {
                 case DefenseThreatSourceKind.SeaInvasion:
-                    return DefenseThreatSignature.ForSeaInvasion(
-                        src.InvasionForceInstanceId, src.SpotName, src.SourcePortName);
+                    return DefenseThreatSignature.ForSeaInvasion(src.EnemyUnitKey);
                 case DefenseThreatSourceKind.RaidForce:
-                    return DefenseThreatSignature.ForRaid(
-                        src.RaidGroupInstanceId, src.AssetName);
+                    return DefenseThreatSignature.ForRaid(src.EnemyUnitKey, src.AssetName);
                 case DefenseThreatSourceKind.AssetProximity:
                     return DefenseThreatSignature.ForAsset(
                         src.AssetKind, src.AssetName, src.EnemyInstanceIds, topN: 3);
@@ -244,15 +241,13 @@ namespace WhiskeyRealism.Strategic
             switch (src.Kind)
             {
                 case DefenseThreatSourceKind.SeaInvasion:
-                    if (src.VanillaCollapsed) return DefensePosture.Recovered;
+                    if (src.SightingLapsed) return DefensePosture.Recovered;
                     return src.LandedSignal
                         ? DefensePosture.ActiveInvasion
                         : DefensePosture.InvasionWatch;
 
                 case DefenseThreatSourceKind.RaidForce:
-                    return src.RaidCurrentState >= 5
-                        ? DefensePosture.Recovered
-                        : DefensePosture.ActiveInvasion;
+                    return src.SightingLapsed ? DefensePosture.Recovered : DefensePosture.ActiveInvasion;
 
                 case DefenseThreatSourceKind.AssetProximity:
                     return DefensePosture.ActiveInvasion;

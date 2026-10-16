@@ -45,9 +45,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     public readonly struct CorpsAssignment
     {
         public CorpsAssignment(string childId, PlayRectKind rectKind, int rectIndex, float rectAnchorX, float rectAnchorZ, float startTimeOffsetSeconds,
-            bool envelops = false)
+            bool envelops = false, bool templateEnvelops = false, bool projectedMirrored = false, float authoredAnchorX = 0f, float authoredAnchorZ = 0f)
         {
             Envelops = envelops;
+            TemplateEnvelops = templateEnvelops;
+            ProjectedMirrored = projectedMirrored;
+            AuthoredAnchorX = authoredAnchorX;
+            AuthoredAnchorZ = authoredAnchorZ;
             ChildId = childId ?? string.Empty;
             RectKind = rectKind;
             RectIndex = rectIndex;
@@ -64,6 +68,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float StartTimeOffsetSeconds { get; }
         /// <summary>BC11: the rect this corps was assigned has PlayRect.Envelops.</summary>
         public bool Envelops { get; }
+
+        /// <summary>BC14: some rect of the template envelops (the fixing rects of such a template hold for the synchronized release).</summary>
+        public bool TemplateEnvelops { get; }
+
+        /// <summary>BC14: the template was projected mirrored; <see cref="AuthoredAnchorX"/>/<see cref="AuthoredAnchorZ"/> is the rect's un-mirrored anchor.</summary>
+        public bool ProjectedMirrored { get; }
+        public float AuthoredAnchorX { get; }
+        public float AuthoredAnchorZ { get; }
     }
 
     /// <summary>
@@ -96,22 +108,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             if (rects == null || rects.Count == 0) return Array.Empty<CorpsAssignment>();
             if (corps == null || corps.Count == 0) return Array.Empty<CorpsAssignment>();
+            var into = new CorpsAssignment[rects.Count];
+            int n = AssignInto(rects, corps, objectives, into);
+            var result = new List<CorpsAssignment>(n);
+            for (int i = 0; i < n; i++) result.Add(into[i]);
+            return result;
+        }
 
-            // Sort rect indices by Priority desc, then by original index for stability.
-            var rectOrder = new int[rects.Count];
-            for (int i = 0; i < rects.Count; i++) rectOrder[i] = i;
-            Array.Sort(rectOrder, (a, b) =>
+        /// <summary>
+        /// Allocation-free <see cref="Assign"/> (BC14's hypothetical layout): the same rules and the same result order, written to
+        /// <paramref name="into"/> (at least the rect count long); returns how many rects got a corps.
+        /// </summary>
+        public static int AssignInto(
+            IReadOnlyList<WorldPlayRect> rects,
+            IReadOnlyList<CorpsPosition> corps,
+            IReadOnlyList<ObjectivePosition> objectives,
+            Span<CorpsAssignment> into)
+        {
+            if (rects == null || rects.Count == 0) return 0;
+            if (corps == null || corps.Count == 0) return 0;
+
+            // Rect indices by Priority desc, then original index (insertion sort: a handful of rects, no closure).
+            Span<int> rectOrder = stackalloc int[rects.Count];
+            for (int i = 0; i < rects.Count; i++)
             {
-                int pa = rects[a].Priority;
-                int pb = rects[b].Priority;
-                if (pa != pb) return pb - pa;
-                return a - b;
-            });
+                int at = i;
+                while (at > 0 && Before(rects, i, rectOrder[at - 1])) { rectOrder[at] = rectOrder[at - 1]; at--; }
+                rectOrder[at] = i;
+            }
 
-            var assigned = new HashSet<int>();          // indices into corps
-            var result = new List<CorpsAssignment>(rects.Count);
+            bool templateEnvelops = false;
+            for (int i = 0; i < rects.Count; i++) if (rects[i].Envelops) templateEnvelops = true;
 
-            for (int ri = 0; ri < rectOrder.Length; ri++)
+            Span<bool> assigned = stackalloc bool[corps.Count];       // indices into corps
+            int result = 0;
+
+            for (int ri = 0; ri < rectOrder.Length && result < into.Length; ri++)
             {
                 int rectIdx = rectOrder[ri];
                 var rect = rects[rectIdx];
@@ -145,23 +177,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
 
                 if (pickedCorps < 0) continue;
-                assigned.Add(pickedCorps);
-                result.Add(new CorpsAssignment(
+                assigned[pickedCorps] = true;
+                into[result++] = new CorpsAssignment(
                     childId: corps[pickedCorps].ChildId,
                     rectKind: rect.Kind,
                     rectIndex: rectIdx,
                     rectAnchorX: rect.AnchorX,
                     rectAnchorZ: rect.AnchorZ,
                     startTimeOffsetSeconds: rect.StartTimeOffsetSeconds,
-                    envelops: rect.Envelops));
+                    envelops: rect.Envelops,
+                    templateEnvelops: templateEnvelops,
+                    projectedMirrored: rect.Mirrored,
+                    authoredAnchorX: rect.AuthoredX,
+                    authoredAnchorZ: rect.AuthoredZ);
             }
 
             return result;
         }
 
+        // Priority descending, then the lower index first: a sorts before b.
+        private static bool Before(IReadOnlyList<WorldPlayRect> rects, int a, int b)
+        {
+            int pa = rects[a].Priority, pb = rects[b].Priority;
+            if (pa != pb) return pa > pb;
+            return a < b;
+        }
+
         private static int ClosestUnassignedCorps(
             IReadOnlyList<CorpsPosition> corps,
-            HashSet<int> assigned,
+            ReadOnlySpan<bool> assigned,
             float x,
             float z,
             float maxDistance)
@@ -172,7 +216,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 : maxDistance * maxDistance;
             for (int i = 0; i < corps.Count; i++)
             {
-                if (assigned.Contains(i)) continue;
+                if (assigned[i]) continue;
                 float dx = corps[i].WorldX - x;
                 float dz = corps[i].WorldZ - z;
                 float dSq = dx * dx + dz * dz;

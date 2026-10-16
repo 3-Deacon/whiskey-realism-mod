@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -21,7 +22,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // ArmyEvidenceBuilder.ReadBattleStance, the stance the director and the posture
     // guard read);
     // the AI pool (unitsused, captured on the coordinator tick); the operation's
-    // objective; vanilla's GamePrefs distances (maximumlineofsight 51308,
+    // objective; BC14's crossing look requests (the army's feasibility ledger); vanilla's GamePrefs distances (maximumlineofsight 51308,
     // distancetoenemytocancelinterruption / distancetoenemyforinterruption 52444-52446,
     // aiminmoraletodeployskirmishers 52606).
     //
@@ -146,6 +147,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             p.Phase = army != null && army.HasPlan ? army.CurrentPlan.Phase : (BattlePhase?)null;
             p.SideDefending = army != null && army.CurrentBattleStance == BattleStance.Defender;
             p.HasObjective = PostureTargets.TryOperationObjective(side, out p.ObjectiveX, out p.ObjectiveZ, out _);
+
+            // BC14: the unknown crossings the plan depends on (the feasibility ledger's look requests, already expired against the live crossing watch).
+            if (army?.Feasibility != null)
+            {
+                Span<float> lookX = stackalloc float[ManeuverFeasibility.MaxLookRequests];
+                Span<float> lookZ = stackalloc float[ManeuverFeasibility.MaxLookRequests];
+                int looks = army.Feasibility.LookRequests(lookX, lookZ);
+                for (int k = 0; k < looks; k++) p.AddLook(lookX[k], lookZ[k]);
+            }
 
             PostureTick.State posture = PostureTick.Current(s);
             UnitRecord[] own = s.Own;

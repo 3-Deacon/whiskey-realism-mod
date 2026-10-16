@@ -414,7 +414,7 @@ internal static partial class TerrainPictureTests
 
         // The first step allocates the lattice layers.
         builder.Step(heights, covers, buildings, t + 2, clock);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int steps = 0;
         bool ready = false;
         while (!ready && steps < 2000)
@@ -422,7 +422,7 @@ internal static partial class TerrainPictureTests
             ready = builder.Step(heights, covers, buildings, t + 6, clock);
             steps++;
         }
-        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        long bytes = TestFixtures.AllocatedSince(before);
         AssertTrue(ready, "the build finished");
         AssertEqual(0L, bytes, "every step after the first allocates nothing (" + bytes + " bytes over " + steps + " steps)");
     }

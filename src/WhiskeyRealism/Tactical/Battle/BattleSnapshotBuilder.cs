@@ -329,7 +329,11 @@ namespace WhiskeyRealism.Tactical.Battle
             if (group) flags |= UnitFlags.IsGroup;
             else if (reg.unittyp == TacticalUnitType.Infantry) flags |= UnitFlags.IsInfantry;
             else if (reg.unittyp == TacticalUnitType.Cavalry) flags |= UnitFlags.IsCavalry;
-            else if (reg.unittyp == TacticalUnitType.Artillery) flags |= UnitFlags.IsArtillery;
+            else if (reg.unittyp == TacticalUnitType.Artillery)
+            {
+                flags |= UnitFlags.IsArtillery;
+                if (reg.ishorseartillery) flags |= UnitFlags.HorseArtillery;
+            }
             flags |= TacticalWriteGuard.OwnershipFlags(reg, in ownership);
             record.Flags = flags;
             return record;

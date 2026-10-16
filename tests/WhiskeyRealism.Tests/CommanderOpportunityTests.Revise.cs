@@ -464,10 +464,10 @@ internal static partial class CommanderOpportunityTests
         string a = "child-123456", b = "child--98765";
         DirectChildIds.InstanceId(a);
         ArmyOrchestrator.ChildInstanceId(b);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int sum = 0;
         for (int i = 0; i < 10000; i++) sum += DirectChildIds.InstanceId(a) + ArmyOrchestrator.ChildInstanceId(b);
-        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        long bytes = TestFixtures.AllocatedSince(before);
         AssertEqual(10000 * (123456 - 98765), sum, "sum");
         AssertEqual(0L, bytes, "parsing a child id allocated bytes");
         AssertContains(ReadSrc("Tactical/Orchestrator/Plays/PlayExecutorRuntime.cs"), "ParseChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);", "the play runtime parses through the same allocation-free reader");
@@ -499,9 +499,9 @@ internal static partial class CommanderOpportunityTests
         OnceLog.Info(key, "first");
         AssertTrue(OnceLog.AlreadyLogged(key), "fired");
         OnceLog.AlreadyLogged(key);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 1000; i++) OnceLog.AlreadyLogged(key);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "asking allocates nothing");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "asking allocates nothing");
         string producer = ReadSrc("Tactical/Battle/Producers/OpportunityIntentProducer.cs");
         AssertContains(producer, "!OnceLog.AlreadyLogged(\"tactical-battle-core:opportunity-first-opening\")", "the opening line is built only when it logs");
         AssertContains(producer, "!OnceLog.AlreadyLogged(\"tactical-battle-core:opportunity-first-exploit\")", "and the exploit line");

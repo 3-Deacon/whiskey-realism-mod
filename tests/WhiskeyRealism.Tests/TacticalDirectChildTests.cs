@@ -29,7 +29,6 @@ internal static class TacticalDirectChildTests
             ("allocator with zones overrides evidence", AllocatorWithZonesOverridesEvidence),
             ("allocator without zones uses existing evidence path", AllocatorWithoutZonesUsesExistingEvidencePath),
             ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable),
-            ("division refuses enemy army without support", DivisionRefusesEnemyArmyWithoutSupport),
             ("direct child intent sanitizes nonfinite floats", DirectChildIntentSanitizesNonfiniteFloats),
             ("direct child intent clamps support priority", DirectChildIntentClampsSupportPriority),
             ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
@@ -94,16 +93,6 @@ internal static class TacticalDirectChildTests
         AssertEqual(FormationLevel.Division, snap.Level);
         AssertEqual(true, snap.IsAttachedDivision);
         AssertEqual(false, snap.CanReceiveDirectDirective);
-    }
-
-    private static void DivisionRefusesEnemyArmyWithoutSupport()
-    {
-        var snap = Snapshot("division", 1, 14, 4500f, 50000f, FormationLevel.Army, FrontPosture.Hold);
-        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Amateur1861, null);
-        var assignment = ledger.GetAssignment("division");
-
-        AssertEqual(FormationDirective.Screen, assignment.Directive);
-        AssertEqual(false, assignment.OffensiveAllowed);
     }
 
     private static void DirectChildIntentSanitizesNonfiniteFloats()
