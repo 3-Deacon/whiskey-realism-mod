@@ -19,7 +19,6 @@ namespace WhiskeyRealism.Strategic
         public string CityName;
         public int StateId = -1;
         public string StateName;
-        public string StateAbbrev;
         public int Owner = -1;
         public int OriginalOwner = -1;
         public bool IsCapital;
@@ -58,7 +57,6 @@ namespace WhiskeyRealism.Strategic
         public string Name;
         public int StateId = -1;
         public string StateName;
-        public string StateAbbrev;
         public int Owner = -1;
         public float X;
         public float Z;
@@ -228,7 +226,6 @@ namespace WhiskeyRealism.Strategic
                 CityName = source.CityName,
                 StateId = source.StateId,
                 StateName = source.StateName,
-                StateAbbrev = source.StateAbbrev,
                 Owner = source.Owner,
                 OriginalOwner = source.OriginalOwner,
                 IsCapital = source.IsCapital,
@@ -251,7 +248,6 @@ namespace WhiskeyRealism.Strategic
                 Name = source.Name,
                 StateId = source.StateId,
                 StateName = source.StateName,
-                StateAbbrev = source.StateAbbrev,
                 Owner = source.Owner,
                 X = source.X,
                 Z = source.Z,

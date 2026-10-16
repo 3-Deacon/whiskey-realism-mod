@@ -239,6 +239,9 @@ internal static class CensusReceiverTypes
         return PlannerReadCensusTests.CodeLines(text).Any(l => rx.IsMatch(l));
     }
 
+    // Limit (verify G7 r2 n2): only the receivers the environment resolves are followed. A write through a local alias of a part of
+    // a published object (`var list = plan.Sectors; list.Add(x);`, or a copied element variable) is not seen unless the alias is
+    // itself declared or inferred as `type`; such a patch needs a reviewer's eye.
     // The first line in `text` that writes through a receiver of `type` (an assignment to a member or to an element, a compound
     // assignment, ++/--, or a mutating collection call on a member chain), or null. Used by the patches' read-only pin.
     internal static string FindWrite(string text, string cacheKey, string type)

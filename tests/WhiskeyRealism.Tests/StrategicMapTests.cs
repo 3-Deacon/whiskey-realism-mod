@@ -464,7 +464,6 @@ internal static class StrategicMapTests
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
             Name = "wilmington-harbor",
-            StateAbbrev = "NC",
             Theater = Theater.Coast,
             Owner = 1,
             Capacity = 4f,
@@ -482,7 +481,6 @@ internal static class StrategicMapTests
         {
             Kind = CampaignMapAssetKind.RiverHarbor,
             Name = "cairo-harbor",
-            StateAbbrev = "IL",
             Theater = Theater.River,
             Owner = 0,
             Capacity = 2f
@@ -525,7 +523,6 @@ internal static class StrategicMapTests
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
             Name = "unmapped-port",
-            StateAbbrev = "??",
             Theater = Theater.Unknown
         };
         var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 9999f, frontDistance: 9999f);
@@ -539,7 +536,6 @@ internal static class StrategicMapTests
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
             Name = "hampton-roads",
-            StateAbbrev = "VA",
             Theater = Theater.Coast,
             Owner = 0,            // Union-owned
             Capacity = 5f
@@ -556,7 +552,6 @@ internal static class StrategicMapTests
         {
             Kind = CampaignMapAssetKind.SeaHarbor,
             Name = "wilmington-harbor",
-            StateAbbrev = "NC",
             Theater = Theater.Coast,
             Owner = 1,            // CSA-owned — must NOT count as Union forward base
             Capacity = 4f

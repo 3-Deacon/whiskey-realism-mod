@@ -1372,6 +1372,8 @@ internal static class CampaignExecutorTests
                 else
                     AssertEqual(allowedMembers[owner], member, name + " uses " + owner + "." + member + ": the read-only accessor is " + owner + "." + allowedMembers[owner]);
             }
+            // Stated limit: a write through a local alias of a part of a published object (`var list = plan.Sectors; list.Add(x);`)
+            // is not seen (CensusReceiverTypes.FindWrite).
             // A patch that holds a published TheaterPlan, Allocation, SectorModel or ExecutorContext (or one of their records)
             // changes nothing in it: no assignment, compound assignment, ++/-- or mutating collection call through it.
             foreach (string published in PublishedTypes)
