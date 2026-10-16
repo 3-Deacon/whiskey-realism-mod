@@ -445,6 +445,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalEnemyContactLedger.cs" Link="Orchestrator\TacticalEnemyContactLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDoctrineTime.cs" Link="Orchestrator\TacticalDoctrineTime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\PlayerIntelIncidents.cs" Link="Util\PlayerIntelIncidents.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\PatchFirstFire.cs" Link="Util\PatchFirstFire.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\ScopedState.cs" Link="Util\ScopedState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />

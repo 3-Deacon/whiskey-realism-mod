@@ -66,8 +66,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static FogOfWar[] _fows;
         private static readonly FieldMask<DLC_WL.Incident, float> IncidentMask = new FieldMask<DLC_WL.Incident, float>(
-            i => i.launchedtime, (i, v) => i.launchedtime = v, DetectionRules.IncidentNotLaunched);
-        private static readonly DLC_WL.Incident[] IntelIncidents = new DLC_WL.Incident[DetectionRules.PlayerIntelIncidents.Length];
+            i => i.launchedtime, (i, v) => i.launchedtime = v, PlayerIntelIncidents.NotLaunched);
+        private static readonly DLC_WL.Incident[] IntelIncidents = new DLC_WL.Incident[PlayerIntelIncidents.Ids.Length];
 
         // Drift table for the alliance being updated (P6), read by the cached delegate.
         private static readonly float[] DriftTable = new float[32];
@@ -161,7 +161,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (_gridBroken)
                     OnceLog.Warning("campaign-planner:detect-no-grid", "[EnemyBeliefs] fows[1] not found; this review detects by contact only");
 
-                bool mask = DetectionRules.MasksPlayerIntelIncidents(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive);
+                bool mask = PlayerIntelIncidents.Masks(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive);
                 if (mask) FillIntelIncidents();
                 try
                 {
@@ -476,7 +476,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private static void FillIntelIncidents()
         {
             var incidents = DLC_WL.incidents;
-            int[] ids = DetectionRules.PlayerIntelIncidents;
+            int[] ids = PlayerIntelIncidents.Ids;
             for (int i = 0; i < ids.Length; i++)
                 IntelIncidents[i] = incidents != null && ids[i] >= 0 && ids[i] < incidents.Count ? incidents[ids[i]] : null;
         }

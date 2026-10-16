@@ -456,26 +456,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // and the probe cost never arise for the other rules.
     internal static class DetectionRules
     {
-        // W&L player-intelligence incidents that make FogOfWar.UnitIsHidden answer "visible" for
-        // every position (101183-101186): 60 Lost Orders, 61 and 64 Scouting Ahead.
-        // Incident.launchedtime >= 0 is what IsIncidentActive tests (46251-46263). Ported verbatim
-        // from BattlePerception on fix/campaign-terrain-bugs (BUG-TAC-020); dedupe when it merges.
-        internal static readonly int[] PlayerIntelIncidents = { 60, 61, 64 };
-        internal const float IncidentNotLaunched = -1f;
         internal const float CavalryMajorityShare = 0.5f;
-
-        internal static bool IncidentLaunched(float launchedTime)
-        {
-            return launchedTime >= 0f;
-        }
-
-        // Only rule (b) asks an AI side's grid about the player's units; vanilla never does (it
-        // computes iswithinfog for non-player units only, 127212-127230), so the incident's
-        // shortcut is the player's intelligence, never the AI side's. Rule (c) keeps it.
-        internal static bool MasksPlayerIntelIncidents(bool fogGridRule, bool dlcScenarioActive)
-        {
-            return dlcScenarioActive && fogGridRule;
-        }
 
         // Runs `probe` with the launched incidents masked as not launched (when `apply`), and
         // restores them in a finally, also when the probe throws (the exception propagates).
@@ -486,7 +467,7 @@ namespace WhiskeyRealism.Strategic.Planner
             restoreFailure = null;
             try
             {
-                if (apply && mask != null) mask.Mask(incidents, item => IncidentLaunched(launchedTime(item)));
+                if (apply && mask != null) mask.Mask(incidents, item => PlayerIntelIncidents.Launched(launchedTime(item)));
                 probe();
             }
             finally
