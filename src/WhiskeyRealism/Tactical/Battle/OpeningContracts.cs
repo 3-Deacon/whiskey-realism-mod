@@ -14,6 +14,8 @@ namespace WhiskeyRealism.Tactical.Battle
         FlankInAir = 2,
         UnsupportedBattery = 3,
         IsolatedCluster = 4,
+        /// <summary>A Defender side only, with Enable Defender Counterstroke on: an enemy that broke into the ground behind the own line.</summary>
+        Penetration = 5,
     }
 
     /// <summary>
@@ -129,6 +131,43 @@ namespace WhiskeyRealism.Tactical.Battle
             float depth = DepthPoints > 1 ? DepthMin + di * ((DepthMax - DepthMin) / (DepthPoints - 1)) : DepthMin;
             x = OriginX + lateral * RightX + depth * ForwardX;
             z = OriginZ + lateral * RightZ + depth * ForwardZ;
+        }
+
+        /// <summary>World position of a corner: lateral (0 min, 1 max) and depth (0 min, 1 max) end.</summary>
+        private void Corner(int lateralEnd, int depthEnd, out float x, out float z)
+        {
+            float lateral = lateralEnd == 0 ? LateralMin : LateralMax;
+            float depth = depthEnd == 0 ? DepthMin : DepthMax;
+            x = OriginX + lateral * RightX + depth * ForwardX;
+            z = OriginZ + lateral * RightZ + depth * ForwardZ;
+        }
+
+        /// <summary>
+        /// Whether a corner of <paramref name="other"/> stands more than <paramref name="toleranceMeters"/> from this
+        /// box's (requirement-perceived-ground: an edge that moved by more than half of ProbeSpacingMeters restarts a
+        /// lattice). Compared in the world, because the front axis's origin follows the army from tick to tick.
+        /// </summary>
+        public bool GeometryDiffers(in ProbeBox other, float toleranceMeters)
+        {
+            float limit = toleranceMeters * toleranceMeters;
+            for (int c = 0; c < 4; c++)
+            {
+                int lateralEnd = c & 1, depthEnd = c >> 1;
+                Corner(lateralEnd, depthEnd, out float ax, out float az);
+                other.Corner(lateralEnd, depthEnd, out float bx, out float bz);
+                float dx = ax - bx, dz = az - bz;
+                if (dx * dx + dz * dz > limit) return true;
+            }
+            return false;
+        }
+
+        /// <summary>The world centre of the box.</summary>
+        public void Centre(out float x, out float z)
+        {
+            Corner(0, 0, out float ax, out float az);
+            Corner(1, 1, out float bx, out float bz);
+            x = (ax + bx) * 0.5f;
+            z = (az + bz) * 0.5f;
         }
     }
 }

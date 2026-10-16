@@ -204,14 +204,44 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             finally
             {
-                if (_incidentMask.Active)
-                {
-                    string failure = _incidentMask.Restore(incident => incident == null);
-                    if (failure != null)
-                        OnceLog.Warning("tactical.battle-perception:incident-restore",
-                            "[BattlePerception] W&L incident restore failed: " + failure);
-                }
+                RestoreIncidentMask();
             }
+        }
+
+        private static void RestoreIncidentMask()
+        {
+            if (!_incidentMask.Active) return;
+            string failure = _incidentMask.Restore(incident => incident == null);
+            if (failure != null)
+                OnceLog.Warning("tactical.battle-perception:incident-restore",
+                    "[BattlePerception] W&L incident restore failed: " + failure);
+        }
+
+        /// <summary>
+        /// BC13: the incident mask around a block of UnitIsHidden calls the ground probe makes (the opportunity producer's
+        /// perceived-ground oracle), BUG-TAC-020's mask with the same restore. Applied in FogGrid mode only; dispose restores.
+        /// </summary>
+        internal static IncidentMaskScope WithIntelIncidentMask(PerceptionMode mode)
+        {
+            MaskPlayerIntelIncidents(mode);
+            return default;
+        }
+
+        internal readonly struct IncidentMaskScope : IDisposable
+        {
+            public void Dispose() => RestoreIncidentMask();
+        }
+
+        /// <summary>The side's own fog grid (every unit of a side shares it), or null.</summary>
+        internal static FogOfWar GridOf(BattleSnapshot s) => SideGrid(s);
+
+        /// <summary>
+        /// Hands the RangeOnly reach arrays the last probe filled (own units' positions and list reach) to the ground
+        /// oracle. They describe this tick's roster only after a RangeOnly probe, which is the only mode that asks.
+        /// </summary>
+        internal static void FillRangeOnlyGround(RangeOnlyPerceivedGround ground)
+        {
+            ground.SetReach(_ownX, _ownZ, _ownReach, _ownReachCount);
         }
 
         // FogOfWar.UnitIsHidden returns false for every position while the W&L player's

@@ -27,6 +27,8 @@ namespace WhiskeyRealism.Tactical
     //     attack (3) would close to 0.85 × range and advance its infantry; that
     //     is a commitment, not a probe.)
     //   AttackObjective / SupportAttack → attack (3).
+    //   Counterstroke → attack (3): a Defender's bounded counterstroke against a penetration (BC13); only an exploit
+    //     order carries it, and the #45 scorer below gives no opinion on it.
     //   FixEnemy → attack (3): a fixing force must stay engaged. Defend (2)
     //     disables the micro advance (5694), so the group would never close to
     //     fire range unless the enemy came to it; screen (1) gives ground. Attack
@@ -56,6 +58,7 @@ namespace WhiskeyRealism.Tactical
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
+                case CommandTaskType.Counterstroke:
                     return StanceAttack;
 
                 case CommandTaskType.FormUp:

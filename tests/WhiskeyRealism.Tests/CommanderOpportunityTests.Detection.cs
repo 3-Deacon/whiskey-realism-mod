@@ -487,7 +487,7 @@ internal static partial class CommanderOpportunityTests
         };
         var blind = new FnGround((x, z) => !((x > -400f && x < -10f) || (x > 360f && x < 700f)));
         var many = new OpeningDetector();
-        Detect(many, full(), blind, now: 20.0);
+        Settle(many, full(), blind, now: 20.0, maxTicks: 80);
         AssertEqual(32, many.Count, "32 held");
         int gapId = First(many, OpeningKind.Gap).Id;
         AssertNear(0.6f, First(many, OpeningKind.Gap).Confidence01, 1e-4f, "the gap's confidence is the product of its samples'");
@@ -495,16 +495,16 @@ internal static partial class CommanderOpportunityTests
         // the 33rd opening drops the lowest-confidence unconfirmed one
         var thirtyThird = full();
         thirtyThird.Art(2000f + 31 * 200f, 700f);
-        Detect(many, thirtyThird, blind, now: 20.001);
+        Settle(many, thirtyThird, blind, now: 20.001, maxTicks: 80);
         AssertEqual(32, many.Count, "capped at MaxOpenings");
         AssertEqual(0, CountKind(many, OpeningKind.Gap), "the lowest-confidence unconfirmed opening (the 0.6 gap) was dropped");
         AssertEqual(32, CountKind(many, OpeningKind.UnsupportedBattery), "the new battery took its place");
 
         // a claimed opening is never dropped: the new one is refused instead
         var guarded = new OpeningDetector();
-        Detect(guarded, full(), blind, now: 20.0);
+        Settle(guarded, full(), blind, now: 20.0, maxTicks: 80);
         guarded.SetClaimed(First(guarded, OpeningKind.Gap).Id);
-        Detect(guarded, thirtyThird, blind, now: 20.001);
+        Settle(guarded, thirtyThird, blind, now: 20.001, maxTicks: 80);
         AssertEqual(32, guarded.Count, "still capped");
         AssertEqual(1, CountKind(guarded, OpeningKind.Gap), "the claimed gap stays");
         AssertEqual(31, CountKind(guarded, OpeningKind.UnsupportedBattery), "the 33rd opening was refused (a tie goes to the oldest)");

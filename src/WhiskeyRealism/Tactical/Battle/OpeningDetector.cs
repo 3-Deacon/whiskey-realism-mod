@@ -19,16 +19,24 @@ namespace WhiskeyRealism.Tactical.Battle
     // a larger D (requirement-detector-geometry).
     //
     // One instance per side, pooled and grow-only: Detect allocates only while its arrays still grow. The perceived
-    // ground of an absence-asserting opening (a gap, a flank in the air, a battery) is proved by a probe lattice; this
-    // file asks the oracle for every lattice point of a candidate before it emits it.
+    // ground of an absence-asserting opening (a gap, a flank in the air, a battery) is proved by a probe lattice
+    // (PerceivedGroundLattice), at most MaxProbePointsPerTick points a tick across all of the side's lattices, oldest
+    // first; a candidate is emitted only once its lattice is complete and every point is perceived.
     public sealed class OpeningDetector
     {
         public const float GapMinMeters = 150f, LineDepthBandMeters = 200f, GapDepthMeters = 300f, ProbeSpacingMeters = 50f,
             RememberedMinConfidence = 0.5f, DefaultEnemyFrontageMeters = 100f, ShakenShareMin = 0.4f, FlankWatchMeters = 300f,
             FlankOffsetMeters = 150f, SupportMeters = 250f, ClusterLinkMeters = 150f, RefusedEndDegrees = 45f,
-            ConfirmHours = 0.02f, LostHours = 0.05f, CounterstrokeMaxMeters = 400f, PenetrationMinDepthMeters = 100f,
-            PenetrationClearMeters = 50f;
-        public const int MaxOpenings = 32, MaxClusters = 64;
+            CounterstrokeMaxMeters = 400f, PenetrationMinDepthMeters = 100f, PenetrationClearMeters = 50f;
+
+        // Doctrine hours are doubles, so are the times compared with them: a float 0.05 is 0.05000000074 and would put
+        // the bucket boundary at 10.0 h on the wrong side of a double division.
+        public const double ConfirmHours = 0.02, LostHours = 0.05, ProbeEpochHours = 0.05;
+        public const int MaxOpenings = 32, MaxClusters = 64, MaxProbePointsPerTick = 128;
+        // Pooled lattices: one per candidate that needs its ground proved, including those that ended unperceived (their
+        // result is kept until the time bucket turns). Twice the opening table, so the candidates beyond MaxOpenings that the
+        // identity rule sorts out still get their proof; a candidate with no slot waits (counted as deferred).
+        public const int MaxLattices = 2 * MaxOpenings;
 
         // Constants of the rules above that the spec states in prose.
         public const float FrontWindowMeters = 300f;            // front line: same-side infantry within +-300 m lateral
@@ -61,6 +69,8 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             public Opening O;
             public float ClusterX, ClusterZ, ClusterValue, ClusterNearest;
+            /// <summary>The pooled lattice proving the ground this candidate asserts, or -1 when it needs none.</summary>
+            public int Lattice;
         }
 
         private struct ClusterInfo
@@ -74,6 +84,12 @@ namespace WhiskeyRealism.Tactical.Battle
         private int[] _inf = new int[256], _front = new int[256];
         private int _nfront;
         private readonly Dictionary<int, int> _rowByInstanceId = new Dictionary<int, int>(256);
+        private Sample[] _o = new Sample[64];
+        private int _no;
+        private int[] _oinf = new int[64], _ofront = new int[64];
+        private int _nofront;
+        private readonly PerceivedGroundLattice[] _lattices = new PerceivedGroundLattice[MaxLattices];
+        private long _tick, _latticeOrder;
         private Candidate[] _cand = new Candidate[64];
         private int _candCount;
         private Opening[] _open = new Opening[MaxOpenings];
@@ -94,6 +110,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private IOpeningTerrain _terrain;
         private OpeningRules _rules;
         private double _now;
+        private ProbeEpoch _epoch;
 
         /// <summary>The openings the detector holds (including those unseen for less than <see cref="LostHours"/>).</summary>
         public ReadOnlySpan<Opening> Openings => new ReadOnlySpan<Opening>(_open, 0, _openCount);
@@ -106,6 +123,17 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public int Count => _openCount;
 
+        /// <summary>Candidates the last Detect call held back: their lattice is not complete (or has no pooled slot) and no earlier complete result is emitted.</summary>
+        public int Deferred { get; private set; }
+
+        /// <summary>Point results the last Detect call reused instead of probing.</summary>
+        public int ProbeCached { get; private set; }
+
+        /// <summary>Lattices that reached their start, lattices that completed or ended unperceived, and lattices that ended past the completion bound (0 expected), in the last Detect call.</summary>
+        public int LatticesStarted { get; private set; }
+        public int LatticesEnded { get; private set; }
+        public int DeferOverBound { get; private set; }
+
         /// <summary>
         /// Detects the side's openings for this tick and returns how many it holds. Allocation-free after warm-up.
         /// A Defender side (with the counterstroke flag on) detects Penetration only: it can launch nothing else.
@@ -114,18 +142,29 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             SuppressedUnperceived = 0;
             ProbePointsEvaluated = 0;
+            Deferred = 0;
+            ProbeCached = 0;
+            LatticesStarted = 0;
+            LatticesEnded = 0;
+            DeferOverBound = 0;
             _candCount = 0;
             _now = nowHours;
+            _tick++;
             if (s != null && perceived != null && terrain != null && s.FrontAxis.IsValid)
             {
                 _axis = s.FrontAxis;
                 _perceived = perceived;
                 _terrain = terrain;
                 _rules = rules;
+                _epoch = new ProbeEpoch { Mode = s.Perception, Fallback = (int)s.PerceptionFallback, Bucket = ProbeEpoch.BucketOf(nowHours) };
                 try
                 {
                     BuildSamples(s);
-                    if (!defender)
+                    if (defender)
+                    {
+                        if (rules.CounterstrokeOn) PenetrationPass(s);
+                    }
+                    else
                     {
                         _nfront = BuildFront(_s, _n, true, ref _inf, ref _front);
                         GapPass();
@@ -134,6 +173,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         BatteryPass();
                         ClusterPass();
                     }
+                    ResolveProbes();
                 }
                 finally
                 {
@@ -404,14 +444,20 @@ namespace WhiskeyRealism.Tactical.Battle
         // the probe found unperceived ground.
         private int AddCandidate(OpeningKind kind, float aimX, float aimZ, float heading, float width, float confidence, int target, bool hasBox, in ProbeBox box)
         {
-            if (hasBox && !AllPerceived(in box))
+            int lattice = -1;
+            if (hasBox)
             {
-                SuppressedUnperceived++;
-                return -1;
+                lattice = RequestProbe(kind, in box);
+                if (lattice < 0)
+                {
+                    Deferred++;   // no pooled lattice slot free this tick
+                    return -1;
+                }
             }
             if (_candCount == _cand.Length) Array.Resize(ref _cand, _cand.Length * 2);
             ref Candidate c = ref _cand[_candCount];
             c = default;
+            c.Lattice = lattice;
             c.O.Kind = kind;
             c.O.AimX = aimX;
             c.O.AimZ = aimZ;
@@ -424,19 +470,86 @@ namespace WhiskeyRealism.Tactical.Battle
             return _candCount++;
         }
 
-        private bool AllPerceived(in ProbeBox box)
+        // The lattice proving a candidate's ground: the one this candidate had last tick (same kind, box centre within
+        // 100 m), restarted when its geometry, the perception mode or the fallback changed (or, once it is complete,
+        // when the time bucket turned), else a new one at the back of the serving order. -1 when the pool is full.
+        private int RequestProbe(OpeningKind kind, in ProbeBox box)
         {
-            int count = box.PointCount;
-            for (int k = 0; k < count; k++)
+            box.Centre(out float cx, out float cz);
+            int found = -1;
+            float bestD = OpeningMatchMeters * OpeningMatchMeters;
+            int free = -1;
+            for (int i = 0; i < _lattices.Length; i++)
             {
-                box.PointAt(k, out float x, out float z);
-                ProbePointsEvaluated++;
-                bool seen;
-                try { seen = _perceived.IsPerceived(x, z); }
-                catch { seen = false; }
-                if (!seen) return false;
+                PerceivedGroundLattice lattice = _lattices[i];
+                if (lattice == null || !lattice.InUse)
+                {
+                    if (free < 0) free = i;
+                    continue;
+                }
+                if (lattice.Claimed || lattice.Kind != kind) continue;
+                lattice.Box.Centre(out float lx, out float lz);
+                float dx = lx - cx, dz = lz - cz;
+                float d = dx * dx + dz * dz;
+                if (d <= bestD) { bestD = d; found = i; }
             }
-            return true;
+            if (found >= 0)
+            {
+                PerceivedGroundLattice lattice = _lattices[found];
+                lattice.Claimed = true;
+                if (lattice.NeedsRestart(in box, in _epoch, out bool keep))
+                    lattice.Begin(found, kind, in box, in _epoch, keep, ++_latticeOrder);
+                return found;
+            }
+            if (free < 0) return -1;
+            if (_lattices[free] == null) _lattices[free] = new PerceivedGroundLattice();
+            _lattices[free].Begin(free, kind, in box, in _epoch, false, ++_latticeOrder);
+            _lattices[free].Claimed = true;
+            return free;
+        }
+
+        // Serves this tick's budget to the claimed lattices, then keeps the candidates whose ground is proved: a complete
+        // lattice that perceives every point, or one re-probing a bucket turn whose last complete result was proved.
+        private void ResolveProbes()
+        {
+            var stats = new LatticeTickStats();
+            PerceivedGroundLattice.Serve(_lattices, _lattices.Length, _perceived, MaxProbePointsPerTick, _tick, ref stats);
+            ProbePointsEvaluated = stats.PointsProbed;
+            ProbeCached = stats.PointsCached;
+            LatticesStarted = stats.Started;
+            LatticesEnded = stats.Ended;
+            DeferOverBound = stats.OverBound;
+
+            int kept = 0;
+            for (int c = 0; c < _candCount; c++)
+            {
+                int index = _cand[c].Lattice;
+                if (index >= 0)
+                {
+                    PerceivedGroundLattice lattice = _lattices[index];
+                    if (lattice.State == LatticeState.Unperceived)
+                    {
+                        SuppressedUnperceived++;
+                        continue;
+                    }
+                    if (lattice.State == LatticeState.Incomplete && !lattice.LastResultPerceived)
+                    {
+                        Deferred++;
+                        continue;
+                    }
+                }
+                if (kept != c) _cand[kept] = _cand[c];
+                kept++;
+            }
+            _candCount = kept;
+
+            // A lattice no candidate asked for this tick is dropped: its candidate is gone.
+            for (int i = 0; i < _lattices.Length; i++)
+            {
+                if (_lattices[i] == null) continue;
+                if (!_lattices[i].Claimed) _lattices[i].InUse = false;
+                _lattices[i].Claimed = false;
+            }
         }
 
         private float LocalEnemyValue(float aimX, float aimZ)
@@ -818,6 +931,74 @@ namespace WhiskeyRealism.Tactical.Battle
                 else hi = mid;
             }
             return lo;
+        }
+
+        // ================================================================================ penetration
+
+        private void PenetrationPass(BattleSnapshot s)
+        {
+            if (_o.Length < s.OwnCount) _o = new Sample[Math.Max(s.OwnCount, _o.Length * 2)];
+            _no = 0;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if (!IsOwnLineRegiment(in s.Own[i])) continue;
+                FillOwn(ref _o[_no], in s.Own[i], in _axis);
+                _no++;
+            }
+            _nofront = BuildFront(_o, _no, false, ref _oinf, ref _ofront);
+            if (_nofront == 0) return;
+
+            float clear2 = PenetrationClearMeters * PenetrationClearMeters;
+            for (int i = 0; i < _n; i++)
+            {
+                ref Sample e = ref _s[i];
+                if (!e.Visible || e.InMelee || (e.Type != 0 && e.Type != 1)) continue;
+                if (!OwnTraceDepth(e.L, out float traceDepth)) continue;
+                float behind = traceDepth - e.D;
+                if (behind < PenetrationMinDepthMeters || behind > CounterstrokeMaxMeters) continue;
+                bool clear = true;
+                for (int k = 0; k < _nofront && clear; k++)
+                {
+                    float dx = _o[_ofront[k]].X - e.X, dz = _o[_ofront[k]].Z - e.Z;
+                    clear = dx * dx + dz * dz > clear2;
+                }
+                if (!clear) continue;
+                AddCandidate(OpeningKind.Penetration, e.X, e.Z, 0f, 0f, e.Conf, e.Id, false, default);
+            }
+        }
+
+        /// <summary>
+        /// The own trace: the depth of the own front line at a lateral position. Flat across a regiment's footprint,
+        /// linear between two adjacent front-line regiments whose edges are no more than GapMinMeters apart; there is
+        /// no trace across a larger gap or beyond the line's ends.
+        /// </summary>
+        private bool OwnTraceDepth(float lateral, out float depth)
+        {
+            for (int k = 0; k < _nofront; k++)
+            {
+                ref Sample a = ref _o[_ofront[k]];
+                if (lateral >= a.L - a.W * 0.5f && lateral <= a.L + a.W * 0.5f)
+                {
+                    depth = a.D;
+                    return true;
+                }
+            }
+            for (int k = 0; k + 1 < _nofront; k++)
+            {
+                ref Sample a = ref _o[_ofront[k]];
+                ref Sample b = ref _o[_ofront[k + 1]];
+                if (lateral <= a.L || lateral >= b.L) continue;
+                float edgeGap = (b.L - b.W * 0.5f) - (a.L + a.W * 0.5f);
+                if (edgeGap > GapMinMeters)
+                {
+                    depth = 0f;
+                    return false;
+                }
+                depth = a.D + (b.D - a.D) * ((lateral - a.L) / (b.L - a.L));
+                return true;
+            }
+            depth = 0f;
+            return false;
         }
 
         // ================================================================================ identity

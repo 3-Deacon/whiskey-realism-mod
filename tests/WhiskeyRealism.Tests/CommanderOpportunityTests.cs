@@ -5,11 +5,12 @@ using static TestHarness;
 // commander opportunity and exploitation. One test array per partial file, joined here:
 //   .Personality  PERS-*  (spec § 4)
 //   .Detection    DET-*   (spec § 5)
+//   .Probe        the perceived-ground lattice, penetration, Counterstroke (spec § 5)
 internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests(), DetectionTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)
