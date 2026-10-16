@@ -15,6 +15,9 @@ namespace WhiskeyRealism
         internal static TestPluginInstance Instance = new TestPluginInstance();
         internal static bool FlankResponse = true;
         internal static bool FlankResponseEnabled() => FlankResponse;
+        // BC13: Tactical / Enable Per-Commander Personality (the attack-threshold band and the casualty threshold's basis).
+        internal static bool PerCommanderPersonality = true;
+        internal static bool PerCommanderPersonalityEnabled() => PerCommanderPersonality;
     }
 
     // Stands in for the BepInEx plugin instance's master switch.

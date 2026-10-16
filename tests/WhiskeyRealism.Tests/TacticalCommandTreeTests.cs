@@ -116,14 +116,14 @@ internal static class TacticalCommandTreeTests
     {
         var states = CommandNodeOperationsRuntime.Build(new[]
         {
-            new CommandNodeIntent("army", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.5f, 0),
-            new CommandNodeIntent("corps", "corps", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 0.4f, 1),
-            new CommandNodeIntent("division", "division", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 2),
-            new CommandNodeIntent("brigade", "brigade", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 0.2f, 3),
-            new CommandNodeIntent("reserve", "reserve", DirectChildRole.Reserve, DirectChildAxis.Hold, 0, 20, 0.1f, 4),
-            new CommandNodeIntent("fallback", "fallback", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 0, 20, 0.1f, 1),
-            new CommandNodeIntent("refuse", "refuse", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 0, 20, 0.1f, 2),
-            new CommandNodeIntent("unknown", "unknown", DirectChildRole.Unknown, DirectChildAxis.None, 0, 0, 0f, 2),
+            new CommandNodeIntent("army", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0),
+            new CommandNodeIntent("corps", "corps", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 1),
+            new CommandNodeIntent("division", "division", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 2),
+            new CommandNodeIntent("brigade", "brigade", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 3),
+            new CommandNodeIntent("reserve", "reserve", DirectChildRole.Reserve, DirectChildAxis.Hold, 0, 20, 4),
+            new CommandNodeIntent("fallback", "fallback", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 0, 20, 1),
+            new CommandNodeIntent("refuse", "refuse", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 0, 20, 2),
+            new CommandNodeIntent("unknown", "unknown", DirectChildRole.Unknown, DirectChildAxis.None, 0, 0, 2),
         }, TacticalOperationShape.FixAndFlank);
 
         AssertEqual(8, states.Count, "state count");
@@ -172,8 +172,8 @@ internal static class TacticalCommandTreeTests
 
         var states = CommandNodeOperationsRuntime.Build(new[]
         {
-            new CommandNodeIntent("fix", "fix", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 2),
-            new CommandNodeIntent("defend", "defend", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 3, 50, 0.3f, 2),
+            new CommandNodeIntent("fix", "fix", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 2),
+            new CommandNodeIntent("defend", "defend", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 3, 50, 2),
         }, operation, objectives, BattleStance.Meeting);
 
         AssertEqual(CommandTaskType.FixEnemy, states[0].Task, "fixing force reacts to contested objective as contact");
@@ -204,7 +204,7 @@ internal static class TacticalCommandTreeTests
         };
 
         bool built = CommandNodeOperationsRuntime.TryBuildSingle(
-            new CommandNodeIntent("node--27662", "node--26354", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.6f, 3),
+            new CommandNodeIntent("node--27662", "node--26354", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 3),
             operation,
             objectives,
             BattleStance.Meeting,
@@ -376,13 +376,11 @@ internal static class TacticalCommandTreeTests
             axis: DirectChildAxis.SectorAxis,
             primarySector: -2,
             supportPriority: 120,
-            aggressionBias01: float.PositiveInfinity,
             depth: -1);
         AssertEqual("node-unknown", intent.NodeId);
         AssertEqual("node-unknown", intent.SourceNodeId);
         AssertEqual(0, intent.PrimarySector);
         AssertEqual(100, intent.SupportPriority);
-        AssertEqual(0f, intent.AggressionBias01);
         AssertEqual(0, intent.Depth);
     }
 
@@ -531,7 +529,7 @@ internal static class TacticalCommandTreeTests
         }, 1, 0);
         var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
         {
-            DirectIntent("child-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 0.75f, 0.6f),
+            DirectIntent("child-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 0.75f),
         });
 
         AssertEqual(2, intents.Count);
@@ -542,7 +540,7 @@ internal static class TacticalCommandTreeTests
 
         var syntheticMapped = CommandTreeIntentAllocator.Allocate(tree, new[]
         {
-            DirectIntent("synth-army-100", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 1, 0.3f, 0.2f),
+            DirectIntent("synth-army-100", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 1, 0.3f),
         });
         AssertEqual(DirectChildRole.Fallback, syntheticMapped[0].Role);
         AssertEqual("node-100", syntheticMapped[0].SourceNodeId);
@@ -558,7 +556,7 @@ internal static class TacticalCommandTreeTests
         }, 1, 0);
         var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
         {
-            DirectIntent("child-200", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+            DirectIntent("child-200", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f),
         });
 
         AssertEqual(DirectChildRole.Fix, intents[2].Role);
@@ -577,14 +575,13 @@ internal static class TacticalCommandTreeTests
         AssertEqual(DirectChildRole.Reserve, intents[0].Role);
         AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
         AssertEqual(25, intents[0].SupportPriority);
-        AssertTrue(intents[0].AggressionBias01 >= 0f && intents[0].AggressionBias01 <= 1f, "fallback aggression bounded");
     }
 
     private static void TestCommandIntentResolverFindsExactNode()
     {
         var intents = new[]
         {
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 1),
         };
 
         var resolution = CommandIntentResolver.ResolveForInstance(200, intents);
@@ -598,7 +595,7 @@ internal static class TacticalCommandTreeTests
     {
         var intents = new[]
         {
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 1),
         };
 
         var resolution = CommandIntentResolver.ResolveForInstance(
@@ -620,7 +617,7 @@ internal static class TacticalCommandTreeTests
             Array.Empty<CommandNodeIntent>(),
             new[]
             {
-                DirectIntent("child-300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+                DirectIntent("child-300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f),
             });
 
         AssertTrue(resolution.Found, "game object direct child id should resolve when component id differs");
@@ -633,15 +630,15 @@ internal static class TacticalCommandTreeTests
     {
         var exact = CommandIntentResolver.ResolveForInstance(-200, new[]
         {
-            new CommandNodeIntent("node--200", "node--200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+            new CommandNodeIntent("node--200", "node--200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 1),
         });
         var childFallback = CommandIntentResolver.ResolveForInstance(-300, Array.Empty<CommandNodeIntent>(), new[]
         {
-            DirectIntent("child--300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+            DirectIntent("child--300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f),
         });
         var synthFallback = CommandIntentResolver.ResolveForInstance(-400, Array.Empty<CommandNodeIntent>(), new[]
         {
-            DirectIntent("synth-army--400", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 5, 0.2f, 0.1f),
+            DirectIntent("synth-army--400", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 5, 0.2f),
         });
 
         AssertTrue(exact.Found, "negative exact command node should resolve");
@@ -656,7 +653,7 @@ internal static class TacticalCommandTreeTests
     {
         var missing = CommandIntentResolver.ResolveForInstance(999, new[]
         {
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 1),
         });
         var invalid = CommandIntentResolver.ResolveForInstance(0, Array.Empty<CommandNodeIntent>());
 

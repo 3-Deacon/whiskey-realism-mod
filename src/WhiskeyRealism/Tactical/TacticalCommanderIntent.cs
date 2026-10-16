@@ -1,5 +1,4 @@
 using System;
-using WhiskeyRealism.Strategic;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -15,32 +14,18 @@ namespace WhiskeyRealism.Tactical
 
     public readonly struct TacticalIntentInput
     {
-        public TacticalIntentInput(
-            OperationPosture operationPosture,
-            bool hasPlan,
-            int vanillaMacro,
-            float commanderInitiative01,
-            float oddsConfidence,
-            bool weakPointConfirmed)
+        public TacticalIntentInput(int vanillaMacro, float commanderInitiative01)
         {
-            OperationPosture = operationPosture;
-            HasPlan = hasPlan;
             VanillaMacro = vanillaMacro;
             CommanderInitiative01 = Clamp01(commanderInitiative01);
-            OddsConfidence = Clamp01(oddsConfidence);
-            WeakPointConfirmed = weakPointConfirmed;
         }
 
-        public OperationPosture OperationPosture { get; }
-        public bool HasPlan { get; }
         public int VanillaMacro { get; }
         public float CommanderInitiative01 { get; }
-        public float OddsConfidence { get; }
-        public bool WeakPointConfirmed { get; }
 
         private static float Clamp01(float v)
         {
-            // 0.5 mid-band default for confidence/initiative inputs: a NaN must not flip an attacker to no-confidence behavior. Sibling Sanitize/Clamp01 helpers in odds/sector ledgers clamp to 0 because they represent strength, not bounded probabilities.
+            // 0.5 mid-band default for the initiative input: a NaN must not flip an attacker to no-confidence behavior. Sibling Sanitize/Clamp01 helpers in odds/sector ledgers clamp to 0 because they represent strength, not bounded probabilities.
             if (float.IsNaN(v) || float.IsInfinity(v)) return 0.5f;
             if (v < 0f) return 0f;
             if (v > 1f) return 1f;
@@ -62,42 +47,13 @@ namespace WhiskeyRealism.Tactical
         public string Reason { get; }
     }
 
+    // The legacy B6a intent resolver (telemetry only with the army orchestrator on). BC13 deleted its
+    // operation-posture switch: the observer never had a plan, so every call already took the macro path.
     public static class TacticalCommanderIntentResolver
     {
         public static TacticalIntentDecision Resolve(TacticalIntentInput input)
         {
-            if (!input.HasPlan)
-                return ResolveFromMacro(input);
-
-            switch (input.OperationPosture)
-            {
-                case OperationPosture.ConcentratedAttack:
-                    if (input.WeakPointConfirmed && input.CommanderInitiative01 >= 0.6f)
-                        return new TacticalIntentDecision(CommanderIntent.AllOutAttack, true, "concentrated-attack-weak-point");
-                    return new TacticalIntentDecision(CommanderIntent.Attack, true, "concentrated-attack");
-                case OperationPosture.ExploitBreakthrough:
-                    if (input.OddsConfidence < 0.55f)
-                        return new TacticalIntentDecision(CommanderIntent.Attack, true, "exploit-low-confidence");
-                    return new TacticalIntentDecision(CommanderIntent.AllOutAttack, true, "exploit-breakthrough");
-                case OperationPosture.Counterstroke:
-                    return new TacticalIntentDecision(CommanderIntent.Defend, true, "counterstroke");
-                case OperationPosture.ProbeAndDevelop:
-                    return new TacticalIntentDecision(CommanderIntent.ProbeIntent, false, "probe-and-develop");
-                case OperationPosture.ScreenAndDelay:
-                    return new TacticalIntentDecision(CommanderIntent.Defend, false, "screen-and-delay");
-                case OperationPosture.ReinforceAndHold:
-                    return new TacticalIntentDecision(CommanderIntent.Hold, false, "reinforce-and-hold");
-                case OperationPosture.Recover:
-                    return new TacticalIntentDecision(CommanderIntent.HoldToLast, false, "recover");
-                case OperationPosture.Inherit:
-                default:
-                    return ResolveFromMacro(input);
-            }
-        }
-
-        private static TacticalIntentDecision ResolveFromMacro(TacticalIntentInput input)
-        {
-            // Commander initiative modulates intent on the macro-fallback path:
+            // Commander initiative modulates intent on the macro path:
             // high-initiative commanders (Hood, Jackson, Grant) push attack into
             // all-out-attack; low-initiative commanders (McClellan, Johnston)
             // de-escalate macro=attack to probe. Defensive and retreat macros
@@ -117,8 +73,6 @@ namespace WhiskeyRealism.Tactical
                         return new TacticalIntentDecision(CommanderIntent.ProbeIntent, false, "macro-attack-cautious-commander");
                     return new TacticalIntentDecision(CommanderIntent.Attack, true, "macro-attack");
                 case 2:
-                    if (input.CommanderInitiative01 >= 0.75f && input.OddsConfidence >= 0.6f)
-                        return new TacticalIntentDecision(CommanderIntent.Defend, true, "macro-defend-aggressive-counterstroke");
                     return new TacticalIntentDecision(CommanderIntent.Defend, false, "macro-defend");
                 case 3:
                     return new TacticalIntentDecision(CommanderIntent.HoldToLast, false, "macro-retreat-vanilla-owns");

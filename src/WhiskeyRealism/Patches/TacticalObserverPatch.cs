@@ -10,6 +10,7 @@ using WhiskeyRealism.Tactical.PlayerOrders;
 using BattleCore = WhiskeyRealism.Tactical.Battle.BattleCore;
 using BattleSnapshot = WhiskeyRealism.Tactical.Battle.BattleSnapshot;
 using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
+using CommanderPersonalityRuntime = WhiskeyRealism.Tactical.Battle.CommanderPersonalityRuntime;
 using TroopQuality = WhiskeyRealism.Tactical.Battle.TroopQuality;
 using TroopQualityPrefs = WhiskeyRealism.Tactical.Battle.TroopQualityPrefs;
 using TroopQualityRuntime = WhiskeyRealism.Tactical.Battle.TroopQualityRuntime;
@@ -1339,7 +1340,7 @@ namespace WhiskeyRealism.Patches
                     intendedPathId: SafePathId(target, true),
                     transmittedPathId: SafePathId(target, false),
                     contactChangedMaterially: false,
-                    commanderInitiative01: 0.50f));
+                    commanderInitiative01: FrictionInitiative(issuer)));
                 var command = TacticalCommandLedger.Summarize(
                     BuildCommanderProfile(issuer),
                     BuildCommanderProfile(target),
@@ -1407,7 +1408,7 @@ namespace WhiskeyRealism.Patches
                     intendedPathId: SafePathId(lineTarget, true),
                     transmittedPathId: SafePathId(lineTarget, false),
                     contactChangedMaterially: false,
-                    commanderInitiative01: 0.50f));
+                    commanderInitiative01: FrictionInitiative(lineSource)));
                 var command = TacticalCommandLedger.Summarize(
                     BuildCommanderProfile(lineSource),
                     BuildCommanderProfile(lineTarget),
@@ -2770,6 +2771,13 @@ namespace WhiskeyRealism.Patches
             {
                 return null;
             }
+        }
+
+        // The issuing group's commander's live initiative, the value vanilla's own battle AI reads (BC13,
+        // requirement-dead-personality-paths); 0.5 when there is no issuer.
+        private static float FrictionInitiative(Regiment unit)
+        {
+            return unit != null ? CommanderPersonalityRuntime.LiveInitiative(unit.commander) : 0.5f;
         }
 
         private static TacticalCommanderProfile BuildCommanderProfile(Regiment unit)

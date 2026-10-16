@@ -64,11 +64,19 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
         internal static ConfigEntry<bool> EnableBattleTerrainPicture;
+        internal static ConfigEntry<bool> EnablePerCommanderPersonality;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
         {
             try { return EnableBattleTerrainPicture != null && EnableBattleTerrainPicture.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Per-Commander Personality (BC13 section 4: the commander table, the derived army vector, the attack-threshold band, the casualty threshold's basis).</summary>
+        internal static bool PerCommanderPersonalityEnabled()
+        {
+            try { return EnablePerCommanderPersonality != null && EnablePerCommanderPersonality.Value; }
             catch { return false; }
         }
 
@@ -534,6 +542,17 @@ namespace WhiskeyRealism
                 "The picture itself builds either way (the playbook terrain reads it). Off: objectives keep their types and zero " +
                 "terrain strength, the defensive anchor keeps its terrain-anchor-preserved behaviour, no strong-ground evidence, and " +
                 "ReverseSlopeDefense is never chosen (it needs a crest line).");
+            EnablePerCommanderPersonality = Config.Bind(
+                "Tactical",
+                "Enable Per-Commander Personality",
+                true,
+                "Default ON. BC13: each corps and division commander has his own temperament. A historical commander keeps the list's " +
+                "values; every other commander's aggression, caution, audacity and casualty tolerance are derived from his game stats " +
+                "(initiative, cunning, leadership, administration, veteran, political), so an unlisted army commander is no longer the " +
+                "faction default. The army's attack threshold for a Meeting or Attacker side becomes a band (1.20 at aggression 0 to 0.80 at " +
+                "1.0, 1.00 at 0.5) instead of the parity cap, and the casualty level that ends a delaying defence follows the commander's " +
+                "casualty tolerance instead of his aggression. Off: the army vector is the roster's as before, every node uses it, the " +
+                "threshold cap at 1.0 and the aggression-based casualty threshold return.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

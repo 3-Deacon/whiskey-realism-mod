@@ -10,23 +10,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     public sealed partial class TacticalCommanderRoster
     {
         /// <summary>
-        /// Vanilla commander object (e.g., GameVars.commander[i]): historical registry lookup via
-        /// HistoricalFigureRegistry.Resolve. If matched (isHistorical == true), vector uses the
-        /// historical personality without rank-tier bias. If unmatched, falls back to faction default
-        /// + rank-tier bias. The nameHint is used both as the display name AND as a fallback key for
-        /// registry matching when combinedname fails or returns a non-matching string.
+        /// Vanilla commander object (e.g., GameVars.commander[i]), resolved registry first
+        /// (CommanderPersonalityRuntime.Resolve, BC13): a full-name match in HistoricalFigureRegistry gives the
+        /// list's vector without rank-tier bias; otherwise, with Enable Per-Commander Personality on, the vector is
+        /// derived from the commander's stats plus the rank-tier bias; otherwise (stats unreadable, or the flag off)
+        /// the faction default + rank-tier bias. The nameHint is used both as the display name AND as a fallback
+        /// key for registry matching when combinedname fails or returns a non-matching string.
         /// </summary>
         public static CommanderRosterEntry FromVanilla(object commanderObj, string nameHint, EchelonKind echelon, int allianceId)
         {
-            var (vector, isHistorical) = HistoricalFigureRegistry.Resolve(commanderObj, allianceId, nameHint);
-            var resolved = isHistorical ? vector : ApplyRankBias(FactionProfiles.For(allianceId), echelon);
+            var (vector, source) = WhiskeyRealism.Tactical.Battle.CommanderPersonalityRuntime.Resolve(commanderObj, allianceId, nameHint, echelon);
             return new CommanderRosterEntry
             {
                 Name = nameHint,
                 Echelon = echelon,
                 AllianceId = allianceId,
-                MatchedHistoricalRegistry = isHistorical,
-                PersonalityVector = resolved,
+                MatchedHistoricalRegistry = source == WhiskeyRealism.Tactical.Battle.PersonalitySource.Registry,
+                PersonalityVector = vector,
+                Source = source,
             };
         }
 

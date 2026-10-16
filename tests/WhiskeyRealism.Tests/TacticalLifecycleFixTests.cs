@@ -422,9 +422,9 @@ internal static class TacticalLifecycleFixTests
         return new[]
         {
             new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold,
-                primarySector: 1, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
+                primarySector: 1, supportPriority: 50, depth: 1),
             new CommandNodeIntent("node-2", "node-1", DirectChildRole.Reserve, DirectChildAxis.Hold,
-                primarySector: 2, supportPriority: 10, aggressionBias01: 0.2f, depth: 2),
+                primarySector: 2, supportPriority: 10, depth: 2),
         };
     }
 

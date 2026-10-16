@@ -81,8 +81,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (commanderAggression01 < 0f) commanderAggression01 = 0f;
                 if (commanderAggression01 > 1f) commanderAggression01 = 1f;
 
+                // The casualty escalation threshold reads the commander's casualty tolerance (BC13).
+                float commanderCasualtyTolerance01 = Battle.CommanderPersonalityDerivation.To01(army.CommanderPersonality.CasualtyTolerance);
                 var forceBalance = ArmyEvidenceBuilder.BuildForceBalance(
-                    battle, allianceId, army.LiveCommanderInitiative01, commanderAggression01);
+                    battle, allianceId, army.LiveCommanderInitiative01, commanderAggression01, commanderCasualtyTolerance01);
                 if (forceBalance.HasValue)
                 {
                     army.UpdateReinforcementOpportunity(forceBalance.Value);

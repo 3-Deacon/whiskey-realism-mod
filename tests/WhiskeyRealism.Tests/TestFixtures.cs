@@ -307,8 +307,7 @@ internal static class TestFixtures
         DirectChildRole role,
         DirectChildAxis axis,
         int primarySector,
-        float supportPriority01,
-        float aggressionBias01)
+        float supportPriority01)
     {
         return new DirectChildIntent(
             childId,
@@ -320,7 +319,6 @@ internal static class TestFixtures
             axis,
             axisSector: primarySector,
             supportPriority01,
-            aggressionBias01,
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
     }
 
@@ -332,8 +330,11 @@ internal static class TestFixtures
         float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f,
         float ownCasualtyRatio = 0f, float ownRoutedFraction = 0f,
         float battleHoursElapsed = 0f,
-        BattleStance stance = BattleStance.Meeting)
+        BattleStance stance = BattleStance.Meeting,
+        float? casualtyTolerance = null)
     {
+        // The casualty escalation threshold follows the commander's casualty tolerance (BC13); a fixture
+        // that names no tolerance gives the commander the tolerance of his aggression, as the older tests read it.
         return new TacticalForceBalanceEvidence(
             own, enemy,
             ownArrivals ?? System.Array.Empty<ReinforcementArrival>(),
@@ -341,7 +342,8 @@ internal static class TestFixtures
             ownCasualtyRatio01: ownCasualtyRatio,
             ownRoutedFraction01: ownRoutedFraction,
             battleHoursElapsed: battleHoursElapsed,
-            stance: stance);
+            stance: stance,
+            commanderCasualtyTolerance01: casualtyTolerance ?? aggression);
     }
 
     // Walks up from the working directory to the first ancestor holding relativePath.

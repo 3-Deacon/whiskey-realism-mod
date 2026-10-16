@@ -528,7 +528,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     s.ChildId, s.RawUnitTyp, s.EffectiveCommandLevel, s.DisplayName,
                     primarySector: 0, role: DirectChildRole.Unknown,
                     axis: DirectChildAxis.None, axisSector: 0,
-                    supportPriority01: 0f, aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
+                    supportPriority01: 0f,
                     enemyIntent: unknownEnemy);
             }
             _directChildIntents = initial;

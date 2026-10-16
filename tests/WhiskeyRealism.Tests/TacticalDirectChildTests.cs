@@ -31,7 +31,7 @@ internal static class TacticalDirectChildTests
             ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable),
             ("division refuses enemy army without support", DivisionRefusesEnemyArmyWithoutSupport),
             ("direct child intent sanitizes nonfinite floats", DirectChildIntentSanitizesNonfiniteFloats),
-            ("direct child intent clamps support and aggression bias", DirectChildIntentClampsSupportAndAggression),
+            ("direct child intent clamps support priority", DirectChildIntentClampsSupportPriority),
             ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
             ("direct child evidence equals same buckets", DirectChildEvidenceEqualsSameBuckets),
             ("direct child snapshot stores raw and effective unittyp", DirectChildSnapshotStoresRawAndEffectiveUnittyp),
@@ -118,21 +118,17 @@ internal static class TacticalDirectChildTests
             axis: DirectChildAxis.SectorAxis,
             axisSector: 2,
             supportPriority01: float.NaN,
-            aggressionBias01: float.PositiveInfinity,
             enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
         AssertEqual(0f, intent.SupportPriority01, "NaN sanitized to 0");
-        AssertEqual(0.5f, intent.AggressionBias01, "Inf sanitized to 0.5");
     }
 
-    private static void DirectChildIntentClampsSupportAndAggression()
+    private static void DirectChildIntentClampsSupportPriority()
     {
         var intent = new DirectChildIntent(
             "c1", 15, 16, "1st", 0, DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 0,
             supportPriority01: 1.5f,
-            aggressionBias01: -0.2f,
             enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
         AssertEqual(1f, intent.SupportPriority01);
-        AssertEqual(0f, intent.AggressionBias01);
     }
 
     private static void DirectChildEvidenceBucketsAreNonNegative()

@@ -676,7 +676,7 @@ internal static class PlayerOrderTests
             givenOrderSession: 12,
             commandIntent: new CommandIntentResolutionSnapshot(
                 true,
-                new CommandNodeIntentSnapshot("node-u1", "node-parent", "RefuseLeft", "Hold", 0, 30, 0.4f, 1),
+                new CommandNodeIntentSnapshot("node-u1", "node-parent", "RefuseLeft", "Hold", 0, 30, 1),
                 "inherited-defensive-intent"),
             commandTask: new CommandTaskSnapshot(false, "Defender", string.Empty, default(PlayerOrderPoint), default(PlayerOrderPoint), string.Empty, "intent-only"),
             doctrine: new ArmyDoctrineSnapshot("Committed", "DefensiveNetwork", "road-approach", "runtime"),
@@ -732,7 +732,7 @@ internal static class PlayerOrderTests
             givenOrderSession: 12,
             commandIntent: new CommandIntentResolutionSnapshot(
                 true,
-                new CommandNodeIntentSnapshot("n1", "s1", "Main", "Forward", 0, 0, 0.5f, 1),
+                new CommandNodeIntentSnapshot("n1", "s1", "Main", "Forward", 0, 0, 1),
                 "intent-only"),
             commandTask: new CommandTaskSnapshot(false, string.Empty, string.Empty, default(PlayerOrderPoint), default(PlayerOrderPoint), string.Empty, string.Empty),
             doctrine: new ArmyDoctrineSnapshot("forming", "parallel", string.Empty, "runtime"),
@@ -826,7 +826,6 @@ internal static class PlayerOrderTests
                     axis: axis,
                     primarySector: 2,
                     supportPriority: 70,
-                    aggressionBias01: 0.6f,
                     depth: 1),
                 reason: "test-intent"),
             commandTask: new CommandTaskSnapshot(

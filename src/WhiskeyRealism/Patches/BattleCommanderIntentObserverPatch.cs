@@ -154,18 +154,7 @@ namespace WhiskeyRealism.Patches
             // mid-band only when the lookup fails.
             float commanderInitiative01 = ResolveLiveCommanderInitiative(side, battle);
 
-            // OperationPosture lookup is wired in a future strategic-tactical bridge
-            // slice (CIC plan → tactical posture mapping). Inherit triggers
-            // ResolveFromMacro which now consults commanderInitiative01 directly
-            // for tempo modulation. oddsConfidence stays at 0.5f mid-band — the
-            // macro layer owns the live odds doctrine.
-            return new TacticalIntentInput(
-                operationPosture: OperationPosture.Inherit,
-                hasPlan: false,
-                vanillaMacro: macro,
-                commanderInitiative01: commanderInitiative01,
-                oddsConfidence: 0.5f,
-                weakPointConfirmed: false);
+            return new TacticalIntentInput(macro, commanderInitiative01);
         }
 
         private static FieldInfo _bunitsFieldCache;
@@ -532,11 +521,9 @@ namespace WhiskeyRealism.Patches
 
             TelemetryRouter.LegacyInfo("[TacticalIntent] side=" + side +
                 " intent=" + intent.Intent +
-                " posture=" + input.OperationPosture +
                 " commanderInit=" + input.CommanderInitiative01.ToString("0.00") +
                 " macro=" + macro +
-                " reason=" + intent.Reason +
-                " confidence=" + input.OddsConfidence.ToString("0.00"), TelemetryLayer.Tactical);
+                " reason=" + intent.Reason, TelemetryLayer.Tactical);
         }
 
         private static void EmitPlaybook(int side, TacticalPlaybookDecision decision)

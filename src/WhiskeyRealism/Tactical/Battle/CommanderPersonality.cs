@@ -61,6 +61,39 @@ namespace WhiskeyRealism.Tactical.Battle
             => TacticalCommanderRoster.ApplyRankBias(FactionProfiles.For(alliance), echelon);
 
         /// <summary>
+        /// The resolution order (requirement-registry-first): the historical list's full-name match first, the list's
+        /// vector as it is (no rank bias); else, with Enable Per-Commander Personality on and readable stats, the
+        /// derivation plus the echelon's rank bias; else the ranked faction profile.
+        /// </summary>
+        public static PersonalitySource Resolve(bool registryMatched, in PersonalityVector registryVector, bool deriveFromStats,
+            in CommanderStats stats, int alliance, EchelonKind echelon, out PersonalityVector vector)
+        {
+            if (registryMatched)
+            {
+                vector = registryVector;
+                return PersonalitySource.Registry;
+            }
+            if (deriveFromStats && stats.Valid)
+            {
+                vector = TacticalCommanderRoster.ApplyRankBias(Derive(stats), echelon);
+                return PersonalitySource.Derived;
+            }
+            vector = Default(alliance, echelon);
+            return PersonalitySource.Default;
+        }
+
+        /// <summary>
+        /// The echelon a group record stands for: the root of the command tree is the army, otherwise by vanilla
+        /// unittyp (14 brigade, 15 division, 16 and above corps). The first echelon seen for a commander wins.
+        /// </summary>
+        public static EchelonKind EchelonOf(int unitTyp, bool isTreeRoot)
+        {
+            if (isTreeRoot) return EchelonKind.Army;
+            if (unitTyp <= 14) return EchelonKind.Brigade;
+            return unitTyp == 15 ? EchelonKind.Division : EchelonKind.Corps;
+        }
+
+        /// <summary>
         /// Vanilla scales the stats of a commander who is out of duty (status 2 captured, 3 wounded, 4 killed) by
         /// GamePrefs.reductionfactorcommanderoutofduty (unitprefs.txt, shipped 0.5; decompile 61134-61233). The
         /// vector stays pinned; the exploit chance carries the same factor (requirement-commander-duty).

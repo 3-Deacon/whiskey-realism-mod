@@ -360,7 +360,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     h = h * 31 + intent.PrimarySector;
                     h = h * 31 + intent.SupportPriority;
                     h = h * 31 + intent.Depth;
-                    h = h * 31 + intent.AggressionBias01.GetHashCode();
                 }
                 return h;
             }
