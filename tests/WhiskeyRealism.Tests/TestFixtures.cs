@@ -208,8 +208,6 @@ internal static class TestFixtures
         return new FormationSnapshot
         {
             UnitKey = key,
-            AllianceId = alliance,
-            UnitName = key,
             UnitType = unitType,
             IsTopUnit = true,
             GroupStrengthActive = strength,
@@ -218,7 +216,6 @@ internal static class TestFixtures
             RifleAmmo = 0.8f,
             ArtilleryAmmo = 0.8f,
             Supply = 0.8f,
-            WeaponFirepower = 1.0f,
             AreaKey = "VirginiaCapitalCorridor",
             SectorKey = "Richmond",
             LocalEnemyStrength = enemy,

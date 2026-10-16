@@ -118,10 +118,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     UnitKey = UnitKey(unit),
                     ParentUnitKey = commandTree?.ParentKeyOf(((UnityEngine.Object)unit).GetInstanceID()),
-                    AllianceId = allianceId,
                     StableUnitId = ((UnityEngine.Object)unit).GetInstanceID(),
-                    UnitName = ((UnityEngine.Object)unit).name,
-                    CommanderName = CommanderName(unit),
                     UnitType = unit.unittyp,
                     IsTopUnit = unit.istopunit,
                     IsGarrisoned = unit.garrisonreference != null,
@@ -135,10 +132,8 @@ namespace WhiskeyRealism.Strategic
                     ArtilleryAmmo = ReadSupplyState(unit, 1, unit.groupammo),
                     Supply = ReadSupply(unit),
                     Fatigue = FormationSnapshot.Clamp01(unit.groupfatigue),
-                    WeaponFirepower = EstimateWeaponFirepower(unit),
                     CommandRange = unit.commanderrange,
                     BugleRange = unit.buglerange,
-                    InBattle = unit.inbattle,
                     OnRetreat = unit.onretreat,
                     HasActivePath = unit.regimentpaths > 0
                 };
@@ -292,22 +287,6 @@ namespace WhiskeyRealism.Strategic
             return ((UnityEngine.Object)unit).name + ":" + unit.commander.ToString();
         }
 
-        private static string CommanderName(Regiment unit)
-        {
-            try
-            {
-                int commanderId = unit.commander;
-                var commanders = GameVars.commander;
-                if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return null;
-                return commanders[commanderId].combinedname;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("formation-directive:commander", "[FormationDirective] commander lookup failed: " + ex.Message);
-                return null;
-            }
-        }
-
         private static float ReadSupplyState(Regiment unit, int index, float fallback)
         {
             try
@@ -334,27 +313,6 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return 1f;
-        }
-
-        private static float EstimateWeaponFirepower(Regiment unit)
-        {
-            // groupstrengthperunittypcampaigndirect: infantry/cavalry/artillery strength breakdown
-            float direct = Sum(unit.groupstrengthperunittypcampaigndirect);
-            if (direct <= 0f)
-                direct = Sum(unit.groupstrengthperunittyp);
-            if (direct <= 0f)
-                direct = Math.Max(0f, unit.groupstrengthactive);
-
-            float guns = Math.Max(0, unit.groupstatsgunsactive);
-            return Math.Max(1f, direct + guns * 65f);
-        }
-
-        private static float Sum(int[] values)
-        {
-            if (values == null) return 0f;
-            float total = 0f;
-            for (int i = 0; i < values.Length; i++) total += Math.Max(0, values[i]);
-            return total;
         }
 
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);

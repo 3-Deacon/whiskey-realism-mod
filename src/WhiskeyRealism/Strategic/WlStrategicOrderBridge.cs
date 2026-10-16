@@ -206,15 +206,12 @@ namespace WhiskeyRealism.Strategic
     internal sealed class WlStrategicOrderRequest
     {
         internal int AllianceId;
-        internal int AifactionIndex;
         internal Regiment Unit;
         internal Vector3 TargetPosition;
         internal string TargetName;
-        internal int ObjectiveId;
         internal WlStrategicIntent Intent;
         internal float Width;
         internal float Depth;
-        internal string SourceSystem;
     }
 #pragma warning restore 0649
 

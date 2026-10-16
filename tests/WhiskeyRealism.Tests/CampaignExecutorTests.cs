@@ -1204,15 +1204,13 @@ internal static class CampaignExecutorTests
     {
         // The host's move half is VanillaMoveHost (G5d shares it with the recon executor): the pins follow it.
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
-        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy,"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
+        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
-        AssertTrue(HasLine(src, "SourceSystem = \"campaign-planner\""), "the dispatch names its source");
         AssertTrue(HasLine(src, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
         AssertFalse(src.Contains("EnterMoveSource"), "G5a does not call EnterMoveSource: stage F's Postfix types the march by list membership");
         AssertFalse(src.Contains("IsPackageLocked") || src.Contains("CoordinatedOperation"), "the old package layer is gone (G6): the mover refuses nothing on its account");
         AssertTrue(HasLine(src, "unit.userails = true;"), "vanilla's AI default for rails (112862-112867)");
         AssertTrue(HasLine(src, "unit.userivers = true;"), "...and rivers");
-        AssertTrue(HasLine(src, "AifactionIndex = _faction,") || HasLine(src, "AifactionIndex = faction,"), "the dispatch carries the faction index (the shape of vanilla's own dispatches)");
     }
 
     private static void SteeringRuntimeStatementsPinned()

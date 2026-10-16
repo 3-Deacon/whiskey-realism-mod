@@ -720,7 +720,6 @@ internal static class DailyReviewSchedulerTests
                             snapshots.Add(new FormationSnapshot
                             {
                                 UnitKey = "u" + a + i,
-                                AllianceId = a,
                                 UnitType = 14 + i,
                                 IsTopUnit = true,
                                 GroupStrengthActive = 1000f + rng.Next(9000),
@@ -729,7 +728,6 @@ internal static class DailyReviewSchedulerTests
                                 RifleAmmo = (float)rng.NextDouble(),
                                 ArtilleryAmmo = 0.8f,
                                 Supply = (float)rng.NextDouble(),
-                                WeaponFirepower = 1f,
                                 AreaKey = "A" + i,
                                 SectorKey = sector?.SectorKey,
                                 FrontPosture = sector != null ? sector.Posture : FrontPosture.Hold,
