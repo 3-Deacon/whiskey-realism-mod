@@ -32,6 +32,8 @@ internal static partial class CommanderOpportunityTests
             ("bc13 FIX-SEP the steer sets aiassaultmove for a Whiskey-commanded group only, and the Finalizer restores it", FixSepPatch),
             ("bc13 FIX-RESERVE-PICK the real CheckUseOfReserves IL has exactly one Count - 1 pick and it is rewritten", FixReservePickIl),
             ("bc13 FIX-RESERVE-PICK a method with another site count is left as vanilla; the hook reads its flag live", FixReservePickGuards),
+            ("bc13 FIX-ARTY-SIDE the real AssignReserves IL has exactly one Random.Range(1, 2) and its bound becomes the hook", FixArtyIl),
+            ("bc13 FIX-ARTY-SIDE other site counts stay vanilla; the bound is 3 on and 2 off; the float roll is not matched", FixArtyGuards),
         };
     }
 
@@ -403,5 +405,55 @@ internal static partial class CommanderOpportunityTests
         AssertFalse(ReadSrc("Tactical/Battle/BugFixes/ReserveSupportPickIl.cs").Contains(".Clone()"), "copies with new CodeInstruction(ci)");
         AssertEqual(0, RandomPickRangeIl.UpperOffset(true), "fix on: the whole list");
         AssertEqual(1, RandomPickRangeIl.UpperOffset(false), "fix off: vanilla's Count - 1");
+    }
+
+    // ------------------------------------------------------------------ #123 artillery chain side (BUG-TAC-028)
+
+    private static void FixArtyIl()
+    {
+        var method = AccessTools.Method(typeof(AIBattle), ArtillerySideIl.Method);
+        AssertTrue(method != null, "AssignReserves exists");
+        var vanilla = PatchProcessor.GetOriginalInstructions(method);
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(PickHookStub));
+        var edited = ArtillerySideIl.Transpile(vanilla, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertEqual(1, matches, "exactly one ldc.i4.1; ldc.i4.2; call Random.Range(int, int)");
+        AssertFalse(ReferenceEquals(edited, vanilla), "an edited copy");
+        AssertEqual(vanilla.Count, edited.Count, "same length: the 2 became the hook call");
+        int at = -1;
+        for (int i = 0; i < edited.Count; i++) if (edited[i].Calls(hook)) at = i;
+        AssertTrue(at >= 1, "the hook call is in the list");
+        AssertTrue(edited[at - 1].opcode == OpCodes.Ldc_I4_1, "after the lower bound 1");
+        AssertTrue(edited[at + 1].opcode == OpCodes.Call && edited[at + 1].operand is MethodInfo m && m.Name == "Range", "before Random.Range");
+        AssertTrue(vanilla[at].opcode == OpCodes.Ldc_I4_2, "where vanilla loaded the constant 2");
+        int hooks = 0;
+        for (int i = 0; i < edited.Count; i++) if (edited[i].Calls(hook)) hooks++;
+        AssertEqual(1, hooks, "one hook call");
+    }
+
+    private static void FixArtyGuards()
+    {
+        var other = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), "CheckUseOfReserves"));
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(PickHookStub));
+        var same = ArtillerySideIl.Transpile(other, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertTrue(ReferenceEquals(same, other), "a method without the pattern comes back as vanilla's own list");
+        AssertEqual(0, matches, "no sites");
+        AssertEqual(3, ArtillerySideIl.UpperBound(true), "fix on: Random.Range(1, 3) is 1 or 2");
+        AssertEqual(2, ArtillerySideIl.UpperBound(false), "fix off: vanilla's Random.Range(1, 2)");
+
+        // Expected count other than the real one: untouched.
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), ArtillerySideIl.Method));
+        var copy = new System.Collections.Generic.List<CodeInstruction>();
+        foreach (var ci in vanilla) copy.Add(new CodeInstruction(ci));
+        AssertEqual(1, ArtillerySideIl.Rewrite(copy, RandomPickRangeIl.ResolveRandomRangeInt(), hook, 2), "a count of one against an expected two reports one");
+        for (int i = 0; i < copy.Count; i++) AssertTrue(copy[i].opcode == vanilla[i].opcode, "and changes nothing (" + i + ")");
+
+        string patch = ReadSrc("Patches/ArtilleryChainSideFixPatch.cs");
+        AssertContains(patch, "[HarmonyPatch(typeof(AIBattle), \"AssignReserves\")]", "the target");
+        AssertContains(patch, "return ArtillerySideIl.UpperBound(Enabled());", "a live flag read");
+        AssertContains(patch, "tactical-il:artillery-side:applied", "applied key");
+        AssertContains(patch, "tactical-il:artillery-side:pattern", "pattern key");
+        AssertContains(patch, "tactical-il:artillery-side:transpiler", "exception key");
+        AssertContains(patch, "[ArtillerySideIl] applied sites=", "the applied line");
+        AssertFalse(ReadSrc("Tactical/Battle/BugFixes/ArtillerySideIl.cs").Contains(".Clone()"), "copies with new CodeInstruction(ci)");
     }
 }

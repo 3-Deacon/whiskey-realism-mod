@@ -242,6 +242,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CavalryStrikeCheck.cs" Link="Battle\CavalryStrikeCheck.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\StanceCooldownRestamp.cs" Link="Battle\BugFixes\StanceCooldownRestamp.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\ReserveSupportPickIl.cs" Link="Battle\BugFixes\ReserveSupportPickIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\ArtillerySideIl.cs" Link="Battle\BugFixes\ArtillerySideIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReserveReleaseState.cs" Link="Orchestrator\ReserveReleaseState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpportunityDoctrine.cs" Link="Battle\OpportunityDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ChargeDoctrine.cs" Link="Battle\ChargeDoctrine.cs" />

@@ -9,7 +9,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // #121 SeparatedEnemyOwnershipPatch (BUG-TAC-029) - Vanilla AIBattle.CheckForSeparatedEnemy (8056-8215, called per AI group from
+    // #121 SeparatedEnemyOwnershipPatch (a steer, no bug id) - Vanilla AIBattle.CheckForSeparatedEnemy (8056-8215, called per AI group from
     // the macro cycle, 5676) sends a group straight at an isolated enemy cluster it finds from the true battlefield state
     // (SetWaypoint ... useorderdelay: false, 8188), whatever its orders, and the posture pipeline then re-asserts the ledger order:
     // two movers on one group. Whiskey's IsolatedCluster opening (requirement-detect-isolated-cluster) does the same thing

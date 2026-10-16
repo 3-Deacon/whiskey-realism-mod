@@ -72,6 +72,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaStanceCooldownFix;
         internal static ConfigEntry<bool> EnableSeparatedEnemySteer;
         internal static ConfigEntry<bool> EnableVanillaReserveSupportPickFix;
+        internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -654,7 +655,7 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Separated Enemy Steer",
                 true,
-                "Default ON. #121 (BUG-TAC-029): vanilla sends an AI group straight at an isolated enemy cluster it finds from the true " +
+                "Default ON. #121 (a steer): vanilla sends an AI group straight at an isolated enemy cluster it finds from the true " +
                 "state of the battlefield, whatever the group's orders, and Whiskey's posture then re-issues the ledger order: two movers " +
                 "on one group. With this on, a group Whiskey commands (in the AI pool with a doctrine state) is left out of that vanilla " +
                 "behaviour; Whiskey's own isolated-cluster opening, which only sees what the side perceives, takes over. Groups vanilla " +
@@ -668,6 +669,14 @@ namespace WhiskeyRealism
                 "a random range that excludes the last candidate, so the last endangered regiment is never supported and, with two, always the " +
                 "first. With this on the pick includes every endangered regiment. A live rollback: turning it off restores vanilla's pick " +
                 "without a restart. Whiskey's reserve gate still denies this vanilla path for Reserve-role children.");
+            EnableVanillaArtilleryChainSideFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Artillery Chain Side Fix",
+                true,
+                "Default ON. #123 (BUG-TAC-029): vanilla's battle AI decides which end of the line an artillery group joins with a random range " +
+                "that can only give one answer, so every artillery group joins the left end of the chain and none the right. With this on " +
+                "artillery groups split between the left and right ends at random. A live rollback: turning it off restores vanilla's " +
+                "value without a restart.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

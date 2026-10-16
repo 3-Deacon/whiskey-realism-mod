@@ -25,6 +25,7 @@ internal static class TranspilerLabelTests
             ("transpiler allocation trims keep every label and block", AllocationTrimsKeepLabels),
             ("transpiler autoresolve weapon gate keeps every label and block", AutoresolveGateKeepsLabels),
             ("transpiler reserve support pick keeps every label and block", ReserveSupportPickKeepsLabels),
+            ("transpiler artillery side keeps every label and block", ArtillerySideKeepsLabels),
             ("transpiler sources never copy instructions with clone", SourcesNeverCloneInstructions),
         });
     }
@@ -51,6 +52,16 @@ internal static class TranspilerLabelTests
             AssertFalse(ReferenceEquals(edited, vanilla), site.Method + " edited copy");
             AssertMarksKept(vanilla, edited, site.Method);
         }
+    }
+
+    private static void ArtillerySideKeepsLabels()
+    {
+        var vanilla = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), WhiskeyRealism.Tactical.Battle.BugFixes.ArtillerySideIl.Method));
+        var hook = AccessTools.Method(typeof(TranspilerLabelTests), nameof(IntHookStub));
+        var edited = WhiskeyRealism.Tactical.Battle.BugFixes.ArtillerySideIl.Transpile(vanilla, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertEqual(1, matches, "AssignReserves sites");
+        AssertFalse(ReferenceEquals(edited, vanilla), "AssignReserves edited copy");
+        AssertMarksKept(vanilla, edited, "AssignReserves");
     }
 
     private static void ReserveSupportPickKeepsLabels()
