@@ -562,13 +562,13 @@ internal static class TacticalLifecycleFixTests
         TacticalBattleCoordinator.ParseCommandNodeInstanceId(node); // JIT warm-up
         TacticalBattleCoordinator.ParseCommandNodeInstanceId(child);
         TacticalBattleCoordinator.ParseCommandNodeInstanceId(synth);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         long sum = 0;
         for (int i = 0; i < 1000; i++)
             sum += TacticalBattleCoordinator.ParseCommandNodeInstanceId(node)
                 + TacticalBattleCoordinator.ParseCommandNodeInstanceId(child)
                 + TacticalBattleCoordinator.ParseCommandNodeInstanceId(synth);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         TestHarness.AssertEqual(0L, allocated, "allocated bytes (sum " + sum + ")");
     }
 

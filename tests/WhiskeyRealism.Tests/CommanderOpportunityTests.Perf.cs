@@ -95,9 +95,9 @@ internal static partial class CommanderOpportunityTests
 
     private static long Allocated(PerfRig rig, int from, int count)
     {
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < count; i++) rig.Run(from + i);
-        return GC.GetAllocatedBytesForCurrentThread() - before;
+        return TestFixtures.AllocatedSince(before);
     }
 
     private static void AllocDetection()

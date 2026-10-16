@@ -27,6 +27,7 @@ There is no registration list. `Program.Main` discovers every top-level `static 
 - Builders and fixtures used by more than one test class live in `TestFixtures.cs`. A helper used by a single class stays private in that class.
 - Per-area files import both with `using static TestHarness;` and `using static TestFixtures;`. Do not add a second copy of a helper in a test class.
 - `TestPluginLogStub.cs` stands in for `Plugin` (log + the config entries pure code reads).
+- Allocation tests measure with `TestFixtures.BeginAllocationWindow()` / `AllocatedSince(mark)`, never with `GC.GetAllocatedBytesForCurrentThread()` directly: a background GC ending its mark phase adds up to ~8 KB of phantom bytes to the raw counter (see the helper's comment). `AllocationMeasurementTests` fails any test file that reads the raw counter.
 
 ## Test Style
 

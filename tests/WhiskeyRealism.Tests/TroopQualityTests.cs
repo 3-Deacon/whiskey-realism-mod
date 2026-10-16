@@ -269,9 +269,9 @@ internal static class TroopQualityTests
 
         Tick(0);
         Tick(1);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int t = 2; t < 6; t++) Tick(t);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         AssertTrue(s.PerceivedEnemyQuality.Known, "quality published");
         AssertEqual(0L, allocated, "quality path allocated bytes after warm-up");
     }

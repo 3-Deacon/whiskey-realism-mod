@@ -604,7 +604,7 @@ internal static class ChargeDoctrineTests
         float[] distances = { 120f, 60f, 90f, 30f };
         ChargeDoctrine.Decide(in ready);
         ChargeDoctrine.IsLeading(distances, 0);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int hits = 0;
         for (int i = 0; i < 10000; i++)
         {
@@ -612,7 +612,7 @@ internal static class ChargeDoctrineTests
             if (ChargeDoctrine.Decide(in armed) == ChargeAction.None) hits++;
             if (ChargeDoctrine.IsLeading(distances, i & 3)) hits++;
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         AssertEqual(25000, hits, "hit count");
         AssertEqual(0L, allocated, "allocated bytes");
     }
@@ -1273,13 +1273,13 @@ internal static class ChargeDoctrineTests
         h.ExecuteAll(1.0);
         h.Plan(b, settings);
         h.Plan(a, settings);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 200; i++)
         {
             h.Sink.Clear();
             ChargeIntentProducer.Plan((i & 1) == 0 ? b : a, settings, h.Memory, h.Executor, h.Sink);
         }
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "allocated bytes");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "allocated bytes");
     }
 
     private sealed class AllowGuard : IOrderGuard
