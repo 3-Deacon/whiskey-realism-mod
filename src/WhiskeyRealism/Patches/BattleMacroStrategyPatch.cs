@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -528,12 +529,22 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // The army-off fallback's aggression. With Enable Per-Commander Personality on it is the side's army
+        // commander's table entry (0.5 without one), so army-on and army-off agree (BC13
+        // requirement-army-vector-from-table); off, the commander's live initiative as before.
         private static float CommanderAggression01(BattleUnits bunits, int side)
         {
             try
             {
                 if (bunits == null || side < 0 || side >= bunits.alliance.Length) return 0.5f;
                 int commanderId = bunits.GetCommandingOfficerFromSide(side);
+                if (Plugin.PerCommanderPersonalityEnabled())
+                {
+                    CommanderPersonalityTable table = CommanderPersonalityRuntime.TableFor(bunits.alliance[side]);
+                    PersonalityVector vector = default;
+                    bool found = table != null && table.TryGet(commanderId, out vector, out _);
+                    return CommanderPersonalityDerivation.ArmyAggression01(found, in vector, bunits.alliance[side]);
+                }
                 if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
                 float initiative = GameVars.commander[commanderId].GetCommanderInitiative();
                 if (float.IsNaN(initiative) || float.IsInfinity(initiative)) return 0.5f;

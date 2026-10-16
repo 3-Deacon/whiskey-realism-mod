@@ -23,6 +23,7 @@ internal static class BattleCoreIntegrationTests
             ("battle-core ProducerRegistryDropsMissingAndMisnamedProducers", ProducerRegistryDropsMissingAndMisnamedProducers),
             ("battle-core ProducerRegistrySurvivesAThrowingFactory", ProducerRegistrySurvivesAThrowingFactory),
             ("battle-core RuntimeRegistryBuildsEveryProducerExplicitly", RuntimeRegistryBuildsEveryProducerExplicitly),
+            ("bc13 OPP-REGISTRY Opportunity runs immediately before Posture; thirteen producers", OpportunityRunsImmediatelyBeforePosture),
             ("battle-core GroupReachIsWidestCombatSightOrCancelDistance", GroupReachIsWidestCombatSightOrCancelDistance),
             ("battle-core ArbiterStatsRowReachesTheMainLog", ArbiterStatsRowReachesTheMainLog),
             ("battle-core DiscardedLegacyRowsRouteToTheSidecar", DiscardedLegacyRowsRouteToTheSidecar),
@@ -34,7 +35,7 @@ internal static class BattleCoreIntegrationTests
 
     private static readonly string[] PlanOrder =
     {
-        "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Posture",
+        "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Opportunity", "Posture",
         "FacingPulse", "FireControl", "DivisionPlay", "Recon", "ReserveRelease", "Charge",
     };
 
@@ -46,12 +47,23 @@ internal static class BattleCoreIntegrationTests
     }
 
     // Plan BC5 order without "Play": the geometric play is no mover (BC5a As built);
-    // BC9 adds Recon after DivisionPlay (it reads the posture producer's per-group record).
+    // BC9 adds Recon after DivisionPlay (it reads the posture producer's per-group record); BC13 adds Opportunity
+    // immediately before Posture (the posture producer executes the exploit table the opportunity producer publishes).
     private static void ProducerRegistryOrderIsThePlanOrder()
     {
         AssertEqual(PlanOrder.Length, BattleProducerRegistry.Order.Count, "producer count");
         for (int i = 0; i < PlanOrder.Length; i++)
             AssertEqual(PlanOrder[i], BattleProducerRegistry.Order[i], "slot " + i);
+    }
+
+    private static void OpportunityRunsImmediatelyBeforePosture()
+    {
+        AssertEqual(13, BattleProducerRegistry.Order.Count, "thirteen producers");
+        int at = -1;
+        for (int i = 0; i < BattleProducerRegistry.Order.Count; i++)
+            if (BattleProducerRegistry.Order[i] == "Opportunity") at = i;
+        AssertTrue(at >= 0, "Opportunity is registered");
+        AssertEqual("Posture", BattleProducerRegistry.Order[at + 1], "immediately before Posture");
     }
 
     private static void ProducerRegistryBuildsEveryNameInOrder()

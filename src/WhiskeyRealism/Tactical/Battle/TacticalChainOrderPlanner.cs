@@ -35,6 +35,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public int[] TargetIndices; // caller-owned; indices into the own records
         public bool FannedOut;
         public bool PlayerShareNeedsDispatch;
+        // BC13: children the fan-out left out because they are player-owned (the order never reaches them).
+        public int PlayerExcluded;
     }
 
     public static class TacticalChainOrderPlanner
@@ -79,7 +81,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 for (int child = 0; child < count; child++)
                 {
                     if (child == parent || own[child].ParentIndex != parent) continue;
-                    if ((own[child].Flags & UnitFlags.PlayerOwned) != 0) continue;
+                    if ((own[child].Flags & UnitFlags.PlayerOwned) != 0)
+                    {
+                        result.PlayerExcluded++;
+                        continue;
+                    }
                     if (shielded != null && child < shielded.Length && shielded[child]) continue;
                     if (NeedsFanOut(own, count, child, shieldedBelow))
                     {
@@ -104,6 +110,7 @@ namespace WhiskeyRealism.Tactical.Battle
             result.Count = 0;
             result.FannedOut = false;
             result.PlayerShareNeedsDispatch = false;
+            result.PlayerExcluded = 0;
         }
 
         private static void Add(ref ChainResolution result, int index)

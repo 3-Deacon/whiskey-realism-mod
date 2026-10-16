@@ -520,7 +520,7 @@ internal static class TacticalPlaybookTests
         }, 0, -1);
         var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
         {
-            DirectIntent("child-100", DirectChildRole.Main, DirectChildAxis.SectorAxis, 1, 0.75f, 0.6f),
+            DirectIntent("child-100", DirectChildRole.Main, DirectChildAxis.SectorAxis, 1, 0.75f),
         });
         var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
         var objective = new ObjectiveRecord(

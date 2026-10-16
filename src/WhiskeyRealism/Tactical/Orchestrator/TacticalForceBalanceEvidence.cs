@@ -81,13 +81,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             BattleStance stance = BattleStance.Meeting,
             SideQuality ownQuality = default,
             SideQuality enemyQuality = default,
-            float initiativeTriggerInfluence = 0f)
+            float initiativeTriggerInfluence = 0f,
+            float commanderCasualtyTolerance01 = 0.5f)
         {
             OwnDeployedStrength = SanitizeNonNeg(ownDeployedStrength);
             EnemyDeployedStrength = SanitizeNonNeg(enemyDeployedStrength);
             OwnArrivals = ownArrivals ?? Array.Empty<ReinforcementArrival>();
             CommanderInitiative01 = Clamp01(commanderInitiative01);
             CommanderAggression01 = Clamp01(commanderAggression01);
+            CommanderCasualtyTolerance01 = Clamp01(commanderCasualtyTolerance01);
             IntelConfidence01 = Clamp01(intelConfidence01);
             OwnCasualtyRatio01 = Clamp01(ownCasualtyRatio01);
             OwnRoutedFraction01 = Clamp01(ownRoutedFraction01);
@@ -107,6 +109,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyList<ReinforcementArrival> OwnArrivals { get; }
         public float CommanderInitiative01 { get; }
         public float CommanderAggression01 { get; }
+
+        /// <summary>
+        /// The army commander's casualty tolerance mapped to [0, 1] (BC13): the basis of the casualty
+        /// escalation threshold with Enable Per-Commander Personality on. 0.5 mid-band when absent.
+        /// </summary>
+        public float CommanderCasualtyTolerance01 { get; }
         public float IntelConfidence01 { get; }
 
         /// <summary>

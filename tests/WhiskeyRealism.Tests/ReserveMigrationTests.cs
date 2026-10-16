@@ -494,12 +494,12 @@ internal static class ReserveMigrationTests
     private static CommandIntentResolution Resolved(DirectChildRole role)
     {
         return new CommandIntentResolution(true,
-            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0f, 0), "test");
+            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0), "test");
     }
 
     private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector)
     {
-        return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f, 0.5f,
+        return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f,
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
     }
 

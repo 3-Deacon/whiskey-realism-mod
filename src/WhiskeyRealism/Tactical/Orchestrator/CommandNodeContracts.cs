@@ -89,7 +89,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildAxis axis,
             int primarySector,
             int supportPriority,
-            float aggressionBias01,
             int depth)
         {
             NodeId = string.IsNullOrWhiteSpace(nodeId) ? "node-unknown" : nodeId;
@@ -98,9 +97,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Axis = axis;
             PrimarySector = Math.Max(0, primarySector);
             SupportPriority = Math.Max(0, Math.Min(100, supportPriority));
-            AggressionBias01 = float.IsNaN(aggressionBias01) || float.IsInfinity(aggressionBias01)
-                ? 0f
-                : Math.Max(0f, Math.Min(1f, aggressionBias01));
             Depth = Math.Max(0, depth);
         }
 
@@ -110,7 +106,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public DirectChildAxis Axis { get; }
         public int PrimarySector { get; }
         public int SupportPriority { get; }
-        public float AggressionBias01 { get; }
         public int Depth { get; }
     }
 

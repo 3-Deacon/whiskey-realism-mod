@@ -80,11 +80,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // Alliances 0 and 1 only; Europe (2) never runs a battle side.
         private static readonly SideState[] _sides = { new SideState(), new SideState() };
         private static readonly HashSet<int> _rangeVisible = new HashSet<int>();
-        // RangeOnly: own unit positions and list reach, refreshed with _rangeVisible.
-        private static float[] _ownX = new float[InitialCapacity];
-        private static float[] _ownZ = new float[InitialCapacity];
-        private static float[] _ownReach = new float[InitialCapacity];
-        private static int _ownReachCount;
+        // RangeOnly: each side's own unit positions and list reach live in OwnReachBuffer.ForAlliance (per alliance).
         private static double _battleStartHours = double.NaN;
         private static bool _geometryRead;
         private static SliceGeometry _geometry;
@@ -110,7 +106,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 _sides[i].HasMode = false;
             }
             _rangeVisible.Clear();
-            _ownReachCount = 0;
             _battleStartHours = double.NaN;
             _geometryRead = false;
             _paintedGrids.Reset();
@@ -204,14 +199,44 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             finally
             {
-                if (_incidentMask.Active)
-                {
-                    string failure = _incidentMask.Restore(incident => incident == null);
-                    if (failure != null)
-                        OnceLog.Warning("tactical.battle-perception:incident-restore",
-                            "[BattlePerception] W&L incident restore failed: " + failure);
-                }
+                RestoreIncidentMask();
             }
+        }
+
+        private static void RestoreIncidentMask()
+        {
+            if (!_incidentMask.Active) return;
+            string failure = _incidentMask.Restore(incident => incident == null);
+            if (failure != null)
+                OnceLog.Warning("tactical.battle-perception:incident-restore",
+                    "[BattlePerception] W&L incident restore failed: " + failure);
+        }
+
+        /// <summary>
+        /// BC13: the incident mask around a block of UnitIsHidden calls the ground probe makes (the opportunity producer's
+        /// perceived-ground oracle), BUG-TAC-020's mask with the same restore. Applied in FogGrid mode only; dispose restores.
+        /// </summary>
+        internal static IncidentMaskScope WithIntelIncidentMask(PerceptionMode mode)
+        {
+            MaskPlayerIntelIncidents(mode);
+            return default;
+        }
+
+        internal readonly struct IncidentMaskScope : IDisposable
+        {
+            public void Dispose() => RestoreIncidentMask();
+        }
+
+        /// <summary>The side's own fog grid (every unit of a side shares it), or null.</summary>
+        internal static FogOfWar GridOf(BattleSnapshot s) => SideGrid(s);
+
+        /// <summary>
+        /// Hands the RangeOnly reach arrays the last probe filled (own units' positions and list reach) to the ground
+        /// oracle. They describe this tick's roster only after a RangeOnly probe, which is the only mode that asks.
+        /// </summary>
+        internal static void FillRangeOnlyGround(int alliance, RangeOnlyPerceivedGround ground)
+        {
+            ground.SetReach(OwnReachBuffer.ForAlliance(alliance));
         }
 
         // FogOfWar.UnitIsHidden returns false for every position while the W&L player's
@@ -264,7 +289,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     if (_rangeVisible.Contains(record.InstanceId)) return true;
                     return (record.Flags & UnitFlags.Routed) != 0
-                        && BattlePerception.WithinAnyReach(_ownX, _ownZ, _ownReach, _ownReachCount, record.X, record.Z);
+                        && OwnReachBuffer.WithinFor(s.Alliance, record.X, record.Z);
             }
         }
 
@@ -283,7 +308,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (column.gameObject.activeInHierarchy) continue; // arrived: probed as a unit
                 Vector3 pos = entry.entrypointposition;
                 bool visible = mode == PerceptionMode.RangeOnly
-                    ? BattlePerception.WithinAnyReach(_ownX, _ownZ, _ownReach, _ownReachCount, pos.x, pos.z)
+                    ? OwnReachBuffer.WithinFor(alliance, pos.x, pos.z)
                     : (UnityEngine.Object)grid != null && !grid.UnitIsHidden(pos);
                 AddRow(ref side.Result, column.gameObject.GetInstanceID(), visible, pos.x, pos.z, column.groupstrength,
                     column.unittyp, routed: false, reinforcement: true, arrivalHours: arrival.durationleft, experience: 0f, morale: 0f);
@@ -321,7 +346,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void CollectRangeVisible(BattleSnapshot s)
         {
             _rangeVisible.Clear();
-            _ownReachCount = 0;
+            OwnReachBuffer reach = OwnReachBuffer.ForAlliance(s.Alliance);   // null: no battle side, no reach is kept
+            if (reach != null) reach.Count = 0;
             float[] sight = GamePrefs.maximumlineofsight;
             UnitRecord[] own = s.Own;
             for (int i = 0; i < s.OwnCount; i++)
@@ -333,20 +359,10 @@ namespace WhiskeyRealism.Tactical.Battle
                     AddIds(unit.unitrange.enemyinfirerangereg);
                 }
                 if ((own[i].Flags & UnitFlags.Active) == 0 || (own[i].Flags & UnitFlags.Routed) != 0) continue;
-                if (_ownReachCount == _ownX.Length)
-                {
-                    int size = _ownX.Length * 2;
-                    Array.Resize(ref _ownX, size);
-                    Array.Resize(ref _ownZ, size);
-                    Array.Resize(ref _ownReach, size);
-                }
                 int t = own[i].UnitTyp;
-                _ownX[_ownReachCount] = own[i].X;
-                _ownZ[_ownReachCount] = own[i].Z;
-                _ownReach[_ownReachCount] = BattlePerception.RangeOnlyReach(
+                reach?.Add(own[i].X, own[i].Z, BattlePerception.RangeOnlyReach(
                     sight != null && t >= 0 && t < sight.Length ? sight[t] : 0f,
-                    GamePrefs.distancetoenemytocancelinterruption);
-                _ownReachCount++;
+                    GamePrefs.distancetoenemytocancelinterruption));
             }
         }
 

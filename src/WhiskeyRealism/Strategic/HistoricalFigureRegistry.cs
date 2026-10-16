@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using HarmonyLib;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -112,7 +111,9 @@ namespace WhiskeyRealism.Strategic
         /// CSA has 7 Lees, 4 Johnstons, 12 Jacksons, 14 Smiths, 11 Andersons),
         /// so a bare surname never matches. Candidates, in order: vanilla
         /// <c>combinedname</c> (= firstname + " " + name, decompile 59081),
-        /// <c>firstname + " " + name</c>, then <paramref name="nameHint"/>.
+        /// <c>firstname + " " + name</c>, then <paramref name="nameHint"/>. A commander the list does not know
+        /// returns the zero vector and <c>isHistorical == false</c>: his temperament is derived from his game stats
+        /// (CommanderPersonalityDerivation, BC13), not from here.
         /// </summary>
         internal static (PersonalityVector vector, bool isHistorical) Resolve(object commanderObj, int allianceId, string nameHint = null)
         {
@@ -128,7 +129,7 @@ namespace WhiskeyRealism.Strategic
                 if (TryMatch(allianceTag, joined, out var v2)) return (v2, true);
                 if (TryMatch(allianceTag, nameHint, out var v3)) return (v3, true);
 
-                return (commanderObj == null ? default(PersonalityVector) : Derive(commanderObj), false);
+                return (default(PersonalityVector), false);
             }
             catch (Exception ex)
             {
@@ -155,37 +156,6 @@ namespace WhiskeyRealism.Strategic
                 }
             }
             return false;
-        }
-
-        private static PersonalityVector Derive(object commanderObj)
-        {
-            bool westpoint = false;
-            bool political = false;
-            float fame     = 0f;
-            float lastfame = 0f;
-            try
-            {
-                var t = commanderObj.GetType();
-                var fWP   = AccessTools.Field(t, "westpoint");
-                var fPol  = AccessTools.Field(t, "political");
-                var fFame = AccessTools.Field(t, "fame");
-                var fLast = AccessTools.Field(t, "lastfame");
-                if (fWP   != null) westpoint = (bool)fWP.GetValue(commanderObj);
-                if (fPol  != null) political = (bool)fPol.GetValue(commanderObj);
-                if (fFame != null) fame      = (float)fFame.GetValue(commanderObj);
-                if (fLast != null) lastfame  = (float)fLast.GetValue(commanderObj);
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning($"[HistoricalFigureRegistry] derive read failed: {ex.Message}");
-            }
-
-            float agg  = (westpoint ? 0.1f : 0f) + (!political ? 0.2f : 0f);
-            float caut = political ? 0.3f : 0f;
-            float aud  = westpoint ? 0.2f : 0f;
-            float cas  = PersonalityVector.Clamp(0.1f * (fame - lastfame));
-            float pol  = political ? 0.4f : 0f;
-            return new PersonalityVector(agg, caut, aud, cas, pol);
         }
 
         /// <summary>

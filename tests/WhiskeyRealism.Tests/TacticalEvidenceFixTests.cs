@@ -918,7 +918,7 @@ internal static class TacticalEvidenceFixTests
     }
 
     private static DirectChildIntent DI(string id, DirectChildRole role, int sector)
-        => new DirectChildIntent(id, 15, 15, id, sector, role, DirectChildAxis.SectorAxis, sector, 0.5f, 0.5f,
+        => new DirectChildIntent(id, 15, 15, id, sector, role, DirectChildAxis.SectorAxis, sector, 0.5f,
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
 
     private static void MainRoleHysteresis()

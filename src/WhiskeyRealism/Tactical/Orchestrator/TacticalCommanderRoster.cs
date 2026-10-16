@@ -10,6 +10,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int AllianceId { get; set; }
         public bool MatchedHistoricalRegistry { get; set; }
         public PersonalityVector PersonalityVector { get; set; }
+
+        /// <summary>Where the vector came from (BC13): the list, a derivation from the commander's stats, or the faction default.</summary>
+        public WhiskeyRealism.Tactical.Battle.PersonalitySource Source { get; set; }
     }
 
     public readonly struct SyntheticCommanderInput

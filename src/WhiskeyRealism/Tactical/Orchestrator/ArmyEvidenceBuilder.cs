@@ -1016,7 +1016,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             AIBattle battle,
             int allianceId,
             float commanderInitiative01,
-            float commanderAggression01)
+            float commanderAggression01,
+            float commanderCasualtyTolerance01)
         {
             try
             {
@@ -1078,7 +1079,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     stance: stance,
                     ownQuality: ownQuality,
                     enemyQuality: enemyQuality,
-                    initiativeTriggerInfluence: quality.InitiativeInfluence);
+                    initiativeTriggerInfluence: quality.InitiativeInfluence,
+                    commanderCasualtyTolerance01: commanderCasualtyTolerance01);
             }
             catch (Exception e)
             {
