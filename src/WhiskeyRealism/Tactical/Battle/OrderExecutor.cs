@@ -80,12 +80,18 @@ namespace WhiskeyRealism.Tactical.Battle
         // CheckIfOutflanked retreat (6235) and CheckForSeparatedEnemy (8188).
         // The executor's only in-contact reaction is a withdrawal under contact
         // or flank risk; everything else is a planned group move.
+        //
+        // BC13: an exploit's Advance and Strike Moves are not delayed either, as vanilla's own isolated-target move
+        // (CheckForSeparatedEnemy 8188, useorderdelay: false): the courier cadence never applies, and the asset
+        // settles the moment it is ordered. The posture pipeline passes exploit for an exploit order only.
         public static bool ShouldUseOrderDelayForExecutorWaypoint(
             CommandTaskType task,
             bool battleActive,
-            bool inContactWithdrawal = false)
+            bool inContactWithdrawal = false,
+            bool exploit = false)
         {
             if (!battleActive) return true;
+            if (exploit) return false;
             if (task == CommandTaskType.FallBackToLine && inContactWithdrawal) return false;
             return true;
         }

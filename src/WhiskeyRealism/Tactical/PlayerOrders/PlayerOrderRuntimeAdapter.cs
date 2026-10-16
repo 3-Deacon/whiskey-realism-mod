@@ -330,7 +330,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     resolution.Intent.Axis.ToString(),
                     resolution.Intent.PrimarySector,
                     resolution.Intent.SupportPriority,
-                    resolution.Intent.AggressionBias01,
                     resolution.Intent.Depth),
                 resolution.Reason);
         }

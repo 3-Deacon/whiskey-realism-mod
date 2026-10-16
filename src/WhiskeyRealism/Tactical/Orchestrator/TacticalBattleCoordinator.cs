@@ -158,15 +158,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible)
         {
+            unchecked { BattleDayEpoch++; }
             if (army == null || !army.HasPlan) return;
             var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);
             army.Replan(ownEvidence, intent);
         }
 
+        /// <summary>
+        /// Counts new battle days (each side's night replan bumps it): the opportunity tick ends every live exploit when it changes
+        /// (OVR-NEWDAY). The night's end-of-day stand-down has usually cleared the table by then.
+        /// </summary>
+        internal static int BattleDayEpoch { get; private set; }
+
         /// <summary>Battle end / failure: clock back to 0, no suspension.</summary>
         internal static void ResetDoctrineClock()
         {
+            BattleDayEpoch = 0;
             _endOfDayGate = new TacticalEndOfDayGate();
             _doctrineClock = new TacticalDoctrineClock();
             _doctrineClockSampled = false;
@@ -360,7 +368,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     h = h * 31 + intent.PrimarySector;
                     h = h * 31 + intent.SupportPriority;
                     h = h * 31 + intent.Depth;
-                    h = h * 31 + intent.AggressionBias01.GetHashCode();
                 }
                 return h;
             }

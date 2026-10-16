@@ -281,6 +281,15 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>The probe nomination of <paramref name="groupId"/>: its look point.</summary>
+        /// <summary>BC13: the running mission's scout group, 0 with no mission (an exploit never picks it, an ancestor or a descendant).</summary>
+        public int MissionScoutId => Leg != ReconLeg.None ? ScoutId : 0;
+
+        /// <summary>BC13: the group is a probe's nominee or holds the ground its probe gained (an exploit never picks it).</summary>
+        public bool HasProbeOrHold(int groupId)
+        {
+            return groupId != 0 && (TryGetProbe(groupId, out _, out _) || HoldSlotOf(groupId) >= 0);
+        }
+
         public bool TryGetProbe(int groupId, out float x, out float z)
         {
             for (int b = 0; b < MaxBands; b++)

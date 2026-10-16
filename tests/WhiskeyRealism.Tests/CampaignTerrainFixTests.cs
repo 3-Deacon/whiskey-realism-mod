@@ -435,7 +435,8 @@ internal static class CampaignTerrainFixTests
         int reinforcements = fill.IndexOf("AddReinforcements(", StringComparison.Ordinal);
         AssertTrue(mask >= 0 && mask < enemies && mask < reinforcements, "masked before both UnitIsHidden paths");
         int finallyAt = fill.IndexOf("finally", StringComparison.Ordinal);
-        AssertTrue(finallyAt > reinforcements && fill.IndexOf("_incidentMask.Restore(", finallyAt, StringComparison.Ordinal) > finallyAt, "restored in finally");
+        AssertTrue(finallyAt > reinforcements && fill.IndexOf("RestoreIncidentMask();", finallyAt, StringComparison.Ordinal) > finallyAt, "restored in finally");
+        AssertTrue(Body(probe, "private static void RestoreIncidentMask(").Contains("_incidentMask.Restore("), "the restore unmasks the incidents");
         AssertTrue(Body(probe, "private static void MaskPlayerIntelIncidents(").Contains("BattlePerception.MasksPlayerIntelIncidents(mode, DLC_WL.dlc_scenarioactive)"), "mask only for the AI side's fog grid");
     }
 

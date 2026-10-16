@@ -12,7 +12,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             string axis,
             int primarySector,
             int supportPriority,
-            float aggressionBias01,
             int depth)
         {
             NodeId = Clean(nodeId);
@@ -21,7 +20,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             Axis = Clean(axis);
             PrimarySector = Math.Max(0, primarySector);
             SupportPriority = Math.Max(0, Math.Min(100, supportPriority));
-            AggressionBias01 = Clamp01(aggressionBias01);
             Depth = Math.Max(0, depth);
         }
 
@@ -31,18 +29,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public string Axis { get; }
         public int PrimarySector { get; }
         public int SupportPriority { get; }
-        public float AggressionBias01 { get; }
         public int Depth { get; }
 
         private static string Clean(string value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
-
-        private static float Clamp01(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
-            if (value < 0f) return 0f;
-            if (value > 1f) return 1f;
-            return value;
-        }
     }
 
     internal readonly struct CommandIntentResolutionSnapshot

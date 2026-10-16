@@ -303,7 +303,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     DirectChildAxis.Hold,
                     primarySector: 0,
                     supportPriority: 0,
-                    aggressionBias01: 0f,
                     depth: 0),
                 "operations-ledger-command-state:" + state.Role + ":" + state.Task);
         }

@@ -58,7 +58,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     directIntent.Axis,
                     directIntent.PrimarySector,
                     (int)Math.Round(directIntent.SupportPriority01 * 100f),
-                    directIntent.AggressionBias01,
                     node.Depth);
             }
 
@@ -74,7 +73,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         parentIntent.Axis,
                         parentIntent.PrimarySector,
                         parentIntent.SupportPriority,
-                        parentIntent.AggressionBias01,
                         node.Depth);
                 }
 
@@ -88,7 +86,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 DirectChildAxis.Hold,
                 primarySector: 0,
                 supportPriority: 25,
-                aggressionBias01: 0.5f,
                 node.Depth);
         }
 

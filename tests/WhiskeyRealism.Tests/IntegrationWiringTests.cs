@@ -28,7 +28,7 @@ internal static class IntegrationWiringTests
     private static CommandIntentResolution Resolved(DirectChildRole role)
         => new CommandIntentResolution(true,
             new CommandNodeIntent("node-200", "node-200", role, DirectChildAxis.Hold,
-                primarySector: 2, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
+                primarySector: 2, supportPriority: 50, depth: 1),
             "test");
 
     private static readonly CommandIntentResolution NotFound = new CommandIntentResolution(false, default, "missing");

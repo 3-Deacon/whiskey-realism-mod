@@ -85,11 +85,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   aggression 0.0 (cautious)  → 1.56  ("need 56% advantage")
         //   aggression 0.5 (mid-band)  → 1.32  ("need 32% advantage")
         //   aggression 1.0 (aggressive)→ 1.08  ("need 8% advantage")
-        // Capped at parity for Meeting/Attacker stances — see
-        // EffectiveAttackThreshold.
+        // Meeting/Attacker stances use the band below instead (EffectiveAttackThreshold).
         public const float BaseAttackThreshold = 1.20f;
         public const float AggressionThresholdScale = 0.40f;
         public const float AggressionThresholdOffset = 1.30f;
+
+        // BC13 (requirement-attack-threshold-band): the Meeting/Attacker threshold is a band centred on parity,
+        //   1.0 + 0.4 x (0.5 - aggression01): 1.20 at aggression 0, 1.00 at 0.5, 0.80 at 1.0.
+        // The parity cap it replaces made personality inert for attackers (a mid commander is unchanged).
+        public const float NonDefenderBandCentre = 1.0f;
+        public const float NonDefenderBandSlope = 0.4f;
 
         // Personality-tuned attack-window (minimum hours the enemy must stay
         // weak enough for the attack to complete before parity):
@@ -130,6 +135,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   aggressive (1.0)  → casualty 0.15, rout 0.30
         //   mid       (0.5)   → casualty 0.10, rout 0.22
         //   cautious  (0.0)   → casualty 0.05, rout 0.15
+        // The casualty threshold reads the commander's CasualtyTolerance (BC13, requirement-personality-live-inputs;
+        // aggression with Enable Per-Commander Personality off); the rout threshold keeps aggression.
         public const float BaseCasualtyEscalationThreshold = 0.05f;
         public const float CasualtyAggressionScale = 0.10f;
         public const float BaseRoutEscalationThreshold = 0.15f;
@@ -293,7 +300,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 (parityForOwn >= 999f || parityForOwn > maxWaitHours))
             {
                 // Check escalation triggers.
-                float casualtyThreshold = ComputeCasualtyEscalationThreshold(ev.CommanderAggression01);
+                float casualtyBasis = Plugin.PerCommanderPersonalityEnabled() ? ev.CommanderCasualtyTolerance01 : ev.CommanderAggression01;
+                float casualtyThreshold = ComputeCasualtyEscalationThreshold(casualtyBasis);
                 float routEscalationThreshold = ComputeRoutEscalationThreshold(ev.CommanderAggression01);
                 bool casualtyEscalation = ev.OwnCasualtyRatio01 >= casualtyThreshold;
                 bool routEscalation = ev.OwnRoutedFraction01 >= routEscalationThreshold;
@@ -356,16 +364,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Personality-modulated casualty ratio above which a side delaying
-        /// defensively escalates to withdrawal. Aggressive commanders tolerate
-        /// higher losses; cautious commanders pull back sooner.
-        ///   aggressive (1.0) → 0.15  (15% casualties before withdraw)
-        ///   mid       (0.5) → 0.10
-        ///   cautious  (0.0) → 0.05
+        /// defensively escalates to withdrawal. A commander who accepts loss
+        /// (casualty tolerance 1.0; vanilla's leadership and veteran stats
+        /// through CommanderPersonalityDerivation) tolerates more before pulling back.
+        ///   tolerant (1.0) → 0.15  (15% casualties before withdraw)
+        ///   mid      (0.5) → 0.10
+        ///   careful  (0.0) → 0.05
         /// </summary>
-        public static float ComputeCasualtyEscalationThreshold(float aggression01)
+        public static float ComputeCasualtyEscalationThreshold(float casualtyTolerance01)
         {
-            float agg = Clamp01(aggression01);
-            return BaseCasualtyEscalationThreshold + agg * CasualtyAggressionScale;
+            float tolerance = Clamp01(casualtyTolerance01);
+            return BaseCasualtyEscalationThreshold + tolerance * CasualtyAggressionScale;
         }
 
         /// <summary>
@@ -396,21 +405,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// whenever forcebalance ≥ forcebalancetriggerattack / (1 + initiative
         /// × 0.7) = 0.80 / 1.35 ≈ 0.59 at mid initiative (battleprefs) — below
         /// parity. Requiring 1.08-1.56x for every stance left both sides of a
-        /// near-even meeting in DefensiveHold (BR-H1). Meeting/Attacker cap at
-        /// parity; a Defender keeps the personality threshold (vanilla's
-        /// defender only assaults at overwhelming balance, 6408).
+        /// near-even meeting in DefensiveHold (BR-H1), so the parity cap fixed that
+        /// and made personality inert for attackers. BC13 replaces the cap with a
+        /// band centred on it: Meeting/Attacker use 1.0 + 0.4 x (0.5 - aggression01)
+        /// (1.20 / 1.00 / 0.80 at aggression 0 / 0.5 / 1; a mid commander is
+        /// unchanged). With Enable Per-Commander Personality off the cap returns.
+        /// A Defender keeps the personality threshold (vanilla's defender only
+        /// assaults at overwhelming balance, 6408).
         /// </summary>
         public static float EffectiveAttackThreshold(float commanderAggression01, BattleStance stance)
         {
+            if (stance == BattleStance.Defender) return ComputeAttackThreshold(commanderAggression01);
+            if (Plugin.PerCommanderPersonalityEnabled())
+                return NonDefenderBandCentre + NonDefenderBandSlope * (0.5f - Clamp01(commanderAggression01));
             float t = ComputeAttackThreshold(commanderAggression01);
-            if (stance != BattleStance.Defender && t > 1f) t = 1f;
-            return t;
+            return t > 1f ? 1f : t;
         }
 
         /// <summary>
         /// The stance threshold divided as vanilla divides its attack/defend/assault triggers
         /// (CheckGlobalAIStrategy 6396-6430): / (1 + live initiative ×
-        /// influenceofcommanderinitiativeonattackdefendtrigger), after the parity cap. With
+        /// influenceofcommanderinitiativeonattackdefendtrigger), after the band. With
         /// the shipped 0.7 a mid-initiative commander's Meeting/Attacker threshold is 1 / 1.35
         /// ≈ 0.74 (vanilla's own attack trigger is 0.80 / 1.35 ≈ 0.59). Influence 0 is the
         /// undivided threshold (BC8 rollback).

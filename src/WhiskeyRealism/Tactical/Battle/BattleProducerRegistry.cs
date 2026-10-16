@@ -24,7 +24,7 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         public static readonly IReadOnlyList<string> Order = new[]
         {
-            "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Posture",
+            "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Opportunity", "Posture",
             "FacingPulse", "FireControl", "DivisionPlay", "Recon", "ReserveRelease", "Charge",
         };
 
@@ -78,7 +78,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// OnceLog key for a producer that threw, built once per producer (a fixed
-        /// set of twelve, so the keys stay static); prefixed "tactical" so
+        /// set of thirteen, so the keys stay static); prefixed "tactical" so
         /// OnceLog.ResetTactical re-arms it each battle.
         /// </summary>
         public string ThrewKey(int index) => _threwKeys[index];

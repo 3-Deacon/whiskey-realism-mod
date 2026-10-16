@@ -37,14 +37,6 @@ internal static class TacticalB6Tests
             ("tactical b6c reaction context returns last decision per group", TacticalB6cReactionContextReturnsLastDecisionPerGroup),
             ("tactical b6c reaction context clear discards all entries", TacticalB6cReactionContextClearDiscardsAllEntries),
             ("tactical b6c reaction context missing key returns default maintain", TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain),
-            ("tactical b6a probe posture maps to probe intent", TacticalB6aProbePostureMapsToProbeIntent),
-            ("tactical b6a concentrated attack maps to attack", TacticalB6aConcentratedAttackMapsToAttack),
-            ("tactical b6a concentrated attack with weak point and high init upgrades to all out", TacticalB6aConcentratedAttackUpgradesToAllOut),
-            ("tactical b6a exploit breakthrough downgrades on low confidence", TacticalB6aExploitDowngradesOnLowConfidence),
-            ("tactical b6a counterstroke maps to defend", TacticalB6aCounterstrokeMapsToDefend),
-            ("tactical b6a screen and delay maps to defend", TacticalB6aScreenAndDelayMapsToDefend),
-            ("tactical b6a reinforce and hold maps to hold", TacticalB6aReinforceAndHoldMapsToHold),
-            ("tactical b6a recover maps to hold to last", TacticalB6aRecoverMapsToHoldToLast),
             ("tactical b6a no plan falls back to macro", TacticalB6aNoPlanFallsBackToMacro),
             ("tactical b6a macro retreat falls to hold to last", TacticalB6aMacroRetreatFallsToHoldToLast),
             ("tactical b6a macro attack aggressive commander upgrades to all out", TacticalB6aMacroAttackAggressiveCommanderUpgradesToAllOut),
@@ -86,111 +78,16 @@ internal static class TacticalB6Tests
         });
     }
 
-    private static void TacticalB6aProbePostureMapsToProbeIntent()
-    {
-        var input = new TacticalIntentInput(
-            operationPosture: WhiskeyRealism.Strategic.OperationPosture.ProbeAndDevelop,
-            hasPlan: true,
-            vanillaMacro: 1,
-            commanderInitiative01: 0.5f,
-            oddsConfidence: 0.7f,
-            weakPointConfirmed: false);
-
-        var decision = TacticalCommanderIntentResolver.Resolve(input);
-
-        AssertTrue(decision.Intent == CommanderIntent.ProbeIntent, "Expected ProbeIntent, got " + decision.Intent);
-        AssertTrue(!decision.AllowsCharge, "ProbeIntent must not allow charge");
-    }
-
-    private static void TacticalB6aConcentratedAttackMapsToAttack()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.ConcentratedAttack,
-            hasPlan: true, vanillaMacro: 1, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.7f, weakPointConfirmed: false);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.Attack, "Expected Attack, got " + d.Intent);
-        AssertTrue(d.AllowsCharge, "Attack should allow charge");
-    }
-
-    private static void TacticalB6aConcentratedAttackUpgradesToAllOut()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.ConcentratedAttack,
-            hasPlan: true, vanillaMacro: 0, commanderInitiative01: 0.7f,
-            oddsConfidence: 0.8f, weakPointConfirmed: true);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.AllOutAttack, "Expected AllOutAttack, got " + d.Intent);
-    }
-
-    private static void TacticalB6aExploitDowngradesOnLowConfidence()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.ExploitBreakthrough,
-            hasPlan: true, vanillaMacro: 0, commanderInitiative01: 0.7f,
-            oddsConfidence: 0.4f, weakPointConfirmed: true);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.Attack, "Expected Attack on low confidence, got " + d.Intent);
-    }
-
-    private static void TacticalB6aCounterstrokeMapsToDefend()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Counterstroke,
-            hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.6f, weakPointConfirmed: false);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.Defend, "Expected Defend, got " + d.Intent);
-        AssertTrue(d.AllowsCharge, "Counterstroke must keep charge available for LimitedCounterstroke");
-    }
-
-    private static void TacticalB6aScreenAndDelayMapsToDefend()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.ScreenAndDelay,
-            hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.Defend, "Expected Defend, got " + d.Intent);
-        AssertTrue(!d.AllowsCharge, "ScreenAndDelay must not allow charge");
-    }
-
-    private static void TacticalB6aReinforceAndHoldMapsToHold()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.ReinforceAndHold,
-            hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.Hold, "Expected Hold, got " + d.Intent);
-    }
-
-    private static void TacticalB6aRecoverMapsToHoldToLast()
-    {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Recover,
-            hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
-        var d = TacticalCommanderIntentResolver.Resolve(input);
-        AssertTrue(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast, got " + d.Intent);
-    }
-
     private static void TacticalB6aNoPlanFallsBackToMacro()
     {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 2, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 2, commanderInitiative01: 0.5f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.Defend, "Expected Defend from macro 2, got " + d.Intent);
     }
 
     private static void TacticalB6aMacroRetreatFallsToHoldToLast()
     {
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 3, commanderInitiative01: 0.5f,
-            oddsConfidence: 0.0f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 3, commanderInitiative01: 0.5f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast from macro 3, got " + d.Intent);
     }
@@ -198,10 +95,7 @@ internal static class TacticalB6Tests
     private static void TacticalB6aMacroAttackAggressiveCommanderUpgradesToAllOut()
     {
         // Hood-style high-initiative commander on macro=attack: upgrade to all-out.
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.85f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 1, commanderInitiative01: 0.85f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.AllOutAttack,
             "Aggressive commander on macro-attack should escalate to AllOutAttack, got " + d.Intent);
@@ -211,10 +105,7 @@ internal static class TacticalB6Tests
     private static void TacticalB6aMacroAttackCautiousCommanderDeescalatesToProbe()
     {
         // McClellan-style low-initiative commander on macro=attack: down-shift to probe.
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.15f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 1, commanderInitiative01: 0.15f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.ProbeIntent,
             "Cautious commander on macro-attack should de-escalate to ProbeIntent, got " + d.Intent);
@@ -224,10 +115,7 @@ internal static class TacticalB6Tests
     private static void TacticalB6aMacroAttackMidInitiativePreservesAttack()
     {
         // Regression: mid-band 0.5 initiative on macro=attack → still Attack (unchanged).
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.50f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 1, commanderInitiative01: 0.50f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.Attack,
             "Mid-band initiative on macro-attack should preserve Attack, got " + d.Intent);
@@ -236,10 +124,7 @@ internal static class TacticalB6Tests
     private static void TacticalB6aMacroAssaultCautiousCommanderDowngrades()
     {
         // Macro=assault (0) with very cautious commander: downgrade to Attack (not all-out).
-        var input = new TacticalIntentInput(
-            WhiskeyRealism.Strategic.OperationPosture.Inherit,
-            hasPlan: false, vanillaMacro: 0, commanderInitiative01: 0.15f,
-            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var input = new TacticalIntentInput(vanillaMacro: 0, commanderInitiative01: 0.15f);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.Attack,
             "Cautious commander on macro-assault should downgrade to Attack, got " + d.Intent);
