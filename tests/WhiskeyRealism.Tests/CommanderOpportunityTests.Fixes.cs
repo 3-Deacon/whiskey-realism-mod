@@ -128,6 +128,11 @@ internal static partial class CommanderOpportunityTests
         int snap = factsBody.IndexOf("BattleCore.TryGetSnapshot(", StringComparison.Ordinal);
         AssertTrue(guard > 0 && feud > 0 && snap > guard && snap > feud, "the player, feud and mode guards come before the snapshot is read");
         AssertContains(body, "__result = null;", "a refused pick becomes null (vanilla's 5050 test skips the charge)");
+        // Fail-open: where the gate does not apply, the result is left alone.
+        int gate = body.IndexOf("if (!CavalryStrikeGate.Applies(in scope))", StringComparison.Ordinal);
+        int vanillaPick = body.IndexOf("Regiment vanilla = __result;", StringComparison.Ordinal);
+        AssertTrue(gate > 0 && vanillaPick > gate, "the gate precedes the check");
+        AssertFalse(body.Substring(gate, vanillaPick - gate).Contains("__result = null"), "a call outside the discipline keeps vanilla's pick");
     }
 
     // The real IL: exactly one call to Regiment.GetClosestEnemyUnitReg in AdjustCavalryBehavior, its first argument
