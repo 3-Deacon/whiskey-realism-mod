@@ -36,6 +36,8 @@ internal static class StrategicOperationsTests
             ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges),
             ("formation directive carries stable id and position", FormationDirectiveCarriesStableIdAndPosition),
             ("formation directive summary changes on stable position", FormationDirectiveSummaryChangesOnStablePosition),
+            ("formation directive flags per reason", FormationDirectiveFlagsPerReason),
+            ("attached division inherits the parent's defensive flag and donates nothing", AttachedDivisionInheritsDefensiveFlagAndDonatesNothing),
         });
     }
 
@@ -195,6 +197,74 @@ internal static class StrategicOperationsTests
         string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
 
         AssertTrue(first != second, "summary must change when stable position changes");
+    }
+
+    // Every reason the ledger can give a top formation, with the directive and the two flags it sets
+    // (DefensiveAllowed: DefenseIntentRuntime may use the formation as a defender; TransferDonorAllowed:
+    // StrategicMovementBudget may take men from it). The order of the rows is the order of the rules, so a
+    // swapped, forgotten or defaulted flag turns exactly one row red.
+    private static void FormationDirectiveFlagsPerReason()
+    {
+        var rows = new (string reason, FormationDirective directive, bool defensive, bool donor, Func<FormationSnapshot> snap, bool recon)[]
+        {
+            ("low-morale-readiness", FormationDirective.Recover, false, false, () => { var x = Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold); x.Morale = 0.2f; return x; }, false),
+            ("low-ammo-supply", FormationDirective.Recover, false, false, () => { var x = Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold); x.RifleAmmo = 0.1f; return x; }, false),
+            ("retreat-skirmish-risk", FormationDirective.Delay, true, false, () => { var x = Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold); x.OnRetreat = true; x.HasActivePath = true; return x; }, false),
+            ("recon-mission", FormationDirective.Screen, true, false, () => Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold), true),
+            ("division-vs-army-no-support", FormationDirective.Delay, true, false, () => Snapshot("u", 0, 14, 4500f, 50000f, FormationLevel.Army, FrontPosture.Hold), false),
+            ("division-vs-corps-delay", FormationDirective.Delay, true, false, () => Snapshot("u", 0, 14, 4500f, 9000f, FormationLevel.Corps, FrontPosture.Hold), false),
+            ("front-concede", FormationDirective.Concede, false, true, () => Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Concede), false),
+            ("economy-of-force", FormationDirective.Reserve, true, true, () => Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.EconomyOfForce), false),
+            ("army-plan-target", FormationDirective.Mass, true, false, () => { var x = Snapshot("u", 0, 16, 40000f, 0f, FormationLevel.Unknown, FrontPosture.Hold); x.IsPlanTargetArea = true; x.GrandArmyStructureAvailable = true; return x; }, false),
+            ("risk-gate-passed", FormationDirective.Counterstroke, true, false, () => Snapshot("u", 0, 15, 10000f, 5000f, FormationLevel.Corps, FrontPosture.Counterstroke), false),
+            ("risk-gate-passed", FormationDirective.Mass, true, false, () => Snapshot("u", 0, 15, 10000f, 5000f, FormationLevel.Corps, FrontPosture.Exploit), false),
+            ("critical-sector", FormationDirective.Guard, true, false, () => { var x = Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold); x.IsCriticalSector = true; return x; }, false),
+            ("army-hold", FormationDirective.Hold, true, false, () => Snapshot("u", 0, 16, 40000f, 0f, FormationLevel.Unknown, FrontPosture.Hold), false),
+            (FormationDirectiveLedger.DefaultHoldReason, FormationDirective.Hold, true, false, () => Snapshot("u", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold), false),
+        };
+        foreach (var row in rows)
+        {
+            var ledger = FormationDirectiveLedger.Build(new[] { row.snap() }, EraStage.Operational1862, null, null, row.recon ? (Func<string, bool>)(_ => true) : null);
+            var a = ledger.GetAssignment("u");
+            string label = row.reason + "/" + row.directive;
+            AssertEqual(row.reason, a.Reason, label + ": reason");
+            AssertEqual(row.directive, a.Directive, label + ": directive");
+            AssertEqual(row.defensive, a.DefensiveAllowed, label + ": defensive flag");
+            AssertEqual(row.donor, a.TransferDonorAllowed, label + ": donor flag");
+            AssertTrue(a.DirectMovementAllowed, label + ": a top formation takes a direct movement");
+        }
+    }
+
+    // An attached division repeats its parent's directive and DefensiveAllowed, is never a transfer donor and takes no
+    // direct movement; with no parent in the ledger it defends and says so.
+    private static void AttachedDivisionInheritsDefensiveFlagAndDonatesNothing()
+    {
+        FormationSnapshot Child(string parentKey)
+        {
+            var c = Snapshot("child", 0, 14, 4000f, 0f, FormationLevel.Unknown, FrontPosture.Hold);
+            c.IsTopUnit = false;
+            c.ParentUnitKey = parentKey;
+            return c;
+        }
+
+        var concede = Snapshot("parent", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Concede);
+        var under = FormationDirectiveLedger.Build(new[] { concede, Child("parent") }, EraStage.Operational1862, null).GetAssignment("child");
+        AssertEqual(FormationDirective.Concede, under.Directive, "the child repeats the parent's directive");
+        AssertEqual("attached-inherits-parent", under.Reason, "and says why");
+        AssertFalse(under.DefensiveAllowed, "a conceding parent's child does not defend");
+        AssertFalse(under.TransferDonorAllowed, "the parent donates (front-concede), the child never does");
+        AssertFalse(under.DirectMovementAllowed, "an attached division takes no direct movement");
+
+        var hold = Snapshot("parent", 0, 15, 10000f, 0f, FormationLevel.Unknown, FrontPosture.Hold);
+        var underHold = FormationDirectiveLedger.Build(new[] { hold, Child("parent") }, EraStage.Operational1862, null).GetAssignment("child");
+        AssertTrue(underHold.DefensiveAllowed, "a holding parent's child defends");
+        AssertEqual(FormationDirectiveLedger.DefaultHoldReason, underHold.Reason, "and keeps the default-hold reason, so its perks fall through to the objective role");
+
+        var orphan = FormationDirectiveLedger.Build(new[] { Child("gone") }, EraStage.Operational1862, null).GetAssignment("child");
+        AssertEqual("attached-parent-missing", orphan.Reason, "no parent in the ledger");
+        AssertEqual(FormationDirective.Hold, orphan.Directive, "holds");
+        AssertTrue(orphan.DefensiveAllowed, "and defends");
+        AssertFalse(orphan.TransferDonorAllowed, "and donates nothing");
     }
 
     private static FormationSnapshot ProbeSnapshot(
