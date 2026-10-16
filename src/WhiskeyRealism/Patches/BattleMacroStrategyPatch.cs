@@ -541,9 +541,9 @@ namespace WhiskeyRealism.Patches
                 if (Plugin.PerCommanderPersonalityEnabled())
                 {
                     CommanderPersonalityTable table = CommanderPersonalityRuntime.TableFor(bunits.alliance[side]);
-                    return table != null && table.TryGet(commanderId, out PersonalityVector vector, out _)
-                        ? CommanderPersonalityDerivation.To01(vector.Aggression)
-                        : 0.5f;
+                    PersonalityVector vector = default;
+                    bool found = table != null && table.TryGet(commanderId, out vector, out _);
+                    return CommanderPersonalityDerivation.ArmyAggression01(found, in vector, bunits.alliance[side]);
                 }
                 if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
                 float initiative = GameVars.commander[commanderId].GetCommanderInitiative();

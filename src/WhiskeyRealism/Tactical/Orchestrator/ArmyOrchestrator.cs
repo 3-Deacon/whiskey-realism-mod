@@ -643,12 +643,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // Child ids read "child-" + the instance id.
-        internal static int ChildInstanceId(string childId)
-        {
-            const string prefix = "child-";
-            return !string.IsNullOrEmpty(childId) && childId.StartsWith(prefix, System.StringComparison.Ordinal) &&
-                int.TryParse(childId.Substring(prefix.Length), out int id) ? id : 0;
-        }
+        internal static int ChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);
 
         // One TacticalReserveRelease row per stagger or crisis release of this allocation (bounded by the releases themselves).
         private void EmitStaggeredReleaseTelemetry()

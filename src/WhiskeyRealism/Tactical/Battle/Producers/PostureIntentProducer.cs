@@ -496,7 +496,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC13 requirement-exploit-override: a descendant of an exploiting asset follows. vanilla's group order re-lays every
             // child (SetGroupFormation 92076-92108), so the posture producer submits no Move and no Formation for it; its facing
             // pulse and fire control read the posture recorded here and run as usual.
-            if (exploitKind == ExploitOverrideKind.Follow)
+            if (!ExploitPosture.SubmitsMoveOrFormation(exploitKind))
             {
                 if (recordTick)
                 {
@@ -699,6 +699,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 InContactWithdrawal = closeEngaged || flankRisk,
                 AvoidCoveredCrossings = hasTarget && PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z),
                 Exploit = exploit,
+                ExploitId = exploit && hasOrder && order.ExploitId > 0 ? order.ExploitId : 0,
                 Refuse = refuseDue ? refuse : RefuseFlank.None,
                 // #61 wheeled with the threat heading whenever it had one (not only
                 // when the facing was off): a refuse-only wheel faces the threat.

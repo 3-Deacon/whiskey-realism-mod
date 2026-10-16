@@ -243,6 +243,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\StanceCooldownRestamp.cs" Link="Battle\BugFixes\StanceCooldownRestamp.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\ReserveSupportPickIl.cs" Link="Battle\BugFixes\ReserveSupportPickIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\ArtillerySideIl.cs" Link="Battle\BugFixes\ArtillerySideIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\BattleFixGate.cs" Link="Battle\BugFixes\BattleFixGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\SeparatedEnemySteerGate.cs" Link="Battle\BugFixes\SeparatedEnemySteerGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BugFixes\MacroUpgradeIl.cs" Link="Battle\BugFixes\MacroUpgradeIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReserveReleaseState.cs" Link="Orchestrator\ReserveReleaseState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpportunityDoctrine.cs" Link="Battle\OpportunityDoctrine.cs" />

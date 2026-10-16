@@ -4,6 +4,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.BugFixes;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -92,13 +93,8 @@ namespace WhiskeyRealism.Patches
                 if (battle == null || (UnityEngine.Object)__result == null) return;
                 try
                 {
-                    if (!Plugin.CavalryStrikeDisciplineEnabled() || (UnityEngine.Object)__instance == null || __instance.unittyp != TacticalUnitType.Cavalry) return;
-                    if (!TacticalBattleCoordinator.DrivesOrchestrator(battle.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(battle)) return;
-                    if (!TacticalWriteGuard.CanWrite(__instance)) return;
-                    if (Plugin.EnableBattleFogHonestPerception == null || !Plugin.EnableBattleFogHonestPerception.Value) return;
-                    if (!BattleCore.TryGetSnapshot(__instance.alliance, out BattleSnapshot snapshot) || snapshot == null) return;
-                    int charger = snapshot.IndexOfOwn(__instance.gameObject.GetInstanceID());
-                    if (charger < 0) return;
+                    CavalryStrikeScope scope = Facts(battle, __instance, out BattleSnapshot snapshot, out int charger);
+                    if (!CavalryStrikeGate.Applies(in scope)) return;
 
                     Regiment vanilla = __result;
                     bool allowed = Evaluate(snapshot, charger, __instance, vanilla, out string reason);
@@ -116,7 +112,8 @@ namespace WhiskeyRealism.Patches
                     }
                     __result = null;
                     Row(__instance, snapshot, "refused", reason);
-                    OnceLog.Info("tactical-battle-core:cavalry-strike-first-refusal", "[CavalryStrike] first refused: reason=" + reason);
+                    if (!OnceLog.HasFired("tactical-battle-core:cavalry-strike-first-refusal"))
+                        OnceLog.Info("tactical-battle-core:cavalry-strike-first-refusal", "[CavalryStrike] first refused: reason=" + reason);
                 }
                 catch (Exception ex)
                 {
@@ -124,6 +121,31 @@ namespace WhiskeyRealism.Patches
                         "[CavalryStrike] discipline check failed; vanilla's pick kept: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
+        }
+
+        // The runtime facts the pure gate decides on; each failed term stops the reading (the rest stay false), so a call outside the
+        // discipline costs a few field reads.
+        private static CavalryStrikeScope Facts(AIBattle battle, Regiment unit, out BattleSnapshot snapshot, out int charger)
+        {
+            snapshot = null;
+            charger = -1;
+            var scope = new CavalryStrikeScope { InsideAdjustCavalry = battle != null, HasVanillaResult = true };
+            scope.FlagOn = BattleFixGate.Runs(BattleFixKind.CavalryStrike, Plugin.MasterEnabled(), Plugin.CavalryStrikeDisciplineEnabled(),
+                TacticalWriteGuard.ModeAllowsWrites());
+            if (!scope.FlagOn || (UnityEngine.Object)unit == null) return scope;
+            scope.ChargerIsCavalry = unit.unittyp == TacticalUnitType.Cavalry;
+            if (!scope.ChargerIsCavalry) return scope;
+            scope.SideDrivenByOrchestrator = TacticalBattleCoordinator.DrivesOrchestrator(battle.isplayeraiorfeud);
+            scope.FeudInstance = TacticalWriteGuard.IsFeudInstance(battle);
+            if (!scope.SideDrivenByOrchestrator || scope.FeudInstance) return scope;
+            scope.CanWrite = TacticalWriteGuard.CanWrite(unit);
+            scope.FogHonestPerceptionOn = Plugin.EnableBattleFogHonestPerception != null && Plugin.EnableBattleFogHonestPerception.Value;
+            if (!scope.CanWrite || !scope.FogHonestPerceptionOn) return scope;
+            scope.HasSnapshot = BattleCore.TryGetSnapshot(unit.alliance, out snapshot) && snapshot != null;
+            if (!scope.HasSnapshot) return scope;
+            charger = snapshot.IndexOfOwn(unit.gameObject.GetInstanceID());
+            scope.ChargerInSnapshot = charger >= 0;
+            return scope;
         }
 
         // The check over what the side perceives of the target (its Visible observation) and the charger's own record.
@@ -139,7 +161,7 @@ namespace WhiskeyRealism.Patches
                 break;
             }
             var input = new CavalryStrikeInput { ShakenMorale = GamePrefs.maxenemymoraleforcavalrychargenonarty };
-            if (found >= 0 && obs[found].State == ObservationState.Visible)
+            if (found >= 0 && CavalryStrikeCheck.TargetSeen(true, obs[found].State))
             {
                 input.TargetVisible = true;
                 input.TargetUnitTyp = obs[found].UnitTyp;
@@ -201,12 +223,14 @@ namespace WhiskeyRealism.Patches
                 {
                     Regiment candidate = candidates[c];
                     if ((UnityEngine.Object)candidate == null || candidate.gameObject.GetInstanceID() != e.TargetObservation) continue;
+                    // What the side perceives first; the live candidate's own fields (reach, vanilla's 5050 filter) only after it passes.
+                    if (!Evaluate(s, charger, unit, candidate, out _)) continue;
                     float dx = candidate.GetPosition().x - unit.GetPosition().x, dz = candidate.GetPosition().z - unit.GetPosition().z;
                     if (!CavalryStrikeCheck.SubstituteInReach((float)Math.Sqrt(dx * dx + dz * dz), GamePrefs.maxdistancecavalryattack)) continue;
                     // vanilla's own 5050 filter
                     bool vanillaOk = (candidate.unittyp == TacticalUnitType.Artillery ||
                         (candidate.unittyp <= TacticalUnitType.MaxCombat && candidate.morale < GamePrefs.maxenemymoraleforcavalrychargenonarty)) && !candidate.isrouted;
-                    if (!vanillaOk || !Evaluate(s, charger, unit, candidate, out _)) continue;
+                    if (!vanillaOk) continue;
                     reason = CavalryStrikeCheck.ExploitTarget;
                     return candidate;
                 }

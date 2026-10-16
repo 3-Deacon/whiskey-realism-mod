@@ -119,6 +119,24 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public int Count => _openCount;
 
+        /// <summary>
+        /// A new battle: forget every opening, id, claim and proved ground. The doctrine clock restarts at the new battle's own hour,
+        /// so a stale opening would otherwise survive (now - LastSeen is negative) and a completed lattice would keep proving ground
+        /// this battle never probed.
+        /// </summary>
+        public void Reset()
+        {
+            _openCount = 0;
+            _candCount = 0;
+            _nextId = 1;
+            _tick = 0;
+            _latticeOrder = 0;
+            _traceTick = -1;
+            _n = _nfront = _no = _nofront = 0;
+            for (int i = 0; i < _lattices.Length; i++) _lattices[i]?.Clear();
+            SuppressedUnperceived = ProbePointsEvaluated = Deferred = ProbeCached = LatticesStarted = LatticesEnded = DeferOverBound = 0;
+        }
+
         /// <summary>Candidates the last Detect call held back: their lattice is not complete (or has no pooled slot) and no earlier complete result is emitted.</summary>
         public int Deferred { get; private set; }
 

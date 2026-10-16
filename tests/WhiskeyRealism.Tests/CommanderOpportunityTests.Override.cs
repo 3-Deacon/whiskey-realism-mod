@@ -126,7 +126,7 @@ internal static partial class CommanderOpportunityTests
         int run = src.IndexOf("internal static bool Run(", StringComparison.Ordinal);
         AssertTrue(run > 0, "PosturePipeline.Run exists");
         string body = src.Substring(run);
-        int follow = body.IndexOf("exploitKind == ExploitOverrideKind.Follow", StringComparison.Ordinal);
+        int follow = body.IndexOf("ExploitPosture.SubmitsMoveOrFormation(exploitKind)", StringComparison.Ordinal);
         int decide = body.IndexOf("CommandPostureExecutor.Decide(", StringComparison.Ordinal);
         int submit = body.IndexOf("PostureIntentPlan.Submit(", StringComparison.Ordinal);
         AssertTrue(follow > 0 && decide > follow && submit > follow, "the follow early return precedes the decision and every submit");

@@ -157,6 +157,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (e.Phase == ExploitPhase.None || e.Phase == ExploitPhase.Recall) continue;
                     e.End = reason;
                     e.Phase = ExploitPhase.Recall;
+                    e.PlayerSkips += ExploitFeedback.TakePlayerSkips(table.Alliance, e.Id);
                     sink.Ended(in e, nowHours, false, table.Count - 1);
                 }
             }
@@ -170,6 +171,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _nextExploitId = 1;
             TableRefusals = 0;
             WindowProbePoints = WindowProbeCached = WindowLatticesStarted = WindowLatticesEnded = WindowDeferOverBound = 0;
+            _detector.Reset();
             Forget();
         }
 
@@ -239,6 +241,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (e.Phase == ExploitPhase.None || e.Phase == ExploitPhase.Recall) continue;
                 int ai = s.IndexOfOwn(e.AssetId);
                 BindSubtree(s, table, e.Id, ai);
+                e.PlayerSkips += ExploitFeedback.TakePlayerSkips(s.Alliance, e.Id);
                 ExploitStepInput input = BuildStepInput(s, w, in rules, in e, ai, now);
                 ExploitPhase before = e.Phase;
                 ExploitLifecycle.Step(ref e, in input);
@@ -380,6 +383,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 for (int i = 0; i < collected; i++)
                 {
+                    _ended[i].PlayerSkips += ExploitFeedback.TakePlayerSkips(table.Alliance, _ended[i].Id);
                     ExploitLifecycle.MarkHesitation(_hesitation, in _ended[i], now);
                     sink?.Ended(in _ended[i], now, _ended[i].LeftSector, table.Count);
                 }
@@ -414,7 +418,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 int assetCount = GatherAssets(s, w, in rules, table, ni, now, out int childCount, out int uncommitted);
                 var input = new DecisionInput
                 {
-                    NodeId = nodeId, CommanderIndex = commander, CommanderStatus = 0, ChildCount = childCount, UncommittedChildren = uncommitted,
+                    NodeId = nodeId, CommanderIndex = commander, ChildCount = childCount, UncommittedChildren = uncommitted,
                     Assets = _assets, AssetCount = assetCount, Openings = _openings, OpeningCount = openingCount,
                     Stance = w.Stance, PlanPhase = w.PlanPhase, MacroAi = w.MacroAi, MainEffortSector = w.MainEffortSector,
                     SideLiveExploits = LiveCount(table), NodeHasExploit = NodeHasExploit(table, nodeId), CounterstrokeOn = rules.CounterstrokeOn,

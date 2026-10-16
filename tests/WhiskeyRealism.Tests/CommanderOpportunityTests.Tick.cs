@@ -114,6 +114,7 @@ internal static partial class CommanderOpportunityTests
         public readonly int[] Brigade = new int[5], Regiment = new int[5];
         // Every flank end is river-anchored, so the only opening in the fixtures is the gap (no FlankInAir competes for the asset).
         public IOpeningTerrain Terrain = new AnchoredTerrain();
+        public IPerceivedGround Ground = new AllPerceived();
         public OpeningRules Rules = OpeningRules.Shipped;
         public double Now = 10.0;
 
@@ -178,7 +179,7 @@ internal static partial class CommanderOpportunityTests
         {
             Now += step;
             BattleSnapshot s = Fx.Build(Now);
-            Tick.Run(s, World, new AllPerceived(), Terrain, in Rules, Table, Sink);
+            Tick.Run(s, World, Ground, Terrain, in Rules, Table, Sink);
         }
 
         // Runs until an exploit is live or the limit; true if one launched.

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using WhiskeyRealism.Tactical.Battle.BugFixes;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -58,12 +59,13 @@ namespace WhiskeyRealism.Patches
             return num4;
         }
 
+        // A vanilla bug fix: its flag, in every Commander Mode (BattleFixGate).
         internal static bool Enabled()
         {
             try
             {
-                return Plugin.Instance != null && Plugin.Instance.Enabled.Value && Plugin.EnableVanillaMacroAssaultUpgradeFix != null
-                    && Plugin.EnableVanillaMacroAssaultUpgradeFix.Value;
+                return BattleFixGate.Runs(BattleFixKind.MacroUpgrade, Plugin.MasterEnabled(), Plugin.EnableVanillaMacroAssaultUpgradeFix != null && Plugin.EnableVanillaMacroAssaultUpgradeFix.Value,
+                    TacticalWriteGuard.ModeAllowsWrites());
             }
             catch { return false; }
         }

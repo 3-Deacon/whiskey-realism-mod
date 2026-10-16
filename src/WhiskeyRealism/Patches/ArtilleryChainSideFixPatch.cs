@@ -4,6 +4,7 @@ using System.Linq;
 using HarmonyLib;
 using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Tactical.Battle.BugFixes;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -47,12 +48,13 @@ namespace WhiskeyRealism.Patches
             return ArtillerySideIl.UpperBound(Enabled());
         }
 
+        // A vanilla bug fix: its flag, in every Commander Mode (BattleFixGate).
         internal static bool Enabled()
         {
             try
             {
-                return Plugin.Instance != null && Plugin.Instance.Enabled.Value && Plugin.EnableVanillaArtilleryChainSideFix != null
-                    && Plugin.EnableVanillaArtilleryChainSideFix.Value;
+                return BattleFixGate.Runs(BattleFixKind.ArtillerySide, Plugin.MasterEnabled(), Plugin.EnableVanillaArtilleryChainSideFix != null && Plugin.EnableVanillaArtilleryChainSideFix.Value,
+                    TacticalWriteGuard.ModeAllowsWrites());
             }
             catch { return false; }
         }

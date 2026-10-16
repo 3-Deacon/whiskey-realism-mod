@@ -12,6 +12,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // Owner: DirectChildAllocator.ReleaseReserves writes it during an allocation; ArmyOrchestrator reads the outcomes to emit
     // the TacticalReserveRelease rows and clears it on a plan change, a new battle day and a stand-down. It lives on the army
     // orchestrator, which is created per battle, so no static state needs a scope reset.
+    /// <summary>The direct-child id ("child-" + the regiment's instance id, which may be negative) read without allocating.</summary>
+    public static class DirectChildIds
+    {
+        private const string Prefix = "child-";
+
+        /// <summary>The instance id, or 0 when the text is not a child id.</summary>
+        public static int InstanceId(string childId)
+        {
+            if (childId == null || childId.Length <= Prefix.Length) return 0;
+            for (int k = 0; k < Prefix.Length; k++)
+                if (childId[k] != Prefix[k]) return 0;
+            int at = Prefix.Length;
+            bool negative = false;
+            if (childId[at] == '-')
+            {
+                negative = true;
+                at++;
+                if (at == childId.Length) return 0;
+            }
+            long value = 0;
+            for (; at < childId.Length; at++)
+            {
+                char c = childId[at];
+                if (c < '0' || c > '9') return 0;
+                value = value * 10 + (c - '0');
+                if (value > 2147483648L) return 0;
+            }
+            if (negative) value = -value;
+            return value < int.MinValue || value > int.MaxValue ? 0 : (int)value;
+        }
+    }
+
     public sealed class ReserveReleaseState
     {
         /// <summary>One release of the last allocation, for its TacticalReserveRelease row.</summary>

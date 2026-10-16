@@ -140,7 +140,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
     public struct DecisionInput
     {
-        public int NodeId, CommanderIndex, CommanderStatus, ChildCount, UncommittedChildren;
+        public int NodeId, CommanderIndex, ChildCount, UncommittedChildren;
         public ExploitAsset[] Assets;
         public int AssetCount;
         public Opening[] Openings;

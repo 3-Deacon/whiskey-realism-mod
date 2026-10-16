@@ -224,6 +224,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     for (int w = 0; w < winners; w++)
                     {
                         ExecutionPlan plan = executor.Plan(snapshot, _winners[w], now);
+                        // BC13 playerSkips: what an exploit's own intent left out because of the player.
+                        ExploitFeedback.NotePlan(alliance, in _winners[w], in plan);
                         if (!plan.Execute)
                         {
                             stats.Skip(plan.Skip);

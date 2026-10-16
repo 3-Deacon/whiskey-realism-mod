@@ -61,6 +61,13 @@ namespace WhiskeyRealism.Tactical.Battle
             => TacticalCommanderRoster.ApplyRankBias(FactionProfiles.For(alliance), echelon);
 
         /// <summary>
+        /// The army commander's aggression (0-1) for the army-off fallback (#44): his table vector when the table holds one, else the
+        /// ranked faction Default the army orchestrator itself uses for an army with no commander entry (not a flat 0.5).
+        /// </summary>
+        public static float ArmyAggression01(bool tableHasCommander, in PersonalityVector tableVector, int alliance)
+            => To01(tableHasCommander ? tableVector.Aggression : Default(alliance, EchelonKind.Army).Aggression);
+
+        /// <summary>
         /// The resolution order (requirement-registry-first): the historical list's full-name match first, the list's
         /// vector as it is (no rank bias); else, with Enable Per-Commander Personality on and readable stats, the
         /// derivation plus the echelon's rank bias; else the ranked faction profile.

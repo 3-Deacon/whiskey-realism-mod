@@ -2,6 +2,7 @@ using System;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.BugFixes;
 using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -55,10 +56,11 @@ namespace WhiskeyRealism.Patches
                     int side = __instance.sideofai;
                     __state.Side = side;
                     __state.IsolatedBefore = aigroup.aiassaultmoveisolatedtarget;
-                    if (side < 0 || side >= Suppressed.Length) return;
-                    if (!TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(__instance)) return;
-                    __state.Whiskey = WhiskeyCommanded(aigroup);
-                    if (!__state.Whiskey || !Plugin.SeparatedEnemySteerEnabled() || !TacticalWriteGuard.ModeAllowsWrites()) return;
+                    SeparatedEnemySteerInput gate = Facts(__instance, aigroup, side);
+                    if (!gate.SideInRange) return;
+                    if (!SeparatedEnemySteerGate.Tallied(in gate)) return;
+                    __state.Whiskey = SeparatedEnemySteerGate.WhiskeyCommanded(in gate);
+                    if (!SeparatedEnemySteerGate.Suppress(in gate)) return;
                     __state.Original = aigroup.aiassaultmove;
                     __state.Forced = true;
                     aigroup.aiassaultmove = true;
@@ -101,13 +103,28 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Whiskey-commanded: in the AI pool and the operations ledger holds a doctrine state for it (BC15 A2's "Whiskey-owned" test).
-        private static bool WhiskeyCommanded(Regiment group)
+        // The runtime facts the pure gate decides on (SeparatedEnemySteerGate): flags, the side's orchestrator, the AI pool, the ledger and
+        // the write guard. A group Whiskey does not command (a vanilla-owned group, the player's units) is left to vanilla.
+        private static SeparatedEnemySteerInput Facts(AIBattle battle, Regiment group, int side)
         {
+            var input = new SeparatedEnemySteerInput
+            {
+                HasInstanceAndGroup = true,
+                SideInRange = side >= 0 && side < Suppressed.Length,
+                FlagOn = Plugin.MasterEnabled() && Plugin.SeparatedEnemySteerEnabled(),
+                CommanderModeAllowsWrites = TacticalWriteGuard.ModeAllowsWrites(),
+            };
+            if (!input.SideInRange) return input;
+            input.SideDrivenByOrchestrator = TacticalBattleCoordinator.DrivesOrchestrator(battle.isplayeraiorfeud);
+            input.FeudInstance = TacticalWriteGuard.IsFeudInstance(battle);
+            if (!input.SideDrivenByOrchestrator || input.FeudInstance) return input;
             int alliance = group.alliance;
             int id = group.gameObject.GetInstanceID();
-            TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(alliance);
-            return side != null && ArmyPostureInputsRuntime.InAiPool(alliance, id) && PostureLedger.TryResolveState(id, side, out _);
+            TacticalBattleOrchestrator orchestrator = TacticalBattleCoordinator.GetSideOrchestrator(alliance);
+            input.InAiPool = orchestrator != null && ArmyPostureInputsRuntime.InAiPool(alliance, id);
+            input.HasDoctrineState = input.InAiPool && PostureLedger.TryResolveState(id, orchestrator, out _);
+            input.CanWrite = TacticalWriteGuard.CanWrite(group);
+            return input;
         }
 
         private static void EmitRowIfDue(int side)

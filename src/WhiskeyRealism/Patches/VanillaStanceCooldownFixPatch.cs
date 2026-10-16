@@ -46,15 +46,16 @@ namespace WhiskeyRealism.Patches
                 {
                     if (!Applies(__instance, out StanceRestampBook book, out int side)) return;
                     float now = GameVars.currenttimefromstart;
-                    if (__instance.macroai == 3)
+                    bool retreat = __instance.macroai == 3;
+                    StanceCooldownPlan plan = StanceCooldownPlan.Decide(FixOn(), retreat);
+                    if (plan.ReleaseOnRetreat)
                     {
                         Stamps.Bind(__instance);
                         int released = book.ReleaseOnRetreat(now, Stamps);
                         if (released > 0)
                             OnceLog.Info("tactical-battle-core:stance-cooldown-retreat", "[StanceCooldown] army retreat: released " + released + " restamped group(s) so vanilla's retreat block acts");
-                        return;
                     }
-                    book.NoteNotRetreating();
+                    else if (!retreat) book.NoteNotRetreating();
                     var pool = __instance.unitsused;
                     if (pool == null) return;
                     BattleUnits bunits = BattleCoreTick.ResolveBattleUnits();
@@ -66,6 +67,7 @@ namespace WhiskeyRealism.Patches
                         if ((UnityEngine.Object)group == null) continue;
                         int id = group.GetInstanceID();
                         book.RecordBefore(id, group.ai_stanceordered);
+                        if (!plan.Restamp) continue;
                         // A group whose re-stamp holds it: would vanilla's own chain change it now? That wait is the cost of the fix (smoke item 11).
                         if (book.TryWritten(id, out float written) && group.lastaistancechangetime == written &&
                             StanceCooldownRestamp.VanillaSkips(written, now, reset) && (UnityEngine.Object)bunits != null)
@@ -92,7 +94,8 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("tactical.patch.stance-cooldown.postfix");
                 try
                 {
-                    if (!Applies(__instance, out StanceRestampBook book, out int side) || __instance.macroai == 3) return;
+                    if (!Applies(__instance, out StanceRestampBook book, out int side)) return;
+                    StanceCooldownPlan plan = StanceCooldownPlan.Decide(FixOn(), __instance.macroai == 3);
                     var pool = __instance.unitsused;
                     if (pool == null) return;
                     float now = GameVars.currenttimefromstart;
@@ -107,13 +110,14 @@ namespace WhiskeyRealism.Patches
                             !StanceCooldownRestamp.VanillaChanged(before, group.ai_stanceordered, group.lastaistancechangetime, now))
                             continue;
                         book.NoteVanillaChange(id, doctrine);
+                        if (!plan.Restamp) continue;
                         book.ResolveWant(id, doctrine);
                         float stamp = StanceCooldownRestamp.Restamp(now, reset);
                         group.lastaistancechangetime = stamp;
                         book.NoteRestamp(id, stamp);
                         OnceLog.Info("tactical-battle-core:stance-cooldown-first", "[StanceCooldown] first vanilla stance hold restored");
                     }
-                    EmitRowIfDue(side, book, doctrine);
+                    EmitRowIfDue(side, book, doctrine, plan);
                 }
                 catch (Exception ex)
                 {
@@ -123,12 +127,14 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // The fix serves AI-run instances only: not the W&L feud instance, and only while the flag is on.
+        // The patch serves AI-run instances only: not the W&L feud instance. The instance is counted (vanilla's own stance changes)
+        // whatever the flag and the macro stance; only the re-stamp itself needs the flag on and no army retreat, so smoke item 2.50
+        // can compare the change rate with the fix on and off.
         private static bool Applies(AIBattle battle, out StanceRestampBook book, out int side)
         {
             book = null;
             side = -1;
-            if ((UnityEngine.Object)battle == null || !Plugin.VanillaStanceCooldownFixEnabled()) return false;
+            if ((UnityEngine.Object)battle == null) return false;
             if (!TacticalBattleCoordinator.DrivesOrchestrator(battle.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(battle)) return false;
             side = battle.sideofai;
             if (side < 0 || side >= Books.Length) return false;
@@ -136,18 +142,27 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static void EmitRowIfDue(int side, StanceRestampBook book, double doctrine)
+        // A vanilla bug fix: its flag, in every Commander Mode (BattleFixGate).
+        private static bool FixOn()
+        {
+            return BattleFixGate.Runs(BattleFixKind.StanceCooldown, Plugin.MasterEnabled(), Plugin.VanillaStanceCooldownFixEnabled(),
+                TacticalWriteGuard.ModeAllowsWrites());
+        }
+
+        private static void EmitRowIfDue(int side, StanceRestampBook book, double doctrine, StanceCooldownPlan plan)
         {
             if (doctrine < NextRow[side]) return;
             NextRow[side] = doctrine + RowIntervalHours;
             if (!TelemetryRouter.ShouldEmit(TelemetryRouter.CurrentProfile, TelemetryLayer.Tactical, TelemetryCategory.State)) return;
-            bool fix = Plugin.VanillaStanceCooldownFixEnabled();
+            bool fix = plan.FixActing;
+            string reason = plan.Reason;
             int changes = book.VanillaChanges, restamped = book.Restamped, maxPerHour = book.MaxChangesPerGroupHour, released = book.Released, held = book.RestampedCount;
             int d0 = book.DelayUnder025, d1 = book.Delay025To05, d2 = book.Delay05To1, d3 = book.DelayOver1;
             TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.State, "TacticalStanceCooldown", TelemetrySeverity.Info,
                 ev => ev
                     .WithSide(side)
                     .WithField("fix", fix)
+                    .WithField("reason", reason)
                     .WithField("vanillaChanges", changes)
                     .WithField("restamped", restamped)
                     .WithField("restampedHeld", held)

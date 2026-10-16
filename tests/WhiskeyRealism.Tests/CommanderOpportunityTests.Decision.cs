@@ -109,7 +109,7 @@ internal static partial class CommanderOpportunityTests
         {
             return new DecisionInput
             {
-                NodeId = 100, CommanderIndex = Commander, CommanderStatus = 0, ChildCount = Children, UncommittedChildren = Uncommitted,
+                NodeId = 100, CommanderIndex = Commander, ChildCount = Children, UncommittedChildren = Uncommitted,
                 Assets = Assets.ToArray(), AssetCount = Assets.Count, Openings = Openings.ToArray(), OpeningCount = Openings.Count,
                 Stance = Stance, PlanPhase = Phase, MacroAi = MacroAi, MainEffortSector = MainEffortSector, SideLiveExploits = SideLive,
                 NodeHasExploit = NodeHasExploit, CounterstrokeOn = CounterstrokeOn,

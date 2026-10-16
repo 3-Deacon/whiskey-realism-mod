@@ -613,12 +613,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)).y;
         }
 
-        private static int ParseChildInstanceId(string childId)
-        {
-            const string prefix = "child-";
-            return !string.IsNullOrEmpty(childId) && childId.StartsWith(prefix, StringComparison.Ordinal) &&
-                int.TryParse(childId.Substring(prefix.Length), out int id) ? id : 0;
-        }
+        private static int ParseChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);
 
         // One TacticalEnvelopment row per phase change (or mirror), so the stream is bounded by the state machine.
         private static void EmitEnvelopment(int allianceId, BattlePlanId planId, string childId, in ManeuverOrder order, in ManeuverState state,

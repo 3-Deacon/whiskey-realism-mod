@@ -41,6 +41,18 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly FogGround[] Fog = { new FogGround(), new FogGround() };
         private static readonly RangeOnlyPerceivedGround[] Range = { new RangeOnlyPerceivedGround(), new RangeOnlyPerceivedGround() };
 
+        static PerceivedGroundRuntime()
+        {
+            WhiskeyRealism.Util.BattleScope.Register("perceived-ground-runtime", Reset);
+        }
+
+        // A new battle: the sides' fog-grid references and RangeOnly reach arrays belong to the battle that ended.
+        private static void Reset()
+        {
+            for (int i = 0; i < Fog.Length; i++) Fog[i].Grid = null;
+            for (int i = 0; i < Range.Length; i++) Range[i].SetReach(new float[0], new float[0], new float[0], 0);
+        }
+
         internal readonly struct Handle : IDisposable
         {
             internal readonly IPerceivedGround Oracle;
@@ -72,7 +84,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     Fog[alliance].Grid = BattlePerceptionProbe.GridOf(s);
                     return new Handle(Fog[alliance], default);
                 default:
-                    BattlePerceptionProbe.FillRangeOnlyGround(Range[alliance]);
+                    BattlePerceptionProbe.FillRangeOnlyGround(alliance, Range[alliance]);
                     return new Handle(Range[alliance], default);
             }
         }

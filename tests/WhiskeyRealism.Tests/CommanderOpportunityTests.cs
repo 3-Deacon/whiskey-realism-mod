@@ -16,7 +16,7 @@ internal static partial class CommanderOpportunityTests
 {
     public static void Run()
     {
-        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests(), LifeTests(), TickTests(), OverrideTests(), ReserveTests(), FixTests(), PerfTests()));
+        RunAll(Join(PersonalityTests(), DetectionTests(), ProbeTests(), DecisionTests(), LifeTests(), TickTests(), OverrideTests(), ReserveTests(), FixTests(), PerfTests(), ReviseTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

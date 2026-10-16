@@ -89,6 +89,13 @@ namespace WhiskeyRealism
             catch { return false; }
         }
 
+        /// <summary>The plugin's master switch (Enabled), false before the plugin loaded.</summary>
+        internal static bool MasterEnabled()
+        {
+            try { return Instance != null && Instance.Enabled.Value; }
+            catch { return false; }
+        }
+
         /// <summary>Tactical / Enable Commander Opportunity (BC13 sections 5-6: the opening detector, the per-commander decision and the exploit override).</summary>
         internal static bool CommanderOpportunityEnabled()
         {

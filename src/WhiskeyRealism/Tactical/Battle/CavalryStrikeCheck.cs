@@ -22,8 +22,33 @@ namespace WhiskeyRealism.Tactical.Battle
         public float ShakenMorale;
     }
 
+    /// <summary>What the #120 target Postfix knows about one GetClosestEnemyUnitReg result inside AdjustCavalryBehavior.</summary>
+    public struct CavalryStrikeScope
+    {
+        public bool InsideAdjustCavalry, HasVanillaResult, FlagOn, ChargerIsCavalry, SideDrivenByOrchestrator, FeudInstance;
+        /// <summary>TacticalWriteGuard.CanWrite(charger): Commander Mode Active, AI-controlled, not player-owned, no exposed player descendant.</summary>
+        public bool CanWrite;
+        public bool FogHonestPerceptionOn, HasSnapshot, ChargerInSnapshot;
+    }
+
+    /// <summary>Whether the discipline acts on a result; every false term fails open (vanilla's pick is kept).</summary>
+    public static class CavalryStrikeGate
+    {
+        public static bool Applies(in CavalryStrikeScope s)
+        {
+            return s.InsideAdjustCavalry && s.HasVanillaResult && s.FlagOn && s.ChargerIsCavalry && s.SideDrivenByOrchestrator
+                && !s.FeudInstance && s.CanWrite && s.FogHonestPerceptionOn && s.HasSnapshot && s.ChargerInSnapshot;
+        }
+    }
+
     public static class CavalryStrikeCheck
     {
+        /// <summary>The target counts as seen only when the side holds a Visible observation of it; Remembered and unknown are hidden.</summary>
+        public static bool TargetSeen(bool observed, ObservationState state)
+        {
+            return observed && state == ObservationState.Visible;
+        }
+
         public const float SupportMeters = 250f;
 
         public const string Hidden = "hidden", Square = "square", Garrisoned = "garrisoned", Supported = "supported",

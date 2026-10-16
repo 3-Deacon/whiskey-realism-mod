@@ -1130,6 +1130,8 @@ namespace WhiskeyRealism.Tactical.Operations
         // BC13: the request is an exploit order's. Its Move is not delayed (no courier cadence), as vanilla's own
         // isolated-target move (CheckForSeparatedEnemy 8188).
         public bool Exploit;
+        // BC13: the exploit's id (ExploitEntry.Id) when Exploit, else 0; carried on the Move, Stance and Formation intents.
+        public int ExploitId;
         // #61 refused flank, carried on the formation and facing intents.
         public RefuseFlank Refuse;
         // #61 threat facing (holding tasks with a visible threat): the wheel's
@@ -1343,7 +1345,7 @@ namespace WhiskeyRealism.Tactical.Operations
             sink.Submit(new BattleOrderIntent
             {
                 GroupId = r.GroupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = r.Task,
-                Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                Priority = r.Priority, Source = r.Source, Reason = r.Reason, ExploitId = r.ExploitId,
             });
             return 1;
         }
@@ -1352,6 +1354,7 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings, r.Exploit,
                 r.Priority, r.Source, r.Reason);
+            move.ExploitId = r.ExploitId;
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);
@@ -1375,7 +1378,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 {
                     GroupId = r.GroupId, Channel = OrderChannel.Formation, Value = r.TargetFormation,
                     Heading = r.HasThreatHeading ? PostureSense.NormalizeHeading(r.ThreatHeading) : -1f, Task = r.Task,
-                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason,
+                    Refuse = r.Refuse, Priority = r.Priority, Source = r.Source, Reason = r.Reason, ExploitId = r.ExploitId,
                 });
                 n++;
             }

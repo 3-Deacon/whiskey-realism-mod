@@ -14,6 +14,35 @@ namespace WhiskeyRealism.Tactical.Battle.BugFixes
     // Army retreat (macroai 3): nothing is re-stamped, and on the first call with macroai 3 the stamps this fix wrote are pulled back
     // (to ReleaseStamp) before vanilla runs, so vanilla's retreat block (4258) acts in that call. A group whose stamp is no longer the
     // value the fix wrote has been stamped by Whiskey's writer since; it is dropped from the set without a release.
+    /// <summary>
+    /// What one AdjustGroupAIStance call of a served (AI-run, non-feud) instance does. Vanilla's own stance changes are counted in every
+    /// case (so smoke item 2.50 can compare the rate with the fix on and off, and under an army retreat); the re-stamp needs the
+    /// flag on and no army retreat; the retreat release needs the flag on and the retreat. The row's `reason` names the case.
+    /// </summary>
+    public readonly struct StanceCooldownPlan
+    {
+        public const string RestampReason = "restamp", FlagOffReason = "flag-off", RetreatReason = "retreat";
+
+        public readonly bool Restamp, ReleaseOnRetreat;
+        public readonly string Reason;
+
+        private StanceCooldownPlan(bool restamp, bool release, string reason)
+        {
+            Restamp = restamp;
+            ReleaseOnRetreat = release;
+            Reason = reason;
+        }
+
+        /// <summary>The row's `fix` field: the fix is acting.</summary>
+        public bool FixActing => Restamp;
+
+        public static StanceCooldownPlan Decide(bool fixEnabled, bool armyRetreat)
+        {
+            if (!fixEnabled) return new StanceCooldownPlan(false, false, FlagOffReason);
+            return armyRetreat ? new StanceCooldownPlan(false, true, RetreatReason) : new StanceCooldownPlan(true, false, RestampReason);
+        }
+    }
+
     public static class StanceCooldownRestamp
     {
         /// <summary>The stamp that makes vanilla skip the group until rawNow + T: now + 2 x T.</summary>

@@ -358,7 +358,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public void OpeningSummary(OpportunityTick tick, ExploitTable table, double nowHours)
             {
                 OpeningDetector d = tick.Detector;
-                if (d.Count > 0)
+                if (d.Count > 0 && !OnceLog.HasFired("tactical-battle-core:opportunity-first-opening"))
                     OnceLog.Info("tactical-battle-core:opportunity-first-opening", "[Opportunity] first opening: kind=" + d.Openings[0].Kind + " side=" + _alliance);
                 if (!TelemetryRouter.ShouldEmit(TelemetryRouter.CurrentProfile, TelemetryLayer.Tactical, TelemetryCategory.State)) return;
                 int gap = 0, shaken = 0, flank = 0, battery = 0, cluster = 0, penetration = 0, confirmed = 0;
@@ -402,9 +402,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             public void Launched(in ExploitEntry entry, in DecisionResult result, in OpportunityPersonality personality, int live)
             {
-                OnceLog.Info("tactical-battle-core:opportunity-first-exploit",
-                    "[Opportunity] first exploit launched: kind=" + entry.Kind + " asset=" + entry.AssetId + " commander=" + entry.CommanderIndex +
-                    " source=" + personality.Source);
+                if (!OnceLog.HasFired("tactical-battle-core:opportunity-first-exploit"))
+                    OnceLog.Info("tactical-battle-core:opportunity-first-exploit",
+                        "[Opportunity] first exploit launched: kind=" + entry.Kind + " asset=" + entry.AssetId + " commander=" + entry.CommanderIndex +
+                        " source=" + personality.Source);
                 ExploitEntry e = entry;
                 DecisionResult r = result;
                 OpportunityPersonality p = personality;
@@ -459,7 +460,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         if (reason != null) ev.WithField("reason", reason).WithField("chance", chance).WithField("roll", roll);
                         if (end.HasValue)
                             ev.WithField("end", e.End == ExploitEnd.Success ? "success" : e.End.ToString()).WithField("durationHours", end.Value.Hours)
-                                .WithField("lossDelta", e.LossDelta).WithField("leftSector", end.Value.LeftSector);
+                                .WithField("lossDelta", e.LossDelta).WithField("playerSkips", e.PlayerSkips).WithField("leftSector", end.Value.LeftSector);
                     });
             }
         }

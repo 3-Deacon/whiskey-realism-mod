@@ -111,18 +111,21 @@ internal static partial class CommanderOpportunityTests
     private static void FixCavMap()
     {
         string src = CavalrySource();
-        AssertContains(src, "snapshot.IndexOfOwn(__instance.gameObject.GetInstanceID())", "the charger maps by the game object's instance id");
+        AssertContains(src, "snapshot.IndexOfOwn(unit.gameObject.GetInstanceID())", "the charger maps by the game object's instance id");
         AssertContains(src, "int targetId = target.gameObject.GetInstanceID();", "the target maps the same way");
-        AssertContains(src, "obs[found].State == ObservationState.Visible", "only a Visible observation keeps the pick");
-        AssertContains(src, "if (charger < 0) return;", "a charger missing from the snapshot fails open");
-        AssertContains(src, "if (!BattleCore.TryGetSnapshot(__instance.alliance, out BattleSnapshot snapshot) || snapshot == null) return;", "no snapshot fails open");
+        AssertContains(src, "CavalryStrikeCheck.TargetSeen(true, obs[found].State)", "only a Visible observation keeps the pick (TargetSeen)");
+        AssertContains(src, "scope.ChargerInSnapshot = charger >= 0;", "a charger missing from the snapshot fails open (gate term)");
+        AssertContains(src, "CavalryStrikeGate.Applies(in scope)", "the pure gate decides whether the discipline acts");
+        AssertContains(src, "scope.HasSnapshot = BattleCore.TryGetSnapshot(unit.alliance, out snapshot) && snapshot != null;", "no snapshot fails open (gate term)");
         AssertContains(src, "Plugin.EnableBattleFogHonestPerception", "perception off fails open");
         AssertContains(src, "catch (Exception ex)", "an exception fails open");
         int postfix = src.IndexOf("internal static void Postfix(Regiment __instance, ref Regiment __result)", StringComparison.Ordinal);
         string body = src.Substring(postfix);
-        int guard = body.IndexOf("TacticalWriteGuard.CanWrite(__instance)", StringComparison.Ordinal);
-        int feud = body.IndexOf("TacticalWriteGuard.IsFeudInstance(battle)", StringComparison.Ordinal);
-        int snap = body.IndexOf("BattleCore.TryGetSnapshot(", StringComparison.Ordinal);
+        int facts = body.IndexOf("private static CavalryStrikeScope Facts(", StringComparison.Ordinal);
+        string factsBody = body.Substring(facts);
+        int guard = factsBody.IndexOf("TacticalWriteGuard.CanWrite(unit)", StringComparison.Ordinal);
+        int feud = factsBody.IndexOf("TacticalWriteGuard.IsFeudInstance(battle)", StringComparison.Ordinal);
+        int snap = factsBody.IndexOf("BattleCore.TryGetSnapshot(", StringComparison.Ordinal);
         AssertTrue(guard > 0 && feud > 0 && snap > guard && snap > feud, "the player, feud and mode guards come before the snapshot is read");
         AssertContains(body, "__result = null;", "a refused pick becomes null (vanilla's 5050 test skips the charge)");
     }
@@ -284,7 +287,7 @@ internal static partial class CommanderOpportunityTests
     {
         string src = StanceSource();
         AssertContains(src, "TacticalBattleCoordinator.DrivesOrchestrator(battle.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(battle)", "the feud instance is skipped");
-        AssertFalse(src.Contains("ModeAllowsWrites"), "no Commander Mode gate: a vanilla bug fix runs in every mode");
+        AssertContains(src, "BattleFixGate.Runs(BattleFixKind.StanceCooldown,", "a vanilla bug fix: the gate lets it run in every mode (REV-GATE tests the table)");
         AssertContains(src, "Plugin.VanillaStanceCooldownFixEnabled()", "the rollback flag");
         foreach (string id in new[] { "prefix", "postfix" })
         {
@@ -310,7 +313,8 @@ internal static partial class CommanderOpportunityTests
         AssertEqual(1, book.ReleaseOnRetreat(20f, stamps), "a later retreat releases again");
         AssertEqual(2, book.Released, "released total");
         string src = StanceSource();
-        AssertContains(src, "if (!Applies(__instance, out StanceRestampBook book, out int side) || __instance.macroai == 3) return;", "the Postfix re-stamps nothing while macroai is 3");
+        AssertTrue(StanceCooldownPlan.Decide(true, true).Restamp == false, "the Postfix re-stamps nothing while macroai is 3 (the plan)");
+        AssertContains(src, "if (!plan.Restamp) continue;", "and the loops honour the plan");
         AssertContains(src, "book.ReleaseOnRetreat(now, Stamps)", "the Prefix pulls the stamps back before vanilla runs");
     }
 
@@ -349,12 +353,14 @@ internal static partial class CommanderOpportunityTests
     {
         string src = ReadSrc("Patches/SeparatedEnemyOwnershipPatch.cs");
         AssertContains(src, "[HarmonyPatch(typeof(AIBattle), \"CheckForSeparatedEnemy\")]", "the target");
-        int whiskey = src.IndexOf("__state.Whiskey = WhiskeyCommanded(aigroup);", StringComparison.Ordinal);
-        int drives = src.IndexOf("TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(__instance)", StringComparison.Ordinal);
+        int tallied = src.IndexOf("if (!SeparatedEnemySteerGate.Tallied(in gate)) return;", StringComparison.Ordinal);
+        int whiskey = src.IndexOf("__state.Whiskey = SeparatedEnemySteerGate.WhiskeyCommanded(in gate);", StringComparison.Ordinal);
+        int suppress = src.IndexOf("if (!SeparatedEnemySteerGate.Suppress(in gate)) return;", StringComparison.Ordinal);
         int force = src.IndexOf("aigroup.aiassaultmove = true;", StringComparison.Ordinal);
-        AssertTrue(drives > 0 && whiskey > drives && force > whiskey, "orchestrated side and not the feud instance, then Whiskey-commanded, then the force");
-        AssertContains(src, "!Plugin.SeparatedEnemySteerEnabled() || !TacticalWriteGuard.ModeAllowsWrites()", "the flag and Commander Mode Active");
-        AssertContains(src, "ArmyPostureInputsRuntime.InAiPool(alliance, id) && PostureLedger.TryResolveState(id, side, out _)", "Whiskey-commanded: in the AI pool with a doctrine state");
+        AssertTrue(tallied > 0 && whiskey > tallied && suppress > whiskey && force > suppress, "the gate (orchestrated side, not the feud instance), then Whiskey-commanded, then the suppress decision, then the force");
+        AssertContains(src, "DrivesOrchestrator(battle.isplayeraiorfeud)", "the side facts are read from the coordinator (REV-GATE tests the decisions)");
+        AssertContains(src, "ArmyPostureInputsRuntime.InAiPool(alliance, id)", "Whiskey-commanded: in the AI pool");
+        AssertContains(src, "PostureLedger.TryResolveState(id, orchestrator, out _)", "with a doctrine state");
         AssertContains(src, "if (__state.Forced) aigroup.aiassaultmove = __state.Original;", "the Finalizer restores the stored value");
         AssertContains(src, "[HarmonyFinalizer]", "as a Finalizer, so it runs when vanilla throws");
         AssertFalse(src.Contains("__exception"), "and passes the exception through unchanged");
@@ -410,7 +416,7 @@ internal static partial class CommanderOpportunityTests
         AssertEqual(1, RandomPickRangeIl.UpperOffset(false), "fix off: vanilla's Count - 1");
     }
 
-    // ------------------------------------------------------------------ #123 artillery chain side (BUG-TAC-028)
+    // ------------------------------------------------------------------ #123 artillery chain side (BUG-TAC-029)
 
     private static void FixArtyIl()
     {

@@ -68,6 +68,18 @@ namespace WhiskeyRealism.Tactical.Battle
         public int ProbePoints => Box.PointCount;
         public int CachedPoints => Next;
 
+        /// <summary>A new battle: nothing this lattice proved carries over (the result, the cache, the order).</summary>
+        public void Clear()
+        {
+            InUse = false;
+            Claimed = false;
+            State = LatticeState.Incomplete;
+            LastResultPerceived = false;
+            Next = 0;
+            StartTick = -1;
+            Order = 0;
+        }
+
         public void Begin(int candidateSlot, OpeningKind kind, in ProbeBox box, in ProbeEpoch epoch, bool keepLastResult, long order)
         {
             Slot = candidateSlot;
@@ -192,6 +204,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private float[] _x = Array.Empty<float>(), _z = Array.Empty<float>(), _reach = Array.Empty<float>();
         private int _count;
 
+        public void SetReach(OwnReachBuffer buffer) => SetReach(buffer.X, buffer.Z, buffer.Reach, buffer.Count);
+
         public void SetReach(float[] ownX, float[] ownZ, float[] reach, int count)
         {
             _x = ownX ?? Array.Empty<float>();
@@ -201,5 +215,45 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         public bool IsPerceived(float x, float z) => BattlePerception.WithinAnyReach(_x, _z, _reach, _count, x, z);
+    }
+
+    /// <summary>
+    /// The RangeOnly reach of one side's own units (position and list reach), one buffer per alliance (BattleScope): the perception
+    /// probe fills a side's buffer and that side's ground oracle reads it, so one side never reads the other's reach.
+    /// </summary>
+    public sealed class OwnReachBuffer
+    {
+        public float[] X = new float[64], Z = new float[64], Reach = new float[64];
+        public int Count;
+
+        private static readonly OwnReachBuffer[] Sides = { new OwnReachBuffer(), new OwnReachBuffer() };
+
+        static OwnReachBuffer()
+        {
+            WhiskeyRealism.Util.BattleScope.Register("own-reach-buffer", () => { for (int i = 0; i < Sides.Length; i++) Sides[i].Count = 0; });
+        }
+
+        /// <summary>The side's buffer; alliances other than 0 and 1 (Europe has no battle side) get a throwaway empty one.</summary>
+        public static OwnReachBuffer ForAlliance(int alliance)
+        {
+            return alliance >= 0 && alliance < Sides.Length ? Sides[alliance] : new OwnReachBuffer();
+        }
+
+        public void Add(float x, float z, float reach)
+        {
+            if (Count == X.Length)
+            {
+                int size = X.Length * 2;
+                Array.Resize(ref X, size);
+                Array.Resize(ref Z, size);
+                Array.Resize(ref Reach, size);
+            }
+            X[Count] = x;
+            Z[Count] = z;
+            Reach[Count] = reach;
+            Count++;
+        }
+
+        public bool Within(float x, float z) => BattlePerception.WithinAnyReach(X, Z, Reach, Count, x, z);
     }
 }

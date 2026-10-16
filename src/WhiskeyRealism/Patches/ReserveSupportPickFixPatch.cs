@@ -4,6 +4,7 @@ using System.Linq;
 using HarmonyLib;
 using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Tactical.Battle.BugFixes;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -49,12 +50,13 @@ namespace WhiskeyRealism.Patches
             return RandomPickRangeIl.UpperOffset(Enabled());
         }
 
+        // A vanilla bug fix: its flag, in every Commander Mode (BattleFixGate).
         internal static bool Enabled()
         {
             try
             {
-                return Plugin.Instance != null && Plugin.Instance.Enabled.Value && Plugin.EnableVanillaReserveSupportPickFix != null
-                    && Plugin.EnableVanillaReserveSupportPickFix.Value;
+                return BattleFixGate.Runs(BattleFixKind.ReserveSupportPick, Plugin.MasterEnabled(), Plugin.EnableVanillaReserveSupportPickFix != null && Plugin.EnableVanillaReserveSupportPickFix.Value,
+                    TacticalWriteGuard.ModeAllowsWrites());
             }
             catch { return false; }
         }
