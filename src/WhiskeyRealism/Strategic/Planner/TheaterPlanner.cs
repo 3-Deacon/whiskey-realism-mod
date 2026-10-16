@@ -127,6 +127,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             public float[] CX, CZ, Radius, Threat, Need, Own, Supply, Morale, NearX, NearZ;
             public int[] Count, Strongest;
+            public int[] Orderable; // formations the planner can order (WlChainRules.MayMove): the base of the Supply/Morale averages
         }
 
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
@@ -498,6 +499,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var count = x.Count;
             var supply = x.Supply;
             var morale = x.Morale;
+            var orderable = x.Orderable;
             var strongest = x.Strongest;
 
             for (int sector = 0; sector < n; sector++)
@@ -507,7 +509,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 float threat = x.Threat[sector];
                 TheaterPosture posture;
                 if (sector == plan.MainSectorId) posture = TheaterPosture.MainEffort;
-                else if (hasOwn && (supply[sector] / count[sector] < RecoverSupplyBelow || morale[sector] / count[sector] < s.MinMoraleForMovement))
+                // Recover is decided by the formations the planner can order: the player's supply and morale
+                // (his own command's, the map-group player's) cannot send a sector to Recover, though his
+                // strength still counts toward its hold (G4 verify r4 V2).
+                else if (orderable[sector] > 0 && (supply[sector] / orderable[sector] < RecoverSupplyBelow || morale[sector] / orderable[sector] < s.MinMoraleForMovement))
                     posture = TheaterPosture.Recover;
                 else if (threat > 0f) posture = hasOwn && own[sector] >= x.Need[sector] ? TheaterPosture.Hold : TheaterPosture.Screen;
                 else if (!hasOwn) continue;
@@ -616,7 +621,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 CX = new float[n], CZ = new float[n], Radius = new float[n], Threat = new float[n], Need = new float[n],
                 Own = new float[n], Supply = new float[n], Morale = new float[n], NearX = new float[n], NearZ = new float[n],
-                Count = new int[n], Strongest = new int[n]
+                Count = new int[n], Strongest = new int[n], Orderable = new int[n]
             };
             float holdRatio = HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
             for (int k = 0; k < n; k++)
@@ -630,13 +635,18 @@ namespace WhiskeyRealism.Strategic.Planner
                 // The sector this formation counts in, for every fact below: where it stands, except the
                 // map-group player, who counts where his last waypoint lies (ReserveRules.HoldSectorOf),
                 // so Own and Count agree on whether a sector has a holder and a player bound for an empty
-                // threatened sector makes it Hold, even when he now stands off the sector map.
+                // threatened sector makes it Hold. Supply and Morale are averaged over the formations the
+                // planner can order only.
                 int sector = ReserveRules.HoldSectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
                 if (WlChainRules.CountsTowardHold(f.Chain)) x.Own[sector] += ReserveRules.HoldStrength(f);
                 x.Count[sector]++;
-                x.Supply[sector] += f.Supply01;
-                x.Morale[sector] += f.Morale;
+                if (WlChainRules.MayMove(f.Chain))
+                {
+                    x.Orderable[sector]++;
+                    x.Supply[sector] += f.Supply01;
+                    x.Morale[sector] += f.Morale;
+                }
                 if (x.Strongest[sector] < 0 || f.Strength > s.Own[x.Strongest[sector]].Strength) x.Strongest[sector] = i;
             }
             for (int i = 0; i < s.Areas.Count; i++)

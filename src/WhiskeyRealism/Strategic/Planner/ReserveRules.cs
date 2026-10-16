@@ -68,7 +68,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The sector a formation holds: SectorOf for the AI, the sector of the hold point for the
-        // map-group player (falling back to his position when the waypoint is off the sector map).
+        // map-group player (falling back to his position when his waypoint is not a usable point, e.g. NaN).
         internal static int HoldSectorOf(SectorModel sectors, in FormationRecord f)
         {
             if (f.Chain != WlChainClass.PlayerMapGroup) return SectorOf(sectors, f);

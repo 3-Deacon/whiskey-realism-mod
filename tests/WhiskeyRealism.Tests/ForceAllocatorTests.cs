@@ -51,6 +51,8 @@ internal static class ForceAllocatorTests
             ("PlayerMarchingAwayLeavesTheSectorToAnAIHolder", PlayerMarchingAwayLeavesTheSectorToAnAIHolder),
             ("PlayerIsNeverInTheMassOrAMustHold", PlayerIsNeverInTheMassOrAMustHold),
             ("MapGroupPlayerIsNeverPickedAsAPicket", MapGroupPlayerIsNeverPickedAsAPicket),
+            ("MixedSectorRealPlannerNeverPicketsThePlayer", MixedSectorRealPlannerNeverPicketsThePlayer),
+            ("StarvingPlayerAloneInAThreatenedSectorIsNotRecover", StarvingPlayerAloneInAThreatenedSectorIsNotRecover),
             ("PlayerBoundForAnEmptyThreatenedSectorMakesItHold", PlayerBoundForAnEmptyThreatenedSectorMakesItHold),
             ("HoldSectorOfCreditsTheWaypointWhateverThePosition", HoldSectorOfCreditsTheWaypointWhateverThePosition),
             ("SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck", SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck),
@@ -950,6 +952,71 @@ internal static class ForceAllocatorTests
             }
     }
 
+    // G4 verify r4 V1, through the real planner, PlanTasks and Allocate: a town whose sector holds an AI corps of 50000 and
+    // the map-group player's 5000 against a hold need of 18000. The AI corps cannot spare itself and the player is
+    // never picked (the picket sum alone does not keep him out in a mixed sector: only the MayMove guard does).
+    private static void MixedSectorRealPlannerNeverPicketsThePlayer()
+    {
+        var s = Wide();
+        var guard = Corps(1, 100f, 30000f);
+        guard.SightRadius = 30f;
+        s.Own.Add(guard);
+        var ai = Corps(2, 420f, 50000f);
+        ai.SightRadius = 30f;
+        s.Own.Add(ai);
+        var player = Corps(9, 410f, 5000f);
+        player.SightRadius = 30f;
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 400f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 1f });
+        s.Beliefs.Add(Belief(450f, 0f, 30000f));
+        var sectors = Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+        var missions = new ReconMissionLedger();
+        var tasks = new List<ReconTask>();
+        ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
+        var a = Alloc(plan, s, null, tasks, missions);
+        AssertTrue(Of(a, 9).Role != FormationRole.Recon, "the player is never a recon post");
+        AssertFalse(Of(a, 9).Withheld, "and never withheld");
+        foreach (var task in tasks)
+            AssertTrue(ReconPlanner.PickFormation(s, sectors, plan, missions, task, null, false) != 9, "no task " + task.Kind + "@" + task.HoldX + " picks him");
+        var direct = new ReconTask { Kind = ReconKind.Picket, SectorId = sectors.SectorAt(400f, 0f), FromX = 400f, FromZ = 0f, HoldX = 400f, HoldZ = 0f, Reason = "picket-town" };
+        AssertTrue(ReconPlanner.PickFormation(s, sectors, plan, missions, direct, null, false) != 9, "nor a picket built by hand for the town's sector");
+    }
+
+    // G4 verify r4 V2: a sector's Recover posture is decided by the formations the planner can order. A map-group
+    // player (or the player's own command) below the supply floor, alone in a threatened sector, counts toward its
+    // hold but cannot turn it to Recover: it stays Hold or Screen (a Recover sector gets no screen or picket). An AI corps in the same
+    // state still does.
+    private static void StarvingPlayerAloneInAThreatenedSectorIsNotRecover()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand, WlChainClass.None })
+            foreach (float strength in new[] { 2000f, 20000f })
+            {
+                var s = Wide();
+                var guard = Corps(1, 100f, 30000f);
+                guard.SightRadius = 30f;
+                s.Own.Add(guard);
+                var lone = Corps(9, 550f, strength);
+                lone.Chain = chain;
+                lone.Supply01 = 0.1f;
+                lone.Morale = 0.1f;
+                s.Own.Add(lone);
+                s.Beliefs.Add(Belief(600f, 0f, 10000f));
+                var sectors = Sectors(s);
+                int k = sectors.SectorAt(550f, 0f);
+                var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, Speed(), out _);
+                var posture = PostureOfSector(plan, k);
+                string label = chain + " " + strength + ": ";
+                if (chain == WlChainClass.None)
+                {
+                    AssertEqual(TheaterPosture.Recover, posture, label + "an AI corps below the floor sends its sector to Recover");
+                    continue;
+                }
+                AssertEqual(TheaterPosture.Screen, posture, label + "the player's supply and morale do not; at morale 0.1 his strength counts too little (2000 at most against 6000) to hold");
+            }
+    }
+
     // G4 verify r3 F2, through the real planner and ReconPlanner.PlanTasks: the player stands at x 310 (sector 1)
     // with his last waypoint at x 500, an empty threatened sector (need 6000, nothing of ours physically there).
     // He counts there at 20000, so the planner calls it Hold and plans no screen for it; with the waypoint at x 310
@@ -991,8 +1058,8 @@ internal static class ForceAllocatorTests
         }
     }
 
-    // G4 verify r3 F6: the hold sector is the waypoint's whatever the physical position says (even a position the
-    // sector map cannot place), and the position only when the waypoint is unusable.
+    // G4 verify r3 F6: the hold sector is the waypoint's whatever the physical position says, and the position only
+    // when the waypoint is not a usable point (NaN).
     private static void HoldSectorOfCreditsTheWaypointWhateverThePosition()
     {
         var s = Wide();
@@ -1014,7 +1081,7 @@ internal static class ForceAllocatorTests
     }
 
     // F6 and F2 in the planner's sector facts: the loop must key every fact on HoldSectorOf and never skip a
-    // formation on its physical sector first (a player off the sector map would never be credited).
+    // formation on its physical sector first (the credit follows the waypoint, whatever the position).
     private static void SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck()
     {
         string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "private static SectorFacts BuildSectorFacts(");

@@ -62,6 +62,7 @@ internal static class ReconPlannerTests
             ("DefaultHoldKeepsObjectivePerkRole", DefaultHoldKeepsObjectivePerkRole),
             ("PicketReserveIgnoresPlayerCommand", PicketReserveIgnoresPlayerCommand),
             ("PicketReserveIgnoresMapGroupPlayer", PicketReserveIgnoresMapGroupPlayer),
+            ("MixedSectorPicketNeverTakesTheMapGroupPlayer", MixedSectorPicketNeverTakesTheMapGroupPlayer),
             ("PicketComesFromItsOwnSector", PicketComesFromItsOwnSector),
             ("BusySetIncludesVanillaOperationLists", BusySetIncludesVanillaOperationLists),
             ("AdvanceGuardAndProbeSizeCap", AdvanceGuardAndProbeSizeCap),
@@ -819,6 +820,29 @@ internal static class ReconPlannerTests
         int got = Pick(s, sectors, plan, picket);
         AssertTrue(got != 1, "the AI corps is the sector's final reserve, got " + got);
         AssertEqual(-1, got, "the map-group player is never picked (G4 verify r3 F1); the AI corps keeps the hold");
+    }
+
+    // G4 verify r4 V1: the MayMove guard is what keeps the map-group player out, not the picket sum. An AI corps of
+    // 50000 and a map-group player of 5000 share the sector against a hold need of 18000. The AI corps is the final
+    // reserve (50000 - 50000 < 18000) and the player's 5000 is not counted by the recon sums, so before F1 the
+    // player alone could be picked (50000 - 0 >= 18000). Now nobody is, whichever the order they are listed in; with
+    // a second, spare AI corps the picket falls to an AI corps and still never to the player.
+    private static void MixedSectorPicketNeverTakesTheMapGroupPlayer()
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 600f, 0f, 50000f, 0f, 15));
+        var player = Unit(2, 500f, 0f, 5000f, 0f, 15);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        s.Beliefs.Add(Belief("threat", 550f, 60f, 30000f, Today, 1f, 5f)); // hold need 0.6 x 30000 = 18000
+        var sectors = SectorModel.Build(s);
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
+        var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
+        AssertEqual(-1, Pick(s, sectors, plan, picket), "the AI corps is the final reserve and the player is never a picket: nobody");
+
+        s.Own.Add(Unit(3, 450f, 0f, 20000f, 0f, 15));
+        AssertEqual(3, Pick(s, sectors, plan, picket), "with a spare AI corps it goes, and never the player");
     }
 
     private static (CampaignSnapshot, SectorModel, TheaterPlan, ReconTask) ReserveFixture(WlChainClass otherChain)
