@@ -36,6 +36,7 @@ internal static partial class ManeuverFeasibilityTests
         all.AddRange(CrossingTests());       // ManeuverFeasibilityTests.Crossings.cs
         all.AddRange(RouteTests());          // ManeuverFeasibilityTests.Routes.cs
         all.AddRange(VerdictTests());        // ManeuverFeasibilityTests.Verdicts.cs
+        all.AddRange(RiskTests());           // ManeuverFeasibilityTests.Risk.cs
         return all.ToArray();
     }
 

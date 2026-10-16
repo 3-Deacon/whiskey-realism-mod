@@ -274,6 +274,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Job.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Job.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Candidates.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Candidates.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Screen.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Screen.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Risk.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Risk.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.cs" Link="Orchestrator\Plays\FeasibilityLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FlankFacing.cs" Link="Battle\FlankFacing.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DeployedReserveMemory.cs" Link="Orchestrator\DeployedReserveMemory.cs" />

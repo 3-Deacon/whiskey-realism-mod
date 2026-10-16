@@ -466,6 +466,7 @@ internal static partial class ManeuverFeasibilityTests
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Job.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Candidates.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Screen.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Risk.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/LegCostCache.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityRuntime.cs",

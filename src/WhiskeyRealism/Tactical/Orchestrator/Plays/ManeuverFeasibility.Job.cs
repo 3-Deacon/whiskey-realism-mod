@@ -58,6 +58,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         internal FeasibilityInput Input;
         internal readonly CrossingGraphView Graph = new CrossingGraphView();
+        internal readonly EnemyPicture Enemy = new EnemyPicture();
         private readonly LegCostCache _ownCache = new LegCostCache();
 
         internal readonly ChildFact[] Children = new ChildFact[ManeuverFeasibility.MaxChildren];
@@ -139,6 +140,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Graph.Searches = 0;
 
             PrepareFrame();
+            Enemy.Build(Input.Snapshot, Input.EnemyEstimate, Input.Confidence, Input.Army.Caution01, Input.HasAssumedEnemy, Input.AssumedEnemyX,
+                Input.AssumedEnemyZ, EnemyX, EnemyZ);
             PrepareChildren();
             ledger.BeginBack();
             Running = true;

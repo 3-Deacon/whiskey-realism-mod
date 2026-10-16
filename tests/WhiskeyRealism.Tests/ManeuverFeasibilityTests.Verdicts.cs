@@ -240,7 +240,7 @@ internal static partial class ManeuverFeasibilityTests
     }
 
     // A fake exploit table: the listed instance is a live exploit asset.
-    sealed class FakeExploits : IExploitLookup
+    internal sealed class FakeExploits : IExploitLookup
     {
         public int Asset, Ancestor;
         public bool IsExploiting(int instanceId) => instanceId == Asset;

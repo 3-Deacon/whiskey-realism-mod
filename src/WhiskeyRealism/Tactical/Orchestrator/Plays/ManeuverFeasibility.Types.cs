@@ -41,6 +41,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>The main body's strike legs' weighted state value.</summary>
         public float StrikeContested;
         public float CourierHours, MarchHours, StrikeHours, DesiredStrikeHours, ReleaseHours, OffsetHours;
+        /// <summary>The strength this body pins at its strike (an enveloping body's, the main body's fixing members' without its reserve) and the defence ratio there.</summary>
+        public float PinStrength, DefenseRatio;
+        /// <summary>
+        /// The detail risk's working terms (requirement-detail-risk): the enemy's shift hours to this body (tau), the own support time (sigma) and the
+        /// exposure window (W), the enemy near the strike point (L), the pinned enemy, the enemy against this body (E), the own ratio and the isolated odds.
+        /// </summary>
+        public float EnemyShiftHours, SupportHours, ExposureWindowHours, LocalEnemy, Pin, EnemyAgainst, OwnRatio, IsolatedOdds;
         /// <summary>The terms of the penalty.</summary>
         public float Daylight, Detail, Contested, Approach, Exposure, Turn, Penalty;
         /// <summary>The reason literal when this body's penalty is largest (set with the verdict).</summary>
@@ -100,6 +107,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int CandidateCount;
         /// <summary>The crest line across the front (ReverseSlopeDefense's anchor); <c>Has</c> false when there is none.</summary>
         public TerrainLine Crest;
+        /// <summary>The reach (RangeOnlyReach) of a regiment of each unit type, indexed by <c>UnitTyp</c>: where a perceived regiment would see a column.</summary>
+        public float[] ReachByUnitType;
+        /// <summary>BC10's assumed enemy point, used as the enemy mass when the side perceives no enemy at all.</summary>
+        public bool HasAssumedEnemy;
+        public float AssumedEnemyX, AssumedEnemyZ;
         public LegCostCache Cache;
     }
 }

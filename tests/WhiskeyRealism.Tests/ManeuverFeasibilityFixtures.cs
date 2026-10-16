@@ -174,6 +174,12 @@ internal static class ManeuverFeasibilityFixtures
         /// <summary>Probe answer for BC13's perceived ground: everything perceived means every unheld crossing reads Clear.</summary>
         public Func<float, float, bool> Perceived = (x, z) => true;
         public readonly int ArmyIndex;
+        public bool HasAssumedEnemy;
+        /// <summary>Tree indexes of units with a Visible enemy inside the contact distance (the snapshot's perceived contact).</summary>
+        public readonly List<int> Contact = new List<int>();
+        /// <summary>Enemy unit records that are not observations: units the side does not perceive.</summary>
+        public readonly List<UnitRecord> HiddenEnemies = new List<UnitRecord>();
+        public float AssumedEnemyLateral, AssumedEnemyDepth;
 
         private static FeasField _flat;
 
@@ -212,7 +218,7 @@ internal static class ManeuverFeasibilityFixtures
             int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
             for (int r = 0; r < regiments; r++)
                 Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
-                    strength / regiments, fireRange: fireRange, rotationY: 0f, fatigue: fatigue);
+                    strength / regiments, morale: 1f, fireRange: fireRange, rotationY: 0f, fatigue: fatigue);
             ChildIds.Add("child-" + Tree.InstanceId(corps));
             DeployedReserve.Add(deployedReserve);
             return corps;
@@ -238,7 +244,21 @@ internal static class ManeuverFeasibilityFixtures
             AddEnemy(450f, depth, totalStrength / 3f);
         }
 
-        public BattleSnapshot Snapshot() => Tree.Build(Now, Enemies.ToArray());
+        public BattleSnapshot Snapshot()
+        {
+            BattleSnapshot s = Tree.Build(Now, Enemies.ToArray());
+            for (int i = 0; i < Contact.Count; i++) s.SetClosestVisibleEnemy(Contact[i], 0, 100f);
+            for (int i = 0; i < HiddenEnemies.Count; i++)
+            {
+                UnitRecord r = HiddenEnemies[i];
+                s.AddEnemy(in r);
+            }
+            return s;
+        }
+
+        /// <summary>An own regiment under the army that is no direct child's (a picket): it counts in the centroid and covers ground.</summary>
+        public int AddPicket(float lateral, float depth, float rotationY, float fireRange = 100f, float strength = 400f)
+            => Tree.Add(TacticalUnitType.Infantry, X(lateral), Z(depth), ArmyIndex, UnitFlags.IsInfantry, strength, morale: 1f, fireRange: fireRange, rotationY: rotationY);
 
         public FeasibilityInput Build(params BattlePlanId[] plans)
         {
@@ -289,7 +309,8 @@ internal static class ManeuverFeasibilityFixtures
                 Rules = Rules, Army = Army, EnemyEstimate = EnemyEstimate ?? total, Confidence = Confidence, EnemyIntent = EnemyIntent,
                 NowHours = Now, DaylightHours = DaylightHours, Exploits = Exploits, Legs = Legs,
                 ChildIds = ChildIds.ToArray(), ChildCount = ChildIds.Count, DeployedReserve = DeployedReserve.ToArray(),
-                Candidates = plans, CandidateCount = plans.Length,
+                Candidates = plans, CandidateCount = plans.Length, ReachByUnitType = ShippedReachByType, HasAssumedEnemy = HasAssumedEnemy,
+                AssumedEnemyX = X(AssumedEnemyLateral), AssumedEnemyZ = Z(AssumedEnemyDepth),
                 Cache = new LegCostCache(),
             };
         }

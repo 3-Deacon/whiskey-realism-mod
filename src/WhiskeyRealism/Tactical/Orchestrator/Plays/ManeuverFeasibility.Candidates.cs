@@ -211,6 +211,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 float before = body.Strength;
                 body.ChildCount++;
                 body.Strength = before + child.Strength;
+                if (kind != MemberOther) body.PinStrength += child.Strength;
                 body.Morale = body.Strength > 0f ? (body.Morale * before + child.Morale * child.Strength) / body.Strength : child.Morale;
                 if (kind == MemberEnvelops)
                 {

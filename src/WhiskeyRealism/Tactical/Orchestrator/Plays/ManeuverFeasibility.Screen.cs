@@ -230,7 +230,5 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         public const float ReasonThreshold = 0.2f;
-
-        static partial void ComputeRisk(FeasibilityJob job, PlayTemplate template, CandidateScratch w);
     }
 }
