@@ -1568,7 +1568,7 @@ See `### BC7 smoke checklist`, items 2.30-2.32.
 
 **As built (BC12):**
 
-Branch `feat/battle-next`, base `0a312ef`. Commits: `69aeea5` (picture core, stepped builder, build tests, TerrainModule reference), `bee6872` (runtime builder, flag, classification, strength, director sign, line planner), `c747697` (anchor planner terrain branch, anchored-end slots, strong-ground inference, crest plays, `LineHold`, picture terrain; sampler and `ownEvidence` deleted), `1d49404` (scope, first-fire, crest axis use, `AnchorStrength`), then test and doc commits. Harness 2610 PASS (base 2574, +36), build 0 warnings, config-audit 0, orphan-sweep 0 and `--include-test-only` 29, `tools/test_smoke_check.py` OK, `NavMeshQueriesSitAtTerrainHeight` still sees exactly three NavMesh query sites (BC12 adds none). 27 mutation plants, all killed (list in the build record).
+Branch `feat/battle-next`, base `0a312ef`. Commits: `69aeea5` (picture core, stepped builder, build tests, TerrainModule reference), `bee6872` (runtime builder, flag, classification, strength, director sign, line planner), `c747697` (anchor planner terrain branch, anchored-end slots, strong-ground inference, crest plays, `LineHold`, picture terrain; sampler and `ownEvidence` deleted), `1d49404` (scope, first-fire, crest axis use, `AnchorStrength`), then test and doc commits. Harness 2618 PASS (base 2574, +44 after verify round 1), build 0 warnings, config-audit 0, orphan-sweep 0 and `--include-test-only` 29, `tools/test_smoke_check.py` OK, `NavMeshQueriesSitAtTerrainHeight` still sees exactly three NavMesh query sites (BC12 adds none). 27 mutation plants, all killed (list in the build record).
 
 What changed against the plan (each a finding or a deliberate deviation, with anchors):
 

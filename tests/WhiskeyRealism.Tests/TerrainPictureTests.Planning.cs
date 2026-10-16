@@ -43,6 +43,7 @@ internal static partial class TerrainPictureTests
             ("bc12 OnlyARiverAnchorsAFlank", OnlyARiverAnchorsAFlank),
             ("bc12 EnemyHeldObjectiveWaterIsOnOurSide", EnemyHeldObjectiveWaterIsOnOurSide),
             ("bc12 EnemyHeldObjectiveApproachIsOnOurSide", EnemyHeldObjectiveApproachIsOnOurSide),
+            ("bc12 EnemyHeldObjectiveAxisUsesBothCoordinates", EnemyHeldObjectiveAxisUsesBothCoordinates),
             ("bc12 ClassificationFollowsThePlanningFlag", ClassificationFollowsThePlanningFlag),
             ("bc12 PlumbingFromTheArmyAndEvidenceIsPinned", PlumbingFromTheArmyAndEvidenceIsPinned),
             ("bc12 BuildingIndexIsIncremental", BuildingIndexIsIncremental),
@@ -346,6 +347,10 @@ internal static partial class TerrainPictureTests
         var riverLine = new TerrainLine { Has = true, Kind = TerrainLineKind.River, CenterX = 400f, CenterZ = -390f };
         TacticalTerrainLinePlanner.AnchorPoint(in riverLine, 0f, 1f, false, out float qx, out float qz);
         AssertNear(-390f - 150f, qz, 0.01f, "a river line is held from 150 m behind it");
+        TacticalTerrainLinePlanner.AnchorPoint(in riverLine, 1f, 0f, false, out float sideX, out float sideZ);
+        AssertNear(400f - 150f, sideX, 0.01f, "behind it along x when the threat axis is +x");
+        AssertNear(-390f, sideZ, 0.01f, "...and unchanged in z");
+        AssertEqual(150f, TacticalTerrainLinePlanner.RiverStandOffMeters, "RiverStandOffMeters");
     }
 
     private static TacticalBattlefrontSnapshot NoFront => default(TacticalBattlefrontSnapshot);
@@ -799,6 +804,16 @@ internal static partial class TerrainPictureTests
         TerrainPicture between = Build(Grid(Map, (x, z) => (z - Map < -400) ? 15 : Grass), Map, Flat());
         AssertEqual(0f, ReadObjectiveAt(beyond, () => true, 400f, -400f)[0].ApproachDifficulty, "a swamp behind the objective does not slow our approach");
         AssertNear(1f, ReadObjectiveAt(between, () => true, 400f, -400f)[0].ApproachDifficulty, 0.0001f, "a swamp between us and it does");
+    }
+
+    private static void EnemyHeldObjectiveAxisUsesBothCoordinates()
+    {
+        // The objective is off to the side (700, -400) of our centroid (400, -700): the way to it runs along the diagonal, and a river
+        // band across that diagonal (x + z in -60..20) lies between us and it; the same kind of band beyond it (x + z in 600..700) does not.
+        TerrainPicture column = Build(Grid(Map, (x, z) => (x + (z - Map) >= -60 && x + (z - Map) < 20) ? River : Grass), Map, Flat());
+        AssertNear(0.4f, ReadObjectiveAt(column, () => true, 700f, -400f)[0].TerrainStrength, 0.0001f, "a river band between us and an objective off to the side");
+        TerrainPicture far = Build(Grid(Map, (x, z) => (x + (z - Map) >= 600 && x + (z - Map) < 700) ? River : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(far, () => true, 700f, -400f)[0].TerrainStrength, "a river beyond it, off to the side, is not ours to cross");
     }
 
     private static void ClassificationFollowsThePlanningFlag()
