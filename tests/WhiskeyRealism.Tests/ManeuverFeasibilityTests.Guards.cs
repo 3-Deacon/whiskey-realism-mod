@@ -27,6 +27,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 LOOK-LIST-ORDER the Defender's look list is the crossings the enemy reaches before dark, earliest first, at most eight", LookListOrder),
         ("bc14 DEF-WORK-UNITS the Defender's picture is built in work units: no slice runs more than its budget, no unit costs more than one body's rides, the result equals a forced run", DefWorkUnits),
         ("bc14 DEF-TIME informational: a 60-crossing Defender field's whole picture and its largest work unit, in milliseconds", DefTime),
+        ("bc14 FEAS-TICK-ORDER with both pending the tick runs the monitor first, so a wide Defender evaluation never starves it", FeasTickOrder),
         ("bc14 XING-OWN-COVER an own regiment covers a crossing by its facing and fire range; a routed, grouped, artillery or off-line one does not", XingOwnCover),
     };
 
@@ -442,5 +443,73 @@ internal static partial class ManeuverFeasibilityTests
                 + bestLargest.ToString("F3") + " ms");
             AssertTrue(ledger.Job.Defender.IsDone && units > 0, "the picture was built in units");
         }
+    }
+
+    struct RecordingTick : IFeasibilityTickWork
+    {
+        public List<string> Log;
+        public bool Pending;
+        public bool MonitorPending => Pending;
+        public void RunMonitor() => Log.Add("monitor");
+        public void RunEvaluation() => Log.Add("evaluate");
+    }
+
+    // Both jobs of a 60-ford Defender field on the real ledgers, one shared budget a tick, the clock one tick a check.
+    struct SharedBudgetTick : IFeasibilityTickWork
+    {
+        public FeasibilityLedger Ledger;
+        public FeasibilityInput Full, Monitored;
+        public long Deadline;
+        public Func<long> Clock;
+        public bool MonitorWanted;
+        public bool MonitorPending => MonitorWanted;
+        public void RunMonitor() { if (ManeuverFeasibility.EvaluateSelectedSlice(in Monitored, Ledger, Deadline, Clock)) MonitorWanted = false; }
+        public void RunEvaluation() => ManeuverFeasibility.EvaluateSlice(in Full, Ledger.Job, Ledger, Deadline, Clock);
+    }
+
+    static void FeasTickOrder()
+    {
+        var log = new List<string>();
+        var both = new RecordingTick { Log = log, Pending = true };
+        FeasibilityTick.Run(ref both);
+        AssertEqual("monitor,evaluate", string.Join(",", log), "with both pending the monitor runs first");
+        log.Clear();
+        var only = new RecordingTick { Log = log, Pending = false };
+        FeasibilityTick.Run(ref only);
+        AssertEqual("evaluate", string.Join(",", log), "with no monitor pending only the evaluation runs");
+
+        // The property it buys, on the real jobs: how many ticks the monitor needs while a wide evaluation is also running, under one budget.
+        const int budget = 6;
+        FeasField f = WideDefender(24);
+        FeasibilityInput full = f.Build(DefensivePlans);
+        var probe = new FeasibilityLedger();
+        ManeuverFeasibility.Evaluate(in full, probe);
+        probe.CaptureSelection(BattlePlanId.PreparedDefense, false);
+        ManeuverFeasibility.Evaluate(in full, probe);
+        EvaluateSelectedFully(in full, probe);
+        int monitorUnits = probe.MonitorLedger.Job.WorkUnits + 1;       // the picture and the one candidate
+        AssertTrue(monitorUnits > 100, "the monitor's run is many units: " + monitorUnits);
+
+        int Ticks()
+        {
+            // A running full evaluation (restarted when it finishes, as the interval does) and a monitor run wanted from tick 0.
+            var ledger = new FeasibilityLedger();
+            ManeuverFeasibility.Evaluate(in full, ledger);
+            ledger.CaptureSelection(BattlePlanId.PreparedDefense, false);
+            long ticks = 0;
+            Func<long> clock = () => ticks++;
+            var work = new SharedBudgetTick { Ledger = ledger, Full = full, Monitored = full, Clock = clock, MonitorWanted = true };
+            int n = 0;
+            while (work.MonitorWanted && n < 1000)
+            {
+                work.Deadline = ticks + budget;
+                FeasibilityTick.Run(ref work);
+                n++;
+            }
+            return n;
+        }
+        int monitorFirst = Ticks();
+        AssertTrue(monitorFirst <= (monitorUnits + budget - 1) / (budget - 1) + 1, "the monitor finishes in about units / budget ticks: " + monitorFirst + " for " + monitorUnits + " units at " + budget);
+        AssertTrue(monitorFirst < 1000, "and it finishes");
     }
 }

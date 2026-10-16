@@ -493,6 +493,7 @@ internal static partial class ManeuverFeasibilityTests
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/LegCostCache.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.Look.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ConfirmedLegs.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityTick.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityTelemetry.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityRuntime.cs",
         };

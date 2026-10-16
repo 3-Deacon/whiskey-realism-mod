@@ -173,10 +173,11 @@ internal static partial class ManeuverFeasibilityTests
 
         string runtime = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityRuntime.cs");
         string order = FlankResponseTests.Flat(runtime);
-        int classify = order.IndexOf("Classify(st, snapshot, regions, now); Evaluate(", StringComparison.Ordinal);
-        int monitor = order.IndexOf("Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);", StringComparison.Ordinal);
+        int classify = order.IndexOf("Classify(st, snapshot, regions, now);", StringComparison.Ordinal);
+        int tick = order.IndexOf("FeasibilityTick.Run(ref work);", StringComparison.Ordinal);
         int confirm = order.IndexOf("st.Legs.Process(NavQuery);", StringComparison.Ordinal);
-        AssertTrue(classify > 0 && monitor > classify && confirm > monitor, "probes and the evaluation, then the monitor, then the confirmation query");
+        AssertTrue(classify > 0 && tick > classify && confirm > tick, "probes, then the monitor and the evaluation in FeasibilityTick's order, then the confirmation query");
+        FlankResponseTests.AssertPinned(runtime, "public bool MonitorPending => !Forced && (St.MonitorWanted || St.Ledger.MonitorRunning);", "a monitor run is pending when wanted or part-way, never in a forced run");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.evaluate\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the evaluate scope at 2.0 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.monitor\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))", "the monitor scope at 0.5 ms");
         FlankResponseTests.AssertPinned(runtime, "using (TelemetryPerf.Scope(\"tactical.feasibility.navmesh\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))", "the navmesh scope at 2.0 ms");
@@ -185,8 +186,10 @@ internal static partial class ManeuverFeasibilityTests
         FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "ManeuverFeasibility.Candidates.cs"),
             "EvaluateIntervalHours = 0.05f, EvaluateSliceMs = 1.5f", "the spec's evaluation interval (0.05 h) and slice (1.5 ms)");
         // One slice budget per tick, shared by the evaluation and the monitor; the monitor resumes a part-run on the next tick.
-        FlankResponseTests.AssertPinned(runtime, "Evaluate(st, side, army, bunits, snapshot, evidence, axis, regions, now, forced, deadline);", "the evaluation takes the tick's deadline");
-        FlankResponseTests.AssertPinned(runtime, "Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);", "and so does the monitor");
+        FlankResponseTests.AssertPinned(runtime, "Evaluate(St, Side, Army, Bunits, Snapshot, Evidence, Axis, Regions, Now, Forced, Deadline);", "the evaluation takes the tick's deadline");
+        FlankResponseTests.AssertPinned(runtime, "Monitor(St, Side, Army, Bunits, Snapshot, Evidence, Axis, Regions, Now, Deadline);", "and so does the monitor");
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityTick.cs"),
+            "if (work.MonitorPending) work.RunMonitor();", "the monitor goes first (FEAS-TICK-ORDER runs it)");
         FlankResponseTests.AssertPinned(runtime, "if (!ManeuverFeasibility.EvaluateSelectedSlice(in input, ledger, deadline, Stopwatch.GetTimestamp)) return;", "a monitor run that ran out of budget waits for the next tick");
         FlankResponseTests.AssertPinned(runtime, "st.MonitorWanted = true;", "a new heavy snapshot asks for a monitor run");
         FlankResponseTests.AssertPinned(runtime, "army.SetFeasibility(Plugin.ManeuverFeasibilityEnabled() ? st.Ledger : null);", "the ledger is pushed, null with the flag off");

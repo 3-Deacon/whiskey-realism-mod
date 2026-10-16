@@ -145,25 +145,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 st.Legs.SetClock(now);
                 RiverRegions regions = RiverRegionsRuntime.Ready();
 
-                // One slice budget for the tick: the evaluation and the monitor share it, each resuming on the next tick where the budget ran out.
+                // One slice budget for the tick, shared by the monitor and the evaluation, the monitor first (FeasibilityTick): a replan the
+                // monitor owes is never starved by a wide Defender evaluation; each resumes on the next tick where the budget ran out.
                 long deadline = Stopwatch.GetTimestamp() + (long)(ManeuverFeasibility.EvaluateSliceMs * 0.001 * Stopwatch.Frequency);
                 using (TelemetryPerf.Scope("tactical.feasibility.evaluate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
-                {
                     Classify(st, snapshot, regions, now);
-                    Evaluate(st, side, army, bunits, snapshot, evidence, axis, regions, now, forced, deadline);
-                }
 
-                if (forced) return;
-                if (snapshotGeneration < 0 || snapshotGeneration != st.MonitoredGeneration)
+                if (!forced && (snapshotGeneration < 0 || snapshotGeneration != st.MonitoredGeneration))
                 {
                     st.MonitoredGeneration = snapshotGeneration;
                     st.MonitorWanted = true;
                 }
-                if (st.MonitorWanted || st.Ledger.MonitorRunning)
+                var work = new TickWork
                 {
-                    using (TelemetryPerf.Scope("tactical.feasibility.monitor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
-                        Monitor(st, side, army, bunits, snapshot, evidence, axis, regions, now, deadline);
-                }
+                    St = st, Side = side, Army = army, Bunits = bunits, Snapshot = snapshot, Evidence = evidence, Axis = axis, Regions = regions,
+                    Now = now, Forced = forced, Deadline = deadline,
+                };
+                FeasibilityTick.Run(ref work);
+
+                if (forced) return;
 
                 using (TelemetryPerf.Scope("tactical.feasibility.navmesh", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                     st.Legs.Process(NavQuery);
@@ -172,6 +172,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-battle-core:feasibility-tick", "[Feasibility] the heavy path threw, the last ledger stands: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // The tick's two jobs for FeasibilityTick (a struct: no allocation per tick).
+        private struct TickWork : IFeasibilityTickWork
+        {
+            public SideState St;
+            public TacticalBattleOrchestrator Side;
+            public ArmyOrchestrator Army;
+            public BattleUnits Bunits;
+            public BattleSnapshot Snapshot;
+            public ArmyEvidence Evidence;
+            public TacticalFrontAxis Axis;
+            public RiverRegions Regions;
+            public double Now;
+            public bool Forced;
+            public long Deadline;
+
+            public bool MonitorPending => !Forced && (St.MonitorWanted || St.Ledger.MonitorRunning);
+
+            public void RunMonitor()
+            {
+                using (TelemetryPerf.Scope("tactical.feasibility.monitor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
+                    Monitor(St, Side, Army, Bunits, Snapshot, Evidence, Axis, Regions, Now, Deadline);
+            }
+
+            public void RunEvaluation()
+            {
+                using (TelemetryPerf.Scope("tactical.feasibility.evaluate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                    Evaluate(St, Side, Army, Bunits, Snapshot, Evidence, Axis, Regions, Now, Forced, Deadline);
             }
         }
 
