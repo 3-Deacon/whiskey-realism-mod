@@ -339,7 +339,7 @@ internal static partial class BattleMovementHonestyTests
     {
         string posture = StripComments(System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs")));
         AssertTrue(posture.Contains("PostureRoutes.Resolve("), "the pipeline resolves a route");
-        AssertTrue(posture.Contains("ViaCount = roadRoute.Use ? roadRoute.ViaCount : 0"), "and puts the via points on the request");
+        AssertTrue(posture.Contains("ViaCount = roadRoute.Use ? roadRoute.ViaCount : (maneuverVia ? 1 : 0)"), "and puts the via points on the request");
         AssertTrue(posture.Contains("ColumnWait = columnWait"), "and the column wait");
         AssertTrue(posture.Contains("Plugin.EnableDeploymentAndMarchDoctrine.Value"), "the doctrine flag gates the route");
         string reserve = StripComments(System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical/Battle/Producers/ReserveReleaseIntentProducer.cs")));

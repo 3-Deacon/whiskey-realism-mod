@@ -1262,6 +1262,36 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         /// <summary>
+        /// BC14 requirement-crossing-via: the crossing a maneuvering wing's order is routed through. Only a March or an Attack on the doctrine
+        /// order's primary target carries it (a hold, a turn and a main-body member's order have none, and an exploit order is its own), and the
+        /// via is the order's own, which the maneuver dropped once the child stood past it.
+        /// </summary>
+        public static bool TryManeuverVia(in CommandDoctrineOrder order, CommandTaskType task, bool exploit, PostureExecutionTarget target,
+            out float viaX, out float viaZ)
+        {
+            viaX = 0f;
+            viaZ = 0f;
+            if (exploit || !order.HasVia || target != PostureExecutionTarget.DoctrinePrimaryTarget) return false;
+            if (task != CommandTaskType.AdvanceToAssembly && task != CommandTaskType.AttackObjective) return false;
+            viaX = order.ViaX;
+            viaZ = order.ViaZ;
+            return true;
+        }
+
+        /// <summary>
+        /// Which of the two route aids a move may still use. A move through a crossing via is routed by that via alone: a BC10 road route plans
+        /// its own via points, and a move around covered crossings is vanilla's BlockedMovingOrder, which has no via points at all (the executor
+        /// would drop the crossing). Both outputs are true when nothing suppresses them; the caller keeps its own conditions
+        /// (PostureRoutes.Applies, AvoidsCoveredCrossings).
+        /// </summary>
+        public static void RouteFlagsFor(CommandTaskType task, bool hasManeuverVia, out bool useRoadRoute, out bool avoidCoveredCrossings)
+        {
+            bool routedByVia = hasManeuverVia && (task == CommandTaskType.AdvanceToAssembly || task == CommandTaskType.AttackObjective);
+            useRoadRoute = !routedByVia;
+            avoidCoveredCrossings = !routedByVia;
+        }
+
+        /// <summary>
         /// A nested leaf brigade's move to its slot, facing <paramref name="heading"/>
         /// (-1 none): no stance (it is not an AI group), and never through
         /// BlockedMovingOrder (#61's leaf path called SetWaypoint directly).

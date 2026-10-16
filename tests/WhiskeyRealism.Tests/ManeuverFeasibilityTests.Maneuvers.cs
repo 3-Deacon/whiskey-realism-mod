@@ -28,6 +28,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 VIA-ROUTE-CHECK the march leg's route check runs as two half-queries through the via", ViaRouteCheck),
         ("bc14 INWARD-VIA-BC11 the inward leg is sampled as two sub-legs through the attack via and the via's own footprint is not river", InwardViaBc11),
         ("bc14 READER-NODE-COPY a maneuver order's via reaches the node entry, the doctrine order and the maneuver hash", ReaderNodeCopy),
+        ("bc14 VIA-ORDER a maneuver task with a via takes no road route and no covered-crossing avoidance, and its move carries the crossing", ViaOrder),
         ("bc14 LEDGER-CHILD-TABLE the selected plan's per-child table gives each wing its release, budget and via and a fix its release", LedgerChildTable),
         ("bc14 MANEUVER-WIRED BC11's runtime reads the ledger's plan only for the selected plan and the ledger's side", ManeuverWired),
     };
@@ -548,6 +549,97 @@ internal static partial class ManeuverFeasibilityTests
         ManeuverNodeTable attackTable = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", attack, 1f, 0f) }, intents);
         attackTable.TryGet("node-7", out ManeuverNodeEntry attackEntry);
         AssertTrue(attackEntry.HasVia && attackEntry.ViaX == 300f, "the attack via reaches the entry");
+    }
+
+    sealed class MoveSink : IIntentSink
+    {
+        public readonly List<BattleOrderIntent> Items = new List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) { Items.Add(intent); }
+        public BattleOrderIntent Move()
+        {
+            foreach (BattleOrderIntent i in Items) if (i.Channel == OrderChannel.Move) return i;
+            return default(BattleOrderIntent);
+        }
+    }
+
+    static void ViaOrder()
+    {
+        // The route aids a via suppresses: only a March or an Attack carries one.
+        foreach (CommandTaskType task in new[] { CommandTaskType.AdvanceToAssembly, CommandTaskType.AttackObjective })
+        {
+            PostureIntentPlan.RouteFlagsFor(task, true, out bool road, out bool covered);
+            AssertFalse(road, task + " with a via: no road route");
+            AssertFalse(covered, task + " with a via: no covered-crossing avoidance");
+            PostureIntentPlan.RouteFlagsFor(task, false, out road, out covered);
+            AssertTrue(road && covered, task + " without a via keeps both");
+        }
+        PostureIntentPlan.RouteFlagsFor(CommandTaskType.FormUp, true, out bool holdRoad, out bool holdCovered);
+        AssertTrue(holdRoad && holdCovered, "a hold has no via to route by");
+
+        // The March node's doctrine order, built from the maneuver, carries the via to the posture producer.
+        var nodes = new[] { new CommandNodeOperationalState("node-7", CommandEchelonKind.CorpsLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, CommandTaskState.Planning) };
+        var intents = new[] { FlankResponseTests.NodeIntent("node-7", "node-7") };
+        var march = new ManeuverOrder
+        {
+            Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly, TargetX = 1000f, TargetZ = 500f, Heading = -1f, Reason = "march-anchor",
+            HasVia = true, ViaX = 420f, ViaZ = -600f,
+        };
+        CommandDoctrineOrder marchOrder = FlankResponseTests.DoctrineOrders(nodes, BattleStance.Meeting,
+            EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", march, 1f, 0f) }, intents))[0];
+        AssertEqual(CommandTaskType.AdvanceToAssembly, marchOrder.Task, "the March order's task");
+        AssertTrue(PostureIntentPlan.TryManeuverVia(in marchOrder, marchOrder.Task, false, PostureExecutionTarget.DoctrinePrimaryTarget, out float vx, out float vz),
+            "the March order is routed through its via");
+        AssertEqual(420f, vx, "via x");
+        AssertEqual(-600f, vz, "via z");
+        // The producer's request for it: one via, no covered-crossing flag, the target the order's own.
+        PostureIntentPlan.RouteFlagsFor(marchOrder.Task, true, out _, out bool coveredAllowed);
+        var sink = new MoveSink();
+        PostureIntentPlan.Submit(sink, new PostureIntentRequest
+        {
+            GroupId = 7, Action = PostureExecutionAction.SetFormationAndWaypoint, Task = marchOrder.Task, HasTarget = true, TargetX = 1000f, TargetZ = 500f,
+            TargetFormation = -1, AvoidCoveredCrossings = coveredAllowed, ViaCount = 1, ViaX0 = vx, ViaZ0 = vz,
+            Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test",
+        });
+        BattleOrderIntent move = sink.Move();
+        AssertEqual(1, move.ViaCount, "the move carries one via");
+        AssertEqual(420f, move.ViaX0, "at the crossing: x");
+        AssertEqual(-600f, move.ViaZ0, "z");
+        AssertEqual(1000f, move.TargetX, "and its target is the rect anchor");
+        AssertTrue((move.Flags & IntentFlags.AvoidCoveredCrossings) == 0, "with no covered-crossing avoidance");
+
+        // An Attack with an attack via: the same, its target still the line end.
+        var attack = new ManeuverOrder
+        {
+            Phase = ManeuverPhase.Attack, Task = CommandTaskType.AttackObjective, TargetX = 800f, TargetZ = 1500f, Heading = -1f, Reason = "attack-line-end",
+            HasVia = true, ViaX = 300f, ViaZ = 400f,
+        };
+        CommandDoctrineOrder attackOrder = FlankResponseTests.DoctrineOrders(nodes, BattleStance.Meeting,
+            EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", attack, 1f, 0f) }, intents))[0];
+        AssertTrue(PostureIntentPlan.TryManeuverVia(in attackOrder, attackOrder.Task, false, PostureExecutionTarget.DoctrinePrimaryTarget, out vx, out vz), "the Attack is routed through its via");
+        AssertEqual(300f, vx, "attack via x");
+        AssertEqual(800f, attackOrder.PrimaryTarget.X, "its target is the line end");
+        AssertEqual(1500f, attackOrder.PrimaryTarget.Z, "z");
+
+        // No via, a hold, an exploit order, another target and a main-body member's order carry none.
+        CommandDoctrineOrder plain = PlainOrder();
+        AssertFalse(PostureIntentPlan.TryManeuverVia(in plain, CommandTaskType.AdvanceToAssembly, false, PostureExecutionTarget.DoctrinePrimaryTarget, out _, out _),
+            "a main-body member's order has no via");
+        AssertFalse(PostureIntentPlan.TryManeuverVia(in marchOrder, CommandTaskType.FormUp, false, PostureExecutionTarget.DoctrinePrimaryTarget, out _, out _), "a hold has none");
+        AssertFalse(PostureIntentPlan.TryManeuverVia(in marchOrder, marchOrder.Task, true, PostureExecutionTarget.DoctrinePrimaryTarget, out _, out _), "an exploit order is its own");
+        AssertFalse(PostureIntentPlan.TryManeuverVia(in marchOrder, marchOrder.Task, false, PostureExecutionTarget.FallbackLine, out _, out _), "a fallback target is not the maneuver's");
+        var hold = new ManeuverOrder { Phase = ManeuverPhase.Hold, Task = CommandTaskType.FormUp, Heading = -1f, Reason = "hold-offset" };
+        CommandDoctrineOrder holdOrder = FlankResponseTests.DoctrineOrders(nodes, BattleStance.Meeting,
+            EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", hold, 1f, 0f) }, intents))[0];
+        AssertFalse(holdOrder.HasVia, "a hold's doctrine order has no via");
+
+        // The producer feeds the request from these functions.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "PostureIntentPlan.TryManeuverVia(in order, state.Task, exploit, decision.Target, out maneuverViaX, out maneuverViaZ);", "the order's via is read once");
+        FlankResponseTests.AssertPinned(producer, "PostureIntentPlan.RouteFlagsFor(state.Task, maneuverVia, out bool roadRouteAllowed, out bool coveredAvoidanceAllowed);", "and decides the route aids");
+        FlankResponseTests.AssertPinned(producer, "if (hasTarget && roadRouteAllowed && rec.UnitTyp > TacticalUnitType.MaxCombat", "no road route with a via");
+        FlankResponseTests.AssertPinned(producer, "AvoidCoveredCrossings = hasTarget && coveredAvoidanceAllowed && PostureIntentPlan.AvoidsCoveredCrossings(", "no covered-crossing avoidance with a via");
+        FlankResponseTests.AssertPinned(producer, "ViaCount = roadRoute.Use ? roadRoute.ViaCount : (maneuverVia ? 1 : 0),", "one via on the move");
+        FlankResponseTests.AssertPinned(producer, "ViaX0 = roadRoute.Use ? roadRoute.ViaX0 : maneuverViaX,", "at the crossing");
     }
 
     static void LedgerChildTable()
