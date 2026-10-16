@@ -46,13 +46,9 @@ namespace WhiskeyRealism.Patches
                     {
                         AllianceId = owner,
                         Kind = KindForBuilding(type),
-                        BuildingTypeId = type,
                         Name = SafeBuildingName(__result, type),
                         Theater = TheaterFromPosition(actualPosition),
-                        SiteKey = actualPosition.x.ToString("0") + "," + actualPosition.z.ToString("0"),
-                        Year = SafeYear(),
-                        Month = SafeMonth(),
-                        Day = SafeDay()
+                        SiteKey = actualPosition.x.ToString("0") + "," + actualPosition.z.ToString("0")
                     };
 
                     StrategicCoordinator.Instance?.RecordConstructionStart(start);
@@ -89,13 +85,9 @@ namespace WhiskeyRealism.Patches
                     {
                         AllianceId = _alliancetoconstruct,
                         Kind = ConstructionCandidateKind.Railroad,
-                        BuildingTypeId = -1,
                         Name = name,
                         Theater = TheaterFromPosition(position),
-                        SiteKey = name,
-                        Year = SafeYear(),
-                        Month = SafeMonth(),
-                        Day = SafeDay()
+                        SiteKey = name
                     };
 
                     StrategicCoordinator.Instance?.RecordConstructionStart(start);
@@ -163,24 +155,6 @@ namespace WhiskeyRealism.Patches
             {
                 return "<railroad>";
             }
-        }
-
-        private static int SafeYear()
-        {
-            try { return Mathf.FloorToInt(GameVars.GetCampaignFloatingDate()); }
-            catch { return 0; }
-        }
-
-        private static int SafeMonth()
-        {
-            try { return GameVars.GetCampaignFloatingDateSep().month; }
-            catch { return 0; }
-        }
-
-        private static int SafeDay()
-        {
-            try { return GameVars.GetCampaignFloatingDateSep().day; }
-            catch { return 0; }
         }
 
         private static Theater TheaterFromPosition(Vector3 position)

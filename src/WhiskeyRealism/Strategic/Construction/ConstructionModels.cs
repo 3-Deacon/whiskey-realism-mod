@@ -43,15 +43,12 @@ namespace WhiskeyRealism.Strategic.Construction
     public sealed class ConstructionInput
     {
         public int AllianceId;
-        public EraStage EraStage;
         public int CurrentYear = 1861;
         public FiscalPosture FiscalPosture = FiscalPosture.BalancedWar;
-        public FiscalGate FiscalDefendedGate = FiscalGate.None;
         public int CurrentRating;
         public int BondFloorRating = 11;
         public bool SupplyProtection;
         public bool LogisticsExpansion;
-        public bool ForceCapWarning;
         public string TopSupplyTheater = "";
         public string TopSupplyAreaKey = "";
         public List<ConstructionSectorThreat> SectorThreats = new List<ConstructionSectorThreat>();
@@ -72,7 +69,6 @@ namespace WhiskeyRealism.Strategic.Construction
         {
             Kind = ConstructionCandidateKind.None,
             Name = "<none>",
-            Reason = "none",
             VanillaValid = false,
             Score = 0f
         };
@@ -90,12 +86,10 @@ namespace WhiskeyRealism.Strategic.Construction
         public float WoundedPressure;
         public float CapitalThreat;
         public bool VanillaValid;
-        public bool SafeRear;
         public bool ArmsIndustry;
         public bool SupportsActiveArmyCorridor;
         public bool CriticalDefense;
         public float Score;
-        public string Reason;
     }
 
     public struct ConstructionSuppression
@@ -144,13 +138,9 @@ namespace WhiskeyRealism.Strategic.Construction
     {
         public int AllianceId;
         public ConstructionCandidateKind Kind;
-        public int BuildingTypeId;
         public string Name;
         public Theater Theater;
         public string SiteKey;
-        public int Year;
-        public int Month;
-        public int Day;
     }
 }
 

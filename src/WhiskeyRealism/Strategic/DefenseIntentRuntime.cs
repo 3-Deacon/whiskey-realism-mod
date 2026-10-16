@@ -593,15 +593,12 @@ namespace WhiskeyRealism.Strategic
                 input.Candidates.Add(new DefenseCandidate
                 {
                     UnitInstanceId = unitInstanceId,
-                    UnitKey = unitKey,
-                    UnitName = unitName,
                     SectorKey = sectorKey,
                     X = unitPos.x,
                     Z = unitPos.z,
                     ActiveStrength = (float)strength,
                     Morale = morale,
                     ReadinessStep = readinessStep,
-                    Theater = unitTheater,
                     Tier = tier,
                     InOffensiveOperation = inOffensive,
                     PlayerControlled = playerControlled,

@@ -364,7 +364,7 @@ internal static class TheaterPlannerTests
         s.Beliefs.Add(Belief(300f, 0f, 20000f, 1f));
         AssertEqual(-1, PlanOnce(s).MainObjectiveId, "a neutral commander does not attack at even odds");
 
-        Func<int, CommanderProfile> bold = id => new CommanderProfile { CommanderId = id, RequiredOddsShift = -0.25f };
+        Func<int, CommanderProfile> bold = id => new CommanderProfile { RequiredOddsShift = -0.25f };
         var plan = TheaterPlanner.Plan(s, Sectors(s), bold, new PlannerState(), null, null, Speed(), out _);
         AssertEqual(99, plan.MainObjectiveId, "a bold commander attacks at worse odds");
         AssertNear(0.85f, plan.MainRequiredRatio, 0.0001f, "required ratio shifted by the profile");
@@ -1552,7 +1552,7 @@ internal static class TheaterPlannerTests
     private static CampaignSnapshot Fresh(int alliance)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, null);
         return s;
     }
 
@@ -1561,7 +1561,7 @@ internal static class TheaterPlannerTests
     private static CampaignSnapshot Line(int alliance = 0, int areas = 5, DirectorPosture tempo = null)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, true, tempo);
+        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, tempo);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -1622,7 +1622,7 @@ internal static class TheaterPlannerTests
 
     private static SupplySourceRecord Iip(int id, float x, int owner)
     {
-        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true };
+        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, Condition = 1f, Built = true };
     }
 
     private static EnemyBelief Belief(float x, float z, float strength, float confidence)

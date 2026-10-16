@@ -334,7 +334,7 @@ internal static class ForceAllocatorTests
         int Role8(DirectorPosture tempo)
         {
             var s = Wide();
-            s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, true, tempo);
+            s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, tempo);
             s.RelocationRange = 150f;
             s.OffensiveDominance = 1.1f;
             s.MinStrengthForMovement = 1000f;
@@ -1368,7 +1368,7 @@ internal static class ForceAllocatorTests
         CampaignSnapshot Side(int alliance, WlChainClass chain)
         {
             var s = Wide();
-            s.Reset(alliance, alliance, Day, PlayerCommandClass.CommanderInChief, -1, true, null);
+            s.Reset(alliance, alliance, Day, PlayerCommandClass.CommanderInChief, -1, null);
             s.RelocationRange = 150f;
             s.OffensiveDominance = 1.1f;
             s.MinStrengthForMovement = 1000f;
@@ -1675,7 +1675,7 @@ internal static class ForceAllocatorTests
         AssertEqual(0, ForceAllocator.Allocate(plan, null, sectors, null, null, null).Assignments.Count, "no snapshot");
         AssertEqual(0, ForceAllocator.Allocate(plan, s, null, null, null, null).Assignments.Count, "no sectors");
         var two = new CampaignSnapshot();
-        two.Reset(2, 2, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        two.Reset(2, 2, Day, PlayerCommandClass.NotCareer, -1, null);
         two.Own.Add(Corps(1, 200f, 20000f));
         AssertEqual(0, ForceAllocator.Allocate(plan, two, sectors, null, null, null).Assignments.Count, "alliance 2");
         var none = Wide();
@@ -1824,7 +1824,7 @@ internal static class ForceAllocatorTests
     private static CampaignSnapshot Line(int alliance, int areas)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, Day, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -1873,7 +1873,7 @@ internal static class ForceAllocatorTests
 
     private static SupplySourceRecord Iip(int id, float x, int owner)
     {
-        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true };
+        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, Condition = 1f, Built = true };
     }
 
     private static EnemyBelief Belief(float x, float z, float strength)

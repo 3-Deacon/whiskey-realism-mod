@@ -120,7 +120,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Accomplished;      // IDAccomplished
         public ObjectiveRole Roles;
         public float Importance01;
-        public float GarrisonStrength; // fort garrison groupstrengthdirect at the target, 0 for none
     }
 
     public enum SupplySourceKind
@@ -135,7 +134,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public SupplySourceKind Kind;
         public int Owner;
         public float X, Z;
-        public float TransportCapacity, Condition;
+        public float Condition;
         public bool Built;
         public bool Invisible;
     }
@@ -143,8 +142,6 @@ namespace WhiskeyRealism.Strategic.Planner
     public struct RailLineRecord
     {
         public int Index;
-        public bool Startable;          // StartConstruction(alliance, checkonly: true)
-        public bool UnderConstruction;
         public float Progress;
         // The line's two farthest-apart IIPs (ConstructionSymbol.IIPsForTransportCapacityUpdate,
         // 188134): their positions and instance ids (= SupplySourceRecord.Id of the same IIP),
@@ -336,7 +333,6 @@ namespace WhiskeyRealism.Strategic.Planner
 
     public struct CommanderProfile
     {
-        public int CommanderId;
         public float RequiredOddsShift; // (initiative - 0.5) * -0.5: bold commanders accept worse odds
         public float AttackBias;        // initiative - leadership * 0.5, clamped [-1, 1]
         public float SupplySlack;       // administration * 0.25 of commandrange

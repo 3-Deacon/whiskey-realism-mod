@@ -1295,7 +1295,7 @@ internal static class ReconExecutorTests
     private static CampaignSnapshot World(int day = Day)
     {
         var s = new CampaignSnapshot();
-        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;

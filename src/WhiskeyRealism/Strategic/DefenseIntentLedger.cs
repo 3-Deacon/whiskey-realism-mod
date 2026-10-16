@@ -30,7 +30,6 @@ namespace WhiskeyRealism.Strategic
             var output = new DefenseIntentLedgerOutput();
             if (input == null) return output;
 
-            output.AllianceId = input.AllianceId;
 
             // 1. Short-circuit for player-controlled alliances.
             if (input.PlayerIsCIC) return output;

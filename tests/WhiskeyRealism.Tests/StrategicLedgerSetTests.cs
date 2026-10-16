@@ -36,7 +36,7 @@ internal static class StrategicLedgerSetTests
             set.FormationDirectives[a] = Formations(a);
             set.FiscalIntents[a] = new FiscalOutput { Posture = FiscalPosture.CreditDefense, Signature = "f" + a };
             set.ConstructionIntents[a] = new ConstructionOutput { Signature = "c" + a };
-            set.DefenseIntents[a] = new DefenseIntentLedgerOutput { AllianceId = a, Signature = "d" + a };
+            set.DefenseIntents[a] = new DefenseIntentLedgerOutput { Signature = "d" + a };
             set.Needs[a] = NeedVector.FromArray(new[] { 0.1f, 0.9f, 0.3f });
             set.NeedSnapshots[a] = new NeedSnapshot { Alliance = a };
             set.PolicyPlans[a].Update(new List<PolicyScore>

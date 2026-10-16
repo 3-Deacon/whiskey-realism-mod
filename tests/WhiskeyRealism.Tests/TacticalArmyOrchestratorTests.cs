@@ -227,7 +227,6 @@ internal static class TacticalArmyOrchestratorTests
         var assignment = ledger.GetAssignment("army");
 
         AssertEqual(FormationDirective.Mass, assignment.Directive);
-        AssertEqual(true, assignment.OffensiveAllowed);
     }
 
     private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()

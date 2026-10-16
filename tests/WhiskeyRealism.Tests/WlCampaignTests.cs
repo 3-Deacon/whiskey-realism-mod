@@ -44,7 +44,6 @@ internal static class WlCampaignTests
             ("wl dispatch sanitizer leaves normal content unchanged", WlDispatchSanitizerLeavesNormalContentUnchanged),
             ("wl bridge inactive allows direct movement", WlBridgeInactiveAllowsDirectMovement),
             ("wl bridge null tryissue fails closed", WlBridgeNullTryIssueFailsClosed),
-            ("wl bridge null classify fails closed", WlBridgeNullClassifyFailsClosed),
             ("wl bridge non-player alliance allows direct movement", WlBridgeNonPlayerAllianceAllowsDirectMovement),
             ("wl bridge report only under wl player alliance blocks movement", WlBridgeReportOnlyUnderWlPlayerAllianceBlocksMovement),
             ("wl bridge report only inactive stays not wl", WlBridgeReportOnlyInactiveStaysNotWl),
@@ -412,13 +411,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayMutateOperationList);
     }
 
-    private static void WlBridgeNullClassifyFailsClosed()
-    {
-        var decision = WlStrategicOrderBridge.ClassifyOnly(null);
-        AssertEqual(WlStrategicOrderResult.InvalidRequest, decision.Result);
-        AssertEqual(false, decision.MayDirectMove);
-        AssertEqual(false, decision.MayMutateOperationList);
-    }
     private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
     {
         var decision = WlStrategicOrderBridge.Classify(

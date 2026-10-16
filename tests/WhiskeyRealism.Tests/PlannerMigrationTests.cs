@@ -127,7 +127,7 @@ internal static class PlannerMigrationTests
     private static void FormationDirectiveTargetFromPublishedPlan()
     {
         string coordinator = Coordinator();
-        string update = BodyOf(coordinator, "private bool UpdateFormationDirectiveLedger(");
+        string update = BodyOf(coordinator, "private void UpdateFormationDirectiveLedger(");
         AssertContains(update, "string planTargetAreaKey = PlannerAreaKeys.OfMainTarget(alliance);", "the directive ledger's target area is the published main target's key");
         AssertFalse(Code(update).Contains("ObjectiveAdapter"), "and no ObjectiveAdapter");
         string keys = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/PlannerAreaKeys.cs");

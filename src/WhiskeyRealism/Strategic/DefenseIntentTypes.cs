@@ -21,15 +21,12 @@ namespace WhiskeyRealism.Strategic
     public sealed class DefenseCandidate
     {
         public int UnitInstanceId;
-        public string UnitKey;
-        public string UnitName;
         public string SectorKey;
         public float X;
         public float Z;
         public float ActiveStrength;
         public float Morale;
         public float ReadinessStep;
-        public Theater Theater;
         public CandidateTier Tier;
         public bool InOffensiveOperation;
         // Whiskey may not commit this group (W&L player chain, WlChainRules.MayMove false).
@@ -70,7 +67,6 @@ namespace WhiskeyRealism.Strategic
 
     public sealed class DefenseIntentLedgerOutput
     {
-        public int AllianceId;
         public List<DefenseResponse> Responses = new List<DefenseResponse>();
         public string Signature;
     }

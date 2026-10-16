@@ -14,13 +14,12 @@ namespace WhiskeyRealism.Strategic.Planner
     public static class CommanderProfiles
     {
         // Initiative 0.5, no attack bias, no extra supply slack: what an unknown commander implies.
-        public static CommanderProfile Neutral => new CommanderProfile { CommanderId = -1 };
+        public static CommanderProfile Neutral => new CommanderProfile();
 
         public static CommanderProfile From(in CommanderRecord c)
         {
             return new CommanderProfile
             {
-                CommanderId = c.Id,
                 RequiredOddsShift = (c.Initiative - 0.5f) * -0.5f,
                 AttackBias = Math.Max(-1f, Math.Min(1f, c.Initiative - c.Leadership * 0.5f)),
                 SupplySlack = c.Administration * 0.25f

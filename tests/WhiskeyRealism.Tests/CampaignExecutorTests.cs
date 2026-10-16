@@ -1362,7 +1362,7 @@ internal static class ExecutorFixtures
     internal static CampaignSnapshot Line(int alliance, int areas, int dayOffset = 0)
     {
         var s = new CampaignSnapshot();
-        s.Reset(alliance, alliance, Day + dayOffset, PlayerCommandClass.NotCareer, -1, true, null);
+        s.Reset(alliance, alliance, Day + dayOffset, PlayerCommandClass.NotCareer, -1, null);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
@@ -1401,7 +1401,7 @@ internal static class ExecutorFixtures
 
     internal static SupplySourceRecord Iip(int id, float x, int owner)
     {
-        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true };
+        return new SupplySourceRecord { Id = id, Kind = SupplySourceKind.Iip, Owner = owner, X = x, Z = 0f, Condition = 1f, Built = true };
     }
 
     internal static EnemyBelief Belief(float x, float z, float strength)

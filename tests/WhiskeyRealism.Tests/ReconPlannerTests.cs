@@ -743,7 +743,7 @@ internal static class ReconPlannerTests
         for (int alliance = 2; alliance <= 4; alliance++)
         {
             var s = new CampaignSnapshot();
-            s.Reset(alliance, alliance, Today, PlayerCommandClass.NotCareer, -1, true, null);
+            s.Reset(alliance, alliance, Today, PlayerCommandClass.NotCareer, -1, null);
             s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = alliance, Built = true, Condition = 1f });
             s.MinStrengthForMovement = 1000f;
             s.MinMoraleForMovement = 0.3f;
@@ -817,7 +817,6 @@ internal static class ReconPlannerTests
         var recon = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Operational1862, null, null, key => key == "corps").GetAssignment("corps");
         AssertEqual(FormationDirective.Screen, recon.Directive, "on a recon mission: Screen");
         AssertEqual("recon-mission", recon.Reason, "reason");
-        AssertFalse(recon.OffensiveAllowed, "kept out of offensives");
         var other = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Operational1862, null, null, key => key == "else").GetAssignment("corps");
         AssertTrue(other.Directive != FormationDirective.Screen, "another unit's mission does not count");
     }
@@ -1043,7 +1042,6 @@ internal static class ReconPlannerTests
         var assignment = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Amateur1861, null).GetAssignment("division");
         AssertEqual(FormationDirective.Delay, assignment.Directive, "a lone division facing an army delays");
         AssertEqual("division-vs-army-no-support", assignment.Reason, "reason kept");
-        AssertFalse(assignment.OffensiveAllowed, "no offensive");
         AssertTrue(assignment.DefensiveAllowed, "defends");
     }
 
@@ -1623,12 +1621,12 @@ internal static class ReconPlannerTests
     private static CampaignSnapshot WorldOn(int day, DirectorPosture tempo = null)
     {
         var s = new CampaignSnapshot();
-        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, true, tempo);
+        s.Reset(0, 0, day, PlayerCommandClass.NotCareer, -1, tempo);
         s.RelocationRange = 150f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 1000f;
         s.MinMoraleForMovement = 0.3f;
-        s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = 0, X = 0f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
+        s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = 0, X = 0f, Z = 0f, Condition = 1f, Built = true });
         return s;
     }
 

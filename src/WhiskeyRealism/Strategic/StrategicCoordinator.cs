@@ -324,7 +324,6 @@ namespace WhiskeyRealism.Strategic
             internal EraStageManager Era;
             internal int LegacySerial; // year*372 + month*31 + day (persisted scale: director, front day)
             internal bool FrontChanged;
-            internal bool FormationChanged;
         }
 
         private sealed class ReviewDay
@@ -591,7 +590,6 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Formation:
                 {
-                    a.FormationChanged = false;
                     if (!ready || paused) break;
                     string formationSource = FormationSourceSignature(alliance);
                     bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(d.Day, alliance, d.AlternatingCatchUp) ||
@@ -599,7 +597,7 @@ namespace WhiskeyRealism.Strategic
                         a.FrontChanged;
                     if (runFormation)
                     {
-                        d.FormationMs += Measure(() => a.FormationChanged = UpdateFormationDirectiveLedger(alliance, a.Era));
+                        d.FormationMs += Measure(() => UpdateFormationDirectiveLedger(alliance, a.Era));
                         _formationSourceSignatures[alliance] = formationSource;
                     }
                     break;
@@ -933,7 +931,7 @@ namespace WhiskeyRealism.Strategic
                 var fiscal = alliance < _work.FiscalIntents.Length ? _work.FiscalIntents[alliance] : null;
                 var front = alliance < _work.Fronts.Length ? _work.Fronts[alliance] : null;
                 var formation = alliance < _work.FormationDirectives.Length ? _work.FormationDirectives[alliance] : null;
-                var input = ConstructionRuntime.BuildInput(alliance, era, fiscal, front, formation);
+                var input = ConstructionRuntime.BuildInput(alliance, fiscal, front, formation);
                 var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
                 _work.ConstructionIntents[alliance] = output;
 
@@ -1230,7 +1228,7 @@ namespace WhiskeyRealism.Strategic
             return changed;
         }
 
-        private bool UpdateFormationDirectiveLedger(int alliance, EraStageManager era)
+        private void UpdateFormationDirectiveLedger(int alliance, EraStageManager era)
         {
             string planTargetAreaKey = PlannerAreaKeys.OfMainTarget(alliance);
 
@@ -1240,12 +1238,11 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning(
                     "formation-directive:null:" + alliance,
                     $"[FormationDirective] update skipped: build returned null for alliance={alliance}");
-                return false;
+                return;
             }
 
             _work.FormationDirectives[alliance] = ledger;
             string signature = ledger.Summary();
-            bool changed = StrategicCadencePolicy.SourceChanged(signature, _formationDirectiveSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _formationDirectiveSignatures[alliance] != signature)
             {
                 EmitCampaignInfo(
@@ -1255,7 +1252,6 @@ namespace WhiskeyRealism.Strategic
                     $"supplyArea={ledger.Pressure.TopSupplyAreaKey ?? "<none>"}");
                 _formationDirectiveSignatures[alliance] = signature;
             }
-            return changed;
         }
 
         private string FormationSourceSignature(int alliance)
@@ -1464,6 +1460,8 @@ namespace WhiskeyRealism.Strategic
                 .WithDecision("select-package", reason, "alliance=" + alliance + "|threat=" + threatSignature + "|response=" + responseSignature)
                 .WithField("posture", threat != null ? threat.Posture.ToString() : "-")
                 .WithField("sourceKind", threat != null ? threat.SourceKind.ToString() : "-")
+                .WithField("scale", threat != null ? threat.Scale.ToString() : "-")
+                .WithField("assetRole", threat != null ? threat.AssetRole.ToString() : "-")
                 .WithField("threat", threatSignature)
                 .WithField("enemy", threat != null ? threat.EnemyStrength : 0.0)
                 .WithField("desired", threat != null ? threat.DesiredStrength : 0.0)

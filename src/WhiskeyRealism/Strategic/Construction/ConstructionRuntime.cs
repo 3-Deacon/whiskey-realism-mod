@@ -12,12 +12,11 @@ namespace WhiskeyRealism.Strategic.Construction
     {
         public static ConstructionInput BuildInput(
             int alliance,
-            EraStage era,
             FiscalOutput fiscal,
             FrontSectorLedger front,
             FormationDirectiveLedger formation)
         {
-            var input = NewInput(alliance, era, fiscal);
+            var input = NewInput(alliance, fiscal);
             input.ActiveRailroadStarts = CountActiveRailroads(alliance);
 
             FillPressure(input, front, formation);
@@ -39,26 +38,23 @@ namespace WhiskeyRealism.Strategic.Construction
             FrontSectorLedger front,
             FormationDirectiveLedger formation)
         {
-            var input = NewInput(alliance, default(EraStage), fiscal);
+            var input = NewInput(alliance, fiscal);
             FillPressure(input, front, formation);
             AddDepotTaskCandidates(input);
             return input;
         }
 
-        private static ConstructionInput NewInput(int alliance, EraStage era, FiscalOutput fiscal)
+        private static ConstructionInput NewInput(int alliance, FiscalOutput fiscal)
         {
             return new ConstructionInput
             {
                 AllianceId = alliance,
-                EraStage = era,
                 CurrentYear = SafeYear(),
                 FiscalPosture = fiscal != null ? fiscal.Posture : FiscalPosture.BalancedWar,
-                FiscalDefendedGate = fiscal != null ? fiscal.DefendedGate : FiscalGate.None,
                 CurrentRating = SafeRating(alliance),
                 BondFloorRating = SafeBondFloor(),
                 SupplyProtection = fiscal != null && fiscal.SupplyProtection,
                 LogisticsExpansion = fiscal != null && fiscal.LogisticsExpansion,
-                ForceCapWarning = fiscal != null && fiscal.ForceCapWarning,
                 TopSupplyTheater = fiscal != null ? fiscal.TheaterSupplyPriority ?? "" : ""
             };
         }
@@ -156,7 +152,6 @@ namespace WhiskeyRealism.Strategic.Construction
                         TransportPressure = Clamp01(place.transportbottlenecks / 10f),
                         WoundedPressure = NearbyWoundedPressure(place, input.AllianceId),
                         VanillaValid = place.allianceowner == input.AllianceId && buildingType.aiplacement,
-                        SafeRear = SafeRear(position, input.AllianceId),
                         ArmsIndustry = IsArmsIndustry(typeId, buildingType.name),
                         SupportsActiveArmyCorridor = SupportsActiveCorridor(position, input)
                     });
@@ -224,7 +219,6 @@ namespace WhiskeyRealism.Strategic.Construction
                         Name = "fort-site-" + i,
                         Theater = theater,
                         VanillaValid = true,
-                        SafeRear = SafeRear(position, input.AllianceId),
                         CriticalDefense = siteThreat > 0.35f,
                         CapitalThreat = siteThreat
                     });

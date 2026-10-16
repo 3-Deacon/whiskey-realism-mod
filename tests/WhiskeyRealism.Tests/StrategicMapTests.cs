@@ -189,7 +189,6 @@ internal static class StrategicMapTests
         AssertTrue(ObjectiveCatalog.TryResolve(3, out var richmond), "expected Richmond objective metadata");
         AssertEqual(Theater.East, richmond.Theater);
         AssertEqual(Category.CapitalThreat, richmond.Category);
-        AssertEqual(false, richmond.IsDerived);
         AssertTrue(richmond.HasTag(StrategyTag.CapitalThreat), "Richmond should carry capital threat");
         AssertTrue(richmond.HasTag(StrategyTag.CapitalDefense), "Richmond should carry capital defense");
 

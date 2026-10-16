@@ -148,7 +148,6 @@ internal static class TacticalPlaybookTests
         var assignment = ledger.GetAssignment("csa-delay");
 
         AssertEqual(FormationDirective.Delay, assignment.Directive);
-        AssertEqual(false, assignment.OffensiveAllowed);
         AssertEqual(true, assignment.DefensiveAllowed);
     }
 

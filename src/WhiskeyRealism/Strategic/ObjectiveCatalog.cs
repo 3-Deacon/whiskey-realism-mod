@@ -46,12 +46,8 @@ namespace WhiskeyRealism.Strategic
                 Theater = Theater.East,
                 Category = Category.CapitalThreat,
                 StrategyTags = System.Array.Empty<StrategyTag>(),
-                SupplyReachWeight = 0.75f,
-                ForeignRecognitionWeight = 0.85f,
-                AttritionWeight = 0.65f,
                 GeographicCentroidX = x,
-                GeographicCentroidY = y,
-                IsDerived = false
+                GeographicCentroidY = y
             });
         }
 
@@ -82,12 +78,8 @@ namespace WhiskeyRealism.Strategic
                 Theater = theater,
                 Category = category,
                 StrategyTags = System.Array.Empty<StrategyTag>(),
-                SupplyReachWeight = category == Category.SupplyHub || category == Category.RailroadCut ? 0.9f : 0.65f,
-                ForeignRecognitionWeight = category == Category.ForeignRecognition ? 1.0f : 0.55f,
-                AttritionWeight = theater == Theater.River || theater == Theater.Coast ? 0.7f : 0.6f,
                 GeographicCentroidX = x,
-                GeographicCentroidY = y,
-                IsDerived = false
+                GeographicCentroidY = y
             };
         }
     }
