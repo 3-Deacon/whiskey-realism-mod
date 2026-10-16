@@ -27,9 +27,11 @@ namespace WhiskeyRealism.Patches
     //      A player formation can be a shortfall's position marker (spec C4): it contributes its hold
     //      point only, and a source the planner may not move (WlChainRules.MayMove) is never drawn from.
     //      Vanilla picks its donor from the source POINT, the first top group within
-    //      aimaximumdistancetosearchforunitrelocations of it (GrabOwnTopUnitsNearPosition 12824, 17284), so a
-    //      surplus is used only where no MainEffort, withheld, in-transit or unmovable formation stands inside
-    //      that radius (ReinforcementRouting.TryTransferPair); with none, vanilla's records stay.
+    //      aimaximumdistancetosearchforunitrelocations of it (GrabOwnTopUnitsNearPosition 12824, called at
+    //      17284; the donor loop is 17291-17300), so a surplus is used only where no MainEffort, withheld,
+    //      in-transit or unmovable formation stands inside that radius and is not itself in transit
+    //      (ReinforcementRouting.TryTransferPair); with none, no pair is written and the main-target steer
+    //      below (2) may still replace the deficit; otherwise vanilla's records stay.
     //   2. Otherwise, when the main target is under-supplied against the army believed there
     //      (ReplacementFlowPolicy), only the deficit is swapped for the main target; vanilla's own
     //      surplus stays.

@@ -501,6 +501,14 @@ internal static class CapitalAndReplacementTests
         AssertFalse(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false), (2, FormationRole.MainEffort, false)),
             Own(front, frontNearSecond), DonorRadius, out _), "no qualifying surplus: no swap, vanilla's records stay");
 
+        // A surplus that is itself in transit is not a source (a marching corps does not donate): the next surplus is used, and none when it is the only one.
+        var marching = Own();
+        marching[1] = WithFlags(marching[1], FormationFlags.InTransfer);
+        AssertEqual(8, PairSource(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true)), marching), "the largest surplus is marching: the next surplus");
+        var onlyMarching = Alloc((7, FormationRole.Reserve, true));
+        onlyMarching.Surpluses.Remove(8);
+        AssertEqual(-1, PairSource(plan0, onlyMarching, marching), "the only surplus is marching: no pair");
+
         // The radius is vanilla's: a protected formation just beyond it does not block, just inside does.
         var edge = Corps(1, 250f + DonorRadius + 1f, 20000f);
         AssertTrue(ReinforcementRouting.TryTransferPair(plan0, Alloc((7, FormationRole.Reserve, true), (8, FormationRole.Reserve, true), (1, FormationRole.MainEffort, false)), Own(edge), DonorRadius, out pair), "beyond the radius");
@@ -794,6 +802,12 @@ internal static class CapitalAndReplacementTests
     {
         var f = Corps(id, waypointX, strength);
         f.Morale = morale;
+        return f;
+    }
+
+    private static FormationRecord WithFlags(FormationRecord f, FormationFlags flags)
+    {
+        f.Flags |= flags;
         return f;
     }
 

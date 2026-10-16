@@ -62,14 +62,14 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // CheckTransferOfUnits (17232): the worst shortfall (first of Allocation.Shortfalls whose need
         // is positive) as the deficit and the largest surplus formation vanilla may take from. A source
-        // is dropped when it is not the planner's to move (!MayMove), is the deficit itself, or is held
+        // is dropped when it is not the planner's to move (!MayMove), is in transit (a marching corps does not donate), is the deficit itself, or is held
         // as MainEffort or CapitalGuard (the allocator never lists those; the check keeps a stale list
         // from draining the front).
         //
         // The source POINT is what vanilla reads, and vanilla picks its donor from the point, not from our
         // formation: GrabOwnTopUnitsNearPosition (12824, called with no range at 17284) takes every ownunits
         // top group within GamePrefs.aimaximumdistancetosearchforunitrelocations (XZ, transform.position,
-        // raid forces excluded) of it, and 17297-17301 then takes the first of them that is out of battle and
+        // raid forces excluded) of it, and 17291-17300 then takes the first of them that is out of battle and
         // in no operation list, with no role or player filter. So a surplus is used only where no protected
         // formation stands inside that donor radius (donorRadius): one the planner holds as MainEffort, one
         // withheld from vanilla (CapitalGuard, Recon, Recover, hold at need; a withheld Reserve is itself a
@@ -100,6 +100,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (index < 0 || index == deficit) continue;
                 var f = own[index];
                 if (!WlChainRules.MayMove(f.Chain) || !(f.Strength > 0f)) continue;
+                if ((f.Flags & FormationFlags.InTransfer) != 0) continue; // a marching corps does not donate
                 if (!allocation.TryGet(f.InstanceId, out var assignment)) continue;
                 if (assignment.Role == FormationRole.MainEffort || assignment.Role == FormationRole.CapitalGuard) continue;
                 if (ProtectedFormationWithinDonorReach(allocation, own, index, donorRadius)) continue;
@@ -120,7 +121,8 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // True when a formation vanilla's donor pick must not reach stands within donorRadius (XZ) of the
-        // source formation's point (the formation itself excluded).
+        // source formation's point (the source itself excluded: it is a listed surplus, movable, not marching and not the
+        // front, all checked before this call, so the exclusion is defence in depth).
         private static bool ProtectedFormationWithinDonorReach(Allocation allocation, IReadOnlyList<FormationRecord> own, int sourceIndex, float donorRadius)
         {
             float radiusSq = donorRadius * donorRadius;
