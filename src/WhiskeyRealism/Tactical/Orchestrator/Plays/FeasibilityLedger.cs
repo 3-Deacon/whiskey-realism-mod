@@ -23,6 +23,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     }
 
     /// <summary>
+    /// What BC11's maneuver reads of one direct child of the selected plan (requirement-runtime-wiring, "per-child values"): its planned
+    /// release, time budget, vias and the regions they lead into, and the predicted hour it launches its attack.
+    /// </summary>
+    public struct ChildPlan
+    {
+        public string ChildId;
+        public bool HasRelease;
+        public double ReleaseHours;
+        public bool HasBudget;
+        public double TimeBudgetHours;
+        public float ViaX, ViaZ, AttackViaX, AttackViaZ;
+        public int ViaFarRegion, AttackViaFarRegion;
+    }
+
+    /// <summary>
     /// BC14's per-side feasibility ledger (spec § 8): every candidate's result as the last finished evaluation left it. The writer is the
     /// coordinator's heavy path only; a running evaluation fills the back buffers and <see cref="Publish"/> swaps them in whole, so a
     /// reader never sees a half-evaluated ledger.
@@ -51,6 +66,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private Buffer _back = new Buffer();
         private readonly FeasibilityJob _job = new FeasibilityJob();
 
+        // The selected plan's per-child table, rebuilt at each evaluation and at each capture (double-buffered with the candidates).
+        private ChildPlan[] _childFront = new ChildPlan[ManeuverFeasibility.MaxChildren];
+        private ChildPlan[] _childBack = new ChildPlan[ManeuverFeasibility.MaxChildren];
+        private int _childFrontCount;
+
         /// <summary>The doctrine hour the published evaluation started at.</summary>
         public double EvaluatedHours { get; private set; }
 
@@ -58,6 +78,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool HasEvaluation { get; private set; }
 
         public int CandidateCount => _front.ResultCount;
+
+        /// <summary>The plan and side the army selected (CaptureSelection); the evaluation scores that plan on that side.</summary>
+        public BattlePlanId SelectedPlan { get; private set; }
+
+        public bool SelectedMirrored { get; private set; }
+
+        public bool HasSelection { get; private set; }
+
+        /// <summary>
+        /// The army selected a plan (after every pick and every kept plan): the ledger keeps its identity, scores it on this side from now on,
+        /// and builds the per-child table BC11 reads from its latest result.
+        /// </summary>
+        public void CaptureSelection(BattlePlanId plan, bool mirrored)
+        {
+            SelectedPlan = plan;
+            SelectedMirrored = mirrored;
+            HasSelection = plan != BattlePlanId.Unknown;
+            _childFrontCount = HasSelection ? BuildChildTable(_front, _childFront) : 0;
+        }
 
         /// <summary>The ledger's own resumable job (one per side; the evaluation entry points drive it).</summary>
         internal FeasibilityJob Job => _job;
@@ -80,6 +119,85 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         public ReadOnlySpan<MemberEstimate> Members(in CandidateResult r)
             => new ReadOnlySpan<MemberEstimate>(_front.Members, r.MemberStart, r.MemberCount);
+
+        public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
+            out float attackViaX, out float attackViaZ)
+        {
+            releaseHours = 0.0;
+            timeBudgetHours = 0.0;
+            viaX = viaZ = attackViaX = attackViaZ = float.NaN;
+            for (int i = 0; i < _childFrontCount; i++)
+            {
+                if (!string.Equals(_childFront[i].ChildId, childId, StringComparison.Ordinal)) continue;
+                ChildPlan c = _childFront[i];
+                if (!c.HasRelease) return false;
+                releaseHours = c.ReleaseHours;
+                timeBudgetHours = c.HasBudget ? c.TimeBudgetHours : 0.0;
+                viaX = c.ViaX;
+                viaZ = c.ViaZ;
+                attackViaX = c.AttackViaX;
+                attackViaZ = c.AttackViaZ;
+                return true;
+            }
+            return false;
+        }
+
+        public bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion)
+        {
+            viaFarRegion = -1;
+            attackViaFarRegion = -1;
+            for (int i = 0; i < _childFrontCount; i++)
+            {
+                if (!string.Equals(_childFront[i].ChildId, childId, StringComparison.Ordinal)) continue;
+                viaFarRegion = _childFront[i].ViaFarRegion;
+                attackViaFarRegion = _childFront[i].AttackViaFarRegion;
+                return true;
+            }
+            return false;
+        }
+
+        // One entry per enveloping or fixing member of the selected plan's result in the given buffer.
+        private int BuildChildTable(Buffer source, ChildPlan[] into)
+        {
+            if (!HasSelection) return 0;
+            int n = 0;
+            for (int r = 0; r < source.ResultCount; r++)
+            {
+                if (source.Results[r].Plan != SelectedPlan) continue;
+                CandidateResult result = source.Results[r];
+                FeasibilityInput input = _job.Input;
+                for (int m = 0; m < result.MemberCount && n < into.Length; m++)
+                {
+                    MemberEstimate member = source.Members[result.MemberStart + m];
+                    if (member.Kind == ManeuverFeasibility.MemberOther) continue;
+                    BodyEstimate body = source.Bodies[result.BodyStart + member.Body];
+                    var c = new ChildPlan
+                    {
+                        ChildId = member.ChildId, HasRelease = member.HasRelease && member.Kind != ManeuverFeasibility.MemberOther,
+                        ReleaseHours = ManeuverFeasibility.AbsoluteHours(EvaluatedHours, member.ReleaseHours),
+                        ViaX = float.NaN, ViaZ = float.NaN, AttackViaX = float.NaN, AttackViaZ = float.NaN, ViaFarRegion = -1, AttackViaFarRegion = -1,
+                    };
+                    if (member.Kind == ManeuverFeasibility.MemberEnvelops)
+                    {
+                        c.HasBudget = true;
+                        c.TimeBudgetHours = ManeuverFeasibility.TimeBudget(member.CourierHours, member.MarchHours, (float)input.DaylightHours);
+                        if (member.MarchVia >= 0 && input.Regions != null)
+                        {
+                            input.Regions.LinkCrossing(member.MarchVia, out c.ViaX, out c.ViaZ, out _, out _);
+                            c.ViaFarRegion = input.Regions.RegionAt(member.TargetX, member.TargetZ);
+                        }
+                        if (member.AttackVia >= 0 && input.Regions != null)
+                        {
+                            input.Regions.LinkCrossing(member.AttackVia, out c.AttackViaX, out c.AttackViaZ, out _, out _);
+                            c.AttackViaFarRegion = input.Regions.RegionAt(body.StrikeX, body.StrikeZ);
+                        }
+                    }
+                    into[n++] = c;
+                }
+                break;
+            }
+            return n;
+        }
 
         // ---- writer side (the evaluation) ----------------------------------------------------------------------
 
@@ -109,6 +227,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _back = swap;
             EvaluatedHours = evaluatedHours;
             HasEvaluation = true;
+            // The per-child table follows the new results (the selected plan on its selected side).
+            ChildPlan[] tmp = _childFront;
+            _childFront = _childBack;
+            _childBack = tmp;
+            _childFrontCount = BuildChildTable(_front, _childFront);
         }
     }
 }

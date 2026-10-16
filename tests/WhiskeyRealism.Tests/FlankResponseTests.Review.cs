@@ -266,16 +266,16 @@ internal static partial class FlankResponseTests
     private static void MarchLegRouteIsWired()
     {
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
-        AssertPinned(runtime, "else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId, ref input);",
+        AssertPinned(runtime, "else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, planned.CheckVia, planned.CheckViaX, planned.CheckViaZ, now, snapshot.TickId, ref input);",
             "the march leg is judged by the route result, and a frozen map skips it");
-        AssertPinned(runtime, "NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)", "the planned route, to the anchor at terrain height");
+        AssertPinned(runtime, "NavMesh.CalculatePath(new Vector3(fromX, fromY, fromZ), new Vector3(toX, HeightAt(toX, toZ), toZ), _routeFilter, path)", "the planned route, to its end at terrain height");
         AssertPinned(runtime, "WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter()", "priced like the posture probe");
         AssertPinned(runtime, "EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples)", "sampled segment by segment on the grid");
-        AssertPinned(runtime, "side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now);", "one route plan per side and step, served fairly");
+        AssertPinned(runtime, "side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now, planId, feasibility);", "one route plan per side and step, served fairly");
         AssertPinned(runtime, "&& string.Equals(side.PlanChildId, childId, StringComparison.Ordinal))", "only the picked child is re-planned");
         AssertFalse(Flat(runtime).Contains("SampleLine(child.X"), "a straight line from the child to its anchor is never sampled");
         AssertPinned(runtime, "input.MarchRouteKnown = last.Valid;", "no result for the anchor: the child stays in its phase");
-        AssertPinned(runtime, "AnchorX = anchorX, AnchorZ = anchorZ, NoPath = true };", "a failed plan is a NoPath result, not a straight-line fallback");
+        AssertPinned(runtime, "hitsRiver = false; noPath = true;", "a failed plan is a NoPath result, not a straight-line fallback");
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         AssertPinned(producers, "t.NavFilter = CreateNavFilter();", "the posture probe shares the filter builder");
     }
@@ -500,6 +500,6 @@ internal static partial class FlankResponseTests
         AssertPinned(producers, "return new Vector3(x, SampleHeight(new Vector3(x, 0f, z)), z);", "AtTerrain reads the terrain height");
         AssertFalse(Flat(producers).Contains("var to = new Vector3(x, 0f, z);"), "the old y = 0 target is gone");
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
-        AssertPinned(runtime, "new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)", "the envelopment route target is at terrain height");
+        AssertPinned(runtime, "new Vector3(toX, HeightAt(toX, toZ), toZ), _routeFilter, path)", "the envelopment route target is at terrain height");
     }
 }

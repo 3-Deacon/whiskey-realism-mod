@@ -72,6 +72,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     public interface IFeasibilityLookup
     {
         bool TryGet(BattlePlanId plan, out CandidateResult result);
+
+        /// <summary>The plan the ledger's per-child table is for (the selected plan, captured after every pick); Unknown before the first.</summary>
+        BattlePlanId SelectedPlan { get; }
+
+        /// <summary>
+        /// The selected plan's release for one direct child (requirement-synchronized-release): the absolute doctrine hour its Hold ends, the time
+        /// budget its march gets, and the march via and attack via (NaN: none). False for a child the plan gives no release (a fix in contact, a
+        /// deployed reserve, a child with no entry).
+        /// </summary>
+        bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
+            out float attackViaX, out float attackViaZ);
+
+        /// <summary>The regions a child's vias lead into (-1: no via): once the child stands in one, the via is behind it.</summary>
+        bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion);
     }
 
     /// <summary>

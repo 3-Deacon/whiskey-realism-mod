@@ -109,6 +109,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float HistoryGlobalOdds => _historyGlobalOdds;
         public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
 
+        /// <summary>BC14: the side's feasibility ledger (null with the flag off), read by the pick and by BC11's maneuvers.</summary>
+        public Plays.IFeasibilityLookup Feasibility => _feasibility;
+
         /// <summary>BC14: the side's feasibility ledger the next pick reads (null: the shipped selection, unchanged).</summary>
         public void SetFeasibility(Plays.IFeasibilityLookup lookup) => _feasibility = lookup;
 

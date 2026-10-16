@@ -313,8 +313,11 @@ namespace WhiskeyRealism.Tactical.Operations
     public readonly struct ManeuverNodeEntry
     {
         public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
-            bool hasTarget, float targetX, float targetZ, float heading, string reason)
+            bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f)
         {
+            HasVia = hasVia;
+            ViaX = viaX;
+            ViaZ = viaZ;
             NodeId = nodeId ?? string.Empty;
             Phase = phase;
             Task = task;
@@ -333,6 +336,11 @@ namespace WhiskeyRealism.Tactical.Operations
         public float TargetZ { get; }
         public float Heading { get; }
         public string Reason { get; }
+
+        /// <summary>BC14: the crossing the node's move is routed through (requirement-crossing-via); HasVia false is none.</summary>
+        public bool HasVia { get; }
+        public float ViaX { get; }
+        public float ViaZ { get; }
         public bool Holds => Phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Hold;
     }
 

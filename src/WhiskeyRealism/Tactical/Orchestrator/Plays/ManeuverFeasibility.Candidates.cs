@@ -81,6 +81,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return job.Step(into, deadlineTicks, clock);
         }
 
+        public const float BudgetFactor = 1.5f;
+
+        /// <summary>
+        /// requirement-maneuver-time-budget: the hours a wing's march may take before BC11 abandons it, from the March:
+        /// <c>Min(Max(1.5 x (courier + march) + TurnHoldHours, MaxManeuverHours), Max(daylight, TurnHoldHours))</c>, where the march already
+        /// carries an hour for each Held crossing on it. Never below today's hour, except when less daylight than that remains.
+        /// </summary>
+        public static float TimeBudget(float courierHours, float marchHours, float daylightHours)
+            => Math.Min(Math.Max(BudgetFactor * (courierHours + marchHours) + EnvelopmentManeuver.TurnHoldHours, EnvelopmentManeuver.MaxManeuverHours),
+                Math.Max(daylightHours, EnvelopmentManeuver.TurnHoldHours));
+
         /// <summary>The verdict a penalty gives (requirement-verdict): at least <see cref="RiskyPenalty"/> is Risky.</summary>
         public static FeasibilityVerdict VerdictOf(float penalty) => penalty >= RiskyPenalty ? FeasibilityVerdict.Risky : FeasibilityVerdict.Feasible;
 
@@ -104,7 +115,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 EvaluateSide(job, template, plan, true, job.SideB);
                 sides = 2;
-                if (BetterSide(job.SideB.Result, job.SideA.Result)) best = job.SideB;
+                // The plan the army is executing is judged on the side it executes, whatever the other side would score now.
+                if (ledger.HasSelection && ledger.SelectedPlan == plan) best = ledger.SelectedMirrored ? job.SideB : job.SideA;
+                else if (BetterSide(job.SideB.Result, job.SideA.Result)) best = job.SideB;
             }
             job.SidesEvaluated[planIndex] = sides;
             ledger.AddBack(in best.Result, new ReadOnlySpan<BodyEstimate>(best.Bodies, 0, best.BodyCount),

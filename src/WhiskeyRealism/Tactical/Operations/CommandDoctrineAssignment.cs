@@ -94,6 +94,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     order = order.WithManeuver(
                         maneuver.HasTarget ? DoctrineTargetPoint.From(maneuver.TargetX, maneuver.TargetZ) : DoctrineTargetPoint.None,
                         idle, maneuver.Heading, maneuver.Holds, "maneuver-" + maneuver.Reason);
+                    // BC14: the maneuver's crossing via rides on the node's order (every lane node passes the same crossing).
+                    if (maneuver.HasVia) order = order.WithVia(maneuver.ViaX, maneuver.ViaZ);
                 }
                 orders.Add(order);
             }

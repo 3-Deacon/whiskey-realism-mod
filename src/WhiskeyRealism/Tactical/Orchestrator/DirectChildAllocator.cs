@@ -662,9 +662,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: true,
                     zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ);
             bool wing = zone.RectKind == PlayRectKind.LeftWing || zone.RectKind == PlayRectKind.RightWing;
-            return wing && zone.StartTimeOffsetSeconds > 0f
+            if (wing && zone.StartTimeOffsetSeconds > 0f)
+                return new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false,
+                    zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ);
+            // BC14 requirement-synchronized-release: in a template with an enveloping rect the Center and the Demonstration fix, and a fix
+            // goes in when the common plan says (a start-delay spec with no offset of its own and the ledger's release as its gate).
+            bool fixes = zone.RectKind == PlayRectKind.Center || zone.RectKind == PlayRectKind.Demonstration;
+            return fixes && zone.TemplateEnvelops
                 ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false,
-                    zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ)
+                    zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ, holdsForRelease: true)
                 : default(ManeuverSpec);
         }
 

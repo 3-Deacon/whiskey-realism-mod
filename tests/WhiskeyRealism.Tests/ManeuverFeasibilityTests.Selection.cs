@@ -35,6 +35,22 @@ internal static partial class ManeuverFeasibilityTests
         public float DefaultPenalty;
         public bool AnswerAll;
 
+        public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
+
+        public bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
+            out float attackViaX, out float attackViaZ)
+        {
+            releaseHours = timeBudgetHours = 0.0;
+            viaX = viaZ = attackViaX = attackViaZ = float.NaN;
+            return false;
+        }
+
+        public bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion)
+        {
+            viaFarRegion = attackViaFarRegion = -1;
+            return false;
+        }
+
         public bool TryGet(BattlePlanId plan, out CandidateResult result)
         {
             if (Results.TryGetValue(plan, out result)) return true;

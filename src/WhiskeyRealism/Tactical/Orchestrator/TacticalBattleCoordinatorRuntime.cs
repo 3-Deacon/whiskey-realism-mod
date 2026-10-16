@@ -1618,7 +1618,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 side.Army.SetManeuvers(zoneAssignments == null || !side.Army.HasPlan
                     ? null
                     : WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime.StepManeuvers(
-                        side.AllianceId, side.Army.CurrentPlan.PlanId, side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance));
+                        side.AllianceId, side.Army.CurrentPlan.PlanId, side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance, side.Army.Feasibility));
                 var allocatedRoles = new DirectChildRole[side.Army.CurrentDirectChildIntents.Count];
                 for (int r = 0; r < allocatedRoles.Length; r++) allocatedRoles[r] = side.Army.CurrentDirectChildIntents[r].Role;
                 DeployedReserveMemory.Shared.NoteRoles(deployedReserve, childInstanceIds, allocatedRoles);
