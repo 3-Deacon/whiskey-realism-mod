@@ -29,6 +29,16 @@ namespace WhiskeyRealism.Strategic.Planner
         public string Reason;
     }
 
+    // What the runtime reads for DepotTaskLedger.WishMoment besides the builder: the review day, whether the mover's tracker has the
+    // builder marching to the task's site on a move issued at an earlier review (MoveTracker.MarchingToward), and whether an own
+    // depot still rising stands within the built radius of the site.
+    public struct DepotWishFacts
+    {
+        public int DaySerial;
+        public bool MarchIssuedEarlier;
+        public bool OwnUnbuiltDepotAtSite;
+    }
+
     // The depot task executor's state machine (plan G5c, spec C10): Marching -> Wished -> Built | Abandoned, one active task per
     // alliance. The planner's depot tasks (TheaterPlan.DepotTasks, sites the supply reach needs) become vanilla construction
     // wishes: the DepotBuilder formation the allocation picked (G4) marches to the site (G5a's mover), and on arrival within its
@@ -103,16 +113,37 @@ namespace WhiskeyRealism.Strategic.Planner
         // is to leave no such window: once a depot started by the alliance stands within the builder's command range, job 19 skips the
         // unit (that sets its `flag`, 14695-14712; the test at 14715 also skips a unit with a path), so:
         //   Here    the builder is within arrivalReach of the site: wish at its position (vanilla's own wish position, 14770);
-        //   Adopt   ...and vanilla's job already flagged it VanillaDepotBuilder (an own-started depot is rising within its command
-        //           range, listed at 14778): that is the depot, the task becomes Wished with no second wish;
-        //   Ahead   it will be there before the next review (daysToSite <= AheadDays): wish at the site now, while it still marches;
+        //   Adopt   ...and vanilla's job already flagged it VanillaDepotBuilder AND an own unbuilt depot stands at the site
+        //           (facts.OwnUnbuiltDepotAtSite: the flag is set by any own-started depot within the builder's command range, 50-100
+        //           for a corps or army, which need not be this site's): that is the depot, the task becomes Wished with no second
+        //           wish. A flagged builder with no depot at the site gets its own wish (Here);
+        //   Ahead   it will be there before the next review (daysToSite <= AheadDays) AND the mover's tracker shows it marching to
+        //           this site on a move issued at an earlier review (facts.MarchIssuedEarlier), AND the task did not start today:
+        //           wish at the site now, while it still marches. The wish is paid at once (AddConstructionWish -> Place, 97506,
+        //           96211-96257) and an unattended depot is removed (96626-96648), so a wish is placed ahead only for a builder that is
+        //           on its way (an arrival estimate alone is a lower bound: terrain, a retreat or another order can stop it);
         //   Wait    otherwise.
-        public DepotWishMoment WishMoment(int taskIndex, in FormationRecord builder, float arrivalReach, float daysToSite)
+        public DepotWishMoment WishMoment(int taskIndex, in FormationRecord builder, float arrivalReach, float daysToSite, in DepotWishFacts facts)
         {
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Marching) return DepotWishMoment.Wait;
             if (ShouldWish(taskIndex, builder.X, builder.Z, arrivalReach))
-                return (builder.Flags & FormationFlags.VanillaDepotBuilder) != 0 ? DepotWishMoment.Adopt : DepotWishMoment.Here;
-            return daysToSite <= AheadDays ? DepotWishMoment.Ahead : DepotWishMoment.Wait;
+                return (builder.Flags & FormationFlags.VanillaDepotBuilder) != 0 && facts.OwnUnbuiltDepotAtSite ? DepotWishMoment.Adopt : DepotWishMoment.Here;
+            bool startedEarlier = facts.DaySerial > _tasks[taskIndex].StartedDay;
+            return facts.MarchIssuedEarlier && startedEarlier && daysToSite <= AheadDays ? DepotWishMoment.Ahead : DepotWishMoment.Wait;
+        }
+
+        // The review's watch over a Wished task: Built when a depot stands at the site (SiteBuilt); Abandoned as "wish-lost" when,
+        // on a later review than the wish, no own depot at all (built or still rising) stands within `radius` of it. The wish is a
+        // placeholder at -20000 until WorkDownConstructionWishes (once per AI update, 11201) puts the building on suitable ground or
+        // cancels it with no site found (97538-97591), so a review in the wish's own day cannot tell a pending wish from a lost one;
+        // a lost wish (cancelled, or the depot removed because no unit stood within bugle range, 96626-96648) releases the builder
+        // at once instead of holding it to the timeout.
+        public void WatchWish(int taskIndex, CampaignSnapshot s, float radius)
+        {
+            if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Wished || s == null) return;
+            var task = _tasks[taskIndex];
+            if (SiteBuilt(s, task, radius)) RecordBuilt(taskIndex, s.DaySerial);
+            else if (s.DaySerial > task.StartedDay && !SiteHasOwnDepot(s, task, radius, false)) Finish(taskIndex, DepotTaskState.Abandoned, "wish-lost", s.DaySerial);
         }
 
         public void RecordWished(int taskIndex, int daySerial, string reason = "wish-placed")
@@ -155,6 +186,22 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var source = s.Supply[i];
                 if (source.Kind != SupplySourceKind.Depot || !source.Built) continue;
+                if (Distance(source.X, source.Z, task.X, task.Z) <= radius) return true;
+            }
+            return false;
+        }
+
+        // True when a depot owned by the snapshot's alliance (not an ally's) stands within `radius` of the task's site; `unbuiltOnly`
+        // counts only one still rising. Lets the runtime tell a depot that is this site's (a wish placed, or a vanilla one adopted)
+        // from one that merely lies within a builder's command range.
+        public static bool SiteHasOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly)
+        {
+            if (s == null || radius <= 0f) return false;
+            for (int i = 0; i < s.Supply.Count; i++)
+            {
+                var source = s.Supply[i];
+                if (source.Kind != SupplySourceKind.Depot || source.Owner != s.Alliance) continue;
+                if (unbuiltOnly && source.Built) continue;
                 if (Distance(source.X, source.Z, task.X, task.Z) <= radius) return true;
             }
             return false;

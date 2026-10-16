@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             if (!Read(alliance, out var allocation, out _, out var ctx)) return false;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
-            if (DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId)) return true;
+            if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a)) return false;
             if (a.Withheld) return true;
             if (a.Role == FormationRole.MainEffort) return true;
@@ -133,7 +133,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             if (!Read(alliance, out var allocation, out var sectors, out _)) return false;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
-            if (DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId)) return true;
+            if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a) || !a.Withheld) return false;
             if (a.Role == FormationRole.Hold && a.SectorId >= 0 && sectors != null && sectors.SectorAt(enemyX, enemyZ) == a.SectorId) return false;
             return true;
@@ -152,6 +152,19 @@ namespace WhiskeyRealism.Strategic.Planner
             plan = published;
             sectors = model;
             return true;
+        }
+
+        // The depot-builder hold for a reader outside the availability Postfixes (the fort job, FortConstructionGovernorPatch): the
+        // same picture test as every other clause here, Read (a published plan and allocation, executors allowed, the plan fresh),
+        // so a stale plan or a paused review never holds a builder (plan G5c, verify r2 F6c).
+        internal static bool HoldsDepotBuilder(int alliance, int instanceId)
+        {
+            return Read(alliance, out _, out _, out _) && HeldBuilder(alliance, instanceId);
+        }
+
+        private static bool HeldBuilder(int alliance, int instanceId)
+        {
+            return DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId);
         }
 
         private static bool Read(int alliance, out Allocation allocation, out SectorModel sectors, out ExecutorContext context)

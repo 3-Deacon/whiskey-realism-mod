@@ -113,7 +113,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var task = ledger.Tasks[t];
                 if (task.State == DepotTaskState.Wished)
                 {
-                    if (DepotTaskLedger.SiteBuilt(snapshot, task, builtRadius)) ledger.RecordBuilt(t, snapshot.DaySerial);
+                    ledger.WatchWish(t, snapshot, builtRadius);
                     continue;
                 }
                 if (task.State != DepotTaskState.Marching) continue;
@@ -129,7 +129,13 @@ namespace WhiskeyRealism.Strategic.Planner
                     haveSpeed = true;
                 }
                 float days = MarchTime.EstimateDays(speed, builder, task.X, task.Z, Distance(builder.X, builder.Z, task.X, task.Z), snapshot, null);
-                switch (ledger.WishMoment(t, builder, reach, days))
+                var facts = new DepotWishFacts
+                {
+                    DaySerial = snapshot.DaySerial,
+                    MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial),
+                    OwnUnbuiltDepotAtSite = DepotTaskLedger.SiteHasOwnDepot(snapshot, task, builtRadius, true)
+                };
+                switch (ledger.WishMoment(t, builder, reach, days, facts))
                 {
                     case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;
                     case DepotWishMoment.Ahead: Wish(alliance, snapshot, ledger, t, task, task.X, task.Z, builder.InstanceId); break;

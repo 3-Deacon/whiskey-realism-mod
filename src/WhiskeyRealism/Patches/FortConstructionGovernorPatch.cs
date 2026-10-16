@@ -32,7 +32,7 @@ namespace WhiskeyRealism.Patches
     // rule, the range and the builder logic are vanilla's. The same snapshot-restore carries both filters.
     //
     // Depot builder hold (plan G5c, verify F6): a unit the campaign planner holds as the builder of a depot task
-    // (DepotTaskLedger.HoldsBuilder) is not sent to build a fort for the call: every in-range site is hidden, so vanilla's job 21
+    // (CampaignWithholdView.HoldsDepotBuilder: the ledger's hold under the withhold view's plan-freshness and executors-allowed test) is not sent to build a fort for the call: every in-range site is hidden, so vanilla's job 21
     // (which does not read the availability Postfixes and excludes a unit only once its depot stands, 16376-16381) cannot walk the
     // builder off its site between its arrival and the wish. Out-of-range sites stay, vanilla rejects them itself.
     [HarmonyPatch(typeof(AICampaign), "CheckFortConstruction")]
@@ -91,7 +91,7 @@ namespace WhiskeyRealism.Patches
 
                 Vector3 unitPosition = ((Component)unit).transform.position;
                 float range = GamePrefs.rangefortconstructionsite;
-                bool heldBuilder = holdBuilders && DepotTaskLedgers.For(alliance).HoldsBuilder(unit.GetInstanceID());
+                bool heldBuilder = holdBuilders && CampaignWithholdView.HoldsDepotBuilder(alliance, unit.GetInstanceID());
                 var inRange = new bool[original.Count];
                 var allowed = new bool[original.Count];
                 for (int i = 0; i < original.Count; i++)
