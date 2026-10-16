@@ -159,7 +159,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible)
         {
             if (army == null || !army.HasPlan) return;
-            var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);
+            var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);
             army.Replan(ownEvidence, intent);
         }

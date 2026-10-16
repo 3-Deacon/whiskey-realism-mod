@@ -610,7 +610,7 @@ internal static class BattlePerceptionTests
 
     // A snapshot as the coordinator hands it to the T1 consumers: own roster, observations
     // as perception published them, slice / flank / closest-visible rows built.
-    private static BattleSnapshot ConsumerSnapshot(double nowHours, UnitRecord[] own, params EnemyObservation[] observations)
+    internal static BattleSnapshot ConsumerSnapshot(double nowHours, UnitRecord[] own, params EnemyObservation[] observations)
     {
         var s = new BattleSnapshot();
         Rebuild(s, own, own.Length, nowHours);
@@ -619,8 +619,8 @@ internal static class BattlePerceptionTests
         return s;
     }
 
-    private static EnemyObservation Seen(int id, float x, float z, float strength, float confidence = 1f,
-        bool remembered = false, bool reinforcement = false)
+    internal static EnemyObservation Seen(int id, float x, float z, float strength, float confidence = 1f,
+        bool remembered = false, bool reinforcement = false, bool standing = false)
     {
         return new EnemyObservation
         {
@@ -632,10 +632,11 @@ internal static class BattlePerceptionTests
             State = remembered ? ObservationState.Remembered : ObservationState.Visible,
             Confidence01 = remembered ? confidence : 1f,
             IsReinforcement = reinforcement,
+            Standing = standing,
         };
     }
 
-    private static UnitRecord OwnUnit(int id, float x, float z, int aiGroupStrength = 0, int unitTyp = 0, int strength = 500,
+    internal static UnitRecord OwnUnit(int id, float x, float z, int aiGroupStrength = 0, int unitTyp = 0, int strength = 500,
         UnitFlags flags = UnitFlags.Active | UnitFlags.Alive, float waypointX = 0f, float waypointZ = 0f, float facing = 0f)
     {
         return new UnitRecord

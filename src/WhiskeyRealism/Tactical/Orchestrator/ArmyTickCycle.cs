@@ -123,7 +123,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             orchestrator.ObserveGlobalOdds(ownEvidence.CurrentOdds);
             if (!orchestrator.HasPlan) return ReplanTrigger.None;
 
-            var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);
+            var intent = ArmyIntentInference.Build(enemyVisible);
             orchestrator.ObserveIntent(intent);
 
             // ---- Sector readiness decision (fresh-troops gate) ----

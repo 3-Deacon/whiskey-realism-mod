@@ -134,8 +134,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // stance: the side's battle stance (ArmyEvidenceBuilder.ReadBattleStance, cached
         // by the army from its force-balance evidence); a Defender is never sent probing.
+        // reverseSlope: the army's plan is ReverseSlopeDefense, so a crest line is held 80 m behind the crest (BC12).
         internal void StoreDoctrineForCommandStates(CommandNodeOperationalState[] commandStates, BattleStance stance,
-            ManeuverNodeTable maneuvers = null)
+            ManeuverNodeTable maneuvers = null, bool reverseSlope = false)
         {
             if (!RunsLedger)
             {
@@ -164,7 +165,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _currentTimeSeconds,
                     _currentForce.ReserveFraction,
                     stance,
-                    maneuvers));
+                    maneuvers,
+                    reverseSlope));
         }
 
         private static IReadOnlyList<ObjectiveRecord> CopyObjectives(IReadOnlyList<ObjectiveRecord> objectives)

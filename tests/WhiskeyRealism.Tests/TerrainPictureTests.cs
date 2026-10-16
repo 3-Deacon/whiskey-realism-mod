@@ -251,7 +251,7 @@ internal static partial class TerrainPictureTests
     }
 
     // Paints a 6 m wide road along a line of the 1 m grid.
-    private static bool OnRoad(int x, int worldZ, int cx, int cz, bool alongX, bool alongZ, int half)
+    internal static bool OnRoad(int x, int worldZ, int cx, int cz, bool alongX, bool alongZ, int half)
     {
         if (alongX && Math.Abs(worldZ - cz) <= 3 && Math.Abs(x - cx) <= half) return true;
         if (alongZ && Math.Abs(x - cx) <= 3 && Math.Abs(worldZ - cz) <= half) return true;

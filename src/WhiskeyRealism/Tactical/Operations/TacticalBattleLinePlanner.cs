@@ -101,6 +101,23 @@ namespace WhiskeyRealism.Tactical.Operations
             TacticalBattlefrontSnapshot battlefront,
             int nodeCount)
         {
+            TacticalDefensiveLineAnchor anchor = objectiveMatched && !string.Equals(objective.ObjectiveId, "objective-unknown", StringComparison.Ordinal)
+                ? TacticalDefensiveLineAnchorPlanner.Plan(objective, battlefront, nodeCount)
+                : TacticalDefensiveLineAnchor.None("battle-line-no-objective");
+            return PlanNode(node, task, objective, objectiveMatched, commandIndex, battlefront, nodeCount, anchor);
+        }
+
+        /// <summary>The same plan over an anchor the caller already planned (CommandDoctrineAssignment plans it once per assignment).</summary>
+        public static TacticalBattleLinePlan PlanNode(
+            CommandNodeOperationalState node,
+            CommandTaskType task,
+            BattlefieldObjectiveEstimate objective,
+            bool objectiveMatched,
+            int commandIndex,
+            TacticalBattlefrontSnapshot battlefront,
+            int nodeCount,
+            TacticalDefensiveLineAnchor defensiveAnchor)
+        {
             if (!objectiveMatched || string.Equals(objective.ObjectiveId, "objective-unknown", StringComparison.Ordinal))
             {
                 return new TacticalBattleLinePlan(
@@ -110,10 +127,6 @@ namespace WhiskeyRealism.Tactical.Operations
                     "battle-line-no-objective");
             }
 
-            TacticalDefensiveLineAnchor defensiveAnchor = TacticalDefensiveLineAnchorPlanner.Plan(
-                objective,
-                battlefront,
-                nodeCount);
             BattlefieldObjectiveEstimate lineObjective = defensiveAnchor.AsLineObjective(objective);
             Direction direction = Direction.FromNodeToObjective(node, lineObjective);
             int side = commandIndex % 2 == 0 ? -1 : 1;
@@ -425,14 +438,16 @@ namespace WhiskeyRealism.Tactical.Operations
                 {
                     width = Math.Min(width, 450d);
                 }
-                if (!defensiveAnchor.CorridorAnchor && IsTerrainAnchor(objective))
+                // A terrain-line anchor (BC12) has its own measured frontage; the unanchored terrain objective gets the 700 m default.
+                if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective))
                 {
                     width = Math.Max(width, 700d);
                 }
 
                 double half = width * 0.5d;
                 double laneScale = defensiveAnchor.CorridorAnchor || IsChokeObjective(objective) ? 0.65d : 1d;
-                bool defensiveSideTargets = defensiveAnchor.CorridorAnchor;
+                // A held terrain line is stood on its own side like a corridor intercept (never 75 m out in front of it).
+                bool defensiveSideTargets = defensiveAnchor.CorridorAnchor || defensiveAnchor.OnTerrainLine;
                 DoctrineTargetPoint left = defensiveSideTargets
                     ? BehindObjective(objective, direction, MainApproachDistance, half)
                     : Approach(objective, direction, MainApproachDistance, half);
@@ -445,8 +460,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 string suffix = battlefront.HasFrontage ? ":frontage" : ":generated-frontage";
                 if (direction.UsesApproachAvenue) suffix += ":approach-avenue";
                 if (defensiveAnchor.HasAnchor) suffix += ":" + defensiveAnchor.Reason;
-                if (defensiveSideTargets) suffix += ":defensive-side-corridor";
-                if (!defensiveAnchor.CorridorAnchor && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
+                if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : ":defensive-side-corridor";
+                if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
                 return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, left, right, artillery, suffix);
             }

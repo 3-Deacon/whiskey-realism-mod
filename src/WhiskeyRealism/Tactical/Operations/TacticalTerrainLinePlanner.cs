@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Tactical.Operations
         /// Vanilla's anchored-flank rule (CheckIfFlanksAreAnchored 6599-6640): a flank end is anchored by river id 4 within
         /// AnchorRiverMeters (80) sideways (along the outward direction), or a crest within AnchorCrestMeters (50) of the end.
         /// </summary>
-        public static bool FlankAnchored(TerrainPicture p, float endX, float endZ, float outwardX, float outwardZ)
+        public static bool FlankAnchored(TerrainPicture p, float endX, float endZ, float outwardX, float outwardZ, bool includeCrest = true)
         {
             if (p == null || !p.Ready) return false;
             if (Unit(ref outwardX, ref outwardZ))
@@ -127,7 +127,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 for (float d = 0f; d <= reach; d += TerrainPicture.CellMeters * 0.5f)
                     if (p.IdAt(endX + outwardX * d, endZ + outwardZ * d) == TerrainPicture.IdRiver) return true;
             }
-            return p.CrestNear(endX, endZ, p.Rules.AnchorCrestMeters, p.Rules.MinSteepness);
+            // A crest line's own ends are crest by construction; it passes includeCrest = false and rests only on a river.
+            return includeCrest && p.CrestNear(endX, endZ, p.Rules.AnchorCrestMeters, p.Rules.MinSteepness);
         }
 
         // ---- the search --------------------------------------------------------------------------------------

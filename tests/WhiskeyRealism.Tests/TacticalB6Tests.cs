@@ -58,7 +58,7 @@ internal static class TacticalB6Tests
             ("tactical b6a attack with decisive sector yields weak point pressure", TacticalB6aAttackDecisiveYieldsWeakPointPressure),
             ("tactical b6a attack without decisive sector falls back to probe and fix", TacticalB6aAttackNoDecisiveFallsBack),
             ("tactical b6a main effort rejected when subordinate share over half", TacticalB6aMainEffortRejectedOnPlayerOwnership),
-            ("tactical b6a hold to last yields high ground defense", TacticalB6aHoldToLastYieldsHighGroundDefense),
+            ("tactical b6a hold to last yields line hold", TacticalB6aHoldToLastYieldsLineHold),
             ("tactical b6a empty sectors yields no-sectors decision", TacticalB6aEmptySectorsYieldsEmpty),
             ("tactical b6b probe intent denies charge", TacticalB6bProbeIntentDeniesCharge),
             ("tactical b6b hold to last blocks fallback pressure", TacticalB6bHoldToLastBlocksFallbackPressure),
@@ -352,7 +352,7 @@ internal static class TacticalB6Tests
         AssertTrue(d.Playbook == TacticalPlaybookKind.ProbeAndFix, "Expected ProbeAndFix fallback when main effort denied");
     }
 
-    private static void TacticalB6aHoldToLastYieldsHighGroundDefense()
+    private static void TacticalB6aHoldToLastYieldsLineHold()
     {
         var sectors = new[]
         {
@@ -362,7 +362,7 @@ internal static class TacticalB6Tests
         };
         var input = new TacticalPlaybookInput(CommanderIntent.HoldToLast, -1, sectors, false, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybookKind.HighGroundDefense, "Expected HighGroundDefense, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.LineHold, "Expected LineHold with no crest share (BC12), got " + d.Playbook);
         AssertTrue(d.ReservePolicy == TacticalReservePolicy.HoldReserve, "HoldToLast must keep reserve");
     }
 

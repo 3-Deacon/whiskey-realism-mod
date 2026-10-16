@@ -594,7 +594,7 @@ internal static class TacticalLifecycleFixTests
 
         TestHarness.AssertTrue(army.HasPlan, "plan kept");
         TestHarness.AssertEqual(0f, army.PlanAgeSeconds, "re-planned");
-        var expected = ArmyIntentInference.Build(evidence, visible);
+        var expected = ArmyIntentInference.Build(visible);
         TestHarness.AssertEqual(expected.PrimaryIntent, army.CurrentIntentModel.PrimaryIntent, "intent from the morning's evidence");
     }
 }

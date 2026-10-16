@@ -16,6 +16,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             reserveCommitTriggerOdds: 1.5f)
         { }
 
+        public override bool RequiresCrest => true;
+
         public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
             new TacticalBattlePlan(
                 Id,
