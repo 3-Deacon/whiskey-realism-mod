@@ -71,6 +71,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableCavalryStrikeDiscipline;
         internal static ConfigEntry<bool> EnableVanillaStanceCooldownFix;
         internal static ConfigEntry<bool> EnableSeparatedEnemySteer;
+        internal static ConfigEntry<bool> EnableVanillaReserveSupportPickFix;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -659,6 +660,14 @@ namespace WhiskeyRealism
                 "behaviour; Whiskey's own isolated-cluster opening, which only sees what the side perceives, takes over. Groups vanilla " +
                 "commands, the player's groups and the W&L feud instance are unchanged. Needs Tactical Commander Mode Active. Off: vanilla " +
                 "also sends Whiskey-commanded groups.");
+            EnableVanillaReserveSupportPickFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Reserve Support Pick Fix",
+                true,
+                "Default ON. #124 (BUG-TAC-008): when vanilla's battle AI sends a reserve to support an endangered regiment it picks one with " +
+                "a random range that excludes the last candidate, so the last endangered regiment is never supported and, with two, always the " +
+                "first. With this on the pick includes every endangered regiment. A live rollback: turning it off restores vanilla's pick " +
+                "without a restart. Whiskey's reserve gate still denies this vanilla path for Reserve-role children.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

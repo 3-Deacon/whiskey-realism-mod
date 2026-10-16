@@ -5,6 +5,7 @@ using System.Reflection.Emit;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Strategic.BugFixes;
 using WhiskeyRealism.Tactical.Battle.BugFixes;
 using static TestHarness;
 
@@ -29,6 +30,8 @@ internal static partial class CommanderOpportunityTests
             ("bc13 FIX-RENEW the charge doctrine reads timetorenewaichargecheck, so vanilla's dead renew test needs no fix", FixRenew),
             ("bc13 FIX-SEP vanilla's CheckForSeparatedEnemy returns on aiassaultmove before any write (real IL)", FixSepIl),
             ("bc13 FIX-SEP the steer sets aiassaultmove for a Whiskey-commanded group only, and the Finalizer restores it", FixSepPatch),
+            ("bc13 FIX-RESERVE-PICK the real CheckUseOfReserves IL has exactly one Count - 1 pick and it is rewritten", FixReservePickIl),
+            ("bc13 FIX-RESERVE-PICK a method with another site count is left as vanilla; the hook reads its flag live", FixReservePickGuards),
         };
     }
 
@@ -353,5 +356,52 @@ internal static partial class CommanderOpportunityTests
         AssertContains(src, "tactical.patch.separated-enemy.prefix", "prefix scope");
         AssertContains(src, "tactical.patch.separated-enemy.finalizer", "finalizer scope");
         AssertFalse(src.Contains(".SetWaypoint(") || src.Contains(".ChangeStance("), "the steer writes no order");
+    }
+
+    // ------------------------------------------------------------------ #124 reserve support pick (BUG-TAC-008)
+
+    public static int PickHookStub() => 0;
+
+    private static void FixReservePickIl()
+    {
+        var method = AccessTools.Method(typeof(AIBattle), ReserveSupportPickIl.Method);
+        AssertTrue(method != null, "CheckUseOfReserves exists");
+        var vanilla = PatchProcessor.GetOriginalInstructions(method);
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(PickHookStub));
+        var edited = ReserveSupportPickIl.Transpile(vanilla, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertEqual(1, matches, "exactly one Count - 1 pick (the float Random.Range(-1f, 1f) does not match)");
+        AssertFalse(ReferenceEquals(edited, vanilla), "an edited copy");
+        AssertEqual(vanilla.Count, edited.Count, "same length: the 1 became the hook call");
+        int at = -1;
+        for (int i = 0; i < edited.Count; i++) if (edited[i].Calls(hook)) at = i;
+        AssertTrue(at >= 1, "the hook call is in the list");
+        AssertTrue(edited[at - 1].opcode == OpCodes.Callvirt && edited[at - 1].operand is MethodInfo m && m.Name == "get_Count", "after the Count getter");
+        AssertTrue(edited[at + 1].opcode == OpCodes.Sub, "before the subtraction");
+        AssertTrue(vanilla[at].opcode == OpCodes.Ldc_I4_1, "where vanilla loaded the constant 1");
+        AssertFalse(ReferenceEquals(edited[at], vanilla[at]), "the vanilla list's own instructions are untouched");
+    }
+
+    private static void FixReservePickGuards()
+    {
+        var other = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(AIBattle), "AssignReserves"));
+        var hook = AccessTools.Method(typeof(CommanderOpportunityTests), nameof(PickHookStub));
+        var same = ReserveSupportPickIl.Transpile(other, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int matches);
+        AssertTrue(ReferenceEquals(same, other), "a method without the pattern comes back as vanilla's own list");
+        AssertEqual(0, matches, "no sites");
+        var none = ReserveSupportPickIl.Transpile(null, RandomPickRangeIl.ResolveRandomRangeInt(), hook, out int zero);
+        AssertTrue(none == null && zero == 0, "null in, null out");
+
+        string patch = ReadSrc("Patches/ReserveSupportPickFixPatch.cs");
+        AssertContains(patch, "[HarmonyPatch(typeof(AIBattle), \"CheckUseOfReserves\")]", "the target");
+        AssertContains(patch, "return RandomPickRangeIl.UpperOffset(Enabled());", "the hook reads the flag on every call: a live rollback");
+        AssertContains(patch, "tactical-il:reserve-support-pick:applied", "applied key");
+        AssertContains(patch, "tactical-il:reserve-support-pick:pattern", "pattern key");
+        AssertContains(patch, "tactical-il:reserve-support-pick:transpiler", "exception key");
+        AssertContains(patch, "[ReserveSupportPickIl] applied sites=", "the applied line names the site");
+        AssertContains(patch, "pattern mismatch count=", "the mismatch line names the count");
+        AssertFalse(patch.Contains("TelemetryPerf.Scope("), "a Transpiler carries no scope");
+        AssertFalse(ReadSrc("Tactical/Battle/BugFixes/ReserveSupportPickIl.cs").Contains(".Clone()"), "copies with new CodeInstruction(ci)");
+        AssertEqual(0, RandomPickRangeIl.UpperOffset(true), "fix on: the whole list");
+        AssertEqual(1, RandomPickRangeIl.UpperOffset(false), "fix off: vanilla's Count - 1");
     }
 }
