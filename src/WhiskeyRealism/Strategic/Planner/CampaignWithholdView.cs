@@ -4,15 +4,16 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
-    // What the published plan hands the executors' patches besides the plan, the allocation and the sector model: the decision
-    // the plan belongs to, the decision whose main-effort launch the chapter tempo roll released, whether the executors may run
-    // at all (the pre-war gate) and the W&L map-group player's formation, whom the deferred-Support clause never withholds.
+    // What the published plan hands the executors' patches besides the plan, the allocation and the sector model: whether the
+    // plan's decision has had its main-effort launch released by the chapter tempo roll, whether the executors may run at all
+    // (the pre-war gate) and the W&L map-group player's formation, whom the deferred-Support clause never withholds.
     // Published with the plan (CampaignPlanStore.PublishExecutorContext joins the day's atomic publish), so a patch between the
     // slices of a time-sliced review never sees today's release next to yesterday's plan.
     internal struct ExecutorContext
     {
-        public int DecisionSerial;
-        public int ReleasedDecision;       // PlannerState.TempoReleasedDecision, -1 none
+        // The decision's main-effort launch has been released: PlannerState.TempoReleasedDecision == DecisionSerial, the one release
+        // predicate everywhere in the plan.
+        public bool Released;
         public bool ExecutorsAllowed;      // PlannerChapterRules.ExecutorsAllowed at the review
         public int MapGroupInstanceId;     // the formation of WlChainClass.PlayerMapGroup, -1 none
 
@@ -20,15 +21,11 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             return new ExecutorContext
             {
-                DecisionSerial = state.DecisionSerial,
-                ReleasedDecision = state.TempoReleasedDecision,
+                Released = state.TempoReleasedDecision == state.DecisionSerial,
                 ExecutorsAllowed = executorsAllowed,
                 MapGroupInstanceId = mapGroupInstanceId
             };
         }
-
-        // Released means TempoReleasedDecision == DecisionSerial, everywhere in the plan.
-        internal bool Released => ReleasedDecision == DecisionSerial;
     }
 
     // A paused alliance or a failing review never steers on stale state: every planner patch ignores a published plan more than

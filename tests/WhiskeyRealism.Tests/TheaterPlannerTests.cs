@@ -754,8 +754,7 @@ internal static class TheaterPlannerTests
     private static void PlannerStateRestoreRoundTrips()
     {
         var state = new PlannerState();
-        state.Restore(4, 31, 32, 2, 7, 123456789L, 2, true);
-        AssertEqual(4, state.CurrentMainSector, "sector");
+        state.Restore(31, 32, 2, 7, 123456789L, 2, true);
         AssertEqual(31, state.CurrentMainObjective, "objective");
         AssertEqual(32, state.ChallengerObjective, "challenger");
         AssertEqual(2, state.ChallengerDays, "days");
@@ -929,7 +928,7 @@ internal static class TheaterPlannerTests
         threatened.Own.Add(Corps(2, 200f, 20000f));
         threatened.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
         AssertEqual("capital-threat", Plan(threatened, state).SwitchReason, "onset");
-        state.Restore(0, 99, -1, 0, state.DecisionSerial, state.CampaignSeed, 0, state.CapitalThreatLatched);
+        state.Restore(99, -1, 0, state.DecisionSerial, state.CampaignSeed, 0, state.CapitalThreatLatched);
         AssertEqual("hold", Plan(threatened, state).SwitchReason, "standing threat: no trigger");
         float floor = 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f; // vanilla weighting (11735): 1256
         var easing = TwoTargets(0.5f, 0.6f);
@@ -957,7 +956,7 @@ internal static class TheaterPlannerTests
             s.Own.Add(Corps(2, 200f, 20000f));
             s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
             var state = new PlannerState();
-            state.Restore(0, 99, -1, 0, 0, seed);
+            state.Restore(99, -1, 0, 0, seed);
             var plan = Plan(s, state);
             AssertEqual(99, plan.MainObjectiveId, "current kept within Epsilon, seed " + seed);
             AssertEqual(0, state.DecisionSerial, "no decision, seed " + seed);
@@ -1371,7 +1370,7 @@ internal static class TheaterPlannerTests
         for (int serial = 0; serial < 64; serial++)
         {
             var state = new PlannerState();
-            state.Restore(-1, -1, -1, 0, serial, 99L);
+            state.Restore(-1, -1, 0, serial, 99L);
             bySerial.Add(Plan(TwoTargets(0.5f, 0.5f), state).MainObjectiveId);
         }
         AssertTrue(bySerial.Contains(98) && bySerial.Contains(99), "the decision serial changes the draw");
@@ -1662,7 +1661,7 @@ internal static class TheaterPlannerTests
     private static PlannerState StateOn(int objective)
     {
         var state = new PlannerState();
-        state.Restore(0, objective, -1, 0, 0, 1234L);
+        state.Restore(objective, -1, 0, 0, 1234L);
         return state;
     }
 

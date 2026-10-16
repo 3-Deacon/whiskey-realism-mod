@@ -131,7 +131,7 @@ The commander opportunity tick (plan § BC13) chooses its assets from AI-driven 
 
 ## Candidate vanilla bugs (not yet tracked)
 
-- **Transfers do nothing in a career** (BUG-WL-013): `CheckTransferOfUnits` calls `bunits.MoveUnit` without `skipdlccheck` (17328), and `MoveUnit` returns unless both units are player-owned while a career is active (93099), after 17327 has appended the unit to `unitstobetransfered`. Affects every faction. Tracked in `docs/bug-fixes/README.md`; fix planned in the campaign-planner plan (G5).
+- **Transfers do nothing in a career** (BUG-WL-013): `CheckTransferOfUnits` calls `bunits.MoveUnit` without `skipdlccheck` (17328), and `MoveUnit` returns unless both units are player-owned while a career is active (93099), after 17327 has appended the unit to `unitstobetransfered`. Affects every faction. Tracked in `docs/bug-fixes/README.md`; fixed by #126 `WlCareerTransferFixPatch` (campaign-planner stage G5b; argument-only, never for player-owned units, behind `Enable W&L Career Transfer Fix`; awaiting the in-game smoke).
 - Tracked since: player-economy effects `BUG-WL-005..009`, `BUG-WL-011`, `BUG-WL-012`, Whiskey #3 telemetry `BUG-WL-010` (see `bug-fixes/vanilla-wl-career.md`).
 
 - `CheckShipConstruction` (12012) and `CheckArmyGroupManagement` (17723) skip **every** faction when the W&L player is CIC → tracked as `BUG-WL-001`, guarded by #70 (`docs/bug-fixes/vanilla-wl-career.md`).

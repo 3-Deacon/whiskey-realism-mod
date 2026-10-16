@@ -276,7 +276,6 @@ namespace WhiskeyRealism.Strategic.Planner
                         TargetX = _tx[i],
                         TargetZ = _tz[i],
                         Reason = _reason[i],
-                        ReconMissionId = -1,
                         Withheld = _withheld[i]
                     });
                 }
@@ -319,7 +318,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (_gaveUp == null) return false;
                 int id = _s.Own[i].InstanceId;
                 for (int k = 0; k < _gaveUp.Count; k++)
-                    if (_gaveUp[k].InstanceId == id && _gaveUp[k].Matches(tx, tz)) return true;
+                    if (_gaveUp[k].InstanceId == id && MoveTracker.SameTarget(_gaveUp[k].TargetX, _gaveUp[k].TargetZ, tx, tz)) return true;
                 return false;
             }
 

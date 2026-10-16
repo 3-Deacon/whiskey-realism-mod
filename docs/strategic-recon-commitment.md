@@ -1,18 +1,21 @@
 # Strategic Recon And Campaign Sandbox Doctrine
 
-Living reference for Scourge-derived campaign-map reconnaissance, commitment, advance-guard, picket, and supply-base sandbox ideas. This is backlog/current-design context, not shipped runtime behavior. Shipped state and smoke status live in [`docs/handoff.md`](handoff.md).
+Living reference for campaign-map reconnaissance, fog-honest enemy knowledge and picket/advance-guard missions. Shipped state and smoke status live in [`docs/handoff.md`](handoff.md); the design of record is the campaign planner spec ([`docs/superpowers/specs/2026-10-14-campaign-planner-design.md`](superpowers/specs/2026-10-14-campaign-planner-design.md), components 4 and 4b) and its plan ([`docs/superpowers/plans/2026-10-15-campaign-planner.md`](superpowers/plans/2026-10-15-campaign-planner.md), slices G1 and G1b).
 
-## Current Status
+## Current Status (stage G)
 
-This work is not runtime-implemented: no sighting state, `ConvergentOperationLedger`, `AdvanceGuard` / `Picket` / `SupplyBase*` / `SupplyPatrol` mission types, or config flag for any of it exists in `src/`. What does ship is the earlier, sighting-blind probe/commit layer these ideas would extend:
+Beliefs and active recon are shipped (pending the stage G in-game smoke). The earlier sighting-blind probe/commit layer (`OperationalProbeRuntime`, `OperationalProbeLedger`, `OperationDecisionMemory`, `CoordinatedOperationRuntime`) is deleted; `ContactEvidenceLedger` survives as the pure verdict a probe mission's contact is judged by (`ReconStep` feeds it beliefs and battle history, `ReconMissionLedger.OnProbeContact` withdraws a probe on `OvermatchedContact` or `EnemyReacted` and refuses to escalate on a stale picture); see [`operational-tempo-doctrine.md`](operational-tempo-doctrine.md) and [`coordinated-operation-packages.md`](coordinated-operation-packages.md).
 
-- `OperationalProbeRuntime` / `OperationalProbeLedger` (`Strategic/`): per-formation `OperationalProbeDecision` (`Probe`, `Pause`, `Withdraw`, `Escalate`) from readiness, supply, a probe-strength cap and friendly/enemy ratios (`EscalateFriendlyRatio` 1.8, `WithdrawFriendlyRatio` 0.55, `EnemyReactionMultiplier` 1.45), committed through `CoordinatedOperationRuntime`, `WlStrategicOrderBridge` or `AICampaign.MoveUnitTo`.
-- `ContactEvidenceLedger`: classifies contact (`NoContact` .. `OvermatchedContact`) from strategic battle history and strength readings, not from vanilla spotting.
-- `OperationDecisionMemory`: only a bounded list of recent replan day serials; it holds no commitment or abort state.
+- **Beliefs (`Strategic/Planner/EnemyArmyModel.cs`, `EnemyDetectionRuntime`).** Enemies enter the planner only through what the side's own viewers see (vanilla `FogOfWar`: `Regiment.fows`, `Regiment.fow`, `oppositefow`, `unitrevealedbyenemy`, spotted marks), each as a belief with a last-seen position and strength, an uncertainty radius that grows with the plausible march since last sight (`PlausibleDaysCap` 7), and a confidence that halves every `HalfLifeDays` (7). A belief expires at `ExpireDays` (30) or below `MinConfidence` (0.05). Unseen enemies are excluded, never read from vanilla's own destination fields. Player intelligence incidents 60/61/64 are masked when the AI asks for a fog-grid probe (`Util/PlayerIntelIncidents`).
+- **Recon planning (`ReconPlanner`).** Tasks, in priority order: `screen-posture`, `main-axis`, `probe`, `capital-approach`, `advance-guard`, `front-approach`, `belief`, `picket`; at most `MaxScreensPerTheater` (2) screens per theater and `MaxMissionsPerAlliance` (6) tasks. Hold points keep `StandoffFraction` (0.8) of the sight radius from every live belief. Formation choice prefers cavalry-majority groups, never a busy, below-minimum or W&L-player-chain (`WlChainRules.MayMove`) formation; an advance guard or probe is at most `AdvanceGuardMaxStrengthShare` (25 %) of the main body, a picket never a sector's final reserve.
+- **Recon execution (`ReconExecutorRuntime`, `ReconMissionLedger`).** Missions persist in the sidecar (v3, unit-key rebinding), last at most `MaxMissionDays` (20), and are recalled when the group is needed or the task disappears. Vanilla's campaign AI never scouts and the scouting order does not widen sight, so recon is viewer placement: orders go through vanilla `ChangeCampaignOrders` and `MoveUnitTo`.
+- **Commitment.** The allocator sizes the main effort against believed strength with a required ratio and releases the launch through the chapter tempo gate; there is no separate `ConvergentOperationLedger` (the planner's one allocation expresses multi-arm phasing).
 
-Campaign enemy knowledge in `FrontSectorRuntime.AddUnits` and `DefenseIntentRuntime.BuildInput` does not read vanilla spotting either. The roadmap routes sighting-honest campaign knowledge through stage G ([`docs/superpowers/plans/2026-10-15-full-overhaul-roadmap.md`](superpowers/plans/2026-10-15-full-overhaul-roadmap.md), `EnemyArmyModel` re-based on vanilla campaign spotting) and the live theater campaign planner ([`docs/superpowers/specs/2026-10-14-campaign-planner-design.md`](superpowers/specs/2026-10-14-campaign-planner-design.md): fog-honest snapshot, unseen enemies excluded, last-seen decay). Treat this doc's recon/commitment ideas as inputs to that slice, not a parallel one.
+The direct tactical Scourge conversions are Whiskey-native tactical doctrine documented in [`docs/scourge-of-war-ai-anchors.md`](scourge-of-war-ai-anchors.md), [`docs/tactical-orchestrator.md`](tactical-orchestrator.md) and [`docs/tactical-operations-ledger.md`](tactical-operations-ledger.md).
 
-The direct tactical Scourge conversions are already implemented as Whiskey-native tactical doctrine and documented in [`docs/scourge-of-war-ai-anchors.md`](scourge-of-war-ai-anchors.md), [`docs/tactical-orchestrator.md`](tactical-orchestrator.md), and [`docs/tactical-operations-ledger.md`](tactical-operations-ledger.md). Campaign-map advance guards, pickets, supply-base security, and sighting-grounded operational commitment remain a separate strategic slice.
+## Still backlog
+
+Supply-base missions (`SupplyBaseAttack` / `SupplyBaseDefense` / `SupplyPatrol`), detaching arbitrary children from a parent and `Rejoin`/`Retreat` transitions are not implemented; the depot and rail work shipped in G5 covers supply construction, not supply-base raids. Treat the section below as the backlog design.
 
 The point-in-time specs are archived:
 
@@ -32,27 +35,9 @@ Do not:
 - create a second campaign objective picker;
 - detach arbitrary children without parent/child ledger state and save/load handling.
 
-## Recon-Grounded Commitment
-
-The archived recon/commitment design preserved six decisions (intent, not shipped):
-
-1. Extend existing strategic ledgers with sighting state instead of adding a parallel top-level intel brain.
-2. Apply sighting-aware planning to AI alliances while preserving the player's vanilla UI/control visibility.
-3. Run on the existing daily strategic-review cadence.
-4. Extend `OperationalProbeRuntime` with a Scourge-inspired force-ratio commit/probe/withdraw gate (the ratio gate above exists; the sighting-aware commit does not).
-5. Add a `ConvergentOperationLedger` only for multi-arm phasing that existing ledgers cannot express.
-6. Track commitment and abort state in existing operation memory infrastructure (`OperationDecisionMemory` does not yet hold any).
-
-Key Grand Tactician anchors to recheck before planning (the vanilla fields exist in the current decompile, e.g. `Regiment.fows` at 111348; none is read by campaign-side Whiskey code today):
-
-- `FogOfWar`, `Regiment.fows`, `Regiment.fow`, `Regiment.oppositefow`, `Regiment.unitrevealedbyenemy`, `Regiment.lastspotted`, and `Regiment.spottedmarks` for sighting truth. (The tactical layer reads `FogOfWar` through `TacticalVisionRuntimeAdapter` / `TacticalFogOfWarContact`; see [`docs/vanilla-vision-and-movement.md`](vanilla-vision-and-movement.md).)
-- `Regiment.groupintelligencegathering` and Bureau of Military Information perk arrays for estimate quality and staleness.
-- `FrontSectorRuntime.AddUnits`, `ContactEvidenceLedger`, and `DefenseIntentRuntime.BuildInput` as the first sighting-aware consumers.
-- `OperationalProbeRuntime`, `FormationDirectiveLedger`, `CoordinatedOperationRuntime`, and `OperationDecisionMemory` as the intended integration points.
-
 ## Advance Guard And Picket Sandbox
 
-The campaign sandbox backlog models parent/child mission state before contact:
+The supply-base backlog models parent/child mission state before contact:
 
 - `AdvanceGuard`: detached mobile screen ahead of the main body.
 - `Picket`: small local security detachment near a town, road junction, or supply point.

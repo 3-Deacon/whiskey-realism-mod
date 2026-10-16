@@ -185,7 +185,7 @@ namespace WhiskeyRealism.Telemetry
         }
 
         // Low-priority cut order matches TelemetryQueue.Rank: Trace rows first, then Info
-        // rows (State, Decision, Gate/Write); Performance rows and Warning/Error rows of any
+        // rows (State, Decision, Gate/Write); Performance rows and Warning rows of any
         // category are never cut before the total cap. Performance summaries also keep the
         // protected reserve (CanEmitLocked). Debug severity cuts like Info.
         private static int CutPercent(TelemetryCategory category, TelemetrySeverity severity)

@@ -337,7 +337,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static FormationFlags FlagsOf(Regiment reg, int unitTyp, bool hasDirectCorps, float minStrength)
         {
-            var flags = FormationFlags.None;
+            var flags = default(FormationFlags);
             if (reg.inbattle) flags |= FormationFlags.InBattle;
             if (reg.onretreat) flags |= FormationFlags.OnRetreat;
             if (OffensiveSet.Contains(reg)) flags |= FormationFlags.InOffensiveOps;

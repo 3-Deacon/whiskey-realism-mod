@@ -45,7 +45,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryRecord.cs" Link="BattleHistoryRecord.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryQuery.cs" Link="BattleHistoryQuery.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ContactEvidenceLedger.cs" Link="ContactEvidenceLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterPressureView.cs" Link="TheaterPressureView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicCadencePolicy.cs" Link="StrategicCadencePolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
@@ -445,6 +444,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalEnemyContactLedger.cs" Link="Orchestrator\TacticalEnemyContactLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDoctrineTime.cs" Link="Orchestrator\TacticalDoctrineTime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\PlayerIntelIncidents.cs" Link="Util\PlayerIntelIncidents.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\PatchFirstFire.cs" Link="Util\PatchFirstFire.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\ScopedState.cs" Link="Util\ScopedState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalPatchIds.cs" Link="Patches\TacticalPatchIds.cs" />

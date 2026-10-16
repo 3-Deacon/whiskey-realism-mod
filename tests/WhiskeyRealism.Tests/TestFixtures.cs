@@ -370,7 +370,7 @@ internal static class TestFixtures
         var sb = new System.Text.StringBuilder();
         foreach (var x in a.Assignments)
             sb.Append(x.InstanceId).Append(':').Append(x.Role).Append('@').Append(x.SectorId).Append(':').Append(x.TargetX.ToString("0.###")).Append(',')
-              .Append(x.TargetZ.ToString("0.###")).Append(x.Withheld ? "w" : "-").Append(x.Reason).Append(x.ReconMissionId).Append('|');
+              .Append(x.TargetZ.ToString("0.###")).Append(x.Withheld ? "w" : "-").Append(x.Reason).Append('|');
         sb.Append("short=").Append(string.Join(",", a.Shortfalls)).Append("|surplus=").Append(string.Join(",", a.Surpluses));
         return sb.ToString();
     }

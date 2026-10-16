@@ -29,7 +29,6 @@ namespace WhiskeyRealism.Strategic.Planner
     [System.Flags]
     public enum FormationFlags : uint
     {
-        None = 0,
         InBattle = 1,
         OnRetreat = 2,
         InOffensiveOps = 4,
@@ -158,19 +157,32 @@ namespace WhiskeyRealism.Strategic.Planner
         public float X, Z;
     }
 
+    // How a sighting came about, as far as a decision branches on it: Seen is any fog, own-side or fog-off
+    // sighting (the three provenances that used to be told apart were only ever assigned, never branched on;
+    // sidecars written with the old values 1 and 3 load as Seen, see DetectionSources.FromSaved), Contact is
+    // vanilla's campaign contact (counted in [EnemyBeliefs]), ObjectiveGarrison a fort or town garrison
+    // sighting (keeps its radius). The numbers are persisted: 2 and 4 stay as they were.
     public enum DetectionSource
     {
-        FogGrid = 0,
-        OwnSideWithinFog = 1,
+        Seen = 0,
         Contact = 2,
-        NoFog = 3,
         ObjectiveGarrison = 4
+    }
+
+    public static class DetectionSources
+    {
+        // A saved DetectionSource: 2 and 4 as before; 0, 1 and 3 (FogGrid, OwnSideWithinFog, NoFog) and anything unknown are Seen.
+        public static DetectionSource FromSaved(int saved)
+        {
+            if (saved == (int)DetectionSource.Contact) return DetectionSource.Contact;
+            if (saved == (int)DetectionSource.ObjectiveGarrison) return DetectionSource.ObjectiveGarrison;
+            return DetectionSource.Seen;
+        }
     }
 
     [System.Flags]
     public enum EnemyTraits
     {
-        None = 0,
         Embarked = 1,
         CavalryMajority = 2,
         OnOwnSoil = 4,
@@ -352,7 +364,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public int SectorId;
         public float TargetX, TargetZ;
         public string Reason;
-        public int ReconMissionId; // -1 none
         // Kept out of vanilla's offensive pool: Reserve, CapitalGuard, DepotBuilder, Recon,
         // Recover, and Hold at sector need (G4).
         public bool Withheld;

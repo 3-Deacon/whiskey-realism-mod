@@ -22,7 +22,6 @@ namespace WhiskeyRealism.Strategic.Planner
         public int SectorId;
         public ReconState State;
         public int IssuedDay;
-        public int LastContactDay; // -1 never
         public string Reason;
         // The confidence-weighted enemy strength near the objective at the probe's last verdict (the
         // reference for the enemy-reaction test); -1 before the first look. Probes only.
@@ -37,9 +36,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
     // One alliance's recon missions (plan § G1b), written only inside the daily review: OnReview
     // ages and transitions the missions from today's snapshot (before the planner picks tasks),
-    // Sync binds G4's Recon assignments to missions (after the allocation) and writes the mission id
-    // back into each assignment for the G5d executor. Per review: OnReview -> ReconPlanner.PlanTasks
-    // -> ForceAllocator (PickFormation) -> Sync.
+    // Sync binds G4's Recon assignments to missions (after the allocation); the G5d executor reads the
+    // missions from the ledger by formation, not through the allocation. Per review: OnReview ->
+    // ReconPlanner.PlanTasks -> ForceAllocator (PickFormation) -> Sync.
     //   Assigned/Moving/Holding  derived each review from the formation: at its hold point (within
     //                            max(bugle range, a quarter sight radius)) Holding, else a path or a
     //                            queued move Moving, else Assigned (the executor re-issues).
@@ -47,7 +46,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //                within the standoff of 0.8 x sight); raw Supply01 < 0.5 (vanilla's raid abort,
     //                GetGroupSupplyState < 0.25 at 9092, is on the halved metric of 14063-14066); a
     //                probe's ContactEvidenceLedger verdict to withdraw. A probe's own contact only
-    //                stamps LastContactDay: contact is its job, and the verdict decides.
+    //                does not recall it: contact is its job, and the verdict decides.
     //                The hold point becomes the recall point: the nearest own formation the
     //                allocation holds with (Hold or MainEffort), else the own capital, else the
     //                nearest own formation; never the W&L player's own command or a map-group
@@ -81,13 +80,10 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var assignment = a.Assignments[i];
                 if (assignment.Role != FormationRole.Recon) continue;
-                assignment.ReconMissionId = -1;
                 int task = TaskFor(tasks, assignment);
                 int own = s.IndexOfOwn(assignment.InstanceId);
                 if (task >= 0 && own >= 0 && !IsRecalling(assignment.InstanceId))
-                    assignment.ReconMissionId = Bind(s, s.Own[own], tasks[task]);
-                if (assignment.ReconMissionId >= 0) kept.Add(assignment.ReconMissionId);
-                a.Assignments[i] = assignment;
+                    kept.Add(Bind(s, s.Own[own], tasks[task]));
             }
             for (int m = 0; m < _missions.Count; m++)
             {
@@ -196,7 +192,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 m.ObservedEnemyStrength = observedEnemyStrength;
                 m.ObservedObjectiveId = observedObjectiveId;
             }
-            if (evidence.Evidence != ContactEvidence.NoContact) m.LastContactDay = daySerial;
             if (evidence.AllowsEscalation)
             {
                 m.State = ReconState.Cleared;
@@ -264,11 +259,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if ((f.Flags & FormationFlags.OnRetreat) != 0) return Set(m, ReconState.Cleared, "retreat");
             if (s.DaySerial - m.IssuedDay >= MaxMissionDays) return Set(m, ReconState.Cleared, "expired");
 
-            if (InContact(s, m.Kind, f))
-            {
-                m.LastContactDay = s.DaySerial;
-                if (m.Kind != ReconKind.Probe) return Recall(s, a, m, f, "contact");
-            }
+            if (m.Kind != ReconKind.Probe && InContact(s, m.Kind, f)) return Recall(s, a, m, f, "contact");
             if (f.Supply01 < RecallSupplyBelow) return Recall(s, a, m, f, "low-supply");
 
             if (Distance(f.X, f.Z, m.HoldX, m.HoldZ) <= ArrivalRadius(f)) m.State = ReconState.Holding;
@@ -387,7 +378,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 SectorId = task.SectorId,
                 State = ReconState.Assigned,
                 IssuedDay = s.DaySerial,
-                LastContactDay = -1,
                 Reason = task.Reason,
                 ObservedEnemyStrength = -1f,
                 ObservedObjectiveId = -1,

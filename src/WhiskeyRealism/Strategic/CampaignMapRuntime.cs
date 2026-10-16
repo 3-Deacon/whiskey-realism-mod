@@ -38,7 +38,6 @@ namespace WhiskeyRealism.Strategic
                         CityName = town.CityName,
                         StateId = town.state,
                         StateName = StateName(town.state),
-                        StateAbbrev = StateAbbrev(town.state),
                         Owner = town.Owner,
                         OriginalOwner = town.originalowner >= 0f ? Convert.ToInt32(town.originalowner) : -1,
                         IsCapital = town.IsCapital,
@@ -157,7 +156,6 @@ namespace WhiskeyRealism.Strategic
                     Name = harbor.IIPName,
                     StateId = harbor.state,
                     StateName = StateName(harbor.state),
-                    StateAbbrev = StateAbbrev(harbor.state),
                     Owner = harbor.allianceowner,
                     X = position.x,
                     Z = position.z,
@@ -183,7 +181,6 @@ namespace WhiskeyRealism.Strategic
                     Name = string.IsNullOrEmpty(fort.BuildingName) ? ((UnityEngine.Object)fort).name : fort.BuildingName,
                     StateId = fort.state,
                     StateName = StateName(fort.state),
-                    StateAbbrev = StateAbbrev(fort.state),
                     Owner = fort.Owner,
                     X = position.x,
                     Z = position.z,
@@ -206,17 +203,6 @@ namespace WhiskeyRealism.Strategic
                 if (GameVars.nation == null || stateId < 0 || stateId >= GameVars.nation.Length)
                     return null;
                 return GameVars.nation[stateId]?.name;
-            }
-            catch { return null; }
-        }
-
-        private static string StateAbbrev(int stateId)
-        {
-            try
-            {
-                if (GameVars.nation == null || stateId < 0 || stateId >= GameVars.nation.Length)
-                    return null;
-                return GameVars.nation[stateId]?.abbrev;
             }
             catch { return null; }
         }

@@ -31,6 +31,7 @@ internal static class EnemyArmyModelTests
             ("GarrisonBeliefOnlyWhenGarrisonSeen", GarrisonBeliefOnlyWhenGarrisonSeen),
             ("GarrisonBeliefDoesNotDrift", GarrisonBeliefDoesNotDrift),
             ("PlayerIntelIncidentsNeverRevealToAiSide", PlayerIntelIncidentsNeverRevealToAiSide),
+            ("PlayerIntelIncidentsHaveOneOwner", PlayerIntelIncidentsHaveOneOwner),
             ("ModelUpdateIsIdempotentForSameDay", ModelUpdateIsIdempotentForSameDay),
             ("EmptyDetectionsKeepsMemory", EmptyDetectionsKeepsMemory),
             ("BeliefsKeyedByUnitKeyNotInstanceId", BeliefsKeyedByUnitKeyNotInstanceId),
@@ -150,8 +151,8 @@ internal static class EnemyArmyModelTests
     }
 
     private static EnemyDetection Seen(string key, int instanceId, float x, float z, float strength,
-                                       int unitTyp = 15, DetectionSource source = DetectionSource.FogGrid,
-                                       EnemyTraits traits = EnemyTraits.None)
+                                       int unitTyp = 15, DetectionSource source = DetectionSource.Seen,
+                                       EnemyTraits traits = default(EnemyTraits))
     {
         return new EnemyDetection
         {
@@ -189,7 +190,7 @@ internal static class EnemyArmyModelTests
         bool near = ViewerCoverage.Covers(30f, 0f, vx, vz, vr, 1);
         AssertTrue(DetectionRules.NeedsGridProbe(false, false, false, near), "covered: ask the grid");
         AssertTrue(DetectionRules.TryDecide(false, false, false, false, near, gridVisible: true, out var source), "covered and grid-visible");
-        AssertEqual(DetectionSource.FogGrid, source, "FogGrid");
+        AssertEqual(DetectionSource.Seen, source, "a grid sighting is Seen");
         AssertFalse(DetectionRules.TryDecide(false, false, false, false, near, gridVisible: false, out _), "hidden by concealment");
     }
 
@@ -203,7 +204,7 @@ internal static class EnemyArmyModelTests
         AssertEqual(100, b.LastSeenDay, "last seen today");
         AssertNear(10f, b.X, 1e-6f, "x");
         AssertNear(50000f, b.Strength, 1e-6f, "strength");
-        AssertEqual(DetectionSource.FogGrid, b.LastSource, "source");
+        AssertEqual(DetectionSource.Seen, b.LastSource, "source");
     }
 
     private static void UnseenConfidenceHalvesEverySevenDays()
@@ -336,10 +337,10 @@ internal static class EnemyArmyModelTests
     {
         AssertTrue(DetectionRules.TryDecide(noFog: true, contact: false, sideIsPlayerAlliance: false, ownSideVisible: false,
             viewerCovers: false, gridVisible: false, out var source), "fog off: everything seen");
-        AssertEqual(DetectionSource.NoFog, source, "NoFog");
+        AssertEqual(DetectionSource.Seen, source, "fog off is Seen");
         AssertFalse(DetectionRules.NeedsGridProbe(true, false, false, true), "no grid probe with fog off (usefow NRE, 101188)");
         AssertTrue(DetectionRules.TryDecide(true, true, true, false, false, false, out source), "fog off wins over the other rules");
-        AssertEqual(DetectionSource.NoFog, source, "NoFog even in contact");
+        AssertEqual(DetectionSource.Seen, source, "fog off wins over contact: Seen");
     }
 
     private static void ContactAlwaysReveals()
@@ -354,7 +355,7 @@ internal static class EnemyArmyModelTests
     {
         AssertTrue(DetectionRules.TryDecide(false, false, sideIsPlayerAlliance: true, ownSideVisible: true,
             viewerCovers: false, gridVisible: false, out var source), "W&L player's AI side: !iswithinfog");
-        AssertEqual(DetectionSource.OwnSideWithinFog, source, "OwnSideWithinFog");
+        AssertEqual(DetectionSource.Seen, source, "the player-alliance side is Seen");
         AssertFalse(DetectionRules.TryDecide(false, false, true, ownSideVisible: false, viewerCovers: true, gridVisible: true, out _),
             "the player-alliance side never asks fows[1]");
         AssertFalse(DetectionRules.NeedsGridProbe(false, false, true, true), "no grid probe for the player-alliance side");
@@ -395,19 +396,38 @@ internal static class EnemyArmyModelTests
         public bool Gone;
     }
 
+    // The battle perception and the campaign detection mask the same three incidents by the same rule; the ids, the "not launched"
+    // value, the launched test and the mask rule live in Util/PlayerIntelIncidents.cs and nowhere else (G1 verify M4, deduped at G7).
+    private static void PlayerIntelIncidentsHaveOneOwner()
+    {
+        string root = System.IO.Path.GetFullPath(FindRepoPath("src/WhiskeyRealism"));
+        foreach (string file in System.IO.Directory.GetFiles(root, "*.cs", System.IO.SearchOption.AllDirectories))
+        {
+            string name = System.IO.Path.GetFileName(file);
+            if (name == "PlayerIntelIncidents.cs") continue;
+            string code = string.Join("\n", PlannerReadCensusTests.CodeLines(System.IO.File.ReadAllText(file)));
+            AssertFalse(System.Text.RegularExpressions.Regex.IsMatch(code, @"\{\s*60\s*,\s*61\s*,\s*64\s*\}"), name + " keeps its own copy of the incident ids");
+            AssertFalse(code.Contains("IncidentNotLaunched") || code.Contains("IncidentLaunched("), name + " keeps its own launched test");
+        }
+        string battle = ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/BattlePerception.cs");
+        AssertContains(battle, "return PlayerIntelIncidents.Masks(mode == PerceptionMode.FogGrid, dlcScenarioActive);", "the battle rule is the shared one with the FogGrid mapping");
+        AssertContains(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyDetectionRuntime.cs"), "PlayerIntelIncidents.Masks(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive)", "so is the campaign's");
+        AssertContains(ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/BattlePerceptionProbe.cs"), "PlayerIntelIncidents.Launched(incident.launchedtime)", "the battle probe's mask tests the shared predicate");
+    }
+
     // 101183-101186: incidents 60/61/64 make UnitIsHidden say "visible" everywhere. The AI side's
     // fog-grid probe runs with them masked (not launched) and restores them, also when it throws.
     private static void PlayerIntelIncidentsNeverRevealToAiSide()
     {
-        AssertEqual("60,61,64", string.Join(",", DetectionRules.PlayerIntelIncidents), "Lost Orders and Scouting Ahead (101183)");
-        AssertTrue(DetectionRules.MasksPlayerIntelIncidents(fogGridRule: true, dlcScenarioActive: true), "rule (b) masks");
-        AssertFalse(DetectionRules.MasksPlayerIntelIncidents(fogGridRule: false, dlcScenarioActive: true), "rule (c) keeps the incident: the player's own side");
-        AssertFalse(DetectionRules.MasksPlayerIntelIncidents(true, false), "no W&L scenario");
+        AssertEqual("60,61,64", string.Join(",", PlayerIntelIncidents.Ids), "Lost Orders and Scouting Ahead (101183)");
+        AssertTrue(PlayerIntelIncidents.Masks(asksAnAiSidesGrid: true, dlcScenarioActive: true), "rule (b) masks");
+        AssertFalse(PlayerIntelIncidents.Masks(asksAnAiSidesGrid: false, dlcScenarioActive: true), "rule (c) keeps the incident: the player's own side");
+        AssertFalse(PlayerIntelIncidents.Masks(true, false), "no W&L scenario");
 
         var lostOrders = new FakeIncident { LaunchedTime = 3.5f };
-        var idle = new FakeIncident { LaunchedTime = DetectionRules.IncidentNotLaunched };
+        var idle = new FakeIncident { LaunchedTime = PlayerIntelIncidents.NotLaunched };
         var incidents = new List<FakeIncident> { lostOrders, idle, null };
-        var mask = new FieldMask<FakeIncident, float>(i => i.LaunchedTime, (i, v) => i.LaunchedTime = v, DetectionRules.IncidentNotLaunched);
+        var mask = new FieldMask<FakeIncident, float>(i => i.LaunchedTime, (i, v) => i.LaunchedTime = v, PlayerIntelIncidents.NotLaunched);
 
         // Vanilla's shortcut: any launched incident -> nothing is hidden. Else the grid hides the enemy.
         bool visible = true;
@@ -436,7 +456,7 @@ internal static class EnemyArmyModelTests
     private static bool AnyLaunched(List<FakeIncident> incidents)
     {
         foreach (var i in incidents)
-            if (i != null && DetectionRules.IncidentLaunched(i.LaunchedTime)) return true;
+            if (i != null && PlayerIntelIncidents.Launched(i.LaunchedTime)) return true;
         return false;
     }
 
@@ -629,7 +649,7 @@ internal static class EnemyArmyModelTests
     {
         var t = DetectionRules.Traits(embarked: true, cavalryShare: 0.6f, onOwnSoil: true, nearOwnCoast: true);
         AssertEqual(EnemyTraits.Embarked | EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil | EnemyTraits.NearOwnCoast, t, "all traits");
-        AssertEqual(EnemyTraits.None, DetectionRules.Traits(false, 0.5f, false, false), "half cavalry is no majority");
+        AssertEqual(default(EnemyTraits), DetectionRules.Traits(false, 0.5f, false, false), "half cavalry is no majority");
     }
 
     // ---- Migrated readers (C25) ----
@@ -770,7 +790,7 @@ internal static class EnemyArmyModelTests
         for (int day = 0; day <= 5; day++)
         {
             if (day > 0) m.Update(List(), day, Drift(5f), March(5f));
-            var input = new DefenseIntentInput { AllianceId = 1, Cooldown = cooldown, CooldownDays = 4 };
+            var input = new DefenseIntentInput { Cooldown = cooldown, CooldownDays = 4 };
             foreach (var b in m.Beliefs)
             {
                 var copy = b;
@@ -815,7 +835,7 @@ internal static class EnemyArmyModelTests
         tracker.Close(second, sig);
         AssertEqual(1, second.Count, "only the sea invasion is tracked");
         AssertTrue(second[0].SightingLapsed && second[0].EnemyUnitKey == "Expedition:9", "lapsed copy");
-        var input = new DefenseIntentInput { AllianceId = 1 };
+        var input = new DefenseIntentInput();
         input.Threats.AddRange(second);
         var output = DefenseIntentLedger.Build(input);
         AssertEqual(DefensePosture.Recovered, output.Responses[0].Threat.Posture, "Recovered");
@@ -1030,7 +1050,7 @@ internal static class EnemyArmyModelTests
         AssertContains(detectBody, "_probeNoFog = DetectionRules.IsOmniscient(mode);", "omniscient only in the rollback modes");
         AssertContains(detectBody, "_gridBroken = DetectionRules.GridUnavailable(mode, (UnityEngine.Object)_probeGrid != null);", "a missing grid fails closed");
         AssertContains(detectBody, "DetectionRules.RunMasked(", "the grid probes run inside the incident mask");
-        AssertContains(detectBody, "DetectionRules.MasksPlayerIntelIncidents(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive)", "mask only for rule (b)");
+        AssertContains(detectBody, "PlayerIntelIncidents.Masks(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive)", "mask only for rule (b)");
         AssertContains(MethodBody(runtime, "private static void CollectUnits("),
             "DetectionRules.RelationOf(side, other, sideState.IsInAllianceWith(other), sideState.IsAtWarWith(other), reg.unittyp == 17, (UnityEngine.Object)reg.garrisonreference != null)",
             "own and allied viewers, enemy armies by the pure rule");

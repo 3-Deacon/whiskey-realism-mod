@@ -161,9 +161,7 @@ internal static class ForceAllocatorTests
         {
             AssertTrue(seen.Add(x.InstanceId), "formation " + x.InstanceId + " appears once");
             AssertTrue(x.Reason != null, "every assignment carries a reason");
-            if (x.Role != FormationRole.Recon) AssertEqual(-1, x.ReconMissionId, "no recon mission id outside Recon");
         }
-        AssertEqual(-1, Of(a, 1).ReconMissionId, "ReconMissionId is explicitly -1 (the struct default 0 is a mission id)");
     }
 
     // ---- immobile formations ----
@@ -189,7 +187,7 @@ internal static class ForceAllocatorTests
         }
         var s2 = Wide();
         var hq = Corps(1, 200f, 3000f);
-        hq.Flags = FormationFlags.None; // not a fighting force
+        hq.Flags = default(FormationFlags); // not a fighting force
         s2.Own.Add(hq);
         s2.Own.Add(Corps(2, 300f, 20000f));
         var a2 = Alloc(PlanOf(s2), s2);
@@ -1571,9 +1569,8 @@ internal static class ForceAllocatorTests
         AssertEqual(task.SectorId, x.SectorId, "task sector");
         AssertEqual(task.HoldX, x.TargetX, "hold x, bit for bit");
         AssertEqual(task.HoldZ, x.TargetZ, "hold z, bit for bit");
-        AssertEqual(-1, x.ReconMissionId, "the mission id is the ledger's to write");
         ledger.Sync(s, tasks, a);
-        AssertTrue(Of(a, 2).ReconMissionId > 0, "Sync paired the assignment with its task and wrote the mission id");
+        AssertEqual(2, ledger.Missions[0].InstanceId, "Sync paired the assignment with its task and opened the mission");
         AssertEqual(1, ledger.Missions.Count, "one mission");
     }
 

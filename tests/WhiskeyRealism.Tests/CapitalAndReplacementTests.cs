@@ -756,7 +756,7 @@ internal static class CapitalAndReplacementTests
 
         string reader = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/LiveFormationReader.cs");
         AssertTrue(HasLine(reader, "Strength = activeStrength ? unit.groupstrengthactive : unit.groupstrengthdirect,"), "the reader honours the strength contract");
-        AssertTrue(HasLine(reader, "Flags = unit.transfertime > 0f ? FormationFlags.InTransfer : FormationFlags.None,"), "a unit in transit is flagged, as the snapshot flags it");
+        AssertTrue(HasLine(reader, "Flags = unit.transfertime > 0f ? FormationFlags.InTransfer : default(FormationFlags),"), "a unit in transit is flagged, as the snapshot flags it");
         AssertTrue(HasLine(reader, "Chain = WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit)"), "every record carries its chain class");
 
         string recruit = ReadRepoFile("src/WhiskeyRealism/Patches/RecruitRoutingPatch.cs");

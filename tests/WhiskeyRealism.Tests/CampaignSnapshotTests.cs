@@ -262,8 +262,8 @@ internal static class CampaignSnapshotTests
     private static void AllocationTryGetFindsAssignment()
     {
         var a = new Allocation { Alliance = 1 };
-        a.Assignments.Add(new Assignment { InstanceId = 11, Role = FormationRole.Hold, ReconMissionId = -1 });
-        a.Assignments.Add(new Assignment { InstanceId = 12, Role = FormationRole.MainEffort, ReconMissionId = -1, Withheld = false });
+        a.Assignments.Add(new Assignment { InstanceId = 11, Role = FormationRole.Hold });
+        a.Assignments.Add(new Assignment { InstanceId = 12, Role = FormationRole.MainEffort, Withheld = false });
         AssertTrue(a.TryGet(12, out var found), "found");
         AssertEqual(FormationRole.MainEffort, found.Role, "found role");
         AssertFalse(a.TryGet(13, out _), "absent");
@@ -594,7 +594,7 @@ internal static class CampaignSnapshotTests
         AssertEqual(4, (int)PlayerCommandClass.BelowMapLevel, "BelowMapLevel");
         AssertEqual(5, (int)PlayerCommandClass.ArmyGroupCommander, "ArmyGroupCommander");
 
-        AssertEqual(0u, (uint)FormationFlags.None, "None");
+        AssertEqual(0u, (uint)default(FormationFlags), "None");
         AssertEqual(1u, (uint)FormationFlags.InBattle, "InBattle");
         AssertEqual(2u, (uint)FormationFlags.OnRetreat, "OnRetreat");
         AssertEqual(4u, (uint)FormationFlags.InOffensiveOps, "InOffensiveOps");
@@ -618,12 +618,10 @@ internal static class CampaignSnapshotTests
         AssertEqual(0, (int)SupplySourceKind.Iip, "Iip");
         AssertEqual(1, (int)SupplySourceKind.Depot, "Depot");
 
-        AssertEqual(0, (int)DetectionSource.FogGrid, "FogGrid");
-        AssertEqual(1, (int)DetectionSource.OwnSideWithinFog, "OwnSideWithinFog");
+        AssertEqual(0, (int)DetectionSource.Seen, "Seen");
         AssertEqual(2, (int)DetectionSource.Contact, "Contact");
-        AssertEqual(3, (int)DetectionSource.NoFog, "NoFog");
         AssertEqual(4, (int)DetectionSource.ObjectiveGarrison, "ObjectiveGarrison");
-        AssertEqual(0, (int)EnemyTraits.None, "traits None");
+        AssertEqual(0, (int)default(EnemyTraits), "traits None");
         AssertEqual(1, (int)EnemyTraits.Embarked, "traits Embarked");
         AssertEqual(2, (int)EnemyTraits.CavalryMajority, "CavalryMajority");
         AssertEqual(4, (int)EnemyTraits.OnOwnSoil, "OnOwnSoil");
@@ -657,7 +655,7 @@ internal static class CampaignSnapshotTests
     // every field's shape compiled and round-tripping.
     private static void ContractRecordsCarryCensusFields()
     {
-        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.FogGrid, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
+        var detection = new EnemyDetection { InstanceId = 1, UnitKey = "Army of Tennessee:40", UnitTyp = 16, X = 1f, Z = 2f, Strength = 30000f, Source = DetectionSource.Seen, Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
         AssertEqual("Army of Tennessee:40", detection.UnitKey, "detection key");
         AssertEqual(EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, detection.Traits, "detection traits");
 
@@ -689,10 +687,10 @@ internal static class CampaignSnapshotTests
         AssertEqual(-1, new TheaterPlan().MainSectorId, "no main sector by default");
 
         var allocation = new Allocation { Alliance = 1 };
-        allocation.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Recon, SectorId = 2, TargetX = 7f, TargetZ = 8f, Reason = "screen", ReconMissionId = 4, Withheld = true });
+        allocation.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Recon, SectorId = 2, TargetX = 7f, TargetZ = 8f, Reason = "screen", Withheld = true });
         allocation.Shortfalls.Add(6);
         allocation.Surpluses.Add(7);
-        AssertTrue(allocation.TryGet(5, out var assignment) && assignment.Withheld && assignment.ReconMissionId == 4, "assignment fields");
+        AssertTrue(allocation.TryGet(5, out var assignment) && assignment.Withheld, "assignment fields");
         AssertEqual(6, allocation.Shortfalls[0], "shortfall");
         AssertEqual(7, allocation.Surpluses[0], "surplus");
 

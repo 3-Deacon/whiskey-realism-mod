@@ -52,7 +52,6 @@ internal static class StrategicDirectorTests
             ("campaign pace stalemated when chapter two front static", CampaignPaceStalematedWhenChapterTwoFrontStatic),
             ("campaign pace stable default", CampaignPaceStableDefault),
             ("director cannot publish preserve for late csa under elevated risk", DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk),
-            ("campaign pace publishes theater priority from highest pressure theater", CampaignPacePublishesTheaterPriorityFromHighestPressureTheater),
             ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
@@ -70,7 +69,7 @@ internal static class StrategicDirectorTests
     private static void HoldSourceBlocksTransfer()
     {
         var ledger = BuildLedger();
-        var decision = ledger.EvaluateTransfer("Richmond", "Vicksburg", 2000f);
+        var decision = ledger.EvaluateTransfer("Richmond", 2000f);
         AssertEqual(false, decision.Allowed);
         AssertEqual(TransferBudgetAction.Blocked, decision.Action);
     }
@@ -78,7 +77,7 @@ internal static class StrategicDirectorTests
     private static void EconomySourceAllowsConcessionTransfer()
     {
         var ledger = BuildLedger();
-        var decision = ledger.EvaluateTransfer("Coast", "Vicksburg", 1000f);
+        var decision = ledger.EvaluateTransfer("Coast", 1000f);
         AssertEqual(true, decision.Allowed);
         AssertEqual(TransferBudgetAction.Concession, decision.Action);
     }
@@ -346,7 +345,7 @@ internal static class StrategicDirectorTests
     }
 
     private static CampaignPaceInput BuildPaceInput(
-        int allianceId, int year, int month, int chapter,
+        int allianceId, int year, int chapter,
         float ownNationalMorale,
         int battlesIn14Days, int majorBattlesIn14Days,
         int capitalStreak, int daysSinceFrontChange,
@@ -355,7 +354,7 @@ internal static class StrategicDirectorTests
         return new CampaignPaceInput
         {
             AllianceId = allianceId,
-            Year = year, Month = month,
+            Year = year,
             PolicyChapter = chapter,
             OwnNationalMorale = ownNationalMorale,
             BreakMoraleTrigger = 30f, // arbitrary stable test value
@@ -370,7 +369,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceTooFastCollapseOnEarlyMoraleCrash()
     {
-        var input = BuildPaceInput(allianceId: 1, year: 1862, month: 6, chapter: 2,
+        var input = BuildPaceInput(allianceId: 1, year: 1862, chapter: 2,
             ownNationalMorale: 30f * 1.10f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -381,7 +380,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceLateWarPressureOnChapterThree()
     {
-        var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 3,
+        var input = BuildPaceInput(allianceId: 0, year: 1864, chapter: 3,
             ownNationalMorale: 80f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 60, winter: false);
@@ -394,7 +393,7 @@ internal static class StrategicDirectorTests
         // The Union runway clause escalated on the calendar (year >= 1864 with the CSA still
         // fighting). The late-war stage is vanilla's chapter 3 (the election), so June 1864 in
         // chapter 2 is an ordinary quiet-or-stable month.
-        var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 2,
+        var input = BuildPaceInput(allianceId: 0, year: 1864, chapter: 2,
             ownNationalMorale: 80f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -407,14 +406,14 @@ internal static class StrategicDirectorTests
     // so they are pinned where the calendar and the chapter disagree.
     private static void CampaignPaceCsaFloorIsCalendarAtChapterTwo()
     {
-        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+        var input = BuildPaceInput(allianceId: 1, year: 1864, chapter: 2,
             ownNationalMorale: 30f * 1.40f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         var output = CampaignPaceLedger.Build(input);
         AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
         AssertTrue(output.IntentBlockedFromPreserve, "1864, chapter 2 (election pending or lost): the CSA still may not Preserve");
-        var earlier = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+        var earlier = BuildPaceInput(allianceId: 1, year: 1863, chapter: 3,
             ownNationalMorale: 30f * 1.40f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -423,17 +422,17 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceTooFastCollapseIsCalendarNotChapter()
     {
-        var critical1863 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 2,
+        var critical1863 = BuildPaceInput(allianceId: 1, year: 1863, chapter: 2,
             ownNationalMorale: 30f * 1.10f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863).Pace);
-        var critical1863Chapter3 = BuildPaceInput(allianceId: 1, year: 1863, month: 6, chapter: 3,
+        var critical1863Chapter3 = BuildPaceInput(allianceId: 1, year: 1863, chapter: 3,
             ownNationalMorale: 30f * 1.10f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
         AssertEqual(CampaignPace.TooFastCollapse, CampaignPaceLedger.Build(critical1863Chapter3).Pace);
-        var critical1864 = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 2,
+        var critical1864 = BuildPaceInput(allianceId: 1, year: 1864, chapter: 2,
             ownNationalMorale: 30f * 1.10f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -444,7 +443,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceOverheatedOnHeavy14DayBattles()
     {
-        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 8, chapter: 2,
+        var input = BuildPaceInput(allianceId: 0, year: 1862, chapter: 2,
             ownNationalMorale: 80f,
             battlesIn14Days: 6, majorBattlesIn14Days: 4,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -454,7 +453,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceTooQuietSuppressedInChapterOneWinter()
     {
-        var input = BuildPaceInput(allianceId: 0, year: 1861, month: 12, chapter: 1,
+        var input = BuildPaceInput(allianceId: 0, year: 1861, chapter: 1,
             ownNationalMorale: 95f,
             battlesIn14Days: 0, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 30, winter: true);
@@ -465,7 +464,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceStalematedWhenChapterTwoFrontStatic()
     {
-        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+        var input = BuildPaceInput(allianceId: 0, year: 1862, chapter: 2,
             ownNationalMorale: 80f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 75, winter: false);
@@ -475,7 +474,7 @@ internal static class StrategicDirectorTests
 
     private static void CampaignPaceStableDefault()
     {
-        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+        var input = BuildPaceInput(allianceId: 0, year: 1862, chapter: 2,
             ownNationalMorale: 80f,
             battlesIn14Days: 2, majorBattlesIn14Days: 1,
             capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
@@ -485,7 +484,7 @@ internal static class StrategicDirectorTests
 
     private static void DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk()
     {
-        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 3,
+        var input = BuildPaceInput(allianceId: 1, year: 1864, chapter: 3,
             ownNationalMorale: 30f * 1.40f,
             battlesIn14Days: 1, majorBattlesIn14Days: 0,
             capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
@@ -493,22 +492,6 @@ internal static class StrategicDirectorTests
         AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
         AssertTrue(output.IntentBlockedFromPreserve,
             "1864 CSA under elevated risk must not publish StrategicIntent.Preserve");
-    }
-
-    private static void CampaignPacePublishesTheaterPriorityFromHighestPressureTheater()
-    {
-        var view = new TheaterPressureView();
-        view.OwnStrengthByTheater[Theater.East] = 10000f;
-        view.EnemyStrengthByTheater[Theater.East] = 4000f;
-        view.OwnStrengthByTheater[Theater.West] = 4000f;
-        view.EnemyStrengthByTheater[Theater.West] = 8000f; // West is the hot theater for us
-        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
-            ownNationalMorale: 80f,
-            battlesIn14Days: 2, majorBattlesIn14Days: 0,
-            capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
-        input.TheaterPressure = view;
-        var output = CampaignPaceLedger.Build(input);
-        AssertEqual(Theater.West, output.TheaterPriority);
     }
 
     private static void DirectorMapsOverheatedToRecoverLeaning()

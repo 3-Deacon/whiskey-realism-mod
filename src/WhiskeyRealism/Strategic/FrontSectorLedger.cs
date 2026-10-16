@@ -58,9 +58,7 @@ namespace WhiskeyRealism.Strategic
         public float StrategicImportance;
         public bool IsCritical;
         public bool IsPlanTarget;
-        public float AverageMorale;
         public float AverageSupply;
-        public float AverageReadiness;
         public FrontPosture Posture;
     }
 
@@ -69,8 +67,6 @@ namespace WhiskeyRealism.Strategic
         public bool Allowed;
         public TransferBudgetAction Action;
         public string Reason;
-        public FrontSector Source;
-        public FrontSector Destination;
     }
 
     public sealed class FrontSectorLedger
@@ -105,9 +101,7 @@ namespace WhiskeyRealism.Strategic
                     StrategicImportance = Clamp01(input.StrategicImportance),
                     IsCritical = input.IsCritical,
                     IsPlanTarget = input.IsPlanTarget,
-                    AverageMorale = input.AverageMorale,
-                    AverageSupply = input.AverageSupply,
-                    AverageReadiness = input.AverageReadiness
+                    AverageSupply = input.AverageSupply
                 };
 
                 sector.Posture = ChoosePosture(input, sector, options);
@@ -143,36 +137,33 @@ namespace WhiskeyRealism.Strategic
             return sector;
         }
 
-        public TransferBudgetDecision EvaluateTransfer(string sourceSectorKey, string destinationSectorKey, float strengthToMove)
+        public TransferBudgetDecision EvaluateTransfer(string sourceSectorKey, float strengthToMove)
         {
             var source = GetSector(sourceSectorKey);
-            var destination = GetSector(destinationSectorKey);
             if (source == null)
-                return Decision(false, TransferBudgetAction.Blocked, "missing-source", source, destination);
+                return Decision(false, TransferBudgetAction.Blocked, "missing-source");
 
             if (source.Posture == FrontPosture.Hold)
-                return Decision(false, TransferBudgetAction.Blocked, "min-hold", source, destination);
+                return Decision(false, TransferBudgetAction.Blocked, "min-hold");
 
             float projectedOwn = Math.Max(0f, source.OwnStrength - Math.Max(0f, strengthToMove));
             float projectedRatio = projectedOwn / Math.Max(1f, source.EnemyStrength);
             if (source.IsCritical && projectedRatio < source.MinimumHoldRatio)
-                return Decision(false, TransferBudgetAction.Blocked, "critical-sector-budget", source, destination);
+                return Decision(false, TransferBudgetAction.Blocked, "critical-sector-budget");
 
             if (source.Posture == FrontPosture.EconomyOfForce || source.Posture == FrontPosture.Concede)
-                return Decision(true, TransferBudgetAction.Concession, source.Posture.ToString(), source, destination);
+                return Decision(true, TransferBudgetAction.Concession, source.Posture.ToString());
 
-            return Decision(true, TransferBudgetAction.Allowed, "within-budget", source, destination);
+            return Decision(true, TransferBudgetAction.Allowed, "within-budget");
         }
 
-        private static TransferBudgetDecision Decision(bool allowed, TransferBudgetAction action, string reason, FrontSector source, FrontSector destination)
+        private static TransferBudgetDecision Decision(bool allowed, TransferBudgetAction action, string reason)
         {
             return new TransferBudgetDecision
             {
                 Allowed = allowed,
                 Action = action,
-                Reason = reason,
-                Source = source,
-                Destination = destination
+                Reason = reason
             };
         }
 

@@ -12,7 +12,6 @@ namespace WhiskeyRealism.Strategic.Planner
     // Restore). CampaignSeed 0 means "not computed yet": the first review computes it.
     public sealed class PlannerState
     {
-        public int CurrentMainSector = -1;
         public int CurrentMainObjective = -1;
         public int ChallengerObjective = -1;
         public int ChallengerDays;
@@ -37,7 +36,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // the mover can send; cleared when it has one again). Telemetry only, not persisted.
         public int UndispatchableRowDecision = -1;
 
-        public void Restore(int mainSector, int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
+        public void Restore(int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
                             int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1)
         {
             BelowOddsDays = belowOddsDays;
@@ -46,7 +45,6 @@ namespace WhiskeyRealism.Strategic.Planner
             LastFullReviewDay = lastFullReviewDay;
             TempoRowDecision = -1;
             UndispatchableRowDecision = -1;
-            CurrentMainSector = mainSector;
             CurrentMainObjective = mainObjective;
             ChallengerObjective = challengerObjective;
             ChallengerDays = challengerDays;

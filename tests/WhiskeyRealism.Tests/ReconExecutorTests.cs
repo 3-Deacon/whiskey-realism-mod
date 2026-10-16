@@ -293,7 +293,7 @@ internal static class ReconExecutorTests
         s.Own.Add(tired);
         s.Own.Add(Unit(5, 10f, 0f, cavalry: 0.1f));
         var held = new Allocation { Alliance = 0 };
-        held.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold, ReconMissionId = -1 });
+        held.Assignments.Add(new Assignment { InstanceId = 5, Role = FormationRole.Hold });
         var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f));
         ledger.OnReview(s, held);
         var tracker = new MoveTracker();
@@ -388,7 +388,7 @@ internal static class ReconExecutorTests
         var s = World();
         s.Own.Add(Unit(1, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.InBattle));
         var nonCombat = Unit(3, 0f, 20f, cavalry: 0.1f);
-        nonCombat.Flags = FormationFlags.None;
+        nonCombat.Flags = default(FormationFlags);
         s.Own.Add(nonCombat);
         var ledger = Ledger(s, (ReconKind.Picket, 1, 300f, 0f), (ReconKind.Picket, 3, 300f, 20f));
         var host = new FakeReconHost();
@@ -681,7 +681,7 @@ internal static class ReconExecutorTests
         var ledger = new ReconMissionLedger();
         var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 0, FromX = 300f, HoldX = 300f, Priority = 1f, Reason = "test" };
         var first = new Allocation { Alliance = 0 };
-        first.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test", ReconMissionId = -1 });
+        first.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test" });
         ledger.Sync(s, new List<ReconTask> { task }, first);
         ledger.OnReview(s, null);
         AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: recalled for low supply");
@@ -708,7 +708,7 @@ internal static class ReconExecutorTests
         var ledger = new ReconMissionLedger();
         var task = new ReconTask { Kind = ReconKind.Screen, SectorId = 0, FromX = 300f, HoldX = 300f, Priority = 1f, Reason = "test" };
         var recon = new Allocation { Alliance = 0 };
-        recon.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test", ReconMissionId = -1 });
+        recon.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 300f, TargetZ = 0f, Reason = "test" });
         ledger.Sync(s, new List<ReconTask> { task }, recon);
         var executor = new ReconExecutor();
         var first = new OneReviewHost();
@@ -1303,7 +1303,7 @@ internal static class ReconExecutorTests
         return s;
     }
 
-    private static FormationRecord Unit(int id, float x, float z, float cavalry, WlChainClass chain = WlChainClass.None, FormationFlags extra = FormationFlags.None)
+    private static FormationRecord Unit(int id, float x, float z, float cavalry, WlChainClass chain = WlChainClass.None, FormationFlags extra = default(FormationFlags))
     {
         return new FormationRecord
         {
@@ -1321,7 +1321,7 @@ internal static class ReconExecutorTests
         var ledger = new ReconMissionLedger();
         var task = new ReconTask { Kind = ReconKind.Probe, SectorId = 0, FromX = 200f, FromZ = 0f, HoldX = 200f, HoldZ = 0f, Priority = 1f, Reason = "probe" };
         var a0 = new Allocation { Alliance = 0 };
-        a0.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 200f, TargetZ = 0f, Reason = "probe", ReconMissionId = -1 });
+        a0.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 200f, TargetZ = 0f, Reason = "probe" });
         ledger.Sync(s, new List<ReconTask> { task }, a0);
         ledger.OnProbeContact(1, new ContactEvidenceOutput { Evidence = ContactEvidence.OvermatchedContact }, s.DaySerial);
         ledger.OnReview(s, null);
@@ -1351,7 +1351,7 @@ internal static class ReconExecutorTests
         {
             var task = new ReconTask { Kind = m.kind, SectorId = sector++, FromX = m.x, FromZ = m.z, HoldX = m.x, HoldZ = m.z, Priority = 1f, Reason = reason };
             tasks.Add(task);
-            a.Assignments.Add(new Assignment { InstanceId = m.id, Role = FormationRole.Recon, SectorId = task.SectorId, TargetX = task.HoldX, TargetZ = task.HoldZ, Reason = task.Reason, ReconMissionId = -1 });
+            a.Assignments.Add(new Assignment { InstanceId = m.id, Role = FormationRole.Recon, SectorId = task.SectorId, TargetX = task.HoldX, TargetZ = task.HoldZ, Reason = task.Reason });
         }
         ledger.Sync(s, tasks, a);
     }

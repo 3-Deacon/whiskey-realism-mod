@@ -58,6 +58,7 @@ internal static class PlannerSidecarTests
             ("RuntimeRebindsOnTheFirstReviewWithFormations", RuntimeRebindsOnTheFirstReviewWithFormations),
             ("RuntimeExportsThePendingRecordsWhenNoReviewRanSinceTheLoad", RuntimeExportsThePendingRecordsWhenNoReviewRanSinceTheLoad),
             ("MigrationLineIsLoggedOnce", MigrationLineIsLoggedOnce),
+            ("OldDetectionSourceValuesLoadAsSeen", OldDetectionSourceValuesLoadAsSeen),
         });
     }
 
@@ -88,7 +89,7 @@ internal static class PlannerSidecarTests
     private static PlannerSnapshot SamplePlanner()
     {
         var p = new PlannerSnapshot { UnreliableDays = 4, UnreliableLastDay = 812 };
-        p.State.Restore(mainSector: 3, mainObjective: 29, challengerObjective: 30, challengerDays: 2, decisionSerial: 7,
+        p.State.Restore(mainObjective: 29, challengerObjective: 30, challengerDays: 2, decisionSerial: 7,
             campaignSeed: 0x1234567890ABCDEFL, belowOddsDays: 5, capitalThreatLatched: true, tempoReleasedDecision: 6, lastFullReviewDay: 811);
         p.Beliefs.Add(new EnemyBelief
         {
@@ -106,7 +107,7 @@ internal static class PlannerSidecarTests
         p.ReconMissions.Add(new ReconMission
         {
             MissionId = 9, Kind = ReconKind.Probe, InstanceId = -1, UnitKey = "Cavalry Corps:3", HoldX = 150f, HoldZ = 12f, SectorId = 4, State = ReconState.Cleared,
-            IssuedDay = 790, LastContactDay = 801, Reason = "probe-main", ObservedEnemyStrength = 22000f, ObservedObjectiveId = 29, StandDownDue = true, ClearedDay = 806
+            IssuedDay = 790, Reason = "probe-main", ObservedEnemyStrength = 22000f, ObservedObjectiveId = 29, StandDownDue = true, ClearedDay = 806
         });
         return p;
     }
@@ -196,7 +197,6 @@ internal static class PlannerSidecarTests
         var back = Decoded(SamplePlanner());
         AssertTrue(back != null, "the planner state is present");
         var s = back.State;
-        AssertEqual(3, s.CurrentMainSector, "current main sector");
         AssertEqual(29, s.CurrentMainObjective, "current main objective");
         AssertEqual(30, s.ChallengerObjective, "challenger objective");
         AssertEqual(2, s.ChallengerDays, "challenger days");
@@ -206,6 +206,29 @@ internal static class PlannerSidecarTests
         AssertTrue(s.CapitalThreatLatched, "capital threat latch");
         AssertEqual(4, back.UnreliableDays, "the map-group player's unreliable days");
         AssertEqual(812, back.UnreliableLastDay, "and the last day counted");
+    }
+
+    // F1 (verify G7): the three provenances FogGrid 0, OwnSideWithinFog 1 and NoFog 3 became one value, Seen. A v3 file written
+    // before that carries any of them in "source"; each must load, as Seen, and 2 and 4 must keep their meaning.
+    private static void OldDetectionSourceValuesLoadAsSeen()
+    {
+        var planner = SamplePlanner();
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(WithPlanner(planner)));
+        var source = new System.Text.RegularExpressions.Regex("\"source\":\\s*4\\b");
+        AssertEqual(1, source.Matches(json).Count, "the sample belief is written with source 4, once");
+        var expected = new (int saved, DetectionSource loaded)[]
+        {
+            (0, DetectionSource.Seen), (1, DetectionSource.Seen), (3, DetectionSource.Seen),
+            (2, DetectionSource.Contact), (4, DetectionSource.ObjectiveGarrison), (99, DetectionSource.Seen)
+        };
+        foreach (var e in expected)
+        {
+            string edited = source.Replace(json, "\"source\": " + e.saved);
+            AssertTrue(SidecarDtoCodec.TryDeserialize(edited, out var dto, out var reason), "deserialize source " + e.saved + ": " + reason);
+            AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out reason), "decode source " + e.saved + ": " + reason);
+            AssertEqual(1, back.Planner[0].Beliefs.Count, "the belief loads with source " + e.saved);
+            AssertEqual(e.loaded, back.Planner[0].Beliefs[0].LastSource, "saved source " + e.saved);
+        }
     }
 
     private static void V3RoundTripsBeliefsAndAppointments()
@@ -259,7 +282,6 @@ internal static class PlannerSidecarTests
         var fresh = Decoded(new PlannerSnapshot());
         AssertEqual(-1, fresh.State.TempoReleasedDecision, "unset stays -1 (never reads as released)");
         AssertEqual(-1, fresh.State.LastFullReviewDay, "unset stays -1");
-        AssertEqual(-1, fresh.State.CurrentMainSector, "an empty state keeps its sentinels");
         AssertEqual(-1, fresh.State.CurrentMainObjective, "objective");
         AssertEqual(-1, fresh.State.ChallengerObjective, "challenger");
     }
@@ -268,7 +290,6 @@ internal static class PlannerSidecarTests
     {
         var back = Decode(V3Json("{\"currentMainObjective\":29}")).Planner[0];
         AssertEqual(29, back.State.CurrentMainObjective, "the field that is there");
-        AssertEqual(-1, back.State.CurrentMainSector, "main sector defaults to none");
         AssertEqual(-1, back.State.TempoReleasedDecision, "tempo release defaults to none");
         AssertEqual(-1, back.State.LastFullReviewDay, "the tempo clock defaults to none");
         AssertEqual(int.MinValue, back.UnreliableLastDay, "no unreliable day counted");
@@ -312,7 +333,6 @@ internal static class PlannerSidecarTests
         AssertEqual(4, m.SectorId, "sector");
         AssertEqual(ReconState.Cleared, m.State, "state");
         AssertEqual(790, m.IssuedDay, "issued day");
-        AssertEqual(801, m.LastContactDay, "last contact day");
         AssertEqual("probe-main", m.Reason, "reason");
         AssertNear(22000f, m.ObservedEnemyStrength, 1e-2f, "the probe's reference enemy strength");
         AssertEqual(29, m.ObservedObjectiveId, "the objective it was seen at");
@@ -323,7 +343,6 @@ internal static class PlannerSidecarTests
         var old = Decode(V3Json(oldMission)).Planner[0].ReconMissions[0];
         AssertFalse(old.StandDownDue, "a mission saved without the debt owes none");
         AssertEqual(-1, old.ClearedDay, "and was not cleared");
-        AssertEqual(-1, old.LastContactDay, "no contact");
         AssertNear(-1f, old.ObservedEnemyStrength, 1e-6f, "no look yet");
         AssertEqual(-1, old.ObservedObjectiveId, "no objective seen");
     }
@@ -340,7 +359,7 @@ internal static class PlannerSidecarTests
         AssertEqual(-1, model.Beliefs[0].InstanceId, "with no instance id");
         var seen = new List<EnemyDetection>
         {
-            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Source = DetectionSource.FogGrid }
+            new EnemyDetection { InstanceId = 4242, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f, Source = DetectionSource.Seen }
         };
         model.Update(seen, 806, _ => 1f, _ => 0f);
         AssertEqual(1, model.Beliefs.Count, "the next detection under that key is the same army, not a second one");
@@ -381,7 +400,7 @@ internal static class PlannerSidecarTests
     private static void PlannerIsPerAlliance()
     {
         var csa = new PlannerSnapshot();
-        csa.State.Restore(1, 31, -1, 0, 3, 99L);
+        csa.State.Restore(31, -1, 0, 3, 99L);
         var back = RoundTrip(WithPlanner(SamplePlanner(), csa));
         AssertEqual(29, back.Planner[0].State.CurrentMainObjective, "alliance 0 keeps its own");
         AssertEqual(31, back.Planner[1].State.CurrentMainObjective, "alliance 1 keeps its own");
