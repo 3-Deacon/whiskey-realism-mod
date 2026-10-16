@@ -90,37 +90,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 DLC_WL.GivenOrders order = DLC_WL.givenorder;
                 if (order == null || order.type != e.Type || (UnityEngine.Object)order.groupunit == null) return;
 
-                Regiment unit = order.groupunit;
-                int symbol = unit.overridesymbol >= 0 ? unit.overridesymbol : unit.unittyp;
-                string[] names = GamePrefs.unittypename;
-                string echelon = names != null && symbol >= 0 && symbol < names.Length ? names[symbol] : null;
-                string content = WlOrderText.ReplaceMyEchelon(order.content, echelon, WlOrderText.FormationName(unit.name));
+                string content = WlGivenOrderText.WithFormationName(order);
 
                 string lines = WlOrderText.ContentLines(ContentFor(in e));
                 if (lines.Length > 0) content = string.IsNullOrEmpty(content) ? lines : content + "\n\n" + lines;
                 if (string.Equals(content, order.content, StringComparison.Ordinal)) return;
 
                 order.content = content;
-                CareerInformationPanel panel = Panel();
-                if ((UnityEngine.Object)panel != null) panel.ShowNewOrder(order);
+                WlGivenOrderText.Show(order);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("wl-order-text:accepted", "[W&LOrderText] composing the order text failed: " + ex.GetType().Name + " " + ex.Message);
             }
-        }
-
-        private static CareerInformationPanel _panel;
-
-        private static CareerInformationPanel Panel()
-        {
-            if ((UnityEngine.Object)_panel != null) return _panel;
-            _panel = DLC_WL.careerinformationpanelref;
-            if ((UnityEngine.Object)_panel != null) return _panel;
-            var ui = UnityEngine.GameObject.Find("UI");
-            CareerInformationPanel[] panels = (UnityEngine.Object)ui != null ? ui.GetComponentsInChildren<CareerInformationPanel>(true) : null;
-            _panel = panels != null && panels.Length > 0 ? panels[0] : null;
-            return _panel;
         }
 
         private static ContentInput ContentFor(in CourierEntry e)

@@ -266,13 +266,49 @@ namespace WhiskeyRealism.Strategic
             }
 
             bool showZone = WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: trigger == VanillaMoveTrigger);
+            // The order rides a courier (W&L Order Couriers): it is shown, and the dispatch history
+            // written, when it arrives (ShowQueued). Without one it is shown at once.
+            OrderOrigin origin = trigger == VanillaMoveTrigger ? OrderOrigin.C69 : OrderOrigin.CampaignBridge;
+            string queued = WlCampaignCourierRuntime.EnqueueWhiskey(origin, issuerUnit, issuerCommanderId, type, target, destinationName, width, depth, showZone);
+            if (queued == WlCampaignCourierRuntime.Queued)
+            {
+                LogBounded(signature + ":queued",
+                    "[W&LCampaignDispatch] trigger=" + trigger + " type=" + type + " unit=" + SafeName(issuerUnit) +
+                    " target=" + Fmt(target) + " dest=" + destinationName + " action=queue");
+                return decision;
+            }
+            if (queued != null)
+            {
+                LogBounded(signature + ":" + queued,
+                    "[W&LCampaignDispatch] trigger=" + trigger + " type=" + type + " unit=" + SafeName(issuerUnit) +
+                    " target=" + Fmt(target) + " action=skip reason=" + queued);
+                return queued;
+            }
+
             if (!ShowOrder(issuerUnit, issuerCommanderId, type, target, destinationName, width, depth, showZone)) return "failed";
             _history.Record(target.x, target.z, nowDays);
+            LogIssued(trigger, issuerUnit, issuerCommanderId, type, target, destinationName, showZone);
+            return decision;
+        }
+
+        // A courier arrived (WlCampaignCourierRuntime): the same order ShowOrder has always built, now
+        // that the delay has passed. The dispatch history is written here, so an entry is never
+        // rate-limited against its own target.
+        internal static bool ShowQueued(Regiment issuerUnit, in CourierEntry e)
+        {
+            var target = new Vector3(e.X, e.Y, e.Z);
+            if (!ShowOrder(issuerUnit, e.IssuerCommanderId, e.Type, target, e.Name, e.Width, e.Depth, e.ShowZone)) return false;
+            _history.Record(e.X, e.Z, NowDays());
+            LogIssued(e.Origin == OrderOrigin.C69 ? VanillaMoveTrigger : "whiskey-order", issuerUnit, e.IssuerCommanderId, e.Type, target, e.Name, e.ShowZone);
+            return true;
+        }
+
+        private static void LogIssued(string trigger, Regiment issuerUnit, int issuerCommanderId, int type, Vector3 target, string destinationName, bool showZone)
+        {
             TelemetryRouter.LegacyInfoToMainLogIfAllowed(
                 "[W&LCampaignDispatch] trigger=" + trigger + " type=" + type + " unit=" + SafeName(issuerUnit) +
                 " issuer=" + CommanderName(issuerCommanderId) + " target=" + Fmt(target) + " dest=" + destinationName + " zone=" + (showZone ? "shown" : "none") + " action=issue",
                 TelemetryLayer.Campaign);
-            return decision;
         }
 
         private static bool ShowOrder(Regiment issuerUnit, int issuerCommanderId, int type, Vector3 position, string destinationName, float width, float depth, bool showZone)
@@ -341,7 +377,9 @@ namespace WhiskeyRealism.Strategic
             return _panel;
         }
 
-        private static GivenOrderView CurrentGivenOrder()
+        internal static WlDispatchHistory History => _history;
+
+        internal static GivenOrderView CurrentGivenOrder()
         {
             var order = DLC_WL.givenorder;
             int session = DLC_WL.GivenOrders.givenorderssession;
@@ -432,7 +470,7 @@ namespace WhiskeyRealism.Strategic
             return best;
         }
 
-        private static double NowDays()
+        internal static double NowDays()
         {
             return GameVars.GetCampaignFloatingDate() * WlCampaignDispatchPolicy.HoursPerYear / 24.0;
         }

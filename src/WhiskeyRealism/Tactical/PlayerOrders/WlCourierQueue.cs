@@ -25,6 +25,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public PlayerOrderCandidate P62Candidate;
         // What the order is for, for the condition lines under vanilla's text (Whiskey origins).
         public OrderIntentKind Kind;
+        // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
+        // instance id does not survive a save), the commander shown as issuer, and whether the zone shows.
+        public string UnitName;
+        public int UnitCommanderId;
+        public int IssuerCommanderId;
+        public bool ShowZone;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture
@@ -172,6 +178,30 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return;
             }
             _pending[_count++] = stored;
+        }
+
+        // D11: an entry loaded from the sidecar. It keeps its issue and due times, takes the next
+        // enqueue order, bypasses the cadence and en-route tests and leaves no cadence history (that is
+        // not persisted). A full queue discards it like any overflow.
+        public void Restore(in CourierEntry e)
+        {
+            CourierEntry stored = e;
+            stored.EnqueueSeq = _nextSeq;
+            if (_count == MaxPending && EvictFor(in stored))
+            {
+                _sink?.Discarded(in stored, Overflow);
+                return;
+            }
+            _nextSeq++;
+            _pending[_count++] = stored;
+        }
+
+        // The pending entries, in no particular order, for the sidecar. Returns how many were copied.
+        public int CopyPending(CourierEntry[] destination)
+        {
+            int n = Math.Min(_count, destination.Length);
+            for (int i = 0; i < n; i++) destination[i] = _pending[i];
+            return n;
         }
 
         public void MarkAccepted(double issuedAt)

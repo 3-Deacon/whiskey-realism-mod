@@ -2189,6 +2189,7 @@ namespace WhiskeyRealism.Strategic
             snap.LastSeenYear = LastSeenYear;
             snap.SaveSequence = ++_saveSequence;
             snap.PlayerCompliance = PlayerComplianceRuntime.Export();
+            snap.CampaignCouriers = WlCampaignCourierRuntime.Export();
             var written = PickCampaignObjectivePatch.SnapshotWrittenByMod();
             for (int a = 0; a < written.Length && a < snap.ModWrittenObjective.Length; a++)
                 snap.ModWrittenObjective[a] = written[a];
@@ -2227,6 +2228,7 @@ namespace WhiskeyRealism.Strategic
             LastSeenYear = snap.LastSeenYear;
             _saveSequence = snap.SaveSequence;
             PlayerComplianceRuntime.Restore(snap.PlayerCompliance);
+            WlCampaignCourierRuntime.Restore(snap.CampaignCouriers);
             var written = new int[2];
             for (int a = 0; a < written.Length; a++)
             {

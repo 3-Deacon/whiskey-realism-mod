@@ -83,6 +83,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableWlOrderReadmit { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
+        internal static ConfigEntry<bool> FixCapitalDefensePlayerOrder { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -551,10 +552,12 @@ namespace WhiskeyRealism
                 "W&L",
                 "Enable W&L Order Couriers",
                 true,
-                "Default ON. W&L subordinate career: orders from your superiors (vanilla's and Whiskey's) arrive after the courier " +
-                "delay from the issuing headquarters, using vanilla's own order-delay settings (bugle within range, a mounted courier " +
-                "beyond it, relays down the chain), instead of appearing the instant they are given. Needs Tactical Commander Mode = " +
-                "Active. Off: orders are delivered at the next order pass.");
+                "Default ON. W&L career: orders from your superiors (vanilla's and Whiskey's) arrive after the courier delay from the " +
+                "issuing headquarters instead of appearing the instant they are given. In battle that is vanilla's own order-delay " +
+                "settings (bugle within range, a mounted courier beyond it, relays down the chain; needs Tactical Commander Mode = " +
+                "Active). On the campaign map it is vanilla's campaign order delay from your senior commander (distance, telegraph, " +
+                "winter quarters, entrenchment, readiness and perks of the sender); a campaign order still on its way is saved with " +
+                "the game. Off: orders are delivered at the next order pass.");
             EnableWlOrderText = Config.Bind(
                 "W&L",
                 "Enable W&L Order Text",
@@ -564,6 +567,13 @@ namespace WhiskeyRealism
                 "an internal key, vanilla's \"My Division\" becomes the formation's name (\"Hood's Division\"), and Whiskey's orders carry " +
                 "a short condition line and your neighbours. Also corrects the portrait of an issuer who has been replaced. Off: vanilla texts " +
                 "(Whiskey's orders name the objective or \"Objective\").");
+            FixCapitalDefensePlayerOrder = Config.Bind(
+                "W&L",
+                "Fix Capital Defense Player Order",
+                true,
+                "Default ON. Vanilla re-sends the defend-capital order to a top-level W&L player on every pass and sets forced march " +
+                "(running and double quick, which costs condition on the campaign map) on the player's own group each time. With this " +
+                "on the order is shown once per capital and your group keeps the march mode you set (BUG-WL-018). Off: vanilla.");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",
                 "Enable CIC Faction AI Bug Guard",

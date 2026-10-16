@@ -2,6 +2,15 @@ using System;
 
 namespace WhiskeyRealism.Tactical.PlayerOrders
 {
+    // The bypass the capture Prefix honours: set around a delivery transaction's call into vanilla so the
+    // delivered order (and the type-11 relay vanilla makes while delivering it) is not captured twice.
+    // One flag for both scopes: the battle delivery (WlOrderFlowRuntime) and the campaign delivery
+    // (WlCampaignCourierRuntime) run on the main thread, one at a time.
+    internal static class WlOrderBypass
+    {
+        internal static bool Active;
+    }
+
     // What #62 (the player-order doctrine) is told about an entry it queued.
     internal enum P62Outcome
     {

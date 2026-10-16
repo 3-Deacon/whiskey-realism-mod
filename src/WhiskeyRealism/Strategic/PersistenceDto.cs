@@ -23,6 +23,30 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("battleHistory")] public List<BattleHistoryDto> BattleHistory = new List<BattleHistoryDto>();
         // W&L player-compliance estimate (stage F); null when none. Older readers ignore it.
         [JsonProperty("playerCompliance")] public PlayerComplianceDto PlayerCompliance;
+        // W&L campaign courier queue (order flow, 2026-10-15): campaign orders still on their way to the
+        // player's panel, so a save inside the delay loses none; null when none. Older readers ignore it.
+        [JsonProperty("campaignCouriers")] public List<CampaignCourierDto> CampaignCouriers;
+    }
+
+    // One pending campaign order. The unit is the GameObject name plus its commander id (instance ids do
+    // not survive a save); times are campaign years since 1860 (GameVars.currenttimefromstart).
+    internal class CampaignCourierDto
+    {
+        [JsonProperty("unit")] public string Unit;
+        [JsonProperty("unitCommander")] public int UnitCommander;
+        [JsonProperty("type")] public int Type;
+        [JsonProperty("x")] public float X;
+        [JsonProperty("y")] public float Y;
+        [JsonProperty("z")] public float Z;
+        [JsonProperty("name")] public string Name;
+        [JsonProperty("rotation")] public float Rotation;
+        [JsonProperty("width")] public float Width;
+        [JsonProperty("depth")] public float Depth;
+        [JsonProperty("origin")] public string Origin;
+        [JsonProperty("issuer")] public int Issuer;
+        [JsonProperty("showZone")] public bool ShowZone;
+        [JsonProperty("issuedAt")] public double IssuedAt;
+        [JsonProperty("dueAt")] public double DueAt;
     }
 
     internal class PlayerComplianceDto

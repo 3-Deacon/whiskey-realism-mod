@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -40,7 +41,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Set by the delivery transaction around its call into vanilla; the capture Prefix lets a call
         // through while it is set (so a delivered order, and the type-11 relay vanilla makes while
         // delivering it, are not captured twice).
-        internal static bool Delivering { get; private set; }
+        internal static bool Delivering { get => WlOrderBypass.Active; private set => WlOrderBypass.Active = value; }
         // Set by the capture Prefix when it takes or drops a call; read by the observer Postfix so its
         // telemetry does not read a captured call as a vanilla drop; cleared by the capture Finalizer.
         internal static bool CapturedThisCall { get; private set; }
@@ -231,6 +232,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static CaptureVerdict Route(in OrderCall call, out bool queued)
         {
             queued = false;
+            if (call.Campaign) return RouteCampaign(in call);
             Regiment unit = call.Unit;
             int type = call.Type;
             var input = default(CaptureInput);
@@ -239,7 +241,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             input.CouriersOn = CouriersOn();
             input.Delivering = Delivering;
             input.Facts.CampaignCall = call.Campaign;
-            if (!input.Enabled || (!input.ReadmitOn && !input.CouriersOn) || input.Delivering || call.Campaign)
+            if (!input.Enabled || (!input.ReadmitOn && !input.CouriersOn) || input.Delivering)
                 return CaptureVerdict.Pass;
 
             RefreshFrame();
@@ -297,6 +299,32 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             queued = Flow.Enqueue(in entry, PlayerOrderReadmitPolicy.MinHoldBattleHours);
             if (queued) OnceLog.Info("wl-order:first-capture", "[W&LOrder] first courier queued type=" + type + " origin=" + call.Origin);
             return verdict;
+        }
+
+        // A vanilla campaign call (calledfromcampaign: true): vanilla's gate (8366) first, with the
+        // facts it reads; the campaign runtime then drops a re-pop of the order on the panel or queues
+        // the order on a campaign courier. The battle re-admit policy has no say: vanilla does not
+        // dedupe campaign calls (8640).
+        private static CaptureVerdict RouteCampaign(in OrderCall call)
+        {
+            if (Delivering || !WlCampaignCourierRuntime.CaptureWanted()) return CaptureVerdict.Pass;
+            RefreshFrame();
+            var facts = default(CaptureFacts);
+            facts.CampaignCall = true;
+            facts.Type = call.Type;
+            facts.WlActive = DLC_WL.dlc_scenarioactive;
+            facts.HasCurrentCommand = _hasCommand;
+            facts.PlayerIsCic = _isCic;
+            if (!facts.WlActive || !_hasCommand || _isCic) return CaptureVerdict.Pass;
+            Regiment unit = call.Unit;
+            BattleUnits bunits = Bunits();
+            facts.EodCycle = bunits != null && bunits.eodcycle > 0;
+            facts.UnitMissing = (UnityEngine.Object)unit == null || (UnityEngine.Object)unit.transform.parent == null;
+            facts.UnitIsPlayerAlliance = !facts.UnitMissing && unit.alliance == GameVars.playeralliance;
+            if (WlOrderCaptureGate.CheapReject(in facts)) return CaptureVerdict.Pass;
+            FillChainFacts(ref facts, unit, call.Type, bunits);
+            if (!WlOrderCaptureGate.ReachesDedupe(in facts)) return CaptureVerdict.Pass;
+            return WlCampaignCourierRuntime.Capture(unit, call.Type, call.Position, call.Name, call.Rotation, call.Width, call.Depth);
         }
 
         private static void FillChainFacts(ref CaptureFacts f, Regiment unit, int type, BattleUnits bunits)

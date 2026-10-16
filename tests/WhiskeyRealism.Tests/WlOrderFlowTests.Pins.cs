@@ -222,8 +222,11 @@ internal static partial class WlOrderFlowTests
         string flow = Code(FlowRuntime);
         AssertTrue(flow.Contains("WlOrderTextRuntime.OnAccepted("), "the accepted-order hook calls the text runtime");
         string body = BodyOf(text, "internal static void OnAccepted(");
-        int replace = body.IndexOf("WlOrderText.ReplaceMyEchelon(", StringComparison.Ordinal);
+        int replace = body.IndexOf("WlGivenOrderText.WithFormationName(", StringComparison.Ordinal);
         AssertTrue(replace >= 0, "the replacement is applied");
+        // One definition of the phrase, shared by the battle and the campaign delivery.
+        AssertTrue(Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlGivenOrderText.cs").Contains("WlOrderText.ReplaceMyEchelon("), "the shared helper replaces the phrase");
+        AssertTrue(Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs").Contains("WlGivenOrderText.WithFormationName("), "a delivered vanilla campaign order gets the same replacement");
         AssertFalse(Regex.IsMatch(body.Substring(0, replace), @"Origin\s*[!=]=\s*OrderOrigin\.Vanilla"), "and it is not conditional on a Whiskey origin");
         AssertTrue(body.Contains("WlOrderText.ContentLines("), "Whiskey-origin lines are added separately");
     }

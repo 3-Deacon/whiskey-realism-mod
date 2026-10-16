@@ -62,6 +62,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlDispatchSanitizer.cs" Link="WlDispatchSanitizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStrategicOrderBridge.cs" Link="WlStrategicOrderBridge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchPolicy.cs" Link="WlCampaignDispatchPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignCourierPolicy.cs" Link="WlCampaignCourierPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignCourierRuntime.cs" Link="WlCampaignCourierRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchRuntime.cs" Link="WlCampaignDispatchRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PlayerComplianceLedger.cs" Link="PlayerComplianceLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
@@ -307,6 +309,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlCourierQueue.cs" Link="PlayerOrders\WlCourierQueue.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlOrderFlow.cs" Link="PlayerOrders\WlOrderFlow.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlOrderText.cs" Link="PlayerOrders\WlOrderText.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlGivenOrderText.cs" Link="PlayerOrders\WlGivenOrderText.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

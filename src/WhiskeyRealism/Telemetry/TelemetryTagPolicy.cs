@@ -137,6 +137,7 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Director:trace", TelemetryCategory.Trace);
             AddCampaign("OperationalProbe", TelemetryCategory.Decision);
             AddCampaign("CoordinatedOps", TelemetryCategory.Write);
+            AddCampaign("CampaignPlayerOrderFlow", TelemetryCategory.Decision);
             AddCampaign("ProjectDoctrine", TelemetryCategory.Decision);
             AddCampaign("ProjectAppointed", TelemetryCategory.State);
             AddCampaign("ProjectUnlock", TelemetryCategory.State);
