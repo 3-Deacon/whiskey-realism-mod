@@ -1051,17 +1051,17 @@ internal static class ForceAllocatorTests
     {
         foreach (bool starving in new[] { true, false })
         {
-        var s = Wide();
-        s.Supply.Add(Iip(506, 560f, 0));
-        var guard = Corps(1, 100f, 30000f);
-        guard.SightRadius = 30f;
-        s.Own.Add(guard);
-        var lone = Corps(9, 550f, 2000f);
-        lone.Chain = WlChainClass.PlayerMapGroup;
-        if (starving)
-        {
-            lone.Supply01 = 0.1f;
-            lone.Morale = 0.1f;
+            var s = Wide();
+            s.Supply.Add(Iip(506, 560f, 0));
+            var guard = Corps(1, 100f, 30000f);
+            guard.SightRadius = 30f;
+            s.Own.Add(guard);
+            var lone = Corps(9, 550f, 2000f);
+            lone.Chain = WlChainClass.PlayerMapGroup;
+            if (starving)
+            {
+                lone.Supply01 = 0.1f;
+                lone.Morale = 0.1f;
         }
         s.Own.Add(lone);
         s.Beliefs.Add(Belief(600f, 0f, 10000f));
