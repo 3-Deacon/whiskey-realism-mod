@@ -69,42 +69,6 @@ namespace WhiskeyRealism.Strategic
             return hasPriorTheaterPosition ? ForbiddenCommitRevert.MoveBack : ForbiddenCommitRevert.None;
         }
 
-        // ---- C-Transfer ------------------------------------------------------
-        // Vanilla CheckTransferOfUnits (decompile 17232) sends troops toward
-        // positiondeficit sized by deficit.enemystrength - deficit.ownstrength
-        // (num4, 17275). The plan target only competes for that slot with a
-        // requirement on the same local scale: superiority over the enemy near
-        // the target, floored at a token presence, capped by the phase's
-        // commitment share of the whole army.
-        internal const float PlanTransferMinimumPresence = 2500f;
-        internal const float PlanTransferLocalSuperiority = 1.25f;
-
-        // Vanilla ZoneRecruiting (12470-12507) builds positiondeficit from the
-        // painted cells of AIFaction.recruitmentheatmapown / recruitmentheatmapenemy
-        // (UpdateHeatmaps 12318-12350 registers units; Heatmap.Update ->
-        // UpdateObjects -> PaintObject 34117 paints them). The plan target's own and
-        // enemy strength are read from those same grids, so ShouldSteerTransfer and
-        // the injected TransferData use vanilla's exact scale.
-        internal static readonly string[] TransferHeatmapFields = { "recruitmentheatmapown", "recruitmentheatmapenemy" };
-
-        internal static float PlanTransferRequiredAtTarget(float totalOwn, float forceFraction, float enemyNear)
-        {
-            float share = Math.Max(0f, totalOwn) * Clamp(forceFraction, 0.15f, 0.95f);
-            float local = Math.Max(PlanTransferMinimumPresence, Math.Max(0f, enemyNear) * PlanTransferLocalSuperiority);
-            return Math.Max(PlanTransferMinimumPresence, Math.Min(share, local));
-        }
-
-        // Steer only when the plan's shortfall is worse than the deficit vanilla
-        // already found; otherwise the actually-threatened zone keeps its transfer.
-        internal static bool ShouldSteerTransfer(bool vanillaDeficitPresent, float vanillaDeficitEnemy, float vanillaDeficitOwn, float planShortfall)
-        {
-            if (planShortfall <= 0f) return false;
-            if (!vanillaDeficitPresent) return true;
-            float vanillaSeverity = vanillaDeficitEnemy - vanillaDeficitOwn;
-            if (vanillaSeverity <= 0f) return true;
-            return planShortfall > vanillaSeverity;
-        }
-
         // ---- R7: ImportanceValues --------------------------------------------
         // Vanilla AIArea.CalculateMostValueableAIZones (decompile 10964) only
         // accepts a candidate area that is not the source area, lies within
@@ -145,26 +109,8 @@ namespace WhiskeyRealism.Strategic
         internal static float VanillaCapitalDefenseNeed(float baseMinimum, float searchRadius,
             System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own)
         {
-            return CapitalDefenseNeed(baseMinimum, searchRadius, enemies, own, null, 1f, 1f);
-        }
-
-        // Personality-weighted variant: the base and the enemy pressure scale by the
-        // CIC strength-gate and capital-value multipliers, and pledged defenders that
-        // are still marching (waypoint not yet inside the closest-enemy ring, so not
-        // already subtracted as own units) count at 0.75 of morale-weighted strength.
-        internal static float PersonalityCapitalDefenseNeed(float baseMinimum, float searchRadius,
-            System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own,
-            System.Collections.Generic.IList<CapitalForce> pledged, float strengthMultiplier, float capitalMultiplier)
-        {
-            return CapitalDefenseNeed(baseMinimum, searchRadius, enemies, own, pledged, strengthMultiplier, capitalMultiplier);
-        }
-
-        private static float CapitalDefenseNeed(float baseMinimum, float searchRadius,
-            System.Collections.Generic.IList<CapitalForce> enemies, System.Collections.Generic.IList<CapitalForce> own,
-            System.Collections.Generic.IList<CapitalForce> pledged, float strengthMultiplier, float capitalMultiplier)
-        {
             float closestEnemy = 9999f;
-            float need = baseMinimum * strengthMultiplier * capitalMultiplier;
+            float need = baseMinimum;
             if (enemies != null)
             {
                 for (int i = 0; i < enemies.Count; i++)
@@ -174,7 +120,7 @@ namespace WhiskeyRealism.Strategic
                     if (d < searchRadius)
                     {
                         float pressure = Math.Min(enemies[i].Strength, enemies[i].Strength * enemies[i].Morale);
-                        need += pressure / (float)Math.Pow(Math.Max(10f, d), 0.3f) * 0.5f * strengthMultiplier;
+                        need += pressure / (float)Math.Pow(Math.Max(10f, d), 0.3f) * 0.5f;
                     }
                 }
             }
@@ -184,24 +130,7 @@ namespace WhiskeyRealism.Strategic
                     if (own[i].Distance < closestEnemy)
                         need -= own[i].Strength * own[i].Morale;
             }
-            if (pledged != null)
-            {
-                for (int i = 0; i < pledged.Count; i++)
-                {
-                    if (pledged[i].Distance < closestEnemy) continue; // already counted as own
-                    need -= pledged[i].Strength * Math.Max(0.25f, pledged[i].Morale) * 0.75f;
-                }
-            }
             return need;
-        }
-
-        // Pledge before vanilla runs only when vanilla's own num2 > 0 too: then
-        // vanilla neither strips the pledge (its num2 <= 0 branch removes the
-        // farthest defender every call) and its move loop (11829) moves it this
-        // call. Personality chooses the candidate and adds it alongside vanilla's.
-        internal static bool ShouldPrePledgeCapitalDefender(float vanillaNeed, float personalityNeed)
-        {
-            return vanillaNeed > 0f && personalityNeed > 0f;
         }
 
         // ---- C-ArmyArea -----------------------------------------------------
@@ -260,6 +189,21 @@ namespace WhiskeyRealism.Strategic
             if (value < min) return min;
             if (value > max) return max;
             return value;
+        }
+    }
+
+    // BUG-WL-013 (spec C1): vanilla's AI transfer in a W&L career never runs. CheckTransferOfUnits
+    // (17232) calls BattleUnits.MoveUnit(unit, below) without skipdlccheck (17328) and MoveUnit
+    // returns before moving anything unless BOTH units are player-owned (dlcw_isundercommander,
+    // 93099), so in a career an AI formation's transfer is refused for every AI faction while the
+    // unit still sits in unitstobetransfered. The fix is argument-only: skipdlccheck = true for the
+    // calls CheckTransferOfUnits makes, and only when neither unit is player-owned. A unit the
+    // player owns keeps vanilla's refusal, so Whiskey never re-parents it.
+    internal static class WlTransferFixDecision
+    {
+        internal static bool Allow(bool insideCheckTransferOfUnits, bool careerActive, bool sourceOwnedByPlayer, bool destinationOwnedByPlayer)
+        {
+            return insideCheckTransferOfUnits && careerActive && !sourceOwnedByPlayer && !destinationOwnedByPlayer;
         }
     }
 

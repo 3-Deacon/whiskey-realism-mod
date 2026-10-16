@@ -18,6 +18,11 @@ namespace WhiskeyRealism.Patches
         [ThreadStatic] private static int _activeAifaction;
         private static readonly RecruitmentLogGate _logGate = new RecruitmentLogGate();
 
+        // True while vanilla is inside ZoneRecruiting, and the aifaction it recruits for: RecruitRoutingPatch
+        // acts only there, so the transfer call to the same GrabExistingGroup (17319) is untouched.
+        internal static bool InZoneRecruiting => _zoneDepth > 0;
+        internal static int ActiveAifaction => _activeAifaction;
+
         [HarmonyPatch(typeof(AICampaign), "ZoneRecruiting")]
         internal static class ZoneRecruitingScope
         {

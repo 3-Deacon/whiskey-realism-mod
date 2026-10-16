@@ -98,6 +98,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignMover.cs" Link="Planner\CampaignMover.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CapitalFloorPolicy.cs" Link="Planner\CapitalFloorPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReinforcementRouting.cs" Link="Planner\ReinforcementRouting.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReplacementFlowPolicy.cs" Link="Planner\ReplacementFlowPolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

@@ -137,16 +137,6 @@ namespace WhiskeyRealism.Strategic
             return ledger;
         }
 
-        public bool TryGetTown(string cityName, out CampaignMapTown town)
-        {
-            if (cityName == null)
-            {
-                town = null;
-                return false;
-            }
-            return _townByName.TryGetValue(cityName, out town);
-        }
-
         public bool TryGetStateTheater(int stateId, out Theater theater)
         {
             if (_stateById.TryGetValue(stateId, out var state))

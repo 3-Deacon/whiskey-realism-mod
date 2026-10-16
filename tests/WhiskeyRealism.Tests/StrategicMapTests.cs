@@ -526,7 +526,8 @@ internal static class StrategicMapTests
         });
 
         AssertEqual("Richmond", ledger.BestDefenseTown(1).CityName);
-        AssertTrue(ledger.TryGetTown("Norfolk", out var norfolk), "expected Norfolk in map ledger");
+        var norfolk = TownNamed(ledger, "Norfolk");
+        AssertTrue(norfolk != null, "expected Norfolk in map ledger");
         AssertTrue((norfolk.Roles & CampaignTownRole.MajorCity) != 0, "Norfolk should be tagged as major city");
     }
 
@@ -902,7 +903,8 @@ internal static class StrategicMapTests
 
         var ledger = CampaignMapLedger.Build(towns, assets);
 
-        AssertTrue(ledger.TryGetTown("Norfolk", out var norfolk), "should resolve Norfolk by name");
+        var norfolk = TownNamed(ledger, "Norfolk");
+        AssertTrue(norfolk != null, "should resolve Norfolk by name");
         // Norfolk is a known catalog entry under "norfolk-harbor", but the town is keyed by CityName "Norfolk" — case-insensitive lookup should NOT match a different key. Verify None.
         AssertEqual(AssetStrategicRole.None, norfolk.StrategicRole);
 
@@ -1132,6 +1134,13 @@ internal static class StrategicMapTests
                     return entry.V;
             }
         }
+        return null;
+    }
+
+    private static CampaignMapTown TownNamed(CampaignMapLedger ledger, string cityName)
+    {
+        foreach (var town in ledger.Towns)
+            if (town.CityName == cityName) return town;
         return null;
     }
 }
