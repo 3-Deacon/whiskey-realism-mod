@@ -303,6 +303,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 " areas=" + s.Areas.Count +
                 " sectors=" + sectors.Count +
                 " objectives=" + s.Objectives.Count +
+                " mapped=" + s.MappedObjectiveCount +
                 " supply=" + s.Supply.Count +
                 " rails=" + s.Rails.Count +
                 " commanders=" + s.Commanders.Count +

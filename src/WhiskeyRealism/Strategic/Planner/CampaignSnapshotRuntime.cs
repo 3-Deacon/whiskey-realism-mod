@@ -75,6 +75,7 @@ namespace WhiskeyRealism.Strategic.Planner
             CrossingCache.Clear();
             CrossingSource.Clear();
             PositionCache.Clear();
+            GroundTownCache.Clear();
         }
 
         private static readonly HashSet<Regiment> OffensiveSet = new HashSet<Regiment>();
@@ -88,6 +89,9 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly HashSet<Town> IndustryTowns = new HashSet<Town>();
         private static readonly Dictionary<UnityEngine.Object, float> GarrisonAt = new Dictionary<UnityEngine.Object, float>();
         private static readonly List<float> RawImportance = new List<float>();
+        private static readonly List<Town> MappedTowns = new List<Town>();
+        private const int GroundTownsPerObjective = 8; // ObjectiveGround's longest row has 4
+        private static readonly Dictionary<int, Town> GroundTownCache = new Dictionary<int, Town>();
 
         // Static map facts, read once per campaign (perf review P1) and shared by both alliances:
         // area shapes (index, centre, zone edges; InitializeAIAreas 11251-11301), railroad geometry
@@ -426,7 +430,6 @@ namespace WhiskeyRealism.Strategic.Planner
             string scenario = GamePrefs.leveltoload;
             float townRadius = GamePrefs.radiustowncentertocapture;
             RawImportance.Clear();
-            float maxImportance = 0f;
             for (int i = 0; i < objectives.Count; i++)
             {
                 var o = objectives[i];
@@ -434,24 +437,17 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (o.ObjectiveScenario == null || !o.ObjectiveScenario.Contains(scenario) || o.IsDeactivated()) continue;
                 int id = o.UniqueObjectiveID;
                 bool accomplished = CampaignObjective.IDAccomplished(id);
+                if (o.objectives.Count == 0)
+                {
+                    ReadMappedGround(s, o, scenario, accomplished, alliance, followed, townRadius);
+                    continue;
+                }
                 for (int t = 0; t < o.objectives.Count; t++)
                 {
                     var record = new ObjectiveRecord { ObjectiveId = id, Available = AvailableObjectives.Contains(id), Accomplished = accomplished };
                     float importance;
                     if (o.objectives[t] is Town town && (UnityEngine.Object)town != null)
-                    {
-                        Vector3 p = PositionOf(town);
-                        record.X = p.x;
-                        record.Z = p.z;
-                        record.HolderAlliance = town.Owner;
-                        record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, Rails.LinesNearTown(town.GetInstanceID(), p.x, p.z, townRadius),
-                            IndustryTowns.Contains(town));
-                        record.GarrisonStrength = GarrisonOf(town);
-                        importance = SnapshotRules.TargetImportance(true, town.representingpopulation, 0f, AtWar(town.Owner, alliance),
-                            CampaignObjective.IsPartOfObjective(followed, town), IsCapitalOfIndex(town, f),
-                            GamePrefs.aiimportancepopulation, GamePrefs.aiimportancetransportcapacityweight,
-                            GamePrefs.nonwarparticipantsobjectimportanceweighting, GamePrefs.aitownweightfactorobjective, GamePrefs.aiimportancevaluescapital);
-                    }
+                        record = TownRecord(record, town, alliance, f, followed, townRadius, out importance);
                     else if (o.objectives[t] is IIP iip && (UnityEngine.Object)iip != null)
                     {
                         Vector3 p = PositionOf(iip);
@@ -466,18 +462,102 @@ namespace WhiskeyRealism.Strategic.Planner
                             GamePrefs.nonwarparticipantsobjectimportanceweighting, GamePrefs.aitownweightfactorobjective, GamePrefs.aiimportancevaluescapital);
                     }
                     else continue;
-                    importance = Math.Max(0f, importance);
-                    maxImportance = Math.Max(maxImportance, importance);
-                    RawImportance.Add(importance);
+                    RawImportance.Add(Math.Max(0f, importance));
                     s.Objectives.Add(record);
                 }
             }
+            float maxImportance = 0f;
+            for (int i = 0; i < RawImportance.Count; i++) maxImportance = Math.Max(maxImportance, RawImportance[i]);
             for (int i = 0; i < s.Objectives.Count; i++)
             {
                 var record = s.Objectives[i];
                 record.Importance01 = maxImportance > 0f ? RawImportance[i] / maxImportance : 0f;
                 s.Objectives[i] = record;
             }
+        }
+
+        // One Town target as a record: position, holder, roles, fort garrison and vanilla's own
+        // importance term for this faction. Shared by an objective's listed Town targets and by the
+        // towns ObjectiveGround maps onto an empty target list, so a mapped town is built exactly as
+        // any other.
+        private static ObjectiveRecord TownRecord(ObjectiveRecord record, Town town, int alliance, int factionIndex, int followed,
+                                                  float townRadius, out float importance)
+        {
+            Vector3 p = PositionOf(town);
+            record.X = p.x;
+            record.Z = p.z;
+            record.HolderAlliance = town.Owner;
+            record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, Rails.LinesNearTown(town.GetInstanceID(), p.x, p.z, townRadius),
+                IndustryTowns.Contains(town));
+            record.GarrisonStrength = GarrisonOf(town);
+            importance = SnapshotRules.TargetImportance(true, town.representingpopulation, 0f, AtWar(town.Owner, alliance),
+                CampaignObjective.IsPartOfObjective(followed, town), IsCapitalOfIndex(town, factionIndex),
+                GamePrefs.aiimportancepopulation, GamePrefs.aiimportancetransportcapacityweight,
+                GamePrefs.nonwarparticipantsobjectimportanceweighting, GamePrefs.aitownweightfactorobjective, GamePrefs.aiimportancevaluescapital);
+            return record;
+        }
+
+        // An objective with an empty target list (every scenario 001 objective, Config/
+        // campaignobjectives.dat) gets the towns ObjectiveGround names for it, one record per town
+        // that resolves. Called only after ReadObjectives' gate: the scenario matched and
+        // IsDeactivated() is false, so the chapter, date window and objective gates stay vanilla's.
+        // Availability is GetAvailableObjectives' rule with the mapped towns counted (178838-178864).
+        // Town owners are public map state (the same read a 002 target makes); no enemy unit is read.
+        // IsPartOfObjective walks the objective's empty list and is false for these towns (178769-178800).
+        private static void ReadMappedGround(CampaignSnapshot s, CampaignObjective o, string scenario, bool accomplished,
+                                             int alliance, int followed, float townRadius)
+        {
+            int objectiveId = o.UniqueObjectiveID;
+            var ground = ObjectiveGround.TownsFor(scenario, GamePrefs.subleveltoload, objectiveId);
+            if (ground.Count == 0) return;
+
+            MappedTowns.Clear();
+            int heldByEnemy = 0;
+            for (int g = 0; g < ground.Count; g++)
+            {
+                Town town = ResolveGroundTown(objectiveId, g, ground[g]);
+                if (town == null) continue;
+                MappedTowns.Add(town);
+                if (AtWar(town.Owner, alliance)) heldByEnemy++;
+            }
+
+            // deactivated is false by construction: ReadObjectives skipped the objective if it were not.
+            bool available = ObjectiveGround.Available(alliance, o.ObjectiveAlliance, false, accomplished, heldByEnemy);
+            for (int g = 0; g < MappedTowns.Count; g++)
+            {
+                var seed = new ObjectiveRecord { ObjectiveId = objectiveId, Available = available, Accomplished = accomplished };
+                var record = TownRecord(seed, MappedTowns[g], alliance, s.FactionIndex, followed, townRadius, out float importance);
+                RawImportance.Add(Math.Max(0f, importance));
+                s.Objectives.Add(record);
+                s.MappedObjectiveCount++;
+            }
+        }
+
+        // Vanilla's own lookup (Town.GetTownFromName, 144004: a walk over every town), the names in
+        // the order vanilla tries them, once per campaign: a town never moves or changes name, so the
+        // result, a miss included, is cached under the objective and the town's place in its row
+        // (the table has at most four towns per objective). A town that does not resolve (renamed by
+        // a mod) is logged once, when the miss is recorded: the keys are bounded by ObjectiveGround's
+        // table.
+        private static Town ResolveGroundTown(int objectiveId, int index, ObjectiveGround.GroundTown ground)
+        {
+            int key = objectiveId * GroundTownsPerObjective + index;
+            if (GroundTownCache.TryGetValue(key, out Town cached))
+            {
+                if ((object)cached == null) return null;             // a recorded miss
+                if ((UnityEngine.Object)cached != null) return cached; // else destroyed: resolve again
+            }
+            Town found = null;
+            for (int n = 0; n < ground.Names.Length && found == null; n++)
+            {
+                Town town = Town.GetTownFromName(ground.Names[n], ground.State);
+                if ((UnityEngine.Object)town != null) found = town;
+            }
+            GroundTownCache[key] = found;
+            if (found == null)
+                OnceLog.Warning("campaign-planner:objective-ground-missing:" + objectiveId + ":" + ground.Names[0],
+                    "[CampaignPlanner] objective " + objectiveId + " ground town '" + ground.Names[0] + "' not found; skipped");
+            return found;
         }
 
         // GameVars.alliance[holder].IsAtWarWith(faction alliance), the order vanilla tests (14917, 14958).

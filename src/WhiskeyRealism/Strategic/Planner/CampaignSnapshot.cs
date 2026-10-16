@@ -36,6 +36,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<FormationRecord> Own { get; } = new List<FormationRecord>();
         public List<AreaRecord> Areas { get; } = new List<AreaRecord>();
         public List<ObjectiveRecord> Objectives { get; } = new List<ObjectiveRecord>();
+        // How many of Objectives the mapped-ground branch built (ObjectiveGround, G3c): scenario 001's
+        // objectives have empty target lists, so these records stand in for them.
+        public int MappedObjectiveCount;
         public List<SupplySourceRecord> Supply { get; } = new List<SupplySourceRecord>();
         public List<RailLineRecord> Rails { get; } = new List<RailLineRecord>();
         public List<CommanderRecord> Commanders { get; } = new List<CommanderRecord>();
@@ -68,6 +71,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Own.Clear();
             Areas.Clear();
             Objectives.Clear();
+            MappedObjectiveCount = 0;
             Supply.Clear();
             Rails.Clear();
             Commanders.Clear();
