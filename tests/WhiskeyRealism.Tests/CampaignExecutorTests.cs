@@ -427,7 +427,7 @@ internal static class CampaignExecutorTests
         AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
         AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp);"), "G3 reads the moves with their objectives");
-        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);"), "G4 reads the same moves");
+        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, pinnedBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
     // F1 (verify g5a): the verifier's repro through the real Plan, Allocate and Review. Every mass member gives up on the main

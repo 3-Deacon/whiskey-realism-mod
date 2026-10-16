@@ -14,6 +14,9 @@ namespace WhiskeyRealism.Strategic.Planner
     // snapshot's flags, never from vanilla.
     //
     // Roles, in the order they are handed out:
+    //   pinned        the builder of a Wished depot task (DepotTaskLedger.CollectPinnedBuilders, the Pinned input): DepotBuilder at the
+    //                 wish position, withheld, until the task is Built or lost, whatever the plan does with the task (G5c verify r3 F7).
+    //                 Handed out before everything else; never a formation the planner may not move.
     //   immobile      Hold in place, never moved: a formation that is busy (battle, retreat, raid,
     //                 sea invasion, embarked, fort or depot builder, in transfer), not a combat force,
     //                 or the W&L player's own command or CIC side (stage F's chain classes through
@@ -91,12 +94,13 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonGaveUp = "gave-up";
 
         public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeTheater,
-                                          IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null)
+                                          IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null,
+                                          IReadOnlyList<PinnedBuilder> pinnedBuilders = null)
         {
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
-            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp).Run(allocation);
+            new Pass(plan, s, sectors, homeTheater, reconTasks, missions, gaveUp, pinnedBuilders).Run(allocation);
             return allocation;
         }
 
@@ -183,6 +187,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly int _n;
             private readonly int _sectorCount;
             private readonly IReadOnlyList<GaveUpMove> _gaveUp;
+            private readonly IReadOnlyList<PinnedBuilder> _pinned;
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -196,9 +201,11 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
-                          Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp)
+                          Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp,
+                          IReadOnlyList<PinnedBuilder> pinned)
             {
                 _gaveUp = gaveUp;
+                _pinned = pinned;
                 _plan = plan;
                 _s = s;
                 _sectors = sectors;
@@ -232,8 +239,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 var holdReserved = new int[_n];
                 var capitalReserved = new bool[_n];
 
+                var pinnedBuilder = AssignPinnedBuilders();
                 AssignImmobile();
-                ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved);
+                ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);
                 ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved);
                 MarkMass();
                 AssignCapitalGuards(capitalReserved);
@@ -328,6 +336,28 @@ namespace WhiskeyRealism.Strategic.Planner
                 _tz[i] = tz;
                 _reason[i] = reason;
                 _withheld[i] = withheld;
+            }
+
+            // The builder of a Wished depot task keeps its role whatever the plan does (verify r3 F7): the wish is paid and the depot
+            // rises only while the builder stays within its bugle range (96626-96648), so the formation is out of the free pool and
+            // stays DepotBuilder at the wish position (the site, for an Ahead wish whose builder is still marching to it) until the
+            // ledger stops listing it. Handed out first: nothing else, the mass and the reserves included, may take it. The one
+            // place this rule lives; the mover reads the assignment like any other. A formation the planner may not move (the W&L
+            // player's, a CIC side's) is never a builder, so a pin that names one is ignored. The returned mask keeps the capital
+            // reserve (ReserveRules.Capital, which picks the nearest massable formations until the floor) from counting a pinned builder
+            // as a guard it can raise; the hold reserve needs none, a pinned builder counts at its strength there either way.
+            private bool[] AssignPinnedBuilders()
+            {
+                if (_pinned == null || _pinned.Count == 0) return null;
+                var mask = new bool[_n];
+                for (int k = 0; k < _pinned.Count; k++)
+                {
+                    int i = _s.IndexOfOwn(_pinned[k].InstanceId);
+                    if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain)) continue;
+                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);
+                    mask[i] = true;
+                }
+                return mask;
             }
 
             private void AssignImmobile()

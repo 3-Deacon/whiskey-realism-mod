@@ -41,6 +41,15 @@ namespace WhiskeyRealism.Strategic.Planner
         public float AdoptX, AdoptZ;    // that depot's position, read when OwnUnbuiltDepotAtSite
     }
 
+    // A builder the allocator must keep as it is (plan G5c, verify r3 F7): the formation of a Wished task, pinned to the wish
+    // position until the task is Built or lost. See DepotTaskLedger.CollectPinnedBuilders.
+    public struct PinnedBuilder
+    {
+        public int InstanceId;
+        public int SectorId;
+        public float TargetX, TargetZ;
+    }
+
     // The depot task executor's state machine (plan G5c, spec C10): Marching -> Wished -> Built | Abandoned, one active task per
     // alliance. The planner's depot tasks (TheaterPlan.DepotTasks, sites the supply reach needs) become vanilla construction
     // wishes: the DepotBuilder formation the allocation picked (G4) marches to the site (G5a's mover), and on arrival within its
@@ -69,6 +78,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // A builder that will reach its site before the next review (one review day, CampaignTempoGate.ReviewGapDays) gets its wish
         // now: see WishMoment.
         public const float AheadDays = 1f;
+        // A wish is the CBuilding that AddConstructionWish creates at (-20000, -20000, -20000) (97506) until WorkDownConstructionWishes
+        // moves it onto suitable ground; any own unbuilt depot out past this is a placement still waiting its turn.
+        private const float PlaceholderBelow = -19000f;
 
         private readonly List<DepotTaskRecord> _tasks = new List<DepotTaskRecord>();
         private readonly List<DepotTaskTransition> _transitions = new List<DepotTaskTransition>();
@@ -147,7 +159,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!InRange(taskIndex) || _tasks[taskIndex].State != DepotTaskState.Wished || s == null) return;
             var task = _tasks[taskIndex];
             if (SiteBuilt(s, task, radius)) RecordBuilt(taskIndex, s.DaySerial);
-            else if (s.DaySerial > task.StartedDay && !SiteHasOwnDepot(s, task, radius, false)) Finish(taskIndex, DepotTaskState.Abandoned, "wish-lost", s.DaySerial);
+            else if (s.DaySerial > task.StartedDay && !SiteHasOwnDepot(s, task, radius, false) && !PlacementPending(s)) Finish(taskIndex, DepotTaskState.Abandoned, "wish-lost", s.DaySerial);
         }
 
         // The wish stands (or the vanilla depot was adopted): the task is Wished from `daySerial`, and the depot is looked for within
@@ -183,6 +195,21 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Active(_tasks[t])) Finish(t, DepotTaskState.Abandoned, reason, daySerial);
         }
 
+        // True while an own unbuilt depot still stands at the wish placeholder (-20000): a wish waiting in vanilla's queue
+        // (verify r3 F9). WorkDownConstructionWishes serves aiplacements[0] only, GamePrefs.amountofconstructionsitesearches terrain
+        // probes per AI update, and drops it only when it is placed or has searched out to buildingsitemaxradius (97538-97591), so a
+        // wish behind others can be pending across a review. The wait is bounded by Sync's TimeoutDays on every active task.
+        private static bool PlacementPending(CampaignSnapshot s)
+        {
+            for (int i = 0; i < s.Supply.Count; i++)
+            {
+                var source = s.Supply[i];
+                if (source.Kind == SupplySourceKind.Depot && source.Owner == s.Alliance && !source.Built
+                    && source.X <= PlaceholderBelow && source.Z <= PlaceholderBelow) return true;
+            }
+            return false;
+        }
+
         // The centre a task's depot is looked for around: where the wish was placed once it is Wished, the site before.
         private static void Centre(in DepotTaskRecord task, out float x, out float z)
         {
@@ -211,12 +238,14 @@ namespace WhiskeyRealism.Strategic.Planner
         // counts only one still rising.
         public static bool SiteHasOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly)
         {
-            return NearestOwnDepot(s, task, radius, unbuiltOnly, out _, out _);
+            return NearestOwnDepot(s, task, radius, unbuiltOnly, 0f, 0f, float.PositiveInfinity, out _, out _);
         }
 
         // The nearest such depot's position: the one Adopt takes as the task's (a flagged builder's command range, 50-100 for a corps
-        // or army, reaches depots that are not this site's, so only one within the placement radius of the site counts).
-        public static bool NearestOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly, out float x, out float z)
+        // or army, reaches depots that are not this site's, so only one within the placement radius of the site counts). A depot rises
+        // only while an own unit stands within that unit's bugle range of it (96626-96655), so Adopt also needs it within `builderRange`
+        // of the builder at (builderX, builderZ) (verify r3 F8; PositiveInfinity: no such limit).
+        public static bool NearestOwnDepot(CampaignSnapshot s, in DepotTaskRecord task, float radius, bool unbuiltOnly, float builderX, float builderZ, float builderRange, out float x, out float z)
         {
             x = 0f;
             z = 0f;
@@ -229,6 +258,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var source = s.Supply[i];
                 if (source.Kind != SupplySourceKind.Depot || source.Owner != s.Alliance) continue;
                 if (unbuiltOnly && source.Built) continue;
+                if (Distance(source.X, source.Z, builderX, builderZ) >= builderRange) continue;
                 float d = Distance(source.X, source.Z, cx, cz);
                 if (d > best) continue;
                 best = d;
@@ -246,6 +276,22 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int t = 0; t < _tasks.Count; t++)
                 if (Active(_tasks[t]) && _tasks[t].BuilderInstanceId == instanceId) return true;
             return false;
+        }
+
+        // The builders the allocator must not re-task (plan G5c, verify r3 F7): the formation of every Wished task, at the wish
+        // position (the site for an Ahead wish, whose builder may still be marching to it). A wish is paid at once and the depot rises
+        // only while the builder stays within its bugle range (96626-96648), so from the wish until Built or wish-lost the formation is
+        // the depot's, whatever the plan does with the task. Only a bound builder is listed, and Sync binds none the planner may not
+        // move (BindBuilder abandons a task whose formation is the W&L player's), so the set never holds one.
+        public void CollectPinnedBuilders(List<PinnedBuilder> into)
+        {
+            into.Clear();
+            for (int t = 0; t < _tasks.Count; t++)
+            {
+                var task = _tasks[t];
+                if (task.State != DepotTaskState.Wished || task.BuilderInstanceId < 0) continue;
+                into.Add(new PinnedBuilder { InstanceId = task.BuilderInstanceId, SectorId = task.SectorId, TargetX = task.WishX, TargetZ = task.WishZ });
+            }
         }
 
         // The sidecar's records (G6): builders come back by unit key, instance ids are rebound at the next Sync.

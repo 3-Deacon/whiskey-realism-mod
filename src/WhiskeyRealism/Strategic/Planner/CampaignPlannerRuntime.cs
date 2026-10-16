@@ -133,7 +133,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);
+                        // G5c: the builders of Wished depot tasks keep their role (the executor wrote the ledger at the last review).
+                        var pinnedBuilders = new List<PinnedBuilder>();
+                        DepotTaskLedgers.For(alliance)?.CollectPinnedBuilders(pinnedBuilders);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, pinnedBuilders);
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);

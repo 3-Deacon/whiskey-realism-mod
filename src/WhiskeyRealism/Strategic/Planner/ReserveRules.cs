@@ -100,13 +100,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The capital reserve: the massable formations nearest the own capital until their
         // strength reaches the capital floor (P7).
-        internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved)
+        internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved, bool[] excluded = null)
         {
             for (int i = 0; i < reserved.Length; i++) reserved[i] = false;
             if (!s.HasCapital || capitalFloor <= 0f) return;
             var order = new List<int>();
             for (int i = 0; i < s.Own.Count; i++)
-                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement)) order.Add(i);
+                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement) && (excluded == null || !excluded[i])) order.Add(i);
             SortByDistance(s, order, s.CapitalX, s.CapitalZ);
             float held = 0f;
             for (int k = 0; k < order.Count && held < capitalFloor; k++)

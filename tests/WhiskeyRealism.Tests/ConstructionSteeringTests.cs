@@ -61,6 +61,13 @@ internal static class ConstructionSteeringTests
             ("DepotWishLostWhenNoOwnDepotStandsAtTheSite", DepotWishLostWhenNoOwnDepotStandsAtTheSite),
             ("DepotAdoptNeedsAnOwnUnbuiltDepotAtTheSite", DepotAdoptNeedsAnOwnUnbuiltDepotAtTheSite),
             ("DepotIsLookedForWhereTheWishWasPlaced", DepotIsLookedForWhereTheWishWasPlaced),
+            ("PinnedBuilderListsOnlyWishedTasksOfMovableFormations", PinnedBuilderListsOnlyWishedTasksOfMovableFormations),
+            ("WishedBuilderKeepsItsRoleWhateverThePlanDoes", WishedBuilderKeepsItsRoleWhateverThePlanDoes),
+            ("AheadBuilderStaysOnItsMarchToTheSite", AheadBuilderStaysOnItsMarchToTheSite),
+            ("PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve", PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve),
+            ("AllocatorAndPlannerWiringPinsTheWishedBuilders", AllocatorAndPlannerWiringPinsTheWishedBuilders),
+            ("AdoptNeedsTheDepotWithinTheBuildersBugleRange", AdoptNeedsTheDepotWithinTheBuildersBugleRange),
+            ("APendingPlacementIsNotALostWish", APendingPlacementIsNotALostWish),
             ("DepotHoldReachesTheFortJobOnlyUnderAFreshPlan", DepotHoldReachesTheFortJobOnlyUnderAFreshPlan),
             ("DepotLedgerAbandonsOnlyWithADay", DepotLedgerAbandonsOnlyWithADay),
             ("DepotFlagOffReleasesEveryActiveTask", DepotFlagOffReleasesEveryActiveTask),
@@ -930,7 +937,6 @@ internal static class ConstructionSteeringTests
         {
             new SupplySourceRecord { Id = 9101, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 80f, Built = false },     // an own depot, but not at this site
             new SupplySourceRecord { Id = 9102, Kind = SupplySourceKind.Depot, Owner = 1, X = 250f, Z = 10f, Built = false },     // not ours
-            new SupplySourceRecord { Id = 9103, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = -20000f, Built = false }, // the wish's placeholder, not yet placed
             new SupplySourceRecord { Id = 9104, Kind = SupplySourceKind.Iip, Owner = 0, X = 250f, Z = 10f, Built = true }            // an IIP is not a depot
         })
         {
@@ -967,11 +973,11 @@ internal static class ConstructionSteeringTests
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(world, task, builtRadius, true), "an own unbuilt depot 80 away (inside a corps' command range of 100, outside the placement radius of 50) is not at the site");
         world.Supply.Add(new SupplySourceRecord { Id = 9201, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 40f, Built = false });
         AssertTrue(DepotTaskLedger.SiteHasOwnDepot(world, task, builtRadius, true), "one 40 away is");
-        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out float nx, out float nz) && nx == 250f && nz == 40f, "and its position is the one adopted");
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, 0f, 0f, float.PositiveInfinity, out float nx, out float nz) && nx == 250f && nz == 40f, "and its position is the one adopted");
         world.Supply.Add(new SupplySourceRecord { Id = 9204, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 20f, Built = false });
-        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out nx, out nz) && nx == 250f && nz == 20f, "with two, the nearer to the site");
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, 0f, 0f, float.PositiveInfinity, out nx, out nz) && nx == 250f && nz == 20f, "with two, the nearer to the site");
         world.Supply.Add(new SupplySourceRecord { Id = 9205, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 45f, Built = false });
-        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, out nx, out nz) && nx == 250f && nz == 20f, "a farther one listed later does not displace it");
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, builtRadius, true, 0f, 0f, float.PositiveInfinity, out nx, out nz) && nx == 250f && nz == 20f, "a farther one listed later does not displace it");
         ledger.RecordWished(0, s.DaySerial, nx, nz, "vanilla-depot-adopted");
         AssertTrue(ledger.Tasks[0].WishX == 250f && ledger.Tasks[0].WishZ == 20f, "an adopted task is looked for around the adopted depot");
         var builtOnly = DepotWorld(out _, out _);
@@ -983,7 +989,7 @@ internal static class ConstructionSteeringTests
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(ally, task, builtRadius, true), "another alliance's depot is not ours");
         AssertFalse(DepotTaskLedger.SiteHasOwnDepot(null, task, builtRadius, true) || DepotTaskLedger.SiteHasOwnDepot(world, task, 0f, true), "no snapshot / no radius: none");
         string watch = BodyOf(Src("Strategic/Planner/DepotSteeringRuntime.cs"), "private static void PlaceWishesAndWatchBuilds(");
-        AssertTrue(HasLine(watch, "facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, out facts.AdoptX, out facts.AdoptZ);"), "the runtime reads the snapshot for the nearest own unbuilt depot within the placement radius of the site, and keeps its position");
+        AssertTrue(HasLine(watch, "facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, builder.X, builder.Z, builder.BugleRange, out facts.AdoptX, out facts.AdoptZ);"), "the runtime reads the snapshot for the nearest own unbuilt depot within the placement radius of the site and the builder's bugle range, and keeps its position");
     }
 
     // The wish is placed at the builder, which can be up to its bugle range from the site, and the depot rises within
@@ -1025,6 +1031,230 @@ internal static class ConstructionSteeringTests
         nearSite.Supply.Add(new SupplySourceRecord { Id = 9301, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 5f, Built = true });
         elsewhere.WatchWish(0, nearSite, radius);
         AssertEqual(DepotTaskState.Abandoned, elsewhere.Tasks[0].State, "a standing depot 5 from the site is 65 from the wish: it is not this wish's depot, so the wish is lost");
+    }
+
+    // ---- verify r3 F7: the allocator never re-tasks the builder of a Wished task ----------------------------------------------
+
+    private static FormationRecord BuilderAtWish(int id, float x, float z, float waypointX, float waypointZ)
+    {
+        var f = ExecutorFixtures.Corps(id, x, 9000f);
+        f.Z = z;
+        f.WaypointX = waypointX;
+        f.WaypointZ = waypointZ;
+        return f;
+    }
+
+    private static void PinnedBuilderListsOnlyWishedTasksOfMovableFormations()
+    {
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        var pinned = new List<PinnedBuilder>();
+        ledger.Sync(plan, a, s, null);
+        ledger.CollectPinnedBuilders(pinned);
+        AssertEqual(0, pinned.Count, "a Marching task's builder follows the allocation: not pinned");
+        ledger.RecordWished(0, s.DaySerial, 250f, 70f);
+        ledger.CollectPinnedBuilders(pinned);
+        AssertEqual(1, pinned.Count, "a Wished task's builder is pinned");
+        AssertTrue(pinned[0].InstanceId == 1 && pinned[0].TargetX == 250f && pinned[0].TargetZ == 70f && pinned[0].SectorId == 3, "...at the wish position, in the task's sector");
+        ledger.Abandon(0, "timeout", s.DaySerial + 1);
+        ledger.CollectPinnedBuilders(pinned);
+        AssertEqual(0, pinned.Count, "released when the task ends");
+        var built = new DepotTaskLedger();
+        var s2 = DepotWorld(out var p2, out var a2);
+        built.Sync(p2, a2, s2, null);
+        built.RecordWished(0, s2.DaySerial, 250f, 0f);
+        built.RecordBuilt(0, s2.DaySerial + 1);
+        built.CollectPinnedBuilders(pinned);
+        AssertEqual(0, pinned.Count, "and when the depot stands");
+        // A builder the planner may not move never keeps a task, so it is never listed.
+        var player = new DepotTaskLedger();
+        var s3 = DepotWorld(out var p3, out var a3);
+        player.Sync(p3, a3, s3, null);
+        player.RecordWished(0, s3.DaySerial, 250f, 0f);
+        var own = s3.Own[s3.IndexOfOwn(1)];
+        own.Chain = WlChainClass.PlayerMapGroup;
+        s3.Own[s3.IndexOfOwn(1)] = own;
+        player.Sync(p3, a3, s3, null);
+        player.CollectPinnedBuilders(pinned);
+        AssertEqual(0, pinned.Count, "the W&L map-group player's formation is dropped from the task, so never pinned");
+    }
+
+    // The pin, through the real allocator and the real mover review.
+    private static void WishedBuilderKeepsItsRoleWhateverThePlanDoes()
+    {
+        var s = ExecutorFixtures.Wide(1);
+        s.Own.Add(BuilderAtWish(1, 250f, 70f, 250f, 70f));       // standing at its wish, 70 from the site
+        s.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));      // the mass
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });    // no DepotTasks: the plan dropped the task
+        var sectors = ExecutorFixtures.Sectors(s);
+        int sector = sectors.SectorAt(250f, 70f);
+        var pin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sector, TargetX = 250f, TargetZ = 70f } };
+
+        var free = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        AssertTrue(free.TryGet(1, out var loose) && loose.Role != FormationRole.DepotBuilder, "control: with no pin the dropped task leaves the builder to the allocation (" + loose.Role + ")");
+        var hostFree = new FakeMoverHost();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, free, ExecutorFixtures.OpenTempo()), hostFree, new MoveTracker(), ExecutorFixtures.State());
+        AssertTrue(hostFree.Moves.Exists(m => m.id == 1), "control: and the mover marches it off its wish");
+
+        var pinned = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
+        AssertTrue(pinned.TryGet(1, out var held), "the pinned builder is allocated");
+        AssertEqual(FormationRole.DepotBuilder, held.Role, "it keeps the DepotBuilder role although the plan dropped the task");
+        AssertTrue(held.TargetX == 250f && held.TargetZ == 70f && held.Withheld, "at the wish position, withheld");
+        var host = new FakeMoverHost();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, pinned, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
+        AssertFalse(host.Moves.Exists(m => m.id == 1), "the mover sends it no move");
+
+        // A smaller formation entering the sector, and a plan task in the same sector: the builder is not re-picked away.
+        var s2 = ExecutorFixtures.Wide(1);
+        s2.Own.Add(BuilderAtWish(1, 230f, 70f, 230f, 70f));
+        var small = ExecutorFixtures.Corps(3, 235f, 2000f);
+        small.Z = 70f;
+        s2.Own.Add(small);
+        s2.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+        var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
+        int sector2 = ExecutorFixtures.Sectors(s2).SectorAt(230f, 70f);
+        plan2.DepotTasks.Add(new DepotTask { X = 235f, Z = 70f, SectorId = sector2, Priority = 1f });
+        var pin2 = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sector2, TargetX = 230f, TargetZ = 70f } };
+        var a2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, null, null, null, pin2);
+        AssertTrue(a2.TryGet(1, out var still) && still.Role == FormationRole.DepotBuilder && still.TargetX == 230f && still.TargetZ == 70f, "a smaller formation in the sector does not take its role or move its target");
+        AssertTrue(a2.TryGet(3, out var other) && other.Role == FormationRole.DepotBuilder, "the plan's own task gets the smaller formation (" + other.Role + ")");
+    }
+
+    private static void AheadBuilderStaysOnItsMarchToTheSite()
+    {
+        var s = ExecutorFixtures.Wide(1);
+        s.Own.Add(BuilderAtWish(1, 300f, 0f, 250f, 0f));         // still marching: 50 out, its last waypoint is the site
+        s.Own.Add(ExecutorFixtures.Corps(2, 330f, 15000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
+        var sectors = ExecutorFixtures.Sectors(s);
+        var pin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sectors.SectorAt(250f, 0f), TargetX = 250f, TargetZ = 0f } };
+        var tracker = new MoveTracker();
+        tracker.RecordIssued(1, 400f, 0f, 250f, 0f, s.DaySerial - 1, false);
+
+        var pinned = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
+        AssertTrue(pinned.TryGet(1, out var held) && held.Role == FormationRole.DepotBuilder && held.TargetX == 250f && held.TargetZ == 0f, "an Ahead wish's builder keeps the role, its target the site it is marching to");
+        var host = new FakeMoverHost();
+        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, pinned, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertFalse(host.Moves.Exists(m => m.id == 1), "the mover issues no new move: the march stands");
+        AssertTrue(tracker.MarchingToward(1, 250f, 0f, 25f, s.DaySerial + 1), "and the tracker still has it marching to the site");
+
+        var free = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        AssertTrue(free.TryGet(1, out var loose) && loose.Role != FormationRole.DepotBuilder, "control: with no pin the allocation re-tasks it (" + loose.Role + ")");
+    }
+
+    private static void PinnedBuilderIsNeverTheMapGroupPlayerAndIsNoReserve()
+    {
+        // A pin that names a formation the planner may not move is ignored.
+        var s = ExecutorFixtures.Wide(1);
+        s.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+        var player = ExecutorFixtures.Corps(1, 550f, 6000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
+        var sectors = ExecutorFixtures.Sectors(s);
+        var pinPlayer = new[] { new PinnedBuilder { InstanceId = 1, SectorId = sectors.SectorAt(550f, 0f), TargetX = 550f, TargetZ = 0f } };
+        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pinPlayer);
+        AssertTrue(a.TryGet(1, out var x) && x.Role != FormationRole.DepotBuilder, "the map-group player is never made a builder by a pin");
+        var cic = ExecutorFixtures.Wide(1);
+        var own = ExecutorFixtures.Corps(1, 300f, 9000f);
+        own.Chain = WlChainClass.PlayerCommand;
+        cic.Own.Add(own);
+        var plan2 = ExecutorFixtures.HandPlan(cic, new int[0]);
+        var a2 = ForceAllocator.Allocate(plan2, cic, ExecutorFixtures.Sectors(cic), null, null, null, null, new[] { new PinnedBuilder { InstanceId = 1, SectorId = 0, TargetX = 300f, TargetZ = 0f } });
+        AssertTrue(a2.TryGet(1, out var y) && y.Role != FormationRole.DepotBuilder, "nor the player's own command");
+        AssertEqual(s.Own.Count, ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, new[] { new PinnedBuilder { InstanceId = 99, SectorId = 0, TargetX = 0f, TargetZ = 0f } }).Assignments.Count, "a pin naming no formation changes nothing");
+
+        // A pinned builder is no capital reserve: the guard is raised from the others.
+        var c = ExecutorFixtures.Wide(1);
+        c.Own.Add(BuilderAtWish(1, 20f, 70f, 20f, 70f));
+        c.Own.Add(ExecutorFixtures.Corps(4, 100f, 9000f));
+        c.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
+        var cp = ExecutorFixtures.HandPlan(c, new[] { 2 });
+        cp.CapitalFloorStrength = 5000f;
+        var csectors = ExecutorFixtures.Sectors(c);
+        var cpin = new[] { new PinnedBuilder { InstanceId = 1, SectorId = csectors.SectorAt(20f, 70f), TargetX = 20f, TargetZ = 70f } };
+        var unpinned = ForceAllocator.Allocate(cp, c, csectors, null, null, null);
+        AssertTrue(unpinned.TryGet(1, out var u) && u.Role == FormationRole.CapitalGuard, "control: unpinned, the formation nearest the capital is the capital guard");
+        var guarded = ForceAllocator.Allocate(cp, c, csectors, null, null, null, null, cpin);
+        AssertTrue(guarded.TryGet(1, out var b) && b.Role == FormationRole.DepotBuilder, "the pinned builder nearest the capital stays the builder");
+        AssertTrue(guarded.TryGet(4, out var g) && g.Role == FormationRole.CapitalGuard, "and the next formation is the capital guard: the floor is met without it");
+    }
+
+    private static void AllocatorAndPlannerWiringPinsTheWishedBuilders()
+    {
+        string planner = Src("Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectPinnedBuilders(pinnedBuilders);"), "the review reads the ledger's pins");
+        AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, pinnedBuilders);"), "and hands them to the allocator");
+        string allocator = Src("Strategic/Planner/ForceAllocator.cs");
+        string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
+        AssertTrue(run.IndexOf("AssignPinnedBuilders()", StringComparison.Ordinal) < run.IndexOf("AssignImmobile()", StringComparison.Ordinal), "the pinned builders are handed out first");
+        AssertTrue(HasLine(run, "ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);"), "the capital reserve does not count them");
+        string pin = BodyOf(allocator, "private bool[] AssignPinnedBuilders()");
+        AssertTrue(HasLine(pin, "if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain)) continue;"), "only a formation the planner may move");
+        AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);"), "as DepotBuilder at the pinned position, withheld");
+        string mover = Src("Strategic/Planner/CampaignMover.cs");
+        AssertFalse(mover.Contains("DepotTask") || mover.Contains("PinnedBuilder"), "the mover reads no depot state: the allocator's assignment is the one rule");
+    }
+
+    // F8: a depot rises only while an own unit stands within that unit's bugle range of it (96626-96655).
+    private static void AdoptNeedsTheDepotWithinTheBuildersBugleRange()
+    {
+        var s = DepotWorld(out var plan, out var a);
+        var ledger = new DepotTaskLedger();
+        ledger.Sync(plan, a, s, null);
+        var task = ledger.Tasks[0];
+        var world = DepotWorld(out _, out _);
+        world.Supply.Add(new SupplySourceRecord { Id = 9400, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 40f, Built = false });
+        AssertFalse(DepotTaskLedger.NearestOwnDepot(world, task, 50f, true, 250f, 0f, 5f, out _, out _), "a depot 40 from the builder, bugle range 5: not one it can raise");
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, 50f, true, 250f, 0f, 50f, out float x, out float z) && x == 250f && z == 40f, "bugle range 50: it is");
+        world.Supply.Add(new SupplySourceRecord { Id = 9401, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 20f, Built = false });
+        AssertTrue(DepotTaskLedger.NearestOwnDepot(world, task, 50f, true, 250f, 0f, 30f, out x, out z) && z == 20f, "of two, the one in range");
+        AssertFalse(DepotTaskLedger.NearestOwnDepot(world, task, 50f, true, 250f, 0f, 20f, out _, out _), "the range is strict (96626: distance < buglerange)");
+        AssertEqual(DepotWishMoment.Here, ledger.WishMoment(0, DepotBuilderAt(250f, 0f, FormationFlags.VanillaDepotBuilder), 10f, 0f, Facts(s.DaySerial, depotAtSite: false)), "a flagged builder with no depot in its range gets its own wish");
+    }
+
+    // F9: the wish is a placeholder at -20000 until vanilla's one shared queue reaches it (97538-97591).
+    private static void APendingPlacementIsNotALostWish()
+    {
+        float radius = 50f;
+        var ledger = new DepotTaskLedger();
+        var s = DepotWorld(out var plan, out var a);
+        ledger.Sync(plan, a, s, null);
+        ledger.RecordWished(0, s.DaySerial, 250f, 0f);
+        var next = DepotWorld(out _, out _, 1);
+        next.Supply.Add(new SupplySourceRecord { Id = 9500, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = -20000f, Built = false });
+        ledger.WatchWish(0, next, radius);
+        AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "an own unbuilt depot at the placeholder is a placement waiting its turn: not lost");
+        var days = DepotWorld(out _, out _, 5);
+        days.Supply.Add(new SupplySourceRecord { Id = 9500, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = -20000f, Built = false });
+        ledger.WatchWish(0, days, radius);
+        AssertEqual(DepotTaskState.Wished, ledger.Tasks[0].State, "...and for as long as it is queued");
+        var timeout = DepotWorld(out var p3, out var a3, DepotTaskLedger.TimeoutDays);
+        timeout.Supply.Add(new SupplySourceRecord { Id = 9500, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = -20000f, Built = false });
+        ledger.Sync(p3, a3, timeout, null);
+        AssertEqual(DepotTaskState.Abandoned, ledger.Tasks[0].State, "the wait is bounded by TimeoutDays");
+        bool timedOut = false;
+        for (int k = 0; k < ledger.Transitions.Count; k++) timedOut |= ledger.Transitions[k].Reason == "timeout";
+        AssertTrue(timedOut, "named timeout");
+
+        foreach (var other in new[]
+        {
+            new SupplySourceRecord { Id = 9501, Kind = SupplySourceKind.Depot, Owner = 1, X = -20000f, Z = -20000f, Built = false },   // another alliance's
+            new SupplySourceRecord { Id = 9502, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = -20000f, Built = true },    // not a placeholder
+            new SupplySourceRecord { Id = 9503, Kind = SupplySourceKind.Depot, Owner = 0, X = 250f, Z = 400f, Built = false },         // a rising depot far from the wish
+            new SupplySourceRecord { Id = 9505, Kind = SupplySourceKind.Depot, Owner = 0, X = -20000f, Z = 300f, Built = false },     // out past the threshold in x only
+            new SupplySourceRecord { Id = 9504, Kind = SupplySourceKind.Iip, Owner = 0, X = -20000f, Z = -20000f, Built = false }      // not a depot
+        })
+        {
+            var l = new DepotTaskLedger();
+            var s4 = DepotWorld(out var p4, out var a4);
+            l.Sync(p4, a4, s4, null);
+            l.RecordWished(0, s4.DaySerial, 250f, 0f);
+            var n4 = DepotWorld(out _, out _, 1);
+            n4.Supply.Add(other);
+            l.WatchWish(0, n4, radius);
+            AssertEqual(DepotTaskState.Abandoned, l.Tasks[0].State, "does not count as a pending placement: supply source " + other.Id);
+        }
     }
 
     // F6c: the fort job's hold is the withhold view's hold, under its plan-freshness and executors-allowed test.

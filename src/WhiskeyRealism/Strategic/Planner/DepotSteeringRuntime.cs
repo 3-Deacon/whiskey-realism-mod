@@ -134,7 +134,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     DaySerial = snapshot.DaySerial,
                     MarchIssuedEarlier = MoveTrackers.For(alliance).MarchingToward(builder.InstanceId, task.X, task.Z, DepotTaskLedger.SiteMatchRadius, snapshot.DaySerial)
                 };
-                facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, out facts.AdoptX, out facts.AdoptZ);
+                facts.OwnUnbuiltDepotAtSite = DepotTaskLedger.NearestOwnDepot(snapshot, task, builtRadius, true, builder.X, builder.Z, builder.BugleRange, out facts.AdoptX, out facts.AdoptZ);
                 switch (ledger.WishMoment(t, builder, reach, days, facts))
                 {
                     case DepotWishMoment.Here: Wish(alliance, snapshot, ledger, t, task, builder.X, builder.Z, builder.InstanceId); break;
