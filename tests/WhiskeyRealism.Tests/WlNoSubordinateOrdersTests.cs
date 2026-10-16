@@ -34,6 +34,11 @@ internal static class WlNoSubordinateOrdersTests
             ("wl no subordinate orders vanilla's own campaign gate passes a map-group player and no carried one", VanillaGateByPlayerClass),
             ("wl no subordinate orders a leftover campaign order of a carried player is cleared, a battle order and a map-group player's stay", StaleCarriedOrderRule),
             ("wl no subordinate orders the leftover clear is vanilla's own null write, ahead of delivery", StaleClearWiring),
+            ("wl no subordinate orders a whiskey order queued for a map-group player is dropped when he was transferred under a corps", TransferredPlayerOrderDropped),
+            ("wl no subordinate orders an old sidecar with a showZone key still loads", OldSidecarWithShowZoneLoads),
+            ("wl no subordinate orders the delivery pass asks the pure rule with the player's command and map-group state", DeliveryPassWiring),
+            ("wl no subordinate orders the order pass runs exactly its four statements and only the dispatcher enqueues", OrderPassExactStatements),
+            ("wl no subordinate orders the compliance observation passes the map-group test unmodified", ComplianceExactStatements),
             ("wl no subordinate orders a whiskey order rides from the senior headquarters and shows its zone", WhiskeyOrderRidesFromSeniorHeadquarters),
             ("wl no subordinate orders the carrying group is never ordered by the bridge", CarryingGroupNeverOrdered),
             ("wl no subordinate orders the map-group player still gets the bridge order", MapGroupPlayerStillOrdered),
@@ -133,7 +138,7 @@ internal static class WlNoSubordinateOrdersTests
             old = new CampaignCourierDto
             {
                 Unit = "Army of the Potomac", UnitCommander = 3, Type = type, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective",
-                Rotation = -1f, Width = 20f, Depth = 20f, Origin = "C69", Issuer = 4, ShowZone = true, PlayerCommand = "1st Brigade#2",
+                Rotation = -1f, Width = 20f, Depth = 20f, Origin = "C69", Issuer = 4, PlayerCommand = "1st Brigade#2",
                 IssuedAt = 3.25, DueAt = 3.2502,
             };
             AssertFalse(WlCampaignCourierSidecar.TryFromDto(old, out _), "a #69 entry of type " + type + " does not load");
@@ -141,7 +146,7 @@ internal static class WlNoSubordinateOrdersTests
         var bridgeEntry = new CampaignCourierDto
         {
             Unit = null, UnitCommander = -1, Type = 5, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective",
-            Rotation = -1f, Width = 20f, Depth = 20f, Origin = "CampaignBridge", Issuer = 4, ShowZone = true, PlayerCommand = "1st Corps#2",
+            Rotation = -1f, Width = 20f, Depth = 20f, Origin = "CampaignBridge", Issuer = 4, PlayerCommand = "1st Corps#2",
             IssuedAt = 3.25, DueAt = 3.2502,
         };
         var loaded = new List<CourierEntry>();
@@ -157,7 +162,7 @@ internal static class WlNoSubordinateOrdersTests
         AssertFalse(courier.Contains("issuerUnit : SeniorHeadquarters()"), "no moving-formation headquarters branch");
         string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignDispatchRuntime.cs");
         AssertTrue(runtime.Contains("_showzone: true"), "the map-group player's order shows its zone, as vanilla's does");
-        AssertFalse(runtime.Contains("showZone"), "no zone switch left");
+        AssertFalse(runtime.Contains("showZone") || runtime.Contains("ShowZone"), "no zone switch left");
     }
 
     private static WlStrategicRoleFacts CarryingFacts()
@@ -224,13 +229,118 @@ internal static class WlNoSubordinateOrdersTests
     {
         string courier = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
         string body = TestFixtures.BodyOf(courier, "internal static void ClearStaleCarriedOrder()");
-        int rule = body.IndexOf("WlCampaignCourierPolicy.HoldsStaleCarriedOrder(", StringComparison.Ordinal);
+        // Exact statements: a literal in place of a fact, or a dropped switch, changes who loses an order.
+        AssertTrue(TestFixtures.HasLine(body, "if (!MasterEnabled() || !DLC_WL.dlc_scenarioactive) return;"), "behind the master switch, in a W&L career");
+        AssertTrue(TestFixtures.HasLine(body, "DLC_WL.GivenOrders order = DLC_WL.givenorder;"), "the order slot as it stands");
+        AssertTrue(TestFixtures.HasLine(body, "bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;"), "the map-group test is vanilla's flag2 (8271-8274)");
+        AssertTrue(TestFixtures.HasLine(body, "if (!WlCampaignCourierPolicy.HoldsStaleCarriedOrder(true, DLC_WL.IsCommanderInChief(), ownMapGroup, true, order.IsBattleOrder())) return;"), "the pure rule decides, from the live facts");
+        AssertTrue(TestFixtures.HasLine(body, "DLC_WL.givenorder = null;"), "vanilla's own way to end an order");
+        AssertTrue(TestFixtures.HasLine(body, "_watched = null;"), "no acknowledgement is shown for a cleared leftover");
+        int rule = body.IndexOf("HoldsStaleCarriedOrder(", StringComparison.Ordinal);
         int write = body.IndexOf("DLC_WL.givenorder = null;", StringComparison.Ordinal);
-        AssertTrue(rule >= 0 && write > rule, "the slot is emptied only after the pure rule says so");
-        AssertTrue(body.Contains("order.IsBattleOrder()"), "the order's own vanilla battle test");
-        AssertTrue(body.Contains("BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command"), "the map-group test is vanilla's flag2 (8271-8274)");
-        AssertTrue(body.Contains("_watched = null;"), "no acknowledgement is shown for a cleared leftover");
+        AssertTrue(rule >= 0 && write > rule, "the slot is emptied only after the rule says so");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(body, @"givenorder = ").Count, "one write to the slot");
         AssertTrue(body.Contains("catch (Exception"), "never throws out of the patch");
+    }
+
+    private sealed class NullSink : ICourierDiscardSink
+    {
+        public void Discarded(in CourierEntry e, string reason) { }
+    }
+
+    private static CourierEntry BridgeEntry(OrderOrigin origin, string commandKey) => new CourierEntry
+    {
+        UnitName = null, UnitCommanderId = -1, Type = 5, X = 1000f, Y = 10f, Z = 1500f, Name = "Objective", Rotation = -1f, Width = 20f, Depth = 20f,
+        CampaignCall = true, Origin = origin, IssuerKey = 77, IssuerCommanderId = 4, IssuedAt = 3.0, DueAt = 3.001, PlayerCommandKey = commandKey,
+    };
+
+    // Queued while he led his own map group, he was then moved under a corps (a transfer keeps the command's
+    // name, so the command key still matches), then it arrived.
+    private static void TransferredPlayerOrderDropped()
+    {
+        var queue = new WlCourierQueue(new NullSink());
+        CourierEntry queued = BridgeEntry(OrderOrigin.CampaignBridge, "1st Corps#2");
+        AssertTrue(queue.TryEnqueue(in queued, WlCampaignDispatchPolicy.RateLimitYears, out _), "queued while he led his own map group");
+        AssertTrue(queue.TryTakeDue(4.0, out CourierEntry arrived, out bool superseded) && !superseded, "arrived");
+        AssertEqual(null, WlCampaignCourierPolicy.PreDeliveryDropReason(in arrived, "1st Corps#2", playerIsOwnMapGroup: true), "still his own map group: delivered");
+        AssertEqual(WlCampaignCourierPolicy.CarriedPlayer, WlCampaignCourierPolicy.PreDeliveryDropReason(in arrived, "1st Corps#2", playerIsOwnMapGroup: false), "transferred under a corps: dropped, never shown");
+        AssertEqual("carried-player", WlCampaignCourierPolicy.CarriedPlayer, "the logged reason");
+        AssertEqual(WlCampaignCourierPolicy.CommandChange, WlCampaignCourierPolicy.PreDeliveryDropReason(in arrived, "2nd Corps#2", playerIsOwnMapGroup: true), "another command (a promotion): void");
+        AssertEqual(WlCampaignCourierPolicy.CommandChange, WlCampaignCourierPolicy.PreDeliveryDropReason(in arrived, "2nd Corps#2", playerIsOwnMapGroup: false), "another command wins over the map-group test");
+        CourierEntry unkeyed = BridgeEntry(OrderOrigin.CampaignBridge, null);
+        AssertEqual(null, WlCampaignCourierPolicy.PreDeliveryDropReason(in unkeyed, "1st Corps#2", true), "an old entry without identity is not yet known to be wrong");
+        // Vanilla's own campaign order is left to vanilla's gate (8366), which runs again at delivery.
+        CourierEntry vanilla = BridgeEntry(OrderOrigin.Vanilla, "1st Corps#2");
+        AssertEqual(null, WlCampaignCourierPolicy.PreDeliveryDropReason(in vanilla, "1st Corps#2", playerIsOwnMapGroup: false), "a vanilla order is not this rule's");
+        AssertEqual(WlCampaignCourierPolicy.CommandChange, WlCampaignCourierPolicy.PreDeliveryDropReason(in vanilla, "2nd Corps#2", true), "but it never rides to another command either");
+    }
+
+    private static void DeliveryPassWiring()
+    {
+        string courier = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
+        string body = TestFixtures.BodyOf(courier, "internal static void DeliverDue()");
+        AssertTrue(TestFixtures.HasLine(body, "bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;"), "vanilla's flag2 for the player's command");
+        AssertTrue(TestFixtures.HasLine(body, "string commandKey = CurrentCommandKey();"), "the current command key");
+        AssertTrue(TestFixtures.HasLine(body, "string preDrop = WlCampaignCourierPolicy.PreDeliveryDropReason(in entry, commandKey, ownMapGroup);"), "the pure rule decides before anything is shown");
+        AssertTrue(TestFixtures.HasLine(body, "Row(\"drop\", preDrop, in entry);"), "a carried player's order is a drop row, never shown");
+        AssertTrue(TestFixtures.HasLine(body, "Queue.Discard(in entry, preDrop);"), "another command's order is a discard");
+        int pre = body.IndexOf("PreDeliveryDropReason(", StringComparison.Ordinal);
+        int deliver = body.IndexOf("DeliverOne(in entry);", StringComparison.Ordinal);
+        AssertTrue(pre >= 0 && deliver > pre, "delivery follows the check");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(body, @"DeliverOne\(").Count, "one way to deliver");
+    }
+
+    private static void OldSidecarWithShowZoneLoads()
+    {
+        var snap = SidecarSnapshot.Empty();
+        CourierEntry e = BridgeEntry(OrderOrigin.CampaignBridge, "1st Corps#2");
+        e.UnitName = "1st Corps";
+        e.UnitCommanderId = 3;
+        snap.CampaignCouriers = new List<CampaignCourierDto> { WlCampaignCourierSidecar.ToDto(in e) };
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+        AssertFalse(json.Contains("showZone"), "a new sidecar no longer writes the key");
+        string old = System.Text.RegularExpressions.Regex.Replace(json, "(\"origin\"\\s*:\\s*\"CampaignBridge\")", "$1,\"showZone\":true");
+        AssertTrue(old != json, "the key was added to the saved entry (the sidecar as an older build wrote it)");
+        AssertTrue(SidecarDtoCodec.TryDeserialize(old, out var dto, out _), "an older file deserializes");
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out _), "and decodes");
+        AssertEqual(1, back.CampaignCouriers.Count, "the pending order is kept");
+        AssertTrue(WlCampaignCourierSidecar.TryFromDto(back.CampaignCouriers[0], out CourierEntry loaded), "and loads");
+        AssertEqual(OrderOrigin.CampaignBridge, loaded.Origin);
+        AssertEqual("1st Corps#2", loaded.PlayerCommandKey);
+    }
+
+    private static void OrderPassExactStatements()
+    {
+        string patch = OrderPassPatch();
+        int at = System.Text.RegularExpressions.Regex.Match(patch, @"\btry\b").Index;
+        int open = patch.IndexOf('{', at);
+        int close = patch.IndexOf('}', open);
+        var statements = patch.Substring(open + 1, close - open - 1).Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        AssertEqual(string.Join("|", new[]
+        {
+            "WlCampaignCourierRuntime.ClearStaleCarriedOrder();",
+            "WlCampaignCourierRuntime.DeliverDue();",
+            "WlCampaignCourierRuntime.AcknowledgeReached();",
+            "PlayerComplianceRuntime.ObserveCampaign();",
+        }), string.Join("|", statements), "the order pass is exactly these four calls, in this order");
+        // Only the dispatcher queues a Whiskey order: the definition and the one call in Emit.
+        int enqueues = 0;
+        foreach (string file in SourceFiles("src/WhiskeyRealism"))
+            enqueues += System.Text.RegularExpressions.Regex.Matches(Strip(File.ReadAllText(file)), @"WlCampaignCourierRuntime\.EnqueueWhiskey\(").Count;
+        AssertEqual(1, enqueues, "WlCampaignCourierRuntime.EnqueueWhiskey has one caller in src");
+        string dispatcher = Code("src/WhiskeyRealism/Strategic/WlCampaignDispatchRuntime.cs");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(dispatcher, @"WlCampaignCourierRuntime\.EnqueueWhiskey\(").Count, "the call is the dispatcher's");
+    }
+
+    private static void ComplianceExactStatements()
+    {
+        string runtime = Code("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs");
+        string body = TestFixtures.BodyOf(runtime, "internal static void ObserveCampaign()");
+        AssertTrue(TestFixtures.HasLine(body, "bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;"), "vanilla's flag2");
+        AssertTrue(TestFixtures.HasLine(body, "Observe(ComplianceScope.Campaign, GameVars.GetCampaignFloatingDate() * HoursPerYear, playerDecides: ownMapGroup);"), "a campaign order is a sample only where the player decides the movement, unmodified");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(body, @"Observe\(").Count, "one observation");
+        string battle = TestFixtures.BodyOf(runtime, "internal static void ObserveBattle(double nowBattleHours)");
+        AssertTrue(TestFixtures.HasLine(battle, "Observe(ComplianceScope.Battle, nowBattleHours, playerDecides: true);"), "the battle observation is unchanged");
     }
 
     private static void CarryingGroupNeverOrdered()

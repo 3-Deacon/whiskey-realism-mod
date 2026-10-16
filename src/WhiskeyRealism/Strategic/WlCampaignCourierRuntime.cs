@@ -143,7 +143,6 @@ namespace WhiskeyRealism.Strategic
                     Origin = OrderOrigin.Vanilla,
                     IssuerKey = (UnityEngine.Object)hq != null ? hq.GetInstanceID() : unit.GetInstanceID(),
                     IssuerCommanderId = -1,
-                    ShowZone = true,
                     IssuedAt = now,
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
@@ -197,7 +196,6 @@ namespace WhiskeyRealism.Strategic
                     Origin = OrderOrigin.CampaignBridge,
                     IssuerKey = (UnityEngine.Object)hq != null ? hq.GetInstanceID() : (hasUnit ? issuerUnit.GetInstanceID() : 0),
                     IssuerCommanderId = issuerCommanderId,
-                    ShowZone = true,
                     IssuedAt = now,
                     DueAt = WlOrderFlow.DueAt(now, delay, couriersOn: true, deferUntil: double.NaN),
                     Meters = meters,
@@ -240,15 +238,22 @@ namespace WhiskeyRealism.Strategic
                 double now = GameVars.currenttimefromstart;
                 string commandKey = CurrentCommandKey();
                 Queue.StampPlayerCommand(commandKey);   // an entry from an old sidecar has no identity yet
+                bool ownMapGroup = (UnityEngine.Object)BattleUnits.GetCampaignGroup(command) == (UnityEngine.Object)command;
                 for (int pass = 0; pass < MaxDeliveriesPerPass; pass++)
                 {
                     if (!Queue.TryTakeDue(now, out CourierEntry entry, out bool superseded)) break;
                     if (superseded) continue;
                     // An order queued for another command (a promotion since) is void, however empty the
-                    // queue was in between.
-                    if (!WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey))
+                    // queue was in between; a Whiskey order never reaches a player transferred under a corps.
+                    string preDrop = WlCampaignCourierPolicy.PreDeliveryDropReason(in entry, commandKey, ownMapGroup);
+                    if (preDrop == WlCampaignCourierPolicy.CarriedPlayer)
                     {
-                        Queue.Discard(in entry, "command-change");
+                        Row("drop", preDrop, in entry);
+                        continue;
+                    }
+                    if (preDrop != null)
+                    {
+                        Queue.Discard(in entry, preDrop);
                         continue;
                     }
                     DeliverOne(in entry);

@@ -62,7 +62,7 @@ internal static class WlCampaignCourierTests
         {
             UnitId = 11, UnitName = unit, UnitCommanderId = 3, Type = type, X = x, Y = 10f, Z = z, Name = "Richmond",
             Rotation = -1f, Width = 20f, Depth = 20f, CampaignCall = true, Origin = origin, IssuerKey = 77,
-            IssuerCommanderId = 4, ShowZone = true, IssuedAt = issued, DueAt = due,
+            IssuerCommanderId = 4, IssuedAt = issued, DueAt = due,
         };
     }
 
@@ -166,7 +166,7 @@ internal static class WlCampaignCourierTests
         AssertTrue(WlCampaignCourierPolicy.BelongsToCommand(CommandA, null), "no command to compare with: nothing to void");
         string runtime = Code("src/WhiskeyRealism/Strategic/WlCampaignCourierRuntime.cs");
         AssertEqual(2, System.Text.RegularExpressions.Regex.Matches(runtime, @"PlayerCommandKey = CurrentCommandKey\(\)").Count, "both enqueue paths stamp the command");
-        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.BelongsToCommand(entry.PlayerCommandKey, commandKey)"), "delivery checks it");
+        AssertTrue(runtime.Contains("WlCampaignCourierPolicy.PreDeliveryDropReason(in entry, commandKey, ownMapGroup)"), "delivery checks it, through the pure rule that applies BelongsToCommand");
         int deliver = runtime.IndexOf("internal static void DeliverDue()", StringComparison.Ordinal);
         string body = runtime.Substring(deliver, runtime.IndexOf("internal static void AcknowledgeReached(", deliver, StringComparison.Ordinal) - deliver);
         AssertFalse(body.Contains("_boundary"), "no baseline that an empty queue could reset");
@@ -348,7 +348,6 @@ internal static class WlCampaignCourierTests
         AssertNear(1500f, a2.Z, 1e-3f, "z");
         AssertEqual(OrderOrigin.CampaignBridge, a2.Origin);
         AssertEqual(4, a2.IssuerCommanderId);
-        AssertTrue(a2.ShowZone, "show zone");
         AssertTrue(a2.CampaignCall, "a campaign entry");
         AssertEqual(3.25, a2.IssuedAt);
         AssertEqual(3.2502, a2.DueAt);

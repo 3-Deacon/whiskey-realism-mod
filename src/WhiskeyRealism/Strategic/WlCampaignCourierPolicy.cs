@@ -81,6 +81,22 @@ namespace WhiskeyRealism.Strategic
                 || string.Equals(entryCommandKey, currentCommandKey, StringComparison.Ordinal);
         }
 
+        public const string CommandChange = "command-change";
+        public const string CarriedPlayer = "carried-player";
+
+        // Before an arrived courier is looked at any further: why it must not be shown to the player as he
+        // is now, or null. An order queued for another command (a promotion since) is void. A Whiskey
+        // order (CampaignBridge) is for a player who leads his own campaign-map group; if he was moved
+        // under a corps while it rode (a transfer keeps the command's name, so the command key still
+        // matches), it is dropped: he is carried and is sent no campaign order. A vanilla campaign order is
+        // left to vanilla's own gate (8366), which still runs when it is delivered.
+        public static string PreDeliveryDropReason(in CourierEntry e, string currentCommandKey, bool playerIsOwnMapGroup)
+        {
+            if (!BelongsToCommand(e.PlayerCommandKey, currentCommandKey)) return CommandChange;
+            if (e.Origin == OrderOrigin.CampaignBridge && !playerIsOwnMapGroup) return CarriedPlayer;
+            return null;
+        }
+
         // A Whiskey order (the strategic order bridge) leaves a record in the dispatch history when it is shown.
         public static bool RecordsHistory(OrderOrigin origin)
         {
@@ -122,7 +138,6 @@ namespace WhiskeyRealism.Strategic
                 Depth = e.Depth,
                 Origin = e.Origin.ToString(),
                 Issuer = e.IssuerCommanderId,
-                ShowZone = e.ShowZone,
                 PlayerCommand = e.PlayerCommandKey,
                 IssuedAt = e.IssuedAt,
                 DueAt = e.DueAt,
@@ -166,7 +181,6 @@ namespace WhiskeyRealism.Strategic
                 CampaignCall = true,
                 Origin = origin,
                 IssuerCommanderId = dto.Issuer,
-                ShowZone = dto.ShowZone,
                 PlayerCommandKey = string.IsNullOrEmpty(dto.PlayerCommand) ? null : dto.PlayerCommand,
                 IssuedAt = dto.IssuedAt,
                 DueAt = dto.DueAt,
