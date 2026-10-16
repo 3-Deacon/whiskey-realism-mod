@@ -1,5 +1,7 @@
 # W&L Chain of Command — Campaign Side (Stage F) Implementation Plan
 
+> **Errata 2026-10-16:** the subordinate-player dispatch this plan builds (trigger 1: the `MoveUnitTo`, `CheckFinalPositions` and `RollUpEnemyObjectivesInZone` patches, the pending-move recorder and classifier, the correction memory, `OrderOrigin.C69`, the `.move*`, `.final-positions*`, `.roll-up*` and `.flush` first-fire ids and the zone/prestige constant) was removed on `fix/wl-no-subordinate-orders`: vanilla sends a player below map-group level no campaign order (gate 8366) and Whiskey now sends him none. Patch #69 is now only the `UpdateUnitAI` order pass (`WlCampaignOrderPassPatch`, scope `campaign.patch.wl-campaign-order-pass`). Lines naming the removed pieces below, including the smoke items, are historical. See the amendment at the top of the spec.
+
 > **For agentic workers:** execute task by task with superpowers:test-driven-development for the pure units; verify with superpowers:verification-before-completion.
 
 **Goal:** Roadmap stage F: §D-§F of `docs/superpowers/specs/2026-10-14-wl-chain-of-command-design.md` (as corrected by its § "Vanilla and W&L model (campaign side)"). Campaign dispatches for subordinate W&L players, one campaign dispatcher for Whiskey's own strategic orders, the player-compliance ledger (campaign + battle) wired into the battle evidence and exposed for the campaign planner, and the CIC faction-AI bug guard.

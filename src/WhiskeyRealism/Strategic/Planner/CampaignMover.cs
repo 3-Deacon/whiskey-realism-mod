@@ -95,7 +95,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   - a decision whose mass has no dispatchable MainEffort formation dispatches nothing and is never released.
     // The W&L player: the player's own command and a CIC side are never moved or ordered; the map-group player gets his Support
     // order (a dispatch, never a move) by exactly the rule an AI Support formation's move follows; the AI group above a player
-    // below map level is moved as any AI formation (stage F's MoveUnitTo Postfix dispatches the march).
+    // below map level is moved as any AI formation (the player it carries is sent no order).
     internal static class CampaignMover
     {
         // Within this of the target, or a final waypoint this close to it, the formation is there or already underway.

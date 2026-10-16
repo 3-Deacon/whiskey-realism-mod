@@ -645,7 +645,7 @@ internal static class CampaignExecutorTests
         var host = new FakeMoverHost();
         CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
         AssertEqual(1, host.Moves.Count, "the AI map group above a player below map level is moved as any AI corps");
-        AssertEqual(0, host.Orders.Count, "...by MoveUnitTo (stage F's Postfix dispatches it), not by an order");
+        AssertEqual(0, host.Orders.Count, "...by MoveUnitTo (the carried player is sent no order), not by an order");
     }
 
     private static void MoverDispatchesTheRolesInPriorityOrder()
@@ -1210,7 +1210,7 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
         AssertTrue(HasLine(src, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
-        AssertFalse(src.Contains("EnterMoveSource"), "G5a does not call EnterMoveSource: stage F's Postfix types the march by list membership");
+        AssertFalse(src.Contains("EnterMoveSource"), "G5a marks no move source: nothing types the march");
         AssertFalse(src.Contains("IsPackageLocked") || src.Contains("CoordinatedOperation"), "the old package layer is gone (G6): the mover refuses nothing on its account");
         AssertTrue(HasLine(src, "unit.userails = true;"), "vanilla's AI default for rails (112862-112867)");
         AssertTrue(HasLine(src, "unit.userivers = true;"), "...and rivers");

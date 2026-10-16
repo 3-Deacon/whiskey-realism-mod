@@ -44,8 +44,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // strictly above aiminimumstrength/moraleformovement; Strength here is groupstrengthdirect where
     // vanilla tests groupstrengthactive), never a formation in the W&L player's chain that fails
     // WlChainRules.MayMove (his own command, a CIC side, the map-group player: a picket is a pre-pledge,
-    // and his own vision already reaches the side through vanilla), a carrying group freely (F's
-    // MoveUnitTo Postfix dispatches its march), never the main body's last cavalry-majority group
+    // and his own vision already reaches the side through vanilla), a carrying group freely (the
+    // player it carries is sent no order), never the main body's last cavalry-majority group
     // unless the task is the main effort's own screen or the main effort already has one, a picket
     // only from its own sector and never its final reserve, an advance guard or probe at most
     // AdvanceGuardMaxStrengthShare of the main body. The group already holding a matching mission

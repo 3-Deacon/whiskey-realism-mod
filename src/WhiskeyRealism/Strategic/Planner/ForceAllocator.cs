@@ -54,8 +54,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 MoveTracker.GaveUp) loses that role: the depot and recon picks take the next candidate, any other
     //                 role becomes Hold in place with ReasonGaveUp, until the role's target changes. The set is an
     //                 input (GaveUpMove), so the pass stays pure and deterministic.
-    //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (F's
-    //                 MoveUnitTo Postfix dispatches its march). The map-group player's group counts
+    //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (the
+    //                 player it carries is sent no order). The map-group player's group counts
     //                 toward the hold of the sector where its last waypoint lies, at strength x morale,
     //                 as vanilla counts it (WlChainRules.CountsTowardCoverage; integrator decision
     //                 2026-10-15): the AI formations that would hold that sector are released while he
