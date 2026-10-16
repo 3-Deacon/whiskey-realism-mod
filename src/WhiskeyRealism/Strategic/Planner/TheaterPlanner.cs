@@ -63,7 +63,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // and while it stands the margin rule applies as normal), the current objective accomplished /
     // no longer offered / below its odds (below RequiredRatio - OddsDeadband, or below RequiredRatio
     // on SwitchDays consecutive reviews), or a decisive battle in its theater or near it
-    // (CicReviewRouter.BattleInvalidatesPlan, the R4 rule). A trigger keeps the current main effort
+    // (PlanTriggers.BattleInvalidatesPlan). A trigger keeps the current main effort
     // while it is within Epsilon of the best.
     // Randomness (P5) only at a decision: softmax (Temperature) over the candidates within Epsilon of
     // the best, System.Random seeded with CampaignSeed ^ alliance x 7919 ^ DecisionSerial.
@@ -416,7 +416,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     var record = battles[i];
                     if (record == null) continue;
                     query.BattleTheater = TheaterClassifier.FromPosition(record.PositionX, record.PositionZ);
-                    if (!CicReviewRouter.BattleInvalidatesPlan(record, query)) continue;
+                    if (!PlanTriggers.BattleInvalidatesPlan(record, query)) continue;
                     reason = "battle";
                     return true;
                 }

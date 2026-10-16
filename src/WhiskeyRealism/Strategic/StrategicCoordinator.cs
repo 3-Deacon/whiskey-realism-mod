@@ -127,7 +127,7 @@ namespace WhiskeyRealism.Strategic
                 bool factionListReady = OperationalRuntimeReady();
                 for (int alliance = 0; alliance < 2; alliance++)
                 {
-                    if (!ShouldRunCicFor(alliance, playerAlliance, factionListReady))
+                    if (!ShouldRunPlannerFor(alliance, playerAlliance, factionListReady))
                     {
                         _work.CICs[alliance] = null;
                         continue;
@@ -713,7 +713,7 @@ namespace WhiskeyRealism.Strategic
         {
             int day = d.Day, month = d.Month, year = d.Year;
             bool operationalRuntimeReady = d.OperationalRuntimeReady;
-            if (!ShouldRunCicFor(alliance, d.PlayerAlliance, operationalRuntimeReady))
+            if (!ShouldRunPlannerFor(alliance, d.PlayerAlliance, operationalRuntimeReady))
             {
                 if (!_playerCicAnnounced[alliance])
                 {
@@ -902,7 +902,7 @@ namespace WhiskeyRealism.Strategic
                     ? plugin.LockedDifficulty.Value
                     : DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
                 CicSettings.HistoricalOperationDoctrine = ConfigValue(plugin.EnableHistoricalOperationDoctrine, defaultValue: true);
-                CicSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
+                PlannerSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
                 SuccessionScheduler.TraceEnabled = ConfigValue(plugin.SuccessionTrace);
             }
             catch (Exception ex)
@@ -1791,7 +1791,7 @@ namespace WhiskeyRealism.Strategic
                 BattleTheater = CampaignMapTheaterRuntime.FromPosition(new Vector3(record.PositionX, 0f, record.PositionZ)),
                 Radius = HistoricalOperationContextBuilder.NearTargetRadius(profile)
             };
-            if (CicReviewRouter.BattleInvalidatesPlan(record, query))
+            if (PlanTriggers.BattleInvalidatesPlan(record, query))
                 OnEventTrigger(allianceId, "battle_result");
         }
 
@@ -2000,11 +2000,11 @@ namespace WhiskeyRealism.Strategic
             catch { return -1; }
         }
 
-        private static bool ShouldRunCicFor(int alliance, int playerAlliance, bool factionListReady)
+        private static bool ShouldRunPlannerFor(int alliance, int playerAlliance, bool factionListReady)
         {
             bool aiVsAi = false;
             try { aiVsAi = GameVars.ai_vs_ai; } catch { }
-            return CicEligibility.ShouldRunCic(
+            return PlannerEligibility.ShouldRun(
                 alliance,
                 factionListReady,
                 factionListReady && ResolveAifactionIndexForAlliance(alliance) >= 0,

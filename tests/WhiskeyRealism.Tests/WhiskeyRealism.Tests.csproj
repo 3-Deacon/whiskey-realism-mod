@@ -75,6 +75,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.cs" Link="Planner\LogisticsGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlayerCommandClassifier.cs" Link="Planner\PlayerCommandClassifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerEligibility.cs" Link="Planner\PlannerEligibility.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerSettings.cs" Link="Planner\PlannerSettings.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlanTriggers.cs" Link="Planner\PlanTriggers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyArmyModel.cs" Link="Planner\EnemyArmyModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefReadings.cs" Link="Planner\EnemyBeliefReadings.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderProfiles.cs" Link="Planner\CommanderProfiles.cs" />
@@ -217,6 +220,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentLedger.cs" Link="DefenseIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentTelemetry.cs" Link="DefenseIntentTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignMilitaryGates.cs" Link="CampaignMilitaryGates.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\VanillaFieldCache.cs" Link="VanillaFieldCache.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationPosture.cs" Link="OperationPosture.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignResponsivenessSignals.cs" Link="CampaignResponsivenessSignals.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryContracts.cs" Link="Telemetry\TelemetryContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryFields.cs" Link="Telemetry\TelemetryFields.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryJson.cs" Link="Telemetry\TelemetryJson.cs" />

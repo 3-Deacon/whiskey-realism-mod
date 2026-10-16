@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 
 // WS C1 — campaign plan lifecycle, catalog, persistence regression tests.
 internal static class CampaignLifecycleFixTests
@@ -346,35 +347,35 @@ internal static class CampaignLifecycleFixTests
     {
         var q = TargetQuery();
         q.BattleTheater = Theater.West;
-        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(0, 100f, -300f), q), "minor western battle");
+        TestHarness.AssertFalse(PlanTriggers.BattleInvalidatesPlan(Battle(0, 100f, -300f), q), "minor western battle");
     }
 
     private static void R4MinorBattleAtTargetDoesNotDirtyPlan()
     {
         var q = TargetQuery();
         q.BattleTheater = Theater.East;
-        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(2, 760f, 60f), q), "minor battle never resets an operation");
+        TestHarness.AssertFalse(PlanTriggers.BattleInvalidatesPlan(Battle(2, 760f, 60f), q), "minor battle never resets an operation");
     }
 
     private static void R4MajorBattleElsewhereDoesNotDirtyPlan()
     {
         var q = TargetQuery();
         q.BattleTheater = Theater.West;
-        TestHarness.AssertFalse(CicReviewRouter.BattleInvalidatesPlan(Battle(1, 100f, -300f), q), "major battle in another theater");
+        TestHarness.AssertFalse(PlanTriggers.BattleInvalidatesPlan(Battle(1, 100f, -300f), q), "major battle in another theater");
     }
 
     private static void R4MajorBattleInTargetTheaterDirtiesPlan()
     {
         var q = TargetQuery();
         q.BattleTheater = Theater.East;
-        TestHarness.AssertTrue(CicReviewRouter.BattleInvalidatesPlan(Battle(3, 600f, 400f), q), "major battle in target theater");
+        TestHarness.AssertTrue(PlanTriggers.BattleInvalidatesPlan(Battle(3, 600f, 400f), q), "major battle in target theater");
     }
 
     private static void R4MajorBattleNearTargetDirtiesPlan()
     {
         var q = TargetQuery();
         q.BattleTheater = Theater.Unknown;
-        TestHarness.AssertTrue(CicReviewRouter.BattleInvalidatesPlan(Battle(1, 800f, 100f), q), "major battle within radius");
+        TestHarness.AssertTrue(PlanTriggers.BattleInvalidatesPlan(Battle(1, 800f, 100f), q), "major battle within radius");
     }
 
     // ------------------------------------------------------------------
@@ -401,20 +402,20 @@ internal static class CampaignLifecycleFixTests
 
     private static void R16PlayerAllianceOutsideWlGetsNoCic()
     {
-        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "player alliance, no ai_vs_ai");
-        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(1, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "enemy alliance runs");
+        TestHarness.AssertFalse(PlannerEligibility.ShouldRun(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "player alliance, no ai_vs_ai");
+        TestHarness.AssertTrue(PlannerEligibility.ShouldRun(1, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "enemy alliance runs");
     }
 
     private static void R16WlAiVsAiKeepsPlayerAllianceCic()
     {
-        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "w&l subordinate: vanilla AI runs player alliance");
-        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: true), "w&l player is CIC");
+        TestHarness.AssertTrue(PlannerEligibility.ShouldRun(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "w&l subordinate: vanilla AI runs player alliance");
+        TestHarness.AssertFalse(PlannerEligibility.ShouldRun(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: true), "w&l player is CIC");
     }
 
     private static void R16AiFactionListIsGroundTruth()
     {
-        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(1, factionListReady: true, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "no AIFaction => no CIC");
-        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "AIFaction present => CIC");
+        TestHarness.AssertFalse(PlannerEligibility.ShouldRun(1, factionListReady: true, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "no AIFaction => no CIC");
+        TestHarness.AssertTrue(PlannerEligibility.ShouldRun(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "AIFaction present => CIC");
     }
 
     // ------------------------------------------------------------------

@@ -277,7 +277,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // [CampaignPlan] on change (one row per alliance per decision); the per-candidate trace
-        // under Plan Trace Logging (CicSettings.PlanTrace until G6 moves it to the planner).
+        // under Plan Trace Logging (PlannerSettings.PlanTrace).
         private static void EmitPlan(TheaterPlan plan, string trace, int day, int month, int year)
         {
             string row = TheaterPlanner.Summary(plan);
@@ -285,7 +285,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (a < 0 || a >= LastPlanRow.Length || string.Equals(LastPlanRow[a], row, StringComparison.Ordinal)) return;
             LastPlanRow[a] = row;
             TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
-            if (!CicSettings.PlanTrace) return;
+            if (!PlannerSettings.PlanTrace) return;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "CampaignPlan:trace", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(a)
                 .WithDecision("trace", plan.SwitchReason ?? "none", row)

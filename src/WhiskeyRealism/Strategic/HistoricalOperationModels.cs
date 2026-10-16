@@ -15,18 +15,6 @@ namespace WhiskeyRealism.Strategic
         Recover
     }
 
-    public enum OperationPosture
-    {
-        Inherit,
-        ProbeAndDevelop,
-        ConcentratedAttack,
-        ReinforceAndHold,
-        Counterstroke,
-        ScreenAndDelay,
-        ExploitBreakthrough,
-        Recover
-    }
-
     public enum HistoricalOperationMatchKind
     {
         NoProfile,
