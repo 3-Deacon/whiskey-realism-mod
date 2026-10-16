@@ -22,6 +22,10 @@ namespace WhiskeyRealism
         // BC13: Tactical / Enable Staggered Reserve Release (ArmyOrchestrator builds the allocator's release context from it).
         internal static bool StaggeredReserveRelease = true;
         internal static bool StaggeredReserveReleaseEnabled() => StaggeredReserveRelease;
+
+        // BC14: Tactical / Enable Maneuver Feasibility.
+        internal static bool ManeuverFeasibility = true;
+        internal static bool ManeuverFeasibilityEnabled() => ManeuverFeasibility;
     }
 
     // Stands in for the BepInEx plugin instance's master switch.

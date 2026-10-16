@@ -32,6 +32,7 @@ internal static partial class ManeuverFeasibilityTests
         all.AddRange(StanceTests());
         all.AddRange(CopySiteTests());       // ManeuverFeasibilityTests.Copy.cs
         all.AddRange(ExtractionTests());     // ManeuverFeasibilityTests.Extraction.cs
+        all.AddRange(RegionTests());         // ManeuverFeasibilityTests.Regions.cs
         return all.ToArray();
     }
 
