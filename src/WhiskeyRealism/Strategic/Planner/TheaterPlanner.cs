@@ -126,6 +126,8 @@ namespace WhiskeyRealism.Strategic.Planner
             internal float[] RoadPerDay;
             internal HashSet<int> OwnIips;
             internal readonly List<int> Scratch = new List<int>();
+            // P8: formations that gave up on an objective (MoveTracker); MassFor leaves them out of that objective's mass.
+            internal IReadOnlyList<GaveUpObjective> GaveUp;
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
@@ -137,7 +139,8 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
-                                         IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace)
+                                         IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
+                                         IReadOnlyList<GaveUpObjective> gaveUp = null)
         {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
@@ -145,7 +148,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (state == null) state = new PlannerState();
 
             var review = new ReviewTerrain(terrain, s.Areas);
-            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed };
+            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp };
             var candidates = new List<Candidate>();
             Evaluate(inputs, candidates);
             int unknown = review.Unknown, probed = 0;
@@ -173,7 +176,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
                 plan.MainEnemyStrength = m.Enemy;
-                plan.MassStrength = MassFor(inputs, m.X, m.Z, m.SectorId, inputs.Scratch);
+                plan.MassStrength = MassFor(inputs, m.X, m.Z, m.SectorId, m.ObjectiveId, inputs.Scratch);
                 for (int k = 0; k < inputs.Scratch.Count; k++) plan.MassInstanceIds.Add(s.Own[inputs.Scratch[k]].InstanceId);
                 axisFromX = force.X;
                 axisFromZ = force.Z;
@@ -222,7 +225,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int area = AreaGeometry.AreaAt(s.Areas, o.X, o.Z); // SectorModel.SectorAt's own lookup, done once
                 var cand = new Candidate { ObjectiveId = o.ObjectiveId, X = o.X, Z = o.Z, SectorId = area >= 0 ? c.Sectors.SectorOfArea(s.Areas[area].Index) : -1 };
                 c.Terrain?.Mark(ReviewTerrain.GroupCandidate, o.ObjectiveId, o.X, o.Z);
-                cand.Mass = MassFor(c, o.X, o.Z, cand.SectorId, c.Scratch);
+                cand.Mass = MassFor(c, o.X, o.Z, cand.SectorId, o.ObjectiveId, c.Scratch);
                 cand.Force = PickForce(s, c.Scratch, o.X, o.Z);
                 var profile = ProfileOf(c, cand.Force);
                 cand.Required = Math.Max(0f, s.OffensiveDominance * (1f + mass) + profile.RequiredOddsShift);
@@ -558,8 +561,10 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The massable set for a target in targetSector (indexes into s.Own, written to `into`) and
-        // its strength.
-        internal static float MassFor(Inputs c, float tx, float tz, int targetSector, List<int> into)
+        // its strength. A formation the move tracker gave up on for this objective (P8, GaveUpObjective) is left out like a busy
+        // one, so a mass whose members all gave up is empty: the existing no-force rule drops the main effort and the odds are
+        // judged on the force that can still march.
+        internal static float MassFor(Inputs c, float tx, float tz, int targetSector, int objectiveId, List<int> into)
         {
             var s = c.S;
             into.Clear();
@@ -567,7 +572,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i]) continue;
+                if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId)) continue;
                 int holds = c.HoldReserved[i];
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 if (!WithinHorizon(c, i, tx, tz)) continue;
@@ -575,6 +580,15 @@ namespace WhiskeyRealism.Strategic.Planner
                 total += Math.Max(0f, f.Strength);
             }
             return total;
+        }
+
+        private static bool GaveUpOn(Inputs c, int instanceId, int objectiveId)
+        {
+            var list = c.GaveUp;
+            if (list == null) return false;
+            for (int k = 0; k < list.Count; k++)
+                if (list[k].InstanceId == instanceId && list[k].ObjectiveId == objectiveId) return true;
+            return false;
         }
 
         // A sector's hold is released for a target that is the very army the hold faces (its nearest

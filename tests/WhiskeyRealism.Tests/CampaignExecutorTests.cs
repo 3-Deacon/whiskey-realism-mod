@@ -30,8 +30,15 @@ internal static class CampaignExecutorTests
             ("GaveUpMainEffortLosesTheRoleAtThatTarget", GaveUpMainEffortLosesTheRoleAtThatTarget),
             ("GaveUpDepotBuilderIsReplacedByTheNextFormation", GaveUpDepotBuilderIsReplacedByTheNextFormation),
             ("GaveUpReconIsReplacedByTheNextFormation", GaveUpReconIsReplacedByTheNextFormation),
+            ("GaveUpCapitalGuardBecomesAnUnwithheldHold", GaveUpCapitalGuardBecomesAnUnwithheldHold),
             ("GaveUpSetIsCollectedFromTheTrackerOnly", GaveUpSetIsCollectedFromTheTrackerOnly),
             ("ReviewPlanPassesTheTrackersGaveUpSet", ReviewPlanPassesTheTrackersGaveUpSet),
+            ("GaveUpMassIsDroppedOrRebuiltNeverStalled", GaveUpMassIsDroppedOrRebuiltNeverStalled),
+            ("GaveUpRecordsLapseAndTheRoleComesBack", GaveUpRecordsLapseAndTheRoleComesBack),
+            ("GaveUpObjectivesNameTheObjectiveOfTheTarget", GaveUpObjectivesNameTheObjectiveOfTheTarget),
+            ("UndispatchableMainEffortLogsOnceAndClears", UndispatchableMainEffortLogsOnceAndClears),
+            ("ImportanceRedirectWaitsForTheRelease", ImportanceRedirectWaitsForTheRelease),
+            ("PlannerFactionMapReadsTheAllianceNotTheIndex", PlannerFactionMapReadsTheAllianceNotTheIndex),
             ("MoverDispatchesTheRolesInPriorityOrder", MoverDispatchesTheRolesInPriorityOrder),
             ("MoverListsMainEffortAndSupportInTheOffensiveList", MoverListsMainEffortAndSupportInTheOffensiveList),
             ("MoverSkipsBusyLockedAndArrivedFormations", MoverSkipsBusyLockedAndArrivedFormations),
@@ -128,7 +135,8 @@ internal static class CampaignExecutorTests
         t.RecordIssued(1, 500f, 0f, 100f, 0f, day + 1, queued: false);
         AssertEqual(MoveOutcome.GaveUp, t.Judge(1, 500f, 0f, 500f, 0f, day + 2), "the retry missed too");
         AssertFalse(t.ShouldIssue(1, 100f, 0f, day + 2), "no third attempt at this target");
-        AssertFalse(t.ShouldIssue(1, 100f, 0f, day + 40), "...however long it waits");
+        AssertFalse(t.ShouldIssue(1, 100f, 0f, day + 1 + MoveTracker.GaveUpExpiryDays - 1), "...until the give-up lapses");
+        AssertTrue(t.ShouldIssue(1, 100f, 0f, day + 1 + MoveTracker.GaveUpExpiryDays), "which it does after GaveUpExpiryDays review days");
         AssertTrue(t.ShouldIssue(1, 200f, 0f, day + 2), "a new target starts afresh");
         AssertEqual(MoveOutcome.Issued, t.IssueOutcome(1, 200f, 0f, queued: false), "and is a first issue");
         AssertFalse(t.InTransit(1), "a gave-up record is settled");
@@ -271,10 +279,13 @@ internal static class CampaignExecutorTests
         return t;
     }
 
-    private static List<GaveUpMove> GaveUpOf(MoveTracker t)
+    // The day the review that collects the set runs: the day after TrackerThatGaveUp's judgement.
+    private const int GaveUpReviewDay = 103;
+
+    private static List<GaveUpMove> GaveUpOf(MoveTracker t, int day = GaveUpReviewDay)
     {
         var list = new List<GaveUpMove>();
-        t.CollectGaveUp(list);
+        t.CollectGaveUp(list, day);
         return list;
     }
 
@@ -338,6 +349,30 @@ internal static class CampaignExecutorTests
         AssertEqual(FormationRole.DepotBuilder, next.TryGet(12, out var n12) ? n12.Role : FormationRole.Hold, "the next smallest is tried");
         AssertTrue(next.TryGet(11, out var n11) && n11.Role != FormationRole.DepotBuilder, "the one that gave up is not the builder");
         AssertEqual("depot-task", n12.Reason, "with the depot reason");
+
+    }
+
+    // F3 (verify g5a): the role's withhold does not follow a formation that lost the role; it goes back to vanilla.
+    private static void GaveUpCapitalGuardBecomesAnUnwithheldHold()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(30, 50f, 8000f));
+        var busy = ExecutorFixtures.Corps(31, 60f, 9000f);   // busy: it holds the sector's garrison alone, so the garrison prefix withholds no Hold formation
+        busy.Flags |= FormationFlags.InBattle;
+        s.Own.Add(busy);
+        var plan = ExecutorFixtures.HandPlan(s, new int[0]);
+        plan.CapitalFloorStrength = 5000f;
+        var sectors = ExecutorFixtures.Sectors(s);
+
+        var first = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        AssertTrue(first.TryGet(30, out var guard) && guard.Role == FormationRole.CapitalGuard && guard.Withheld, "the capital guard is withheld from vanilla");
+
+        var gaveUp = GaveUpOf(TrackerThatGaveUp(30, 50f, s.CapitalX, s.CapitalZ));
+        var next = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        AssertTrue(next.TryGet(30, out var hold), "still assigned");
+        AssertEqual(FormationRole.Hold, hold.Role, "the guard that gave up on the capital is a Hold");
+        AssertEqual("gave-up", hold.Reason, "named");
+        AssertFalse(hold.Withheld, "and vanilla's again: the guard's withhold does not follow it");
     }
 
     private static void GaveUpReconIsReplacedByTheNextFormation()
@@ -381,14 +416,192 @@ internal static class CampaignExecutorTests
         AssertEqual(9, set[1].InstanceId, "ordered by instance id");
     }
 
-    // The review passes the tracker's set to the allocator (the whole call, pinned) before it publishes the allocation.
+    // The review collects the tracker's set once, hands the objectives it names to the planner and the moves to the allocator.
     private static void ReviewPlanPassesTheTrackersGaveUpSet()
     {
         string review = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
-        int collect = review.IndexOf("MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp);", StringComparison.Ordinal);
+        int collect = review.IndexOf("MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);", StringComparison.Ordinal);
+        int resolve = review.IndexOf("GaveUpObjectives.Resolve(gaveUp, previousPlan, gaveUpObjectives);", StringComparison.Ordinal);
+        int plan = review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal);
         int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
-        AssertTrue(collect > 0 && allocate > collect, "the set is collected before the allocation that reads it");
-        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);"), "and passed in");
+        AssertTrue(collect > 0 && resolve > collect && plan > resolve && allocate > plan, "collect, resolve to objectives, plan, then allocate");
+        AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
+        AssertTrue(HasLine(review, "if (gaveUp.Count > 0 && CampaignPlanStore.TryGetPlan(alliance, out var previousPlan)) GaveUpObjectives.Resolve(gaveUp, previousPlan, gaveUpObjectives);"), "the objectives come from the previous published plan");
+        AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUpObjectives);"), "G3 reads them");
+        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);"), "G4 reads the moves");
+    }
+
+    // F1 (verify g5a): the verifier's repro through the real Plan, Allocate and Review. Every mass member gives up on the main
+    // objective; the next review's plan must not keep that decision with a mass that cannot march.
+    private static void GaveUpMassIsDroppedOrRebuiltNeverStalled()
+    {
+        var day1 = F1World(0);
+        var state = ExecutorFixtures.State();
+        var plan1 = TheaterPlanner.Plan(day1, ExecutorFixtures.Sectors(day1), null, state, null, null, ExecutorFixtures.Speed(), out _);
+        AssertEqual(98, plan1.MainObjectiveId, "day 1: the main effort is the weak objective");
+        AssertTrue(plan1.MassInstanceIds.Count >= 2, "with several corps in the mass: " + string.Join(",", plan1.MassInstanceIds));
+        var massIds = new List<int>(plan1.MassInstanceIds);
+
+        // Both corps miss twice at the main sector's target.
+        var main = plan1.Sectors.Find(x => x.SectorId == plan1.MainSectorId);
+        var tracker = new MoveTracker();
+        foreach (int id in massIds)
+        {
+            float x = day1.Own[day1.IndexOfOwn(id)].X;
+            tracker.RecordIssued(id, x, 0f, main.TargetX, main.TargetZ, 100, queued: false);
+            tracker.Judge(id, x, 0f, x, 0f, 101);
+            tracker.RecordIssued(id, x, 0f, main.TargetX, main.TargetZ, 101, queued: false);
+            AssertEqual(MoveOutcome.GaveUp, tracker.Judge(id, x, 0f, x, 0f, 102), "formation " + id + " gave up");
+        }
+        var moves = GaveUpOf(tracker);
+        var objectives = new List<GaveUpObjective>();
+        GaveUpObjectives.Resolve(moves, plan1, objectives);
+        AssertEqual(massIds.Count, objectives.Count, "every move resolves to the main objective");
+
+        var day2 = F1World(1);
+        // Control: without the set the decision is kept with its unmarchable mass (the stall the verifier reproduced).
+        var stalled = TheaterPlanner.Plan(day2, ExecutorFixtures.Sectors(day2), null, state, null, null, ExecutorFixtures.Speed(), out _);
+        AssertEqual(98, stalled.MainObjectiveId, "control: no set, the decision is kept");
+        AssertEqual(massIds.Count, stalled.MassInstanceIds.Count, "control: with the same mass");
+
+        // The exclusion is for that formation on that objective only.
+        foreach (var unrelated in new[] { new GaveUpObjective { InstanceId = massIds[0], ObjectiveId = 555 }, new GaveUpObjective { InstanceId = 77, ObjectiveId = 98 } })
+        {
+            var st = ExecutorFixtures.State();
+            TheaterPlanner.Plan(day1, ExecutorFixtures.Sectors(day1), null, st, null, null, ExecutorFixtures.Speed(), out _);
+            var kept = TheaterPlanner.Plan(day2, ExecutorFixtures.Sectors(day2), null, st, null, null, ExecutorFixtures.Speed(), out _, new List<GaveUpObjective> { unrelated });
+            AssertEqual(98, kept.MainObjectiveId, "another objective's give-up (" + unrelated.InstanceId + "/" + unrelated.ObjectiveId + ") keeps the decision");
+            AssertEqual(massIds.Count, kept.MassInstanceIds.Count, "and its whole mass");
+        }
+
+        var state2 = ExecutorFixtures.State();
+        var first = TheaterPlanner.Plan(day1, ExecutorFixtures.Sectors(day1), null, state2, null, null, ExecutorFixtures.Speed(), out _);
+        AssertEqual(98, first.MainObjectiveId, "the same day-1 decision");
+        var plan2 = TheaterPlanner.Plan(day2, ExecutorFixtures.Sectors(day2), null, state2, null, null, ExecutorFixtures.Speed(), out _, objectives);
+        AssertTrue(plan2.MainObjectiveId != 98 || !plan2.MassInstanceIds.Exists(id => massIds.Contains(id)),
+            "the decision is dropped or rebuilt: the objective differs, or no formation that gave up is its mass");
+        AssertFalse(plan2.MainObjectiveId == 98 && plan2.MassInstanceIds.Count > 0, "never kept with a mass of formations that gave up on it");
+
+        // The real allocation and the real mover over that plan: nothing stalls, nothing withheld waits on a decision that cannot go.
+        var allocation = ForceAllocator.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null, moves);
+        var host = new FakeMoverHost();
+        var tally = CampaignMover.Review(ExecutorFixtures.Inputs(day2, plan2, allocation, ExecutorFixtures.OpenTempo()), host, tracker, state2);
+        AssertFalse(tally.MainUndispatchableRow, "no kept main effort without a formation the mover can send");
+        if (plan2.MainObjectiveId < 0)
+            AssertEqual(0, allocation.Assignments.FindAll(x => x.Role == FormationRole.MainEffort).Count, "a dropped decision has no main effort");
+        else
+            AssertTrue(allocation.Assignments.Exists(x => x.Role == FormationRole.MainEffort), "a rebuilt decision has a main effort the mover can send");
+        foreach (var x in allocation.Assignments)
+            AssertFalse(x.Role == FormationRole.Support && plan2.MainObjectiveId < 0, "no Support toward a dropped decision");
+    }
+
+    // Two corps, an enemy of 8000 near the weak objective 98 and none elsewhere, day offset for the second review.
+    private static CampaignSnapshot F1World(int dayOffset)
+    {
+        var s = ExecutorFixtures.Wide(dayOffset);
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
+        s.Own.Add(ExecutorFixtures.Corps(3, 400f, 18000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 8000f));
+        return s;
+    }
+
+    private static void GaveUpRecordsLapseAndTheRoleComesBack()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        s.Own.Add(ExecutorFixtures.Corps(2, 450f, 15000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var sectors = ExecutorFixtures.Sectors(s);
+        var tracker = TrackerThatGaveUp(1, 350f, 100f, 0f);   // gave up at review day 102 (the retry was issued on 101)
+
+        AssertEqual(1, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays - 1).Count, "the day before it lapses it is still collected");
+        AssertEqual(0, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays).Count, "GaveUpExpiryDays after the retry it lapses");
+        var lapsed = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays));
+        AssertEqual(FormationRole.MainEffort, lapsed.TryGet(1, out var a1) ? a1.Role : FormationRole.Hold, "the formation may try the same target again");
+
+        // The mover sends it again as a first issue, not a retry, and the tracker is a fresh attempt.
+        var host = new FakeMoverHost();
+        int lapseDay = 101 + MoveTracker.GaveUpExpiryDays;
+        var late = ExecutorFixtures.Wide(lapseDay - ExecutorFixtures.Day);
+        late.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        late.Own.Add(ExecutorFixtures.Corps(2, 450f, 15000f));
+        CampaignMover.Review(ExecutorFixtures.Inputs(late, plan, lapsed, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
+        AssertTrue(host.Moves.Exists(m => m.id == 1), "it is sent again once the give-up has lapsed");
+        AssertFalse(GaveUpOf(tracker, lapseDay).Exists(m => m.InstanceId == 1), "and is no longer given up");
+    }
+
+    private static void GaveUpObjectivesNameTheObjectiveOfTheTarget()
+    {
+        var plan = new TheaterPlan { Alliance = 0 };
+        plan.Sectors.Add(new SectorPlan { SectorId = 3, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
+        plan.Sectors.Add(new SectorPlan { SectorId = 4, Posture = TheaterPosture.Hold, TargetObjectiveId = -1, TargetX = 550f, TargetZ = 0f });
+        var moves = new List<GaveUpMove>
+        {
+            new GaveUpMove { InstanceId = 1, TargetX = 100f, TargetZ = 0f },
+            new GaveUpMove { InstanceId = 2, TargetX = 550f, TargetZ = 0f },   // a Hold sector's point: no objective
+            new GaveUpMove { InstanceId = 3, TargetX = 100.5f, TargetZ = 0f }, // within the tracker's target tolerance
+            new GaveUpMove { InstanceId = 4, TargetX = 300f, TargetZ = 0f }
+        };
+        var into = new List<GaveUpObjective> { new GaveUpObjective { InstanceId = 99, ObjectiveId = 99 } };
+        GaveUpObjectives.Resolve(moves, plan, into);
+        AssertEqual(2, into.Count, "cleared first; two moves went toward an objective's target");
+        AssertTrue(into[0].InstanceId == 1 && into[0].ObjectiveId == 98 && into[1].InstanceId == 3 && into[1].ObjectiveId == 98, "named by the sector plan's objective");
+        GaveUpObjectives.Resolve(moves, null, into);
+        AssertEqual(0, into.Count, "no previous plan, no objectives");
+    }
+
+    // After the fix the state should not occur; if a kept main effort has no sendable member the mover says so once.
+    private static void UndispatchableMainEffortLogsOnceAndClears()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
+        var none = new Allocation { Alliance = 0 };
+        none.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.Hold, plan.MainSectorId, 350f, 0f));
+        var state = ExecutorFixtures.State();
+        var tracker = new MoveTracker();
+        var host = new FakeMoverHost();
+        var first = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, none, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        AssertTrue(first.MainUndispatchableRow, "the first review in the state logs");
+        AssertEqual("[CampaignTempo] alliance=0 main=98 decision=1 chapter=1 undispatchable=true", first.UndispatchableRow(0), "the row");
+        var second = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, none, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        AssertFalse(second.MainUndispatchableRow, "and once per decision");
+        var sendable = new Allocation { Alliance = 0 };
+        sendable.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
+        var third = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, sendable, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        AssertFalse(third.MainUndispatchableRow, "a sendable main effort logs nothing");
+        var again = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, none, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        AssertTrue(again.MainUndispatchableRow, "and the state change back logs again");
+        var noMain = new TheaterPlan { Alliance = 0, DaySerial = s.DaySerial };
+        var quiet = CampaignMover.Review(ExecutorFixtures.Inputs(s, noMain, none, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        AssertFalse(quiet.MainUndispatchableRow, "no main objective, no main effort to miss");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs");
+        AssertTrue(HasLine(BodyOf(runtime, "internal static void Execute("), "if (tally.MainUndispatchableRow) TelemetryRouter.LegacyInfo(tally.UndispatchableRow(alliance), TelemetryLayer.Campaign);"), "the runtime emits it");
+    }
+
+    // F5 (verify g5a, integrator decision): #2 points a formation at the plan target only once the decision is released.
+    private static void ImportanceRedirectWaitsForTheRelease()
+    {
+        ExecutorFixtures.PublishedWorld(out _);
+        AssertFalse(CampaignWithholdView.TrySteering(0, out var plan, out var sectors) || plan != null || sectors != null, "before the release #2 leaves vanilla's pick");
+        ExecutorFixtures.Release(0);
+        AssertTrue(CampaignWithholdView.TrySteering(0, out plan, out sectors) && plan != null && sectors != null, "once released it steers");
+        string view = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignWithholdView.cs"), "internal static bool TrySteering(");
+        AssertTrue(HasLine(view, "if (!Read(alliance, out _, out var model, out var ctx) || !ctx.Released) return false;"), "the one release predicate");
+        CampaignScope.ResetAll();
+    }
+
+    // F4 (verify g5a): the faction index is not the alliance id (P1).
+    private static void PlannerFactionMapReadsTheAllianceNotTheIndex()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/PlannerFactionMap.cs");
+        string body = BodyOf(src, "internal static int AllianceOf(");
+        AssertTrue(HasLine(body, "if (factionIndex < 0 || factionIndex >= AllianceByFaction.Length) return AICampaignReflect.GetAllianceId(factionIndex);"), "an index off the cache is asked of vanilla");
+        AssertTrue(HasLine(body, "alliance = AICampaignReflect.GetAllianceId(factionIndex);"), "the alliance comes from the faction's own alliance");
+        AssertTrue(HasLine(body, "if (alliance >= 0) AllianceByFaction[factionIndex] = alliance;"), "only a valid answer is cached");
+        AssertEqual(2, body.Split(new[] { "AICampaignReflect.GetAllianceId(factionIndex)" }, StringSplitOptions.None).Length - 1, "and no other source of the alliance");
+        AssertFalse(body.Contains("return factionIndex") && !body.Contains("GetAllianceId"), "the index is never returned as the alliance");
     }
 
     private static void CarryingGroupMovedNormally()
@@ -698,7 +911,8 @@ internal static class CampaignExecutorTests
         var w = ExecutorFixtures.PublishedWorld(out _);
         PlanFreshness.NoteToday(ExecutorFixtures.Day + PlanFreshness.MaxAgeDays);
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Reserve), "two days old: still read");
-        AssertTrue(CampaignWithholdView.TrySteering(0, out _, out _), "steering reads it too");
+        ExecutorFixtures.Release(0);
+        AssertTrue(CampaignWithholdView.TrySteering(0, out _, out _), "steering reads it too, once the decision is released");
         PlanFreshness.NoteToday(ExecutorFixtures.Day + PlanFreshness.MaxAgeDays + 1);
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Reserve), "three days old: ignored");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Main), "the mass too");

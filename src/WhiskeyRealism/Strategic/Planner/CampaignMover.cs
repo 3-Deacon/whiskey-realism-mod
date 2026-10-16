@@ -57,6 +57,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // The tempo roll of this review, when one was evaluated (a new decision's launch).
         public LaunchVerdict Tempo;
         public bool TempoFirstRow, TempoReleaseRow;
+        // A kept main effort with no formation the mover can send (first review of the state; see Review). After G3 leaves out the
+        // formations that gave up this state should not occur; the row is how a smoke run would see it.
+        public bool MainUndispatchableRow;
         public int TempoDecision, TempoMainObjective, TempoChapter;
 
         public bool Any => Issued + Confirmed + Failed + Retried + GaveUp + Queued + SkippedPlayer + SkippedBusy + Deferred + Ordered > 0;
@@ -68,6 +71,13 @@ namespace WhiskeyRealism.Strategic.Planner
             return "[CampaignMover] alliance=" + alliance + " issued=" + Issued + " confirmed=" + Confirmed + " failed=" + Failed + " retried=" + Retried
                 + " gaveUp=" + GaveUp + " queued=" + Queued + " skippedPlayer=" + SkippedPlayer
                 + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred + " ordered=" + Ordered;
+        }
+
+        // [CampaignTempo] undispatchable=true, once per decision per entry into the state.
+        public string UndispatchableRow(int alliance)
+        {
+            return "[CampaignTempo] alliance=" + alliance + " main=" + TempoMainObjective + " decision=" + TempoDecision + " chapter=" + TempoChapter
+                + " undispatchable=true";
         }
 
         // [CampaignTempo] on the first review of a decision and on its release (two rows at most).
@@ -115,7 +125,9 @@ namespace WhiskeyRealism.Strategic.Planner
             JudgeLastReview(s, tracker, tally);
             ReleaseRecoverFromOffense(s, allocation, host);
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
-            if (!released && plan.MainObjectiveId >= 0) released = EvaluateLaunch(inputs, host, state, tally);
+            bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
+            NoteUndispatchable(inputs, state, tally, dispatchable);
+            if (!released && dispatchable) released = EvaluateLaunch(inputs, host, state, tally);
             foreach (var role in Priority)
                 for (int k = 0; k < allocation.Assignments.Count; k++)
                     if (allocation.Assignments[k].Role == role)
@@ -164,13 +176,29 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
+        // A decision with a main objective whose MainEffort assignments are none the mover can send (the planner's mass is
+        // G3's; formations that gave up are left out of it, so this should not occur): one telemetry row on entering the state.
+        private static void NoteUndispatchable(MoverInputs inputs, PlannerState state, MoverTally tally, bool dispatchable)
+        {
+            if (inputs.Plan.MainObjectiveId < 0 || dispatchable)
+            {
+                state.UndispatchableRowDecision = -1;
+                return;
+            }
+            if (state.UndispatchableRowDecision == state.DecisionSerial) return;
+            state.UndispatchableRowDecision = state.DecisionSerial;
+            tally.MainUndispatchableRow = true;
+            tally.TempoDecision = state.DecisionSerial;
+            tally.TempoMainObjective = inputs.Plan.MainObjectiveId;
+            tally.TempoChapter = inputs.Chapter;
+        }
+
         // The chapter tempo roll for a new decision's launch (decision 5). Evaluated only when the mass has a dispatchable
-        // MainEffort formation; the verdict releases the decision (TempoReleasedDecision = DecisionSerial) or defers it.
+        // MainEffort formation (the caller checks); the verdict releases the decision (TempoReleasedDecision = DecisionSerial) or defers it.
         private static bool EvaluateLaunch(MoverInputs inputs, IMoverHost host, PlannerState state, MoverTally tally)
         {
             var s = inputs.Snapshot;
             var plan = inputs.Plan;
-            if (!HasDispatchableMainEffort(s, inputs.Allocation, host)) return false;
 
             var idle = new List<float>();
             bool playerInMass = false;

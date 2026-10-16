@@ -33,6 +33,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // The decision whose first [CampaignTempo] row was emitted (bounds the rows to two per decision).
         // Telemetry only, not persisted: after a reload a decision may log its first row once more.
         public int TempoRowDecision = -1;
+        // The decision whose undispatchable-main-effort row was emitted (one row when a kept main effort first has no formation
+        // the mover can send; cleared when it has one again). Telemetry only, not persisted.
+        public int UndispatchableRowDecision = -1;
 
         public void Restore(int mainSector, int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
                             int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1)
@@ -42,6 +45,7 @@ namespace WhiskeyRealism.Strategic.Planner
             TempoReleasedDecision = tempoReleasedDecision;
             LastFullReviewDay = lastFullReviewDay;
             TempoRowDecision = -1;
+            UndispatchableRowDecision = -1;
             CurrentMainSector = mainSector;
             CurrentMainObjective = mainObjective;
             ChallengerObjective = challengerObjective;

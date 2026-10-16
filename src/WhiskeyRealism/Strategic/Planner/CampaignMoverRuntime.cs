@@ -56,6 +56,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 Inputs.Allocation = null;
                 Host.Unbind();
                 if (tally.TempoFirstRow || tally.TempoReleaseRow) TelemetryRouter.LegacyInfo(tally.TempoRow(alliance), TelemetryLayer.Campaign);
+                if (tally.MainUndispatchableRow) TelemetryRouter.LegacyInfo(tally.UndispatchableRow(alliance), TelemetryLayer.Campaign);
                 if (tally.Any) TelemetryRouter.LegacyInfo(tally.Row(alliance), TelemetryLayer.Campaign);
             }
         }

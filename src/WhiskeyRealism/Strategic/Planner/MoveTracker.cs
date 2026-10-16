@@ -17,7 +17,8 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // A move the tracker gave up on (P8): this formation, at this target. The allocator reads the set so the next review does not
-    // send the same formation to the same place again (plan G5a, "the allocator reassigns the role").
+    // send the same formation to the same place again (plan G5a, "the allocator reassigns the role"); G3 reads it as
+    // GaveUpObjective, so a mass whose members all gave up on the main objective is not kept.
     public struct GaveUpMove
     {
         public int InstanceId;
@@ -26,6 +27,34 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Matches(float tx, float tz)
         {
             return MoveTracker.SameTarget(TargetX, TargetZ, tx, tz);
+        }
+    }
+
+    // A formation that gave up on a main objective (the G3 form of GaveUpMove): TheaterPlanner.MassFor leaves it out of the mass
+    // of that objective, as it leaves out a busy formation.
+    public struct GaveUpObjective
+    {
+        public int InstanceId;
+        public int ObjectiveId;
+    }
+
+    public static class GaveUpObjectives
+    {
+        // Names the objective each gave-up move was sent toward: the previous published plan's sector whose target the move's
+        // target is (a MainEffort or Support move goes to its sector's TargetX/Z, the Assignment's own target). A move toward
+        // anything else (a depot, a recon hold point, a supply source) has no objective and is not G3's concern. Pure.
+        public static void Resolve(IReadOnlyList<GaveUpMove> moves, TheaterPlan previous, List<GaveUpObjective> into)
+        {
+            into.Clear();
+            if (moves == null || previous == null) return;
+            for (int m = 0; m < moves.Count; m++)
+                for (int k = 0; k < previous.Sectors.Count; k++)
+                {
+                    var sp = previous.Sectors[k];
+                    if (sp == null || sp.TargetObjectiveId < 0 || !moves[m].Matches(sp.TargetX, sp.TargetZ)) continue;
+                    into.Add(new GaveUpObjective { InstanceId = moves[m].InstanceId, ObjectiveId = sp.TargetObjectiveId });
+                    break;
+                }
         }
     }
 
@@ -41,6 +70,12 @@ namespace WhiskeyRealism.Strategic.Planner
     public sealed class MoveTracker
     {
         public const int MaxMovesPerDay = 6;
+        // A give-up lasts this many review days, then the formation may try the same target again. A give-up costs two
+        // reviews (one miss, one retry); vanilla's refusal of a target (MoveUnitTo, 14486) follows a state's war status, which
+        // changes in days or weeks, not reviews. Fourteen days is a week of daily reviews on each side of that: long enough
+        // that the retry (2 of the daily budget of 6 per formation) does not repeat every cycle, short enough that a
+        // formation is not shut out of an objective for a season (plan G5a, as built item 3).
+        public const int GaveUpExpiryDays = 14;
         public const float ConfirmFraction = 0.25f;
         // A waypoint within this of the target's distance does not count as having moved toward it.
         private const float WaypointEpsilon = 1f;
@@ -72,8 +107,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 case State.Failed:
                 case State.Confirmed:
                     return true;      // Confirmed: the caller skips a formation already underway (its waypoint is the target)
+                case State.GaveUp:
+                    return Expired(e, daySerial);  // not again at this target until the give-up lapses
                 default:
-                    return false;     // Issued: in transit; GaveUp: not again at this target
+                    return false;     // Issued: in transit
             }
         }
 
@@ -153,12 +190,13 @@ namespace WhiskeyRealism.Strategic.Planner
             into.Sort();
         }
 
-        // Every move given up on, ordered by instance id so the allocator's input is deterministic.
-        public void CollectGaveUp(List<GaveUpMove> into)
+        // Every move given up on and not yet lapsed (GaveUpExpiryDays), ordered by instance id so the planner's and the
+        // allocator's input is deterministic.
+        public void CollectGaveUp(List<GaveUpMove> into, int daySerial)
         {
             into.Clear();
             foreach (var pair in _entries)
-                if (pair.Value.State == State.GaveUp)
+                if (pair.Value.State == State.GaveUp && !Expired(pair.Value, daySerial))
                     into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ });
             into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
         }
@@ -196,6 +234,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     InstanceId = r.InstanceId, UnitKey = r.UnitKey, FromX = r.TargetX, FromZ = r.TargetZ, TargetX = r.TargetX, TargetZ = r.TargetZ,
                     IssuedDay = r.IssuedDay, Retries = r.Retries, State = r.Retries >= 1 ? State.GaveUp : State.Failed
                 };
+        }
+
+        private static bool Expired(Entry e, int daySerial)
+        {
+            return daySerial - e.IssuedDay >= GaveUpExpiryDays;
         }
 
         private int BudgetUsed(int daySerial)

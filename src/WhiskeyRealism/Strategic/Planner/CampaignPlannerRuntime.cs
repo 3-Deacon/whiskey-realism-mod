@@ -113,12 +113,18 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (state.CampaignSeed == 0L)
                         state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
                     Battles.Take(alliance, snapshot.DaySerial, PendingBattles);
+                    // P8: the moves the tracker gave up on (not yet lapsed). G3 leaves a formation out of the mass of the objective
+                    // it gave up on, G4 takes the role from a formation that gave up on the target it would send it to.
+                    var gaveUp = new List<GaveUpMove>();
+                    MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);
+                    var gaveUpObjectives = new List<GaveUpObjective>();
+                    if (gaveUp.Count > 0 && CampaignPlanStore.TryGetPlan(alliance, out var previousPlan)) GaveUpObjectives.Resolve(gaveUp, previousPlan, gaveUpObjectives);
                     TheaterPlan plan;
                     string trace;
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUpObjectives);
                     }
                     // G1b: the recon tasks for this plan (probe verdicts on the battles it judged, then the tasks);
                     // G4's allocation below picks their formations and the sync binds the missions.
@@ -129,9 +135,6 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        // P8: the moves the tracker gave up on cost their formation that role at this review.
-                        var gaveUp = new List<GaveUpMove>();
-                        MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp);
                         allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp);
                     }
                     SyncRecon(snapshot, allocation);

@@ -136,12 +136,14 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The importance-pointer Postfix's inputs (#2): the published plan and sector model, subject to the same freshness and
-        // pre-war rules.
+        // pre-war rules, and only once the decision is released. Before the tempo roll releases the launch #2 leaves vanilla's own
+        // pick, so no formation vanilla leaves free in a Main or Support sector is pointed at the plan target ahead of the main
+        // effort (decision 5, no piecemeal attack).
         internal static bool TrySteering(int alliance, out TheaterPlan plan, out SectorModel sectors)
         {
             plan = null;
             sectors = null;
-            if (!Read(alliance, out _, out var model, out _)) return false;
+            if (!Read(alliance, out _, out var model, out var ctx) || !ctx.Released) return false;
             if (!CampaignPlanStore.TryGetPlan(alliance, out var published) || model == null) return false;
             plan = published;
             sectors = model;

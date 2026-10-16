@@ -22,7 +22,9 @@ namespace WhiskeyRealism.Patches
     // vanilla's live points / distancepoints / importancevalues are its own gate inputs here, not planner inputs, so the
     // fog-honest rule is untouched). Everywhere else vanilla's selection stands, so local counterattacks keep working
     // and nothing is pulled cross-map. Vanilla's supply gate (ownpoints <= supplycapacity, 10983) relies on the zone
-    // supply-capacity fix of fix/campaign-logistics-bugs (G5a builds on it). Reads the published plan only (a stale plan, a
+    // supply-capacity fix of fix/campaign-logistics-bugs (G5a builds on it). Reads the published plan only, and only once the tempo
+    // roll has released the decision (CampaignWithholdView.TrySteering: before release vanilla's own pick stands, so no formation
+    // is pointed at the target ahead of the main effort) (a stale plan, a
     // pre-war scenario and an alliance other than 0 and 1 steer nothing). Rollback: Enable Campaign Planner Executors.
     //
     // History: v0.2.0 targeted AICampaign.UpdateImportanceValues (wrong shape: parameterless, chunked, writes only
