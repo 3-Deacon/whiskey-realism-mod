@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Patches
         // Called from the rewritten vanilla IL in place of the constant 2 of "Random.Range(1, 2)".
         public static int UpperBound()
         {
-            PatchFirstFire.Mark("tactical.patch.artillery-side.hook");
+            PatchFirstFire.Mark("tactical.patch.artillery-chain-side.hook");
             return ArtillerySideIl.UpperBound(Enabled());
         }
 

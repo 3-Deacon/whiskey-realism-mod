@@ -433,6 +433,10 @@ The Whiskey play-template ↔ Scourge play translation:
 
 The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetypes (after the 2026-05-23 generic rename — `LeeEnvelopment → DoubleEnvelopment` etc.). Offensive templates only fire when stance allows attack; defensive templates only on Defender stance.
 
+### Division think loop: local opportunities now exist (BC13, 2026-10-15)
+
+Scourge of War's division AI re-thinks locally every cycle and takes an opening (a gap, a shaken unit, an unanchored flank) when the commander's temperament allows it. Whiskey's tactical stack had only the army-level plan until BC13: nothing at division level reacted to what the line saw. `OpportunityTick` adds that think loop, fog-honest (Visible/Remembered rows and a perceived-ground lattice only), per deciding commander, with a personality-weighted odds/reach/risk decision, a bounded exploit and an abort chain. See [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core (Commander opportunity).
+
 ### Whiskey ↔ vanilla macroai
 
 #44 `BattleMacroStrategyPatch` (Postfix on `AIBattle.CheckGlobalAIStrategy`, line 6314, plus a value-restoring Prefix) is the single owner of the AIBattle instance `macroai`. Vanilla's `AdjustGroupAIStance` (4221) then drives per-group `ai_stance` for brigades Whiskey has no explicit role for, so the line of battle forms through vanilla's own cascade. The 2026-05-23 `BattleMacroAIOverridePatch` Prefix that wrote the persisted `sideinformation[side].macroai` was removed on 2026-10-15; its reinforcement-opportunity opinion is now #44's fallback when the operations ledger has none.

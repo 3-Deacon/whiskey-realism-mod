@@ -86,6 +86,10 @@ Rules:
 
 **Avenue flags (BC10):** `TacticalVisionRuntimeAdapter` reads `roadAnchored` and `crossingAnchored` from the terrain grid (`AvenueAnchors`): road-anchored needs half the entry-to-target samples on road or bridge, or the entry point within 20 m of a road cell; crossing-anchored needs a ford or bridge sample, or a vanilla `rivercrossingpositions` point within 50 m of the segment. Fewer avenues read road-anchored than before (every entry point with a target used to), so `TacticalDefensiveLineAnchorPlanner` uses its generic intercept and frontage more often.
 
+### Exploit orders and reserve release (BC13)
+
+The commander opportunity tick (`Tactical/Battle/Producers/OpportunityIntentProducer`, plan § BC13) can override the ledger for one asset at a time. An exploit order is a `CommandDoctrineOrder` carrying `ExploitId` (role `SupportingAttack` for a gap, shaken, flank, battery or cluster exploit with an attack task; role `Defender` with the `Counterstroke` task for a Defender's penetration on a second-line reserve). The posture pipeline (`PosturePipeline.Run`, `ExploitOverrideKind`) reads `ExploitTable` before the ledger order: the asset's Moves go out without the order delay, its formation follows the exploit task, and its descendants "follow" (no Move or Formation). The ledger itself is not rewritten: when the exploit ends the asset returns to its ledger assignment, and a cooldown (`AssetCooldownHours`) keeps it from being picked again at once. `DirectChildAllocator.ReleaseReserves` releases reserves one per interval above a floor (`ReserveReleaseState`, `TacticalReserveRelease` rows with `reason=stagger|crisis`); a crisis release of an exploit asset's parent line aborts the exploit (`line-crisis`). Rollback flags: `Enable Commander Opportunity`, `Enable Staggered Reserve Release`.
+
 ## Other Doctrine Consumers
 
 | Gate | Whiskey owner | Write anchor | Behavior |

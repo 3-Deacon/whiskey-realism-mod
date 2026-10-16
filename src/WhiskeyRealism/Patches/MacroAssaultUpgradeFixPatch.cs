@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Patches
         // Called from the rewritten vanilla IL in place of "if (newmacroaitoset == 1) newmacroaitoset = 0"; the result is stored in num4.
         public static int Hook(AIBattle battle, int num4)
         {
-            PatchFirstFire.Mark("tactical.patch.macro-upgrade.hook");
+            PatchFirstFire.Mark("tactical.patch.macro-assault-upgrade.hook");
             try
             {
                 if (Enabled()) return MacroUpgradeIl.UpgradedDecision(num4);

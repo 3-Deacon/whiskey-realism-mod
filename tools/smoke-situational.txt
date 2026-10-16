@@ -77,3 +77,10 @@ campaign.patch.battle-result-observer              # BattleMonument.UpdateAllian
 tactical.patch.wl-order-capture*                   # AIBattle.CheckCurrentOrderUpdate: its callers call it only in a W&L career (dlc_scenarioactive)
 tactical.patch.wl-removal-source.*                 # AIBattle.CheckRemovalOfOrders: UpdateDLCPlayerOrders (6747) calls it only in a W&L career
 campaign.patch.lost-orders-fow                     # DLC_WL.LaunchIncident: W&L career, when an incident is launched
+
+# BC13 commander opportunity bundle (plan 2026-10-15-battle-core.md, BC13). The Transpiler hooks and the steer mark only when their
+# vanilla call site runs in the situation named here.
+tactical.patch.macro-assault-upgrade.hook          # CheckGlobalAIStrategy upgrade block: only when no flanking is possible and the balance clears the assault trigger
+tactical.patch.reserve-support-pick.hook           # CheckUseOfReserves: only with an outflanked regiment in an AI group
+tactical.patch.separated-enemy*                    # CheckForSeparatedEnemy: micro cycle 26 with at least two hotspot clusters
+tactical.patch.artillery-chain-side.hook           # AssignReserves artillery loop: only for a chain with artillery groups when no flank reserve was assigned first in that call
