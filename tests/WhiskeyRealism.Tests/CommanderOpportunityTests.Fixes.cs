@@ -450,6 +450,31 @@ internal static partial class CommanderOpportunityTests
         AssertEqual(1, ArtillerySideIl.Rewrite(copy, RandomPickRangeIl.ResolveRandomRangeInt(), hook, 2), "a count of one against an expected two reports one");
         for (int i = 0; i < copy.Count; i++) AssertTrue(copy[i].opcode == vanilla[i].opcode, "and changes nothing (" + i + ")");
 
+        // The exact anchor: the lower bound must be the constant 1, and a second site makes the rewrite refuse.
+        var range = RandomPickRangeIl.ResolveRandomRangeInt();
+        var zeroLower = new System.Collections.Generic.List<CodeInstruction>
+        {
+            new CodeInstruction(OpCodes.Ldc_I4_0), new CodeInstruction(OpCodes.Ldc_I4_2), new CodeInstruction(OpCodes.Call, range), new CodeInstruction(OpCodes.Ret),
+        };
+        AssertEqual(0, ArtillerySideIl.Rewrite(zeroLower, range, hook, 1), "Range(0, 2) is not the artillery pick");
+        AssertTrue(zeroLower[1].opcode == OpCodes.Ldc_I4_2, "and is left alone");
+        var twice = new System.Collections.Generic.List<CodeInstruction>();
+        for (int site = 0; site < 2; site++)
+        {
+            twice.Add(new CodeInstruction(OpCodes.Ldc_I4_1));
+            twice.Add(new CodeInstruction(OpCodes.Ldc_I4_2));
+            twice.Add(new CodeInstruction(OpCodes.Call, range));
+        }
+        twice.Add(new CodeInstruction(OpCodes.Ret));
+        AssertEqual(2, ArtillerySideIl.Rewrite(twice, range, hook, 1), "two sites against an expected one");
+        AssertTrue(twice[1].opcode == OpCodes.Ldc_I4_2 && twice[4].opcode == OpCodes.Ldc_I4_2, "and neither is rewritten");
+        var once = new System.Collections.Generic.List<CodeInstruction>
+        {
+            new CodeInstruction(OpCodes.Ldc_I4_1), new CodeInstruction(OpCodes.Ldc_I4_2), new CodeInstruction(OpCodes.Call, range), new CodeInstruction(OpCodes.Ret),
+        };
+        AssertEqual(1, ArtillerySideIl.Rewrite(once, range, hook, 1), "one site");
+        AssertTrue(once[1].Calls(hook), "the bound becomes the hook call");
+
         string patch = ReadSrc("Patches/ArtilleryChainSideFixPatch.cs");
         AssertContains(patch, "[HarmonyPatch(typeof(AIBattle), \"AssignReserves\")]", "the target");
         AssertContains(patch, "return ArtillerySideIl.UpperBound(Enabled());", "a live flag read");

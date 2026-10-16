@@ -398,6 +398,9 @@ internal static partial class CommanderOpportunityTests
         fx.Inf(110f, -60f);
         fx.Inf(210f, -25f, melee: true);
         fx.Inf(300f, -55f);
+        // Clear of every own sample (81 m or more) and not in melee, 95 m behind the trace (the 200 m regiment's footprint reaches
+        // lateral 160): only the 100 m minimum depth keeps it out.
+        fx.Inf(160f, -85f);
         var d = new OpeningDetector();
         Settle(d, fx, defender: true);
         AssertEqual(0, CountKind(d, OpeningKind.Penetration), "close contact alone is no counterstroke trigger");

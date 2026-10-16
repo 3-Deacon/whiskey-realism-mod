@@ -217,7 +217,9 @@ internal static partial class CommanderOpportunityTests
     private static void DetGapSecondLine()
     {
         var fx = GapLine();
-        fx.Inf(200f, 750f);   // a second line 150 m behind the gap, inside the corridor
+        // A second line 250 m behind the gap, inside the 300 m corridor: more than the 200 m line band deeper than the front, so
+        // it is not itself front-line (a unit within the band would be, and would close the gap by shrinking it below 150 m).
+        fx.Inf(200f, 850f);
         var d = new OpeningDetector();
         Detect(d, fx);
         AssertEqual(0, CountKind(d, OpeningKind.Gap), "a unit behind the gap closes it");

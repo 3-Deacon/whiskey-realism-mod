@@ -27,6 +27,8 @@ internal static partial class CommanderOpportunityTests
             ("bc13 OPP-PHASE the Withdraw phase launches nothing and ends a live exploit", TickWithdraw),
             ("bc13 COUNTER-ASSET a Defender launches a Penetration counterstroke on a second-line reserve", TickDefender),
             ("bc13 OPP-TICK a stand-by tick with no confirmed opening submits nothing and holds no entry", TickIdle),
+            ("bc13 OPP-ROLL a roll-miss passes the opening over for 0.1 h before the same commander decides on it again", TickRollMissHesitates),
+            ("bc13 OPP-INTEGRITY-SIBLING two divisions deciding in one tick: the second sees the first's launch in the commitment ledger", TickSiblingLedger),
         };
     }
 
@@ -421,5 +423,89 @@ internal static partial class CommanderOpportunityTests
         AssertEqual(0, closed.Table.Count, "no confirmed opening, no exploit");
         AssertEqual(0, closed.Sink.Launches.Count, "no launch row");
         AssertTrue(closed.Sink.Summaries >= 1, "the opening summary row is emitted on its interval");
+    }
+
+    // The first commander index at or above `from` whose first eight rolls on opening 1 are all below 0.9 (see FindReliableCommander).
+    private static int ReliableCommanderFrom(int from, int staggerSlot = -1)
+    {
+        for (int c = from; c < 20000; c++)
+        {
+            if (staggerSlot >= 0 && (c & 3) != staggerSlot) continue;
+            bool ok = true;
+            for (int n = 0; n < 8 && ok; n++) ok = OpportunityDoctrine.Roll(7, c, 1, n) < 0.9f;
+            if (ok) return c;
+        }
+        throw new Exception("no reliable commander index");
+    }
+
+    private static void TickRollMissHesitates()
+    {
+        BattleScope.ResetAll();
+        // A commander whose first roll on opening 1 misses (>= the 0.95 chance cap) and whose next six all hit: without the
+        // hesitation mark he would launch at his very next decision, 0.05 h later.
+        int missing = -1;
+        for (int c = 40; c < 40000 && missing < 0; c++)
+        {
+            if (OpportunityDoctrine.Roll(7, c, 1, 0) < 0.95f) continue;
+            bool hits = true;
+            for (int n = 1; n <= 6 && hits; n++) hits = OpportunityDoctrine.Roll(7, c, 1, n) < 0.9f;
+            if (hits) missing = c;
+        }
+        AssertTrue(missing >= 0, "a first-miss commander exists");
+        TickFx t = TickFx.Attacker();
+        t.Patch(t.Div, (ref UnitRecord r) => { r.Commander = missing; });
+        bool missed = false;
+        for (int i = 0; i < 14 && !missed; i++)
+        {
+            t.Run();
+            foreach (string d in t.Sink.Declines) if (d.StartsWith(OpportunityDoctrine.RollMiss, StringComparison.Ordinal)) missed = true;
+        }
+        AssertTrue(missed, "the first decision is a roll-miss");
+        AssertEqual(0, t.Table.Count, "and launches nothing");
+        double passedOver = t.Now;
+        while (t.Now < passedOver + 0.09)
+        {
+            t.Run();
+            AssertEqual(0, t.Table.Count, "the passed-over opening is not decided again within 0.1 h (t=" + t.Now + ")");
+        }
+        AssertTrue(t.RunToLaunch(8), "once the hesitation has run out the next decision launches");
+    }
+
+    private static void TickSiblingLedger()
+    {
+        BattleScope.ResetAll();
+        // One closed line of five holding brigades at depth 0, 110 m apart (100 m wide: a 10 m edge gap). Division A holds g0 and
+        // g1, division B holds g2 and g3. Removing one interior brigade opens 120 m (below the 150 m gap minimum), two adjacent
+        // ones 230 m. Division A launches g1 on the single gap in front. Division B decides on the same tick: for its g2 the
+        // commitment ledger must already carry g1, so the line-integrity check (risk 2) fails; without A's same-tick launch in
+        // the ledger g2 would pass it and fail only the later concurrency check (risk 7, the opening is claimed). Both commanders
+        // are due on the same tick (their stagger is 0). The division's last-failing reason is the one reported, so each has one asset.
+        var t = new TickFx();
+        t.Army = t.Fx.OwnGroup();
+        t.Patch(t.Army, (ref UnitRecord r) => { r.UnitTyp = TacticalUnitType.BattleGroupArmy; });
+        int commanderA = ReliableCommanderFrom(40, 0);
+        int commanderB = ReliableCommanderFrom(commanderA + 1, 0);
+        var ids = new List<int>();
+        t.Div = t.Fx.OwnGroup(t.Army);
+        t.Patch(t.Div, (ref UnitRecord r) => { r.UnitTyp = TacticalUnitType.BattleGroupDivision; r.Commander = commanderA; r.GroupMorale = 0.8f; });
+        int g1 = AddBrigade(t, 110f, 0f, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, ids);
+        int g0 = AddBrigade(t, 0f, 0f, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, ids);
+        t.Div = t.Fx.OwnGroup(t.Army);
+        t.Patch(t.Div, (ref UnitRecord r) => { r.UnitTyp = TacticalUnitType.BattleGroupDivision; r.Commander = commanderB; r.GroupMorale = 0.8f; });
+        AddBrigade(t, 220f, 0f, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, ids);
+        int g3 = AddBrigade(t, 330f, 0f, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, ids);
+        // g0 and g3 hold the line ends and are not candidates (a Safety claim makes an asset ineligible), so each division has
+        // exactly one asset: g1 and g2.
+        t.World.Safety.Add(TickFx.IdOf(g0));
+        t.World.Safety.Add(TickFx.IdOf(g3));
+        t.World.MainEffortSector = -1;
+        t.Fx.Inf(60f, 300f);
+        t.Fx.Inf(330f, 300f);
+        for (int i = 0; i < 12 && t.Table.Count == 0; i++) t.Run();
+        AssertEqual(1, t.Table.Count, "one launch");
+        AssertEqual(TickFx.IdOf(g1), t.Table.At(0).AssetId, "division A's g1, a brigade of the closed line");
+        string declines = string.Join(",", t.Sink.Declines);
+        AssertTrue(declines.Contains("line-integrity@"), "division B's g2 is refused for the line the ledger shows, not for the claimed opening: " + declines);
+        AssertFalse(declines.Contains("concurrency@"), "the integrity check comes first: " + declines);
     }
 }
