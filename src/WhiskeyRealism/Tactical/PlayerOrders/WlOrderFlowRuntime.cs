@@ -116,6 +116,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _reachedSession = int.MinValue;
             _reachedAt = 0.0;
             _followUpSession = int.MinValue;
+            EnemyRetreatGuard.Clear();
             _prestigeSession = int.MinValue;
             _prestigeOrigin = OrderOrigin.Vanilla;
             _prestigeLast = float.NaN;
@@ -143,6 +144,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static bool CouriersOn()
         {
             return Plugin.EnableWlOrderCouriers != null && Plugin.EnableWlOrderCouriers.Value;
+        }
+
+        private static bool EnemyRetreatGuardOn()
+        {
+            return Plugin.EnableWlEnemyRetreatGuard != null && Plugin.EnableWlEnemyRetreatGuard.Value;
+        }
+
+        private static bool TextOn()
+        {
+            return Plugin.EnableWlOrderText != null && Plugin.EnableWlOrderText.Value;
         }
 
         private static bool FollowUpOn()
@@ -260,6 +271,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         {
             queued = false;
             if (call.Campaign) return RouteCampaign(in call);
+            if (TryDropEnemySideRetreat(in call)) return CaptureVerdict.Drop;
             Regiment unit = call.Unit;
             int type = call.Type;
             var input = default(CaptureInput);
@@ -335,23 +347,50 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static CaptureVerdict RouteCampaign(in OrderCall call)
         {
             if (Delivering || !WlCampaignCourierRuntime.CaptureWanted()) return CaptureVerdict.Pass;
+            if (!ReachesPlayerPanel(call.Unit, call.Type, campaignCall: true)) return CaptureVerdict.Pass;
+            return WlCampaignCourierRuntime.Capture(call.Unit, call.Type, call.Position, call.Name, call.Rotation, call.Width, call.Depth);
+        }
+
+        // Would vanilla's gates (8251-8369) let this call reach the player's panel? The player's command,
+        // parent unit and campaign group come from the per-frame cache; the cheap facts are read first.
+        private static bool ReachesPlayerPanel(Regiment unit, int type, bool campaignCall)
+        {
             RefreshFrame();
             var facts = default(CaptureFacts);
-            facts.CampaignCall = true;
-            facts.Type = call.Type;
+            facts.CampaignCall = campaignCall;
+            facts.Type = type;
             facts.WlActive = DLC_WL.dlc_scenarioactive;
             facts.HasCurrentCommand = _hasCommand;
             facts.PlayerIsCic = _isCic;
-            if (!facts.WlActive || !_hasCommand || _isCic) return CaptureVerdict.Pass;
-            Regiment unit = call.Unit;
+            if (!facts.WlActive || !_hasCommand || _isCic) return false;
             BattleUnits bunits = Bunits();
             facts.EodCycle = bunits != null && bunits.eodcycle > 0;
             facts.UnitMissing = (UnityEngine.Object)unit == null || (UnityEngine.Object)unit.transform.parent == null;
             facts.UnitIsPlayerAlliance = !facts.UnitMissing && unit.alliance == GameVars.playeralliance;
-            if (WlOrderCaptureGate.CheapReject(in facts)) return CaptureVerdict.Pass;
-            FillChainFacts(ref facts, unit, call.Type, bunits);
-            if (!WlOrderCaptureGate.ReachesDedupe(in facts)) return CaptureVerdict.Pass;
-            return WlCampaignCourierRuntime.Capture(unit, call.Type, call.Position, call.Name, call.Rotation, call.Width, call.Depth);
+            if (WlOrderCaptureGate.CheapReject(in facts)) return false;
+            FillChainFacts(ref facts, unit, type, bunits);
+            return WlOrderCaptureGate.ReachesDedupe(in facts);
+        }
+
+        // BUG-WL-019 (D13, N2): a type-15 call made while the enemy's or the feud's AIBattle is inside
+        // CheckRemovalOfOrders is the enemy's retreat sent to the player by mistake. A bug fix, so it does
+        // not depend on the order flow's switches or on Commander Mode.
+        private static bool TryDropEnemySideRetreat(in OrderCall call)
+        {
+            if (!EnemyRetreatGuard.IsEnemySideRetreat(call.Type, EnemyRetreatGuard.Stamp)) return false;
+            if (!MasterEnabled() || !EnemyRetreatGuardOn()) return false;
+            if (!ReachesPlayerPanel(call.Unit, call.Type, call.Campaign)) return false;
+            var entry = new CourierEntry
+            {
+                UnitId = call.Unit.gameObject.GetInstanceID(),
+                Type = call.Type,
+                Origin = call.Origin,
+                IssuerKey = EnemyRetreatGuard.Stamp,
+                IssuedAt = TacticalDoctrineTime.NowBattleHours,
+            };
+            Host.Row(in entry, "drop", "enemy-side-retreat");
+            OnceLog.Info("wl-order:first-enemy-retreat-dropped", "[W&LOrder] the enemy side's retreat order was not sent to the player");
+            return true;
         }
 
         private static void FillChainFacts(ref CaptureFacts f, Regiment unit, int type, BattleUnits bunits)
@@ -478,6 +517,31 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (slot == null || slot.type != 13) Latch.Reset();
             Flow.RunPass();
             SamplePrestige();
+            CorrectStaleIssuer();
+        }
+
+        // BUG-WL-022 (D18, N3): the order on the panel names the commander of the unit that issued it; when
+        // that commander has since been killed, relieved or swapped, the portrait is the order group's
+        // current commander. Writes the portrait id only.
+        private static void CorrectStaleIssuer()
+        {
+            try
+            {
+                if (_isCic || !TextOn()) return;
+                DLC_WL.GivenOrders order = DLC_WL.givenorder;
+                if (order == null || (UnityEngine.Object)order.groupunit == null || GameVars.commander == null) return;
+                int id = order.commanderid;
+                bool exists = id >= 0 && id < GameVars.commander.Count && GameVars.commander[id] != null;
+                Regiment command = exists ? GameVars.commander[id].currentcommand : null;
+                int owner = (UnityEngine.Object)command != null ? command.commander : -1;
+                if (!StaleIssuer.TryReplacement(id, exists, owner, order.groupunit.commander, DLC_WL.dlc_chosencommander, out int replacement)) return;
+                order.commanderid = replacement;
+                OnceLog.Info("wl-order:first-stale-issuer", "[W&LOrder] the issuer shown on the panel was replaced by the order group's commander");
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:stale-issuer", "[W&LOrder] correcting the issuer failed: " + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         // What the order session that just ended paid, as one row (a non-paying session always gets one: it

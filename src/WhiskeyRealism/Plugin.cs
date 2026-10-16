@@ -85,6 +85,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableWlOrderText { get; private set; }
         internal static ConfigEntry<bool> FixCapitalDefensePlayerOrder { get; private set; }
         internal static ConfigEntry<bool> EnableWlOrderFollowUp { get; private set; }
+        internal static ConfigEntry<bool> EnableWlEnemyRetreatGuard { get; private set; }
+        internal static ConfigEntry<bool> FixLostOrdersFogGrid { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -577,6 +579,20 @@ namespace WhiskeyRealism
                 "sample; needs Enable W&L Order Readmit); on the campaign map a reached Redeploy, Offensive, Offensive Operation " +
                 "or Engage order is acknowledged with a short message. Information only: nothing moves and nothing is taken away. " +
                 "Off: no follow-up and no acknowledgement.");
+            EnableWlEnemyRetreatGuard = Config.Bind(
+                "W&L",
+                "Enable W&L Enemy Retreat Order Guard",
+                true,
+                "Default ON. Vanilla checks the enemy army's order list with the same code as yours, so when the ENEMY army retreats a " +
+                "top-level W&L player is told 'our army retreats'. With this on that order is not sent to you (BUG-WL-019). Your own " +
+                "army's retreat order is unchanged. Off: vanilla.");
+            FixLostOrdersFogGrid = Config.Bind(
+                "W&L",
+                "Fix Lost Orders Fog Grid",
+                true,
+                "Default ON. Vanilla hides the paper-map fog-of-war grid when the Lost Orders incident is rolled and then, when the " +
+                "incident does not apply (no Expert Spy companion), leaves it hidden until the paper map is closed and opened again. " +
+                "With this on the grid is shown again at once (BUG-WL-020). Off: vanilla.");
             FixCapitalDefensePlayerOrder = Config.Bind(
                 "W&L",
                 "Fix Capital Defense Player Order",

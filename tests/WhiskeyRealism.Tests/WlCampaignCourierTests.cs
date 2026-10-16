@@ -367,15 +367,16 @@ internal static class WlCampaignCourierTests
         string flow = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderFlowRuntime.cs");
         int start = flow.IndexOf("private static CaptureVerdict RouteCampaign(", StringComparison.Ordinal);
         AssertTrue(start >= 0, "a campaign branch");
-        string body = flow.Substring(start, flow.IndexOf("private static void FillChainFacts(", start, StringComparison.Ordinal) - start);
-        int gate = body.IndexOf("WlOrderCaptureGate.ReachesDedupe(", StringComparison.Ordinal);
+        string body = flow.Substring(start, flow.IndexOf("private static bool ReachesPlayerPanel(", start, StringComparison.Ordinal) - start);
+        int gate = body.IndexOf("ReachesPlayerPanel(call.Unit, call.Type, campaignCall: true)", StringComparison.Ordinal);
         int capture = body.IndexOf("WlCampaignCourierRuntime.Capture(", StringComparison.Ordinal);
         AssertTrue(gate >= 0 && capture > gate, "vanilla's gate (8366) before the campaign runtime");
-        AssertTrue(body.Contains("facts.CampaignCall = true"), "the gate is asked as a campaign call");
         AssertFalse(body.Contains("Readmit"), "no re-admit in the campaign branch");
+        int shared = flow.IndexOf("private static bool ReachesPlayerPanel(", StringComparison.Ordinal);
+        string gateBody = flow.Substring(shared, flow.IndexOf("private static bool TryDropEnemySideRetreat(", shared, StringComparison.Ordinal) - shared);
+        AssertTrue(gateBody.Contains("WlOrderCaptureGate.ReachesDedupe(") && gateBody.Contains("facts.CampaignCall = campaignCall;"), "the shared gate is asked with the call's own campaign flag");
         AssertTrue(flow.Contains("if (call.Campaign) return RouteCampaign(in call);"), "the route sends campaign calls there");
-        string capturePatch = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlOrderFlowRuntime.cs");
-        AssertTrue(capturePatch.Contains("if (Delivering) return true;"), "a delivered order is never captured twice");
+        AssertTrue(flow.Contains("if (Delivering) return true;"), "a delivered order is never captured twice");
     }
 
     private static void DeliveryRunsAfterFlush()
