@@ -27,6 +27,8 @@ internal static partial class CommanderOpportunityTests
             ("bc13 FIX-STANCE-FEUD the feud instance and a non-orchestrated side are untouched; every Commander Mode runs it", FixStanceFeud),
             ("bc13 FIX-STANCE-RETREAT an army retreat releases the fix's stamps once and re-stamps nothing", FixStanceRetreat),
             ("bc13 FIX-RENEW the charge doctrine reads timetorenewaichargecheck, so vanilla's dead renew test needs no fix", FixRenew),
+            ("bc13 FIX-SEP vanilla's CheckForSeparatedEnemy returns on aiassaultmove before any write (real IL)", FixSepIl),
+            ("bc13 FIX-SEP the steer sets aiassaultmove for a Whiskey-commanded group only, and the Finalizer restores it", FixSepPatch),
         };
     }
 
@@ -309,5 +311,47 @@ internal static partial class CommanderOpportunityTests
         string charge = ReadSrc("Tactical/Battle/Producers/ChargeIntentProducer.cs");
         AssertContains(charge, "GamePrefs.timetorenewaichargecheck", "the charge producer reads timetorenewaichargecheck");
         AssertContains(ReadSrc("Tactical/Battle/ChargeDoctrine.cs"), "RefusalBackoffSeconds(float vanillaRenewHours)", "and the doctrine turns it into the refusal back-off");
+    }
+
+    // ------------------------------------------------------------------ #121 separated enemy steer
+
+    // Vanilla's first test (8078): "... || aigroup.aiassaultmove) return;" - the early return that the steer relies on must come
+    // before any SetWaypoint or any write to aiassaultmoveisolatedtarget.
+    private static void FixSepIl()
+    {
+        var method = AccessTools.Method(typeof(AIBattle), "CheckForSeparatedEnemy");
+        AssertTrue(method != null, "CheckForSeparatedEnemy exists");
+        var code = PatchProcessor.GetOriginalInstructions(method);
+        int test = -1, firstWrite = -1;
+        for (int i = 0; i < code.Count; i++)
+        {
+            if (test < 0 && code[i].opcode == OpCodes.Ldfld && code[i].operand is FieldInfo f && f.Name == "aiassaultmove") test = i;
+            if (firstWrite < 0 && code[i].opcode == OpCodes.Stfld && code[i].operand is FieldInfo w && w.Name == "aiassaultmoveisolatedtarget") firstWrite = i;
+            if (firstWrite < 0 && (code[i].opcode == OpCodes.Callvirt || code[i].opcode == OpCodes.Call) && code[i].operand is MethodInfo m && m.Name == "SetWaypoint") firstWrite = i;
+        }
+        AssertTrue(test >= 0, "the method reads aiassaultmove");
+        AssertTrue(firstWrite > test, "and reads it before its first write or move order");
+        bool branches = false;
+        for (int i = test + 1; i <= test + 2 && i < code.Count; i++) branches |= code[i].opcode.FlowControl == FlowControl.Cond_Branch;
+        AssertTrue(branches, "straight into a conditional branch (the early return)");
+        AssertTrue(test < 60, "inside the opening condition chain");
+    }
+
+    private static void FixSepPatch()
+    {
+        string src = ReadSrc("Patches/SeparatedEnemyOwnershipPatch.cs");
+        AssertContains(src, "[HarmonyPatch(typeof(AIBattle), \"CheckForSeparatedEnemy\")]", "the target");
+        int whiskey = src.IndexOf("__state.Whiskey = WhiskeyCommanded(aigroup);", StringComparison.Ordinal);
+        int drives = src.IndexOf("TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud) || TacticalWriteGuard.IsFeudInstance(__instance)", StringComparison.Ordinal);
+        int force = src.IndexOf("aigroup.aiassaultmove = true;", StringComparison.Ordinal);
+        AssertTrue(drives > 0 && whiskey > drives && force > whiskey, "orchestrated side and not the feud instance, then Whiskey-commanded, then the force");
+        AssertContains(src, "!Plugin.SeparatedEnemySteerEnabled() || !TacticalWriteGuard.ModeAllowsWrites()", "the flag and Commander Mode Active");
+        AssertContains(src, "ArmyPostureInputsRuntime.InAiPool(alliance, id) && PostureLedger.TryResolveState(id, side, out _)", "Whiskey-commanded: in the AI pool with a doctrine state");
+        AssertContains(src, "if (__state.Forced) aigroup.aiassaultmove = __state.Original;", "the Finalizer restores the stored value");
+        AssertContains(src, "[HarmonyFinalizer]", "as a Finalizer, so it runs when vanilla throws");
+        AssertFalse(src.Contains("__exception"), "and passes the exception through unchanged");
+        AssertContains(src, "tactical.patch.separated-enemy.prefix", "prefix scope");
+        AssertContains(src, "tactical.patch.separated-enemy.finalizer", "finalizer scope");
+        AssertFalse(src.Contains(".SetWaypoint(") || src.Contains(".ChangeStance("), "the steer writes no order");
     }
 }

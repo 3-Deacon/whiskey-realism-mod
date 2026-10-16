@@ -70,6 +70,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableStaggeredReserveRelease;
         internal static ConfigEntry<bool> EnableCavalryStrikeDiscipline;
         internal static ConfigEntry<bool> EnableVanillaStanceCooldownFix;
+        internal static ConfigEntry<bool> EnableSeparatedEnemySteer;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -110,6 +111,13 @@ namespace WhiskeyRealism
         internal static bool VanillaStanceCooldownFixEnabled()
         {
             try { return EnableVanillaStanceCooldownFix != null && EnableVanillaStanceCooldownFix.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Separated Enemy Steer (#121: vanilla's omniscient isolated-target move does not also send Whiskey-commanded groups).</summary>
+        internal static bool SeparatedEnemySteerEnabled()
+        {
+            try { return EnableSeparatedEnemySteer != null && EnableSeparatedEnemySteer.Value; }
             catch { return false; }
         }
 
@@ -641,6 +649,16 @@ namespace WhiskeyRealism
                 "this on, a group whose stance vanilla itself just changed is held for that hour, so vanilla's weak-group defend and screen " +
                 "changes wait up to an hour after the group's previous change instead of flipping every cycle. An army retreat releases the " +
                 "holds at once. Whiskey's own stance holds and the W&L feud instance are untouched. Off: vanilla's re-decision every cycle.");
+            EnableSeparatedEnemySteer = Config.Bind(
+                "Tactical",
+                "Enable Separated Enemy Steer",
+                true,
+                "Default ON. #121 (BUG-TAC-029): vanilla sends an AI group straight at an isolated enemy cluster it finds from the true " +
+                "state of the battlefield, whatever the group's orders, and Whiskey's posture then re-issues the ledger order: two movers " +
+                "on one group. With this on, a group Whiskey commands (in the AI pool with a doctrine state) is left out of that vanilla " +
+                "behaviour; Whiskey's own isolated-cluster opening, which only sees what the side perceives, takes over. Groups vanilla " +
+                "commands, the player's groups and the W&L feud instance are unchanged. Needs Tactical Commander Mode Active. Off: vanilla " +
+                "also sends Whiskey-commanded groups.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",
