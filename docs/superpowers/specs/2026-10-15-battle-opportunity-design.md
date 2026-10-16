@@ -205,7 +205,7 @@ All detection is pure (`OpeningDetector`) over the side's `BattleSnapshot` and i
 
   A `Visible` observation's own `EnemyRecords` row may be read (the BC6b precedent) for `UnitWidth`, `Flags.Routed`, `Flags.Garrisoned`, `Formation` and `Morale`. A `Remembered` sample uses the morale, heading and position stored at last sight, and its width falls back to `DefaultEnemyFrontageMeters` = 100 m. No other `EnemyRecords` read is allowed (source pin, test DET-PIN).
 - **requirement-perceived-ground** — An opening that asserts the **absence** of enemy (a gap, a flank in the air, an unsupported battery) is emitted only when the whole ground it asserts lies inside the side's own perception. That is the same perception the snapshot uses to make an observation `Visible` (`BattlePerceptionProbe`'s mode). Lateral adjacency of an own unit does not count, and the ground counts at the depth the opening needs.
-  - **FogGrid or OwnSideWithinFog mode.** A probe point is perceived when vanilla's own fog grid would show an enemy infantry regiment standing there: `!fow.UnitIsHidden(point at terrain height, unittype: Infantry)` on the side's grid. `UnitIsHidden` (101179-101229) tests `PositionIsWithinFog`, then the terrain concealment at the point minus the infantry spotting factor. No cunning, strength, cover-object or perk terms enter, because no known unit stands there. A reverse slope out of sight, or a wood that conceals, is therefore not perceived.
+  - **FogGrid or OwnSideWithinFog mode.** A probe point is perceived when vanilla's own fog grid would show an enemy infantry regiment standing there: `!fow.UnitIsHidden(point, unittype: Infantry)` on the side's grid (the grid index reads only x and z, `WorldPositionToFogEntry` 101139). In FogGrid mode the call runs inside `BattlePerceptionProbe`'s BUG-TAC-020 mask (`BattlePerception.MasksPlayerIntelIncidents`: W&L player-intelligence incidents 60, 61 and 64, which make `UnitIsHidden` answer "visible" for every position, 101183-101186). That is the mask the snapshot's own probe uses; without it every point reads perceived while such an incident is active. OwnSideWithinFog mode reads the player's own grid and is not masked, as for the snapshot. `UnitIsHidden` (101179-101229) tests `PositionIsWithinFog`, then the terrain concealment at the point minus the infantry spotting factor. No cunning, strength, cover-object or perk terms enter, because no known unit stands there. A reverse slope out of sight, or a wood that conceals, is therefore not perceived.
   - **RangeOnly mode** (fog off, HQ in the saddle, grid not painted, perception flag off). A probe point is perceived when it lies within an own unit's `BattlePerception.RangeOnlyReach`.
   - **Probe points.** A lattice at `ProbeSpacingMeters` = 50 m over the ground's full lateral span and full depth:
     - a gap: the whole corridor, to `max(Da, Db) + GapDepthMeters`;
@@ -213,7 +213,13 @@ All detection is pure (`OpeningDetector`) over the side's `BattleSnapshot` and i
     - a battery: the 250 m support ring.
 
     Every probe point must be perceived. One unperceived point suppresses the opening.
-  - **Runtime.** The pure detector asks an `IPerceivedGround` interface, which the opportunity producer implements per side. At most `MaxProbePointsPerTick` = 512 probe points per side per tick are evaluated. A candidate opening the budget does not reach this tick is deferred: not emitted this tick, tried first on the next.
+  - **Runtime.** The pure detector asks an `IPerceivedGround` interface, which the opportunity producer implements per side.
+  - **Incremental lattice** (integrator decision, crit r2 L3: the lattice must fit criterion-frame-budget, which is not raised):
+    - At most `MaxProbePointsPerTick` = 128 probe points are evaluated per side per tick. This is sized to the budget: each `UnitIsHidden` computes two fog-grid indices from native `terrainData.size` reads (101139-101168), estimated at about 1 ms per 512 points on Mono, so 128 points is about 0.25 ms and leaves the rest of the 0.5 ms p95 for detection and decisions. Smoke 9 measures it, and if the p95 is exceeded the cap is lowered, never the criterion.
+    - A candidate's lattice is probed across ticks, oldest candidate first. Each probed point's result is cached in the candidate's probe state.
+    - The cache is kept until the candidate's geometry changes (a probe box edge moves by more than half of `ProbeSpacingMeters`, 25 m) or the perception epoch changes. The epoch is the perception mode and fallback reason together with the doctrine-time bucket `floor(now / ProbeEpochHours)`, `ProbeEpochHours` = 0.05 doctrine-h (the opening's `LostHours`). A change clears the cache, and the lattice restarts.
+    - A candidate is **emitted only once its lattice is complete** and every point is perceived. Until then it is deferred: not emitted, counted as `deferred`. A probed point found unperceived ends the candidate's lattice at once (suppressed).
+    - The probe state lives in the detector's pooled candidate slots (`BattleScope`, at most `MaxOpenings`).
   - **Suppressed and confidence.** A suppressed opening is counted as `suppressedUnperceived` on the `TacticalOpening` row. An opening's confidence is the product of its samples' confidences (`Visible` 1.0).
 
 - **requirement-detect-gap** — The detector projects the samples on the axis (lateral L, depth D) and sorts them by L in place. For each pair of adjacent front-line samples (a, b) with `|Da − Db| <= LineDepthBandMeters` = 200 m it computes `edgeGap = (Lb − Wb/2) − (La + Wa/2)`. It emits a `Gap` when all of these hold:
@@ -330,7 +336,7 @@ All detection is pure (`OpeningDetector`) over the side's `BattleSnapshot` and i
 - **requirement-exploit-chance** — After the thresholds and risk checks pass, the decision rolls `p = clamp(baseChance(kind) × (0.5 + agg01) × (0.75 + 0.5 × audacity01) × duty, 0, 0.95)`, with `duty` from requirement-commander-duty. The base chances are: Gap 0.6, ShakenSector 0.6, UnsupportedBattery 0.5, IsolatedCluster 0.5, FlankInAir 0.4, Penetration 0.6. The roll is a pure hash of (battle key, commander index, opening id, decision number) mapped to [0, 1): deterministic, testable, no allocation. A failed roll marks that (commander, opening) pair as passed over for `HesitationHours` = 0.1 doctrine-h. Because of the roll, hesitation is a matter of temperament, not a rule.
 - **requirement-decision-contract** — `OpportunityDoctrine.Decide` is pure. It takes one deciding node's input and returns one `DecisionResult`. The producer owns everything around it:
   - **Before `Decide`:** the decision interval and the stagger, asset eligibility (requirement-asset-eligibility), and the hesitation and claim lookups.
-  - **After `Decide`:** writing the hesitation mark on `roll-miss`, setting `Opening.Claimed` and creating the exploit entry on a launch, and incrementing the node's decision number.
+  - **After `Decide`:** writing the hesitation mark on `roll-miss`, creating the exploit entry on a launch (which claims the opening, requirement-opening-claim), and incrementing the node's decision number.
 
   Inside `Decide`, pairs are formed and scored (requirement-asset-choice, reach, odds) and sorted by score descending. For the top `MaxPairsPerDecision` pairs, `Decide` applies the odds, confidence and age, and risk checks in § 6 order. The first pair that passes rolls. It launches iff `roll < chance`, else `roll-miss`. If no pair passes, the result carries the last failing reason, or `no-pair` when there was no pair.
 
@@ -394,7 +400,7 @@ All detection is pure (`OpeningDetector`) over the side's `BattleSnapshot` and i
     - Cavalry is never a counterstroke asset (kind weight 0).
     - There is no Pursue phase. Consolidate holds at the aim point and Recall always follows.
     - Every risk check in requirement-risk-check applies, except check 5.
-  - **Lifecycle.** The exploit lifecycle applies unchanged. An `opening-lost` before Strike means the penetration withdrew or was repelled by others.
+  - **Lifecycle.** The exploit lifecycle applies, with one rule of its own. A `Penetration` exploit's aim follows its target only while the target lies behind the own trace at its lateral. When the target reaches the trace (falling back unrouted, or driven out), the aim freezes at the trace point at that lateral, and the entry goes to Consolidate there. The counterstroke never follows an enemy in front of the own line. An `opening-lost` before Strike means the penetration withdrew or was repelled by others.
   - **Flag off.** No `Penetration` is detected, and a Defender never launches.
 - **requirement-lifecycle-contract** — The precise rules `ExploitLifecycle.Step` follows:
   - **Input.** `ExploitStepInput` carries: now; the deciding commander's audacity01 and casualtyTolerance01; `ShakenMorale`; whether the asset is alive, with its position, `LossFraction` and `GroupMorale`; whether the opening is still held by the detector; whether the executor gave up the Advance Move; whether the entry has a target, with the target's perceived, routed and position fields; the nearest Visible enemy to the asset; the nearest enemy sample to the aim; the local odds; the line-integrity result; a crisis release of the asset's parent line; a Safety claim on the asset; the posture pipeline's flank emergency; stand-down; and the plan's Withdraw phase.
@@ -450,7 +456,7 @@ Each bug gets a bug id at merge (provisional, after BUG-TAC-026, which BC15 hold
   - **Army retreat.** The fix stays out of the way of an army retreat:
     - While the instance's `macroai == 3`, the Postfix re-stamps nothing.
     - The fix keeps its own `RestampedGroups` set (per AI instance, `BattleScope`): the instance ids it re-stamped, each with the stamp value it wrote.
-    - On the first `AdjustGroupAIStance` call with `macroai == 3`, the Prefix pulls each one back before vanilla runs, so vanilla's retreat line (4258, every group to screen) acts in that same call. It sets `lastaistancechangetime = TacticalStanceOwnership.ReleaseStamp(now)`, as `TacticalStanceWriter.ReleaseForRetreat` does for Whiskey's own records, then clears the set. Groups vanilla needs at screen for `MicroAICheckForRetreats` (`macroai` 3 and `ai_stance` 1, 5641) are re-armed at once.
+    - On the first `AdjustGroupAIStance` call with `macroai == 3`, the Prefix pulls each one back before vanilla runs, so vanilla's retreat block (4260-4263, `macroai == 3` sets every group to screen) acts in that same call. It sets `lastaistancechangetime = TacticalStanceOwnership.ReleaseStamp(now)`, as `TacticalStanceWriter.ReleaseForRetreat` does for Whiskey's own records, then clears the set. Groups vanilla needs at screen for `MicroAICheckForRetreats` (`macroai` 3 and `ai_stance` 1, 5641) are re-armed at once.
     - A group whose stamp no longer equals the value the fix wrote (Whiskey's writer has stamped it since) is dropped from the set without a release. Its stamp is Whiskey's, and `ReleaseForRetreat` already releases it.
 
   Whiskey's own stamps are untouched, and `TacticalStanceWriter`'s yield and retreat paths release only Whiskey's own records (`_records`). That is why the fix releases its own stamps on retreat. Patch `VanillaStanceCooldownFixPatch`, flag `Enable Vanilla Stance Cooldown Fix`, scopes `tactical.patch.stance-cooldown.prefix|.postfix` (2.0 ms). Like the other vanilla bug fixes (BC15 A2 part 2, A3), it runs in every Commander Mode. Effect: vanilla's weak-group defend and screen valves now wait up to 1 h after vanilla's own previous change of the group. That is applied exactly as `battleprefs` intends (integrator decision (a), question-stance-cooldown-valves), and smoke item 11 measures the delays.
@@ -544,7 +550,7 @@ namespace WhiskeyRealism.Tactical.Battle {
     public const float GapMinMeters = 150f, LineDepthBandMeters = 200f, GapDepthMeters = 300f, ProbeSpacingMeters = 50f, RememberedMinConfidence = 0.5f,
       DefaultEnemyFrontageMeters = 100f, ShakenShareMin = 0.4f, FlankWatchMeters = 300f, FlankOffsetMeters = 150f, SupportMeters = 250f,
       ClusterLinkMeters = 150f, RefusedEndDegrees = 45f, ConfirmHours = 0.02f, LostHours = 0.05f, CounterstrokeMaxMeters = 400f, PenetrationMinDepthMeters = 100f, PenetrationClearMeters = 50f;
-    public const int MaxProbePointsPerTick = 512;
+    public const int MaxProbePointsPerTick = 128; public const float ProbeEpochHours = 0.05f;
     public const int MaxOpenings = 32, MaxClusters = 64;
     public int Detect(BattleSnapshot s, IPerceivedGround perceived, IOpeningTerrain terrain, in OpeningRules rules, bool defender, double nowHours);  // returns count; no allocation after warm-up
     public ReadOnlySpan<Opening> Openings { get; } public int SuppressedUnperceived { get; }
@@ -677,6 +683,7 @@ References are **latest**, never pinned: the opportunity producer reads this tic
   - Detection is O(n log n) in the sample count (one in-place sort by lateral, one bucket-grid pass for clusters and support rings, one pass for sectors).
   - Decisions are at most (due commanders × `MaxPairsPerDecision`).
   - Lifecycle steps are at most 3 per side.
+  - Perceived ground: at most `MaxProbePointsPerTick` (128) `IsPerceived` calls per side per tick, cached per candidate until geometry or the perception epoch changes, with emission only once a lattice is complete (requirement-perceived-ground). This is the producer's largest per-tick cost and the term the cap tunes.
   - Scope `tactical.producer.opportunity` (1.0 ms threshold). Target: criterion-frame-budget.
 - **requirement-zero-alloc** — No allocation after warm-up: all arrays pooled and grow-only, sorts in place without a comparer allocation, telemetry strings built only on rows that are emitted (numeric throttles, the BC11 F4 precedent). Pinned by OPP-ALLOC.
 - **requirement-config** — `Tactical` section, all default `true`, each with a reader and a truthful description:
@@ -694,10 +701,10 @@ References are **latest**, never pinned: the opportunity producer reads this tic
   | `Enable Separated Enemy Steer` | requirement-fix-separated-enemy-steer | Vanilla also sends Whiskey-commanded groups |
   | `Enable Defender Counterstroke` | requirement-detect-penetration, requirement-defender-counterstroke | No `Penetration`, no Defender exploit |
 
-  Rollback of all battle writes stays `Tactical Commander Mode = MonitorOnly` / `Off`. `requirement-dead-personality-paths` is a cleanup and has no flag.
+  Rollback of every Whiskey command write stays Commander Mode `MonitorOnly` / `Off`. The vanilla bug fixes roll back by their own flags (§ 15 item 7). `requirement-dead-personality-paths` is a cleanup and has no flag.
 - **requirement-telemetry** — Through the TelemetryRouter tuning-log sink, bounded:
   - `TacticalCommanderPersonality` (State, once per commander per battle): side, commander index, echelon, `source`, the five components, the `agg01` band.
-  - `TacticalOpening` (State, per side every 0.1 doctrine-h): counts by kind, confirmed count, best confidence, `suppressedUnperceived`.
+  - `TacticalOpening` (State, per side every 0.1 doctrine-h): counts by kind, confirmed count, best confidence, `suppressedUnperceived`, `probePoints` (points evaluated in the row's window), `probeCached` (point results reused from cache) and `deferred` (candidates waiting for a complete lattice).
   - `TacticalExploit` (Decision): one row per launch, per declined best pair (`reason` = the failing threshold or risk check, or `roll-miss` with `chance` and `roll`), per phase change and per end (`end`, duration, `lossDelta`, stance, `cavalry`, `playerSkips`).
   - `TacticalReserveRelease` (existing) gains `reason=stagger|crisis|flank`, `held`, `floor`, `floorBreach`.
   - `TacticalCavalryStrike` (Decision, throttled per regiment per 0.05 doctrine-h): `allowed` / `refused`, `reason` (`hidden`, `square`, `garrisoned`, `supported`, `steady`, `odds`, `outflanked`, `exploit-target`).
@@ -740,7 +747,7 @@ References are **latest**, never pinned: the opportunity producer reads this tic
 - **criterion-player-never-moved** — 0 exploit orders planned onto a `PlayerOwned` unit, and 0 W&L player command nodes deciding. Basis: the standing rule. Measured: OPP-PLAYER and the `playerSkips` field (executor `PlayerOwned` skips for `exploit-*` reasons).
   - no-guardrail: a zero bound.
   - read path: `TacticalExploit` rows' `playerSkips`, plus the `[OrderArbiter]` `topSkip`.
-- **criterion-defender-no-offense** — 0 launches with a kind other than `Penetration` on a Defender side; 0 `Penetration` launches with `Enable Defender Counterstroke` off; every counterstroke aim within 400 m of the own front-line trace; and every counterstroke ending in Recall. Basis: the standing rule. Measured: OPP-DEF and the rows' `stance`.
+- **criterion-defender-no-offense** — 0 launches with a kind other than `Penetration` on a Defender side; 0 `Penetration` launches with `Enable Defender Counterstroke` off; no counterstroke aim in front of the own front-line trace, and none more than 400 m behind it; and every counterstroke ending in Recall. Basis: the standing rule. Measured: OPP-DEF and the rows' `stance`.
   - no-guardrail: a zero bound.
   - read path: `TacticalExploit` rows.
 - **criterion-stance-cooldown** — With the fix on, vanilla's own stance changes per pool group are ≤ 1 per `updatetimeforresettingofaistance` (1 game-h). Today vanilla can change every macro cycle (0.015 h). Basis: `battleprefs` 804-805. Measured: `TacticalStanceCooldown` rows.
@@ -827,6 +834,7 @@ Test file `CommanderOpportunityTests.cs` (`internal static class CommanderOpport
   - COUNTER-ASSET: a frontage-holding child is never the asset; a reserve or second-line child is; cavalry never is.
   - COUNTER-BOUNDS: an aim beyond 400 m is not emitted; no Pursue; Recall always follows.
   - COUNTER-FLAG: with the flag off, a Defender never launches.
+  - LIFE-COUNTER-AIM: during Strike the penetrating sample falls back unrouted across the own trace; the aim freezes at the trace and the asset consolidates there, never in front of the line.
   - OPP-ARMY-DECIDES: with no corps or division nodes, the army node decides.
   - OPP-CONTRACT: launch iff `roll < chance`; the last failing reason is returned, or `no-pair`; the producer writes the hesitation mark and the claim, never `Decide`; the nested-asset main-effort rule; the roll's FNV-1a vector.
 - **S4 Lifecycle and override.**
@@ -862,7 +870,7 @@ Test file `CommanderOpportunityTests.cs` (`internal static class CommanderOpport
   - FIX-STANCE: a re-stamp of exactly the groups vanilla changed in the call, to `now + 2T`, which holds `T`.
   - FIX-STANCE-TRACE: Vanilla changes to 2 at raw 3.00 with T = 1.0 → re-stamp 5.00, held until 4.00. A Whiskey write at 3.20 → 4.45, which vanilla may re-decide after 3.45.
   - FIX-STANCE-FEUD: the feud instance is untouched.
-  - FIX-STANCE-RETREAT: vanilla changes a group at raw 3.00 (re-stamped to 5.00), and the army retreat (`macroai` 3) begins at 3.20. On the 3.20 call the Prefix releases the group's stamp before vanilla runs, so vanilla moves it to screen (4258) in that call, and `MicroAICheckForRetreats` (5641) can act. No re-stamp happens while `macroai` is 3. A group Whiskey stamped after the fix is left to `ReleaseForRetreat`.
+  - FIX-STANCE-RETREAT: vanilla changes a group at raw 3.00 (re-stamped to 5.00), and the army retreat (`macroai` 3) begins at 3.20. On the 3.20 call the Prefix releases the group's stamp before vanilla runs, so vanilla moves it to screen (4260-4263) in that call, and `MicroAICheckForRetreats` (5641) can act. No re-stamp happens while `macroai` is 3. A group Whiskey stamped after the fix is left to `ReleaseForRetreat`.
   - FIX-STANCE-WHISKEY: Whiskey writer stamps are untouched, and `ReleaseStamp` still re-arms.
   - FIX-STANCE-PIN: the 4264 comparison text is unchanged in the decompile pin.
   - FIX-RENEW: `ChargeDoctrine` reads `timetorenewaichargecheck`.
@@ -877,7 +885,9 @@ Test file `CommanderOpportunityTests.cs` (`internal static class CommanderOpport
   - FIX-SEP: the Prefix sets the flag only for a Whiskey-commanded group, with mode Active, a driven side and not the feud instance. The Finalizer restores the stored value, including when vanilla throws. A vanilla-owned group is untouched. A source pin checks that `aiassaultmove` is the first test of `CheckForSeparatedEnemy` (8078).
 - **S7 Performance.**
   - OPP-ALLOC: 0 bytes after warm-up for detection (400 samples), decisions (12 commanders) and lifecycle (3 exploits).
-  - OPP-TIME: a harness timing smoke on 1,000 samples, informational.
+  - OPP-TIME: a harness timing smoke on 1,000 samples, plus a full-budget case: 128 `IsPerceived` calls through a fixture grid in one tick. Informational; the binding measurement is smoke 9.
+  - DET-PROBE-BUDGET: with 10 candidate openings of 63 lattice points each, no more than 128 points are probed per tick; no candidate is emitted before its lattice is complete; the oldest candidate is served first; cached results are reused on the next tick; a 30 m geometry shift or an epoch change clears a candidate's cache; one unperceived point suppresses at once.
+  - DET-PERCEIVED-INCIDENT: in FogGrid mode with W&L incident 60, 61 or 64 active, the ground probe still reads a hidden point as unperceived (mask applied); in OwnSideWithinFog mode no mask applies.
 
 ### Mutation plants (each must make a listed test fail)
 
@@ -916,6 +926,12 @@ Each plant is listed with the test that must catch it:
 - the melee exclusion removed (DET-PEN-MELEE);
 - Remembered samples admitted as penetrations (DET-PEN-REMEMBERED);
 - the stance-cooldown retreat release removed (FIX-STANCE-RETREAT);
+- the claim kept after Recall (OPP-CLAIM-RELEASE);
+- RangeOnly treating every probe point as perceived (DET-RANGE-ONLY);
+- the own trace bridged across a gap of `GapMinMeters` or more (DET-PEN-BRIDGE);
+- the counterstroke aim following its target across the own trace (LIFE-COUNTER-AIM);
+- emission before a complete lattice, or the per-tick point cap ignored (DET-PROBE-BUDGET);
+- the incident mask skipped in the ground probe (DET-PERCEIVED-INCIDENT);
 - the 400 m counterstroke bound removed (COUNTER-BOUNDS);
 - the macro hook returning `num4` unchanged with the flag on (FIX-MACRO);
 - the artillery bound hook returning 2 with the flag on (FIX-ARTY-SIDE);
@@ -952,7 +968,7 @@ Each plant is listed with the test that must catch it:
 | requirement-personality-live-inputs | § 4 | PERS-CASUALTY, OPP-CONF, OPP-FLOOR, OPP-REACH | | |
 | requirement-dead-personality-paths | § 4 | PERS-DEAD | | |
 | requirement-enemy-samples | § 5 | DET-HIDDEN, DET-REMEMBERED-LOW, DET-PIN | | |
-| requirement-perceived-ground | § 5 | DET-UNPERCEIVED, DET-REVERSE-SLOPE, DET-RANGE-ONLY | | |
+| requirement-perceived-ground | § 5 | DET-UNPERCEIVED, DET-REVERSE-SLOPE, DET-RANGE-ONLY, DET-PERCEIVED-INCIDENT, DET-PROBE-BUDGET | | |
 | requirement-detect-gap | § 5 | DET-GAP, DET-GAP-SECOND-LINE, DET-GAP-NARROW | | |
 | requirement-detect-shaken | § 5 | DET-SHAKEN, DET-SHAKEN-REMEMBERED | | |
 | requirement-detect-flank-in-air | § 5 | DET-FLANK-RIVER, DET-FLANK-CREST, DET-FLANK-REFUSED, DET-FLANK-SCREEN | | |
@@ -977,7 +993,7 @@ Each plant is listed with the test that must catch it:
 | requirement-exploit-override | § 6 | OVR-POSTURE, OVR-PLAY, OVR-MANEUVER, OVR-SAFETY, OVR-FOLLOW, OVR-LEAF, OVR-FEEDBACK | | |
 | requirement-runtime-wiring | § 6 | PERS-ARMY, OVR-FOLLOW, OVR-LEAF, FIX-STANCE-TRACE, FIX-STANCE-FEUD | | |
 | requirement-exploit-lifecycle | § 6 | LIFE-PHASES, LIFE-CAV-STANDOFF, LIFE-PURSUE, LIFE-ABORTS, LIFE-CLOCK, OVR-RECALL, OVR-NEWDAY | | |
-| requirement-defender-counterstroke | § 6 | COUNTER-TASK, COUNTER-PIN, COUNTER-ASSET, COUNTER-BOUNDS, COUNTER-FLAG, DET-PEN | | |
+| requirement-defender-counterstroke | § 6 | COUNTER-TASK, COUNTER-PIN, COUNTER-ASSET, COUNTER-BOUNDS, COUNTER-FLAG, LIFE-COUNTER-AIM, DET-PEN | | |
 | requirement-lifecycle-contract | § 6 | LIFE-AIM, LIFE-PRECEDENCE, LIFE-PHASES | | |
 | requirement-staggered-reserve-release | § 6 | RES-STAGGER, RES-FLOOR, RES-SINGLE, RES-CRISIS-ONE, RES-CRISIS-LATENCY, RES-PERSIST, RES-REVERT, RES-EXPLOITING-SKIPPED, RES-TIE, RES-CRISIS-HELD | | |
 | requirement-fix-stance-cooldown | § 7 | FIX-STANCE, FIX-STANCE-WHISKEY, FIX-STANCE-PIN, FIX-STANCE-RETREAT, smoke 11 | | |
@@ -992,7 +1008,7 @@ Each plant is listed with the test that must catch it:
 | requirement-fix-cavalry-morale-label | § 7 | DET-SHAKEN (reuses the value) | | |
 | requirement-fix-outflanked-flag | § 7 | FIX-CAV (outflanked case) | | |
 | requirement-fix-dead-outflank-retreat | § 7 | (user decision: left unused; no test) | | |
-| requirement-frame-budget | § 11 | OPP-TIME, smoke 9 | | |
+| requirement-frame-budget | § 11 | OPP-TIME, DET-PROBE-BUDGET, smoke 9 | | |
 | requirement-zero-alloc | § 11 | OPP-ALLOC | | |
 | requirement-config | § 11 | config-audit 0 findings | | |
 | requirement-telemetry | § 11 | smoke 1-13 | | |
