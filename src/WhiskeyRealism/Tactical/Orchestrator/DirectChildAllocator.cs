@@ -611,7 +611,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // point behind the crossing, and stays bound there while the threat holds. Per allocation: first the standing bindings are kept or
         // ended, then each counted crossing without a guard gets the eligible Reserve child that reaches it soonest, when the enemy arrives
         // within ThreatLeadHours of that child and the floor of held reserves allows.
-        private static void ReleaseReserveToCrossings(
+        internal static void ReleaseReserveToCrossings(
             DirectChildRole[] roles,
             int[] axisOverride,
             GuardPoint[] guards,
