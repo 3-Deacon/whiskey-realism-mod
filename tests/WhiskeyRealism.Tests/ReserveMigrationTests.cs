@@ -467,9 +467,9 @@ internal static class ReserveMigrationTests
 
         // The live fields change every tick; they are not roster: no tree rebuild, no allocation.
         Build(2, 0f, 0, 0f, interrupted: false);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         Build(3, 0.7f, 1, -1f, interrupted: true);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "same-roster rebuild allocated bytes");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "same-roster rebuild allocated bytes");
         AssertEqual(generation, scratch.TreeGeneration, "live fields do not rebuild the tree");
         AssertEqual(0.7f, s.Own[leaf].CoverValue, "updated cover");
         AssertTrue((s.Own[leaf].Flags & UnitFlags.PathInterrupted) != 0, "updated flag");

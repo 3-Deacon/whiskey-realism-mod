@@ -321,14 +321,14 @@ internal static class CampaignSnapshotTests
             CampaignPlanStore.PreparePublish();
             CampaignPlanStore.SwapPublished();
             AssertTrue(CampaignPlanStore.TryGetPlan(0, out var after) && after.DaySerial == 11, "after the commit: Tuesday");
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = TestFixtures.BeginAllocationWindow();
             for (int i = 0; i < 1000; i++)
             {
                 CampaignPlanStore.PreparePublish();
                 CampaignPlanStore.SwapPublished();
                 CampaignPlanStore.TryGetPlan(0, out _);
             }
-            AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "plan commit and published read bytes");
+            AssertEqual(0L, TestFixtures.AllocatedSince(before), "plan commit and published read bytes");
         }
         finally
         {

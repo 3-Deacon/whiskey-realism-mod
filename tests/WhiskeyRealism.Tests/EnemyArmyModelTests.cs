@@ -139,9 +139,9 @@ internal static class EnemyArmyModelTests
                 if (seen.Count != 40) throw new InvalidOperationException("count " + seen.Count);
             };
             for (int i = 0; i < 16; i++) commit();
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = TestFixtures.BeginAllocationWindow();
             for (int i = 0; i < 500; i++) commit();
-            AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "belief commit and published read bytes");
+            AssertEqual(0L, TestFixtures.AllocatedSince(before), "belief commit and published read bytes");
         }
         finally
         {

@@ -1007,7 +1007,7 @@ internal static class CampaignExecutorTests
             CampaignWithholdView.WithheldFromOffense(0, w.Main);
             CampaignWithholdView.WithheldFromDefense(0, w.HoldAtNeed, 560f, 0f);
         }
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         bool any = false;
         for (int i = 0; i < 2000; i++)
         {
@@ -1015,7 +1015,7 @@ internal static class CampaignExecutorTests
             any |= CampaignWithholdView.WithheldFromDefense(0, w.HoldAtNeed, 560f, 0f);
             any |= CampaignWithholdView.WithheldFromOffense(1, w.Main);
         }
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "no allocation after warm-up");
         AssertTrue(any, "and the calls did answer");
         CampaignScope.ResetAll();
     }

@@ -104,7 +104,7 @@ internal static partial class WlOrderFlowTests
         AssertFalse(WlOrderCaptureGate.CheapReject(chain), "a player-side call needs the chain test");
 
         WlOrderCaptureGate.ReachesDedupe(chain);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         int hits = 0;
         for (int i = 0; i < 10000; i++)
         {
@@ -113,7 +113,7 @@ internal static partial class WlOrderFlowTests
             if (!WlOrderCaptureGate.ReachesDedupe(nonChain)) hits++;
             if (WlOrderCaptureGate.ReachesDedupe(chain)) hits++;
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = TestFixtures.AllocatedSince(before);
         AssertEqual(40000, hits, "gate verdicts");
         AssertEqual(0L, allocated, "capture gate allocated bytes");
     }

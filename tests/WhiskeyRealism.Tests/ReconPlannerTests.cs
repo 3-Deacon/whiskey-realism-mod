@@ -1332,7 +1332,7 @@ internal static class ReconPlannerTests
             ReconStep.IsReconKey(s, ledger, "u2:2");
         }
         AssertEqual(2, ledger.Missions.Count, "fixture: two live missions");
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 50; i++)
         {
             ledger.OnReview(s, alloc);
@@ -1341,7 +1341,7 @@ internal static class ReconPlannerTests
             if (!counts.Equals(last)) throw new Exception("the steady state changed");
             ReconStep.IsReconKey(s, ledger, "u2:2");
         }
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "OnReview, Sync, the row counts and the directive filter allocate nothing in a steady review");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "OnReview, Sync, the row counts and the directive filter allocate nothing in a steady review");
     }
 
     // ---- the runtime step, by source (the runtime itself needs the vanilla assembly) ----

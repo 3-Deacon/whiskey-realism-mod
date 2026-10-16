@@ -101,9 +101,9 @@ internal static class BattleSnapshotTests
             AssertFalse((q.Own[2].Flags & UnitFlags.Feud) != 0, "X not marked through a propagated G");
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int k = 0; k < 100; k++) PlayerOwnership.ApplyFeudGroups(s, ref scratch);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "no allocation after warm-up");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "no allocation after warm-up");
     }
 
     // Ids of the small fixture army.
@@ -418,17 +418,17 @@ internal static class BattleSnapshotTests
         f.Load(1); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
         f.Load(2); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         f.Load(3); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
-        long reuse = GC.GetAllocatedBytesForCurrentThread() - before;
+        long reuse = TestFixtures.AllocatedSince(before);
         AssertEqual(0L, reuse, "second assembly (same roster) allocated bytes");
 
         // A roster change (vanilla replaced completeunitlist) rebuilds the tree from
         // pooled buffers.
         int generation = f.Scratch.TreeGeneration;
-        before = GC.GetAllocatedBytesForCurrentThread();
+        before = TestFixtures.BeginAllocationWindow();
         f.Load(4); f.Scratch.SourceListIdentity = 4242; f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous, commandHierarchyShift: 0);
-        long rebuild = GC.GetAllocatedBytesForCurrentThread() - before;
+        long rebuild = TestFixtures.AllocatedSince(before);
         AssertEqual(0L, rebuild, "roster-change rebuild allocated bytes");
         AssertEqual(generation + 1, f.Scratch.TreeGeneration, "the measured pass was a rebuild");
         AssertTrue(previous.IsValid, "front axis fitted");

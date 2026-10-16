@@ -212,9 +212,9 @@ internal static class SlicePressureBuilderTests
         for (int k = 0; k < 700; k++)
             s.AddObservation(Obs(k, (float)(rng.NextDouble() * 1200.0) - 600f, 125f + (float)(rng.NextDouble() * 200.0), 300f, ObservationState.Visible));
         SlicePressureBuilder.Build(s, Vanilla);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 5; i++) SlicePressureBuilder.Build(s, Vanilla);
-        AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "slice pressure build allocated bytes");
+        AssertEqual(0L, TestFixtures.AllocatedSince(before), "slice pressure build allocated bytes");
     }
 
     // ---- fixtures
