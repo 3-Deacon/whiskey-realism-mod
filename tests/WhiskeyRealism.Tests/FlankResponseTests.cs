@@ -705,7 +705,7 @@ internal static partial class FlankResponseTests
 
     private static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
 
-    private static void AssertPinned(string body, string expected, string label)
+    internal static void AssertPinned(string body, string expected, string label)
     {
         AssertTrue(Flat(body).Contains(Flat(expected)), label + ": " + expected);
     }

@@ -52,9 +52,9 @@ namespace WhiskeyRealism.Tactical.Operations
         public float Value { get; }
         public bool TypeAnchorVerified { get; }
         public TacticalApproachAvenueEstimate ApproachAvenue { get; }
-        /// <summary>BC12 decision 4: the terrain picture's strength of the ground at the objective against the threat axis (0 without a picture).</summary>
+        /// <summary>BC12 decision 4: the terrain picture's strength of the ground at the objective against the own side's approach to it (0 without a picture).</summary>
         public float TerrainStrength { get; }
-        /// <summary>BC12 decision 4: the speed-cost difficulty of the 300 m approach from the enemy side (0 without a picture).</summary>
+        /// <summary>BC12 decision 4: the speed-cost difficulty of the 300 m the own side crosses to reach the objective, ending at it (0 without a picture).</summary>
         public float ApproachDifficulty { get; }
 
         public ObjectiveObservationInput(

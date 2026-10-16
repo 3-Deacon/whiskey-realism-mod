@@ -39,6 +39,13 @@ internal static partial class TerrainPictureTests
             ("bc12 TerrainAnchorReplacesPreservedNone", TerrainAnchorReplacesPreservedNone),
             ("bc12 FlankAnchoredByRiverWithin80m", FlankAnchoredByRiverWithin80m),
             ("bc12 AnchoredSideGetsNoGuardFlankSlot", AnchoredSideGetsNoGuardFlankSlot),
+            ("bc12 DefenderLineSlotsStandOnTheTerrainLine", DefenderLineSlotsStandOnTheTerrainLine),
+            ("bc12 OnlyARiverAnchorsAFlank", OnlyARiverAnchorsAFlank),
+            ("bc12 EnemyHeldObjectiveWaterIsOnOurSide", EnemyHeldObjectiveWaterIsOnOurSide),
+            ("bc12 EnemyHeldObjectiveApproachIsOnOurSide", EnemyHeldObjectiveApproachIsOnOurSide),
+            ("bc12 ClassificationFollowsThePlanningFlag", ClassificationFollowsThePlanningFlag),
+            ("bc12 PlumbingFromTheArmyAndEvidenceIsPinned", PlumbingFromTheArmyAndEvidenceIsPinned),
+            ("bc12 BuildingIndexIsIncremental", BuildingIndexIsIncremental),
             // inference
             ("bc12 EnemyStandingOnStrongGroundReadsDefend", EnemyStandingOnStrongGroundReadsDefend),
             ("bc12 MovingEnemyOnStrongGroundNotDefend", MovingEnemyOnStrongGroundNotDefend),
@@ -648,5 +655,206 @@ internal static partial class TerrainPictureTests
             if (t == TacticalObjectiveType.FallbackLine) continue;       // read by no planner branch
             AssertTrue(contracts.Contains(t.ToString()), t + " exists");
         }
+    }
+
+    // ------------------------------------------------------------------ verify r1: a terrain line is stood on
+
+    private static CommandNodeOperationalState[] SixDefenderNodes()
+    {
+        var nodes = new CommandNodeOperationalState[6];
+        for (int i = 0; i < nodes.Length; i++)
+            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp,
+                150f + 100f * i, -150f, 0f);
+        return nodes;
+    }
+
+    private static CommandDoctrineOrder[] DefenderOrders(TerrainPicture picture, bool reverseSlope, out TacticalDefensiveLineAnchor anchor)
+    {
+        CommandNodeOperationalState[] nodes = SixDefenderNodes();
+        BattlefieldObjectiveEstimate objective = RidgeObjective(ObjX, ObjZ, -760f);
+        var operation = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, objective.ObjectiveId, 900f);
+        var snapshot = new BattlefieldPictureSnapshot(new[] { objective });
+        Func<TerrainPicture> savedProvider = TerrainPicture.Provider;
+        Func<bool> savedEnabled = TerrainPicture.PlanningEnabled;
+        try
+        {
+            TerrainPicture.Provider = () => picture;
+            TerrainPicture.PlanningEnabled = () => true;
+            anchor = TacticalDefensiveLineAnchorPlanner.Plan(objective, TacticalBattlefrontGeometry.Build(nodes, objective), nodes.Length, picture, reverseSlope);
+            return CommandDoctrineAssignment.Build(nodes, operation, snapshot, 5000f, 100f, 0.2f, BattleStance.Defender, null, reverseSlope);
+        }
+        finally
+        {
+            TerrainPicture.Provider = savedProvider;
+            TerrainPicture.PlanningEnabled = savedEnabled;
+        }
+    }
+
+    private static void DefenderLineSlotsStandOnTheTerrainLine()
+    {
+        BattleTerrainGrid grid = Grid(Map, (x, z) => Grass);
+
+        // A crest at world z -390, the enemy to -z: the anchor is the crest's forward edge (z -400) and the line slots stand on it,
+        // not AssemblyDistance (210 m) behind it.
+        TerrainPicture crest = Build(grid, Map, RidgeAlongX(30f, 5f, Map));
+        CommandDoctrineOrder[] orders = DefenderOrders(crest, reverseSlope: false, out TacticalDefensiveLineAnchor crestAnchor);
+        AssertTrue(crestAnchor.HasAnchor && crestAnchor.OnTerrainLine, "a crest anchor: " + crestAnchor.Reason);
+        int lineSlots = 0;
+        for (int i = 0; i < orders.Length; i++)
+        {
+            AssertTrue(orders[i].Task == CommandTaskType.FormUp || orders[i].Task == CommandTaskType.GuardFlank, "task " + orders[i].Task);
+            if (orders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            lineSlots++;
+            AssertTrue(Math.Abs(orders[i].PrimaryTarget.Z - crestAnchor.Center.Z) <= TerrainPicture.CellMeters,
+                "crest line slot " + i + " at z " + orders[i].PrimaryTarget.Z + " stands within a cell of the anchor " + crestAnchor.Center.Z);
+        }
+        AssertEqual(2, lineSlots, "six nodes: two line slots between the flank guards and the depth slots");
+        for (int i = 0; i < orders.Length; i++)
+            if (orders[i].Reason.IndexOf("scourge-slot-depth", StringComparison.Ordinal) >= 0)
+                AssertTrue(orders[i].PrimaryTarget.Z > crestAnchor.Center.Z + 200f, "depth slots stay well behind the line");
+
+        // A wall line: the slots land inside the cover radius, where vanilla's cover snap takes them.
+        TerrainPicture wall = Build(grid, Map, Flat(), cover: new[] { Wall(100f, 700f, -390f) });
+        CommandDoctrineOrder[] wallOrders = DefenderOrders(wall, reverseSlope: false, out TacticalDefensiveLineAnchor wallAnchor);
+        AssertTrue(wallAnchor.OnTerrainLine && wallAnchor.Reason.StartsWith("terrain-line:wall", StringComparison.Ordinal), "a wall anchor: " + wallAnchor.Reason);
+        int wallSlots = 0;
+        for (int i = 0; i < wallOrders.Length; i++)
+        {
+            if (wallOrders[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            wallSlots++;
+            DoctrineTargetPoint t = wallOrders[i].PrimaryTarget;
+            AssertTrue(wall.TerrainStrength(t.X, t.Z, 0f, -1f) >= 0.34f,
+                "wall line slot " + i + " at (" + t.X + ", " + t.Z + ") has the wall's cover within " + TerrainPicture.CoverRadiusMeters + " m");
+        }
+        AssertEqual(2, wallSlots, "two wall line slots");
+
+        // Reverse slope: the slots stand at the plan's setback behind the crest, the value the play rect uses.
+        CommandDoctrineOrder[] reverse = DefenderOrders(crest, reverseSlope: true, out TacticalDefensiveLineAnchor reverseAnchor);
+        float crestZ = -390f;
+        int reverseSlots = 0;
+        for (int i = 0; i < reverse.Length; i++)
+        {
+            if (reverse[i].Reason.IndexOf("scourge-slot-line", StringComparison.Ordinal) < 0) continue;
+            reverseSlots++;
+            AssertTrue(Math.Abs(reverse[i].PrimaryTarget.Z - (crestZ + TacticalTerrainLinePlanner.ReverseSlopeSetbackMeters)) <= TerrainPicture.CellMeters,
+                "reverse-slope line slot " + i + " at z " + reverse[i].PrimaryTarget.Z + " stands ReverseSlopeSetbackMeters behind the crest");
+        }
+        AssertEqual(2, reverseSlots, "two reverse-slope line slots");
+        AssertTrue(reverseAnchor.Center.Z > crestAnchor.Center.Z + 60f, "the reverse-slope anchor is behind the forward-edge anchor");
+
+        // A corridor intercept is still a line to form up behind: its line slots keep the assembly distance.
+        string planner = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalBattleLinePlanner.cs");
+        FlankResponseTests.AssertPinned(planner, "double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;", "only a terrain line has a zero line stand-off");
+    }
+
+    private static void OnlyARiverAnchorsAFlank()
+    {
+        // A creek (3), a forest (14), a road (7) and a swamp (15) beside the end are not vanilla's river id 4.
+        foreach (int id in new[] { 3, 14, 7, 15 })
+        {
+            int captured = id;
+            TerrainPicture p = Build(Grid(Map, (x, z) => (x >= 600 && x < 640) ? captured : Grass), Map, Flat());
+            AssertFalse(TacticalTerrainLinePlanner.FlankAnchored(p, 560f, -400f, 1f, 0f), "terrain id " + id + " 40 m from the end does not anchor it");
+        }
+        TerrainPicture river = Build(Grid(Map, (x, z) => (x >= 600 && x < 640) ? River : Grass), Map, Flat());
+        AssertTrue(TacticalTerrainLinePlanner.FlankAnchored(river, 560f, -400f, 1f, 0f), "control: the river does");
+    }
+
+    // ------------------------------------------------------------------ verify r1: the ground the own side has to cross
+
+    private static List<ObjectiveObservationInput> ReadObjectiveAt(TerrainPicture picture, Func<bool> enabled, float x, float z)
+    {
+        BattleSnapshot source = BattlePerceptionTests.ConsumerSnapshot(10.0, new[] { BattlePerceptionTests.OwnUnit(1, 400f, -700f) });
+        var observations = new List<ObjectiveObservationInput> { Observation(x, z) };
+        Func<TerrainPicture> savedProvider = TerrainPicture.Provider;
+        Func<bool> savedEnabled = TerrainPicture.PlanningEnabled;
+        try
+        {
+            TerrainPicture.Provider = () => picture;
+            TerrainPicture.PlanningEnabled = enabled;
+            TacticalVisionRuntimeAdapter.ApplyTerrainPicture(observations, source);
+        }
+        finally
+        {
+            TerrainPicture.Provider = savedProvider;
+            TerrainPicture.PlanningEnabled = savedEnabled;
+        }
+        return observations;
+    }
+
+    private static void EnemyHeldObjectiveWaterIsOnOurSide()
+    {
+        // We stand at z -700; the objective is at z -400 (toward +z from us). A river band beyond it (z -300..-240) is the enemy's
+        // side; a band between us and it (z -560..-500) is ours to cross.
+        TerrainPicture beyond = Build(Grid(Map, (x, z) => (z - Map >= -300 && z - Map < -240) ? River : Grass), Map, Flat());
+        TerrainPicture between = Build(Grid(Map, (x, z) => (z - Map >= -560 && z - Map < -500) ? River : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(beyond, () => true, 400f, -400f)[0].TerrainStrength, "a river beyond the objective is no obstacle to us");
+        AssertNear(0.4f, ReadObjectiveAt(between, () => true, 400f, -400f)[0].TerrainStrength, 0.0001f, "a river between us and the objective is");
+    }
+
+    private static void EnemyHeldObjectiveApproachIsOnOurSide()
+    {
+        // Swamp (15) across everything beyond the objective, or across everything between us and it.
+        TerrainPicture beyond = Build(Grid(Map, (x, z) => (z - Map >= -400) ? 15 : Grass), Map, Flat());
+        TerrainPicture between = Build(Grid(Map, (x, z) => (z - Map < -400) ? 15 : Grass), Map, Flat());
+        AssertEqual(0f, ReadObjectiveAt(beyond, () => true, 400f, -400f)[0].ApproachDifficulty, "a swamp behind the objective does not slow our approach");
+        AssertNear(1f, ReadObjectiveAt(between, () => true, 400f, -400f)[0].ApproachDifficulty, 0.0001f, "a swamp between us and it does");
+    }
+
+    private static void ClassificationFollowsThePlanningFlag()
+    {
+        BattleTerrainGrid grid = GridWithCrossings(Map, (x, z) => Grass, new[] { 400f }, new[] { -400f }, new[] { Bridge });
+        TerrainPicture p = Build(grid, Map, Flat());
+        AssertEqual(TacticalObjectiveType.Bridge, ReadObjectiveAt(p, () => true, 410f, -400f)[0].Type, "flag on: the bridge is read");
+        ObjectiveObservationInput off = ReadObjectiveAt(p, () => false, 410f, -400f)[0];
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, off.Type, "flag off: the vanilla objective keeps its type");
+        AssertFalse(off.TypeAnchorVerified, "...unverified");
+        AssertEqual(0f, off.TerrainStrength, "...with no terrain strength");
+    }
+
+    // The two Current()/CurrentForPlanning() splits and the reverse-slope flag live in runtime files the harness does not build.
+    private static void PlumbingFromTheArmyAndEvidenceIsPinned()
+    {
+        string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
+        FlankResponseTests.AssertPinned(army, "HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);", "the army passes the reverse-slope plan to the doctrine build");
+        string evidence = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyEvidenceBuilder.cs");
+        FlankResponseTests.AssertPinned(evidence, "ClassifyFromPicture(TerrainPicture.Current(), enemyVisible.FrontAxis)", "playbook terrain reads the picture whatever the planning flag says");
+        FlankResponseTests.AssertPinned(evidence, "crestLine: CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), enemyVisible.FrontAxis)", "the crest line follows the planning flag");
+        FlankResponseTests.AssertPinned(evidence, "_knownEnemyBuffer, TerrainPicture.CurrentForPlanning());", "strong-ground evidence follows the planning flag");
+        string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        FlankResponseTests.AssertPinned(ledger, "terrainStrength: observation.TerrainStrength", "the ledger passes the observation's terrain strength");
+    }
+
+    private static void BuildingIndexIsIncremental()
+    {
+        // 640 single buildings spread out plus one cluster of three: the index stages are chunked (no unit grows with the building
+        // count), and the town is still found.
+        const int size = 4000;
+        BattleTerrainGrid grid = Grid(size, (x, z) => Grass);
+        var bx = new List<float>(); var bz = new List<float>();
+        for (int i = 0; i < 640; i++) { bx.Add(100f + (i % 32) * 120f); bz.Add(-100f - (i / 32) * 190f); }
+        bx.AddRange(new[] { 3500f, 3520f, 3540f }); bz.AddRange(new[] { -3500f, -3510f, -3520f });
+        long Units(float[] x, float[] z)
+        {
+            var builder = new TerrainPictureBuilder(grid, size, size, TerrainShapeRules.Shipped);
+            var heights = new FnHeights(size, size, Flat());
+            var covers = new ListCover(null);
+            var buildings = new ListBuildings(x, z);
+            long t = 0;
+            int guard = 0;
+            while (!builder.Step(heights, covers, buildings, 0L, () => ++t))
+                if (builder.Failed || ++guard > 1000000) break;
+            AssertTrue(builder.Picture.Ready, "ready");
+            return builder.TotalUnits;
+        }
+        float[] allX = bx.ToArray(), allZ = bz.ToArray();
+        long without = Units(new float[0], new float[0]);
+        long with = Units(allX, allZ);
+        // 643 buildings = 11 chunks of 64: collect, count, place and towns are a unit per chunk (about 42 units over the empty build's); one
+        // unbucketed index unit would give about 23.
+        AssertTrue(with - without >= 40, "the building stages are chunked, " + (with - without) + " units for 643 buildings");
+        TerrainPicture p = Build(grid, size, Flat(), bx: allX, bz: allZ);
+        AssertTrue(p.TownNear(3520f, -3510f, 40f), "the cluster is a town after the chunked index");
+        AssertFalse(p.TownNear(100f, -100f, 40f), "a lone building is not");
     }
 }

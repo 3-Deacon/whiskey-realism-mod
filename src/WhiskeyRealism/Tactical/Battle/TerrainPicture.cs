@@ -218,7 +218,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // ---- decision 4: terrain strength and approach difficulty ----------------------------------------------
 
         /// <summary>
-        /// 1 - (1 - c)(1 - h)(1 - w)(1 - b) for a point and the threat axis (unit vector toward the enemy): c the best cover
+        /// 1 - (1 - c)(1 - h)(1 - w)(1 - b) for a point and the axis toward the side that has to cross the ground to reach it (the holder's front: toward the enemy for a line we hold, toward our own side for an objective the enemy holds): c the best cover
         /// value within 60 m, h = min(1, crest prominence / 15 m) x 0.5 (height raises fire range and cuts the enemy's sight),
         /// w = 0.4 when water covers at least 60 % of a lateral transect 100-300 m in front, b = 0.7 for a town.
         /// </summary>

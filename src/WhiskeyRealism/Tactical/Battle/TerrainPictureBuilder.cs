@@ -83,7 +83,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private float[] _bx, _bz;
         private int _buildingCount;
         private float[] _chunkX, _chunkZ;
-        private int[] _bucketStart, _bucketOrder, _bucketOf;
+        private int[] _bucketStart, _bucketOrder, _bucketOf, _bucketFill;
+        private int _indexPhase;
         private int _bucketColumns, _bucketRows;
         private readonly int[] _idCounts = new int[32];
 
@@ -179,6 +180,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _bucketStart = new int[_bucketColumns * _bucketRows + 1];
             _bucketOrder = new int[MaxBuildings];
             _bucketOf = new int[MaxBuildings];
+            _bucketFill = new int[_bucketColumns * _bucketRows];
             _allocated = true;
             return true;
         }
@@ -213,8 +215,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     CollectBuildings(buildings);
                     return true;
                 case Stage.BuildingIndex:
-                    IndexBuildings();
-                    Advance(Stage.Towns);
+                    if (IndexBuildingsChunk()) Advance(Stage.Towns);
                     return true;
                 case Stage.Towns:
                     if (_index >= _buildingCount) { Advance(Stage.Junctions); return false; }
@@ -398,24 +399,38 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        // Counting sort of the buildings into 150 m buckets (one unit): a town test reads the 3 x 3 buckets around a building.
-        private void IndexBuildings()
+        // Counting sort of the buildings into 150 m buckets, a town test reads the 3 x 3 buckets around a building. Three phases,
+        // each a unit of work or a BuildingChunk of buildings per unit, so no unit grows with the building count: count each
+        // building into its bucket, prefix-sum the bucket starts, place each building at its bucket's cursor. True when done.
+        private bool IndexBuildingsChunk()
         {
-            Array.Clear(_bucketStart, 0, _bucketStart.Length);
-            for (int i = 0; i < _buildingCount; i++)
+            int buckets = _bucketColumns * _bucketRows;
+            if (_indexPhase == 0)
             {
-                int b = BucketOf(_bx[i], _bz[i]);
-                _bucketOf[i] = b;
-                _bucketStart[b + 1]++;
+                if (_index == 0) Array.Clear(_bucketStart, 0, _bucketStart.Length);
+                int end = Math.Min(_buildingCount, _index + BuildingChunk);
+                for (; _index < end; _index++)
+                {
+                    int b = BucketOf(_bx[_index], _bz[_index]);
+                    _bucketOf[_index] = b;
+                    _bucketStart[b + 1]++;
+                }
+                if (_index >= _buildingCount) { _indexPhase = 1; _index = 0; }
+                return false;
             }
-            for (int b = 0; b < _bucketColumns * _bucketRows; b++) _bucketStart[b + 1] += _bucketStart[b];
-            // _bucketStart[b] is now the first slot of bucket b; one pass per bucket fills it (the building count is small).
-            for (int b = 0; b < _bucketColumns * _bucketRows; b++)
+            if (_indexPhase == 1)
             {
-                int slot = _bucketStart[b];
-                for (int i = 0; i < _buildingCount; i++)
-                    if (_bucketOf[i] == b) _bucketOrder[slot++] = i;
+                for (int b = 0; b < buckets; b++)
+                {
+                    _bucketStart[b + 1] += _bucketStart[b];
+                    _bucketFill[b] = _bucketStart[b];
+                }
+                _indexPhase = 2;
+                return false;
             }
+            int last = Math.Min(_buildingCount, _index + BuildingChunk);
+            for (; _index < last; _index++) _bucketOrder[_bucketFill[_bucketOf[_index]]++] = _index;
+            return _index >= _buildingCount;
         }
 
         private int BucketOf(float x, float z)

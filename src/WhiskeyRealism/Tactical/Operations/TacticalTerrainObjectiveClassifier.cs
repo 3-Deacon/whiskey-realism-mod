@@ -7,7 +7,7 @@ namespace WhiskeyRealism.Tactical.Operations
     // Within ClassifyRadiusMeters (60 m) of the objective: Bridge (a listed bridge crossing) > Ford (a listed ford) > Town >
     // RoadJunction > Ridge (a crest cell of at least 3 m prominence) > unchanged. A classified type is verified by the picture
     // (TypeAnchorVerified), so TacticalObjectiveSourceModel.Normalize keeps it; ChokePoint keeps its one producer (corridor
-    // anchors). The observation also carries the terrain strength and approach difficulty of decision 4 against the threat axis.
+    // anchors). The observation also carries the terrain strength and approach difficulty of decision 4, read toward the own side (the axis passed is from the objective toward the side that must reach it).
     public static class TacticalTerrainObjectiveClassifier
     {
         /// <summary>The observation read against the picture; unchanged without one, or for a type the picture does not classify.</summary>

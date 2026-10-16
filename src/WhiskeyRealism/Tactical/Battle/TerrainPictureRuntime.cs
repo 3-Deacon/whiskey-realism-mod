@@ -221,8 +221,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if ((UnityEngine.Object)collider == null) continue;
                     Bounds b = collider.bounds;
                     Vector3 min = b.min, max = b.max;
-                    // The collider's segment is the pair of opposite horizontal AABB corners whose midpoint is closer to its surface.
-                    var mid0 = new Vector3((min.x + max.x) * 0.5f, b.center.y, (min.z + max.z) * 0.5f);
+                    // The collider's segment is the AABB diagonal whose quarter point lies closer to its surface.
                     bool firstDiagonal = true;
                     try
                     {

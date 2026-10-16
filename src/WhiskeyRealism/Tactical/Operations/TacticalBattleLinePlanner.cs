@@ -293,6 +293,7 @@ namespace WhiskeyRealism.Tactical.Operations
             private readonly double _halfWidth;
             private readonly double _laneScale;
             private readonly bool _defensiveSideTargets;
+            private readonly double _assemblyStandOff;
 
             private FrontageGeometry(
                 BattlefieldObjectiveEstimate objective,
@@ -300,6 +301,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 double halfWidth,
                 double laneScale,
                 bool defensiveSideTargets,
+                double assemblyStandOff,
                 DoctrineTargetPoint left,
                 DoctrineTargetPoint right,
                 DoctrineTargetPoint artillery,
@@ -310,6 +312,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 _halfWidth = halfWidth;
                 _laneScale = laneScale;
                 _defensiveSideTargets = defensiveSideTargets;
+                _assemblyStandOff = assemblyStandOff;
                 Left = left;
                 Right = right;
                 Artillery = artillery;
@@ -361,7 +364,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     return BehindObjective(_objective, _direction, DepthSlotDistance, DepthLane(commandIndex, nodeCount));
                 }
 
-                return Target(AssemblyDistance, AssemblyLane(commandIndex, nodeCount));
+                return Target(_assemblyStandOff, AssemblyLane(commandIndex, nodeCount));
             }
 
             public string AssemblySlotReasonSuffix(int commandIndex, int nodeCount)
@@ -449,6 +452,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 double laneScale = defensiveAnchor.CorridorAnchor || IsChokeObjective(objective) ? 0.65d : 1d;
                 // A held terrain line is stood on its own side like a corridor intercept (never 75 m out in front of it).
                 bool defensiveSideTargets = defensiveAnchor.CorridorAnchor || defensiveAnchor.OnTerrainLine;
+                // A corridor intercept is a line to form up behind (AssemblyDistance back); a terrain line is the line to stand on: the
+                // line slots take the anchor itself, which already sits at the crest's forward edge, 80 m behind the crest under
+                // ReverseSlopeDefense, or on the wall / river line (inside vanilla's cover snap). Depth slots keep their distance.
+                double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;
                 DoctrineTargetPoint left = defensiveSideTargets
                     ? BehindObjective(objective, direction, MainApproachDistance, half)
                     : Approach(objective, direction, MainApproachDistance, half);
@@ -464,7 +471,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : ":defensive-side-corridor";
                 if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
-                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, left, right, artillery, suffix);
+                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, left, right, artillery, suffix);
             }
 
             private static bool IsTerrainAnchor(BattlefieldObjectiveEstimate objective)
