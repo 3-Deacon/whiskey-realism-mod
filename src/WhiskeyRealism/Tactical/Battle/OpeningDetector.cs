@@ -25,7 +25,7 @@ namespace WhiskeyRealism.Tactical.Battle
     public sealed class OpeningDetector
     {
         public const float GapMinMeters = 150f, LineDepthBandMeters = 200f, GapDepthMeters = 300f, ProbeSpacingMeters = 50f,
-            RememberedMinConfidence = 0.5f, DefaultEnemyFrontageMeters = 100f, ShakenShareMin = 0.4f, FlankWatchMeters = 300f,
+            DefaultEnemyFrontageMeters = 100f, ShakenShareMin = 0.4f, FlankWatchMeters = 300f,
             FlankOffsetMeters = 150f, SupportMeters = 250f, ClusterLinkMeters = 150f, RefusedEndDegrees = 45f,
             CounterstrokeMaxMeters = 400f, PenetrationMinDepthMeters = 100f, PenetrationClearMeters = 50f;
 
@@ -55,7 +55,6 @@ namespace WhiskeyRealism.Tactical.Battle
         // distance, so a nearer neighbour is not worth an opening.
         public const float ClusterIsolationFloorMeters = ClusterSeparationFactor * ClusterMinAssetMeters;
         private const int MaxBands = 16;
-        private const int CellOffset = 16384, CellStride = 32768;
 
         private struct Sample
         {
@@ -96,7 +95,11 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly float[] _secTotal = new float[MaxBands], _secVisible = new float[MaxBands], _secShaken = new float[MaxBands], _secRouted = new float[MaxBands];
         private float[] _cx = new float[64], _cz = new float[64], _cvalue = new float[64], _cstrength = new float[64], _cconf = new float[64], _cbest = new float[64];
         private float[] _cmorale = new float[64], _cvisible = new float[64];
-        private int[] _cbestId = new int[64], _cidx = new int[256], _uf = new int[256], _ckey = new int[256], _corder = new int[256];
+        private int[] _cbestId = new int[64];
+        // ClusterPass: the shared single-link labelling (BC14 extracted it) and its coordinate and label scratch.
+        private readonly SingleLinkClusters _links = new SingleLinkClusters();
+        private float[] _lx = new float[256], _lz = new float[256];
+        private int[] _lab = new int[256];
         private bool[] _ckeep = new bool[64];
         private float[] _cnearest = new float[64];
 
@@ -329,9 +332,8 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int k = 0; k < s.ObservationCount; k++)
             {
                 ref EnemyObservation o = ref obs[k];
+                if (!EnemySamples.Accepts(in o)) continue;
                 bool visible = o.State == ObservationState.Visible;
-                if (!visible && !(o.State == ObservationState.Remembered && o.Confidence01 >= RememberedMinConfidence)) continue;
-                if (o.IsReinforcement || o.UnitTyp < 0 || o.UnitTyp > 2) continue;
                 ref Sample m = ref _s[_n];
                 m = default;
                 m.X = o.X;
@@ -773,62 +775,30 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             int n = _n;
             if (n < 2) return;
-            if (_ckey.Length < n)
+            if (_lx.Length < n)
             {
-                int size = Math.Max(n, _ckey.Length * 2);
-                _ckey = new int[size];
-                _corder = new int[size];
-                _uf = new int[size];
-                _cidx = new int[size];
+                int size = Math.Max(n, _lx.Length * 2);
+                _lx = new float[size];
+                _lz = new float[size];
+                _lab = new int[size];
             }
             for (int i = 0; i < n; i++)
             {
-                int cx = (int)Math.Floor(_s[i].X / ClusterLinkMeters);
-                int cz = (int)Math.Floor(_s[i].Z / ClusterLinkMeters);
-                _ckey[i] = (cx + CellOffset) * CellStride + (cz + CellOffset);
-                _corder[i] = i;
-                _uf[i] = i;
-                _cidx[i] = -1;
+                _lx[i] = _s[i].X;
+                _lz[i] = _s[i].Z;
             }
-            Array.Sort(_ckey, _corder, 0, n);
-
-            float link2 = ClusterLinkMeters * ClusterLinkMeters;
-            for (int p = 0; p < n; p++)
+            int clusters = _links.Label(_lx, _lz, n, ClusterLinkMeters, _lab);
+            EnsureClusterArrays(clusters);
+            for (int c = 0; c < clusters; c++)
             {
-                int u = _corder[p];
-                int ucx = _ckey[p] / CellStride - CellOffset;
-                int ucz = _ckey[p] % CellStride - CellOffset;
-                for (int dcx = -1; dcx <= 1; dcx++)
-                {
-                    for (int dcz = -1; dcz <= 1; dcz++)
-                    {
-                        int key = (ucx + dcx + CellOffset) * CellStride + (ucz + dcz + CellOffset);
-                        for (int q = LowerBound(key, n); q < n && _ckey[q] == key; q++)
-                        {
-                            int v = _corder[q];
-                            if (v <= u) continue;
-                            float dx = _s[v].X - _s[u].X, dz = _s[v].Z - _s[u].Z;
-                            if (dx * dx + dz * dz <= link2) Union(u, v);
-                        }
-                    }
-                }
+                _cx[c] = _cz[c] = _cvalue[c] = _cstrength[c] = _cmorale[c] = _cvisible[c] = 0f;
+                _cbest[c] = -1f;
+                _cconf[c] = 1f;
+                _cbestId[c] = -1;
             }
-
-            int clusters = 0;
             for (int i = 0; i < n; i++)
             {
-                int root = Find(i);
-                if (_cidx[root] < 0)
-                {
-                    EnsureClusterArrays(clusters + 1);
-                    _cidx[root] = clusters;
-                    _cx[clusters] = _cz[clusters] = _cvalue[clusters] = _cstrength[clusters] = _cmorale[clusters] = _cvisible[clusters] = 0f;
-                    _cbest[clusters] = -1f;
-                    _cconf[clusters] = 1f;
-                    _cbestId[clusters] = -1;
-                    clusters++;
-                }
-                int c = _cidx[root];
+                int c = _lab[i];
                 float w = Math.Max(1f, _s[i].Strength);
                 _cx[c] += _s[i].X * w;
                 _cz[c] += _s[i].Z * w;
@@ -908,34 +878,6 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Resize(ref _cnearest, size);
             Array.Resize(ref _cmorale, size);
             Array.Resize(ref _cvisible, size);
-        }
-
-        private int Find(int i)
-        {
-            while (_uf[i] != i)
-            {
-                _uf[i] = _uf[_uf[i]];
-                i = _uf[i];
-            }
-            return i;
-        }
-
-        private void Union(int a, int b)
-        {
-            int ra = Find(a), rb = Find(b);
-            if (ra != rb) _uf[ra < rb ? rb : ra] = ra < rb ? ra : rb;
-        }
-
-        private int LowerBound(int key, int n)
-        {
-            int lo = 0, hi = n;
-            while (lo < hi)
-            {
-                int mid = (lo + hi) >> 1;
-                if (_ckey[mid] < key) lo = mid + 1;
-                else hi = mid;
-            }
-            return lo;
         }
 
         // ================================================================================ penetration

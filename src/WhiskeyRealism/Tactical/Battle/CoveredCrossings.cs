@@ -23,7 +23,7 @@ namespace WhiskeyRealism.Tactical.Battle
     // Reinforcement columns and groups are not regiments in the field and are skipped.
     public static class CoveredCrossings
     {
-        public const float RememberedMinConfidence = 0.5f;
+        public const float RememberedMinConfidence = EnemySamples.RememberedMinConfidence;
         public const float ArcDegrees = 45f;
         public const float RangeFactor = 1.5f;
         public const float MinCoverValue = 0.15f;
