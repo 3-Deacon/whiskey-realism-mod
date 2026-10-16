@@ -33,9 +33,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// <summary>The plan of a zone assignment that carries a maneuver (DirectChildIntent.Maneuver).</summary>
     public readonly struct ManeuverSpec
     {
-        public ManeuverSpec(PlayRectKind kind, float anchorX, float anchorZ, float startOffsetSeconds, bool envelops)
+        public ManeuverSpec(PlayRectKind kind, float anchorX, float anchorZ, float startOffsetSeconds, bool envelops,
+            bool projectedMirrored = false, float authoredAnchorX = 0f, float authoredAnchorZ = 0f, bool holdsForRelease = false)
         {
             HasValue = true;
+            HoldsForRelease = holdsForRelease;
+            ProjectedMirrored = projectedMirrored;
+            AuthoredAnchorX = authoredAnchorX;
+            AuthoredAnchorZ = authoredAnchorZ;
             Kind = kind;
             AnchorX = anchorX;
             AnchorZ = anchorZ;
@@ -49,6 +54,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float AnchorZ { get; }
         public float StartOffsetSeconds { get; }
         public bool Envelops { get; }
+
+        /// <summary>
+        /// BC14 requirement-selected-side: the plan was projected mirrored (the feasibility evaluation chose that side). BC11's one
+        /// mirrored try then goes to <see cref="AuthoredAnchorX"/>/<see cref="AuthoredAnchorZ"/>, the rect's un-mirrored anchor, and not to
+        /// MirrorAcrossAxis: the projection frame and the front axis need not coincide.
+        /// </summary>
+        public bool ProjectedMirrored { get; }
+        public float AuthoredAnchorX { get; }
+        public float AuthoredAnchorZ { get; }
+
+        /// <summary>
+        /// BC14 requirement-synchronized-release: a fixing child of a template with an enveloping rect holds at its position until its planned
+        /// release (a start-delay maneuver whose gate is the ledger's release, not the rect's offset).
+        /// </summary>
+        public bool HoldsForRelease { get; }
     }
 
     public struct ManeuverInput
@@ -78,6 +98,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float ArrivalSlackMeters;
         public BattleStance Stance;
         public double NowHours;
+
+        // BC14, each value beside its flag (a default input is "none"; 0 is a valid hour).
+        /// <summary>The ledger's planned release, an absolute doctrine hour: the Hold ends at it in place of the Center's contact and the offset.</summary>
+        public bool HasPlannedRelease;
+        public double PlannedReleaseHours;
+        /// <summary>The ledger's time budget (hours from the march): the timeout abandon counts it in place of MaxManeuverHours.</summary>
+        public bool HasTimeBudget;
+        public double TimeBudgetHours;
+        /// <summary>The march via and the attack via the ledger chose (a link crossing). Latched at the March.</summary>
+        public bool HasVia;
+        public float ViaX, ViaZ;
+        public bool HasAttackVia;
+        public float AttackViaX, AttackViaZ;
+        /// <summary>The child already stands in the far region of the via: the order carries it no more.</summary>
+        public bool ViaPassed, AttackViaPassed;
+        /// <summary>The spec's HoldsForRelease.</summary>
+        public bool HoldsForRelease;
     }
 
     public struct ManeuverState
@@ -89,8 +126,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // Additive: when the march began (MaxManeuverHours counts from it) and whether a DeepRaid reached its outflank point.
         public double ActiveSinceHours;
         public bool OutflankReached;
-        // Additive: why the Hold ended (static literal: center-contact, offset, hold-ceiling), carried into the telemetry row.
+        // Additive: why the Hold ended (static literal: center-contact, offset, planned-release, hold-ceiling), carried into the telemetry row.
         public string ProceedReason;
+
+        // BC14, each value beside its flag: Step resets the state with default(ManeuverState), where 0 is a valid hour. The first planned
+        // release is latched the first time the Hold sees one (the ceiling is anchored to it, so a release that keeps receding still ends);
+        // the budget and the vias at the March, and they do not change after it.
+        public bool HasFirstPlannedRelease;
+        public double FirstPlannedReleaseHours;
+        public bool HasBudget;
+        public double BudgetHours;
+        public bool HasVia;
+        public float ViaX, ViaZ;
+        public bool HasAttackVia;
+        public float AttackViaX, AttackViaZ;
     }
 
     public struct ManeuverOrder
@@ -99,6 +148,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public CommandTaskType Task;
         public float TargetX, TargetZ, Heading;   // Heading -1 = none
         public string Reason;                      // static literal
+
+        /// <summary>BC14: the crossing the order is routed through (the March's or the Attack's via); HasVia false is none.</summary>
+        public bool HasVia;
+        public float ViaX, ViaZ;
 
         /// <summary>The phases that override the child's doctrine order.</summary>
         public bool Overrides => Phase == ManeuverPhase.Hold || Phase == ManeuverPhase.March || Phase == ManeuverPhase.Turn || Phase == ManeuverPhase.Attack;
@@ -158,6 +211,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // long after the play's activation and then returns to its allocator role. It never marches, turns or attacks.
         private static ManeuverOrder StepStartDelay(ref ManeuverState state, in ManeuverInput input)
         {
+            if (input.HoldsForRelease) return StepFixHold(ref state, in input);
             if (!(input.StartOffsetSeconds > 0f))
             {
                 state = default(ManeuverState);
@@ -178,6 +232,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return HoldOrder(in input, "start-delay");
         }
 
+        // BC14 requirement-synchronized-release: a fixing child with a release still ahead holds (FormUp at its position) until it, then
+        // goes back to its allocator role; a fix in contact, a deployed reserve and a child with no ledger entry have no planned release and are
+        // never held. The wings' ceiling stands for the fix too: it never waits for good on a stalled wing.
+        private static ManeuverOrder StepFixHold(ref ManeuverState state, in ManeuverInput input)
+        {
+            if (state.Phase == ManeuverPhase.None)
+            {
+                if (!input.HasPlannedRelease || input.NowHours >= input.PlannedReleaseHours)
+                {
+                    state = default(ManeuverState);
+                    return Done(ManeuverPhase.None, "no-planned-release");
+                }
+                state.Phase = ManeuverPhase.Hold;
+                state.PhaseSinceHours = input.NowHours;
+            }
+            LatchFirstPlannedRelease(ref state, in input);
+            bool ceiling = input.NowHours >= HoldCeilingHours(in state, in input);
+            if (!ceiling && input.HasPlannedRelease && input.NowHours < input.PlannedReleaseHours) return HoldOrder(in input, "fix-planned-release");
+            state.Phase = ManeuverPhase.Released;
+            state.PhaseSinceHours = input.NowHours;
+            return Done(ManeuverPhase.Released, ceiling ? "hold-ceiling" : "planned-release");
+        }
+
+        private static void LatchFirstPlannedRelease(ref ManeuverState state, in ManeuverInput input)
+        {
+            if (!input.HasPlannedRelease || state.HasFirstPlannedRelease) return;
+            state.HasFirstPlannedRelease = true;
+            state.FirstPlannedReleaseHours = input.PlannedReleaseHours;
+        }
+
+        // The Hold ceiling: an hour past the play's activation; with a planned release, never earlier than an hour past the release first
+        // planned (the latched value, so a release that keeps receding still ends).
+        private static double HoldCeilingHours(in ManeuverState state, in ManeuverInput input)
+        {
+            double ceiling = input.PlayActivatedHours + MaxManeuverHours;
+            if (state.HasFirstPlannedRelease) ceiling = Math.Max(ceiling, state.FirstPlannedReleaseHours + MaxManeuverHours);
+            return ceiling;
+        }
+
         private static ManeuverOrder StepEnvelopment(ref ManeuverState state, in ManeuverInput input)
         {
             if (state.Phase == ManeuverPhase.None)
@@ -189,14 +282,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (state.Phase == ManeuverPhase.Hold)
             {
                 // The ceiling: a Hold never outlasts MaxManeuverHours from the play's activation (a Center child that never makes
-                // contact, or is destroyed, must not hold the wings for good); the wings then proceed on their own checks.
-                bool ceiling = input.NowHours - input.PlayActivatedHours >= MaxManeuverHours;
+                // contact, or is destroyed, must not hold the wings for good); the wings then proceed on their own checks. BC14: with a
+                // planned release it is never earlier than an hour past the release first planned.
+                LatchFirstPlannedRelease(ref state, in input);
+                bool ceiling = input.NowHours >= HoldCeilingHours(in state, in input);
                 if (!ceiling)
                 {
-                    if (input.TemplateHasCenter && input.CenterContactHours < 0.0) return HoldOrder(in input, "await-center-contact");
-                    double reference = input.TemplateHasCenter ? Math.Max(input.PlayActivatedHours, input.CenterContactHours) : input.PlayActivatedHours;
-                    double goHours = reference + input.StartOffsetSeconds / (double)TacticalBattleClock.BattleSecondsPerHour;
-                    if (input.NowHours < goHours) return HoldOrder(in input, "hold-offset");
+                    if (input.HasPlannedRelease)
+                    {
+                        // The ledger's release replaces both waits: the wing leaves when the common plan says so.
+                        if (input.NowHours < input.PlannedReleaseHours) return HoldOrder(in input, "await-planned-release");
+                    }
+                    else
+                    {
+                        if (input.TemplateHasCenter && input.CenterContactHours < 0.0) return HoldOrder(in input, "await-center-contact");
+                        double reference = input.TemplateHasCenter ? Math.Max(input.PlayActivatedHours, input.CenterContactHours) : input.PlayActivatedHours;
+                        double goHours = reference + input.StartOffsetSeconds / (double)TacticalBattleClock.BattleSecondsPerHour;
+                        if (input.NowHours < goHours) return HoldOrder(in input, "hold-offset");
+                    }
                 }
 
                 // A wing is never launched (or abandoned) before its march leg has a route result: it holds one step more.
@@ -213,12 +316,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 state.Phase = ManeuverPhase.March;
                 state.PhaseSinceHours = input.NowHours;
                 state.ActiveSinceHours = input.NowHours;
-                state.ProceedReason = ceiling ? "hold-ceiling" : (input.TemplateHasCenter ? "center-contact" : "offset");
+                state.ProceedReason = ceiling ? "hold-ceiling"
+                    : (input.HasPlannedRelease ? "planned-release" : (input.TemplateHasCenter ? "center-contact" : "offset"));
+                // Latched at the March and never changed after it (requirement-crossing-via, requirement-maneuver-time-budget).
+                state.HasBudget = input.HasTimeBudget;
+                state.BudgetHours = input.TimeBudgetHours;
+                state.HasVia = input.HasVia;
+                state.ViaX = input.ViaX;
+                state.ViaZ = input.ViaZ;
+                state.HasAttackVia = input.HasAttackVia;
+                state.AttackViaX = input.AttackViaX;
+                state.AttackViaZ = input.AttackViaZ;
             }
 
             // March, Turn and Attack share the abandon rules.
             if (input.ChildStrengthBucket <= 0) return Abandon(ref state, "lost-strength");
-            if (input.NowHours - state.ActiveSinceHours >= MaxManeuverHours) return Abandon(ref state, "timeout");
+            if (input.NowHours - state.ActiveSinceHours >= (state.HasBudget ? state.BudgetHours : MaxManeuverHours)) return Abandon(ref state, "timeout");
             if (state.Phase != ManeuverPhase.Attack)
             {
                 string failure = FlankMoveCheck(in input);
@@ -247,11 +360,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     {
                         state.Phase = ManeuverPhase.Attack;
                         state.PhaseSinceHours = input.NowHours;
-                        return AttackOrder(in input);
+                        return AttackOrder(in state, in input);
                     }
                     return TurnOrder(in input);
                 default:
-                    return AttackOrder(in input);
+                    return AttackOrder(in state, in input);
             }
         }
 
@@ -261,6 +374,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             state.Mirrored = true;
             state.OutflankReached = false;
+            // The ledger's release, budget and vias were computed for the other side: BC11's own rule governs the child from here on.
+            state.HasFirstPlannedRelease = false;
+            state.HasBudget = false;
+            state.HasVia = false;
+            state.HasAttackVia = false;
             state.Phase = ManeuverPhase.Hold;
             state.PhaseSinceHours = input.NowHours;
             return HoldOrder(in input, "mirror-flank");
@@ -273,11 +391,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (raid && !state.OutflankReached && Arrived(input.ChildX, input.ChildZ, input.OutflankX, input.OutflankZ, input.ArrivalSlackMeters))
                 state.OutflankReached = true;
             bool outflank = raid && !state.OutflankReached;
+            // The via rides until the child stands in its far region; an order re-issued each step never walks it back to the crossing.
+            bool via = state.HasVia && !input.ViaPassed;
             return new ManeuverOrder
             {
                 Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly,
                 TargetX = outflank ? input.OutflankX : input.AnchorX, TargetZ = outflank ? input.OutflankZ : input.AnchorZ,
                 Heading = -1f, Reason = outflank ? "march-outflank" : "march-anchor",
+                HasVia = via, ViaX = via ? state.ViaX : 0f, ViaZ = via ? state.ViaZ : 0f,
             };
         }
 
@@ -292,13 +413,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             };
         }
 
-        private static ManeuverOrder AttackOrder(in ManeuverInput input)
+        private static ManeuverOrder AttackOrder(in ManeuverState state, in ManeuverInput input)
         {
             LineEnd(in input, out float ex, out float ez);
+            // The attack keeps its target, the line end; the attack via only routes the move to it.
+            bool via = state.HasAttackVia && !input.AttackViaPassed;
             return new ManeuverOrder
             {
                 Phase = ManeuverPhase.Attack, Task = CommandTaskType.AttackObjective, TargetX = ex, TargetZ = ez, Heading = -1f,
                 Reason = "attack-line-end",
+                HasVia = via, ViaX = via ? state.AttackViaX : 0f, ViaZ = via ? state.AttackViaZ : 0f,
             };
         }
 
@@ -388,6 +512,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         /// <summary>
+        /// FlankMove's river check on the inward leg (anchor to the enemy line end), BC14 form: without an attack via the straight leg is
+        /// sampled and read by <see cref="InwardLegClear"/> exactly as before; with one the leg is two sub-legs, anchor to the via and the via
+        /// to the line end, and a river sample within <paramref name="footprintMeters"/> of the via is the crossing's own footprint and does not
+        /// count. True only when a sub-leg samples open river elsewhere (the wing is then abandoned river-on-leg).
+        /// </summary>
+        public static bool InwardLegHitsRiver(BattleTerrainGrid g, float ax, float az, bool hasVia, float vx, float vz, float ex, float ez,
+            float footprintMeters, int[] scratch)
+        {
+            if (g == null || scratch == null) return false;
+            if (!hasVia) return !InwardLegClear(scratch, g.SampleLine(ax, az, ex, ez, InwardStepMeters, scratch));
+            return SubLegHitsRiver(g, ax, az, vx, vz, vx, vz, footprintMeters, scratch) || SubLegHitsRiver(g, vx, vz, ex, ez, vx, vz, footprintMeters, scratch);
+        }
+
+        private static bool SubLegHitsRiver(BattleTerrainGrid g, float x0, float z0, float x1, float z1, float viaX, float viaZ, float footprintMeters, int[] scratch)
+        {
+            int n = g.SampleLine(x0, z0, x1, z1, InwardStepMeters, scratch);
+            float length = Distance(x0, z0, x1, z1);
+            float ux = length > 0f ? (x1 - x0) / length : 0f, uz = length > 0f ? (z1 - z0) / length : 0f;
+            for (int i = 0; i < n && i < scratch.Length; i++)
+            {
+                if (scratch[i] != BattleTerrainGrid.RiverId) continue;
+                float t = i * InwardStepMeters;
+                if (Distance(x0 + ux * t, z0 + uz * t, viaX, viaZ) <= footprintMeters) scratch[i] = 0;
+            }
+            return !InwardLegClear(scratch, n);
+        }
+
+        /// <summary>
         /// The march leg judged on the route the child will actually walk: the polyline of NavMesh corners
         /// (<paramref name="xs"/>, <paramref name="zs"/>), each segment sampled every <paramref name="stepMeters"/> on the terrain grid;
         /// true when any sample is river id 4. A straight line from the child to the anchor can cross a river that the planned route
@@ -420,6 +572,69 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public bool HitsRiver;
             /// <summary>No complete NavMesh path: a result in its own right (the leg cannot be walked).</summary>
             public bool NoPath;
+
+            // BC14: a leg through a crossing is planned as two half-queries, child to via and via to anchor, one per step. The first half is
+            // staged here; the published result above is replaced only when the second half completes it.
+            public bool HasVia;
+            public float ViaX, ViaZ;
+            public bool FirstDone, FirstHitsRiver, FirstNoPath;
+        }
+
+        /// <summary>
+        /// Which query the march leg's next route plan is: 0 the whole leg (no via), 1 the child to the via, 2 the via to the anchor (the
+        /// first half is staged and still current for this via).
+        /// </summary>
+        public static int HalfToPlan(in MarchRouteCheck last, bool hasVia, float viaX, float viaZ)
+        {
+            if (!hasVia) return 0;
+            return last.FirstDone && last.HasVia && Distance(last.ViaX, last.ViaZ, viaX, viaZ) <= RouteAnchorMoveMeters ? 2 : 1;
+        }
+
+        /// <summary>
+        /// The check after one planned query. A whole leg (half 0) is the result; the first half is staged beside the old result, so a
+        /// recheck never blinds a launched child; the second half completes the combined result (a river or a missing path on either half).
+        /// </summary>
+        public static MarchRouteCheck ApplyHalf(in MarchRouteCheck last, int half, bool hitsRiver, bool noPath, double nowHours,
+            float anchorX, float anchorZ, bool hasVia, float viaX, float viaZ)
+        {
+            MarchRouteCheck check = last;
+            check.AnchorX = anchorX;
+            check.AnchorZ = anchorZ;
+            check.HasVia = hasVia;
+            check.ViaX = viaX;
+            check.ViaZ = viaZ;
+            if (half == 1)
+            {
+                check.FirstDone = true;
+                check.FirstHitsRiver = hitsRiver;
+                check.FirstNoPath = noPath;
+                return check;
+            }
+            check.Valid = true;
+            check.CheckedHours = nowHours;
+            check.HitsRiver = hitsRiver || (half == 2 && last.FirstHitsRiver);
+            check.NoPath = noPath || (half == 2 && last.FirstNoPath);
+            check.FirstDone = false;
+            check.FirstHitsRiver = false;
+            check.FirstNoPath = false;
+            return check;
+        }
+
+        /// <summary>Whether the check must be recomputed for this leg (<see cref="NeedsRouteRecheck(in MarchRouteCheck, double, float, float)"/>), a staged half or a moved via included.</summary>
+        public static bool NeedsRouteRecheck(in MarchRouteCheck last, double nowHours, float anchorX, float anchorZ, bool hasVia, float viaX, float viaZ)
+        {
+            if (NeedsRouteRecheck(in last, nowHours, anchorX, anchorZ)) return true;
+            if (last.HasVia != hasVia) return true;
+            if (hasVia && (last.FirstDone || Distance(last.ViaX, last.ViaZ, viaX, viaZ) > RouteAnchorMoveMeters)) return true;
+            return false;
+        }
+
+        /// <summary>The last result as it applies to this leg: one whose anchor or via moved on is no result.</summary>
+        public static MarchRouteCheck CheckForLeg(in MarchRouteCheck last, float anchorX, float anchorZ, bool hasVia, float viaX, float viaZ)
+        {
+            MarchRouteCheck check = CheckForAnchor(in last, anchorX, anchorZ);
+            if (check.HasVia != hasVia || (hasVia && Distance(check.ViaX, check.ViaZ, viaX, viaZ) > RouteAnchorMoveMeters)) return default(MarchRouteCheck);
+            return check;
         }
 
         /// <summary>
@@ -481,6 +696,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         // ---- geometry (axis frame) -------------------------------------------------------------
+
+        /// <summary>
+        /// The anchor a maneuver reads this step: the spec's own; after BC11's one mirrored try (<paramref name="flipped"/>) the mirror across the
+        /// front axis, or, for a spec the plan projected mirrored (BC14), the authored anchor: the projection frame and the front axis need not
+        /// coincide, so the fallback goes to the stored anchor and not to <see cref="MirrorAcrossAxis"/>.
+        /// </summary>
+        public static void AnchorFor(in TacticalFrontAxis axis, in ManeuverSpec spec, bool flipped, out float x, out float z)
+        {
+            x = spec.AnchorX;
+            z = spec.AnchorZ;
+            if (!flipped) return;
+            if (spec.ProjectedMirrored)
+            {
+                x = spec.AuthoredAnchorX;
+                z = spec.AuthoredAnchorZ;
+                return;
+            }
+            MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out x, out z);
+        }
 
         /// <summary>True when the rect anchor lies on the right of the army's centre line (the lateral centre of its extent).</summary>
         public static bool RectIsRight(in TacticalFrontAxis axis, float anchorX, float anchorZ)
@@ -605,10 +839,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// A Hold carries no target (the child stands where it is). Phases that do not override add nothing.
         /// </summary>
         internal static ManeuverNodeTable ExpandToNodes(System.Collections.Generic.IReadOnlyList<ChildManeuver> maneuvers,
-            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents,
+            System.Collections.Generic.IReadOnlyList<DirectChildIntent> directChildIntents = null)
         {
             var table = new ManeuverNodeTable();
-            if (maneuvers == null || nodeIntents == null) return table;
+            if (nodeIntents == null) return table;
+            AddGuards(table, directChildIntents, nodeIntents);
+            if (maneuvers == null) return table;
             for (int m = 0; m < maneuvers.Count; m++)
             {
                 ChildManeuver maneuver = maneuvers[m];
@@ -637,10 +874,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     table.Add(new ManeuverNodeEntry(
                         nodeIntents[i].NodeId, maneuver.Order.Phase, maneuver.Order.Task, !hold,
                         maneuver.Order.TargetX + maneuver.LateralX * offset, maneuver.Order.TargetZ + maneuver.LateralZ * offset,
-                        maneuver.Order.Heading, maneuver.Order.Reason));
+                        maneuver.Order.Heading, maneuver.Order.Reason,
+                        maneuver.Order.HasVia, maneuver.Order.ViaX, maneuver.Order.ViaZ));
                 }
             }
             return table;
+        }
+
+        // BC14 requirement-defender-crossing-release: a reserve released to a crossing stands at its guard point facing the crossing. Every node of
+        // the child takes the guard point as its primary target (a guard has no lanes: the groups below follow their parent's formation) and the
+        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task.
+        private static void AddGuards(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+        {
+            if (children == null) return;
+            for (int c = 0; c < children.Count; c++)
+            {
+                if (!children[c].HasGuardPoint) continue;
+                string source = NodeIdOfChild(children[c].ChildId);
+                if (source.Length == 0) continue;
+                for (int i = 0; i < nodeIntents.Count; i++)
+                {
+                    if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.GuardFlank, true,
+                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, "guard-crossing", isGuard: true));
+                }
+            }
         }
 
         // A hash of what the doctrine build reads from the maneuvers, so a phase change triggers a ledger tick.
@@ -663,6 +922,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         h = h * 31 + (int)(c.Order.TargetZ / 50f);
                     }
                     h = h * 31 + (int)(c.Order.Heading / 5f);
+                    // BC14: a via set, moved or cleared (it is dropped once the child has crossed) re-stores the orders.
+                    h = h * 31 + (c.Order.HasVia ? 1 : 0);
+                    if (c.Order.HasVia)
+                    {
+                        h = h * 31 + (int)(c.Order.ViaX / 50f);
+                        h = h * 31 + (int)(c.Order.ViaZ / 50f);
+                    }
                 }
                 return h;
             }

@@ -5,6 +5,35 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
+    /// What one <see cref="ArmyTickCycle"/> step did about the replan triggers (BC14): the trigger it evaluated, whether it replanned or
+    /// kept the plan (the hysteresis of a broken maneuver assumption), and, when a broken assumption was supplied and did not replan,
+    /// the named suppression for the TacticalManeuverBody row.
+    /// </summary>
+    public readonly struct ReplanOutcome
+    {
+        public const string SuppressedByCooldown = "cooldown", SuppressedByMargin = "margin", SuppressedByPreemption = "preempted", SuppressedByCommitment = "committed";
+
+        public ReplanOutcome(ReplanTrigger trigger, bool replanned, bool kept, string suppression)
+        {
+            Trigger = trigger;
+            Replanned = replanned;
+            Kept = kept;
+            Suppression = suppression;
+        }
+
+        /// <summary>The trigger that fired this step, None when none did.</summary>
+        public ReplanTrigger Trigger { get; }
+        /// <summary>The plan was re-picked.</summary>
+        public bool Replanned { get; }
+        /// <summary>The hysteresis kept the current plan: it stays as it is and the cooldown is stamped.</summary>
+        public bool Kept { get; }
+        /// <summary>A static literal: why a supplied broken assumption did not replan the maneuver (cooldown, margin) or was pre-empted; null otherwise.</summary>
+        public string Suppression { get; }
+
+        public static ReplanOutcome None => default(ReplanOutcome);
+    }
+
+    /// <summary>
     /// Pure army-orchestrator tick driver. Runtime callers own telemetry and
     /// battle-object adaptation; this class only advances state and replans.
     /// </summary>
@@ -82,7 +111,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float battleDeltaSeconds = -1f,
             double doctrineNowSeconds = double.NaN)
         {
-            if (orchestrator == null) return ReplanTrigger.None;
+            ReplanOutcome outcome = MaybeReplan(
+                orchestrator, deltaSeconds, ownEvidence, enemyVisible, ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
+                ownReinforcementsArriving, minReplanSeconds, ownAvgFatigue01, ownAvgAmmo01, nearestReinforcementHours,
+                nearestReinforcementStrength, battleDeltaSeconds, doctrineNowSeconds, assumptionReason: null);
+            return outcome.Replanned ? outcome.Trigger : ReplanTrigger.None;
+        }
+
+        /// <summary>
+        /// The tick step with BC14's broken-assumption input: <paramref name="assumptionReason"/> (a static literal from the feasibility
+        /// monitor, null none) raises <see cref="ReplanTrigger.ManeuverAssumptionBroken"/> when no concrete trigger fires first. That trigger
+        /// replans with hysteresis (the current plan is kept unless it is gone, impossible, or beaten by the score margin), and a kept plan
+        /// stamps the cooldown and the replan baseline like a replan does.
+        /// </summary>
+        public static ReplanOutcome MaybeReplan(
+            ArmyOrchestrator orchestrator,
+            float deltaSeconds,
+            ArmyEvidence ownEvidence,
+            EnemyVisibleState enemyVisible,
+            float ownMainEffortStrength,
+            float ownArmyMorale,
+            float ownReservesCommittedFraction,
+            float ownReinforcementsArriving,
+            int minReplanSeconds,
+            float ownAvgFatigue01,
+            float ownAvgAmmo01,
+            float nearestReinforcementHours,
+            float nearestReinforcementStrength,
+            float battleDeltaSeconds,
+            double doctrineNowSeconds,
+            string assumptionReason)
+        {
+            if (orchestrator == null) return ReplanOutcome.None;
 
             var allianceId = orchestrator.AllianceId;
             // Doctrine clock (T8): plan age, phase age and the replan cooldown
@@ -121,7 +181,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             orchestrator.ObserveFrontGeometry(enemyVisible);
             orchestrator.ObserveGlobalOdds(ownEvidence.CurrentOdds);
-            if (!orchestrator.HasPlan) return ReplanTrigger.None;
+            if (!orchestrator.HasPlan) return ReplanOutcome.None;
 
             var intent = ArmyIntentInference.Build(enemyVisible);
             orchestrator.ObserveIntent(intent);
@@ -314,10 +374,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ownStrength: ownMainEffortStrength,
                 reinforcementShareAtLastReplan: baseline.ReinforcementShare,
                 currentEnemyIntent: intent.PrimaryIntent,
-                enemyIntentAtLastReplan: baseline.EnemyIntent);
+                enemyIntentAtLastReplan: baseline.EnemyIntent,
+                assumptionReason: assumptionReason);
 
             var trigger = orchestrator.CheckReplanTriggers(input);
-            if (trigger == ReplanTrigger.None) return ReplanTrigger.None;
+            if (trigger == ReplanTrigger.None) return ReplanOutcome.None;
 
             float now;
             _clockByAlliance.TryGetValue(allianceId, out now);
@@ -329,10 +390,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (_lastReplanByAlliance.TryGetValue(allianceId, out var lastReplan) &&
                 lastReplan <= now && now - lastReplan < cooldown)
             {
-                return ReplanTrigger.None;
+                return new ReplanOutcome(trigger, false, false, assumptionReason != null ? ReplanOutcome.SuppressedByCooldown : null);
             }
 
-            orchestrator.Replan(ownEvidence, intent);
+            bool brokenAssumption = trigger == ReplanTrigger.ManeuverAssumptionBroken;
+            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption, trigger.ToString());
             orchestrator.RecordReplanBaseline(new ReplanBaseline(
                 ownArmyMorale,
                 ownReservesCommittedFraction,
@@ -342,7 +404,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 mainOwnCurrent,
                 mainBandOdds));
             _lastReplanByAlliance[allianceId] = now;
-            return trigger;
+            string suppression = null;
+            if (assumptionReason != null) suppression = kept ? ReplanOutcome.SuppressedByMargin : (brokenAssumption ? null : ReplanOutcome.SuppressedByPreemption);
+            return new ReplanOutcome(trigger, !kept, kept, suppression);
         }
 
         private static float ConfidenceWeightedShift(TacticalIntentModel intent)

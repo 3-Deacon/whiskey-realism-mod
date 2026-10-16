@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -21,19 +23,67 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public int Count => _playbooks.Count;
 
-        public TacticalPlaybook Select(PlaybookContext ctx)
+        public TacticalPlaybook Select(PlaybookContext ctx) => Select(ctx, null);
+
+        /// <summary>
+        /// The playbooks that reach the scoring step for this context: they pass their precondition, the stance filter and, for a crest play,
+        /// the crest check. BC14's feasibility evaluation times exactly these candidates. Writes at most <paramref name="into"/>.Length ids
+        /// and returns how many.
+        /// </summary>
+        public int EligiblePlans(PlaybookContext ctx, BattlePlanId[] into)
         {
+            int n = 0;
+            for (int i = 0; i < _playbooks.Count && n < into.Length; i++)
+            {
+                TacticalPlaybook pb = _playbooks[i];
+                if (PassesGates(pb, in ctx) && (!pb.RequiresCrest || ctx.HasCrestLine)) into[n++] = pb.Id;
+            }
+            return n;
+        }
+
+        private static bool PassesGates(TacticalPlaybook pb, in PlaybookContext ctx)
+            => pb.MatchesPreconditions(ctx) && StanceAllowsPlaybook(ctx.Stance, pb.Id);
+
+        // requirement-never-empty: when every candidate that reaches scoring is Impossible, the feasibility filter is lifted for this selection.
+        private bool AllCandidatesImpossible(in PlaybookContext ctx)
+        {
+            int candidates = 0, impossible = 0;
+            for (int i = 0; i < _playbooks.Count; i++)
+            {
+                TacticalPlaybook pb = _playbooks[i];
+                if (!PassesGates(pb, in ctx) || (pb.RequiresCrest && !ctx.HasCrestLine)) continue;
+                candidates++;
+                if (ctx.Feasibility.TryGet(pb.Id, out CandidateResult r) && r.Verdict == FeasibilityVerdict.Impossible) impossible++;
+            }
+            return candidates > 0 && impossible == candidates;
+        }
+
+        /// <summary>
+        /// <see cref="Select(PlaybookContext)"/> that also reports its candidates (ranked, with the feasibility term) into a pooled
+        /// <paramref name="report"/> for the TacticalPlanSelection row. With <c>ctx.Feasibility</c> set (BC14), an Impossible candidate is skipped
+        /// after its jitter and crest draws and every other candidate's score loses <see cref="ManeuverFeasibility.FeasibilityWeight"/> times its
+        /// penalty; the term only subtracts, so a sound plan scores exactly as before.
+        /// </summary>
+        public TacticalPlaybook Select(PlaybookContext ctx, SelectionReport report)
+        {
+            report?.Clear();
             if (_playbooks.Count == 0) return null;
 
             TacticalPlaybook best = null;
             float bestScore = float.NegativeInfinity;
+            // BC14 hysteresis: the plan being kept, scored in this pass.
+            TacticalPlaybook current = null;
+            float currentScore = float.NegativeInfinity;
             // Deterministic per-seed jitter (xorshift32). Seed must be non-zero for the
             // generator to produce useful state, so OR with 1.
             // Precondition filter (2026-05-21). Excludes plays the force can't
             // execute (cavalry plays w/o cavalry). Hard filter — happens
             // before scoring so an ineligible play can't win on personality
             // fit.
-            int preconditionFiltered = 0;
+            int preconditionFiltered = 0, stanceFiltered = 0, crestFiltered = 0, feasibilityFiltered = 0;
+            bool lift = ctx.Feasibility != null && AllCandidatesImpossible(in ctx);
+            if (lift) OnceLog.Warning("tactical-battle-core:feasibility-all-impossible",
+                "[Feasibility] every candidate is impossible: the feasibility filter is lifted for this selection");
             uint state = unchecked((uint)ctx.JitterSeed | 1u);
             for (int i = 0; i < _playbooks.Count; i++)
             {
@@ -50,7 +100,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // by vanilla's GetBattleType, not by per-tick force balance.
                 if (!StanceAllowsPlaybook(ctx.Stance, pb.Id))
                 {
-                    preconditionFiltered++;
+                    stanceFiltered++;
                     continue;
                 }
                 float personalityScore = pb.Fit.Score(ctx.CommanderPersonality);
@@ -63,8 +113,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // check follows the jitter draw so the other plays' jitter stream does not depend on whether a crest exists.
                 if (pb.RequiresCrest && !ctx.HasCrestLine)
                 {
-                    preconditionFiltered++;
+                    crestFiltered++;
                     continue;
+                }
+                // BC14: the feasibility verdict follows the same two draws, for the same reason. An Impossible play is skipped.
+                var verdict = FeasibilityVerdict.Unknown;
+                float penalty = 0f;
+                bool mirrored = false;
+                string reason = null;
+                if (ctx.Feasibility != null && ctx.Feasibility.TryGet(pb.Id, out CandidateResult feasibility))
+                {
+                    verdict = feasibility.Verdict;
+                    penalty = feasibility.Penalty;
+                    mirrored = feasibility.Mirrored;
+                    reason = feasibility.Reason;
+                    if (verdict == FeasibilityVerdict.Impossible && !lift)
+                    {
+                        feasibilityFiltered++;
+                        report?.Add(pb.Id, 0f, 0f, verdict, mirrored, reason, skipped: true);
+                        continue;
+                    }
                 }
 
                 float score = 0.5f * personalityScore
@@ -107,11 +175,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     score += 0.35f * DelayingAffinity(pb.Id);
                 }
 
+                float baseScore = score;
+                float term = -ManeuverFeasibility.FeasibilityWeight * penalty;
+                score += term;
+                report?.Add(pb.Id, baseScore, term, verdict, mirrored, reason, skipped: false);
+
                 if (score > bestScore)
                 {
                     bestScore = score;
                     best = pb;
                 }
+                if (pb.Id == ctx.HysteresisPlan && ctx.HysteresisPlan != BattlePlanId.Unknown)
+                {
+                    current = pb;
+                    currentScore = score;
+                }
+            }
+            // The current plan stays unless it is absent or Impossible (then it was never scored) or the best beats it by the margin.
+            if (current != null && best != current && bestScore - currentScore < ctx.HysteresisMargin) best = current;
+            if (report != null)
+            {
+                report.PreconditionFiltered = preconditionFiltered;
+                report.StanceFiltered = stanceFiltered;
+                report.CrestFiltered = crestFiltered;
+                report.FeasibilityFiltered = feasibilityFiltered;
+                report.AllImpossible = lift;
+                report.Rank();
             }
             return best;
         }

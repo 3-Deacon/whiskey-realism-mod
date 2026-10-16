@@ -9,19 +9,29 @@ static class Program
     {
         if (args != null && args.Length > 0)
         {
-            if (args[0] != "--validate-telemetry" || args.Length != 2)
+            if (args[0] == "--only" && (args.Length == 2 || args.Length == 3))
             {
-                Console.Error.WriteLine("usage: --validate-telemetry <session-dir>");
+                TestFilter.Class = args[1];
+                TestFilter.Name = args.Length == 3 ? args[2] : null;
+            }
+            else if (args[0] != "--validate-telemetry" || args.Length != 2)
+            {
+                Console.Error.WriteLine("usage: --validate-telemetry <session-dir> | --only <class> [<test prefix>]");
                 return 1;
             }
-
-            var result = TelemetrySessionValidator.ValidateDirectory(args[1]);
-            Console.WriteLine(result.Summary);
-            return result.Success ? 0 : 1;
+            else
+            {
+                var result = TelemetrySessionValidator.ValidateDirectory(args[1]);
+                Console.WriteLine(result.Summary);
+                return result.Success ? 0 : 1;
+            }
         }
 
         foreach (MethodInfo run in DiscoverTestClasses())
+        {
+            if (!TestFilter.RunsClass(run.DeclaringType.Name)) continue;
             ((Action)Delegate.CreateDelegate(typeof(Action), run))();
+        }
 
         return 0;
     }

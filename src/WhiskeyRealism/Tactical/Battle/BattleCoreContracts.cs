@@ -42,6 +42,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // Vanilla unitlinkedto != null (111136): UpdateUnitLink re-lays the unit to its
         // link slot (124396-124500), so a move of it lasts only until the next link cycle.
         Linked = 4194304,
+        // BC14, additive. Vanilla ishorseartillery on an artillery regiment (GetSlowestSpeedOfGroup 91717-91720
+        // scales its march speed by GamePrefs.horseartilleryspeedfactor).
+        HorseArtillery = 8388608,
     }
 
     public struct UnitRecord

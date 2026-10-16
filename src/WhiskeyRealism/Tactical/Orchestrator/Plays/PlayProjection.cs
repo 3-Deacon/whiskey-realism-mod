@@ -18,10 +18,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float halfExtentX, float halfExtentZ,
             float startTimeOffsetSeconds,
             int priority,
-            bool envelops = false)
+            bool envelops = false,
+            bool mirrored = false,
+            float authoredX = 0f,
+            float authoredZ = 0f)
         {
             Kind = kind;
             Envelops = envelops;
+            Mirrored = mirrored;
+            AuthoredX = authoredX;
+            AuthoredZ = authoredZ;
             AnchorX = anchorX;
             AnchorZ = anchorZ;
             HalfExtentX = halfExtentX < 0f ? 0f : halfExtentX;
@@ -39,6 +45,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int Priority { get; }
         /// <summary>PlayRect.Envelops, carried to the zone assignment.</summary>
         public bool Envelops { get; }
+
+        /// <summary>BC14: the template was projected mirrored (every rect's lateral offset negated in the projection frame).</summary>
+        public bool Mirrored { get; }
+
+        /// <summary>BC14: with <see cref="Mirrored"/>, the rect's un-mirrored anchor, the authored side BC11's one mirrored try falls back to; 0 otherwise.</summary>
+        public float AuthoredX { get; }
+        public float AuthoredZ { get; }
 
         public bool ContainsPoint(float x, float z)
         {
@@ -106,8 +119,44 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float frontageMeters,
             in TerrainLine crest)
         {
+            return Project(template, armyCentroidX, armyCentroidZ, enemyCentroidX, enemyCentroidZ, frontageMeters, in crest, false);
+        }
+
+        /// <summary>
+        /// BC14 requirement-selected-side: the same projection with every rect's lateral offset negated in the projection frame when
+        /// <paramref name="mirrored"/>, so the executor's layout matches the side the feasibility evaluation timed. A mirrored rect
+        /// carries <see cref="WorldPlayRect.Mirrored"/> and its un-mirrored anchor.
+        /// </summary>
+        public static IReadOnlyList<WorldPlayRect> Project(
+            PlayTemplate template,
+            float armyCentroidX, float armyCentroidZ,
+            float enemyCentroidX, float enemyCentroidZ,
+            float frontageMeters,
+            in TerrainLine crest,
+            bool mirrored)
+        {
             if (template == null || template.Rects == null || template.Rects.Count == 0)
                 return Array.Empty<WorldPlayRect>();
+            var result = new WorldPlayRect[template.Rects.Count];
+            ProjectInto(template, armyCentroidX, armyCentroidZ, enemyCentroidX, enemyCentroidZ, frontageMeters, in crest, mirrored, result);
+            return result;
+        }
+
+        /// <summary>
+        /// Allocation-free <see cref="Project(PlayTemplate, float, float, float, float, float, in TerrainLine, bool)"/>: writes the rects
+        /// to <paramref name="into"/> (at least the template's rect count long) and returns how many.
+        /// </summary>
+        public static int ProjectInto(
+            PlayTemplate template,
+            float armyCentroidX, float armyCentroidZ,
+            float enemyCentroidX, float enemyCentroidZ,
+            float frontageMeters,
+            in TerrainLine crest,
+            bool mirrored,
+            Span<WorldPlayRect> into)
+        {
+            if (template == null || template.Rects == null || template.Rects.Count == 0) return 0;
+            int count = Math.Min(template.Rects.Count, into.Length);
 
             float frontage = Sanitize(frontageMeters, DefaultFrontageMeters);
             if (frontage <= 0f) frontage = DefaultFrontageMeters;
@@ -132,8 +181,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float rightX = forwardZ;
             float rightZ = -forwardX;
 
-            var result = new WorldPlayRect[template.Rects.Count];
-            for (int i = 0; i < template.Rects.Count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var rect = template.Rects[i];
 
@@ -147,25 +195,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Forward offset = relAy * dist along forwardAxis.
                 float lateralOffset = relAx * halfFrontage;
                 float forwardOffset = relAy * dist;
-                float anchorWorldX = armyCentroidX + rightX * lateralOffset + forwardX * forwardOffset;
-                float anchorWorldZ = armyCentroidZ + rightZ * lateralOffset + forwardZ * forwardOffset;
-                if (crest.Has && template.PlaybookId == BattlePlanId.ReverseSlopeDefense)
-                    AnchorToCrest(rect.Kind, crest, armyCentroidX, armyCentroidZ, forwardX, forwardZ, ref anchorWorldX, ref anchorWorldZ);
+                // The authored side (a mirrored projection negates the lateral offset below and keeps this anchor for BC11's fallback).
+                float authoredWorldX = armyCentroidX + rightX * lateralOffset + forwardX * forwardOffset;
+                float authoredWorldZ = armyCentroidZ + rightZ * lateralOffset + forwardZ * forwardOffset;
+                bool crestAnchored = crest.Has && template.PlaybookId == BattlePlanId.ReverseSlopeDefense;
+                if (crestAnchored)
+                    AnchorToCrest(rect.Kind, crest, armyCentroidX, armyCentroidZ, forwardX, forwardZ, ref authoredWorldX, ref authoredWorldZ);
+                float anchorWorldX = authoredWorldX;
+                float anchorWorldZ = authoredWorldZ;
+                if (mirrored)
+                {
+                    anchorWorldX = armyCentroidX - rightX * lateralOffset + forwardX * forwardOffset;
+                    anchorWorldZ = armyCentroidZ - rightZ * lateralOffset + forwardZ * forwardOffset;
+                    if (crestAnchored)
+                        AnchorToCrest(rect.Kind, crest, armyCentroidX, armyCentroidZ, forwardX, forwardZ, ref anchorWorldX, ref anchorWorldZ);
+                }
 
                 // Half-extents in world units. Lateral extent scales with
                 // frontage; forward extent scales with engagement distance.
                 float halfExtentX = relSx * halfFrontage * 0.5f;
                 float halfExtentZ = relSy * dist * 0.5f;
 
-                result[i] = new WorldPlayRect(
+                into[i] = new WorldPlayRect(
                     rect.Kind,
                     anchorWorldX, anchorWorldZ,
                     halfExtentX, halfExtentZ,
                     rect.StartTimeOffsetSeconds,
                     rect.Priority,
-                    rect.Envelops);
+                    rect.Envelops,
+                    mirrored,
+                    mirrored ? authoredWorldX : 0f,
+                    mirrored ? authoredWorldZ : 0f);
             }
-            return result;
+            return count;
         }
 
         // The screen stands on the crest centre; the holds keep their lateral place and move along the forward axis to

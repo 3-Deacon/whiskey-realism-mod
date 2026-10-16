@@ -228,7 +228,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Movement time of a polyline in metre-cost units: each leg in steps of at most 10 m,
         // each priced at the speed cost of the cell under its midpoint.
-        private static float PolylineCost(BattleTerrainGrid g, ReadOnlySpan<float> px, ReadOnlySpan<float> pz, int corners)
+        internal static float PolylineCost(BattleTerrainGrid g, ReadOnlySpan<float> px, ReadOnlySpan<float> pz, int corners)
         {
             corners = Math.Min(corners, Math.Min(px.Length, pz.Length));
             float total = 0f;

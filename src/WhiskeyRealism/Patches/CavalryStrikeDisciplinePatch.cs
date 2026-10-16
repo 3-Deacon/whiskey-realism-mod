@@ -182,9 +182,8 @@ namespace WhiskeyRealism.Patches
             float r2 = CavalryStrikeCheck.SupportMeters * CavalryStrikeCheck.SupportMeters;
             for (int k = 0; k < s.ObservationCount; k++)
             {
-                if (k == battery || obs[k].IsReinforcement) continue;
+                if (k == battery || !EnemySamples.Accepts(in obs[k])) continue;
                 if (obs[k].UnitTyp != TacticalUnitType.Infantry && obs[k].UnitTyp != TacticalUnitType.Cavalry) continue;
-                if (obs[k].State != ObservationState.Visible && obs[k].Confidence01 < OpeningDetector.RememberedMinConfidence) continue;
                 float dx = obs[k].X - obs[battery].X, dz = obs[k].Z - obs[battery].Z;
                 if (dx * dx + dz * dz <= r2) return true;
             }

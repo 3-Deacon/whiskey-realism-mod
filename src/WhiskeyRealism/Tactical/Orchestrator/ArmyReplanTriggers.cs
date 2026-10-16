@@ -29,6 +29,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // kept executing their initial plan's roles even when the army's
         // analysis said "withdraw" or "attack now."
         OpportunityChange,
+        // BC14 (appended last): the assumption monitor found a broken assumption of the selected plan's maneuvers
+        // (ReplanTriggerInput.AssumptionReason names which). Lowest priority: every concrete trigger above replans first.
+        ManeuverAssumptionBroken,
     }
 
     public readonly struct ReplanTriggerInput
@@ -56,8 +59,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownStrength = 0f,
             float reinforcementShareAtLastReplan = 0f,
             InferredIntent? currentEnemyIntent = null,
-            InferredIntent enemyIntentAtLastReplan = InferredIntent.Unknown)
+            InferredIntent enemyIntentAtLastReplan = InferredIntent.Unknown,
+            string assumptionReason = null)
         {
+            AssumptionReason = assumptionReason;
             PlanAgeSeconds = planAgeSeconds;
             CurrentPhase = currentPhase;
             MainEffortOwnStrength = mainEffortOwnStrength;
@@ -129,6 +134,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>Inferred enemy intent now; null = not supplied (level behaviour).</summary>
         public InferredIntent? CurrentEnemyIntent { get; }
         public InferredIntent EnemyIntentAtLastReplan { get; }
+        /// <summary>BC14: the assumption the maneuver monitor found broken (a static literal), or null.</summary>
+        public string AssumptionReason { get; }
 
         /// <summary>Own arriving reinforcements as a share of own strength.</summary>
         public float ReinforcementShare =>
@@ -260,6 +267,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return ReplanTrigger.OpportunityChange;
             }
+
+            // BC14: a broken maneuver assumption comes last, so any concrete trigger above pre-empts it (and its replan reads the ledger anyway).
+            if (i.AssumptionReason != null) return ReplanTrigger.ManeuverAssumptionBroken;
 
             return ReplanTrigger.None;
         }

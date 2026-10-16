@@ -54,6 +54,34 @@ namespace WhiskeyRealism.Tactical.Battle
         public static float To01(float signed) => (signed + 1f) * 0.5f;
 
         /// <summary>
+        /// The vector a doctrine decides by: the table's entry with Enable Per-Commander Personality on and an entry present, else the
+        /// roster vector the army orchestrator was built with (BC13's opportunity producer and BC14's feasibility evaluation share this).
+        /// </summary>
+        public static PersonalityVector ChooseVector(bool perCommanderEnabled, bool tableHasEntry, in PersonalityVector tableVector,
+            PersonalitySource tableSource, in PersonalityVector rosterVector, out PersonalitySource source)
+        {
+            if (perCommanderEnabled && tableHasEntry)
+            {
+                source = tableSource;
+                return tableVector;
+            }
+            source = PersonalitySource.Default;
+            return rosterVector;
+        }
+
+        /// <summary>The 0-1 temperament the opportunity and feasibility doctrines read, from a vector, its source and the duty factor.</summary>
+        public static OpportunityPersonality ToOpportunity(in PersonalityVector vector, PersonalitySource source, float duty)
+            => new OpportunityPersonality
+            {
+                Agg01 = To01(vector.Aggression),
+                Caution01 = To01(vector.Caution),
+                Audacity01 = To01(vector.Audacity),
+                CasualtyTolerance01 = To01(vector.CasualtyTolerance),
+                Duty = duty,
+                Source = source,
+            };
+
+        /// <summary>
         /// The vector of a commander whose stats cannot be read: the faction profile with the rank bias of his
         /// echelon, as the roster does for an unlisted commander today.
         /// </summary>

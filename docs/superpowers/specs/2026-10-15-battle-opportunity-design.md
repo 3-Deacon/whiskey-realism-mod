@@ -4,6 +4,8 @@ Produced-by: claude-opus-5-5 (high)
 
 **Status:** draft for review (gate: user approval of this spec, then the plan section). **Slice:** BC13 of the battle-core plan (`docs/superpowers/plans/2026-10-15-battle-core.md`). The user placed it after BC12; the plan's former BC13 (battle AI level of detail) becomes **BC14** and the former BC14 (formations, slots and lanes) becomes **BC15**. This spec does not edit the plan; § 15 lists what the plan owes. **Branch:** `feat/battle-next-bc13` from `feat/battle-next` once BC12 passes verify. **Vanilla:** decompile build 14703111 (`/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`); game data `Config/battleprefs.txt`, `Config/unitprefs.txt`, `Config/commanders.txt` (shipped install, read only). Anchors are method names first. Decompile line numbers are only there to help find the code.
 
+**Errata (2026-10-16):** the battle-core plan renumbered its later slices a second time when BC14 maneuver feasibility was placed after BC13: level of detail is now **BC15** and formations, slots and lanes **BC16** (plan § BC13, errata note). The references below are updated to those numbers; the renumbering history in the status line above and in § 15 item 1 is kept as written.
+
 **User decisions (2026-10-15, AskUserQuestion, verbatim):**
 - Exploit slice: "Add it after BC12 (Recommended)".
 - Who decides: "Each commander his own (Recommended)". Corps and division commanders use their own personality for local opportunities. The army commander sets the overall plan.
@@ -36,7 +38,7 @@ Produced-by: claude-opus-5-5 (high)
 12. Fit criteria
 13. (E) Tests, mutation plants, smoke items, coverage matrix (the frozen test plan)
 14. Decisions and rejected alternatives
-15. Amendments owed to the plan (renumbering, BC14 level of detail, BC15 formations)
+15. Amendments owed to the plan (renumbering, BC15 level of detail, BC16 formations)
 16. Not verified (runtime-only claims)
 17. Decisions on the former open questions
 18. Out of scope
@@ -441,14 +443,14 @@ All detection is pure (`OpeningDetector`) over the side's `BattleSnapshot` and i
 
 ## 7. (D) Vanilla battle bug fixes
 
-Each bug gets a bug id at merge (provisional, after BUG-TAC-026, which BC15 holds), an entry in `docs/bug-fixes/vanilla-tactical-battlefield.md`, a test and its own default-on rollback flag. The three Transpilers and the separated-enemy steer were approved by the user on 2026-10-15 (verbatim in the header).
+Each bug gets a bug id at merge (provisional, after BUG-TAC-026, which BC16 holds), an entry in `docs/bug-fixes/vanilla-tactical-battlefield.md`, a test and its own default-on rollback flag. The three Transpilers and the separated-enemy steer were approved by the user on 2026-10-15 (verbatim in the header).
 
 - **requirement-il-fix-rules** — Every Transpiler in this slice (requirement-fix-macro-upgrade, requirement-fix-artillery-side, requirement-fix-reserve-support-pick) follows the shipped `RandomPickRangeIl` pattern (BUG-LOG-011):
   - **A pure rewriter** in `Tactical/Battle/BugFixes/*Il.cs`. It copies the method's instructions with `new CodeInstruction(ci)` (labels and exception blocks kept), never `.Clone()`.
   - **An exact anchor.** Each rewriter matches one IL sequence a stated number of times (1 for every site here). On any other count it returns vanilla's own list unchanged and writes one OnceLog with a static key naming the site and the count. On a match it writes one OnceLog that the site was applied.
   - **A live hook, not a baked constant.** The rewritten site calls a static hook that reads its own rollback flag on every call, so turning the flag off restores vanilla's value or write without a restart (the BUG-LOG-011 hook design).
   - **Its own rollback flag**, default on, and an entry in `TranspilerLabelTests`. The rewriter runs on the real game IL (`refs/Assembly-CSharp.dll` through `PatchProcessor.GetOriginalInstructions`, which keeps labels), and mismatched fixtures prove it leaves the method unchanged.
-  - **Vanilla bug fixes**: they run in every Commander Mode, like BC15's A3. Transpilers carry no `TelemetryPerf` scope (AGENTS); their hooks are trivial.
+  - **Vanilla bug fixes**: they run in every Commander Mode, like BC16's A3. Transpilers carry no `TelemetryPerf` scope (AGENTS); their hooks are trivial.
 
 
 - **requirement-fix-stance-cooldown** (4264, `AdjustGroupAIStance`). The test `lastaistancechangetime < now + updatetimeforresettingofaistance` is always true for a past stamp. The `battleprefs` 804-805 text ("Time … to wait for resetting of new ai stances once set (for enemy ai only)", 1 game-h) states the intent: wait 1 h after a change.
@@ -462,7 +464,7 @@ Each bug gets a bug id at merge (provisional, after BUG-TAC-026, which BC15 hold
     - On the first `AdjustGroupAIStance` call with `macroai == 3`, the Prefix pulls each one back before vanilla runs, so vanilla's retreat block (4260-4263, `macroai == 3` sets every group to screen) acts in that same call. It sets `lastaistancechangetime = TacticalStanceOwnership.ReleaseStamp(now)`, as `TacticalStanceWriter.ReleaseForRetreat` does for Whiskey's own records, then clears the set. Groups vanilla needs at screen for `MicroAICheckForRetreats` (`macroai` 3 and `ai_stance` 1, 5641) are re-armed at once.
     - A group whose stamp no longer equals the value the fix wrote (Whiskey's writer has stamped it since) is dropped from the set without a release. Its stamp is Whiskey's, and `ReleaseForRetreat` already releases it.
 
-  Whiskey's own stamps are untouched, and `TacticalStanceWriter`'s yield and retreat paths release only Whiskey's own records (`_records`). That is why the fix releases its own stamps on retreat. Patch `VanillaStanceCooldownFixPatch`, flag `Enable Vanilla Stance Cooldown Fix`, scopes `tactical.patch.stance-cooldown.prefix|.postfix` (2.0 ms). Like the other vanilla bug fixes (BC15 A2 part 2, A3), it runs in every Commander Mode. Effect: vanilla's weak-group defend and screen valves now wait up to 1 h after vanilla's own previous change of the group. That is applied exactly as `battleprefs` intends (integrator decision (a), question-stance-cooldown-valves), and smoke item 11 measures the delays.
+  Whiskey's own stamps are untouched, and `TacticalStanceWriter`'s yield and retreat paths release only Whiskey's own records (`_records`). That is why the fix releases its own stamps on retreat. Patch `VanillaStanceCooldownFixPatch`, flag `Enable Vanilla Stance Cooldown Fix`, scopes `tactical.patch.stance-cooldown.prefix|.postfix` (2.0 ms). Like the other vanilla bug fixes (BC16 A2 part 2, A3), it runs in every Commander Mode. Effect: vanilla's weak-group defend and screen valves now wait up to 1 h after vanilla's own previous change of the group. That is applied exactly as `battleprefs` intends (integrator decision (a), question-stance-cooldown-valves), and smoke item 11 measures the delays.
 - **requirement-fix-charge-renew** (4917, `MicroAICheckForCharges`). The inverted renew test sits inside a method that never proceeds (4910, BUG-TAC-016). The intended back-off is already applied by `ChargeDoctrine.RefusalBackoffSeconds`. **No new code.** The bug entry records the coverage, and test FIX-RENEW pins that the doctrine reads `timetorenewaichargecheck`.
 - **requirement-fix-macro-upgrade** (6432-6434, `CheckGlobalAIStrategy`). Vanilla's upgrade "no flanking possible and balance ≥ 3.0 / (1 + init × 0.7) → assault" writes `newmacroaitoset = 0` only when `newmacroaitoset == 1`, instead of turning this cycle's `num4` from 1 into 0. The tail block (6438-6446) then compares and stores `num4`, so the upgrade takes effect only when the pending value was already attack and the tail does not overwrite it.
 
@@ -513,7 +515,7 @@ Each bug gets a bug id at merge (provisional, after BUG-TAC-026, which BC15 hold
       - Commander Mode is Active;
       - the side `DrivesOrchestrator`;
       - the `AIBattle` is not the W&L feud instance;
-      - the group is **Whiskey-commanded**: the posture producer holds a doctrine state for it (in the AI pool and `PostureLedger.TryResolveState` true; BC15 A2's "Whiskey-owned" test).
+      - the group is **Whiskey-commanded**: the posture producer holds a doctrine state for it (in the AI pool and `PostureLedger.TryResolveState` true; BC16 A2's "Whiskey-owned" test).
 
       Vanilla then returns at its first test (8078, `… || aigroup.aiassaultmove) return;`), before any write.
     - A Finalizer restores the stored value whatever happens, and passes any exception through unchanged.
@@ -741,7 +743,7 @@ References are **latest**, never pinned: the opportunity producer reads this tic
 - **criterion-cavalry-discipline** — With the steer on, 0 vanilla cavalry charges at a target hidden from the side or at a supported battery. Basis: requirement-fix-cavalry-strike. Measured: `TacticalCavalryStrike` rows (every allowed row has a passing reason).
   - guardrail: the refused share of vanilla's candidates is ≤ 80 % per battle, and at least one allowed charge in any battle where AI cavalry met shaken or unsupported targets, so cavalry does not go passive.
   - read path: `TacticalCavalryStrike` rows.
-- **criterion-frame-budget** — `tactical.producer.opportunity` p95 ≤ 0.5 ms and max ≤ 2.0 ms per side per tick in a battle with about 500 regiments a side. Basis: the BC13 (now BC14) estimate of about 2-4 ms for all tiered producers per side per cycle. This producer must stay a small share of that.
+- **criterion-frame-budget** — `tactical.producer.opportunity` p95 ≤ 0.5 ms and max ≤ 2.0 ms per side per tick in a battle with about 500 regiments a side. Basis: the BC13 (now BC15) estimate of about 2-4 ms for all tiered producers per side per cycle. This producer must stay a small share of that.
   - guardrail: the `tactical.patch.battle-core-arbiter` scope's mean time per call (`Σ totalMs / Σ count`) rises by ≤ 10 % with the flag on against off. `PerformanceAggregate` carries no percentile, so the guardrail uses the mean.
   - read path: `PerformanceAggregate` rows of the scope (threshold 0.5 ms): the p95 is within 0.5 ms when `Σ slowCount / Σ count` ≤ 0.05, and the max is the largest `maxMs`.
 - **criterion-zero-alloc** — 0 bytes allocated per opportunity tick after warm-up. Basis: Global Constraints. Measured: OPP-ALLOC (`GC.GetAllocatedBytesForCurrentThread`).
@@ -1085,15 +1087,15 @@ Each plant is listed with the test that must catch it:
 ## 15. Amendments owed to the plan (the integrator writes them; this spec does not edit the plan)
 
 1. **Renumbering.** The plan's "BC13 — battle AI level of detail" becomes BC14, and "BC14 — formations, slots and lanes" becomes BC15. These must be updated with it: their cross-references (for example BC15's "BC13's tiers" and "BC13 promotion inputs"), the dependency diagram, the BC10-BC12 rules paragraph naming BC13, and the smoke item ranges. A new "BC13 — commander opportunity and exploitation" section is written from this spec.
-2. **BC14 (level of detail).**
+2. **BC15 (level of detail).**
    - A group with a live exploit, or under an exploit override, is never `Distant`. `ITaskLookup.HasLatchOrManeuver` returns true for it.
    - Creating or ending an entry is a promotion: trigger (c), the order target changed. The posture producer's resolved target is the exploit aim.
    - `OpportunityIntentProducer` is not tiered: it acts on openings at full rate, and its per-commander interval is its own cadence.
-   - BC14's equivalence test gains a case: an exploit launch on a group that was `Distant` the tick before.
-3. **BC15 (formations).**
+   - BC15's equivalence test gains a case: an exploit launch on a group that was `Distant` the tick before.
+3. **BC16 (formations).**
    - `GroupFormationDoctrine.Target` treats an exploit Advance or Strike as `AttackObjective`, its assault-range row included. Consolidate is `HoldObjective`.
    - `CommandTaskType.Counterstroke` needs a formation row (as `AttackObjective`). Its stance mapping (→ 3) is BC13's own (requirement-defender-counterstroke).
-   - BC15's slot fitness is not used by BC13, which merges first. Asset choice reads BC8 troop quality only through `GroupMorale` and `LossFraction`.
+   - BC16's slot fitness is not used by BC13, which merges first. Asset choice reads BC8 troop quality only through `GroupMorale` and `LossFraction`.
 4. **Producer order.** `BattleProducerRegistry.Order` gains `"Opportunity"` before `"Posture"`, and the `[BattleCore] producers count=` line becomes 13.
 5. **Bug ledger.** The plan's BC13 section lists BUG-TAC-008's move from Backlog to In progress.
 6. **Patch catalog.** The new patches are named here without ordinals; ordinals and bug ids are assigned at merge to `main`.

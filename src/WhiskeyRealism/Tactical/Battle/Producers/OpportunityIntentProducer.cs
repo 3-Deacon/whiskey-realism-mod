@@ -165,27 +165,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             public bool TryPersonality(int commanderIndex, out OpportunityPersonality personality)
             {
-                PersonalityVector vector;
-                PersonalitySource source;
                 CommanderPersonalityTable table = CommanderPersonalityRuntime.TableFor(_alliance);
-                if (Plugin.PerCommanderPersonalityEnabled() && table != null && table.TryGet(commanderIndex, out vector, out source))
-                {
-                    // the table's own vector
-                }
-                else
-                {
-                    vector = _army.CommanderPersonality;
-                    source = PersonalitySource.Default;
-                }
-                personality = new OpportunityPersonality
-                {
-                    Agg01 = CommanderPersonalityDerivation.To01(vector.Aggression),
-                    Caution01 = CommanderPersonalityDerivation.To01(vector.Caution),
-                    Audacity01 = CommanderPersonalityDerivation.To01(vector.Audacity),
-                    CasualtyTolerance01 = CommanderPersonalityDerivation.To01(vector.CasualtyTolerance),
-                    Duty = CommanderPersonalityDerivation.Duty(CommanderPersonalityRuntime.Status(commanderIndex), GamePrefs.reductionfactorcommanderoutofduty),
-                    Source = source,
-                };
+                PersonalityVector tableVector = default;
+                PersonalitySource tableSource = PersonalitySource.Default;
+                bool hasEntry = table != null && table.TryGet(commanderIndex, out tableVector, out tableSource);
+                PersonalityVector vector = CommanderPersonalityDerivation.ChooseVector(Plugin.PerCommanderPersonalityEnabled(), hasEntry,
+                    in tableVector, tableSource, _army.CommanderPersonality, out PersonalitySource source);
+                personality = CommanderPersonalityDerivation.ToOpportunity(in vector, source,
+                    CommanderPersonalityDerivation.Duty(CommanderPersonalityRuntime.Status(commanderIndex), GamePrefs.reductionfactorcommanderoutofduty));
                 return true;
             }
 

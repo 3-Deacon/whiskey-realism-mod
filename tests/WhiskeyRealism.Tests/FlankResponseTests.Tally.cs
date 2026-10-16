@@ -177,7 +177,7 @@ internal static partial class FlankResponseTests
         AssertPinned(patch, "OnceLog.Warning(\"tactical-flank-threat:failed\",", "2.29 failure key");
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         AssertPinned(army, "\"TacticalReserveRelease\",", "2.29 reserve release row");
-        AssertPinned(army, ".WithField(\"reason\", \"flank-threat\")", "2.29 reason");
+        AssertPinned(army, "released.HasGuardPoint ? \"crossing-threat\" : \"flank-threat\"", "2.29 reason (a crossing guard names its own)");
     }
 
     private static void FlankMoveWatchAllocatesNothingAfterWarmup()
