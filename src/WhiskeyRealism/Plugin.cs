@@ -65,6 +65,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
         internal static ConfigEntry<bool> EnableBattleTerrainPicture;
         internal static ConfigEntry<bool> EnablePerCommanderPersonality;
+        internal static ConfigEntry<bool> EnableCommanderOpportunity;
+        internal static ConfigEntry<bool> EnableDefenderCounterstroke;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -77,6 +79,20 @@ namespace WhiskeyRealism
         internal static bool PerCommanderPersonalityEnabled()
         {
             try { return EnablePerCommanderPersonality != null && EnablePerCommanderPersonality.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Commander Opportunity (BC13 sections 5-6: the opening detector, the per-commander decision and the exploit override).</summary>
+        internal static bool CommanderOpportunityEnabled()
+        {
+            try { return EnableCommanderOpportunity != null && EnableCommanderOpportunity.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Defender Counterstroke (BC13: the Penetration opening and the Defender's bounded local counterstroke).</summary>
+        internal static bool DefenderCounterstrokeEnabled()
+        {
+            try { return EnableDefenderCounterstroke != null && EnableDefenderCounterstroke.Value; }
             catch { return false; }
         }
 
@@ -553,6 +569,24 @@ namespace WhiskeyRealism
                 "1.0, 1.00 at 0.5) instead of the parity cap, and the casualty level that ends a delaying defence follows the commander's " +
                 "casualty tolerance instead of his aggression. Off: the army vector is the roster's as before, every node uses it, the " +
                 "threshold cap at 1.0 and the aggression-based casualty threshold return.");
+            EnableCommanderOpportunity = Config.Bind(
+                "Tactical",
+                "Enable Commander Opportunity",
+                true,
+                "Default ON. BC13: each AI corps and division commander looks for local openings the side perceives (a gap in the enemy line, a " +
+                "shaken sector, a flank in the air, an unsupported battery, an isolated cluster) and, by his own temperament, sends one of his " +
+                "brigades or divisions at one as a bounded exploit: advance, strike, consolidate, then back to its post. The detection reads " +
+                "only what the side perceives (the fog grid), never the enemy's true positions. At most three exploits at a time, one per " +
+                "commander, with a reserve floor and a line-integrity check. Off: no detection and no exploits; the posture is the " +
+                "operations ledger's alone.");
+            EnableDefenderCounterstroke = Config.Bind(
+                "Tactical",
+                "Enable Defender Counterstroke",
+                true,
+                "Default ON. BC13: a Defender side may answer an enemy that broke through its line (a visible unit 100 to 400 m behind the " +
+                "own front line, clear of it) with a bounded local counterstroke by a reserve or second-line brigade, never beyond the own " +
+                "line and never by cavalry. Other attack tasks on a Defender are still held. Needs Enable Commander Opportunity. Off: no " +
+                "penetration is detected and a Defender never launches an exploit.");
             EnableVanillaFlankThreatTallyFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Flank Threat Tally Fix",

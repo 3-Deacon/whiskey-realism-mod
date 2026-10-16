@@ -55,6 +55,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly int[] _flankMoveIds = new int[16];
         private static readonly int[] _flankMoveDirections = new int[16];
 
+        private static readonly int[] _macroAi = new int[2];
         private static BattleOrderIntent[] _winners = new BattleOrderIntent[256];
         private static readonly BattleOrderIntent[] _retries = new BattleOrderIntent[32];
         private static readonly OrderOutcome[] _outcomes = new OrderOutcome[256];
@@ -83,6 +84,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 case "ArtilleryPointBlank": return new ArtilleryIntentProducer(pointBlank: true);
                 case "GroupStance": return new GroupStanceIntentProducer();
                 case "ChargeDemotion": return new ChargeDemotionIntentProducer();
+                case "Opportunity": return new OpportunityIntentProducer();
                 case "Posture": return new PostureIntentProducer();
                 case "FacingPulse": return new FacingPulseIntentProducer();
                 case "FireControl": return new FireControlIntentProducer();
@@ -132,7 +134,12 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             OrderArbiter arbiter = OrderArbiter.ForAlliance(alliance);
             if (arbiter != null) arbiter.ClearClaims();
+            // BC13: a gated-off side ends every live exploit (stand-down) and the posture producer finds an empty table.
+            OpportunityIntentProducer.StandDown(alliance);
         }
+
+        /// <summary>The side's vanilla macroai as of its last arbiter tick (0 before one).</summary>
+        internal static int MacroAiOf(int alliance) => alliance >= 0 && alliance < _macroAi.Length ? _macroAi[alliance] : 0;
 
         internal static void RunArbiter(AIBattle battle, int alliance)
         {
@@ -163,6 +170,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             double now = TacticalDoctrineTime.NowBattleHours;
             ArbiterStats stats = _stats[alliance];
+            _macroAi[alliance] = battle.macroai;
 
             arbiter.BeginTick();
             for (int p = 0; p < Producers.Count; p++)
@@ -300,6 +308,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 _builtBattleKey[a] = 0;
                 _stats[a].Clear();
                 _flankMoves[a].Clear();
+                _macroAi[a] = 0;
             }
         }
 

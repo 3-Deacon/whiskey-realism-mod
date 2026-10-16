@@ -687,40 +687,52 @@ internal static partial class CommanderOpportunityTests
         ExploitTable t = ExploitTable.ForAlliance(0);
         var hes = new HesitationStore();
 
-        ExploitEntry e = LaunchOf(OpeningKind.Gap, false, 0f, 600f);
-        t.Add(in e);
-        AssertTrue(t.IsClaimed(5), "the claim is held while the entry lives");
-        AssertFalse(t.IsClaimed(6), "only the entry's opening");
+        // A real opening from the detector: the claim is derived onto the detector's own openings.
+        var d = new OpeningDetector();
+        Settle(d, GapLine());
+        Opening gap = First(d, OpeningKind.Gap);
+        AssertFalse(gap.Claimed, "unclaimed before any exploit");
 
-        var openings = new[] { new Opening { Id = 5 }, new Opening { Id = 6, Claimed = true } };
-        t.ApplyClaims(openings, 2);
-        AssertTrue(openings[0].Claimed, "ApplyClaims derives the flag from the live entries");
-        AssertFalse(openings[1].Claimed, "and clears a stale one: the claim is derived, never stored");
+        var asset = new ExploitAsset { Id = 100, OwnIndex = 3, X = 0f, Z = 0f, LossFraction = 0.05f };
+        ExploitEntry e = ExploitLifecycle.Launch(1, 7, 50, in asset, in gap, 1f, T0);
+        t.Add(in e);
+        t.DeriveClaims(d);
+        AssertTrue(First(d, OpeningKind.Gap).Claimed, "the claim is held while the entry lives");
+
+        // A stale claim is cleared: the claim is derived, never stored.
+        d.SetClaimed(gap.Id);
+        t.Clear(ExploitEnd.StandDown);
+        t.DeriveClaims(d);
+        AssertFalse(First(d, OpeningKind.Gap).Claimed, "with no entry the flag is cleared");
+        t.Add(in e);
+        t.DeriveClaims(d);
 
         // Past Strike the entry keeps running on its own state when the detector drops the opening, and the claim stays with it.
         ref ExploitEntry live = ref t.At(0);
-        ExploitLifecycle.Step(ref live, Calm(T0 + 0.015625, 0f, 470f));
+        float aimX = live.AimX, aimZ = live.AimZ;
+        ExploitLifecycle.Step(ref live, Calm(T0 + 0.015625, aimX, aimZ - 100f));
         AssertEqual(ExploitPhase.Strike, live.Phase, "setup: Strike");
-        ExploitStepInput lostOpening = Calm(T0 + 0.03125, 0f, 480f);
+        ExploitStepInput lostOpening = Calm(T0 + 0.03125, aimX, aimZ - 100f);
         lostOpening.OpeningLive = false; lostOpening.NearestEnemyToAim = 40f;
         ExploitLifecycle.Step(ref live, in lostOpening);
         AssertEqual(ExploitPhase.Strike, live.Phase, "still running");
-        AssertTrue(t.IsClaimed(5), "and the claim stays with it");
 
-        // Success: Consolidate completes, Recall, the claim goes, and no hesitation is marked.
-        ExploitLifecycle.Step(ref live, Calm(T0 + 0.046875, 0f, 595f));
+        // Success: Consolidate completes, Recall; the entry still claims until it is collected.
+        ExploitLifecycle.Step(ref live, Calm(T0 + 0.046875, aimX, aimZ - 5f));
         AssertEqual(ExploitPhase.Consolidate, live.Phase, "setup: Consolidate");
-        ExploitLifecycle.Step(ref live, Calm(T0 + 0.25, 0f, 600f));
+        ExploitLifecycle.Step(ref live, Calm(T0 + 0.25, aimX, aimZ));
         AssertEqual(ExploitEnd.Success, live.End, "Success");
-        AssertTrue(t.IsClaimed(5), "an ended entry still in the table still claims until it is collected");
+        t.DeriveClaims(d);
+        AssertTrue(First(d, OpeningKind.Gap).Claimed, "an ended entry still in the table still claims until it is collected");
         var ended = new ExploitEntry[4];
         int n = t.CollectEnded(ended, T0 + 0.25);
         AssertEqual(1, n, "one ended entry collected");
         AssertEqual(ExploitEnd.Success, ended[0].End, "its end rides out");
         AssertEqual(0, t.Count, "and it left the table");
-        AssertFalse(t.IsClaimed(5), "the claim is released at Recall");
+        t.DeriveClaims(d);
+        AssertFalse(First(d, OpeningKind.Gap).Claimed, "the claim is released at Recall");
         ExploitLifecycle.MarkHesitation(hes, in ended[0], T0 + 0.25);
-        AssertFalse(hes.IsHesitating(7, 5, T0 + 0.25), "a Success marks nobody hesitant");
+        AssertFalse(hes.IsHesitating(7, gap.Id, T0 + 0.25), "a Success marks nobody hesitant");
 
         // The asset's cooldown stays in the table's per-asset store.
         AssertTrue(t.InCooldown(100, T0 + 0.25), "the asset is cooling down");
@@ -729,20 +741,22 @@ internal static partial class CommanderOpportunityTests
         AssertFalse(t.InCooldown(101, T0 + 0.25), "another asset is not");
 
         // An abort: Recall, the claim goes, the aborting commander is hesitant for that opening, another commander is not.
-        ExploitEntry a = LaunchOf(OpeningKind.Gap, false, 0f, 600f, now: T0 + 1.0);
-        a.Id = 2;
+        ExploitEntry a = ExploitLifecycle.Launch(2, 7, 50, in asset, in gap, 1f, T0 + 1.0);
         t.Add(in a);
+        t.DeriveClaims(d);
+        AssertTrue(First(d, OpeningKind.Gap).Claimed, "claimed again");
         ExploitStepInput safety = Calm(T0 + 1.015625, 0f, 100f);
         safety.SafetyClaim = true;
         ExploitLifecycle.Step(ref t.At(0), in safety);
         AssertEqual(ExploitEnd.Safety, t.At(0).End, "aborted");
         n = t.CollectEnded(ended, T0 + 1.015625);
         AssertEqual(1, n, "collected");
-        AssertFalse(t.IsClaimed(5), "the abort released the claim");
+        t.DeriveClaims(d);
+        AssertFalse(First(d, OpeningKind.Gap).Claimed, "the abort released the claim");
         ExploitLifecycle.MarkHesitation(hes, in ended[0], T0 + 1.015625);
-        AssertTrue(hes.IsHesitating(7, 5, T0 + 1.015625 + 0.05), "the aborting commander is hesitant for that opening");
-        AssertFalse(hes.IsHesitating(8, 5, T0 + 1.015625 + 0.05), "another commander may take it on his next decision");
-        AssertFalse(hes.IsHesitating(7, 5, T0 + 1.015625 + 0.2), "and the mark runs out after HesitationHours");
+        AssertTrue(hes.IsHesitating(7, gap.Id, T0 + 1.015625 + 0.05), "the aborting commander is hesitant for that opening");
+        AssertFalse(hes.IsHesitating(8, gap.Id, T0 + 1.015625 + 0.05), "another commander may take it on his next decision");
+        AssertFalse(hes.IsHesitating(7, gap.Id, T0 + 1.015625 + 0.2), "and the mark runs out after HesitationHours");
         BattleScope.ResetAll();
     }
 

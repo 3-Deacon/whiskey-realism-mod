@@ -61,6 +61,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
+        /// <summary>BC13: the side's running mission scout group, 0 with none.</summary>
+        internal static int MissionScoutId(int alliance)
+        {
+            return alliance >= 0 && alliance < _memory.Length ? _memory[alliance].MissionScoutId : 0;
+        }
+
+        /// <summary>BC13: the group is a probe nominee or holds a probe's ground.</summary>
+        internal static bool HasProbeOrHold(int alliance, int groupId)
+        {
+            return alliance >= 0 && alliance < _memory.Length && _memory[alliance].HasProbeOrHold(groupId);
+        }
+
         /// <summary>The probe nomination of a group this battle (the posture pipeline's rewrite).</summary>
         internal static bool TryProbe(int alliance, int groupId, out float x, out float z)
         {

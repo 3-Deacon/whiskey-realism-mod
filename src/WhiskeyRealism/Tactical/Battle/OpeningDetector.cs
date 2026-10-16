@@ -82,6 +82,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private int _no;
         private int[] _oinf = new int[64], _ofront = new int[64];
         private int _nofront;
+        // The tick whose PenetrationPass built the own trace (a Defender side's Detect), for TryTraceBehind.
+        private long _traceTick = -1;
         private readonly PerceivedGroundLattice[] _lattices = new PerceivedGroundLattice[MaxLattices];
         private long _tick, _latticeOrder;
         private Candidate[] _cand = new Candidate[64];
@@ -177,22 +179,6 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             UpdateIdentity(nowHours);
             return _openCount;
-        }
-
-        /// <summary>Writes the cluster behind a ClusterKind opening: centroid, value, and the nearest other cluster's distance.</summary>
-        public bool TryCluster(int id, out float x, out float z, out float value, out float nearestOtherMeters)
-        {
-            for (int i = 0; i < _openCount; i++)
-            {
-                if (_open[i].Id != id || _open[i].Kind != OpeningKind.IsolatedCluster) continue;
-                x = _open[i].AimX;
-                z = _open[i].AimZ;
-                value = _open[i].ClusterValue;
-                nearestOtherMeters = _open[i].ClusterNearestMeters;
-                return true;
-            }
-            x = z = value = nearestOtherMeters = 0f;
-            return false;
         }
 
         /// <summary>
@@ -938,6 +924,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private void PenetrationPass(BattleSnapshot s)
         {
+            _traceTick = _tick;
             if (_o.Length < s.OwnCount) _o = new Sample[Math.Max(s.OwnCount, _o.Length * 2)];
             _no = 0;
             for (int i = 0; i < s.OwnCount; i++)
@@ -966,6 +953,35 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!clear) continue;
                 AddCandidate(OpeningKind.Penetration, e.X, e.Z, 0f, 0f, e.Conf, e.Id, false, default);
             }
+        }
+
+        /// <summary>
+        /// How far behind the own trace, at the point's lateral, a point stands (positive: behind the line; 0 or less: at it or in
+        /// front), and the trace point at that lateral. False when this tick's Detect built no trace (not a Defender side, or the
+        /// counterstroke flag off), or the lateral has none (a gap of <see cref="GapMinMeters"/> or more, or beyond the line's ends).
+        /// </summary>
+        public bool TryTraceBehind(float x, float z, out float behindMeters, out float traceX, out float traceZ)
+        {
+            behindMeters = traceX = traceZ = 0f;
+            if (_traceTick != _tick) return false;
+            ToFrame(in _axis, x, z, out float lateral, out float depth);
+            if (!OwnTraceDepth(lateral, out float traceDepth)) return false;
+            behindMeters = traceDepth - depth;
+            FromFrame(lateral, traceDepth, out traceX, out traceZ);
+            return true;
+        }
+
+        /// <summary>Whether a Visible target sample, as of the last Detect, is routed (read through the same visible-row region as the detection itself).</summary>
+        public bool TryTargetRouted(int observationId, out bool routed)
+        {
+            for (int i = 0; i < _n; i++)
+            {
+                if (_s[i].Id != observationId || !_s[i].Visible) continue;
+                routed = _s[i].Routed;
+                return true;
+            }
+            routed = false;
+            return false;
         }
 
         /// <summary>

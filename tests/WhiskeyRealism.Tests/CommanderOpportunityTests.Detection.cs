@@ -410,11 +410,10 @@ internal static partial class CommanderOpportunityTests
         AssertEqual(2, CountKind(d, OpeningKind.IsolatedCluster), "both clusters are isolated (600 m apart)");
         Opening west = default;
         foreach (Opening o in d.Openings.ToArray()) if (o.Kind == OpeningKind.IsolatedCluster && o.AimX < 400f) west = o;
-        AssertTrue(d.TryCluster(west.Id, out float x, out float z, out float value, out float nearest), "cluster data");
-        AssertNear(50f, x, 1e-3f, "centroid x");
-        AssertNear(600f, z, 1e-3f, "centroid z");
-        AssertNear(2f * 100f * 0.8f, value, 1e-3f, "value = sum strength x morale");
-        AssertNear(700f, nearest, 1e-3f, "nearest other cluster: centroid to centroid");
+        AssertNear(50f, west.AimX, 1e-3f, "centroid x");
+        AssertNear(600f, west.AimZ, 1e-3f, "centroid z");
+        AssertNear(2f * 100f * 0.8f, west.ClusterValue, 1e-3f, "value = sum strength x morale");
+        AssertNear(700f, west.ClusterNearestMeters, 1e-3f, "nearest other cluster: centroid to centroid");
         AssertEqual(1000, west.TargetObservation, "target = the strongest member");
         AssertNear(2f * 100f * 0.8f, west.ClusterValue, 1e-3f, "the opening carries the cluster value");
         AssertNear(700f, west.ClusterNearestMeters, 1e-3f, "and the nearest neighbour");

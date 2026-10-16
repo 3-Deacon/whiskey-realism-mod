@@ -15,6 +15,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public float Agg01, Caution01, Audacity01, CasualtyTolerance01;
         /// <summary>1 in duty, vanilla's reductionfactorcommanderoutofduty (0.5) when the commander is captured, wounded or killed.</summary>
         public float Duty;
+        /// <summary>Where the vector came from (telemetry only).</summary>
+        public PersonalitySource Source;
     }
 
     /// <summary>One direct child of the deciding node the producer found eligible, with what Decide weighs (spec § 8).</summary>
