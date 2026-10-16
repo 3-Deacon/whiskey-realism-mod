@@ -662,7 +662,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (HeldReserves(roles, release) - 1 < FloorOf(r0x, floorShare)) continue;
 
                 GuardAt(roles, axisOverride, guards, pick, in threat);
-                state.BindCrossing(new CrossingBinding { ChildId = snapshots[pick].ChildId, Link = threat.Link, OwnShiftAtRelease = pickShift, ReleasedAtHours = release.NowHours });
+                state.BindCrossing(new CrossingBinding
+                {
+                    ChildId = snapshots[pick].ChildId, Link = threat.Link, OwnShiftAtRelease = pickShift, ReleasedAtHours = release.NowHours,
+                    Held = HeldReserves(roles, release), Floor = FloorOf(r0x, floorShare),
+                });
             }
         }
 

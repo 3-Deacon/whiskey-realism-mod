@@ -99,6 +99,65 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             into.MarkMonitorFresh();
         }
 
+        // The first approach reason in the spec's order, or null: crossing-held, route-missing, late, detail, wing-abandoned.
+        private static string ApproachReason(in CandidateResult atSelection, in CandidateResult now, ReadOnlySpan<BodyEstimate> before,
+            ReadOnlySpan<BodyEstimate> after, in MonitorFacts facts)
+        {
+            // crossing-held: a crossing on a still-to-launch member's route turned Held and the member has not passed it.
+            for (int i = 0; i < facts.MemberCount; i++)
+            {
+                if (!Pending(in facts, i)) continue;
+                for (int c = 0; c < facts.CrossingCount[i]; c++)
+                {
+                    int at = facts.CrossingStart[i] + c;
+                    if (facts.CrossingHeld[at] && !facts.CrossingPassed[at]) return ReasonCrossingHeld;
+                }
+            }
+
+            // route-missing: a leg of the plan has no path (the NavMesh refused it and no other crossing serves).
+            if (now.Verdict == FeasibilityVerdict.Impossible && string.Equals(now.Reason, "no-route", StringComparison.Ordinal)
+                && !(atSelection.Verdict == FeasibilityVerdict.Impossible && string.Equals(atSelection.Reason, "no-route", StringComparison.Ordinal)))
+                return ReasonRouteMissing;
+
+            // late: a member's strike estimate is past the desired strike recorded at selection. A held member is measured from its
+            // planned release (its order has not gone out), a marching one from now.
+            for (int i = 0; i < facts.MemberCount; i++)
+            {
+                if (!Pending(in facts, i) || float.IsNaN(facts.StrikeAfter[i])) continue;
+                bool held = (facts.Phase[i] == ManeuverPhase.None || facts.Phase[i] == ManeuverPhase.Hold) && facts.HasRelease[i];
+                double estimate = (held ? facts.PlannedReleaseHours[i] : facts.NowHours) + facts.StrikeAfter[i];
+                double desired = facts.SelectedAtHours + facts.DesiredBefore[i];
+                if (estimate - desired > LateHours) return ReasonLate;
+            }
+
+            // detail: a still-to-launch body's detail penalty rose past Risky and well above its value at selection.
+            for (int b = 0; b < before.Length; b++)
+            {
+                bool pending = false;
+                for (int i = 0; i < facts.MemberCount; i++) if (facts.Body[i] == b && Pending(in facts, i)) pending = true;
+                if (!pending) continue;
+                for (int a = 0; a < after.Length; a++)
+                {
+                    if (!string.Equals(after[a].ChildId, before[b].ChildId, StringComparison.Ordinal)) continue;
+                    if (after[a].Detail > RiskyPenalty && after[a].Detail - before[b].Detail >= ReplanPenaltyMargin) return ReasonDetail;
+                }
+            }
+
+            // wing-abandoned: BC11 gave up an enveloping child while another enveloping child, or a fix still to go in, depends on it.
+            for (int i = 0; i < facts.MemberCount; i++)
+            {
+                if (facts.Kind[i] != MemberEnvelops || !Abandoned(in facts, facts.ChildId[i])) continue;
+                for (int j = 0; j < facts.MemberCount; j++)
+                {
+                    if (j == i) continue;
+                    bool otherWing = facts.Kind[j] == MemberEnvelops && !Abandoned(in facts, facts.ChildId[j]);
+                    bool fixWaiting = facts.Kind[j] == MemberFix && Pending(in facts, j);
+                    if (otherWing || fixWaiting) return ReasonWingAbandoned;
+                }
+            }
+            return null;
+        }
+
         // A member still to launch: an enveloping child before its Turn (an abandoned one is no longer waited on), a fix still holding or whose release is ahead.
         private static bool Pending(in MonitorFacts f, int i)
         {
@@ -129,75 +188,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         public static bool TryBrokenAssumption(in CandidateResult atSelection, in CandidateResult now, ReadOnlySpan<BodyEstimate> before,
             ReadOnlySpan<BodyEstimate> after, in MonitorFacts facts, out string reason)
+            => TryBrokenAssumption(in atSelection, in now, before, after, in facts, out reason, out _);
+
+        /// <summary>
+        /// <see cref="TryBrokenAssumption(in CandidateResult, in CandidateResult, ReadOnlySpan{BodyEstimate}, ReadOnlySpan{BodyEstimate}, in MonitorFacts, out string)"/>
+        /// that also reports <paramref name="committedReason"/>: the approach reason that would have broken the plan had a wing not already been
+        /// committed (the telemetry row names the suppression <c>committed</c>); null when none, or when the plan is broken.
+        /// </summary>
+        public static bool TryBrokenAssumption(in CandidateResult atSelection, in CandidateResult now, ReadOnlySpan<BodyEstimate> before,
+            ReadOnlySpan<BodyEstimate> after, in MonitorFacts facts, out string reason, out string committedReason)
         {
             reason = null;
+            committedReason = null;
             bool envelops = false;
             for (int b = 0; b < before.Length; b++) if (before[b].Envelops) envelops = true;
             bool committed = true;
             for (int i = 0; i < facts.MemberCount; i++)
                 if (facts.Kind[i] == MemberEnvelops && facts.Phase[i] != ManeuverPhase.Turn && facts.Phase[i] != ManeuverPhase.Attack) committed = false;
 
-            if (envelops && !committed)
+            string approach = envelops ? ApproachReason(in atSelection, in now, before, after, in facts) : null;
+            if (approach != null)
             {
-                // crossing-held: a crossing on a still-to-launch member's route turned Held and the member has not passed it.
-                for (int i = 0; i < facts.MemberCount; i++)
+                if (!committed)
                 {
-                    if (!Pending(in facts, i)) continue;
-                    for (int c = 0; c < facts.CrossingCount[i]; c++)
-                    {
-                        int at = facts.CrossingStart[i] + c;
-                        if (facts.CrossingHeld[at] && !facts.CrossingPassed[at]) { reason = ReasonCrossingHeld; return true; }
-                    }
-                }
-
-                // route-missing: a leg of the plan has no path (the NavMesh refused it and no other crossing serves).
-                if (now.Verdict == FeasibilityVerdict.Impossible && string.Equals(now.Reason, "no-route", StringComparison.Ordinal)
-                    && !(atSelection.Verdict == FeasibilityVerdict.Impossible && string.Equals(atSelection.Reason, "no-route", StringComparison.Ordinal)))
-                {
-                    reason = ReasonRouteMissing;
+                    reason = approach;
                     return true;
                 }
-
-                // late: a member's strike estimate is past the desired strike recorded at selection. A held member is measured from its
-                // planned release (its order has not gone out), a marching one from now.
-                for (int i = 0; i < facts.MemberCount; i++)
-                {
-                    if (!Pending(in facts, i) || float.IsNaN(facts.StrikeAfter[i])) continue;
-                    bool held = (facts.Phase[i] == ManeuverPhase.None || facts.Phase[i] == ManeuverPhase.Hold) && facts.HasRelease[i];
-                    double estimate = (held ? facts.PlannedReleaseHours[i] : facts.NowHours) + facts.StrikeAfter[i];
-                    double desired = facts.SelectedAtHours + facts.DesiredBefore[i];
-                    if (estimate - desired > LateHours) { reason = ReasonLate; return true; }
-                }
-
-                // detail: a still-to-launch body's detail penalty rose past Risky and well above its value at selection.
-                for (int b = 0; b < before.Length; b++)
-                {
-                    bool pending = false;
-                    for (int i = 0; i < facts.MemberCount; i++) if (facts.Body[i] == b && Pending(in facts, i)) pending = true;
-                    if (!pending) continue;
-                    for (int a = 0; a < after.Length; a++)
-                    {
-                        if (!string.Equals(after[a].ChildId, before[b].ChildId, StringComparison.Ordinal)) continue;
-                        if (after[a].Detail > RiskyPenalty && after[a].Detail - before[b].Detail >= ReplanPenaltyMargin)
-                        {
-                            reason = ReasonDetail;
-                            return true;
-                        }
-                    }
-                }
-
-                // wing-abandoned: BC11 gave up an enveloping child while another enveloping child, or a fix still to go in, depends on it.
-                for (int i = 0; i < facts.MemberCount; i++)
-                {
-                    if (facts.Kind[i] != MemberEnvelops || !Abandoned(in facts, facts.ChildId[i])) continue;
-                    for (int j = 0; j < facts.MemberCount; j++)
-                    {
-                        if (j == i) continue;
-                        bool otherWing = facts.Kind[j] == MemberEnvelops && !Abandoned(in facts, facts.ChildId[j]);
-                        bool fixWaiting = facts.Kind[j] == MemberFix && Pending(in facts, j);
-                        if (otherWing || fixWaiting) { reason = ReasonWingAbandoned; return true; }
-                    }
-                }
+                committedReason = approach;
             }
 
             // map-known: the plan was selected while its verdict was Unknown and a known verdict has appeared; once per selection.

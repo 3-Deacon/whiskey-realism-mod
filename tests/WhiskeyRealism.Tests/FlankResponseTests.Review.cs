@@ -492,7 +492,7 @@ internal static partial class FlankResponseTests
                     "no NavMesh query is built with a literal 0 height: " + Flat(args));
             }
         }
-        AssertEqual(3, calls.Count, "the Whiskey NavMesh queries (a new one must be added here with its target at terrain height): " + string.Join(" | ", calls));
+        AssertEqual(4, calls.Count, "the Whiskey NavMesh queries (a new one must be added here with its target at terrain height): " + string.Join(" | ", calls));
 
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         AssertPinned(producers, "Vector3 to = PostureTargets.AtTerrain(x, z);", "the road-route plan target is at terrain height");
@@ -501,5 +501,8 @@ internal static partial class FlankResponseTests
         AssertFalse(Flat(producers).Contains("var to = new Vector3(x, 0f, z);"), "the old y = 0 target is gone");
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
         AssertPinned(runtime, "new Vector3(toX, HeightAt(toX, toZ), toZ), _routeFilter, path)", "the envelopment route target is at terrain height");
+        string confirm = SourceText("Tactical", "Orchestrator", "Plays", "FeasibilityRuntime.cs");
+        AssertPinned(confirm, "NavMesh.CalculatePath(PostureTargets.AtTerrain(x0, z0), PostureTargets.AtTerrain(x1, z1), filter, path)",
+            "BC14's confirmation query (the fourth site) starts and ends at terrain height");
     }
 }

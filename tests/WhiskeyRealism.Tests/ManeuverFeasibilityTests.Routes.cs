@@ -472,6 +472,9 @@ internal static partial class ManeuverFeasibilityTests
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.Monitor.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/LegCostCache.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.Look.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ConfirmedLegs.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityTelemetry.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityRuntime.cs",
         };
         var found = new System.Collections.Generic.List<string>();

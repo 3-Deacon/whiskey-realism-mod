@@ -19,6 +19,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <inheritdoc />
         public string BrokenAssumption { get; private set; }
 
+        /// <summary>The approach reason a committed plan did not act on at the last <see cref="Assess"/> (the row's <c>committed</c> suppression), else null.</summary>
+        public string CommittedReason { get; private set; }
+
         /// <summary>The monitor's re-evaluation of the selected plan (created on first use).</summary>
         internal FeasibilityLedger MonitorLedger => _monitor ?? (_monitor = new FeasibilityLedger { _isMonitor = true });
 
@@ -77,11 +80,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool Assess(IMonitorWorld world, double nowHours)
         {
             BrokenAssumption = null;
+            CommittedReason = null;
             if (!HasSelection || !_monitorFresh || _monitor == null || !_monitor.TryGet(SelectedPlan, out CandidateResult now)) return false;
             FillFacts(world, nowHours, in now);
             CandidateResult before = _hasSnapshot ? _selected.Results[0] : default(CandidateResult);
             ReadOnlySpan<BodyEstimate> bodiesBefore = _hasSnapshot ? new ReadOnlySpan<BodyEstimate>(_selected.Bodies, 0, before.BodyCount) : default(ReadOnlySpan<BodyEstimate>);
-            if (ManeuverFeasibility.TryBrokenAssumption(in before, in now, bodiesBefore, _monitor.Bodies(in now), in _facts, out string reason))
+            bool broken = ManeuverFeasibility.TryBrokenAssumption(in before, in now, bodiesBefore, _monitor.Bodies(in now), in _facts, out string reason, out string committed);
+            CommittedReason = committed;
+            if (broken)
             {
                 BrokenAssumption = reason;
                 if (string.Equals(reason, ManeuverFeasibility.ReasonMapKnown, StringComparison.Ordinal)) _mapKnownFired = true;

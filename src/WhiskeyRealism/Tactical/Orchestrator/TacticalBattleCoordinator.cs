@@ -156,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// DoPlacementAIUnitsWithinDeploymentzoneNew 85524) and pick a plan on it. The
         /// orchestrator and its plan memory are kept.
         /// </summary>
-        internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible)
+        internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible, Action evaluate = null)
         {
             unchecked { BattleDayEpoch++; }
             // The reserve release starts over on a new day, plan or no plan.
@@ -164,7 +164,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (army == null || !army.HasPlan) return;
             var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);
-            army.Replan(ownEvidence, intent);
+            // BC14: the feasibility evaluation runs, forced to completion, so the night's pick reads a ledger of the morning's ground.
+            evaluate?.Invoke();
+            army.Replan(ownEvidence, intent, "new-day");
         }
 
         /// <summary>

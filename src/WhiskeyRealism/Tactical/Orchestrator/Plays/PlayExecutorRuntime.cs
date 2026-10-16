@@ -296,11 +296,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             // keeps one writer (the coordinator's heavy path), so BC11 only queues them here and the heavy path drains the queue into the
             // monitor's facts on its next run.
             public readonly List<string> Abandoned = new List<string>(4);
+            // The ledger's predicted arrival and march hours of each enveloping child, latched when its March began (the Turn row compares with them).
+            public readonly Dictionary<string, (double arrival, double march)> Predicted = new Dictionary<string, (double, double)>(StringComparer.Ordinal);
 
             public void Clear()
             {
                 Plan = BattlePlanId.Unknown;
                 Abandoned.Clear();
+                Predicted.Clear();
                 ActivatedHours = -1.0;
                 CenterContactHours = -1.0;
                 States.Clear();
@@ -406,6 +409,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         side.States[intents[i].ChildId] = state;
                         side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
                         if (state.Phase == ManeuverPhase.Abandoned && before != ManeuverPhase.Abandoned && spec.Envelops) side.Abandoned.Add(intents[i].ChildId);
+                        if (state.Phase == ManeuverPhase.March && before != ManeuverPhase.March)
+                        {
+                            if (feasibility != null && feasibility.TryPredictedArrival(intents[i].ChildId, out double arrival, out double predictedMarch))
+                                side.Predicted[intents[i].ChildId] = (arrival, predictedMarch);
+                            if (state.HasVia) FeasibilityTelemetry.FirstVia(FeasibilityRuntime.StateAt(allianceId, state.ViaX, state.ViaZ));
+                        }
                         if (state.Phase != before || state.Mirrored != wasMirrored) EmitEnvelopment(allianceId, planId, intents[i].ChildId, order, state, input);
                     }
                     return side.Orders;
@@ -436,6 +445,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (id != 0 && n < into.Length) into[n++] = id;
             }
             return n;
+        }
+
+        /// <summary>BC14: BC11's phase for the side's direct child (None before its maneuver starts), the monitor's read of how far each wing has got.</summary>
+        internal static ManeuverPhase PhaseOf(int allianceId, string childId)
+        {
+            if (allianceId < 0 || allianceId >= SideCount || childId == null) return ManeuverPhase.None;
+            return _maneuvers[allianceId].States.TryGetValue(childId, out ManeuverState state) ? state.Phase : ManeuverPhase.None;
+        }
+
+        /// <summary>BC14: the child is past its Hold (marching, turning or attacking): its order delay was paid when it was released.</summary>
+        internal static bool IsMoving(int allianceId, string childId)
+        {
+            ManeuverPhase phase = PhaseOf(allianceId, childId);
+            return phase == ManeuverPhase.March || phase == ManeuverPhase.Turn || phase == ManeuverPhase.Attack;
+        }
+
+        /// <summary>
+        /// BC14 requirement-wing-abandon-replan: moves the enveloping children BC11 abandoned since the last call into <paramref name="into"/> (after
+        /// <paramref name="count"/> entries, as many as fit) and returns the new count. The ledger's heavy path is the one caller.
+        /// </summary>
+        internal static int DrainAbandoned(int allianceId, string[] into, int count)
+        {
+            if (allianceId < 0 || allianceId >= SideCount) return count;
+            List<string> queue = _maneuvers[allianceId].Abandoned;
+            int taken = 0;
+            while (taken < queue.Count && count < into.Length) into[count++] = queue[taken++];
+            queue.RemoveRange(0, taken);
+            return count;
         }
 
         // Children still maneuvering when their plan changed: one Abandoned row each (smoke item 2.28, reason plan-changed).
@@ -757,6 +794,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 bool mirrored = state.Mirrored;
                 string proceed = state.ProceedReason ?? string.Empty;
                 float targetX = order.TargetX, targetZ = order.TargetZ, anchorX = input.AnchorX, anchorZ = input.AnchorZ;
+                // BC14: the doctrine clock at the transition, the ledger's release and budget the maneuver latched, its vias, and on the Turn the
+                // arrival against the prediction latched at the March (criterion-arrival-prediction).
+                double now = TacticalDoctrineTime.NowBattleHours;
+                double plannedRelease = state.HasFirstPlannedRelease ? state.FirstPlannedReleaseHours : -1.0;
+                double budget = state.HasBudget ? state.BudgetHours : -1.0;
+                bool hasVia = state.HasVia, hasAttackVia = state.HasAttackVia;
+                float viaX = hasVia ? state.ViaX : 0f, viaZ = hasVia ? state.ViaZ : 0f;
+                float attackViaX = hasAttackVia ? state.AttackViaX : 0f, attackViaZ = hasAttackVia ? state.AttackViaZ : 0f;
+                bool turn = state.Phase == ManeuverPhase.Turn;
+                double predictedArrival = -1.0, predictedMarch = -1.0;
+                if (turn && allianceId >= 0 && allianceId < SideCount && _maneuvers[allianceId].Predicted.TryGetValue(childId, out var predicted))
+                {
+                    predictedArrival = predicted.arrival;
+                    predictedMarch = predicted.march;
+                }
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(allianceId)
@@ -771,7 +823,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("anchorX", anchorX)
                         .WithField("anchorZ", anchorZ)
                         .WithField("targetX", targetX)
-                        .WithField("targetZ", targetZ));
+                        .WithField("targetZ", targetZ)
+                        .WithField("doctrineHours", now)
+                        .WithField("plannedReleaseHours", plannedRelease)
+                        .WithField("timeBudgetHours", budget)
+                        .WithField("via", hasVia)
+                        .WithField("viaX", viaX)
+                        .WithField("viaZ", viaZ)
+                        .WithField("attackVia", hasAttackVia)
+                        .WithField("attackViaX", attackViaX)
+                        .WithField("attackViaZ", attackViaZ)
+                        .WithField("arrivedHours", turn ? now : -1.0)
+                        .WithField("predictedArrivalHours", predictedArrival)
+                        .WithField("predictedMarchHours", predictedMarch));
             }
             catch { }
         }

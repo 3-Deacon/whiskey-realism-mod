@@ -80,7 +80,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // execute (cavalry plays w/o cavalry). Hard filter — happens
             // before scoring so an ineligible play can't win on personality
             // fit.
-            int preconditionFiltered = 0, feasibilityFiltered = 0;
+            int preconditionFiltered = 0, stanceFiltered = 0, crestFiltered = 0, feasibilityFiltered = 0;
             bool lift = ctx.Feasibility != null && AllCandidatesImpossible(in ctx);
             if (lift) OnceLog.Warning("tactical-battle-core:feasibility-all-impossible",
                 "[Feasibility] every candidate is impossible: the feasibility filter is lifted for this selection");
@@ -100,7 +100,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // by vanilla's GetBattleType, not by per-tick force balance.
                 if (!StanceAllowsPlaybook(ctx.Stance, pb.Id))
                 {
-                    preconditionFiltered++;
+                    stanceFiltered++;
                     continue;
                 }
                 float personalityScore = pb.Fit.Score(ctx.CommanderPersonality);
@@ -113,7 +113,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // check follows the jitter draw so the other plays' jitter stream does not depend on whether a crest exists.
                 if (pb.RequiresCrest && !ctx.HasCrestLine)
                 {
-                    preconditionFiltered++;
+                    crestFiltered++;
                     continue;
                 }
                 // BC14: the feasibility verdict follows the same two draws, for the same reason. An Impossible play is skipped.
@@ -196,6 +196,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (report != null)
             {
                 report.PreconditionFiltered = preconditionFiltered;
+                report.StanceFiltered = stanceFiltered;
+                report.CrestFiltered = crestFiltered;
                 report.FeasibilityFiltered = feasibilityFiltered;
                 report.AllImpossible = lift;
                 report.Rank();

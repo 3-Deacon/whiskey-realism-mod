@@ -33,6 +33,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public string ChildId;
         public bool HasRelease;
         public double ReleaseHours;
+        /// <summary>An enveloping child's predicted arrival at its turn point (absolute doctrine hours: its strike S* less DeployHours) and its predicted march hours.</summary>
+        public double PredictedArrivalHours, PredictedMarchHours;
         public bool HasBudget;
         public double TimeBudgetHours;
         public float ViaX, ViaZ, AttackViaX, AttackViaZ;
@@ -149,6 +151,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return false;
         }
 
+        /// <summary>The published candidate at <paramref name="rank"/> in the evaluation's candidate order (the catalog's score order).</summary>
+        public bool TryGetAt(int rank, out CandidateResult result)
+        {
+            if (rank >= 0 && rank < _front.ResultCount)
+            {
+                result = _front.Results[rank];
+                return true;
+            }
+            result = default(CandidateResult);
+            return false;
+        }
+
+        /// <summary>Where the evaluation found the direct child (the position the route screen starts its march from).</summary>
+        internal bool TryChildPosition(string childId, out float x, out float z)
+        {
+            int slot = _job.SlotOfChild(childId);
+            if (slot < 0)
+            {
+                x = z = 0f;
+                return false;
+            }
+            x = _job.Children[slot].X;
+            z = _job.Children[slot].Z;
+            return true;
+        }
+
         public ReadOnlySpan<BodyEstimate> Bodies(in CandidateResult r)
             => new ReadOnlySpan<BodyEstimate>(_front.Bodies, r.BodyStart, r.BodyCount);
 
@@ -176,6 +204,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 viaZ = c.ViaZ;
                 attackViaX = c.AttackViaX;
                 attackViaZ = c.AttackViaZ;
+                return true;
+            }
+            return false;
+        }
+
+        public bool TryPredictedArrival(string childId, out double arrivalHours, out double marchHours)
+        {
+            arrivalHours = marchHours = 0.0;
+            for (int i = 0; i < _childFrontCount; i++)
+            {
+                if (!string.Equals(_childFront[i].ChildId, childId, StringComparison.Ordinal)) continue;
+                if (!_childFront[i].HasBudget) return false;
+                arrivalHours = _childFront[i].PredictedArrivalHours;
+                marchHours = _childFront[i].PredictedMarchHours;
                 return true;
             }
             return false;
@@ -218,6 +260,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     };
                     if (member.Kind == ManeuverFeasibility.MemberEnvelops)
                     {
+                        c.PredictedArrivalHours = ManeuverFeasibility.AbsoluteHours(EvaluatedHours, member.DesiredStrikeHours) - ManeuverFeasibility.DeployHours(in input.Rules);
+                        c.PredictedMarchHours = member.MarchHours;
                         c.HasBudget = true;
                         c.TimeBudgetHours = ManeuverFeasibility.TimeBudget(member.CourierHours, member.MarchHours, (float)input.DaylightHours);
                         if (member.MarchVia >= 0 && input.Regions != null)

@@ -194,6 +194,18 @@ internal static partial class ManeuverFeasibilityTests
             Fix("child-3", 2, ManeuverPhase.Hold, true, 11.2, after: 0.3f));
         AssertTrue(Broken(marching, before, after, out string reason), "a wing still marching: the exemption is off");
         AssertEqual("detail", reason, "the main body's detail");
+        // The suppression is named: the same rise on a fix still holding is a reason the committed plan did not act on.
+        MonitorFacts holding = MakeFacts(10.0, 11.0, Wing("child-1", 0, ManeuverPhase.Turn), Wing("child-2", 1, ManeuverPhase.Attack),
+            Fix("child-3", 2, ManeuverPhase.Hold, true, 11.2, after: 0.3f));
+        CandidateResult ok = Verdict(FeasibilityVerdict.Feasible);
+        AssertFalse(ManeuverFeasibility.TryBrokenAssumption(in ok, in ok, before, after, in holding, out string none, out string suppressed), "committed: no trigger");
+        AssertEqual(null, none, "no reason");
+        AssertEqual("detail", suppressed, "but the reason it would have fired on is reported (the row says committed)");
+        AssertFalse(ManeuverFeasibility.TryBrokenAssumption(in ok, in ok, before, before, in holding, out _, out string quiet), "committed, nothing risen");
+        AssertEqual(null, quiet, "nothing suppressed");
+        AssertTrue(ManeuverFeasibility.TryBrokenAssumption(in ok, in ok, before, after, in marching, out string fired, out string notSuppressed), "not committed: it fires");
+        AssertEqual("detail", fired, "as before");
+        AssertEqual(null, notSuppressed, "and nothing is suppressed");
         // A crossing turning Held after the commitment is no trigger either, nor a late estimate.
         MonitorFacts spent = MakeFacts(10.0, 11.0, Wing("child-1", 0, ManeuverPhase.Attack, after: 9f), Wing("child-2", 1, ManeuverPhase.Turn),
             Fix("child-3", 2, ManeuverPhase.Released));
@@ -231,6 +243,14 @@ internal static partial class ManeuverFeasibilityTests
         ManeuverFeasibility.EvaluateSelected(f.Build(BattlePlanId.ManeuverAndFix), ledger);
         AssertTrue(ledger.Assess(world, f.Now), "the leg is refused: the plan is broken");
         AssertEqual("route-missing", ledger.BrokenAssumption, "route-missing");
+        // The same refusal once the wing is committed: no trigger, and the ledger names the reason it did not act on.
+        world.Phases[wing.ChildId] = ManeuverPhase.Turn;
+        AssertFalse(ledger.Assess(world, f.Now), "a wing already turning: the approach is spent");
+        AssertEqual(null, ledger.BrokenAssumption, "nothing is broken");
+        AssertEqual("route-missing", ledger.CommittedReason, "but the committed suppression carries the reason");
+        world.Phases[wing.ChildId] = ManeuverPhase.March;
+        AssertTrue(ledger.Assess(world, f.Now), "marching again, it breaks");
+        AssertEqual(null, ledger.CommittedReason, "and nothing is suppressed");
     }
 
     static void MonMapKnown()
@@ -423,6 +443,9 @@ internal static partial class ManeuverFeasibilityTests
         public string BrokenAssumption => null;
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
+        public double EvaluatedHours => 0.0;
+        public bool HasEvaluation => false;
+        public bool TryPredictedArrival(string childId, out double arrivalHours, out double marchHours) { arrivalHours = marchHours = 0.0; return false; }
         public bool TryThreat(int index, out CrossingThreat threat, float[] ownShiftByChild, out int childCount) { threat = default(CrossingThreat); childCount = 0; return false; }
         public bool TryGet(BattlePlanId plan, out CandidateResult result) => Results.TryGetValue(plan, out result);
         public void CaptureSelection(BattlePlanId plan, bool mirrored) { SelectedPlan = plan; Captured.Add((plan, mirrored)); }
@@ -592,7 +615,7 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(3, CountOf(army, "_feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);"), "the first pick, a kept plan and a replan each capture the selection");
         FlankResponseTests.AssertPinned(army, "hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,", "the hysteresis names the plan being kept");
         string cycle = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyTickCycle.cs");
-        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption);", "only the broken assumption replans with hysteresis");
+        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption, trigger.ToString());", "only the broken assumption replans with hysteresis");
         FlankResponseTests.AssertPinned(cycle, "assumptionReason: assumptionReason);", "the reason reaches the trigger input");
         string coordinator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
         FlankResponseTests.AssertPinned(coordinator, "assumptionReason: side.Army.Feasibility?.BrokenAssumption);", "the coordinator feeds the ledger's finding to the tick");

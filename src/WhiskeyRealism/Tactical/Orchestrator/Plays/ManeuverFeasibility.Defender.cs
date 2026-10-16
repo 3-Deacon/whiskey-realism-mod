@@ -198,8 +198,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             EnemyPicture enemy = job.Enemy;
             int count = enemy.Count;
-            d.Perceived = count > 0;
-            if (count == 0)
+            d.Perceived = enemy.HasSamples;
+            if (!enemy.HasSamples)
             {
                 // No samples: the enemy mass is BC10's assumed enemy point, and it is the one body.
                 d.BodyX[0] = enemy.MassX;

@@ -278,6 +278,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.cs" Link="Orchestrator\Plays\FeasibilityLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.Monitor.cs" Link="Orchestrator\Plays\FeasibilityLedger.Monitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.Look.cs" Link="Orchestrator\Plays\FeasibilityLedger.Look.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ConfirmedLegs.cs" Link="Orchestrator\Plays\ConfirmedLegs.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTelemetry.cs" Link="Orchestrator\Plays\FeasibilityTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Defender.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Defender.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FlankFacing.cs" Link="Battle\FlankFacing.cs" />

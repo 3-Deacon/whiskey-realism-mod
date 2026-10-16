@@ -28,7 +28,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public int Count { get; private set; }
 
-        public int PreconditionFiltered, FeasibilityFiltered;
+        public int PreconditionFiltered, StanceFiltered, CrestFiltered, FeasibilityFiltered;
 
         /// <summary>Every candidate was Impossible, so the filter was lifted for this selection.</summary>
         public bool AllImpossible;
@@ -39,6 +39,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             Count = 0;
             PreconditionFiltered = 0;
+            StanceFiltered = 0;
+            CrestFiltered = 0;
             FeasibilityFiltered = 0;
             AllImpossible = false;
         }

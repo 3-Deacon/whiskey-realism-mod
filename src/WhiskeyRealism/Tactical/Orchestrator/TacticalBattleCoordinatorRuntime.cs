@@ -528,6 +528,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // reads this tick's stance and not the previous tick's.
             RefreshPickInputs(side, sideBattle);
 
+            // BC14: the crossing probes, the evaluation slice, the monitor and the confirmation query, before this tick's replan reads the ledger.
+            DriveFeasibility(side, sideBattle);
+
             if (Plugin.EnableTacticalOrchestratorIntentInference != null
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
@@ -539,6 +542,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             RefreshPostureCaches(side, sideBattle);
             DriveOperationsLedger(side, sideBattle);
+        }
+
+        // BC14 requirement-runtime-wiring, steps 2 to 4 of the tick: the heavy path's feasibility work, on the same published snapshot the replan reads.
+        private static void DriveFeasibility(TacticalBattleOrchestrator side, AIBattle sideBattle)
+        {
+            try
+            {
+                if (side.Army == null || !Plugin.ManeuverFeasibilityEnabled()) return;
+                Battle.BattleSnapshot battleSnapshot = SideSnapshot(side);
+                if (battleSnapshot == null) return;
+                int s = side.AllianceId;
+                if (s < 0 || s > 1) s = 0;
+                bool throttled = IsHeavyThrottlingEnabled();
+                TacticalBattleRuntimeSnapshot heavy = throttled ? EnsureSideSnapshot(side, sideBattle) : default(TacticalBattleRuntimeSnapshot);
+                if (throttled && !heavy.HasData) return;
+                ArmyEvidenceBuilder.Bundle bundle = throttled ? BundleFromSnapshot(heavy) : ArmyEvidenceBuilder.Build(battleSnapshot, sideBattle);
+                Plays.FeasibilityRuntime.Tick(side, ResolveBattleUnits(sideBattle), battleSnapshot, bundle.OwnEvidence, bundle.EnemyVisible.FrontAxis,
+                    throttled ? _snapshotGeneration[s] : -1);
+            }
+            catch (Exception e)
+            {
+                WarnTickCycleOnce(side, e);
+            }
         }
 
         /// <summary>
@@ -607,7 +633,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 if (step == TickReplanStep.NightReplan)
                 {
-                    ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible);
+                    ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible,
+                        evaluate: () => Plays.FeasibilityRuntime.EvaluateNow(side, ResolveBattleUnits(battle), SideSnapshot(side), bundleForReplan.OwnEvidence,
+                            bundleForReplan.EnemyVisible.FrontAxis));
+                    Plays.FeasibilityTelemetry.Replan(side.AllianceId, "NewBattleDay", null, false, side.Army.CurrentPlan.PlanId, side.Army.CurrentPlan.Mirrored,
+                        TacticalDoctrineTime.NowBattleHours);
                     // The night replan counts against "Min Replan Seconds" like any other.
                     ArmyTickCycle.RecordReplan(side.AllianceId);
                     // Cleared only once the replan has run; a throw retries next tick.
@@ -638,6 +668,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     doctrineNowSeconds: TacticalDoctrineTime.NowBattleSeconds,
                     assumptionReason: side.Army.Feasibility?.BrokenAssumption);
                 ReplanTrigger trigger = outcome.Replanned || outcome.Kept ? outcome.Trigger : ReplanTrigger.None;
+                string assumption = side.Army.Feasibility?.BrokenAssumption;
+                double replanHours = TacticalDoctrineTime.NowBattleHours;
+                if (trigger != ReplanTrigger.None)
+                    Plays.FeasibilityTelemetry.Replan(side.AllianceId, trigger.ToString(), trigger == ReplanTrigger.ManeuverAssumptionBroken ? assumption : null, outcome.Kept,
+                        side.Army.CurrentPlan.PlanId, side.Army.CurrentPlan.Mirrored, replanHours);
+                if (outcome.Suppression != null && assumption != null)
+                    Plays.FeasibilityRuntime.NoteSuppression(side.AllianceId, assumption, outcome.Suppression, replanHours);
 
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
@@ -1202,10 +1239,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 : armyEntry.PersonalityVector;
             var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyVector);
             side.AttachArmy(army);
-            // BC14: the stance and opportunity inputs are refreshed before the first pick (a Defender never opens offensive).
-            // The forced feasibility evaluation joins this seam in task 15.
-            PickInitialPlanInOrder(army, () => RefreshPickInputs(side, sideBattle), () => { },
-                ArmyEvidenceBuilder.Build(snapshot, sideBattle).OwnEvidence);
+            Plays.FeasibilityRuntime.Attach(army, armyCommander);
+            // BC14: the stance and opportunity inputs are refreshed before the first pick (a Defender never opens offensive), then the
+            // feasibility evaluation runs, forced to completion, so the pick reads a ledger.
+            ArmyEvidenceBuilder.Bundle firstBundle = ArmyEvidenceBuilder.Build(snapshot, sideBattle);
+            PickInitialPlanInOrder(army, () => RefreshPickInputs(side, sideBattle),
+                () => Plays.FeasibilityRuntime.EvaluateNow(side, ResolveBattleUnits(sideBattle), snapshot, firstBundle.OwnEvidence, firstBundle.EnemyVisible.FrontAxis),
+                firstBundle.OwnEvidence);
             if (army.HasPlan)
             {
                 TelemetryRouter.LegacyInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)

@@ -55,6 +55,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public string ChildId;
         public int Link;
         public double OwnShiftAtRelease, ReleasedAtHours;
+        /// <summary>The reserves still held after this release and the floor they were held against (the release row's <c>held</c> and <c>floor</c>).</summary>
+        public int Held, Floor;
     }
 
     public sealed class ReserveReleaseState

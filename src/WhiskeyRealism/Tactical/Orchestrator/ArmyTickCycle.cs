@@ -11,7 +11,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct ReplanOutcome
     {
-        public const string SuppressedByCooldown = "cooldown", SuppressedByMargin = "margin", SuppressedByPreemption = "preempted";
+        public const string SuppressedByCooldown = "cooldown", SuppressedByMargin = "margin", SuppressedByPreemption = "preempted", SuppressedByCommitment = "committed";
 
         public ReplanOutcome(ReplanTrigger trigger, bool replanned, bool kept, string suppression)
         {
@@ -394,7 +394,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             bool brokenAssumption = trigger == ReplanTrigger.ManeuverAssumptionBroken;
-            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption);
+            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption, trigger.ToString());
             orchestrator.RecordReplanBaseline(new ReplanBaseline(
                 ownArmyMorale,
                 ownReservesCommittedFraction,

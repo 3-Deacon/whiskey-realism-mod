@@ -204,11 +204,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float GuardZ => Guard.Z;
         public float GuardHeading => Guard.Heading;
 
-        /// <summary>The same intent with a guard point; every other field is forwarded.</summary>
-        public DirectChildIntent WithGuardPoint(float x, float z, float heading) =>
-            new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector,
-                SupportPriority01, EnemyIntent, Maneuver, ZoneRectKind, new GuardPoint(x, z, heading));
-
         private static float Clamp01(float v)
         {
             if (float.IsNaN(v) || float.IsInfinity(v)) return 0f;

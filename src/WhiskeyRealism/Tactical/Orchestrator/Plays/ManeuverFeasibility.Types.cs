@@ -110,6 +110,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     {
         bool TryGet(BattlePlanId plan, out CandidateResult result);
 
+        /// <summary>The doctrine hour the published evaluation started at; meaningful once <see cref="HasEvaluation"/>.</summary>
+        double EvaluatedHours { get; }
+
+        /// <summary>An evaluation has been published.</summary>
+        bool HasEvaluation { get; }
+
         /// <summary>The plan the ledger's per-child table is for (the selected plan, captured after every pick); Unknown before the first.</summary>
         BattlePlanId SelectedPlan { get; }
 
@@ -120,6 +126,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         bool TryPlannedRelease(string childId, out double releaseHours, out double timeBudgetHours, out float viaX, out float viaZ,
             out float attackViaX, out float attackViaZ);
+
+        /// <summary>
+        /// An enveloping child's predicted arrival at its turn point (absolute doctrine hours: its strike S* less DeployHours) and its predicted
+        /// march hours, as the table last held them (BC11 latches them at the March for the TacticalEnvelopment row). False for any other child.
+        /// </summary>
+        bool TryPredictedArrival(string childId, out double arrivalHours, out double marchHours);
 
         /// <summary>The regions a child's vias lead into (-1: no via): once the child stands in one, the via is behind it.</summary>
         bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion);

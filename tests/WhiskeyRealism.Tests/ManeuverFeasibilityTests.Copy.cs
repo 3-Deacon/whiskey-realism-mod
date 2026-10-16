@@ -14,7 +14,7 @@ internal static partial class ManeuverFeasibilityTests
     static (string, Action)[] CopySiteTests() => new (string, Action)[]
     {
         ("bc14 READER-DOCTRINE-COPY a doctrine order keeps its via through WithSop, WithTask, WithManeuver and WithExploit", ReaderDoctrineCopy),
-        ("bc14 READER-CHILD-COPY a direct-child intent keeps its guard point through the held-main swap and WithGuardPoint", ReaderChildCopy),
+        ("bc14 READER-CHILD-COPY a direct-child intent keeps its guard point through the held-main swap", ReaderChildCopy),
         ("bc14 READER-MIRROR-COPY a mirrored projection carries its authored anchors through Assign, AssignInto and ManeuverOf", ReaderMirrorCopy),
         ("bc14 PROJECT-PARITY the pooled projection equals Project on every template", ProjectParity),
         ("bc14 ASSIGN-PARITY the pooled assignment equals Assign on every template", AssignParity),
@@ -52,27 +52,32 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(7, exploit.ExploitId, "WithExploit still sets the exploit id");
     }
 
+    // The same intent with a guard point; every other field is forwarded.
+    static DirectChildIntent Guarded(DirectChildIntent i, float x, float z, float heading) =>
+        new DirectChildIntent(i.ChildId, i.RawUnitTyp, i.EffectiveCommandLevel, i.DisplayName, i.PrimarySector, i.Role, i.Axis, i.AxisSector,
+            i.SupportPriority01, i.EnemyIntent, i.Maneuver, i.ZoneRectKind, new GuardPoint(x, z, heading));
+
     static void ReaderChildCopy()
     {
         DirectChildIntent plain = DirectIntent("child-1", DirectChildRole.RefuseRight, DirectChildAxis.Hold, 4, 0.3f);
         AssertFalse(plain.HasGuardPoint, "an ordinary intent has no guard point");
 
-        DirectChildIntent guarded = plain.WithGuardPoint(1000f, 210f, 270f);
-        AssertTrue(guarded.HasGuardPoint, "WithGuardPoint sets it");
+        DirectChildIntent guarded = Guarded(plain, 1000f, 210f, 270f);
+        AssertTrue(guarded.HasGuardPoint, "the constructor takes it");
         AssertNear(1000f, guarded.GuardX, 1e-4f, "guard x");
         AssertNear(210f, guarded.GuardZ, 1e-4f, "guard z");
         AssertNear(270f, guarded.GuardHeading, 1e-4f, "guard heading");
-        AssertEqual(plain.ChildId, guarded.ChildId, "WithGuardPoint keeps the child");
-        AssertEqual(plain.Role, guarded.Role, "WithGuardPoint keeps the role");
-        AssertEqual(plain.Axis, guarded.Axis, "WithGuardPoint keeps the axis");
-        AssertEqual(plain.AxisSector, guarded.AxisSector, "WithGuardPoint keeps the axis sector");
-        AssertEqual(plain.PrimarySector, guarded.PrimarySector, "WithGuardPoint keeps the primary sector");
-        AssertNear(plain.SupportPriority01, guarded.SupportPriority01, 1e-4f, "WithGuardPoint keeps the support priority");
+        AssertEqual(plain.ChildId, guarded.ChildId, "the guard keeps the child");
+        AssertEqual(plain.Role, guarded.Role, "the guard keeps the role");
+        AssertEqual(plain.Axis, guarded.Axis, "the guard keeps the axis");
+        AssertEqual(plain.AxisSector, guarded.AxisSector, "the guard keeps the axis sector");
+        AssertEqual(plain.PrimarySector, guarded.PrimarySector, "the guard keeps the primary sector");
+        AssertNear(plain.SupportPriority01, guarded.SupportPriority01, 1e-4f, "the guard keeps the support priority");
 
         // The held-main challenge swaps roles through DirectChildAllocator.With: the incumbent takes Main and the challenger the
         // incumbent's old role. Both children carry a guard point here, and both must keep it.
-        DirectChildIntent incumbent = DirectIntent("child-1", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 0.7f).WithGuardPoint(1f, 2f, 3f);
-        DirectChildIntent challenger = DirectIntent("child-2", DirectChildRole.Main, DirectChildAxis.SectorAxis, 3, 1f).WithGuardPoint(4f, 5f, 6f);
+        DirectChildIntent incumbent = Guarded(DirectIntent("child-1", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 0.7f), 1f, 2f, 3f);
+        DirectChildIntent challenger = Guarded(DirectIntent("child-2", DirectChildRole.Main, DirectChildAxis.SectorAxis, 3, 1f), 4f, 5f, 6f);
         var state = new MainRoleHysteresisState { IncumbentMainId = "child-1" };
         var held = DirectChildAllocator.StabilizeMain(new[] { incumbent, challenger }, state);
         AssertEqual(DirectChildRole.Main, held[0].Role, "the incumbent is held in Main");
