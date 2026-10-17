@@ -1,0 +1,376 @@
+using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
+using WhiskeyRealism.Telemetry;
+
+using static TestHarness;
+
+// The smoke of 2026-10-17 (docs/loop notes build-recon-never-tasks): the Union's [Recon] row read pool=2..7 unwatchedApproaches=3
+// screens=probes=advanceGuards=0 on every review, its mass stayed staged ("scouted=no staged=yes") and its mover deferred one
+// formation on all 22 reviews. The fixture below is that shape with vanilla's real prefs (aiminimumstrengthformovement 2000,
+// morale 0.65, relocation range 200, dominance 0.65 from Config/campaignprefs.txt): two enemy objectives (30 West at 300, 31 East
+// at 900), one ready body in no sector that needs a hold (it is in vanilla's capital-defence list, so it cannot scout), unready
+// and busy formations that already cover the West and East needs, and one ready 3000-man formation that the East hold reserve
+// keeps: the only formation that could scout is the one the hold reserve claimed first.
+internal static class ReconNeverTasksTests
+{
+    public static void Run()
+    {
+        TestHarness.RunAll(new (string name, Action run)[]
+        {
+            ("TheSmokeShapeHasNothingFreeToScoutWith", TheSmokeShapeHasNothingFreeToScoutWith),
+            ("AStagedMainEffortGetsOneScoutFromTheHoldReserve", AStagedMainEffortGetsOneScoutFromTheHoldReserve),
+            ("TheHoldReserveIsDrawnOnceNotPerTask", TheHoldReserveIsDrawnOnceNotPerTask),
+            ("ANonMainTaskNeverDrawsTheHoldReserve", ANonMainTaskNeverDrawsTheHoldReserve),
+            ("AScoutedMainEffortDrawsNothing", AScoutedMainEffortDrawsNothing),
+            ("TheLastMassBodyIsNeverSpentOnScouting", TheLastMassBodyIsNeverSpentOnScouting),
+            ("TheDrawnScoutKeepsItsPostTheNextReview", TheDrawnScoutKeepsItsPostTheNextReview),
+            ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
+            ("AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted", AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted),
+            ("ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget", ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget),
+            ("TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone", TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone),
+            ("TheMoverRowNamesAStagedGatheringThatWaits", TheMoverRowNamesAStagedGatheringThatWaits),
+            ("AZeroCountedFailureIsNotAFailureRow", AZeroCountedFailureIsNotAFailureRow),
+        });
+    }
+
+    // ---- fixtures ----
+
+    private static FormationRecord Corps(int id, float x, float strength, int readiness = 3, FormationFlags extra = 0)
+    {
+        var f = ExecutorFixtures.Corps(id, x, strength);
+        f.SightRadius = 30f;
+        f.Morale = 0.9f;
+        f.ReadinessStep = readiness;
+        f.Flags |= extra;
+        return f;
+    }
+
+    private static CampaignSnapshot Base()
+    {
+        var s = ExecutorFixtures.Line(0, 11);
+        s.MinStrengthForMovement = 2000f;
+        s.MinMoraleForMovement = 0.65f;
+        s.RelocationRange = 200f;
+        s.OffensiveDominance = 0.65f;
+        for (int i = 1; i <= 8; i++) s.Supply.Add(ExecutorFixtures.Iip(600 + i, 100f * i, 0));
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 30, X = 300f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.2f });
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 900f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+        return s;
+    }
+
+    // Body 1: ready, 9563 strong, in vanilla's capital-defence list (CanMove refuses it as a scout; the mass takes it). Unready 9, 10 and
+    // the busy 15 cover the West's need (6000); the busy 13, 14 cover two thirds of the East's (9000) and the ready 3000-man
+    // formation 2 is the East hold reserve that completes it.
+    private static CampaignSnapshot SmokeUnion(FormationFlags bodyFlags = FormationFlags.CapitalDefense, bool withReserve = true, bool secondEastBusy = true)
+    {
+        var s = Base();
+        s.Own.Add(Corps(1, 100f, 9563f, 3, bodyFlags));
+        if (withReserve) s.Own.Add(Corps(2, 760f, 3000f));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(13, 790f, 3000f, 3, FormationFlags.InBattle));
+        if (secondEastBusy) s.Own.Add(Corps(14, 800f, 3000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        return s;
+    }
+
+    private struct Day
+    {
+        public TheaterPlan Plan;
+        public List<ReconTask> Tasks;
+        public Allocation Allocation;
+        public ReconMissionLedger Ledger;
+        public CampaignSnapshot S;
+    }
+
+    private static Day Review(CampaignSnapshot s, PlannerState state = null, ReconMissionLedger ledger = null)
+    {
+        ledger = ledger ?? new ReconMissionLedger();
+        var sectors = ExecutorFixtures.Sectors(s);
+        var day = new Day { Ledger = ledger, Tasks = new List<ReconTask>(), S = s };
+        ledger.OnReview(s, null);
+        day.Plan = TheaterPlanner.Plan(s, sectors, null, state ?? new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, day.Tasks);
+        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
+        ledger.Sync(s, day.Tasks, day.Allocation);
+        return day;
+    }
+
+    private static int Roles(Allocation a, FormationRole role)
+    {
+        int n = 0;
+        foreach (var x in a.Assignments) if (x.Role == role) n++;
+        return n;
+    }
+
+    private static Assignment Of(Allocation a, int id)
+    {
+        a.TryGet(id, out var x);
+        return x;
+    }
+
+    // ---- the cause ----
+
+    // The cause, pinned as the smoke saw it: tasks are planned (three, the main axis among them), the pool is not empty, the main
+    // effort is staged, and nobody is sent, because the one formation that could go is the East hold reserve (already given its
+    // role when the recon pick runs) and the body is in vanilla's capital-defence list. Without the draw this stays 0 screens.
+    private static void TheSmokeShapeHasNothingFreeToScoutWith()
+    {
+        var s = SmokeUnion(withReserve: true);
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        AssertEqual(30, plan.MainObjectiveId, "the push is at the West objective");
+        AssertTrue(plan.MainStaged, "unscouted: staged");
+        AssertEqual(1, plan.MassInstanceIds.Count, "the mass is the one body");
+        var tasks = new List<ReconTask>();
+        ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
+        AssertTrue(tasks.Count >= 3, "tasks are planned: " + tasks.Count);
+        bool mainAxis = false;
+        foreach (var t in tasks) if (t.Reason == ReconPlanner.ReasonMainAxis) mainAxis = true;
+        AssertTrue(mainAxis, "the main axis is unwatched");
+        AssertEqual(1, ReconPlanner.ScoutPool(s), "the pool counts the one ready formation that is not in a vanilla list");
+        var held = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 2).Reason, "and the East hold reserve has it");
+        AssertEqual(FormationRole.MainEffort, Of(held, 1).Role, "the body is the main effort");
+    }
+
+    // The fix: a staged main effort that has no free scout takes the smallest ready formation its hold reserve keeps, once.
+    private static void AStagedMainEffortGetsOneScoutFromTheHoldReserve()
+    {
+        var day = Review(SmokeUnion());
+        AssertTrue(day.Plan.MainStaged, "staged");
+        var scout = Of(day.Allocation, 2);
+        AssertEqual(FormationRole.Recon, scout.Role, "the reserve formation scouts");
+        AssertTrue(scout.Reason == ReconPlanner.ReasonMainAxis || scout.Reason == "probe" || scout.Reason == "advance-guard", "for the main objective: " + scout.Reason);
+        AssertEqual(1, Roles(day.Allocation, FormationRole.Recon), "and only one is drawn");
+        AssertEqual(FormationRole.MainEffort, Of(day.Allocation, 1).Role, "the main effort keeps its body");
+        AssertEqual(1, day.Ledger.Missions.Count, "one mission");
+        AssertTrue(ReconMissionLedger.IsActive(day.Ledger.Missions[0].State), "and it is active");
+        AssertTrue(scout.Withheld, "withheld from vanilla like any scout");
+    }
+
+    private static void TheHoldReserveIsDrawnOnceNotPerTask()
+    {
+        // One busy formation covers a third of the East's 9000: the ready 2, 3 and 4 (3000 each) are all hold reserve.
+        var s = SmokeUnion(secondEastBusy: false);
+        s.Own.Add(Corps(3, 770f, 2000f));
+        s.Own.Add(Corps(4, 780f, 2000f));
+        var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
+        int reserveBefore = 0;
+        foreach (var a in held.Assignments) if (a.Reason == ForceAllocator.ReasonHoldReserve) reserveBefore++;
+        AssertEqual(3, reserveBefore, "the East keeps three ready formations");
+        var east = Review(s);
+        int reserve = 0;
+        foreach (var a in east.Allocation.Assignments) if (a.Reason == ForceAllocator.ReasonHoldReserve) reserve++;
+        AssertTrue(east.Tasks.Count >= 3, "there were several tasks: " + east.Tasks.Count);
+        AssertEqual(1, Roles(east.Allocation, FormationRole.Recon), "one scout from the reserve however many main-objective tasks there are");
+        AssertEqual(2, reserve, "the rest of the reserve keeps holding");
+    }
+
+    // The approach tasks (capital-approach, front-approach, belief, picket) are not a staged push's eyes: they never cost a sector its hold.
+    private static void ANonMainTaskNeverDrawsTheHoldReserve()
+    {
+        var s = SmokeUnion();
+        // The main objective is seen (a fresh belief at 30) but another army is believed somewhere no viewer covers.
+        var near = ExecutorFixtures.Belief(310f, 0f, 1000f);
+        s.Beliefs.Add(near);
+        var day = Review(s);
+        AssertTrue(day.Plan.MainScouted, "the main objective is scouted");
+        AssertTrue(day.Tasks.Count > 0, "approach tasks still exist");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "none of them takes the hold reserve");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "which keeps holding");
+    }
+
+    private static void AScoutedMainEffortDrawsNothing()
+    {
+        var s = SmokeUnion();
+        s.Beliefs.Add(ExecutorFixtures.Belief(310f, 0f, 1000f));
+        var state = new PlannerState();
+        var first = Review(s, state);
+        var again = Review(s, state, first.Ledger);
+        AssertFalse(again.Plan.MainStaged, "scouted, so not staged");
+        AssertEqual(0, Roles(again.Allocation, FormationRole.Recon), "no draw on the second review either");
+    }
+
+    // The other half of the starvation: with no reserve to draw on and a body that is not in a vanilla list, the body itself was the only
+    // formation the pick could return, and the main effort lost all of it to its own screen.
+    private static void TheLastMassBodyIsNeverSpentOnScouting()
+    {
+        var s = SmokeUnion(bodyFlags: 0, withReserve: false);
+        var day = Review(s);
+        AssertEqual(1, day.Plan.MassInstanceIds.Count, "one body");
+        AssertEqual(FormationRole.MainEffort, Of(day.Allocation, 1).Role, "it stays the main effort");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and nobody scouts: there is nobody to send");
+        AssertTrue(day.Tasks.Count > 0, "though the tasks exist");
+    }
+
+    // Reviews are daily and the reserve is rebuilt each time: the formation drawn yesterday is the incumbent today (no churn between
+    // reserve formations, the mission is not cleared and re-opened).
+    private static void TheDrawnScoutKeepsItsPostTheNextReview()
+    {
+        var s = SmokeUnion();
+        var state = new PlannerState();
+        var day1 = Review(s, state);
+        int first = -1;
+        foreach (var a in day1.Allocation.Assignments) if (a.Role == FormationRole.Recon) first = a.InstanceId;
+        AssertTrue(first > 0, "a scout is drawn");
+        int mission = day1.Ledger.Missions[0].MissionId;
+        var s2 = SmokeUnion();
+        var day2 = Review(s2, state, day1.Ledger);
+        AssertEqual(FormationRole.Recon, Of(day2.Allocation, first).Role, "the same formation scouts again");
+        AssertEqual(1, Roles(day2.Allocation, FormationRole.Recon), "and still only one");
+        AssertEqual(mission, day2.Ledger.Missions[0].MissionId, "the mission was kept, not re-opened");
+    }
+
+    private static void TheReconRowCountsTasksAndUnfilled()
+    {
+        // The body is the pool's only member and the last of the main effort: tasks exist, nobody can be sent.
+        var none = Review(SmokeUnion(bodyFlags: 0, withReserve: false));
+        AssertTrue(none.Tasks.Count >= 3, "tasks exist: " + none.Tasks.Count);
+        var rowNone = ReconStep.CountsOf(none.S, none.Ledger, none.Tasks).Row(0);
+        AssertContains(rowNone, " tasks=" + none.Tasks.Count + " unfilled=" + none.Tasks.Count + " ", "nobody was sent: every task is unfilled, " + rowNone);
+        AssertTrue(rowNone.EndsWith("pool=1"), "though the pool is not empty: " + rowNone);
+
+        var drawn = Review(SmokeUnion());
+        var row = ReconStep.CountsOf(drawn.S, drawn.Ledger, drawn.Tasks).Row(0);
+        AssertContains(row, " tasks=" + drawn.Tasks.Count + " unfilled=" + (drawn.Tasks.Count - 1) + " ", "one task has its scout: " + row);
+        AssertContains(row, " listed=1 pool=1", "the capital-defence body is named, and the one formation the pick can take is the pool: " + row);
+        AssertEqual(1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
+        AssertEqual(0, ReconPlanner.ListedCount(SmokeUnion(0)), "an unlisted body is not");
+    }
+
+    // The probe/screen is a question, not a post: answered by sight or a fresh belief, the task is gone and the formation goes back to
+    // the reserve the next review.
+    private static void AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted()
+    {
+        var state = new PlannerState();
+        var day1 = Review(SmokeUnion(), state);
+        AssertEqual(FormationRole.Recon, Of(day1.Allocation, 2).Role, "day 1: drawn");
+        var s2 = SmokeUnion();
+        s2.Beliefs.Add(ExecutorFixtures.Belief(310f, 0f, 1000f));
+        var day2 = Review(s2, state, day1.Ledger);
+        AssertTrue(day2.Plan.MainScouted, "day 2: the objective is scouted");
+        AssertEqual(FormationRole.Hold, Of(day2.Allocation, 2).Role, "the formation is back in its sector's hold");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day2.Allocation, 2).Reason, "as its hold reserve");
+    }
+
+    // ---- Q3: the retarget within one objective ----
+
+    // The smoke: main West/29 scouted=yes at 18:17:02, East/29 scouted=latched at 18:17:32 with the trace reading "unscouted est=9947".
+    // An objective has several target records (29@3, 29@2, 29@6) and the decision follows the objective's id, so the best record of the
+    // same objective is chosen each review with switch=hold; the scouting latch then belonged to the decision, not to the ground that was
+    // scouted, and a different record, unseen, marched as if it were scouted.
+    private static CampaignSnapshot TwoRecords(float beliefAtFirst, float beliefAtSecond)
+    {
+        var s = Base();
+        s.Objectives.Clear();
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.6f });
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 700f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.6f });
+        for (int i = 0; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(410f, 0f, beliefAtFirst));
+        if (beliefAtSecond > 0f) s.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, beliefAtSecond));
+        return s;
+    }
+
+    private static void ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget()
+    {
+        var state = new PlannerState();
+        var day1 = Review(TwoRecords(1000f, 300000f), state);   // the second record is held by an army far too strong for the mass
+        AssertEqual(40, day1.Plan.MainObjectiveId, "objective 40");
+        AssertNear(400f, day1.Plan.MainObjectiveX, 0.5f, "the first record, seen");
+        AssertTrue(day1.Plan.MainScouted && !day1.Plan.MainStaged, "day 1: scouted, not staged");
+        int serial = state.DecisionSerial;
+
+        // Day 2: the first record is now held by far more than the mass can beat; the same objective's other record, never seen, is the best.
+        var day2 = Review(TwoRecords(300000f, 0f), state);
+        AssertEqual(40, day2.Plan.MainObjectiveId, "the same objective");
+        AssertNear(700f, day2.Plan.MainObjectiveX, 0.5f, "now its other record");
+        AssertEqual(serial, state.DecisionSerial, "the same decision (the objective did not change)");
+        AssertEqual("hold", day2.Plan.SwitchReason, "switch=hold, as in the smoke");
+        AssertFalse(day2.Plan.MainScouted, "but nobody has seen this ground");
+        AssertFalse(day2.Plan.MainScoutLatched, "and the old record's picture is not carried over to it");
+        AssertTrue(day2.Plan.MainStaged, "so the mass gathers and scouts first");
+    }
+
+    private static void TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone()
+    {
+        var state = new PlannerState();
+        state.Restore(31, -1, 0, 4, 77L, scoutedDecision: 4, scoutedTargetX: 812.5f, scoutedTargetZ: -40f);
+        var dto = SidecarDtoCodec.PlannerToDto(new PlannerSnapshot { State = state });
+        var back = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>(Newtonsoft.Json.JsonConvert.SerializeObject(dto)));
+        AssertNear(812.5f, back.State.ScoutedTargetX, 0.001f, "x restored");
+        AssertNear(-40f, back.State.ScoutedTargetZ, 0.001f, "z restored");
+        var old = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>("{\"currentMainObjective\":31,\"scoutedDecision\":4}"));
+        AssertEqual(4, old.State.ScoutedDecision, "an older file's latch still reads");
+        AssertTrue(float.IsNaN(old.State.ScoutedTargetX), "without a target: the latch speaks for the decision's target as before");
+    }
+
+    // ---- Q2: what the deferred rows are ----
+
+    private static void TheMoverRowNamesAStagedGatheringThatWaits()
+    {
+        var g = new MoverGate();
+        var tally = g.RunStagedInEnemyGround();
+        AssertEqual(1, tally.Deferred, "the main effort waits");
+        AssertEqual(1, tally.DeferredStaged, "and the row says it is a staged gathering, not the chapter roll");
+        AssertContains(tally.Row(0), "deferredStaged=1", "in the row the smoke reads");
+        AssertFalse(tally.Tempo.NeedsRoll, "no roll was evaluated (the roll is the march's)");
+
+        var marching = g.RunScoutedClosedTempo();
+        AssertEqual(1, marching.Deferred, "a scouted march waits for the roll");
+        AssertEqual(0, marching.DeferredStaged, "which is not a staged gathering");
+        AssertContains(marching.Row(0), "deferredStaged=0", "the row tells them apart");
+    }
+
+    private sealed class MoverGate
+    {
+        private static Allocation AllocOf(CampaignSnapshot s, TheaterPlan plan)
+        {
+            return ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        }
+
+        private (CampaignSnapshot s, TheaterPlan plan) Fixture(bool staged, float startX)
+        {
+            var s = ExecutorFixtures.Wide();
+            s.Own.Add(ExecutorFixtures.Corps(1, 340f, 20000f));
+            s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
+            var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
+            plan.MainStaged = staged;
+            plan.StartLineX = startX;
+            plan.StartLineZ = 0f;
+            return (s, plan);
+        }
+
+        internal MoverTally RunStagedInEnemyGround()
+        {
+            var (s, plan) = Fixture(true, 120f);   // x <= 150 is alliance 1's ground in the fake host
+            return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, AllocOf(s, plan), ExecutorFixtures.ClosedTempo()), new FakeMoverHost(), new MoveTracker(), ExecutorFixtures.State());
+        }
+
+        internal MoverTally RunScoutedClosedTempo()
+        {
+            var (s, plan) = Fixture(false, 0f);
+            return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, AllocOf(s, plan), ExecutorFixtures.ClosedTempo()), new FakeMoverHost(), new MoveTracker(), ExecutorFixtures.State());
+        }
+    }
+
+    // ---- Q4: the row's category ----
+
+    // The smoke's failures.jsonl held 26 rows, all [CampaignMover] with failed=0: the router read the counter's name as an event.
+    private static void AZeroCountedFailureIsNotAFailureRow()
+    {
+        const string quiet = "[CampaignMover] alliance=0 issued=0 confirmed=0 failed=0 retried=0 gaveUp=0 queued=0 skippedPlayer=0 skippedBusy=0 deferred=1";
+        var route = TelemetryTagPolicy.Route(quiet);
+        AssertEqual(TelemetryCategory.Write, route.Category, "a mover row with nothing failed is a Write row");
+        AssertEqual(TelemetrySeverity.Info, route.Severity, "at Info");
+        AssertEqual(TelemetryCategory.Write, TelemetryTagPolicy.Route("[ReconMission] alliance=1 issued=2 retried=0 failed=0 queued=0 ordered=1 skippedPlayer=0 skippedBusy=0").Category, "and so is a recon summary");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 issued=0 confirmed=0 failed=2 retried=0 gaveUp=0 queued=0 skippedPlayer=0 skippedBusy=0 deferred=0").Category, "a failed count above zero is still a failure");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=10").Category, "ten is not zero");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=0.5").Category, "nor is 0.5");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=0 exception while moving").Category, "a zero counter does not hide a real exception word");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 move failed for corps 4").Category, "a failed word with no value is an event");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 error=0 failed=1").Category, "a later non-zero failed still counts");
+    }
+}
