@@ -23,6 +23,8 @@ internal static class ArmyChildrenTests
             ("army children stance order detaching a brigade keeps it a child", StanceOrderDetachingABrigadeKeepsItAChild),
             ("army children routed and skirmisher companies stay out", RoutedAndSkirmisherCompaniesStayOut),
             ("army children player owned detached command stays out", PlayerOwnedDetachedCommandStaysOut),
+            ("army children w and l depth keeps the player's ai brigade, division and army", WlDepthKeepsThePlayersAiBrigadeDivisionAndArmy),
+            ("army children vanilla depth finds corps under the army", VanillaDepthFindsCorpsUnderTheArmy),
         });
     }
 
@@ -124,6 +126,65 @@ internal static class ArmyChildrenTests
         var children = b.Discover(-1, excludePlayerOwned: true);
         AssertEqual(1, children.Count, "the W&L player's detached command is nobody's AI child");
         AssertEqual("child-12", children[0].ChildId, "the AI brigade is");
+    }
+
+    // Whiskey and Lemons (commandhierarchyshift -1, ClampShiftedMin 13): Army(16) -> Division(15)
+    // -> Brigade(14) -> regiments (leaf unittyp 0). The player commands one regiment inside
+    // brigade 1st_Brigade; the brigade, its division and the army above are AI
+    // (AncestorOfPlayerCommand, never PlayerOwned) and keep their place in the roster; only the
+    // player's own subtree leaves it. The sibling brigade and the player's brigade-mates stay.
+    private static void WlDepthKeepsThePlayersAiBrigadeDivisionAndArmy()
+    {
+        const UnitFlags aiAncestor = UnitFlags.AncestorOfPlayerCommand | UnitFlags.PermanentlyDetached;
+        var h = new Hierarchy();
+        h.Add(1, 16, aiAncestor, 10, 20, 21, 22, 30, 31);
+        h.Add(10, 15, aiAncestor, 20, 21, 22, 30);
+        h.Add(20, 14, aiAncestor, 21, 22);          // the player's brigade
+        h.Add(30, 14, UnitFlags.PermanentlyDetached, 31); // a sibling brigade
+        h.Add(21, TacticalUnitType.Infantry, UnitFlags.PlayerOwned | UnitFlags.PlayerCommand);
+        h.Add(22, TacticalUnitType.Infantry, UnitFlags.None);
+        h.Add(31, TacticalUnitType.Infantry, UnitFlags.None);
+        h.Assemble();
+        var children = h.Discover(-1, excludePlayerOwned: true);
+        AssertEqual(1, children.Count, "the division is the army's one child");
+        AssertEqual("child-10", children[0].ChildId, "an AI ancestor of the player's regiment is not dropped");
+        AssertEqual("army-1", children[0].ParentArmyId, "the army above the player's chain is still the root");
+
+        // The same army with brigades directly under it (the CSA side): the player's brigade
+        // is a child although the player sits inside it.
+        var csa = new Hierarchy();
+        csa.Add(1, 16, UnitFlags.AncestorOfPlayerCommand, 20, 30, 21, 22, 31);
+        csa.Add(20, 14, UnitFlags.AncestorOfPlayerCommand | UnitFlags.PermanentlyDetached, 21, 22);
+        csa.Add(30, 14, UnitFlags.PermanentlyDetached, 31);
+        csa.Add(21, TacticalUnitType.Infantry, UnitFlags.PlayerOwned | UnitFlags.PlayerCommand);
+        csa.Add(22, TacticalUnitType.Infantry, UnitFlags.None);
+        csa.Add(31, TacticalUnitType.Infantry, UnitFlags.None);
+        csa.Assemble();
+        var csaChildren = csa.Discover(-1, excludePlayerOwned: true);
+        AssertEqual(2, csaChildren.Count, "both brigades are children");
+        AssertTrue(csaChildren.Any(c => c.ChildId == "child-20"), "the brigade the player sits in stays a child");
+        AssertTrue(csaChildren.All(c => c.ChildId.StartsWith("child-")), "no synthetic army child");
+    }
+
+    // Default game (commandhierarchyshift 0, ClampShiftedMin 14): Army(16) -> Corps(15) ->
+    // Division(14) -> Brigade(13, the combat block) -> regiments. The army's children are
+    // the corps; the 13-type brigades are below the command window.
+    private static void VanillaDepthFindsCorpsUnderTheArmy()
+    {
+        var h = new Hierarchy();
+        h.Add(1, 16, UnitFlags.None, 10, 11, 20, 21, 30, 31, 40, 41);
+        h.Add(10, 15, UnitFlags.PermanentlyDetached, 20, 21, 30, 31);
+        h.Add(11, 15, UnitFlags.PermanentlyDetached, 40, 41);
+        h.Add(20, 14, UnitFlags.None, 30);
+        h.Add(21, 14, UnitFlags.None, 31);
+        h.Add(40, 14, UnitFlags.None, 41);
+        h.Add(30, 13, UnitFlags.None);
+        h.Add(31, 13, UnitFlags.None);
+        h.Add(41, 13, UnitFlags.None);
+        h.Assemble();
+        var children = h.Discover(0);
+        AssertEqual(2, children.Count, "two corps");
+        AssertTrue(children.All(c => c.ChildId == "child-10" || c.ChildId == "child-11"), "the corps are the children");
     }
 
     private sealed class Hierarchy
