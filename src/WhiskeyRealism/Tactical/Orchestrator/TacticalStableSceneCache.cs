@@ -13,7 +13,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //   cached  — the Objectives references (vanilla's own BattleUnits.objectives, 78910,
     //             built in InitBattleUnits incl. inactive ones; FindObjectsOfType fallback),
     //             their ids (objectivename) and positions (objectives do not move).
-    //   live    — Objectives.owner (written on capture, 105746) and isActiveAndEnabled.
+    //   live    — Objectives.owner (written on capture, 105746), Objectives.points (zeroed when a Touch or timed Hold objective
+    //             resolves, 105726-105735), isActiveAndEnabled and gameObject.activeInHierarchy (BC14O).
     // Approach avenues:
     //   cached  — the avenue array, keyed by a TacticalAvenueSourceSignature
     //             (scheduledarrival count: RemoveAt 87620 / Add 87834; EntryPoint.owner
@@ -52,19 +53,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var result = new MapObjectiveCapture[refs.Length];
             for (int i = 0; i < refs.Length; i++)
             {
-                Objectives obj = refs[i];
-                int owner = -2;
-                bool active = false;
-                try
-                {
-                    if (obj != null)
-                    {
-                        owner = obj.owner;
-                        active = obj.isActiveAndEnabled;
-                    }
-                }
-                catch { }
-                result[i] = new MapObjectiveCapture(_objectiveIds[i], _objectivePoints[i], owner, active);
+                result[i] = TacticalVisionRuntimeAdapter.ReadObjectiveLive(refs[i], _objectiveIds[i], _objectivePoints[i]);
             }
             return result;
         }

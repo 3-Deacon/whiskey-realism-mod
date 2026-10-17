@@ -77,6 +77,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
         internal static ConfigEntry<bool> EnableManeuverFeasibility;
         internal static ConfigEntry<bool> EnableEnemyWorksDoctrine;
+        internal static ConfigEntry<bool> EnableObjectiveDoctrine;
         internal static ConfigEntry<bool> EnableCrossingMoveGate;
 
         /// <summary>Tactical / Enable Crossing Move Gate (a doctrine move whose straight leg crosses a river takes a crossing the side knows, or is not made).</summary>
@@ -135,6 +136,17 @@ namespace WhiskeyRealism
         internal static bool EnemyWorksDoctrineEnabled()
         {
             try { return ManeuverFeasibilityEnabled() && EnableEnemyWorksDoctrine != null && EnableEnemyWorksDoctrine.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Tactical / Enable Objective Doctrine (BC14O: an objective's value from vanilla's own points, the victory clock, one main effort on the
+        /// best feasible objective with screens for the others, the designer chains as a timed prior). True only with Enable Maneuver Feasibility
+        /// also on: the slice reads the core's ledger.
+        /// </summary>
+        internal static bool ObjectiveDoctrineEnabled()
+        {
+            try { return ManeuverFeasibilityEnabled() && EnableObjectiveDoctrine != null && EnableObjectiveDoctrine.Value; }
             catch { return false; }
         }
 
@@ -747,6 +759,15 @@ namespace WhiskeyRealism
                 "no turn will do, a willing commander assaults the works' focal point (a salient or a junction) in march column after a " +
                 "bombardment, and an unwilling one holds instead of ordering a hopeless assault. A Defender in works keeps a reserve behind its " +
                 "most threatened point. Needs Enable Maneuver Feasibility. Off: works are priced as open ground, no works assault and no hold.");
+            EnableObjectiveDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Objective Doctrine",
+                true,
+                "Default ON. BC14O: the army puts its main effort on the most valuable objective it can take by vanilla's own victory points, " +
+                "not the nearest; it presses harder when it is behind on the victory bar late in the day and holds more when it is ahead; " +
+                "secondary objectives draw at most two screens; a historical battle's designer timetable is a strong hint from its due hour, " +
+                "not an override. The AI reads the victory bar exactly as the player sees it, nothing more. Needs Enable Maneuver Feasibility. " +
+                "Off: objectives are valued and chosen as before.");
             EnableCrossingMoveGate = Config.Bind(
                 "Tactical",
                 "Enable Crossing Move Gate",

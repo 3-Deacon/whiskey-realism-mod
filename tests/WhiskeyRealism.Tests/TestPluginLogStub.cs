@@ -30,6 +30,10 @@ namespace WhiskeyRealism
         // BC14W: Tactical / Enable Enemy Works Doctrine (true only with the maneuver feasibility also on).
         internal static bool EnemyWorksDoctrine = true;
         internal static bool EnemyWorksDoctrineEnabled() => ManeuverFeasibility && EnemyWorksDoctrine;
+
+        // BC14O: Tactical / Enable Objective Doctrine (true only with the maneuver feasibility also on).
+        internal static bool ObjectiveDoctrine = true;
+        internal static bool ObjectiveDoctrineEnabled() => ManeuverFeasibility && ObjectiveDoctrine;
     }
 
     // Stands in for the BepInEx plugin instance's master switch.
