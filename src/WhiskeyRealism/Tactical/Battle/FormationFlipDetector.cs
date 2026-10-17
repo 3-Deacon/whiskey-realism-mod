@@ -16,6 +16,9 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>Rows a battle may write. The running <see cref="TotalFlips"/> carries on past it, so the count per battle-hour survives a full budget.</summary>
         public const int MaxRows = 256;
 
+        /// <summary>Once the rows are spent, a summary row (the running total) at most this often, so the flip count per battle-hour survives a busy battle.</summary>
+        public const double SummaryEveryHours = 0.25;
+
         // Float-free hour arithmetic: 1.1 - 1.0 is 0.10000000000000009, which must still be "0.1 hours later".
         private const double Slack = 1e-9;
 
@@ -26,6 +29,7 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         private readonly Dictionary<int, Seen> _groups = new Dictionary<int, Seen>();
+        private double _lastSummaryHours = double.NaN;
 
         public int TotalFlips { get; private set; }
 
@@ -71,8 +75,21 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
+        /// <summary>
+        /// True when the rows are spent and no summary has been written within <see cref="SummaryEveryHours"/>: the caller then writes one row
+        /// carrying <see cref="TotalFlips"/>. False while rows remain.
+        /// </summary>
+        public bool TrySummary(double nowHours)
+        {
+            if (RowsTaken < MaxRows) return false;
+            if (!double.IsNaN(_lastSummaryHours) && nowHours - _lastSummaryHours < SummaryEveryHours && nowHours >= _lastSummaryHours) return false;
+            _lastSummaryHours = nowHours;
+            return true;
+        }
+
         public void Clear()
         {
+            _lastSummaryHours = double.NaN;
             _groups.Clear();
             TotalFlips = 0;
             RowsTaken = 0;

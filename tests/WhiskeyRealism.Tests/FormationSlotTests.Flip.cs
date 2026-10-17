@@ -19,6 +19,7 @@ internal static partial class FormationSlotTests
             ("bc16 FLIP groups are tracked independently", GroupsAreIndependent),
             ("bc16 FLIP a clock that runs backwards is never a flip", BackwardsClockIsNoFlip),
             ("bc16 FLIP the row budget is capped while the total keeps counting", RowBudgetIsCapped),
+            ("bc16 FLIP once the rows are spent a summary row follows every quarter hour", SummaryRowsFollowTheBudget),
             ("bc16 FLIP Clear forgets every group and the totals", ClearForgetsEverything),
             ("bc16 FLIP observing allocates nothing after warm-up", FlipAllocatesNothing),
         };
@@ -111,6 +112,22 @@ internal static partial class FormationSlotTests
         d.Observe(1, 0, 1.01, true, out _, out _);
         AssertEqual(1, d.TotalFlips, "the flip is counted although the budget is spent");
         AssertEqual(FormationFlipDetector.MaxRows, d.RowsTaken, "rows taken, as reported");
+    }
+
+    private static void SummaryRowsFollowTheBudget()
+    {
+        var d = new FormationFlipDetector();
+        AssertFalse(d.TrySummary(1.0), "no summary while rows remain");
+        for (int i = 0; i < FormationFlipDetector.MaxRows - 1; i++) d.TryTakeRow();
+        AssertFalse(d.TrySummary(1.0), "one row still remains");
+        d.TryTakeRow();
+        AssertTrue(d.TrySummary(2.00), "budget spent: the first summary is due at once");
+        AssertFalse(d.TrySummary(2.20), "not again within a quarter hour");
+        AssertTrue(d.TrySummary(2.25), "and again at a quarter hour");
+        AssertFalse(d.TrySummary(2.30), "then quiet");
+        AssertTrue(d.TrySummary(1.00), "a clock that ran backwards restarts the cadence");
+        d.Clear();
+        AssertFalse(d.TrySummary(9.0), "Clear refills the budget");
     }
 
     private static void ClearForgetsEverything()
