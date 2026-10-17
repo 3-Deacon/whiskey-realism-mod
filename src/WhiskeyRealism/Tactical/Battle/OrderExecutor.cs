@@ -495,6 +495,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC14W: the last Move target issued to each group (and each unit a group Move fanned out to), read by the works contest.
         private struct LastMove { public float X, Z; public double Hours; }
         private readonly Dictionary<int, LastMove> _lastMove = new Dictionary<int, LastMove>(128);
+        // BC15: groups whose winner the planner refused last tick for any reason but Duplicate (a recent-order window, the failed-write
+        // backoff, a water or off-map target, a missing crossing). A refusal is not a settled group: it is retried when its window ends.
+        private readonly HashSet<int> _refusedLastTick = new HashSet<int>();
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -940,6 +943,35 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        /// <summary>
+        /// BC15 decision 1: the group has an order the executor has not finished with: a move issued and not yet judged, a retry ticket,
+        /// or a winner the planner refused last tick for a reason other than Duplicate (<see cref="NoteRefusal"/>). The battle AI tier pass
+        /// never makes such a group Distant: its producers' next evaluation is not a repeat of the last one.
+        /// </summary>
+        public bool IsUnsettled(int groupId)
+        {
+            if (FindPending(groupId) >= 0) return true;
+            for (int t = 0; t < _ticketCount; t++)
+                if (_tickets[t].Intent.GroupId == groupId) return true;
+            return _refusedLastTick.Contains(groupId);
+        }
+
+        /// <summary>
+        /// BC15: the arbiter tick records a winner the planner refused. Duplicate is the steady state of a settled group and is not recorded;
+        /// every other reason is. The tier pass reads the set at the start of the next tick and then calls <see cref="ClearRefusals"/>.
+        /// </summary>
+        public void NoteRefusal(int groupId, SkipReason reason)
+        {
+            if (reason == SkipReason.None || reason == SkipReason.Duplicate) return;
+            _refusedLastTick.Add(groupId);
+        }
+
+        /// <summary>BC15: the tier pass has read last tick's refusals.</summary>
+        public void ClearRefusals()
+        {
+            _refusedLastTick.Clear();
+        }
+
         /// <summary>The flank the executor last refused on the group's children, or None.</summary>
         public RefuseFlank LastIssuedRefuse(int groupId)
         {
@@ -1309,6 +1341,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _lastMove.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
+            _refusedLastTick.Clear();
             EndTickClaims();
         }
 
