@@ -11,7 +11,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // RearmPriority's and OrdnancePicker's (pure, tested); this reads the alliance's units, the allocation and vanilla's weapon
     // facts, and logs. It writes only vanilla's unit-list order (restored after the call) and, through the patch, the weapon id of
     // one order vanilla is placing. Fog: the only averageweaponstrength read is the steering alliance's OWN lane average, the
-    // candidate test vanilla itself applies (16295); the enemy's arms are the beliefs' lane qualities, recorded at sightings.
+    // candidate test vanilla itself applies (16298, 16315); the enemy's arms are the beliefs' lane qualities, recorded at sightings.
     internal static class OrdnanceRuntime
     {
         private const int Alliances = 2;
@@ -122,7 +122,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The model for the order vanilla is placing (PlaceWeaponOrder 227136) for `alliance`: the lane is the one of the model vanilla
         // picked, the candidates are vanilla's own for it (researched or imported, no open order, WSF above the own lane average,
-        // 16295-16317) that the order screen allows. True with `picked` when that is a different model; the amount, the open-order
+        // 16296-16317) that the order screen allows. True with `picked` when that is a different model; the amount, the open-order
         // rule, the capital check and the charge stay vanilla's. Reads prices through vanilla's figures with its own arguments, so
         // a blockade is already in an import's cost and delivery time (64120-64124).
         internal static bool TryPick(int alliance, int vanillaPick, int quantity, out int picked)

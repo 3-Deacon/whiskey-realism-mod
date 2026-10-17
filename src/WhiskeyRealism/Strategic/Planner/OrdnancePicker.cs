@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float BattleValueWeight = 0.20f;
         public const float StandardizationWeight = 0.15f;
         public const float EnemyEdgeWeight = 0.10f;
-        // GetDeliveryTime caps a delivery at two years (64001).
+        // GetDeliveryTime caps a delivery at two years (64000).
         private const float MaxDeliveryYears = 2f;
 
         // Vanilla's candidate test for the lane's list (16296, 16313, 16300, 16317): researched or imported, no open order, WSF above

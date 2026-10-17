@@ -248,7 +248,7 @@ internal static class OrdnanceTests
         AssertEqual(4, choice.Id, "only vanilla's own candidates are considered");
         AssertTrue(OrdnancePicker.InVanillaSet(ok, OwnAverage) && !OrdnancePicker.InVanillaSet(best, OwnAverage) && !OrdnancePicker.InVanillaSet(open, OwnAverage)
             && !OrdnancePicker.InVanillaSet(unknown, OwnAverage), "vanilla's test: researched or imported, no open order, WSF above the own lane average");
-        AssertFalse(OrdnancePicker.InVanillaSet(Cand(6, wsf: OwnAverage), OwnAverage), "equal to the average is not above it (16295)");
+        AssertFalse(OrdnancePicker.InVanillaSet(Cand(6, wsf: OwnAverage), OwnAverage), "equal to the average is not above it (16298, 16315)");
         AssertTrue(OrdnancePicker.InVanillaSet(Cand(7, researched: false, imported: true), OwnAverage), "an import counts as vanilla's does (16296)");
     }
 
@@ -316,7 +316,7 @@ internal static class OrdnanceTests
         var choice = Pick(0f, 2, slow, fast);
         AssertEqual(3, choice.Id, "equal in every other term, the model that arrives sooner wins");
         AssertEqual(PickReason.Delivery, choice.Reason, "for its delivery time");
-        AssertEqual(3, Pick(0f, 2, Cand(2, years: 2f), Cand(3, years: 1.99f)).Id, "the two-year cap (GetDeliveryTime 64001) is the floor of the term");
+        AssertEqual(3, Pick(0f, 2, Cand(2, years: 2f), Cand(3, years: 1.99f)).Id, "the two-year cap (GetDeliveryTime 64000) is the floor of the term");
     }
 
     private static void PurchasePrefersStandardizedModel()

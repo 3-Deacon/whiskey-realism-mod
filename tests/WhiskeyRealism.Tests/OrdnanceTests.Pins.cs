@@ -119,7 +119,8 @@ internal static class OrdnancePinTests
         AssertTrue(SteeringGate.ShouldSteer(true, 0, 0, true, false, false, true), "a corps-career player's alliance is steered: it is alliance-level buying, never the player's own command's arms");
         AssertFalse(SteeringGate.ShouldSteer(true, 0, 0, false, false, false, true), "the player of an ordinary campaign buys for himself");
         string runtime = Src("Strategic/Planner/OrdnanceRuntime.cs");
-        AssertTrue(runtime.Contains("StrategicCoordinator.IsPlayerCICOf(alliance, GameVars.playeralliance)"), "the runtime asks vanilla's own commander-in-chief test (16263)");
+        AssertTrue(BodyOf(runtime, "internal static bool PurchaseScopeOpens(").Contains("StrategicCoordinator.IsPlayerCICOf(alliance, GameVars.playeralliance)"), "the purchase scope asks vanilla's own commander-in-chief test (16263)");
+        AssertTrue(BodyOf(runtime, "internal static Regiment[] BeginRearm(").Contains("StrategicCoordinator.IsPlayerCICOf(alliance, GameVars.playeralliance)"), "and so does the re-arm order");
     }
 
     private static void DetectionRecordsSightedWeaponQuality()
@@ -217,7 +218,7 @@ internal static class OrdnancePinTests
         AssertTrue(tryPick.Contains("GameVars.alliance[alliance].weaponorders[j].quantity > 0"), "vanilla's open-order test (16296)");
     }
 
-    // Fog: G9 reads the steering alliance's OWN lane average (vanilla's candidate rule, 16295) and never another alliance's (vanilla's
+    // Fog: G9 reads the steering alliance's OWN lane average (vanilla's candidate rule, 16298, 16315) and never another alliance's (vanilla's
     // 16266-16282 loop over the alliances at war with it).
     private static void AssertOnlyTheOwnAlliancesAveragesAreRead()
     {
