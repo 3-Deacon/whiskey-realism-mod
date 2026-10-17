@@ -167,6 +167,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public float CoverValue;
         public int CoverObject;
         public bool Standing;
+        // BC15 decision 2(a): the observation appeared, turned Visible or turned Remembered since the battle-AI tier pass last read it.
+        // BattlePerception.Update sets it on every build (including deployment, battle-start and gated-off builds) and only
+        // BattlePerception.ClearChangeLatch clears it, so a change seen between two arbiter ticks is not lost.
+        public bool ChangedSinceLastTier;
     }
 
     public enum OrderChannel

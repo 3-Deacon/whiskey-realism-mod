@@ -56,6 +56,15 @@ namespace WhiskeyRealism.Tactical.Battle
         public int ObservationCount { get; private set; }
         public EnemyObservation[] Observations => _observations;
 
+        // BC15 decision 2(a): the last positions of observations that left memory since the tier pass last read them
+        // (ObservationDropLog); an overflow means "too many to list", and the tier pass wakes every group.
+        private float[] _droppedX;
+        private float[] _droppedZ;
+        public int DroppedObservationCount { get; private set; }
+        public bool DroppedObservationsOverflowed { get; private set; }
+        public float DroppedObservationX(int index) => _droppedX[index];
+        public float DroppedObservationZ(int index) => _droppedZ[index];
+
         public PerceptionMode Perception { get; private set; }
         public PerceptionFallbackReason PerceptionFallback { get; private set; }
 
@@ -158,6 +167,8 @@ namespace WhiskeyRealism.Tactical.Battle
             OwnCount = 0;
             EnemyRecordCount = 0;
             ObservationCount = 0;
+            DroppedObservationCount = 0;
+            DroppedObservationsOverflowed = false;
             PressureCurrent = false;
             _ownIndexById.Clear();
             _visibleEnemyIds.Clear();
@@ -270,6 +281,22 @@ namespace WhiskeyRealism.Tactical.Battle
             _observations[ObservationCount++] = observation;
             PressureCurrent = false;
             if (observation.State == ObservationState.Visible) _visibleEnemyIds.Add(observation.InstanceId);
+        }
+
+        internal void SetDroppedObservations(ObservationDropLog drops)
+        {
+            DroppedObservationCount = 0;
+            DroppedObservationsOverflowed = false;
+            if (drops == null) return;
+            if (_droppedX == null)
+            {
+                _droppedX = new float[ObservationDropLog.MaxEntries];
+                _droppedZ = new float[ObservationDropLog.MaxEntries];
+            }
+            DroppedObservationCount = drops.Count;
+            Array.Copy(drops.X, _droppedX, drops.Count);
+            Array.Copy(drops.Z, _droppedZ, drops.Count);
+            DroppedObservationsOverflowed = drops.Overflow;
         }
 
         internal void SetEnemySummary(float visibleStrength, float rememberedStrength, float visibleCentroidX, float visibleCentroidZ)

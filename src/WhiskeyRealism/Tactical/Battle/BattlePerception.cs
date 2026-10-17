@@ -113,6 +113,42 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
+    /// <summary>
+    /// BC15 decision 2(a): where observations that were still blocking a group left memory since the tier pass last read it (an enemy seen
+    /// routing; an expiry at 90 minutes is below the blocking confidence and is no change). A dropped entry cannot carry a latch, so its
+    /// last position is logged here, bounded: more than <see cref="MaxEntries"/> sets <see cref="Overflow"/> and the tier pass wakes
+    /// every group. Allocated once per side.
+    /// </summary>
+    public sealed class ObservationDropLog
+    {
+        public const int MaxEntries = 128;
+
+        public readonly float[] X = new float[MaxEntries];
+        public readonly float[] Z = new float[MaxEntries];
+        public int Count;
+        public bool Overflow;
+
+        public void Add(float x, float z)
+        {
+            if (Count < MaxEntries)
+            {
+                X[Count] = x;
+                Z[Count] = z;
+                Count++;
+            }
+            else
+            {
+                Overflow = true;
+            }
+        }
+
+        public void Clear()
+        {
+            Count = 0;
+            Overflow = false;
+        }
+    }
+
     public static class BattlePerception
     {
         public const float FogStartupSeconds = 5f;
@@ -240,7 +276,8 @@ namespace WhiskeyRealism.Tactical.Battle
         /// while its entry point is visible. Allocation-free; new entries beyond
         /// memory.Length are not recorded.
         /// </summary>
-        public static void Update(EnemyObservation[] memory, ref int memoryCount, in PerceptionProbeResult probe, double nowHours)
+        public static void Update(EnemyObservation[] memory, ref int memoryCount, in PerceptionProbeResult probe, double nowHours,
+            ObservationDropLog drops = null)
         {
             if (memory == null) return;
             int count = Math.Min(memoryCount, memory.Length);
@@ -259,15 +296,22 @@ namespace WhiskeyRealism.Tactical.Battle
                 int index = Find(memory, count, id, ref cursor);
                 if (probe.Routed[i])
                 {
-                    if (index >= 0) memory[index].InstanceId = DroppedId;
+                    if (index >= 0)
+                    {
+                        NoteDrop(drops, in memory[index]);
+                        memory[index].InstanceId = DroppedId;
+                    }
                     continue;
                 }
+                // BC15 decision 2(a): a new entry, or one that was only Remembered, is a perception change.
+                bool changed = index < 0 || memory[index].State != ObservationState.Visible;
                 if (index < 0)
                 {
                     if (count >= memory.Length) continue;
                     index = count++;
                     memory[index].InstanceId = id;
                 }
+                if (changed) memory[index].ChangedSinceLastTier = true;
                 memory[index].UnitTyp = probe.UnitTyp[i];
                 memory[index].X = probe.X[i];
                 memory[index].Z = probe.Z[i];
@@ -295,7 +339,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (entry.HiddenTicks > 0)
                 {
                     if (entry.IsReinforcement) continue;
-                    if (entry.HiddenTicks >= HideConfirmTicks) entry.State = ObservationState.Remembered;
+                    if (entry.HiddenTicks >= HideConfirmTicks)
+                    {
+                        if (entry.State == ObservationState.Visible) entry.ChangedSinceLastTier = true;
+                        entry.State = ObservationState.Remembered;
+                    }
                 }
                 if (entry.State == ObservationState.Remembered)
                 {
@@ -307,6 +355,28 @@ namespace WhiskeyRealism.Tactical.Battle
             memoryCount = write;
         }
 
+        // The entry stopped blocking: log where, when it was Visible or a memory at or above the blocking confidence.
+        private static void NoteDrop(ObservationDropLog drops, in EnemyObservation entry)
+        {
+            if (drops == null || entry.IsReinforcement) return;
+            if (entry.State == ObservationState.Visible || entry.Confidence01 >= EnemySamples.RememberedMinConfidence)
+                drops.Add(entry.X, entry.Z);
+        }
+
+        /// <summary>
+        /// The tier pass has read the changes: clears every latch and the drop log. Called once per arbiter tick after BattleLod.Classify
+        /// (never from Update, so a build between two arbiter ticks does not lose a change).
+        /// </summary>
+        public static void ClearChangeLatch(EnemyObservation[] memory, int memoryCount, ObservationDropLog drops)
+        {
+            if (memory != null)
+            {
+                int count = Math.Min(memoryCount, memory.Length);
+                for (int j = 0; j < count; j++) memory[j].ChangedSinceLastTier = false;
+            }
+            drops?.Clear();
+        }
+
         /// <summary>
         /// Writes one tick of perception into a snapshot the builder has just begun: mode,
         /// one observation per memory entry, the enemy summary (visible strength, remembered
@@ -316,10 +386,11 @@ namespace WhiskeyRealism.Tactical.Battle
         /// Call once per build: observations are appended.
         /// </summary>
         public static void Publish(BattleSnapshot s, PerceptionMode mode, PerceptionFallbackReason reason,
-            EnemyObservation[] memory, int memoryCount, in PerceptionProbeResult probe)
+            EnemyObservation[] memory, int memoryCount, in PerceptionProbeResult probe, ObservationDropLog drops = null)
         {
             if (s == null) return;
             s.SetPerception(mode, reason);
+            s.SetDroppedObservations(drops);
 
             int count = memory == null ? 0 : Math.Min(memoryCount, memory.Length);
             float visible = 0f, remembered = 0f, sumX = 0f, sumZ = 0f;
