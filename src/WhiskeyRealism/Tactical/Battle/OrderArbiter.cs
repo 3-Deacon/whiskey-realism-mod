@@ -201,6 +201,25 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
+        /// BC15 decision 14: whether a claim a producer that runs every tick published on one of the group's cells last tick (a source
+        /// <see cref="BattleLod.IsCarriedSource"/> does not carry) has not been renewed by that source this tick. Call after the producers
+        /// submitted and before <see cref="Resolve"/>: this tick's intents are the submissions. A lapse and a change of source both count; the
+        /// intent such a claim outranked has not been seen since it was submitted.
+        /// </summary>
+        public bool HasLapsedUncarriedClaim(int groupId)
+        {
+            for (int c = 0; c < OrderChannels.Count; c++)
+            {
+                if (!_published.TryGet(groupId, (OrderChannel)c, out BattleOrderIntent claim) || BattleLod.IsCarriedSource(claim.Source)) continue;
+                bool renewed = false;
+                for (int i = 0; i < _intentCount && !renewed; i++)
+                    renewed = _intents[i].GroupId == groupId && (int)_intents[i].Channel == c && _intents[i].Source == claim.Source;
+                if (!renewed) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// BC15: this tick's carried cells, after <see cref="Resolve"/>, in execution-channel order. They are claims (published) and are not
         /// winners; the executor reads their Move cells for the chain planner's shield (OrderExecutor.BeginTickClaims).
         /// </summary>

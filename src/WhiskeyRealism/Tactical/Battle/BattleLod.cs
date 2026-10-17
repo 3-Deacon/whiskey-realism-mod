@@ -42,6 +42,8 @@ namespace WhiskeyRealism.Tactical.Battle
         PlayerChain = 1024,
         /// <summary>The #45 cached stance decision for the group changed, or the stance ordered on it did (the group stance producer's inputs).</summary>
         Stance = 2048,
+        /// <summary>A claim of a producer that runs every tick, published on one of the group's cells last tick, was not renewed (it lapsed, or another source took the cell): the intent it hid is due.</summary>
+        Claim = 4096,
     }
 
     /// <summary>The task and target the posture pipeline resolves for a group (the runtime adapter reads the ledger, the leaf map and the exploit table).</summary>
@@ -214,6 +216,32 @@ namespace WhiskeyRealism.Tactical.Battle
                 int group = NearestGroup(own, n, own[i].ParentIndex);
                 if (group >= 0 && configured) state.SetUnitAnswer(s, i, state.TierOf(group), state.IsDue(group), state.LastPromotion(group));
             }
+        }
+
+        /// <summary>
+        /// The late wake-up for a lapsed claim (decision 14), called after every producer submitted and before Resolve. A producer that runs on every
+        /// tick (the division play, a withdrawal, a charge) can hold a cell of a Distant group with a claim that outranks the group's own tiered
+        /// producers; at full rate the intent it hides surfaces on the tick the claim goes. A Distant group that is not due, whose last published
+        /// non-carried claim on a cell was not renewed this tick, is promoted now and the caller runs the tiered producers for it. Returns the
+        /// number of groups woken; <see cref="BattleLodState.IsClaimWoken"/> names them.
+        /// </summary>
+        public static int WakeLapsedClaims(BattleSnapshot s, BattleLodState state, OrderArbiter arbiter, double nowHours)
+        {
+            if (s == null || state == null || arbiter == null) return 0;
+            UnitRecord[] own = s.Own;
+            int woken = 0;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                // The two tests before the lapse test only spare it the cost for a regiment and a due group; PromoteNow is the rule: it takes a group
+                // of a snapshot the pass covered that is Distant and not due, and nothing else.
+                if ((own[i].Flags & UnitFlags.IsGroup) == 0 || state.IsDue(i)) continue;
+                int id = own[i].InstanceId;
+                if (!arbiter.HasLapsedUncarriedClaim(id) || !state.PromoteNow(s, i, LodPromotion.Claim, nowHours)) continue;
+                state.MarkClaimWoken(i);
+                arbiter.DropCarried(id);
+                woken++;
+            }
+            return woken;
         }
 
         private static int NearestGroup(UnitRecord[] own, int n, int from)

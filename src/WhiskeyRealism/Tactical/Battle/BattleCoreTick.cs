@@ -194,6 +194,34 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
 
+            // BC15 decision 14: a Full-only producer's claim on a Distant group's cell that was not renewed hid the group's own intent at full rate; the
+            // group is woken now and the tiered producers run once more for it alone, before Resolve.
+            if (BattleLodRuntime.WakeLapsedClaims(snapshot, arbiter, now) > 0)
+            {
+                BattleLodRuntime.BeginWakePass();
+                try
+                {
+                    for (int p = 0; p < Producers.Count; p++)
+                    {
+                        IBattleIntentProducer producer = Producers[p];
+                        if (!BattleLodRuntime.IsTieredProducer(producer.Name)) continue;
+                        try
+                        {
+                            producer.Produce(snapshot, arbiter);
+                        }
+                        catch (Exception ex)
+                        {
+                            OnceLog.Warning(Producers.ThrewKey(p),
+                                "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
+                        }
+                    }
+                }
+                finally
+                {
+                    BattleLodRuntime.EndWakePass();
+                }
+            }
+
             int intents = arbiter.IntentCount;
             if (_carried.Length < snapshot.OwnCount * OrderChannels.Count) _carried = new BattleOrderIntent[snapshot.OwnCount * OrderChannels.Count];
             if (_winners.Length < intents) _winners = new BattleOrderIntent[Math.Max(intents, _winners.Length * 2)];

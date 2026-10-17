@@ -35,6 +35,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //   Full-only groups (HasLatchOrManeuver): a live exploit (asset, descendants, ancestors), a works hold or pin, a recon probe or hold or the
     //              scout, a main-arrival hold, an envelopment maneuver (heading, hold, via). The BC14W contest turns and the BC14O chain contest need a
     //              path to act on, and a group with a path is never settled, so a vanilla move onto a Distant group promotes it on the tick it shows.
+    //   Lapsed claim: a claim of a Full-only producer (the division play, a withdrawal, a charge) on a Distant group's cell that is not renewed
+    //              wakes the group that tick and BattleCoreTick runs GroupStance, Posture and FacingPulse a second time for it alone (decision 14),
+    //              so the intent the claim hid executes on the tick it would at full rate.
     //   Unsettled below: an order of any unit under a group that the executor has not finished with (a pending move, a retry ticket, a refusal other
     //              than Duplicate) keeps the group Full (BattleLod.FoldUnsettled).
     internal static class BattleLodRuntime
@@ -44,13 +47,15 @@ namespace WhiskeyRealism.Tactical.Battle
         // Index = bit of LodPromotion (the order of the enum's single flags).
         private static readonly string[] ReasonNames =
         {
-            "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain", "stance",
+            "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain", "stance", "claim",
         };
 
         private static readonly PostureLodLookup[] Lookups = { new PostureLodLookup(), new PostureLodLookup() };
         private static readonly double[] LastRowHours = { double.NaN, double.NaN };
         private static readonly StringBuilder RowText = new StringBuilder(128);
         private static bool _firstFireLogged;
+        // True while BattleCoreTick re-runs the tiered producers for the groups a lapsed claim woke (decision 14): IsDue then speaks for those alone.
+        private static bool _wakePass;
 
         static BattleLodRuntime()
         {
@@ -61,6 +66,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             LastRowHours[0] = LastRowHours[1] = double.NaN;
             _firstFireLogged = false;
+            _wakePass = false;
         }
 
         /// <summary>The tier pass and the carry of one arbiter tick; call after <c>arbiter.BeginTick()</c>, before any producer.</summary>
@@ -159,6 +165,7 @@ namespace WhiskeyRealism.Tactical.Battle
         internal static bool IsDue(BattleSnapshot s, int ownIndex)
         {
             BattleLodState state = BattleLodState.ForAlliance(s.Alliance);
+            if (_wakePass) return state != null && state.IsClaimWoken(ownIndex);
             if (state == null || !state.Covers(s) || state.IsDue(ownIndex)) return true;
 
             // Not due. The opportunity producer runs ahead of the posture producer in this very tick and may have launched an exploit on the group,
@@ -169,6 +176,36 @@ namespace WhiskeyRealism.Tactical.Battle
             OrderArbiter.ForAlliance(s.Alliance)?.DropCarried(rec.InstanceId);
             return true;
         }
+
+        /// <summary>The producers the tier pass gates (decision 14): the only ones BattleCoreTick runs a second time for a group woken by a lapsed claim.</summary>
+        internal static bool IsTieredProducer(string name)
+        {
+            return name == "GroupStance" || name == "Posture" || name == "FacingPulse";
+        }
+
+        /// <summary>
+        /// Decision 14, after every producer submitted and before Resolve: promotes the Distant groups whose non-carried claim lapsed
+        /// (<see cref="BattleLod.WakeLapsedClaims"/>) and empties their carried posture row, so the second pass of the tiered producers fills it
+        /// afresh. Returns the number of groups woken; the caller then brackets the second pass with <see cref="BeginWakePass"/>/<see cref="EndWakePass"/>.
+        /// </summary>
+        internal static int WakeLapsedClaims(BattleSnapshot s, OrderArbiter arbiter, double nowHours)
+        {
+            BattleLodState state = BattleLodState.ForAlliance(s.Alliance);
+            if (state == null || arbiter == null || !Plugin.BattleAiLevelOfDetailEnabled()) return 0;
+            int woken = BattleLod.WakeLapsedClaims(s, state, arbiter, nowHours);
+            if (woken == 0) return 0;
+            PostureTick.State tick = PostureTick.Current(s);
+            if (tick != null)
+                for (int i = 0; i < s.OwnCount; i++)
+                    if (state.IsClaimWoken(i)) tick.Groups[i] = default(GroupPosture);
+            return woken;
+        }
+
+        internal static bool InWakePass => _wakePass;
+
+        internal static void BeginWakePass() { _wakePass = true; }
+
+        internal static void EndWakePass() { _wakePass = false; }
 
         /// <summary>The posture producer's NavMesh budget was spent before this group's plan: it stays Full until a plan runs for it.</summary>
         internal static void NavDeferred(BattleSnapshot s, int groupId)

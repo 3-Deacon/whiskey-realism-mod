@@ -121,7 +121,7 @@ internal static partial class BattleLodTests
         string posture = ClassText(PostureFile, "PostureIntentProducer");
         AssertTrue(posture.Contains("int start = t.Nav.StartIndex(t.GroupIds, t.GroupCount);"), "the walk starts after the last planned id");
         AssertTrue(posture.Contains("t.GroupOrder[(start + k) % t.GroupCount]"), "and goes by ascending instance id");
-        AssertTrue(Regex.IsMatch(posture, @"if \(!BattleLodRuntime\.IsDue\(s, i\)\)\s*\{\s*t\.Records\.Carry\(t\.Groups, i, rec\.InstanceId\);\s*continue;\s*\}"),
+        AssertTrue(Regex.IsMatch(posture, @"if \(!BattleLodRuntime\.IsDue\(s, i\)\)\s*\{\s*(//[^\n]*\s*)*if \(!BattleLodRuntime\.InWakePass\) t\.Records\.Carry\(t\.Groups, i, rec\.InstanceId\);\s*continue;\s*\}"),
             "a group that is not due keeps its recorded posture (recon and fire control read it) and submits nothing");
         AssertTrue(posture.Contains("t.Records.Remember(t.Groups, i, rec.InstanceId);"), "an evaluated group's record is kept for the ticks it is carried");
         string tick = ClassText(PostureFile, "PostureTick");

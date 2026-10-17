@@ -46,7 +46,10 @@ internal static partial class BattleLodTests
 
     private static void AssertPromoted(LodWorld w, LodPromotion reason, string label)
     {
+        bool single = reason != LodPromotion.None && ((int)reason & ((int)reason - 1)) == 0;
+        int counted = single ? w.State.PromotionCountOf(reason) : 0;
         w.Tick();
+        if (single) AssertTrue(w.State.PromotionCountOf(reason) > counted, label + ": " + reason + " is counted for the TacticalLod row");
         AssertEqual(LodTier.Full, w.Tier(100), label + ": promoted on the tick the input changed");
         AssertTrue(w.Due(100), label + ": its producers run that tick");
         AssertTrue((w.Why(100) & reason) == reason, label + ": for " + reason + ", reported " + w.Why(100));

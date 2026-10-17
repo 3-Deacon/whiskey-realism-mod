@@ -230,7 +230,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     // BC15: a Distant group that is not due submits nothing; its last posture stays on record, flags included, for fire control and recon.
                     if (!BattleLodRuntime.IsDue(s, i))
                     {
-                        t.Records.Carry(t.Groups, i, rec.InstanceId);
+                        // The second pass of a lapsed-claim wake-up (decision 14) must not put last tick's row over a group that ran in the first.
+                        if (!BattleLodRuntime.InWakePass) t.Records.Carry(t.Groups, i, rec.InstanceId);
                         continue;
                     }
 
