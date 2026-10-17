@@ -37,7 +37,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var posts = new List<GarrisonPost>();
             for (int k = 0; k < sites.Count; k++)
             {
-                var post = Plan(s, plan, sites[k], retained);
+                var post = PlanOne(s, plan, sites[k], retained);
                 if (post != null) posts.Add(post);
             }
             posts.Sort(CompareForCap);
@@ -151,7 +151,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // ---- one post ----
 
         // The post at a site, null when the site wants none: no need and no manned post still inside its quiet fortnight.
-        private static GarrisonPost Plan(CampaignSnapshot s, TheaterPlan plan, in Site site, IReadOnlyList<GarrisonPostRecord> retained)
+        private static GarrisonPost PlanOne(CampaignSnapshot s, TheaterPlan plan, in Site site, IReadOnlyList<GarrisonPostRecord> retained)
         {
             float threat = ReserveRules.VanillaThreat(s, site.X, site.Z, s.RelocationRange, null);
             bool threatened = threat > 0f;

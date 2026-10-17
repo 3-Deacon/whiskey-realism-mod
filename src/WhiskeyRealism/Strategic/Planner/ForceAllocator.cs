@@ -484,7 +484,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         Assign(pick, FormationRole.Hold, _sector[pick], f.X, f.Z, ReasonGarrisonPost, true);
                     else
                         Assign(pick, FormationRole.Garrison, _sectors.SectorAt(post.X, post.Z), post.X, post.Z, ReasonGarrisonPost, true);
-                    if (ReferenceEquals(_reason[pick], ReasonGarrisonPost)) _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = atPost });
+                    _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = atPost });   // never a give-up: PostCandidate left those out
                 }
             }
 

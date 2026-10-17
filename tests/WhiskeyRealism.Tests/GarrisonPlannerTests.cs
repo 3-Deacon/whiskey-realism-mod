@@ -19,6 +19,7 @@ internal static class GarrisonPlannerTests
         TestHarness.RunAll(new (string name, Action run)[]
         {
             ("PostsOnlyOwnTownsHubsPortsDepotsForts", PostsOnlyOwnTownsHubsPortsDepotsForts),
+            ("ASiteIsOnePostWhateverGuardsIt", ASiteIsOnePostWhateverGuardsIt),
             ("CapitalNeverAGarrisonPost", CapitalNeverAGarrisonPost),
             ("PostOnlyInThreatenedOrHoldSectors", PostOnlyInThreatenedOrHoldSectors),
             ("NeedSubtractsFortGarrisonDummy", NeedSubtractsFortGarrisonDummy),
@@ -26,13 +27,16 @@ internal static class GarrisonPlannerTests
             ("NeverFromMainEffortBelowRequiredRatio", NeverFromMainEffortBelowRequiredRatio),
             ("NeverTakesCapitalGuardReconOrRecover", NeverTakesCapitalGuardReconOrRecover),
             ("PrefersSmallestFormationCoveringNeed", PrefersSmallestFormationCoveringNeed),
+            ("PickFormationNeverAnUnreadyOrPlayerFormation", PickFormationNeverAnUnreadyOrPlayerFormation),
             ("PostsCappedPerAlliance", PostsCappedPerAlliance),
             ("ReleasedAfterQuietDays", ReleasedAfterQuietDays),
+            ("AGoneIncumbentReleasesItsPost", AGoneIncumbentReleasesItsPost),
             ("NeverPlayerCommandOrSoleMapGroupPlayer", NeverPlayerCommandOrSoleMapGroupPlayer),
             ("GarrisonWithheldFromVanillaOperations", GarrisonWithheldFromVanillaOperations),
             ("GarrisonPostsRoundTripInSidecar", GarrisonPostsRoundTripInSidecar),
             ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("SecessionAndPostsShareOneRoleOneWithholdOneLedger", SecessionAndPostsShareOneRoleOneWithholdOneLedger),
+            ("ASecessionMemberInTheStateIsSeatedAtItsPostAndHolds", ASecessionMemberInTheStateIsSeatedAtItsPostAndHolds),
             ("ASecessionTownIsNeverAlsoAGarrisonPost", ASecessionTownIsNeverAlsoAGarrisonPost),
             ("AFormationHoldsOnePostAtMostAndPostsNeverShareIt", AFormationHoldsOnePostAtMostAndPostsNeverShareIt),
             ("TheIncumbentKeepsItsPostAndIsNotItsOwnExistingStrength", TheIncumbentKeepsItsPostAndIsNotItsOwnExistingStrength),
@@ -153,6 +157,35 @@ internal static class GarrisonPlannerTests
         AssertEqual(GarrisonPostKind.Port, PostAt(posts, 700f).Kind, "an own port");
         AssertTrue(PostAt(posts, 900f) == null && PostAt(posts, 800f) == null && PostAt(posts, 250f) == null, "no enemy town or depot and no unbuilt depot");
         foreach (var p in posts) AssertTrue(p.Need > 0f, "each stands for a need at " + p.X);
+    }
+
+    // A town, the fort beside it and a depot on the road are one place to man: one post, named for the most specific thing there, with the
+    // strongest garrison dummy of them (the town's total already includes its fort's, so the two are not added).
+    private static void ASiteIsOnePostWhateverGuardsIt()
+    {
+        float full = GarrisonPlanner.ThreatShare * Weighted(30000f, 60f);
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f, garrison: 300f));
+        s.Forts.Add(Fort(520f, garrison: 700f));
+        s.Supply.Add(Depot(601, 510f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        var posts = Posts(s);
+        AssertEqual(1, posts.Count, "one post for the three: " + string.Join(",", posts.Select(p => p.Kind + "@" + p.X)));
+        AssertEqual(GarrisonPostKind.ObjectiveTown, posts[0].Kind, "named for the town, not the fort or the depot");
+        AssertNear(700f, posts[0].ExistingStrength, 0.01f, "with the strongest dummy, not their sum");
+        AssertNear(full - 700f, posts[0].Need, 1f, "which the need subtracts");
+
+        var port = Side();
+        port.Objectives.Add(Town(40, 500f, roles: ObjectiveRole.RailHub | ObjectiveRole.Port));
+        port.Forts.Add(Fort(510f));
+        port.Beliefs.Add(Seen(560f, 30000f));
+        AssertEqual(GarrisonPostKind.Port, Posts(port)[0].Kind, "a port that is also a hub and a town is a port");
+
+        var apart = Side();
+        apart.Objectives.Add(Town(40, 500f));
+        apart.Forts.Add(Fort(560f));                                      // 60 away: its own place
+        apart.Beliefs.Add(Seen(560f, 30000f));
+        AssertEqual(2, Posts(apart).Count, "a fort a bugle call and more away is a post of its own");
     }
 
     private static void CapitalNeverAGarrisonPost()
@@ -339,6 +372,32 @@ internal static class GarrisonPlannerTests
         AssertEqual(-1, GarrisonPlanner.PickFormation(far, Posts(far)[0], AllFree(far)), "a formation beyond the relocation range is not asked");
     }
 
+    // The pool says what the allocator has left free; the pick still asks the formation itself: ready (vanilla refuses to march a readiness 0-1
+    // formation onto contested ground), above the movement morale and supply floors, and one the planner may move.
+    private static void PickFormationNeverAnUnreadyOrPlayerFormation()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        var unready = Corps(1, 480f, 6000f);
+        unready.ReadinessStep = 1;
+        s.Own.Add(unready);
+        var shaken = Corps(2, 485f, 6000f);
+        shaken.Morale = 0.1f;
+        s.Own.Add(shaken);
+        var player = Corps(3, 490f, 6000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        var small = Corps(4, 492f, 600f);                                // below the post's need
+        s.Own.Add(small);
+        var post = Posts(s)[0];
+        AssertEqual(-1, GarrisonPlanner.PickFormation(s, post, AllFree(s)), "an unready, a shaken, a player's and a too-small formation: none is asked");
+        s.Own.Add(Corps(5, 470f, 6000f));
+        AssertEqual(5, s.Own[GarrisonPlanner.PickFormation(s, post, AllFree(s))].InstanceId, "the one fit formation is");
+        var met = new GarrisonPost { Kind = GarrisonPostKind.ObjectiveTown, X = 500f, Z = 0f, Need = 0f };
+        AssertEqual(-1, GarrisonPlanner.PickFormation(s, met, AllFree(s)), "a post with no need and no incumbent asks nobody");
+    }
+
     private static bool[] AllFree(CampaignSnapshot s)
     {
         var pool = new bool[s.Own.Count];
@@ -427,6 +486,28 @@ internal static class GarrisonPlannerTests
         AssertEqual(0, ledger.Posts.Count, "and forgets it");
         allocEnd.TryGet(3, out var free);
         AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost && free.Role == FormationRole.Hold, "the formation holds as any other (no post)");
+    }
+
+    // A manned post lives on its incumbent: a record whose formation has gone from the map (destroyed, disbanded) keeps nothing, however
+    // fresh the record, and is not planned again unless the threat itself still asks for it.
+    private static void AGoneIncumbentReleasesItsPost()
+    {
+        var calm = Side();
+        calm.Objectives.Add(Town(40, 500f));
+        var ghost = new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "ghost:99") };
+        AssertEqual(0, Posts(calm, null, ghost).Count, "no army near and nobody to hold it: the post is released");
+        var threatened = Side();
+        threatened.Objectives.Add(Town(40, 500f));
+        threatened.Beliefs.Add(Seen(560f, 30000f));
+        var again = Posts(threatened, null, ghost);
+        AssertEqual(1, again.Count, "an army near asks for it afresh");
+        AssertEqual(0, again[0].InstanceIds.Count, "with no incumbent");
+        var ledger = new GarrisonLedger();
+        ledger.Restore(ghost);
+        var plan = HandPlan(calm);
+        var result = ledger.Sync(plan.Garrisons, Allocate(calm, plan, ledger.Posts), calm);
+        AssertEqual(1, result.Released, "and the ledger forgets the record");
+        AssertEqual(0, ledger.Posts.Count, "nothing is kept");
     }
 
     private static void NeverPlayerCommandOrSoleMapGroupPlayer()
@@ -569,10 +650,11 @@ internal static class GarrisonPlannerTests
         return s;
     }
 
-    private static TheaterPlan SecessionPlan()
+    private static TheaterPlan SecessionPlan(params FormationRecord[] extra)
     {
         // The secession post as TheaterPlanner makes it, on the same formations with nothing believed anywhere (so no sector holds a reserve).
         var calm = UnionWithBoth();
+        calm.Own.AddRange(extra);
         return TheaterPlanner.Plan(calm, ExecutorFixtures.Sectors(calm), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
     }
 
@@ -604,6 +686,27 @@ internal static class GarrisonPlannerTests
         AssertEqual(GarrisonPostKind.Secession, ledger.Posts[0].Kind, "the secession one");
         AssertEqual("corps2:2", ledger.Posts[0].AssignedUnitKey, "named by the formation's unit key");
         AssertEqual("corps6:6", ledger.Posts[1].AssignedUnitKey, "likewise");
+    }
+
+    // D8's in-state member is seated at its post too (the ledger reads it as Holding), and holds in place under the one role.
+    private static void ASecessionMemberInTheStateIsSeatedAtItsPostAndHolds()
+    {
+        var s = UnionWithBoth();
+        var inside = Corps(3, 280f, 6000f);
+        inside.StateId = KentuckyState;
+        s.Own.Add(inside);
+        var plan = SecessionPlan(inside);
+        var alloc = Allocate(s, plan);
+        alloc.TryGet(3, out var member);
+        AssertEqual(FormationRole.Hold, member.Role, "inside the state it holds in place");
+        AssertEqual(ForceAllocator.ReasonSecession, member.Reason, "for the secession");
+        AssertTrue(member.Withheld, "withheld");
+        var seat = alloc.Seats.First(x => x.InstanceId == 3);
+        AssertTrue(seat.AtPost, "and the seat says it is there");
+        AssertEqual(0, seat.PostIndex, "at the secession post");
+        var ledger = new GarrisonLedger();
+        ledger.Sync(plan.Garrisons, alloc, s);
+        AssertEqual(GarrisonPostState.Holding, ledger.Transitions.First(t => t.Kind == GarrisonPostKind.Secession).State, "the one ledger calls it Holding");
     }
 
     private static void ASecessionTownIsNeverAlsoAGarrisonPost()
@@ -928,6 +1031,9 @@ internal static class GarrisonPlannerTests
         string guard = body.Substring(check, read - check);
         AssertTrue(guard.Contains("continue;"), "and a fort that fails it is skipped, not read");
         AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(src, @"BattleUnits\.fort\b").Count, "and the fort list is walked only there");
+        AssertTrue(body.Contains("fort.constructiontimer > 0f"), "a fort still under construction is neither a post site nor a garrison");
+        AssertTrue(body.Contains("if (fort.Owner == alliance)") && body.IndexOf("s.Forts.Add(", StringComparison.Ordinal) > body.IndexOf("if (fort.Owner == alliance)", StringComparison.Ordinal),
+            "only the side's own forts are post sites: an ally's garrison counts at its target but is not a place to man");
     }
 
     private static void OnlyOwnAndAlliedForts()
