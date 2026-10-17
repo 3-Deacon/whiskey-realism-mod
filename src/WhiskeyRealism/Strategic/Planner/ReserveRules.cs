@@ -164,9 +164,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // a CIC side hold nothing. A formation that Recovers is leaving for supply and counts 0 (G4
         // verify r2 N2). The player's group is never in the massable list (TheaterPlanner.MassEligible),
         // so it is never reserved. holdReserved[i] is the sector whose hold
-        // keeps formation i, -1 none. need/nearX/nearZ are per sector.
+        // keeps formation i, -1 none. need/nearX/nearZ are per sector. held (optional) receives, per sector with a need, the sum the reserve
+        // was sized on: what holds there anyway plus the reserved formations (the measure ForceAllocator tests a scout draw against).
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
-                                  bool[] capitalReserved, int[] holdReserved)
+                                  bool[] capitalReserved, int[] holdReserved, float[] heldOut = null)
         {
             int n = s.Own.Count;
             for (int i = 0; i < holdReserved.Length; i++) holdReserved[i] = -1;
@@ -193,6 +194,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     holdReserved[order[k]] = sector;
                     held += System.Math.Max(0f, s.Own[order[k]].Strength);
                 }
+                if (heldOut != null && sector < heldOut.Length) heldOut[sector] = held;
             }
         }
 

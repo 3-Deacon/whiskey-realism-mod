@@ -257,6 +257,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
             private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
+            private readonly float[] _held;                  // per sector: the hold ReserveRules.Hold sized the reserve on (unready, busy, capital guard, reserve)
             private bool _scoutRefusedForThreat;
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
@@ -286,6 +287,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
                 _believed = new float[_sectorCount];
+                _held = new float[_sectorCount];
 
                 for (int i = 0; i < _n; i++)
                 {
@@ -303,7 +305,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 _pinnedMask = pinnedBuilder;
                 AssignImmobile();
                 ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);
-                ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved);
+                ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved, _held);
                 MarkMass();
                 AssignCapitalGuards(capitalReserved);
                 AssignHoldReserve(holdReserved);
@@ -743,13 +745,15 @@ namespace WhiskeyRealism.Strategic.Planner
 
             // The draw never opens a shortfall against a believed enemy force. A sector gives a scout when (a) its hold need is set by the
             // floor or by the presumption of an unscouted front (no believed army drives it), or (b) its hold, less this formation, still
-            // meets its target. Otherwise the formation stays and the refusal is recorded (Allocation.ReconUnfilledReason).
+            // meets its target. The hold is the sum ReserveRules.Hold sized the reserve on (_held: what holds there anyway, the unready and
+            // the busy and the capital guard included, plus the reserved formations), not the Hold roles assigned so far: the remainder
+            // that stands in the sector is assigned after this pick. Otherwise the formation stays and the refusal is recorded (Allocation.ReconUnfilledReason).
             private bool SectorMayGiveScout(int i)
             {
                 int k = _roleSector[i];
                 if (k < 0 || k >= _sectorCount) return true;
                 bool beliefDriven = _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
-                return !beliefDriven || Counted(k) - Counts(i) >= Target(k);
+                return !beliefDriven || _held[k] - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
             }
 
             // ReconPlanner.PickFormation over the hold reserve alone (everything else stays taken), so its own ranking (cavalry, then the

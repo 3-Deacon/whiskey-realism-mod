@@ -37,6 +37,10 @@ internal static class ReconNeverTasksTests
             ("AScoutOutForAnotherTaskDoesNotBlockTheDraw", AScoutOutForAnotherTaskDoesNotBlockTheDraw),
             ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
             ("ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest", ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest),
+            ("AnUnreadyHolderCountsTowardTheSectorsCoverBeforeADraw", AnUnreadyHolderCountsTowardTheSectorsCoverBeforeADraw),
+            ("ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw", ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw),
+            ("TheCarrierIsTheNearestImmobileHolder", TheCarrierIsTheNearestImmobileHolder),
+            ("ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked", ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
             ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
             ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
@@ -771,6 +775,114 @@ internal static class ReconNeverTasksTests
         AssertEqual(40, day2.MainObjectiveId, "day 2, under a capital threat: still objective 40");
         AssertNear(400f, day2.MainObjectiveX, 0.5f, "on the record it holds");
         AssertEqual(serial, state.DecisionSerial, "the same decision");
+    }
+
+    // ---- rule (b) is judged on the measure the reserve was sized on (verify round 2, major) ----
+
+    // The sum of a sector's Hold roles at the end of the pass (the unready and the busy are Hold; a capital guard is not, and counts separately).
+    private static float HeldAtEnd(Day d, int sector, bool withCapitalGuards)
+    {
+        var sectors = ExecutorFixtures.Sectors(d.S);
+        float sum = 0f;
+        foreach (var a in d.Allocation.Assignments)
+        {
+            var f = d.S.Own[d.S.IndexOfOwn(a.InstanceId)];
+            if (ReserveRules.SectorOf(sectors, f) != sector) continue;
+            if ((a.Role == FormationRole.Hold && a.SectorId == sector) || (withCapitalGuards && a.Role == FormationRole.CapitalGuard)) sum += Math.Max(0f, f.Strength);
+        }
+        return sum;
+    }
+
+    // The East faces a believed 12000 (need 7200, belief-driven). It holds with an unready 4000 (counted by ReserveRules.Hold, assigned Hold only
+    // by AssignRemainder after the recon pick), the ready 3000 nearest the army and a ready 5000 behind it: without the 3000 the East holds 9000.
+    private static CampaignSnapshot EastWithAnUnreadyHolder()
+    {
+        var s = Base();
+        s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(30, 750f, 4000f, 1));          // unready East holder
+        s.Own.Add(Corps(2, 800f, 3000f));              // ready, nearest the believed army
+        s.Own.Add(Corps(3, 760f, 5000f));              // ready, behind it
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
+        return s;
+    }
+
+    private static void AnUnreadyHolderCountsTowardTheSectorsCoverBeforeADraw()
+    {
+        var s = EastWithAnUnreadyHolder();
+        var day = Review(s);
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        float need = 0f, believed = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) { need = sp.HoldNeed; believed = sp.BelievedHold; }
+        AssertNear(7200f, need, 1f, "the East need is HoldRatio x 12000");
+        AssertTrue(believed >= need - 0.01f, "and belief-driven");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 3000 is drawn");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertTrue(HeldAtEnd(day, east, false) >= need, "and the East still holds " + HeldAtEnd(day, east, false) + " against " + need);
+    }
+
+    // The capital reserve (the formations nearest the capital until its floor) holds the sector when the capital stands in it; ReserveRules.Hold
+    // counts it, so the draw does too.
+    private static void ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw()
+    {
+        var s = Base();
+        s.CapitalX = 760f;
+        s.CapitalZ = 0f;
+        s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(31, 755f, 6000f));             // nearest the capital: the capital reserve
+        s.Own.Add(Corps(2, 800f, 1000f));              // ready, nearest the believed army
+        s.Own.Add(Corps(3, 790f, 5000f));              // ready, behind it
+        s.Beliefs.Add(ExecutorFixtures.Belief(900f, 0f, 12000f));
+        var day = Review(s);
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        AssertEqual(FormationRole.CapitalGuard, Of(day.Allocation, 31).Role, "31 is the capital guard");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "3 stays in the East reserve");
+        float need = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
+        AssertNear(7200f, need, 1f, "the East need");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 1000 is drawn: the guard's 6000 and the 5000 still hold the East");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertTrue(HeldAtEnd(day, east, true) >= need, "the East holds " + HeldAtEnd(day, east, true) + " with its guard, against " + need);
+    }
+
+    // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term
+    // (0.6 x 20000 x 0.3 = 3600). The need is presumption-backed, so the scout goes, and the shortfall names the nearest immobile holder.
+    private static CampaignSnapshot EastWithAStaleArmy(float busyAX, float busyBX)
+    {
+        var s = SmokeUnion();
+        var a = s.Own[s.IndexOfOwn(13)]; a.X = busyAX; a.WaypointX = busyAX; s.Own[s.IndexOfOwn(13)] = a;
+        var b = s.Own[s.IndexOfOwn(14)]; b.X = busyBX; b.WaypointX = busyBX; s.Own[s.IndexOfOwn(14)] = b;
+        var stale = ExecutorFixtures.Belief(1000f, 0f, 20000f);
+        stale.Confidence01 = 0.3f;
+        s.Beliefs.Add(stale);
+        return s;
+    }
+
+    private static void ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked()
+    {
+        var day = Review(EastWithAStaleArmy(790f, 800f));
+        int east = ExecutorFixtures.Sectors(day.S).SectorAt(800f, 0f);
+        float need = 0f, believed = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) { need = sp.HoldNeed; believed = sp.BelievedHold; }
+        AssertNear(20000f, need, 1f, "the remembered army sets the need");
+        AssertTrue(believed > 0f && believed < need, "a believed force exists but does not drive it: " + believed);
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "so the East gives its scout though it cannot cover 20000 without it");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+    }
+
+    // The carrier of a short sector is its nearest immobile holder to the army it faces: 14 (x 800) beside the belief at 1000, and 13 when
+    // the two busy formations swap places.
+    private static void TheCarrierIsTheNearestImmobileHolder()
+    {
+        var near14 = Review(EastWithAStaleArmy(790f, 800f));
+        AssertTrue(near14.Allocation.Shortfalls.Contains(14) && !near14.Allocation.Shortfalls.Contains(13), "x 800 is nearer 1000: " + string.Join(",", near14.Allocation.Shortfalls));
+        var near13 = Review(EastWithAStaleArmy(810f, 790f));
+        AssertTrue(near13.Allocation.Shortfalls.Contains(13) && !near13.Allocation.Shortfalls.Contains(14), "and with the places swapped it is 13: " + string.Join(",", near13.Allocation.Shortfalls));
     }
 
     // A record that leads, but by no more than the margin, is not a challenger: it breaks the run of reviews.
