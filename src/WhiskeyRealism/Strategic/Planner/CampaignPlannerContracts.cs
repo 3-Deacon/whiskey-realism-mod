@@ -395,6 +395,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int StateId;
         public float X, Z;
         public bool Marching;                      // a member outside the state is on its way to the town
+        public bool MassPresence;                  // the only own formations inside the state are the main effort's mass, which is not pinned
         public bool PlayerPresence;                // the only own formations inside the state are a player's or a CIC side's: present, but not members
         public bool InState;                       // the Union is present in the state: an own formation stands in it, or vanilla's alliancetroops[0] is set
         public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)

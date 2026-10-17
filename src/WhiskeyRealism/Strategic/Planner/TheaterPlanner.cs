@@ -177,6 +177,7 @@ namespace WhiskeyRealism.Strategic.Planner
             internal GarrisonPost Post;
             internal int Limit;
             internal bool FlagAlone;
+            internal List<int> Inside;   // the own formations standing in the state, nearest the town first (indexes into s.Own)
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
@@ -711,8 +712,11 @@ namespace WhiskeyRealism.Strategic.Planner
             return sum;
         }
 
-        // The second half of the garrison (verify, landing check): formations from outside the state are chosen once the mass is known, so
-        // the garrison can never strip it. The pool is the formations that would otherwise just hold, sit in reserve or have no task: not in
+        // The second half of the garrison (verify, landing check and r2): formations are pledged and posted once the mass is known, so the
+        // garrison can never strip or stop it. A mass member (or the reinforcement) standing inside the state counts as the Union's presence
+        // but is neither pledged nor pinned; the other formations inside are pledged, nearest the town first, until the need is met (the first
+        // always). The next review, with the mass gone, the ordinary rules apply: a state that then needs presence gets a post.
+        // For the formations from outside the state:  The pool is the formations that would otherwise just hold, sit in reserve or have no task: not in
         // the mass (marching with it or released to it, the reinforcement included), not a capital guard, a sector's hold reserve, a builder
         // or a member of another post. Nearest the town first. A need only the mass could meet is posted as far as the pool goes and the
         // rest recorded as the post's Shortfall.
@@ -723,6 +727,28 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var work = c.Pending[w];
                 var post = work.Post;
+                bool massInside = false;
+                float held = 0f;
+                int pledged = 0;
+                for (int k = 0; k < work.Inside.Count; k++)
+                {
+                    int i = work.Inside[k];
+                    if (plan.MassInstanceIds.Contains(s.Own[i].InstanceId))
+                    {
+                        massInside = true;
+                        continue;
+                    }
+                    if (pledged > 0 && held >= post.Need) break;
+                    pledged++;
+                    c.GarrisonReserved[i] = true;
+                    if (WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) held += ReserveRules.HoldStrength(s.Own[i]);
+                    if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
+                }
+                if (post.InstanceIds.Count == 0 && work.Inside.Count > 0)
+                {
+                    post.MassPresence = massInside;
+                    post.PlayerPresence = !massInside;
+                }
                 float posted = 0f;
                 int count = 0;
                 while (count < work.Limit && posted < post.Need)
@@ -781,20 +807,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     int d = DistanceSq(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
                     return d != 0 ? d : s.Own[a].InstanceId.CompareTo(s.Own[b].InstanceId);
                 });
-                float held = 0f;
-                for (int k = 0; k < inside.Count && (k == 0 || held < post.Need); k++)
-                {
-                    int i = inside[k];
-                    c.GarrisonReserved[i] = true;
-                    if (WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) held += ReserveRules.HoldStrength(s.Own[i]);
-                    if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
-                }
-                post.PlayerPresence = inside.Count > 0 && post.InstanceIds.Count == 0;
-                // Formations from outside the state are chosen after the mass (PostFromOutside): one when nobody is present, as many as the
-                // need takes when only the flag shows presence.
+                // The formations inside are pledged, and the formations from outside the state posted, once the mass is known
+                // (PostFromOutside): the main effort's mass is never stopped by a garrison. Outside: one when nobody is present, as many as
+                // the need takes when only the flag shows presence.
                 int limit = flagAlone ? int.MaxValue : !post.InState ? 1 : 0;
-                if (limit > 0 && post.Need > 0f) c.Pending.Add(new PostWork { Post = post, Limit = limit, FlagAlone = flagAlone });
-                if (post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
+                c.Pending.Add(new PostWork { Post = post, Limit = post.Need > 0f ? limit : 0, FlagAlone = flagAlone, Inside = inside });
                 c.Posts.Add(post);
             }
         }

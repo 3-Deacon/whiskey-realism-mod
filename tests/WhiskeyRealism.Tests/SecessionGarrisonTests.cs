@@ -25,6 +25,8 @@ internal static class SecessionGarrisonTests
             ("UnionPostsTheNearestReadyFormationWhenNoneStandsInTheState", UnionPostsTheNearestReadyFormationWhenNoneStandsInTheState),
             ("TheGarrisonIsSizedByTheHoldNeedAtTheTown", TheGarrisonIsSizedByTheHoldNeedAtTheTown),
             ("AGarrisonIsNeverPartOfTheMass", AGarrisonIsNeverPartOfTheMass),
+            ("AMassThatMarchesIntoTheStateIsNotPinnedThere", AMassThatMarchesIntoTheStateIsNotPinnedThere),
+            ("AFreeFormationInsideIsPledgedAndTheMassMemberIsNot", AFreeFormationInsideIsPledgedAndTheMassMemberIsNot),
             ("TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget", TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget),
             ("NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped", NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped),
             ("TheGarrisonIsReadEachReviewNotCached", TheGarrisonIsReadEachReviewNotCached),
@@ -187,8 +189,8 @@ internal static class SecessionGarrisonTests
         AssertEqual(1, plan.Garrisons[0].InstanceIds[0], "nearest first");
     }
 
-    // The enemy target stands at x 330, so the formations at Louisville (x 300) are the nearest to the push: without the exclusion the
-    // garrison would be the first formation massed.
+    // The enemy target stands at x 330. A formation inside the state that is the best mass member is the mass (and counts as presence); it
+    // is not pledged. A garrison posted from outside is never part of the mass either.
     private static void AGarrisonIsNeverPartOfTheMass()
     {
         var s = Side(0, 0, 0.6f);
@@ -198,8 +200,9 @@ internal static class SecessionGarrisonTests
         for (int i = 1; i < 6; i++) s.Own.Add(Corps(i + 1, 40f * i, 9000f));
         var plan = Plan(s);
         AssertEqual(31, plan.MainObjectiveId, "a main effort exists");
-        AssertTrue(plan.MassInstanceIds.Count > 0, "with a mass");
-        AssertFalse(plan.MassInstanceIds.Contains(1), "the formation holding Kentucky is not massed, though it is the nearest to the target");
+        AssertTrue(plan.MassInstanceIds.Contains(1), "the formation standing in Kentucky is the nearest to the target, so it is the mass");
+        AssertTrue(plan.Garrisons[0].InState, "and its presence counts");
+        AssertFalse(plan.Garrisons[0].InstanceIds.Contains(1), "but it is not pledged");
 
         var outside = Side(0, 0, 0.6f);
         outside.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 330f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
@@ -211,6 +214,70 @@ internal static class SecessionGarrisonTests
         int posted = outsidePlan.Garrisons[0].InstanceIds[0];
         AssertEqual(31, outsidePlan.MainObjectiveId, "the push still goes");
         AssertFalse(outsidePlan.MassInstanceIds.Contains(posted), "and the posted formation (" + posted + ") is not in the mass either");
+    }
+
+    // Landing r2: the main effort's mass is never stopped by a secession garrison. The verifier's two-day probe: on day 1 corps 3 is the
+    // mass and stands outside Kentucky; on day 2 its march has taken it into Kentucky. It stays the mass, the main effort stays, and it is
+    // not pledged or pinned there.
+    private static void AMassThatMarchesIntoTheStateIsNotPinnedThere()
+    {
+        CampaignSnapshot Day(int corps3State)
+        {
+            var s = Side(0, 0, 0.6f);
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+            s.Beliefs.Add(Seen(600f, 3000f));
+            s.Own.Add(Corps(1, 100f, 9000f));
+            s.Own.Add(Corps(3, corps3State >= 0 ? 280f : 200f, 9000f, corps3State));
+            return s;
+        }
+        var state = new PlannerState();
+        var day1 = Plan(Day(-1), state);
+        AssertEqual(31, day1.MainObjectiveId, "day 1: a main effort");
+        AssertTrue(day1.MassInstanceIds.Contains(3), "day 1: corps 3 is the mass: " + string.Join(",", day1.MassInstanceIds));
+
+        var s2 = Day(KentuckyState);
+        var day2 = Plan(s2, state);
+        AssertEqual(31, day2.MainObjectiveId, "day 2: the main effort stays");
+        AssertTrue(day2.MassInstanceIds.Contains(3), "day 2: corps 3 is still the mass");
+        var post = day2.Garrisons[0];
+        AssertTrue(post.InState, "its presence in Kentucky counts for the secession");
+        AssertFalse(post.InstanceIds.Contains(3), "but it is not pledged");
+        AssertTrue(post.MassPresence, "the row names it");
+        var alloc = Allocate(s2, day2);
+        alloc.TryGet(3, out var a);
+        AssertTrue(a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support, "corps 3 keeps marching with the push (" + a.Role + "; from Kentucky's West it is the one reinforcement)");
+        AssertTrue(a.Reason != ForceAllocator.ReasonSecession && !a.Withheld, "not withheld for the secession");
+        AssertContains(ForceAllocator.Summary(alloc, day2, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=mass-presence@Kentucky:in/", "the allocation row");
+
+        // The mass moves on: the ordinary rules apply next review (nobody inside, so one formation is posted).
+        var day3 = Plan(Day(-1), state);
+        AssertFalse(day3.Garrisons[0].InState, "day 3: nobody inside again");
+        AssertEqual(1, day3.Garrisons[0].InstanceIds.Count, "so the ordinary rule posts one");
+        AssertFalse(day3.MassInstanceIds.Contains(day3.Garrisons[0].InstanceIds[0]), "not from the mass");
+    }
+
+    // A mass member and a free formation both inside: the free one is pledged, the mass member is not.
+    private static void AFreeFormationInsideIsPledgedAndTheMassMemberIsNot()
+    {
+        var s = Side(0, 0, 0.6f);
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+        s.Beliefs.Add(Seen(600f, 3000f));
+        s.Own.Add(Corps(3, 330f, 9000f, KentuckyState));    // nearest the target: the mass
+        s.Own.Add(Corps(4, 290f, 9000f, KentuckyState));    // free, inside
+        var plan = Plan(s);
+        AssertEqual(31, plan.MainObjectiveId, "a main effort");
+        AssertTrue(plan.MassInstanceIds.Contains(3) && !plan.MassInstanceIds.Contains(4), "corps 3 is the mass, corps 4 is not: " + string.Join(",", plan.MassInstanceIds));
+        var post = plan.Garrisons[0];
+        AssertEqual(1, post.InstanceIds.Count, "one pledged");
+        AssertEqual(4, post.InstanceIds[0], "the free formation");
+        var alloc = Allocate(s, plan);
+        alloc.TryGet(4, out var free);
+        AssertEqual(FormationRole.Hold, free.Role, "it holds where it stands");
+        AssertEqual(ForceAllocator.ReasonSecession, free.Reason, "for the secession");
+        AssertTrue(free.Withheld, "withheld");
+        alloc.TryGet(3, out var mass);
+        AssertTrue(mass.Role == FormationRole.MainEffort || mass.Role == FormationRole.Support, "the mass member marches with the push (" + mass.Role + ")");
+        AssertTrue(mass.Reason != ForceAllocator.ReasonSecession, "and is not pinned");
     }
 
     // The sector's own withhold keeps the formations nearest its threat until its target is met; the garrison is withheld on its own account,
@@ -504,6 +571,15 @@ internal static class SecessionGarrisonTests
         AssertEqual(FormationRole.Garrison, first.Role, "through the garrison role (MayMove, the mover)");
         AssertNear(300f, first.TargetX, 0.01f, "to Louisville");
         AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps2@Kentucky:in+moving/5000 ", "the row says so");
+
+        // A need that takes two: an army of 50000 (30000), one West corps holding (9000), the garrison's 4000: 17000 -> two corps of 9000.
+        var big = FlagAlone(4000f, 50000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
+        var bigPlan = Plan(big);
+        AssertNear(17000f, bigPlan.Garrisons[0].Need, 1f, "30000 - 9000 - 4000: " + bigPlan.Garrisons[0].Need);
+        AssertEqual(2, bigPlan.Garrisons[0].InstanceIds.Count, "two corps are needed: " + string.Join(",", bigPlan.Garrisons[0].InstanceIds));
+        AssertEqual(2, bigPlan.Garrisons[0].InstanceIds[0], "the nearest first");
+        AssertEqual(3, bigPlan.Garrisons[0].InstanceIds[1], "then the next");
+        AssertTrue(bigPlan.Garrisons[0].Shortfall <= 0f, "and nothing is short");
 
         // A hold kept against a different army is not subtracted: an East army of 30000 (18000) keeps corps 2 and 3 in the East; the town's
         // hold is still only corps 1, so 5000 is needed and the free corps 4 goes.

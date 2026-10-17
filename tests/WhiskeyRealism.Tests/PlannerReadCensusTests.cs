@@ -705,6 +705,7 @@ internal static class CensusRows
         "GarrisonPost.StateId | P/ForceAllocator.cs | Landing round ForceAllocator.AssignGarrisons (a member inside holds, one outside marches)",
         "GarrisonPost.Shortfall | P/ForceAllocator.cs | Landing check [Allocation] garrison=...!short<n> (the need the mass would have had to meet)",
         "GarrisonPost.Marching | P/ForceAllocator.cs | Landing round [Allocation] garrison= (in+moving)",
+        "GarrisonPost.MassPresence | P/ForceAllocator.cs | Landing r2 [Allocation] garrison=mass-presence (the mass inside the state is presence, not pinned)",
         "GarrisonPost.PlayerPresence | P/ForceAllocator.cs | Landing round [Allocation] garrison=player-presence",
         "SecessionRecord.HasTown | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons",
         "SecessionRecord.TownX | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons (the post)",
