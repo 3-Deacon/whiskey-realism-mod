@@ -86,8 +86,21 @@ namespace WhiskeyRealism.Tactical.Battle
             return task == CommandTaskType.FallBackToLine || task == CommandTaskType.Delay;
         }
 
-        /// <summary>The one formation intent: stop the march, re-form to line facing <paramref name="heading"/> (negative: keep the facing).</summary>
-        public static BattleOrderIntent Intent(int regimentId, float heading)
+        /// <summary>The intent's reason: static strings (a row names the cause without building one per submit).</summary>
+        public static string ReasonLabel(ColumnDeployReason reason)
+        {
+            switch (reason)
+            {
+                case ColumnDeployReason.FiredOn: return "column-deploy:FiredOn";
+                case ColumnDeployReason.Flanked: return "column-deploy:Flanked";
+                case ColumnDeployReason.Engaged: return "column-deploy:Engaged";
+                case ColumnDeployReason.Approaching: return "column-deploy:Approaching";
+                default: return "column-deploy";
+            }
+        }
+
+        /// <summary>The one formation intent: stop the march, then face <paramref name="heading"/> (negative: keep the facing) in the formation the stop restores.</summary>
+        public static BattleOrderIntent Intent(int regimentId, float heading, ColumnDeployReason reason)
         {
             return new BattleOrderIntent
             {
@@ -98,8 +111,58 @@ namespace WhiskeyRealism.Tactical.Battle
                 Flags = IntentFlags.Deploy,
                 Priority = IntentPriority.Executor,
                 Source = IntentSource.FacingPulse,
-                Reason = "column-deploy",
+                Reason = ReasonLabel(reason),
             };
         }
+
+        /// <summary>
+        /// The deploy, against the regiment (<see cref="IColumnDeployHost"/>; the executor's host wraps vanilla's calls). Vanilla's own guard comes first:
+        /// every re-form of CheckFormationChange (127669, 127676) and of a manual stop (132498, 132502, 132507) needs allblocksoffbridgeorcrossing, so a
+        /// regiment on a bridge or a crossing is not touched. The manual stop restores the formation the column replaced (132502-132506) and ends
+        /// distancemarchcolumn; the line it lands in is the normal case, and the threat heading is applied after it through the executor's facing path.
+        /// Only a regiment whose restored formation is the column itself is re-formed to line.
+        /// </summary>
+        public static ColumnDeployApplied Apply<THost>(ref THost host, float heading) where THost : struct, IColumnDeployHost
+        {
+            if (!host.OffBridgeOrCrossing) return ColumnDeployApplied.HeldOnBridge;
+            host.Stop();
+            if (host.Formation == RegimentMarchColumn)
+            {
+                host.ReformToLine(heading);
+                return ColumnDeployApplied.Reformed;
+            }
+            if (heading < 0f) return ColumnDeployApplied.NoBearing;
+            return host.Rotate(heading) ? ColumnDeployApplied.Faced : ColumnDeployApplied.KeptFacing;
+        }
+    }
+
+    /// <summary>What the deploy did to the regiment; the TacticalColumnDeploy row's <c>applied</c> field.</summary>
+    internal enum ColumnDeployApplied
+    {
+        /// <summary>The regiment is on a bridge or crossing (allblocksoffbridgeorcrossing false): vanilla's guard, nothing was written.</summary>
+        HeldOnBridge = 0,
+        /// <summary>Stopped; the formation the stop restored was the column itself, so the regiment was re-formed to line facing the heading.</summary>
+        Reformed,
+        /// <summary>Stopped, out of the column, and turned to the threat heading.</summary>
+        Faced,
+        /// <summary>Stopped, out of the column; the facing was already within tolerance or the rotation was refused (moving, rotating, charging).</summary>
+        KeptFacing,
+        /// <summary>Stopped, out of the column; no threat bearing was known, so the facing is the regiment's own.</summary>
+        NoBearing,
+    }
+
+    /// <summary>The calls the deploy makes on one regiment (OrderExecutorRuntime wraps vanilla's; a test wraps a fake).</summary>
+    internal interface IColumnDeployHost
+    {
+        /// <summary>Regiment.allblocksoffbridgeorcrossing.</summary>
+        bool OffBridgeOrCrossing { get; }
+        /// <summary>Regiment.formation, read live.</summary>
+        int Formation { get; }
+        /// <summary>Vanilla's manual stop (StopRegiment, 132498-132511).</summary>
+        void Stop();
+        /// <summary>ChangeRegimentFormation to line with a manual final rotation (the heading may be negative: keep the facing).</summary>
+        void ReformToLine(float heading);
+        /// <summary>The executor's rotate-in-place; false when it did not turn the regiment.</summary>
+        bool Rotate(float heading);
     }
 }

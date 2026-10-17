@@ -1109,10 +1109,10 @@ namespace WhiskeyRealism
                 "Enable Column Deployment",
                 true,
                 "Default ON. Battle-core facing-pulse producer: an AI infantry regiment that vanilla put in march column (a path longer than 60 m with no " +
-                "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march and " +
-                "deploys to line facing the closest visible enemy, instead of marching on in column until an enemy is within 100 m (vanilla deploys " +
-                "it there, facing the way it was walking). A regiment of a withdrawing group, a routed or mounted one is left alone. Disable for " +
-                "rollback without turning off Tactical Commander Mode.");
+                "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march (the game's " +
+                "own manual stop restores its line) and turns to face the pressure, instead of marching on in column until an enemy is within 100 m " +
+                "(vanilla deploys it there, facing the way it was walking). A regiment on a bridge or crossing, of a withdrawing group, routed or mounted " +
+                "is left alone. Needs Enable Tactical Contact Facing Pulse. Disable for rollback without turning off Tactical Commander Mode.");
             EnableApproachLineAdvance = Config.Bind(
                 "Tactical",
                 "Enable Approach Line Advance",
@@ -1120,9 +1120,10 @@ namespace WhiskeyRealism
                 "Default ON. User-approved skipping Prefix on the game's CheckFormationChange (2026-10-17). For an AI infantry regiment that Whiskey commands " +
                 "(Commander Mode Active, never a player's unit, never the W&L feud instance) in a group whose current intent is a line advance or hold (not a " +
                 "road route or a march column) and whose closest perceived enemy is inside 500 m, the game's re-column step is skipped, so the regiment keeps " +
-                "its line and advances in line instead of falling back into march column; with Enable Column Deployment, a column regiment inside 500 m " +
-                "deploys to line first. Every other regiment runs the game's method unchanged. Disable for rollback: vanilla's formation change runs " +
-                "for every regiment.");
+                "its line and advances in line instead of falling back into march column. Independent of Enable Column Deployment and of the contact " +
+                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. With " +
+                "Enable Column Deployment on, a column regiment inside 500 m also deploys to line first. Every other regiment runs the game's method " +
+                "unchanged. Disable for rollback: vanilla's formation change runs for every regiment.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",

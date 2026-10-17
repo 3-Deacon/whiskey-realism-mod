@@ -607,6 +607,7 @@ internal static class StanceArtilleryMigrationTests
         var cancel = new OrderOutcome
         {
             GroupId = Battery, Channel = OrderChannel.CombatBehavior, Kind = OrderOutcomeKind.Issued, Source = IntentSource.ArtilleryDoctrine, Value = 7, AtHours = 10.0,
+            Flags = IntentFlags.CancelsBombard,
         };
         AssertTrue(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 10.0 + window * 0.5), "our 7, half a window ago");
         AssertTrue(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 10.0), "in the same instant");
@@ -624,14 +625,42 @@ internal static class StanceArtilleryMigrationTests
         other = cancel;
         other.Channel = OrderChannel.Formation;
         AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1), "the combat behavior channel only");
+        other = cancel;
+        other.Flags = IntentFlags.None;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1),
+            "the doctrine's counter-battery release (8 to 7) and its ammo-conserving cease-fire are also a 7 from the same source: neither cancels a bombardment");
+
+        // The cancel the policy builds carries the flag; the counter-battery release does not.
+        var soft = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "displace");
+        var buffer = new BattleOrderIntent[4];
+        int made = BattleWriterPolicy.ArtilleryDoctrineIntents(ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f), 1, State(ammo: 0.9f, doctrine: soft), Rules(), buffer);
+        bool sawCancel = false;
+        for (int k = 0; k < made; k++)
+            if (buffer[k].Reason == "artillery-cancel-bombard")
+            {
+                sawCancel = true;
+                AssertTrue((buffer[k].Flags & IntentFlags.CancelsBombard) != 0, "the cancel is flagged as one");
+            }
+        AssertTrue(sawCancel, "the doctrine cancelled the bombardment it dislikes");
+        made = BattleWriterPolicy.ArtilleryDoctrineIntents(ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f), 1, State(ammo: 0.9f), Rules(), buffer);
+        bool sawRelease = false;
+        for (int k = 0; k < made; k++)
+            if (buffer[k].Reason == "artillery-counterbattery-release")
+            {
+                sawRelease = true;
+                AssertEqual(7, buffer[k].Value, "the release is a 7");
+                AssertEqual(IntentFlags.None, buffer[k].Flags & IntentFlags.CancelsBombard, "and is not a cancel of a bombardment");
+            }
+        AssertTrue(sawRelease, "counter-battery with no enemy gun in range is released");
 
         // The executor keeps the issued value, which is what makes the above readable.
         var executor = new OrderExecutor();
         executor.Bind(new AllowGuard(), null);
-        var seven = new BattleOrderIntent { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Value = 7, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.ArtilleryDoctrine, Reason = "artillery-cancel-bombard" };
+        var seven = new BattleOrderIntent { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Value = 7, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.ArtilleryDoctrine, Reason = "artillery-cancel-bombard", Flags = IntentFlags.CancelsBombard };
         executor.RecordIssued(seven, 10.0, null, 0, null, 0, 0, 0);
         AssertTrue(executor.TryGetLastOutcome(Battery, OrderChannel.CombatBehavior, out OrderOutcome kept), "recorded");
         AssertEqual(7, kept.Value, "with the value it issued");
+        AssertEqual(IntentFlags.CancelsBombard, kept.Flags, "and the flags it carried");
     }
 
     // The loop as it ran: each tick vanilla starts a bombardment when the battery is not bombarding (its group conditions hold), then the doctrine looks.
@@ -654,7 +683,7 @@ internal static class StanceArtilleryMigrationTests
             {
                 if (buffer[k].Channel != OrderChannel.CombatBehavior || buffer[k].Value != 7) continue;
                 cancels++;
-                last = new OrderOutcome { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Kind = OrderOutcomeKind.Issued, Source = buffer[k].Source, Value = 7, AtHours = now };
+                last = new OrderOutcome { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Kind = OrderOutcomeKind.Issued, Source = buffer[k].Source, Value = 7, Flags = buffer[k].Flags, AtHours = now };
                 haveLast = true;
             }
         }

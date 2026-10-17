@@ -513,14 +513,15 @@ namespace WhiskeyRealism.Tactical
         public const double ArtilleryRestartAcceptHours = 0.25;
 
         /// <summary>
-        /// The battery's last combat behavior outcome is the artillery doctrine's own cancel (7), issued, and no older than
+        /// The battery's last combat behavior outcome is the artillery doctrine's own cancel of a bombardment (behavior 7 flagged
+        /// <see cref="IntentFlags.CancelsBombard"/>, not the counter-battery release or the ammo-conserving cease-fire, which are also 7), issued, and no older than
         /// <see cref="ArtilleryRestartAcceptHours"/>: a battery seen bombarding (9) now was restarted by vanilla. A stamp from the future (a reload, a new
         /// battle) has expired.
         /// </summary>
         public static bool RestartedAfterOwnCancel(in OrderOutcome last, double nowHours)
         {
             if (last.Channel != OrderChannel.CombatBehavior || last.Kind != OrderOutcomeKind.Issued) return false;
-            if (last.Source != IntentSource.ArtilleryDoctrine || last.Value != CombatBehaviorFireAtWill) return false;
+            if (last.Source != IntentSource.ArtilleryDoctrine || last.Value != CombatBehaviorFireAtWill || (last.Flags & IntentFlags.CancelsBombard) == 0) return false;
             double age = nowHours - last.AtHours;
             return age >= 0.0 && age < ArtilleryRestartAcceptHours;
         }
@@ -616,7 +617,9 @@ namespace WhiskeyRealism.Tactical
                 }
                 if (decision == TacticalArtilleryDoctrine.Decision.CancelBombard)
                 {
-                    buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");
+                    BattleOrderIntent cancel = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");
+                    cancel.Flags = IntentFlags.CancelsBombard;
+                    buffer[n++] = cancel;
                     behaviorWritten = true;
                 }
                 else if (decision == TacticalArtilleryDoctrine.Decision.CounterBattery)

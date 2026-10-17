@@ -75,11 +75,16 @@ namespace WhiskeyRealism.Tactical.Battle
             return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters;
         }
 
+        /// <summary>The Prefix's cheap tests, run first for every regiment on every regular cycle: its flag is on, and the regiment is infantry that is not already in column.</summary>
+        public static bool Eligible(bool flagOn, int unitTyp, int formation)
+        {
+            return flagOn && unitTyp == TacticalUnitType.Infantry && formation != ColumnDeployment.RegimentMarchColumn;
+        }
+
         /// <summary>The Prefix's decision: true skips vanilla's CheckFormationChange for this regiment; every other case runs vanilla unchanged.</summary>
         public static bool Skips(bool flagOn, bool commanderModeActive, bool canWrite, int unitTyp, int formation, bool marked)
         {
-            return flagOn && commanderModeActive && canWrite && marked &&
-                unitTyp == TacticalUnitType.Infantry && formation != ColumnDeployment.RegimentMarchColumn;
+            return Eligible(flagOn, unitTyp, formation) && commanderModeActive && canWrite && marked;
         }
     }
 

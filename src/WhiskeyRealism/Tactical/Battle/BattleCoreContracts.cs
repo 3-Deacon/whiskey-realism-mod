@@ -261,6 +261,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // Unit churn, Formation on an infantry regiment: stop its march, then re-form it to line facing the intent's heading
         // (OrderExecutorRuntime.IssueDeploy; ColumnDeployment). Vanilla re-columns a regiment that still has a path, so the stop comes first.
         Deploy = 32768,
+        // Unit churn, CombatBehavior 7 only: the artillery doctrine's cancel of a vanilla bombardment (9). It is the one write the restart memory
+        // (BattleWriterPolicy.RestartedAfterOwnCancel) reads back from the executor's outcome; the counter-battery release (8 to 7) and the ammo-conserving
+        // cease-fire are also behavior 7 from the same source and are not a cancel of a bombardment.
+        CancelsBombard = 65536,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -360,5 +364,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Retries;
         // The intent's Value when an issued write is recorded (a combat behavior, a stance, a formation index); 0 for the other outcomes.
         public int Value;
+        // The intent's flags when an issued write is recorded; None for the other outcomes.
+        public IntentFlags Flags;
     }
 }

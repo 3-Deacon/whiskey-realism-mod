@@ -37,14 +37,15 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("tactical.patch.approach-line-advance");
                 try
                 {
-                    // The cheap tests first: this runs for every regiment on every regular cycle.
-                    if (Plugin.EnableApproachLineAdvance == null || !Plugin.EnableApproachLineAdvance.Value) return true;
-                    if ((UnityEngine.Object)__instance == null || __instance.unittyp != TacticalUnitType.Infantry) return true;
+                    // The cheap tests first: this runs for every regiment on every regular cycle. Every input is the live value; ApproachLine.Eligible and
+                    // ApproachLine.Skips are the pure decision.
+                    bool flagOn = Plugin.EnableApproachLineAdvance != null && Plugin.EnableApproachLineAdvance.Value;
+                    if ((UnityEngine.Object)__instance == null) return true;
                     int formation = __instance.formation;
-                    if (formation == ColumnDeployment.RegimentMarchColumn) return true;
+                    if (!ApproachLine.Eligible(flagOn, __instance.unittyp, formation)) return true;
                     bool marked = ApproachLineTable.Shared.Contains(__instance.alliance, ((Component)__instance).gameObject.GetInstanceID(), TacticalDoctrineTime.NowBattleHours);
                     if (!marked) return true;
-                    bool skip = ApproachLine.Skips(true, TacticalWriteGuard.ModeAllowsWrites(), TacticalWriteGuard.CanWrite(__instance), __instance.unittyp, formation, marked);
+                    bool skip = ApproachLine.Skips(flagOn, TacticalWriteGuard.ModeAllowsWrites(), TacticalWriteGuard.CanWrite(__instance), __instance.unittyp, formation, marked);
                     if (skip) OnceLog.Info("tactical-approach-line:first-skip", "[ApproachLine] first re-column skipped: an AI regiment advancing or holding in line inside the assault range");
                     return !skip;
                 }

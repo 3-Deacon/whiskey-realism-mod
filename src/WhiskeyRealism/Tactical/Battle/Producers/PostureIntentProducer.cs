@@ -1791,35 +1791,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
-        // Unit churn: one row per regiment per TelemetrySeconds, the reason it was deployed from column and the bearing it was given.
-        internal static void Deploy(BattleSnapshot s, int u, ColumnDeployReason reason, float heading)
-        {
-            try
-            {
-                int id = s.Own[u].InstanceId;
-                OnceLog.Info("tactical-column-deploy:first", "[ColumnDeploy] first march column deployed: " + reason + " (stop, then line facing the threat)");
-                string signature = s.Alliance + "|" + id + "|" + reason;
-                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-column-deploy:" + s.Alliance + ":" + id, signature, Time.realtimeSinceStartup, TelemetrySeconds, false))
-                    return;
-                string unit = NameOf(s, u);
-                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalColumnDeploy", TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(s.Alliance)
-                        .WithUnit(unit)
-                        .WithDecision("ColumnDeploy", reason.ToString(), signature)
-                        .WithField("reason", reason.ToString())
-                        .WithField("targetFacing", heading)
-                        .WithField("receivedFire", s.Own[u].ReceivedFire)
-                        .WithField("fireFromFlank", s.Own[u].FireFromFlank)
-                        .WithField("outflanked", s.Own[u].Outflanked)
-                        .WithField("paths", s.Own[u].RegimentPaths));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-producer-posture:telemetry-failed", "[PostureProducer] telemetry threw: " + ex.Message);
-            }
-        }
-
         // BC11 decision 2: a refused flank of a group in combat, rotated in place (limited by vanilla's micro turn).
         internal static void RefuseInPlace(BattleSnapshot s, int i, RefuseFlank side, int rotated, int skipped)
         {
@@ -1871,15 +1842,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.facing-pulse.wake" : "tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.EnableTacticalContactFacingPulse == null || !Plugin.EnableTacticalContactFacingPulse.Value) return;
+                bool pulseOn = Plugin.EnableTacticalContactFacingPulse != null && Plugin.EnableTacticalContactFacingPulse.Value;
+                bool deployOn = pulseOn && Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value;
+                // The approach in line has its own flag and does not depend on the pulse or on the column deployment: the table is rebuilt here whenever it is on.
+                bool approachOn = Plugin.EnableApproachLineAdvance != null && Plugin.EnableApproachLineAdvance.Value;
+                if (!pulseOn && !approachOn) return;
                 PostureTick.State t = PostureTick.Current(s);
                 OrderExecutor executor = OrderExecutor.ForAlliance(s != null ? s.Alliance : -1);
                 if (t == null || executor == null || sink == null) return;
 
-                // Unit churn: a march column that is fired on or flanked deploys at once (ColumnDeployment), whether or not its brigade moved this tick.
-                // It reads the contact flags the posture producer recorded for the brigade, so it runs ahead of the group loop below, not inside it.
-                if (Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value)
-                    SubmitColumnDeployments(s, t, executor, sink);
+                // Unit churn: a march column that is fired on or flanked deploys at once (ColumnDeployment), whether or not its brigade moved this tick,
+                // and the approach table is rebuilt. Both read the contact flags and the group intent the posture producer recorded, so they run ahead of
+                // the group loop below, not inside it.
+                if (deployOn || approachOn) SubmitColumnDeployments(s, t, executor, sink, deployOn, approachOn);
+                if (!pulseOn) return;
 
                 for (int i = 0; i < s.OwnCount; i++)
                 {
@@ -1950,15 +1926,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // Rifle fire comes from inside this; a threat bearing from further away is no bearing at all.
         private const float DeployBearingReachMeters = 700f;
 
-        private static void SubmitColumnDeployments(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, IIntentSink sink)
+        private static void SubmitColumnDeployments(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, IIntentSink sink, bool deployOn, bool approachOn)
         {
             UnitRecord[] own = s.Own;
             int submitted = 0;
-            bool deployOn = Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value;
-            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass, so a switch turned off
-            // empties it and the patch runs vanilla.
-            bool approachOn = Plugin.EnableApproachLineAdvance != null && Plugin.EnableApproachLineAdvance.Value;
-            ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
+            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
+            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
             for (int u = 0; u < s.OwnCount; u++)
             {
                 ref UnitRecord rec = ref own[u];
@@ -1968,7 +1942,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
                 if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
                 bool inColumn = rec.Formation == ColumnDeployment.RegimentMarchColumn;
-                if (!deployOn && !approachOn) continue;
 
                 bool closeEngaged = false, flankRisk = false, withdrawing = (f & UnitFlags.OnRetreat) != 0;
                 // The group whose intent the regiment follows: the nearest group above it with a recorded posture.
@@ -2021,9 +1994,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
                         heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
                 }
-                sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading));
+                sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
                 submitted++;
-                PostureTelemetry.Deploy(s, u, reason, heading);
             }
         }
 

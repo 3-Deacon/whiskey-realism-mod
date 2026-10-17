@@ -25,12 +25,30 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // Brigade and 105 Regiment pulse rows, the Union side none). Pure.
     internal static class LeafPosture
     {
+        // The node id per brigade, built once: Record runs for every leaf brigade on every posture tick, so it must not concatenate a string each time.
+        private static readonly Dictionary<int, string> NodeIds = new Dictionary<int, string>();
+
+        static LeafPosture()
+        {
+            WhiskeyRealism.Util.BattleScope.Register("leaf-posture-node-ids", NodeIds.Clear);
+        }
+
+        internal static string NodeId(int groupId)
+        {
+            if (!NodeIds.TryGetValue(groupId, out string id))
+            {
+                id = "leaf-" + groupId;
+                NodeIds[groupId] = id;
+            }
+            return id;
+        }
+
         public static GroupPosture Record(DirectChildRole role, CommandTaskType task, int groupId, bool closeEngaged, bool flankRisk)
         {
             return new GroupPosture
             {
                 Has = true,
-                State = new CommandNodeOperationalState("leaf-" + groupId, CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role), task, CommandTaskState.Committed),
+                State = new CommandNodeOperationalState(NodeId(groupId), CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role), task, CommandTaskState.Committed),
                 CloseEngaged = closeEngaged,
                 FlankRisk = flankRisk,
             };
