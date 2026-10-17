@@ -52,6 +52,9 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class TacticalBattleLinePlanner
     {
+        /// <summary>The reason of a plan for a node with no position: no post at all. The posture executor holds such a node where it stands (CommandDoctrineOrder.HasNoPost).</summary>
+        public const string NoPositionReason = "battle-line-no-position";
+
         private const double MainApproachDistance = 75d;
         private const double SupportApproachDistance = 125d;
         private const double FixApproachDistance = 170d;
@@ -129,7 +132,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     DoctrineTargetPoint.None,
                     DoctrineTargetPoint.None,
                     DoctrineTargetPoint.None,
-                    "battle-line-no-position");
+                    NoPositionReason);
             }
 
             Direction direction = Direction.FromNodeToObjective(node, lineObjective);

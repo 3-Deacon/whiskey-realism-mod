@@ -48,6 +48,8 @@ namespace WhiskeyRealism.Tactical.Operations
             if (stance == BattleStance.Defender && objectiveMatched && objective.Type == TacticalObjectiveType.EnemyLine)
                 anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(objective, nodes, battlefront);
 
+            int sideBank = crossings != null && stance == BattleStance.Defender ? OwnBank.SideBank(crossings, nodes) : -1;
+
             for (int i = 0; i < nodes.Length; i++)
             {
                 CommandNodeOperationalState node = nodes[i];
@@ -80,17 +82,18 @@ namespace WhiskeyRealism.Tactical.Operations
                     reserveFraction);
                 sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
-                // A position the ledger computes stays on the node's bank unless the node's task goes to the enemy (the crossing gate decides
-                // those at write time) or the plan chose the crossing (a maneuver's via).
-                bool keepBank = crossings != null && !maneuvering && KeepsItsBank(task, stance);
+                // A position the ledger computes stays on a bank unless the node's task goes to the enemy (the crossing gate decides those at
+                // write time): the side's bank for a Defender, the bank the node stands on for the rest. A maneuver's target, which the plan
+                // chose with its crossing, replaces the primary below, after this.
+                bool keepBank = crossings != null && KeepsItsBank(task, stance);
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
                     objective.ObjectiveId,
-                    keepBank ? OwnBank.Keep(crossings, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
-                    keepBank ? OwnBank.Keep(crossings, node, linePlan.SupportTarget) : linePlan.SupportTarget,
-                    keepBank ? OwnBank.Keep(crossings, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
+                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
+                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.SupportTarget) : linePlan.SupportTarget,
+                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,
@@ -110,6 +113,14 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return orders.ToArray();
+        }
+
+        private static DoctrineTargetPoint KeepBank(ICrossingPicture crossings, int sideBank, CommandNodeOperationalState[] nodes,
+            in CommandNodeOperationalState node, DoctrineTargetPoint target)
+        {
+            return sideBank >= 0
+                ? OwnBank.KeepOnSideBank(crossings, sideBank, nodes, node, target)
+                : OwnBank.Keep(crossings, node, target);
         }
 
         // A Defender's every position stays on its bank. Any other side's tasks that go to the enemy (attack, support, fix, probe, scout, screen)

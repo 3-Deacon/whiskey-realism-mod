@@ -788,7 +788,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                     side.OperationsLedger.SetRuntimeClock(nowBattleSeconds);
                     // The ledger plans from where the side's command nodes stand and what it knows of the rivers (smoke 2026-10-17).
-                    side.OperationsLedger.SetGround(new CommandGroundRuntime(SideSnapshot(side), side.AllianceId));
+                    side.OperationsLedger.SetGround(CommandGroundRuntime.For(SideSnapshot(side), side.AllianceId));
                     side.TickOperationsLedger(
                         mode,
                         objectivesToUse,

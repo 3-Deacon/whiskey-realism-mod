@@ -5,6 +5,7 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using static TestHarness;
 
 // Smoke 2026-10-17 (CSA Defender, DelayingDefense, objective enemy-line-1): brigades were given reserve posts, assembly points and flank
@@ -36,6 +37,15 @@ internal static class DefenderGroundTests
             ("defender ground a defender's every position stays on its bank across a river", ADefendersEveryPositionStaysOnItsBank),
             ("defender ground the ledger plans from the ground it was given", TheLedgerPlansFromItsGround),
             ("defender ground the coordinator gives each side's ledger its ground before the tick and the runtime reads the side's snapshot", TheCoordinatorWiresTheGround),
+            ("defender ground a defender node that has already crossed is sent back: its reserve post, screen and fallback lie on the side's bank", ACrossedDefenderNodeIsSentBack),
+            ("defender ground the side's bank is where most placed nodes stand, and a crossed node is pulled back from the nearest bank node", TheSideBankIsWhereMostNodesStand),
+            ("defender ground a node with no position holds: its movement tasks are no move, its reserve idles, its fallback stays", ANodeWithNoPositionHolds),
+            ("defender ground an attacker's screen keeps its target across the river like its attack", AnAttackersScreenKeepsItsTarget),
+            ("defender ground a maneuver's target across the river is left to the plan and the node's fallback stays on the bank", AManeuverTargetIsLeftToThePlan),
+            ("defender ground the pull-back stops at the farthest point on the bank", ThePullBackStopsAtTheFarthestPointOnTheBank),
+            ("defender ground an own front is kept for an enemy-line objective that has an approach avenue", TheOwnFrontOverridesAnAvenueAnchor),
+            ("defender ground the position survives every copy of a state: nested division, works hold, stance guard, exploit overlay, role rewrite", ThePositionSurvivesEveryCopy),
+            ("defender ground the W&L order text gets the node's own position, or no point when the node is unplaced", ThePlayerOrderSnapshotUsesTheNodePosition),
         });
     }
 
@@ -443,11 +453,222 @@ internal static class DefenderGroundTests
     {
         string coordinator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
         FlankResponseTests.AssertPinned(coordinator,
-            "side.OperationsLedger.SetGround(new CommandGroundRuntime(SideSnapshot(side), side.AllianceId)); side.TickOperationsLedger(",
+            "side.OperationsLedger.SetGround(CommandGroundRuntime.For(SideSnapshot(side), side.AllianceId)); side.TickOperationsLedger(",
             "the ledger has its ground before its tick");
         string ground = FlankResponseTests.SourceText("Tactical", "Orchestrator", "CommandGroundRuntime.cs");
         FlankResponseTests.AssertPinned(ground, "_snapshot.IndexOfOwn(TacticalBattleCoordinator.ParseCommandNodeInstanceId(nodeId))", "the node id is the group's GameObject id, the snapshot's key");
         FlankResponseTests.AssertPinned(ground, "public ICrossingPicture Crossings => FeasibilityRuntime.CrossingPicture(_alliance);", "the same picture the crossing gate asks");
+    }
+
+    // ---- a node already across, a node with no position, and the copies ---------------------------------------------------------------
+
+    // The user's case: nodes stand on region 2 (RiverCrossingTests.Picture), the enemy line at x 300 (region 0), and one node is already across in region 1.
+    private static CommandNodeOperationalState[] NodesWithOneCrossed(int crossed, out BattlefieldPictureSnapshot enemy)
+    {
+        var roles = new[] { CommandNodeRole.Defender, CommandNodeRole.Reserve, CommandNodeRole.SupportingAttack, CommandNodeRole.FixingForce, CommandNodeRole.ScreeningForce };
+        float[] xs = { 1150f, 1250f, 1350f, 1300f, 1200f };
+        xs[crossed] = 800f;
+        var nodes = new CommandNodeOperationalState[xs.Length];
+        for (int i = 0; i < xs.Length; i++)
+            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.BrigadeLike, roles[i], CommandTaskType.FormUp, xs[i], -1000f + 60f * i, 270f);
+        enemy = EnemyLinePicture(300f, -1000f);
+        return nodes;
+    }
+
+    private static void ACrossedDefenderNodeIsSentBack()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        foreach (int crossed in new[] { 1, 4 })   // the reserve, then the screen
+        {
+            CommandNodeOperationalState[] nodes = NodesWithOneCrossed(crossed, out BattlefieldPictureSnapshot enemy);
+            AssertEqual(1, picture.RegionAt(nodes[crossed].X, nodes[crossed].Z), "the node stands across the river");
+            CommandDoctrineOrder o = Build(nodes, BattleStance.Defender, enemy, picture)[crossed];
+            AssertTrue(o.PrimaryTarget.HasValue, "node " + crossed + " has a post (" + o.Task + ")");
+            AssertEqual(2, picture.RegionAt(o.PrimaryTarget.X, o.PrimaryTarget.Z), "node " + crossed + " " + o.Task + " post is back on the side's bank (x " + o.PrimaryTarget.X + ")");
+            foreach (DoctrineTargetPoint t in Targets(o))
+                if (t.HasValue) AssertEqual(2, picture.RegionAt(t.X, t.Z), "node " + crossed + " every target is on the side's bank (x " + t.X + ")");
+        }
+    }
+
+    private static void TheSideBankIsWhereMostNodesStand()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = NodesWithOneCrossed(1, out _);
+        AssertEqual(2, OwnBank.SideBank(picture, nodes), "four of five stand in region 2");
+        AssertEqual(-1, OwnBank.SideBank(null, nodes), "no picture, no bank");
+        AssertEqual(-1, OwnBank.SideBank(new RiverCrossingTests.Picture { Ready = false }, nodes), "an unready picture, no bank");
+        AssertEqual(-1, OwnBank.SideBank(picture, EvidenceNodes(placed: false)), "no placed node, no bank");
+        // The crossed node's target across the river is pulled from the nearest bank node, never from the crossed node itself.
+        DoctrineTargetPoint across = DoctrineTargetPoint.From(700f, -940f);
+        DoctrineTargetPoint kept = OwnBank.KeepOnSideBank(picture, 2, nodes, nodes[1], across);
+        AssertEqual(2, picture.RegionAt(kept.X, kept.Z), "back on the bank (x " + kept.X + ")");
+        DoctrineTargetPoint onBank = DoctrineTargetPoint.From(1400f, -900f);
+        AssertEqual(1400f, OwnBank.KeepOnSideBank(picture, 2, nodes, nodes[1], onBank).X, "a target on the bank is kept");
+        AssertEqual(700f, OwnBank.KeepOnSideBank(picture, -1, nodes, nodes[1], across).X, "with no bank nothing is judged");
+    }
+
+    private static void ANodeWithNoPositionHolds()
+    {
+        // The order of an unplaced node, from the doctrine build.
+        CommandDoctrineOrder[] orders = Build(EvidenceNodes(placed: false), BattleStance.Defender, EnemyLinePicture(exposed: false));
+        var physical = new CommandPhysicalState(false, false, false, 0, false, 0);
+        var eligibility = new WriteEligibilitySnapshot(modeAllowsWrites: true, playerProtected: false, routed: false, orderPending: false, recentOrder: false);
+        int moving = 0;
+        foreach (CommandDoctrineOrder o in orders)
+        {
+            AssertTrue(o.HasNoPost, o.NodeId + " " + o.Task + " has no post: " + o.Reason);
+            PostureExecutionDecision d = CommandPostureExecutor.Decide(o, physical, eligibility, 10f);
+            if (o.Task == CommandTaskType.FormUp || o.Task == CommandTaskType.GuardFlank || o.Task == CommandTaskType.Screen)
+            {
+                moving++;
+                AssertEqual(PostureExecutionAction.NoWrite, d.Action, o.NodeId + " " + o.Task + " is no move");
+                AssertEqual("no-position", d.Reason, "and says why");
+            }
+        }
+
+        AssertTrue(moving >= 4, "the fixture has movement tasks (" + moving + ")");
+        // The same task with a post moves; a reserve with no post idles; a fall back keeps its target.
+        CommandDoctrineOrder placed = Build(EvidenceNodes(), BattleStance.Defender, EnemyLinePicture(exposed: false))[2];
+        AssertEqual(CommandTaskType.FormUp, placed.Task, "a placed node forms up");
+        AssertEqual(PostureExecutionAction.SetFormationAndWaypoint, CommandPostureExecutor.Decide(placed, physical, eligibility, 10f).Action, "and moves to its post");
+        CommandDoctrineOrder reserve = Build(EvidenceNodes(placed: false), BattleStance.Defender, EnemyLinePicture(exposed: false))[4];
+        AssertEqual(CommandTaskType.ReserveWait, reserve.Task, "the reserve role waits");
+        AssertEqual("legal-idle", CommandPostureExecutor.Decide(reserve, physical, eligibility, 10f).Reason, "an unplaced reserve idles");
+        CommandDoctrineOrder fall = CommandDoctrineOrder.Create("n", CommandNodeRole.Defender, CommandTaskType.FallBackToLine, "enemy-line-1",
+            DoctrineTargetPoint.None, DoctrineTargetPoint.None, DoctrineTargetPoint.None, DoctrineAllowedIdleReason.None, 0f, 0f, 0.7f, TacticalBattleLinePlanner.NoPositionReason);
+        AssertEqual(PostureExecutionAction.FallbackToLine, CommandPostureExecutor.Decide(fall, new CommandPhysicalState(false, false, true, 0, false, 0), eligibility, 10f).Action,
+            "an interrupted fall back is still recovered: the withdrawal keeps its own target");
+        AssertTrue(FlankResponseTests.SourceText("Tactical", "Operations", "TacticalBattleLinePlanner.cs").Contains("NoPositionReason"), "the planner names the reason");
+    }
+
+    private static void AnAttackersScreenKeepsItsTarget()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        var nodes = new[] { CommandNodeOperationalState.Create("n0", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, 1300f, -1000f, 90f) };
+        BattlefieldPictureSnapshot enemy = EnemyLinePicture(700f, -1000f, exposed: false);
+        CommandDoctrineOrder screen = Build(nodes, BattleStance.Attacker, enemy, picture, TacticalOperationShape.SingleMainEffort)[0];
+        AssertEqual(CommandTaskType.Screen, screen.Task, "the screening role screens");
+        AssertEqual(1, picture.RegionAt(screen.PrimaryTarget.X, screen.PrimaryTarget.Z),
+            "an attacker's screen stays out across the river; the crossing gate routes or refuses it (x " + screen.PrimaryTarget.X + ")");
+        CommandDoctrineOrder defender = Build(nodes, BattleStance.Defender, enemy, picture)[0];
+        AssertEqual(2, picture.RegionAt(defender.PrimaryTarget.X, defender.PrimaryTarget.Z), "a defender's screen stays on its bank");
+    }
+
+    private static void AManeuverTargetIsLeftToThePlan()
+    {
+        // The plan chose the crossing: the maneuver's own target (across the river) is the order's primary; the bank rule does not touch it,
+        // and it does not run after the maneuver replaced the primary.
+        var picture = new RiverCrossingTests.Picture();
+        var nodes = new[] { CommandNodeOperationalState.Create("node-7", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 1300f, -1000f, 270f) };
+        ManeuverOrder turn = new ManeuverOrder { Phase = ManeuverPhase.Turn, Task = CommandTaskType.AdvanceToAssembly, TargetX = 700f, TargetZ = -900f, Heading = 270f, Reason = "turn-to-line-end" };
+        var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", turn, 1f, 0f) }, new[] { FlankResponseTests.NodeIntent("node-7", "node-7") });
+        var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "enemy-line-1", 900f);
+        CommandDoctrineOrder o = CommandDoctrineAssignment.Build(nodes, operation, EnemyLinePicture(500f, -1000f, exposed: false), 20000f, 100f, 0.3f,
+            BattleStance.Meeting, table, false, picture)[0];
+        AssertEqual(270f, o.ManeuverHeading, "the maneuver reached the order");
+        AssertNear(700f, o.PrimaryTarget.X, 0.01f, "its target across the river is the order's primary");
+        if (o.FallbackTarget.HasValue)
+            AssertEqual(2, picture.RegionAt(o.FallbackTarget.X, o.FallbackTarget.Z), "while the node's fallback stays on its bank");
+    }
+
+    private static void ThePullBackStopsAtTheFarthestPointOnTheBank()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        var node = CommandNodeOperationalState.Create("n", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.ReserveWait, 1400f, -100f, 0f);
+        // Eighths of the way from x 1400 to x 100 are 1237, 1075, 912, ...: region 2 holds the first two, so the post is the second.
+        DoctrineTargetPoint kept = OwnBank.Keep(picture, node, DoctrineTargetPoint.From(100f, -100f));
+        AssertNear(1075f, kept.X, 1f, "the farthest point still on the bank, not the nearest");
+    }
+
+    private static void TheOwnFrontOverridesAnAvenueAnchor()
+    {
+        // An enemy-line objective whose approach avenue would anchor an intercept beyond the enemy line: the Defender still stands on its own front.
+        var avenue = TacticalApproachAvenueEstimate.Create(new TacticalMapPoint(2200f, -1100f), new TacticalMapPoint(EnemyX, EnemyZ),
+            TacticalApproachAvenueSource.VisibleEnemyLine, 0.9f, roadAnchored: false, crossingAnchored: false, "test-avenue");
+        var picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("enemy-line-1", TacticalObjectiveType.EnemyLine, 0f, 0.7f, false, 0.4f, EnemyX, EnemyZ, 0f, 0f, avenue),
+        });
+        CommandNodeOperationalState[] nodes = EvidenceNodes();
+        bool ownFront = false;
+        foreach (CommandDoctrineOrder o in Build(nodes, BattleStance.Defender, picture))
+        {
+            ownFront |= o.Reason.Contains("own-front");
+            foreach (DoctrineTargetPoint t in Targets(o))
+                if (t.HasValue) AssertTrue(AheadOfFront(nodes, t.X, t.Z) <= 1f, o.NodeId + " " + o.Task + " is ahead of the front");
+        }
+
+        AssertTrue(ownFront, "own-front despite the avenue and no enemy strength");
+    }
+
+    private static void ThePositionSurvivesEveryCopy()
+    {
+        var placed = CommandNodeOperationalState.Create("node-9", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, 12f, 34f, 90f);
+        var unplaced = new CommandNodeOperationalState("node-9", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, CommandTaskState.Committed);
+        AssertTrue(placed.WithRoleAndTask(CommandNodeRole.Reserve, CommandTaskType.ReserveWait).HasPosition, "a role rewrite keeps the position");
+        AssertFalse(unplaced.WithRoleAndTask(CommandNodeRole.Reserve, CommandTaskType.ReserveWait).HasPosition, "and an unplaced node stays unplaced");
+
+        // Works-hold guard.
+        var ctx = new WorksGuardContext { WorksHold = true, FacesWorks = true };
+        AssertTrue(WorksHoldGuard.ApplyState(in placed, ctx, out CommandNodeOperationalState held), "the works guard holds the attack");
+        AssertTrue(held.HasPosition && held.X == 12f && held.Z == 34f, "and keeps where the node stands");
+        AssertTrue(WorksHoldGuard.ApplyState(in unplaced, ctx, out CommandNodeOperationalState heldUnplaced), "the works guard holds an unplaced attack");
+        AssertFalse(heldUnplaced.HasPosition, "and does not place it");
+
+        // Stance guard.
+        CommandNodeOperationalState byStance = placed;
+        CommandDoctrineOrder noOrder = default(CommandDoctrineOrder);
+        AssertTrue(PostureStanceGuard.Apply(BattleStance.Defender, ref byStance, false, ref noOrder), "the stance guard rewrites a Defender's attack");
+        AssertTrue(byStance.HasPosition && byStance.X == 12f, "and keeps where the node stands");
+        CommandNodeOperationalState byStanceUnplaced = unplaced;
+        PostureStanceGuard.Apply(BattleStance.Defender, ref byStanceUnplaced, false, ref noOrder);
+        AssertFalse(byStanceUnplaced.HasPosition, "an unplaced node stays unplaced");
+
+        // Exploit overlay: the ledger's position, whatever the exploit's.
+        var exploit = CommandNodeOperationalState.Create("node-9", CommandEchelonKind.Unknown, CommandNodeRole.SupportingAttack, CommandTaskType.AttackObjective, 900f, 900f, 0f);
+        CommandNodeOperationalState overlaid = ExploitPosture.Overlay(placed, true, exploit, ExploitOverrideKind.Exploit);
+        AssertTrue(overlaid.HasPosition && overlaid.X == 12f && overlaid.Z == 34f, "the overlay keeps the ledger's position");
+        AssertFalse(ExploitPosture.Overlay(unplaced, true, exploit, ExploitOverrideKind.Exploit).HasPosition, "and the ledger's lack of one");
+
+        // Nested division play.
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 0, 14, "One Division", true, false, false),
+            new CommandTreeBuilder.CommandProbe(201, 100, 0, 13, "1st Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(202, 100, 0, 13, "2nd Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(203, 100, 0, 13, "3rd Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(204, 100, 0, 13, "4th Brigade", true, false, false),
+        }, 0, -1);
+        var states = new List<CommandNodeOperationalState>();
+        for (int i = 0; i < tree.Nodes.Count; i++)
+        {
+            bool placeIt = i != 2;   // one brigade stays unplaced
+            states.Add(placeIt
+                ? CommandNodeOperationalState.Create(tree.Nodes[i].NodeId, CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 100f + i, 200f + i, 0f)
+                : new CommandNodeOperationalState(tree.Nodes[i].NodeId, CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, CommandTaskState.Planning));
+        }
+
+        var nested = TacticalNestedDivisionPlayPlanner.Apply(tree, states);
+        int placedCount = 0, unplacedCount = 0;
+        for (int i = 0; i < nested.Count; i++)
+        {
+            int at = states.FindIndex(x => x.NodeId == nested[i].NodeId);
+            AssertEqual(states[at].HasPosition, nested[i].HasPosition, nested[i].NodeId + " keeps its placement through the nested division play");
+            if (nested[i].HasPosition) { placedCount++; AssertEqual(states[at].X, nested[i].X, nested[i].NodeId + " keeps its x"); }
+            else unplacedCount++;
+        }
+
+        AssertTrue(placedCount >= 3 && unplacedCount >= 1, "the fixture mixes placed and unplaced nodes (" + placedCount + "/" + unplacedCount + ")");
+    }
+
+    private static void ThePlayerOrderSnapshotUsesTheNodePosition()
+    {
+        // PlayerOrderRuntimeAdapter (runtime, excluded from the test csproj): the command-operation fallback used to hand the W&L order text
+        // the state's X/Z, which were the map origin for every node; it now gets the node's own position, or no point.
+        string adapter = FlankResponseTests.SourceText("Tactical", "PlayerOrders", "PlayerOrderRuntimeAdapter.cs");
+        FlankResponseTests.AssertPinned(adapter,
+            "state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint), state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint), army.CurrentOperation.PrimaryObjectiveId, \"command-operation\");",
+            "an unplaced node gives no point");
     }
 
     private static ObjectiveRecord EnemyLineRecord(float x, float z)
