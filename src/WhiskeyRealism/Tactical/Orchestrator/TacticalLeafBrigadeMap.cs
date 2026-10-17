@@ -384,7 +384,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             if (defenderReserve && children.Count >= 2 && nodeRole != DirectChildRole.Reserve && nodeRole != DirectChildRole.Fallback)
-                HoldBackDefenderReserve(node, children, derivedRoles, flankBuckets, geometry.Axis, reserveReport);
+                HoldBackDefenderReserve(node, children, derivedRoles, flankBuckets, geometry.Axis, anchorIndex, secondaryAnchorIndex, reserveReport);
 
             for (int idx = 0; idx < children.Count; idx++)
             {
@@ -420,7 +420,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // The Defender's reserve inside a holding command. The deployment doctrine's rule (floor(N / 3) from N = 3) sets
         // how many; the candidates are the subordinates whose cascade role is SupportMain or Fix, or a Refuse role that is not
         // at the end of the line (the cascade gives every sibling outside the support band a Refuse role, but only the outermost
-        // one guards a flank); never the anchor, a Screen or an end-of-line flank guard. Interior ones go before the two ends of
+        // one guards a flank); never the anchor (nor an envelopment's second anchor), a Screen or an end-of-line flank guard. Interior ones go before the two ends of
         // the line, the rearmost first (smallest depth along the front axis, else the later index). A command that already
         // holds some reserve counts them. A reserve is not spent for nothing: when an end of the line is exposed
         // (flank bucket at FlankExposureRefuseThreshold, the allocator's own bar) the nearest reserve goes to guard that flank
@@ -431,6 +431,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildRole[] roles,
             int[] flankBuckets,
             TacticalFrontAxis axis,
+            int anchorIndex,
+            int secondaryAnchorIndex,
             List<DefenderReserveRecord> report)
         {
             int n = children.Count;
@@ -450,6 +452,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var candidates = new List<int>(n);
                 for (int i = 0; i < n; i++)
                 {
+                    // The anchor (and an envelopment's second anchor) is the command's own main effort; it is never held back.
+                    if (i == anchorIndex || i == secondaryAnchorIndex) continue;
                     bool end = i == 0 || i == n - 1;
                     bool refuse = roles[i] == DirectChildRole.RefuseLeft || roles[i] == DirectChildRole.RefuseRight;
                     if (roles[i] == DirectChildRole.SupportMain || roles[i] == DirectChildRole.Fix || (refuse && !end)) candidates.Add(i);

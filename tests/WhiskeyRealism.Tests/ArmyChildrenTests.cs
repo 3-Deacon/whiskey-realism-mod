@@ -34,6 +34,8 @@ internal static class ArmyChildrenTests
             ("army children a holding division keeps floor(n/3) brigades in reserve, rearmost interior first", AHoldingDivisionKeepsAThirdInReserve),
             ("army children a holding division with fewer than three brigades says the numbers are thin", AHoldingDivisionWithTwoBrigadesSaysThin),
             ("army children an exposed end of a holding division draws the nearest reserve to guard the flank", AnExposedEndDrawsTheNearestReserve),
+            ("army children a Fix command keeps its own reserve", AFixParentKeepsItsOwnReserve),
+            ("army children the anchor of a holding command is never the one held back", TheAnchorIsNeverHeldBack),
             ("army children an attacking division keeps no cascade reserve", AnAttackingDivisionKeepsNoCascadeReserve),
             ("army children the orchestrator's defender leaf map keeps a reserve and rebuilds on a stance change", TheOrchestratorDefenderLeafMapKeepsAReserve),
             ("army children a division in no army is a direct child beside the army's divisions", ALooseDivisionIsADirectChildBesideTheArmysDivisions),
@@ -392,10 +394,11 @@ internal static class ArmyChildrenTests
 
     private static TacticalFrontAxis FacingPlusZ() => TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 1000f).WithOwnExtent(0f, 500f, 5);
 
-    private static IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> HoldingMap(int n, bool defender, List<DefenderReserveRecord> report, float aggression01 = 0.5f)
+    private static IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> HoldingMap(int n, bool defender, List<DefenderReserveRecord> report, float aggression01 = 0.5f,
+        DirectChildRole parentRole = DirectChildRole.Main)
     {
         var (tree, id) = DivisionOf(n);
-        return TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, aggression01,
+        return TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, parentRole) }, aggression01,
             CascadeEnvelopmentMode.None, FacingPlusZ(), null, defender, report);
     }
 
@@ -425,6 +428,40 @@ internal static class ArmyChildrenTests
         var six = HoldingMap(6, defender: true, null);
         AssertEqual(DirectChildRole.Reserve, six[104].LeafRole, "the rearmost interior brigade is in reserve");
         AssertTrue(six[100].LeafRole != DirectChildRole.Reserve && six[105].LeafRole != DirectChildRole.Reserve, "the wings keep the line's ends");
+    }
+
+    // The reserve is taken inside every holding command, not only a Main one: a Fix parent (the cascade gives its
+    // children Fix / Refuse roles) keeps floor(N/3) back too (verify V12).
+    private static void AFixParentKeepsItsOwnReserve()
+    {
+        var report = new List<DefenderReserveRecord>();
+        var map = HoldingMap(6, defender: true, report, parentRole: DirectChildRole.Fix);
+        AssertEqual(2, map.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "a Fix division of six keeps two back: "
+            + string.Join(",", map.Values.OrderBy(a => a.InstanceId).Select(a => a.InstanceId + ":" + a.LeafRole)));
+        AssertEqual(6, map.Count, "every brigade keeps an assignment");
+        AssertEqual("reserved", report[0].Reason, "and the trace says why");
+        var attacker = HoldingMap(6, defender: false, null, parentRole: DirectChildRole.Fix);
+        AssertEqual(0, attacker.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "an attacker's Fix division holds none back");
+    }
+
+    // The anchor is the command's own main effort: with a SupportMain parent, three brigades and a bold commander the
+    // anchor must not be the one held back (verify F6: anchor 101 landed in Reserve).
+    private static void TheAnchorIsNeverHeldBack()
+    {
+        foreach (var parentRole in new[] { DirectChildRole.Main, DirectChildRole.SupportMain })
+            foreach (float aggression in new[] { 0.1f, 0.5f, 0.9f })
+                foreach (int n in new[] { 3, 4, 5, 6, 9 })
+                {
+                    var map = HoldingMap(n, defender: true, null, aggression01: aggression, parentRole: parentRole);
+                    // The anchor is the one child the cascade names for the parent's own role at the narrowest band (Main under a Main
+                    // parent, the lone SupportMain under a SupportMain one); the attacker's map shows it.
+                    var narrow = HoldingMap(n, defender: false, null, aggression01: 0.1f, parentRole: parentRole);
+                    var anchors = narrow.Values.Where(a => a.LeafRole == parentRole).Select(a => a.InstanceId).ToList();
+                    AssertEqual(1, anchors.Count, "the cascade names one anchor for " + n + " brigades under " + parentRole);
+                    AssertTrue(map[anchors[0]].LeafRole != DirectChildRole.Reserve,
+                        "anchor " + anchors[0] + " is not held back (n=" + n + ", aggression " + aggression + ", parent " + parentRole + "): "
+                        + string.Join(",", map.Values.OrderBy(a => a.InstanceId).Select(a => a.InstanceId + ":" + a.LeafRole)));
+                }
     }
 
     // A flank column perceived on the right end of the line (the cascade's flank-threat input, vanilla's 0-4 scale):
