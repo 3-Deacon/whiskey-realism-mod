@@ -1494,6 +1494,22 @@ namespace WhiskeyRealism.Tactical.Operations
             };
         }
 
+        public const string ChainContestReason = "chain-contest";
+
+        /// <summary>
+        /// BC14O (requirement-historical-chain): the move Whiskey gave the group, sent again after vanilla's chain move took it elsewhere, under the group's
+        /// own task (never a hold). <see cref="IntentFlags.Contest"/> exempts it from the recent-order window and the courier cadence; like the works
+        /// contest's move it is the group restoring its standing order, so it carries no order delay.
+        /// </summary>
+        public static BattleOrderIntent ContestReissue(int groupId, float x, float z, CommandTaskType task, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = -1f, Task = task,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ChainContestReason,
+            };
+        }
+
         public static int SubmitWorksHoldStance(IIntentSink sink, int groupId, IntentPriority priority, IntentSource source, int exploitId)
         {
             if (sink == null || groupId == 0) return 0;

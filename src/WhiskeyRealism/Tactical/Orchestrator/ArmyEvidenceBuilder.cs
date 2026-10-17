@@ -306,6 +306,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// BC14O (requirement-historical-chain): the side's own AIBattle for a per-side read of its designer chains, and whether there is one.
+        /// <see cref="ResolveAiBattleForAlliance"/> hands back its caller's fallback when nothing matches, so its caller cannot tell a match;
+        /// this returns false then: no <c>sideofai</c> match, or only the feud instance (<see cref="SelectAiBattleIndexForSide"/> returns -1). Never by
+        /// array position.
+        /// </summary>
+        internal static bool TryResolveOwnAiBattle(BattleUnits bunits, int alliance, out AIBattle battle)
+        {
+            battle = null;
+            int side = ResolveSideFromAlliance(bunits, alliance);
+            if (side < 0) return false;
+            battle = ResolveOwnAiBattle(bunits, side);
+            return battle != null;
+        }
+
+        /// <summary>
         /// The AIBattle that plays <paramref name="allianceId"/>'s side: vanilla
         /// assigns aibattle[1] to the player's side, aibattle[0] to the other and
         /// aibattle[2] to the feud instance on side 0 (85203-85212, SetSide 3408).

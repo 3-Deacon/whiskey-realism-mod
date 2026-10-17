@@ -60,6 +60,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 w.Table[w.Count] = new ObjectiveEstimate
                 {
                     Id = facts[i].Id, V = v, Value = ObjectiveScoring.Value(v, facts[i].OwnHeld),
+                    Prior = IsDueChainObjective(job, facts[i].Id) ? ObjectiveScoring.HistoricalPriorWeight : 0f,
                     Hold = facts[i].OwnHeld ? ObjectiveScoring.HoldWeight * w.Pressure.H : 0f,
                     X = facts[i].X, Z = facts[i].Z, OwnHeld = facts[i].OwnHeld, EnemyHeld = facts[i].EnemyHeld, Threatened = facts[i].Threatened,
                 };
@@ -99,6 +100,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             w.BodyStrength = strength;
             w.BodyMorale = strength > 0f ? moraleSum / strength : 0f;
+        }
+
+        // The objective is the next of a designer chain that is due (the runtime read the chains): it gains the historical prior.
+        private static bool IsDueChainObjective(FeasibilityJob job, string id)
+        {
+            string[] ids = job.Input.DueChainObjectiveIds;
+            for (int i = 0; ids != null && i < job.Input.DueChainCount && i < ids.Length; i++)
+                if (string.Equals(ids[i], id, StringComparison.Ordinal)) return true;
+            return false;
         }
 
         // A child with a screen target at the previous allocation is screening a secondary objective: the main body leaves it out, as the crossing cover

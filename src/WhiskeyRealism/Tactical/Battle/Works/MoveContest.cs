@@ -4,7 +4,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle
 {
-    /// <summary>What the contest does with a held group this tick: nothing, stop it where it stands, or move it back to its hold point.</summary>
+    /// <summary>What the contest does with a group this tick: nothing, stop it where it stands, move it back to its hold point, or re-issue the move Whiskey gave it.</summary>
     public enum ContestAction
     {
         None,
@@ -12,6 +12,8 @@ namespace WhiskeyRealism.Tactical.Battle
         HoldStop,
         /// <summary>The group is farther from its hold point: a Move back to it.</summary>
         HoldMove,
+        /// <summary>BC14O: vanilla's chain move took a group away from the move Whiskey gave it under the current plan: that Move again.</summary>
+        Reissue,
     }
 
     /// <summary>One held group's tick as <see cref="MoveContest.Decide"/> reads it (spec § 7A requirement-works-hold, "One contest rule").</summary>
@@ -30,6 +32,11 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>Whiskey issued a Move to this group (or to a group its Move fanned out to) and it is recorded.</summary>
         public bool HasLastIssued;
         public float X, Z, WaypointX, WaypointZ, LastSeenX, LastSeenZ, LastIssuedX, LastIssuedZ, HoldX, HoldZ;
+        /// <summary>
+        /// BC14O (requirement-historical-chain): the chain contest applies to this group (Enable Objective Doctrine on, the group not engaged), its
+        /// task is a hold (a held group is never marched), and the move Whiskey last issued it was issued at or after the current plan began.
+        /// </summary>
+        public bool Chain, HoldTask, IssuedUnderPlan;
     }
 
     /// <summary>What the pipeline knows of a group this tick: the raw reads <see cref="MoveContestState.Evaluate"/> turns into a <see cref="ContestInput"/>.</summary>
@@ -37,6 +44,9 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         public bool Held, Recon, HasPath, HasLastIssued;
         public float X, Z, WaypointX, WaypointZ, LastIssuedX, LastIssuedZ;
+        /// <summary>BC14O: see <see cref="ContestInput.Chain"/>, <see cref="ContestInput.HoldTask"/>; the hour of the last issued move and of the plan's start, and now (doctrine hours).</summary>
+        public bool Chain, HoldTask;
+        public double LastIssuedHours, PlanStartHours, NowHours;
         /// <summary>A former fix's lane (its fix target, outside the band): its hold point, instead of where it stands at the first hold.</summary>
         public bool HasLane;
         public float LaneX, LaneZ;
@@ -56,11 +66,35 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>A waypoint this far from the last seen one, or from the move Whiskey last issued, is another move.</summary>
         public const float ContestToleranceMeters = 50f;
 
+        /// <summary>BC14O: a group is not contested again within this many doctrine hours of its last re-issue: vanilla re-sends a chain move whenever the group is idle and the head objective is due, so the contest answers once per macro cycle, not once per tick.</summary>
+        public const double ReissueMinHours = 0.05;
+
+        /// <summary>A task that holds ground: a group on one is never marched by the chain contest (it is where it was put).</summary>
+        public static bool IsHoldTask(Operations.CommandTaskType task)
+            => task == Operations.CommandTaskType.HoldObjective || task == Operations.CommandTaskType.HoldChoke || task == Operations.CommandTaskType.ReserveWait
+               || task == Operations.CommandTaskType.GuardFlank || task == Operations.CommandTaskType.Consolidate;
+
         public static ContestAction Decide(in ContestInput c)
         {
-            if (!c.Held || c.Recon || !c.HasPath || !c.WaypointInBand) return ContestAction.None;
+            if (c.Recon) return ContestAction.None;
+            if (c.Held) return DecideHeld(in c);
+            return DecideChain(in c);
+        }
+
+        private static ContestAction DecideHeld(in ContestInput c)
+        {
+            if (!c.HasPath || !c.WaypointInBand) return ContestAction.None;
             if (!c.OnsetMoving && !IsNewMove(in c)) return ContestAction.None;
             return Distance(c.X, c.Z, c.HoldX, c.HoldZ) <= OrderArbiter.DedupeMeters ? ContestAction.HoldStop : ContestAction.HoldMove;
+        }
+
+        // BC14O (requirement-historical-chain): vanilla moves a chain's group at the due hour with no stance gate and no ownership test. A group that
+        // has a Whiskey move under the current plan, whose task is not a hold, and whose waypoint has moved more than the tolerance to a point that is
+        // not that move, is sent the move again.
+        private static ContestAction DecideChain(in ContestInput c)
+        {
+            if (!c.Chain || c.HoldTask || !c.HasPath || !c.HasLastIssued || !c.IssuedUnderPlan) return ContestAction.None;
+            return IsNewMove(in c) ? ContestAction.Reissue : ContestAction.None;
         }
 
         // A snapshot waypoint more than the tolerance from the last seen one, or a path where there was none, that is not the move Whiskey last issued.
@@ -111,6 +145,19 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private readonly Dictionary<int, Memory> _groups = new Dictionary<int, Memory>(64);
 
+        // BC14O: the chain contest's memory is apart from the works hold's (a hold's onset is the first tick a group is held), per group.
+        private struct ChainMemory
+        {
+            public bool LastSeenPath;
+            public float LastSeenX, LastSeenZ;
+            public double LastReissueHours;
+        }
+
+        private readonly Dictionary<int, ChainMemory> _chains = new Dictionary<int, ChainMemory>(64);
+
+        /// <summary>BC14O: moves vanilla's chain made against a Whiskey move that the contest re-issued, since the count was last taken (TacticalMainEffort's <c>vanillaChainContest</c>).</summary>
+        public int ChainReissues;
+
         /// <summary>Contests of moves the executor did not issue (vanilla's chain move and the like), since the counts were last taken.</summary>
         public int VanillaChainContests;
         /// <summary>Contests of a march under way when the hold began.</summary>
@@ -136,9 +183,12 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!o.Held)
             {
                 _groups.Remove(groupId);
+                if (!o.Recon) return EvaluateChain(groupId, in o, out holdX, out holdZ);
+                _chains.Remove(groupId);
                 return ContestAction.None;
             }
             if (o.Recon) return ContestAction.None;
+            _chains.Remove(groupId);
 
             bool onset = !_groups.TryGetValue(groupId, out Memory m);
             if (onset)
@@ -200,6 +250,38 @@ namespace WhiskeyRealism.Tactical.Battle
             return action;
         }
 
+        // BC14O: one not-held group's chain turn. The answer's target (holdX, holdZ) is the move Whiskey last issued. A group the chain does not apply to
+        // forgets its memory; a re-issue is bounded to one per ReissueMinHours, and counted.
+        private ContestAction EvaluateChain(int groupId, in ContestObservation o, out float targetX, out float targetZ)
+        {
+            targetX = o.LastIssuedX;
+            targetZ = o.LastIssuedZ;
+            if (!o.Chain)
+            {
+                _chains.Remove(groupId);
+                return ContestAction.None;
+            }
+            if (!_chains.TryGetValue(groupId, out ChainMemory m)) m.LastReissueHours = double.NegativeInfinity;
+            var input = new ContestInput
+            {
+                Chain = true, HoldTask = o.HoldTask, HasPath = o.HasPath, HasLastIssued = o.HasLastIssued,
+                IssuedUnderPlan = o.HasLastIssued && o.LastIssuedHours >= o.PlanStartHours,
+                LastSeenPath = m.LastSeenPath, X = o.X, Z = o.Z, WaypointX = o.WaypointX, WaypointZ = o.WaypointZ, LastSeenX = m.LastSeenX, LastSeenZ = m.LastSeenZ,
+                LastIssuedX = o.LastIssuedX, LastIssuedZ = o.LastIssuedZ,
+            };
+            ContestAction action = o.NowHours - m.LastReissueHours < MoveContest.ReissueMinHours ? ContestAction.None : MoveContest.Decide(in input);
+            if (action == ContestAction.Reissue)
+            {
+                m.LastReissueHours = o.NowHours;
+                ChainReissues++;
+            }
+            m.LastSeenPath = o.HasPath;
+            m.LastSeenX = o.WaypointX;
+            m.LastSeenZ = o.WaypointZ;
+            _chains[groupId] = m;
+            return action;
+        }
+
         // groupstancename (65061): 4 = assault.
         private const int AssaultStance = 4;
 
@@ -215,10 +297,20 @@ namespace WhiskeyRealism.Tactical.Battle
             VanillaChainContests = OnsetContests = AdvancesOnWorks = BandEntries = 0;
         }
 
+        /// <summary>Reads and clears the chain re-issue count (the TacticalMainEffort row's "since the last row").</summary>
+        public int TakeChainReissues()
+        {
+            int n = ChainReissues;
+            ChainReissues = 0;
+            return n;
+        }
+
         private void Reset()
         {
             _groups.Clear();
+            _chains.Clear();
             VanillaChainContests = OnsetContests = AdvancesOnWorks = BandEntries = 0;
+            ChainReissues = 0;
         }
 
         private static void ResetAll()

@@ -76,6 +76,9 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>A side that is ahead adds this times H to a holding play (Defensive and Neutral) in the catalog's selection.</summary>
         public const float HoldBiasWeight = 0.2f;
 
+        /// <summary>A designer chain's next objective gains this once it is due: the size of half the value range, a strong hint and not an override.</summary>
+        public const float HistoricalPriorWeight = 0.3f;
+
         /// <summary>The chosen main-effort objective changes only when a rival scores this much more.</summary>
         public const float ObjectiveSwitchMargin = 0.1f;
 

@@ -58,6 +58,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return result;
         }
 
+        /// <summary>
+        /// The id (the director's own string) of a vanilla objective reference, or null when it is not one of the battle's objectives: a designer chain's
+        /// <c>objectives[0]</c> is mapped to the capture's id by reference against the cached list.
+        /// </summary>
+        public static string IdOf(Objectives objective)
+        {
+            Objectives[] refs = _objectiveRefs;
+            if (!_populated || refs == null || ReferenceEquals(objective, null)) return null;
+            for (int i = 0; i < refs.Length; i++)
+                if (ReferenceEquals(refs[i], objective)) return _objectiveIds[i];
+            return null;
+        }
+
         public static TacticalApproachAvenueObservation[] GetOrCaptureApproachAvenues(int allianceId)
         {
             if (!_populated || _battleUnits == null)

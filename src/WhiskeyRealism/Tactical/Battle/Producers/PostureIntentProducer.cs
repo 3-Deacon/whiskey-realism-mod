@@ -596,9 +596,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             // BC14W: a held group is not left to walk into the works band by a move Whiskey did not issue (vanilla's chain move, its micro cycle): the
             // contest answers a new move into the band with the hold, a Stop near the hold point or a Move back to it, at once (IntentFlags.Contest).
-            if (recordTick && Plugin.EnemyWorksDoctrineEnabled())
+            // BC14O: the same turn answers vanilla's chain move against a move Whiskey gave a group under the current plan (a re-issue, never in a hold).
+            if (recordTick && (Plugin.EnemyWorksDoctrineEnabled() || Plugin.ObjectiveDoctrineEnabled()))
             {
-                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, army, physical, priority, source, sink);
+                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, state.Task, army, physical, priority, source, sink);
                 if (contested > 0)
                 {
                     // Like every early exit, the group's posture is recorded for the producers that read it this tick (recon's ledger-task test, the
@@ -791,14 +792,19 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither
         // contested nor counted, and the answer is turned into the executor's Stop or Move. Returns the intents submitted.
         private static int WorksContest(BattleSnapshot s, int i, in UnitRecord rec, in CommandDoctrineOrder order, bool hasOrder, bool worksHeld,
-            bool worksLane, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source, IIntentSink sink)
+            bool worksLane, bool closeEngaged, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
+            IIntentSink sink)
         {
             MoveContestState contest = MoveContestState.ForAlliance(s.Alliance);
             if (contest == null) return 0;
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
-            bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out _, out _, out _);
+            double issuedHours = 0.0;
+            bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out _, out _, out issuedHours);
             float issuedX = 0f, issuedZ = 0f;
             if (hasIssued) executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out _);
+            // BC14O: a group in close contact is moved by vanilla's reactions to it (no-delay moves the executor leaves alone), not by a chain: not contested.
+            bool chain = Plugin.ObjectiveDoctrineEnabled() && !closeEngaged;
+            double nowHours = s.DoctrineHours;
             var observation = new ContestObservation
             {
                 Held = worksHeld,
@@ -808,6 +814,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 X = rec.X, Z = rec.Z, WaypointX = rec.LastWaypointX, WaypointZ = rec.LastWaypointZ,
                 HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
                 Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
+                Chain = chain, HoldTask = MoveContest.IsHoldTask(task),
+                LastIssuedHours = issuedHours, PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
             };
             ContestAction action = contest.Evaluate(rec.InstanceId, s.TickId, observation, out float holdX, out float holdZ);
             switch (action)
@@ -817,6 +825,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     return 1;
                 case ContestAction.HoldMove:
                     sink.Submit(PostureIntentPlan.ContestMove(rec.InstanceId, holdX, holdZ, priority, source));
+                    return 1;
+                case ContestAction.Reissue:
+                    sink.Submit(PostureIntentPlan.ContestReissue(rec.InstanceId, holdX, holdZ, task, priority, source));
                     return 1;
                 default:
                     return 0;

@@ -11,6 +11,8 @@ namespace WhiskeyRealism.Tactical.Battle
     // no other (FEAS-PIN-O). Never throws: a failed read leaves the input without objectives, and the shipped director stands.
     internal static class ObjectiveRuntime
     {
+        private static readonly string[][] DueChains = { new string[ManeuverFeasibility.MaxObjectives], new string[ManeuverFeasibility.MaxObjectives] };
+
         private static readonly ObjectiveFact[][] Facts =
         {
             new ObjectiveFact[ManeuverFeasibility.MaxObjectives],
@@ -24,7 +26,11 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static void Reset()
         {
-            for (int i = 0; i < Facts.Length; i++) Array.Clear(Facts[i], 0, Facts[i].Length);
+            for (int i = 0; i < Facts.Length; i++)
+            {
+                Array.Clear(Facts[i], 0, Facts[i].Length);
+                Array.Clear(DueChains[i], 0, DueChains[i].Length);
+            }
         }
 
         /// <summary>
@@ -37,6 +43,8 @@ namespace WhiskeyRealism.Tactical.Battle
             input.Objectives = null;
             input.ObjectiveCount = 0;
             input.HasClock = false;
+            input.DueChainObjectiveIds = null;
+            input.DueChainCount = 0;
             if (!Plugin.ObjectiveDoctrineEnabled() || bunits == null || alliance < 0 || alliance >= Facts.Length) return;
             try
             {
@@ -58,12 +66,20 @@ namespace WhiskeyRealism.Tactical.Battle
                 input.HasClock = true;
                 input.Objectives = facts;
                 input.ObjectiveCount = n;
+                // The side's own designer chains, from its own AIBattle (never by array position or the feud instance): the due ones' next objectives.
+                if (ArmyEvidenceBuilder.TryResolveOwnAiBattle(bunits, alliance, out AIBattle own))
+                {
+                    input.DueChainCount = ObjectiveChains.CollectDue(own.objectivechain, GameVars.currenttimefromstart, TacticalStableSceneCache.IdOf, DueChains[alliance]);
+                    input.DueChainObjectiveIds = DueChains[alliance];
+                }
             }
             catch (Exception e)
             {
                 input.Objectives = null;
                 input.ObjectiveCount = 0;
                 input.HasClock = false;
+                input.DueChainObjectiveIds = null;
+                input.DueChainCount = 0;
                 OnceLog.Warning("tactical-battle-core:objective-runtime", "[Objectives] the objectives or the victory bar could not be read, the shipped choice stands: "
                     + e.GetType().Name + " " + e.Message);
             }

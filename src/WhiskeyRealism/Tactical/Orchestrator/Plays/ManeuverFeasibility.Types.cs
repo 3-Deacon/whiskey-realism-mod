@@ -285,6 +285,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14O: the victory clock; <see cref="HasClock"/> false means no pressure (U = H = 0).</summary>
         public VictoryClock Clock;
         public bool HasClock;
+        /// <summary>BC14O: each due designer chain's next objective (the capture's id), de-duplicated: the historical prior.</summary>
+        public string[] DueChainObjectiveIds;
+        public int DueChainCount;
         /// <summary>BC14O: the children that had a screen target at the previous allocation (their strength screens a secondary objective, not the main effort's).</summary>
         public string[] ScreenChildIds;
         public int ScreenChildCount;

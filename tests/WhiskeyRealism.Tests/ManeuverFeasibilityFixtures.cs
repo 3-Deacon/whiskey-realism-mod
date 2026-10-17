@@ -209,6 +209,8 @@ internal static class ManeuverFeasibilityFixtures
         public VictoryClock? Clock;
         /// <summary>BC14O: the children that screen a secondary objective at the previous allocation.</summary>
         public readonly List<string> ScreenChildren = new List<string>();
+        /// <summary>BC14O: each due designer chain's next objective (the capture's id).</summary>
+        public readonly List<string> DueChains = new List<string>();
 
         private static FeasField _flat;
 
@@ -387,6 +389,7 @@ internal static class ManeuverFeasibilityFixtures
                 Cache = new LegCostCache(), Works = WorksPoints,
                 Objectives = Objectives.ToArray(), ObjectiveCount = Objectives.Count, Clock = Clock ?? default(VictoryClock), HasClock = Clock.HasValue,
                 ScreenChildIds = ScreenChildren.ToArray(), ScreenChildCount = ScreenChildren.Count,
+                DueChainObjectiveIds = DueChains.ToArray(), DueChainCount = DueChains.Count,
             };
         }
 
