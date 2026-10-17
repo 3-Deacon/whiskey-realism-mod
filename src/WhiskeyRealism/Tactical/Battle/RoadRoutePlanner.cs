@@ -508,41 +508,44 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // The crossings the road takes between its vias: walk the path nodes from the entry to the exit; at each change of land region (a node on a bridge
-        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the change is the crossing, in road order. More than
-        // MaxVia changes, or a change no link joins, records none.
-        private static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
+        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the stretch of road between the last land node and the
+        // first node of the new region is the crossing, in road order. A road may leave a bank and come back to it: that is two changes, both recorded.
+        // More than MaxVia changes, or a change no link joins, records none.
+        internal static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
         {
             route.LinkCount = 0;
-            int last = -1, count = 0, first = 0, second = 0;
-            float lastX = 0f, lastZ = 0f;
+            int last = -1, lastK = -1, count = 0, first = 0, second = 0;
             for (int k = entry; k <= exit; k++)
             {
                 int node = s.PathNodes[k];
-                float x = s.SnapX[node], z = s.SnapZ[node];
-                int region = crossings.RegionAt(x, z);
+                int region = crossings.RegionAt(s.SnapX[node], s.SnapZ[node]);
                 if (region < 0) continue;
                 if (last >= 0 && region != last)
                 {
-                    int link = NearestJoining(crossings, last, region, (lastX + x) * 0.5f, (lastZ + z) * 0.5f);
+                    int link = NearestJoining(s, crossings, last, region, lastK, k);
                     if (link < 0 || count == MaxVia) return;
                     if (count == 0) first = link; else second = link;
                     count++;
                 }
                 last = region;
-                lastX = x;
-                lastZ = z;
+                lastK = k;
             }
             route.LinkCount = count;
             route.Link0 = first;
             route.Link1 = second;
         }
 
-        // The link joining the two regions whose crossing point lies nearest (x, z); -1 when none joins them.
-        private static int NearestJoining(ICrossingPicture crossings, int a, int b, float x, float z)
+        // The link joining regions a and b that lies nearest the road's own stretch from path index fromK to toK (the last land node of a, the band
+        // nodes after it, the first node of b). A long run along the river band is not summed up by one point: a link on the road between the
+        // two banks is distance 0 wherever along the run it lies. Links within a metre of each other are told apart by the stretch's midpoint.
+        private static int NearestJoining(RoadRouteScratch s, ICrossingPicture crossings, int a, int b, int fromK, int toK)
         {
             Span<int> regions = stackalloc int[4];
+            int firstNode = s.PathNodes[fromK], lastNode = s.PathNodes[toK];
+            float midX = (s.SnapX[firstNode] + s.SnapX[lastNode]) * 0.5f;
+            float midZ = (s.SnapZ[firstNode] + s.SnapZ[lastNode]) * 0.5f;
             int best = -1;
-            float bestSq = float.MaxValue;
+            float bestOff = float.MaxValue, bestMid = float.MaxValue;
             for (int link = 0; link < crossings.LinkCount; link++)
             {
                 int n = Math.Min(crossings.RegionsOfLink(link, regions), regions.Length);
@@ -554,11 +557,31 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 if (!hasA || !hasB) continue;
                 crossings.LinkPoint(link, out float lx, out float lz);
-                float dx = lx - x, dz = lz - z;
-                float sq = dx * dx + dz * dz;
-                if (sq < bestSq) { bestSq = sq; best = link; }
+                float off = float.MaxValue;
+                for (int k = fromK; k < toK; k++)
+                {
+                    int n0 = s.PathNodes[k], n1 = s.PathNodes[k + 1];
+                    off = Math.Min(off, DistanceToSegment(lx, lz, s.SnapX[n0], s.SnapZ[n0], s.SnapX[n1], s.SnapZ[n1]));
+                }
+                float mdx = lx - midX, mdz = lz - midZ;
+                float mid = mdx * mdx + mdz * mdz;
+                if (off < bestOff - 1f || (off <= bestOff + 1f && mid < bestMid))
+                {
+                    best = link;
+                    bestOff = Math.Min(off, bestOff);
+                    bestMid = mid;
+                }
             }
             return best;
+        }
+
+        private static float DistanceToSegment(float px, float pz, float ax, float az, float bx, float bz)
+        {
+            float dx = bx - ax, dz = bz - az;
+            float lengthSq = dx * dx + dz * dz;
+            float t = lengthSq > 0f ? ((px - ax) * dx + (pz - az) * dz) / lengthSq : 0f;
+            t = t < 0f ? 0f : t > 1f ? 1f : t;
+            return Distance(px, pz, ax + t * dx, az + t * dz);
         }
 
         private static float Distance(float ax, float az, float bx, float bz)
