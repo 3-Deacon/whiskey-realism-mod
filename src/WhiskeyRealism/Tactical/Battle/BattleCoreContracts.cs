@@ -246,6 +246,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC10, Move only: the intent's two vias are a road route (RoadRoutePlanner: the first road entry and the last road exit). The leg between
         // them follows the road, which takes its own crossing: the crossing gate inserts no via there and only checks the crossing the leg passes.
         RoadRoute = 2048,
+        // W&L dispatch, Move only: the move re-lays a group where it was already bound (recovery of an interrupted path, a leaf
+        // brigade's move to its formation slot). It is not a new order, so the player's panel is not told of it
+        // (OrderExecutor.PlanCore step 9). (Declared here, not at the end: sibling branches append there.)
+        Maintenance = 65536,
         // BC14W, CombatBehavior only (behavior 9): the artillery doctrine starts a bombardment of the focal assault's focal point as vanilla's
         // CheckAIBombardment does (3897-3900): the behavior, then the battery's bombardposition (the intent's target) and bombardrange. The executor's
         // OrderExecutorRuntime.StartBombard is its one writer.
@@ -258,10 +262,6 @@ namespace WhiskeyRealism.Tactical.Battle
         // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
         // still applies. (4096 is the BC14W bombard start's.)
         Contest = 16384,
-        // W&L dispatch, Move only: the move re-lays a group where it was already bound (recovery of an interrupted path, a leaf
-        // brigade's move to its formation slot). It is not a new order, so the player's panel is not told of it
-        // (OrderExecutor.PlanCore step 9). (32768 is unit churn's Deploy.)
-        Maintenance = 65536,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
