@@ -204,6 +204,9 @@ internal static class ManeuverFeasibilityFixtures
         public float AssumedEnemyLateral, AssumedEnemyDepth;
         /// <summary>BC14W: the works points the side has perceived (null: none).</summary>
         public IFortificationPoints WorksPoints;
+        /// <summary>BC14O: the live objectives in the scenario frame and the victory clock (null: no clock, so no pressure).</summary>
+        public readonly List<ObjectiveFact> Objectives = new List<ObjectiveFact>();
+        public VictoryClock? Clock;
 
         private static FeasField _flat;
 
@@ -319,6 +322,10 @@ internal static class ManeuverFeasibilityFixtures
             return s;
         }
 
+        /// <summary>BC14O: a live objective at (lateral, depth); enemy-held unless <paramref name="own"/> or <paramref name="neutral"/>.</summary>
+        public void AddObjective(string id, float lateral, float depth, float points, bool own = false, bool neutral = false, bool threatened = false)
+            => Objectives.Add(new ObjectiveFact { Id = id, X = X(lateral), Z = Z(depth), Points = points, OwnHeld = own, EnemyHeld = !own && !neutral, Threatened = threatened });
+
         /// <summary>An own regiment under the army that is no direct child's (a picket): it counts in the centroid and covers ground.</summary>
         public int AddPicket(float lateral, float depth, float rotationY, float fireRange = 100f, float strength = 400f)
             => Tree.Add(TacticalUnitType.Infantry, X(lateral), Z(depth), ArmyIndex, UnitFlags.IsInfantry, strength, morale: 1f, fireRange: fireRange, rotationY: rotationY);
@@ -376,6 +383,7 @@ internal static class ManeuverFeasibilityFixtures
                 Candidates = plans, CandidateCount = plans.Length, ReachByUnitType = ShippedReachByType, HasAssumedEnemy = HasAssumedEnemy,
                 AssumedEnemyX = X(AssumedEnemyLateral), AssumedEnemyZ = Z(AssumedEnemyDepth),
                 Cache = new LegCostCache(), Works = WorksPoints,
+                Objectives = Objectives.ToArray(), ObjectiveCount = Objectives.Count, Clock = Clock ?? default(VictoryClock), HasClock = Clock.HasValue,
             };
         }
 

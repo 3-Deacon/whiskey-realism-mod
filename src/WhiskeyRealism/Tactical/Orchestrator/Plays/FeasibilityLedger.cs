@@ -16,6 +16,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary><see cref="ManeuverFeasibility.MemberEnvelops"/>, <see cref="ManeuverFeasibility.MemberFix"/> or <see cref="ManeuverFeasibility.MemberOther"/>.</summary>
         public byte Kind;
         public bool InContact;
+        /// <summary>The member stands in a Reserve or ReserveLine rect (BC14O leaves it out of the objective table's main body).</summary>
+        public bool Reserve;
         public float TargetX, TargetZ;
         public float CourierHours, MarchHours, StrikeHours, DesiredStrikeHours, ReleaseHours;
         /// <summary>A release is published for the member (a fixing member in contact has none).</summary>
@@ -290,6 +292,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         internal void BeginBack()
         {
             _back.Clear();
+            ClearObjectivesBack();
             ClearStationBack();
             _threatBackCount = 0;
             _threatBackChildren = 0;
@@ -364,6 +367,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childFrontCount = BuildChildTable(_front, _childFront);
             PublishFocal();
             PublishStation();
+            PublishObjectives();
             RefreshWorks(_worksWorld);
             CrossingThreat[] swapThreats = _threatFront;
             _threatFront = _threatBack;

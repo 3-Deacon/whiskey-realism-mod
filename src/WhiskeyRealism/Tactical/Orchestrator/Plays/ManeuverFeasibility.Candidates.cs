@@ -240,7 +240,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ChildFact child = job.Children[slot];
                 w.Members[w.MemberCount++] = new MemberEstimate
                 {
-                    ChildId = ca.ChildId, Body = bodyIndex, Kind = kind, InContact = child.InContact,
+                    ChildId = ca.ChildId, Body = bodyIndex, Kind = kind, InContact = child.InContact, Reserve = IsReserveRect(ca.RectKind),
                     TargetX = ca.RectAnchorX, TargetZ = ca.RectAnchorZ, MarchVia = -1, AttackVia = -1,
                 };
 

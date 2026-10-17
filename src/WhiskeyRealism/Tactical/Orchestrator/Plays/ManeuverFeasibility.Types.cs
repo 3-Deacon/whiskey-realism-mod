@@ -214,6 +214,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>BC14W: the child id of a column of the station's time vector; null past the last.</summary>
         string StationChildId(int column);
+
+        /// <summary>BC14O: the pressure of the victory clock at the published evaluation (U and H are the selection's urgency and hold bias).</summary>
+        ObjectivePressure Pressure { get; }
+
+        /// <summary>BC14O: the rows of the objective table.</summary>
+        int ObjectiveCount { get; }
+
+        /// <summary>BC14O: the i-th row of the objective table; false past the last.</summary>
+        bool TryObjective(int index, out ObjectiveEstimate estimate);
     }
 
     /// <summary>
@@ -267,5 +276,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public LegCostCache Cache;
         /// <summary>BC14W: the works points the side has perceived (the runtime's ObstacleLine pieces); null reads the works samples alone.</summary>
         public IFortificationPoints Works;
+        /// <summary>BC14O: the live objectives (gameObject.activeInHierarchy), at most <see cref="ManeuverFeasibility.MaxObjectives"/>; the runtime's pooled array.</summary>
+        public ObjectiveFact[] Objectives;
+        public int ObjectiveCount;
+        /// <summary>BC14O: the victory clock; <see cref="HasClock"/> false means no pressure (U = H = 0).</summary>
+        public VictoryClock Clock;
+        public bool HasClock;
     }
 }

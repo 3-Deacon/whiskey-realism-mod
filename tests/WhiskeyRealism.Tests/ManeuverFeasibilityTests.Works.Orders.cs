@@ -68,6 +68,11 @@ internal static partial class ManeuverFeasibilityTests
             return HasStation;
         }
         public string StationChildId(int column) => column >= 0 && column < StationIds.Length ? StationIds[column] : null;
+
+        // BC14O: no objective table.
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => default(WhiskeyRealism.Tactical.Battle.ObjectivePressure);
+        public int ObjectiveCount => 0;
+        public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate) { estimate = default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate); return false; }
     }
 
     // An army with two corps (child-2, child-3), each with one brigade (node-10 under node-2, node-20 under node-3).

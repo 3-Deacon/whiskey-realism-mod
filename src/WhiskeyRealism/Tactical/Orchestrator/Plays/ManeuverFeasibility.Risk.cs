@@ -296,33 +296,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 float sigma = assault ? WorksRules.AssaultHours : SupportHours(job, members, bodies, j);
                 b.SupportHours = sigma;
                 b.ExposureWindowHours = Math.Max(0f, latest - strikeHours[j]) + sigma;
-                b.EnemyShiftHours = ShiftHours(job, in b, holdsAgainstWorks);
-
-                // 3. the enemy against this body (a holding fix against works: the enemy outside works only).
-                float scale = enemy.P > 0f ? enemy.N / enemy.P : 0f;
-                float pool = enemy.N;
-                float local;
-                if (holdsAgainstWorks)
-                {
-                    pool = enemy.P > 0f ? enemy.N * enemy.POpen / enemy.P : 0f;
-                    local = enemy.NearOpen(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale;
-                    b.EnemyOpen = pool;
-                }
-                else local = enemy.P > 0f ? enemy.Near(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale : enemy.N / (bodies.Length + 1);
-                b.LocalEnemy = local;
-                float share = ShiftShare(b.ExposureWindowHours, b.EnemyShiftHours);
-                b.EnemyAgainst = local + share * Math.Max(0f, pool - pin - local);
-
-                // 4. the isolated odds: the main body fights from its ground, a wing or a works assault attacks.
-                b.OwnRatio = b.Main && !assault ? MainOwnRatio(job, in b) : 1f;
-                b.IsolatedOdds = b.EnemyAgainst > 0f
-                    ? b.Strength * b.Morale * b.OwnRatio / (b.EnemyAgainst * enemy.Morale)
-                    : EnemyVisibleSector.MaxKnowableOdds;
-
-                // 5. and 6. the bar and the penalty.
-                b.BarUsed = assault ? WorksRules.WorksOddsFactor * bar : bar;
-                b.Detail = DetailPenalty(b.IsolatedOdds, b.BarUsed);
+                PriceDetail(job, ref b, pin, assault, holdsAgainstWorks, b.Main && !assault ? MainOwnRatio(job, in b) : 1f, bar, bodies.Length);
             }
+        }
+
+        /// <summary>
+        /// Steps 3 to 6 of requirement-detail-risk for one body whose pin, support time and exposure window are set: the enemy's shift time to its
+        /// strike point, the enemy against it, the isolated odds at <paramref name="ownRatio"/>, and the detail penalty against the bar. Shared by a
+        /// candidate's bodies and by BC14O's objective table (the main body against an objective).
+        /// </summary>
+        internal static void PriceDetail(FeasibilityJob job, ref BodyEstimate b, float pin, bool assault, bool holdsAgainstWorks, float ownRatio, float bar,
+            int bodyCount)
+        {
+            EnemyPicture enemy = job.Enemy;
+            b.EnemyShiftHours = ShiftHours(job, in b, holdsAgainstWorks);
+
+            // 3. the enemy against this body (a holding fix against works: the enemy outside works only).
+            float scale = enemy.P > 0f ? enemy.N / enemy.P : 0f;
+            float pool = enemy.N;
+            float local;
+            if (holdsAgainstWorks)
+            {
+                pool = enemy.P > 0f ? enemy.N * enemy.POpen / enemy.P : 0f;
+                local = enemy.NearOpen(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale;
+                b.EnemyOpen = pool;
+            }
+            else local = enemy.P > 0f ? enemy.Near(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale : enemy.N / (bodyCount + 1);
+            b.LocalEnemy = local;
+            float share = ShiftShare(b.ExposureWindowHours, b.EnemyShiftHours);
+            b.EnemyAgainst = local + share * Math.Max(0f, pool - pin - local);
+
+            // 4. the isolated odds: the main body fights from its ground, a wing or a works assault attacks.
+            b.OwnRatio = ownRatio;
+            b.IsolatedOdds = b.EnemyAgainst > 0f
+                ? b.Strength * b.Morale * b.OwnRatio / (b.EnemyAgainst * enemy.Morale)
+                : EnemyVisibleSector.MaxKnowableOdds;
+
+            // 5. and 6. the bar and the penalty.
+            b.BarUsed = assault ? WorksRules.WorksOddsFactor * bar : bar;
+            b.Detail = DetailPenalty(b.IsolatedOdds, b.BarUsed);
         }
 
         // The own ratio of a main body that fixes and holds: BaseDefenseRatio + TerrainStrength at its highest-priority fixing member's anchor on

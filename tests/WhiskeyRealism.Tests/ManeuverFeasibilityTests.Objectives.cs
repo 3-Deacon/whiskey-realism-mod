@@ -11,5 +11,8 @@ internal static partial class ManeuverFeasibilityTests
     static partial void AddObjectiveTests(List<(string, Action)> into)
     {
         into.AddRange(ObjectiveValueTests());     // ManeuverFeasibilityTests.Objectives.Value.cs (task 1)
+        into.AddRange(ObjectivePressureTests());  // ManeuverFeasibilityTests.Objectives.Pressure.cs (task 2)
+        into.AddRange(ObjectiveTableTests());     // ManeuverFeasibilityTests.Objectives.Table.cs (task 2)
+        into.AddRange(ObjectivePinTests());       // ManeuverFeasibilityTests.Objectives.Pin.cs (task 2)
     }
 }

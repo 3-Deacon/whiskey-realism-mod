@@ -386,6 +386,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Candidates = st.Candidates, CandidateCount = candidates, Crest = evidence.CrestLine, ReachByUnitType = _reach,
                 HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache, Works = works,
             };
+            // BC14O: the live objectives and the victory clock, once per evaluation (the monitor's one-candidate run prices no objectives).
+            if (withCandidates) ObjectiveRuntime.Fill(bunits, st.Alliance, snapshot, (float)input.DaylightHours, ref input);
         }
 
         // The direct children in the army's own order (the order the allocator, the threats' per-child times and the ledger's rows share).

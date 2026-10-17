@@ -91,6 +91,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         internal bool HasFocal;
         internal FocalPoint Focal;
+        /// <summary>BC14O: the objective table of this evaluation (the rows, the main body they are priced for, the pressure of the clock).</summary>
+        internal readonly ObjectiveWork Objectives = new ObjectiveWork();
         private readonly LegCostCache _ownCache = new LegCostCache();
 
         internal readonly ChildFact[] Children = new ChildFact[ManeuverFeasibility.MaxChildren];
@@ -189,6 +191,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             PrepareChildren();
             ManeuverFeasibility.BeginDefender(this);
             ManeuverFeasibility.BuildWorks(this);
+            ManeuverFeasibility.BeginObjectives(this);
             WorkUnits = 0;
             MaxUnitCost = 0;
             ledger.BeginBack();
@@ -221,6 +224,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 NextCandidate++;
                 doneThisCall++;
             }
+            // BC14O: the objective table, after the candidates (the selected plan's reserve rect is known), one row at a time.
+            ManeuverFeasibility.PrepareObjectiveBody(this);
+            while (!Objectives.Done)
+            {
+                if (doneThisCall > 0 && clock != null && clock() >= deadlineTicks) return false;
+                ManeuverFeasibility.StepObjective(this);
+                doneThisCall++;
+            }
+            ledger.SetObjectivesBack(Objectives.Table, Objectives.Count, in Objectives.Pressure);
             ledger.SetFocalBack(HasFocal, in Focal);
             ledger.SetLooksBack(Defender.LookLinks, Defender.LookCount);     // the picture is candidate-independent: published with every evaluation
             ledger.SetStationBack(Defender.HasStation, in Defender.Station, Defender.StationShift, Defender.StationChildCount, Input.ChildIds);
