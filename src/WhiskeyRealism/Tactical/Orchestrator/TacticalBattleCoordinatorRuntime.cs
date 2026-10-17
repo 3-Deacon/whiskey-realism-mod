@@ -1957,9 +1957,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int dStance = -1;
                     string dReason = null;
                     string doctrineNodeId = null;
+                    CommandTaskType doctrineTask = CommandTaskType.None;
                     if (macro != 3 && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
                     {
                         doctrineNodeId = order.NodeId;
+                        doctrineTask = order.Task;
                         DoctrineStanceDecision dDec = DoctrineConsumerDecisions.DecideStance(
                             order,
                             DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
@@ -1989,7 +1991,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         chargeDenialOn,
                         orchestratorArmyOn,
                         doctrineAction,
-                        chargeDenialOn && !orchestratorArmyOn && localReactionsOn && LegacyReactionDeniesCharge(instanceId)));
+                        chargeDenialOn && !orchestratorArmyOn && localReactionsOn && LegacyReactionDeniesCharge(instanceId),
+                        fixEnemyTask: doctrineTask == CommandTaskType.FixEnemy));
                     ChargeOverrideAction chargeAction = ifAssault.Demotes
                         ? ChargeOverrideAction.DemoteToHold
                         : ChargeOverrideAction.PreserveVanilla;
