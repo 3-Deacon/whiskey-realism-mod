@@ -86,6 +86,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float MainBodyShare = 0.5f;
         public const float AttackBiasBalanceScale = 0.5f;
         public const float OddsDeadband = 0.10f;          // ratio units below RequiredRatio (F1)
+        public const float SameTargetRadius = 1f;          // two target records closer than this are one target (the latch's identity)
         public const float CapitalThreatRelease = 0.4f;   // the latch re-arms below this (F2)
         public const int MaxTraceCandidates = 12;
         // Vanilla refuses to march a formation of readiness step 0 or 1 onto enemy ground: SetWaypoint returns without a waypoint and
@@ -234,8 +235,15 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainEnemyStrength = m.Enemy;
                 // F1 (verify round 1): once a decision's target has been scouted it stays scouted for that decision, so a march released on
                 // a fresh picture is not pulled back to a start line when the belief decays; a new decision starts unscouted.
-                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial;
-                if (m.Scouted) state.ScoutedDecision = state.DecisionSerial;
+                // Smoke 2026-10-17: the latch is for the scouted record. A retarget to another record of the same objective (same decision, switch=hold)
+                // starts unscouted.
+                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial && IsScoutedTarget(state, m.X, m.Z);
+                if (m.Scouted)
+                {
+                    state.ScoutedDecision = state.DecisionSerial;
+                    state.ScoutedTargetX = m.X;
+                    state.ScoutedTargetZ = m.Z;
+                }
                 plan.MainScouted = m.Scouted || plan.MainScoutLatched;
                 plan.MainStaged = !plan.MainScouted;
                 // D3: the capacity the odds were judged on, then the part of it the objective needs.
@@ -265,6 +273,14 @@ namespace WhiskeyRealism.Strategic.Planner
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
+        }
+
+        // Whether (x, z) is the objective record the latch was recorded for, or none was recorded (a file written before the field: the
+        // latch then speaks for the decision's target as it did).
+        private static bool IsScoutedTarget(PlannerState state, float x, float z)
+        {
+            if (float.IsNaN(state.ScoutedTargetX) || float.IsNaN(state.ScoutedTargetZ)) return true;
+            return Math.Abs(state.ScoutedTargetX - x) <= SameTargetRadius && Math.Abs(state.ScoutedTargetZ - z) <= SameTargetRadius;
         }
 
         // D1: an unscouted main effort assembles where an own formation already stands: the forward-most member of the selected mass

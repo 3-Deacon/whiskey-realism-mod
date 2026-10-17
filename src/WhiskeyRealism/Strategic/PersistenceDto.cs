@@ -99,6 +99,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("reinforcementDecision")] public int ReinforcementDecision = -1;
         // The decision whose main objective was seen scouted (a march released on a fresh picture is not re-staged); absent: -1.
         [JsonProperty("scoutedDecision")] public int ScoutedDecision = -1;
+        // The target record that decision was scouted at (the latch does not speak for another record of the same objective); absent: not recorded.
+        [JsonProperty("scoutedTargetX")] public float? ScoutedTargetX;
+        [JsonProperty("scoutedTargetZ")] public float? ScoutedTargetZ;
         [JsonProperty("departments")] public List<DepartmentDto> Departments = new List<DepartmentDto>();
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;

@@ -638,6 +638,8 @@ internal static class CensusRows
         "TheaterPlan.MainScouted | P/TheaterPlanner.cs | D1 [CampaignPlan] scouted=",
         "TheaterPlan.MainScoutLatched | P/TheaterPlanner.cs | F1 [CampaignPlan] scouted=latched",
         "PlannerState.ScoutedDecision | P/TheaterPlanner.cs | F1 TheaterPlanner.Plan (a scouted decision is not re-staged)",
+        "PlannerState.ScoutedTargetX | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
+        "PlannerState.ScoutedTargetZ | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
         "TheaterPlan.MainStaged | P/ForceAllocator.cs, P/CampaignMover.cs | D1 ForceAllocator.MainTarget (the start line); CampaignMover (a gathering is not a march)",
         "TheaterPlan.StartLineX | P/ForceAllocator.cs | D1 ForceAllocator.MainTarget",
         "TheaterPlan.StartLineZ | P/ForceAllocator.cs | D1 ForceAllocator.MainTarget",
