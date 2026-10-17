@@ -19,6 +19,7 @@ internal static class UnitChurnTests
             ("unit-churn FIX-ASSAULT a fixing force vanilla escalated to assault is taken back to the attack stance its task maps to", FixingForceAssaultIsDemotedToAttack),
             ("unit-churn FIX-ASSAULT-HOLD the demotion's hold is not given away by the scorer's own claim, so stance 3 and 4 do not alternate", FixDemotionHoldIsNotGivenAway),
             ("unit-churn FIX-ASSAULT-WIRING the coordinator hands the doctrine order's task to the denial", FixAssaultWiring),
+            ("unit-churn FIX-ASSAULT-DIVISION a pool division at assault is demoted too: its stance order cascades to the leaf brigades under it, and the stance writer refuses a leaf brigade", FixAssaultReachesTheDivision),
             ("unit-churn COLUMN-DEPLOY a march-column infantry regiment fired on, flanked or engaged deploys at once; a regiment in line, mounted, withdrawing or routed does not", ColumnDeployDecision),
             ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
             ("unit-churn COLUMN-DEPLOY-WIRING the executor stops the march, then re-forms to line facing the threat; the pulse producer submits it behind its flag", ColumnDeployWiring),
@@ -228,5 +229,46 @@ internal static class UnitChurnTests
         FlankResponseTests.AssertPinned(produce, "IntentSource.Withdrawal", "as well as the withdrawal producer's");
         string plugin = FlankResponseTests.SourceText("Plugin.cs");
         FlankResponseTests.AssertPinned(plugin, "\"Enable Column Deployment\"", "the flag is declared");
+    }
+
+    // The 2026-10-17 smoke's brigades were leaf brigades: TacticalStanceWriter refuses a group that is not in the AI pool (FindOwningAiBattle: unitsused only,
+    // "not-ai-group"), and their stance was their division's, delivered as a stance order that vanilla applies to the advised group and every unit on its
+    // level (BattleUnits order processing 125390: PerformActionForGroupForAllUnitsOnLevel "SetAIStance"). The 3rd Division sat at 4 from 18:51 and its brigades
+    // took the 4 when the courier order arrived (19:00:09-10). The charge demotion therefore has to reach a pool division; #45's scorer stays brigade-only.
+    private static void FixAssaultReachesTheDivision()
+    {
+        AssertTrue(TacticalDoctrineScorer.AllowsChargeDemotion(TacticalUnitType.BattleGroupBrigade), "a brigade");
+        AssertTrue(TacticalDoctrineScorer.AllowsChargeDemotion(TacticalUnitType.BattleGroupDivision), "a division");
+        AssertFalse(TacticalDoctrineScorer.AllowsChargeDemotion(TacticalUnitType.BattleGroupArmy), "not the army");
+        AssertFalse(TacticalDoctrineScorer.AllowsChargeDemotion(TacticalUnitType.Infantry), "not a regiment");
+        AssertFalse(TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(TacticalUnitType.BattleGroupDivision), "the scorer stays brigade-only");
+
+        var division = new UnitRecord { InstanceId = 31, UnitTyp = TacticalUnitType.BattleGroupDivision, AiStanceOrdered = 4, AiStance = 4, ParentIndex = -1,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup };
+        var resolved = new TacticalResolvedGroupDecision(3, TacticalDoctrineDecisionKind.Skip, "charge-demote-fix", false, false, true, ChargeOverrideAction.DemoteToHold);
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(division, resolved, out BattleOrderIntent intent), "a division at assault gets the demotion intent");
+        AssertEqual(3, intent.Value, "stance 3");
+        AssertEqual(IntentSource.ChargeDemotion, intent.Source, "from the charge demotion");
+        UnitRecord army = division;
+        army.UnitTyp = TacticalUnitType.BattleGroupArmy;
+        AssertFalse(TacticalChargeDenial.TryDemotionIntent(army, resolved, out _), "an army does not");
+        UnitRecord notAssault = division;
+        notAssault.AiStanceOrdered = 3;
+        AssertFalse(TacticalChargeDenial.TryDemotionIntent(notAssault, resolved, out _), "a division not at assault does not");
+
+        string coordinator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
+        string loop = FlankResponseTests.Between(coordinator, "bool localStanceWriter = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(", "int vanillaOrdered = own[i].AiStanceOrdered;");
+        FlankResponseTests.AssertPinned(loop, "TacticalDoctrineScorer.AllowsChargeDemotion(", "a pool division is visited for its charge answer");
+        FlankResponseTests.AssertPinned(coordinator, "CacheDivisionChargeAnswer(", "which caches only the charge answer, a Skip");
+        string divisionCache = FlankResponseTests.Between(coordinator, "private static void CacheDivisionChargeAnswer(", "private static void PopulateResolvedDecisionsForSide(");
+        FlankResponseTests.AssertPinned(divisionCache, "|| order.Task != CommandTaskType.FixEnemy) return;", "for a FixEnemy doctrine order and no other task");
+        FlankResponseTests.AssertPinned(divisionCache, "kind: TacticalDoctrineDecisionKind.Skip", "never an Apply: #45 writes no division stance");
+        FlankResponseTests.AssertPinned(divisionCache, "chargeAction: ChargeOverrideAction.DemoteToHold", "only the demotion");
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "GroupStanceIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp)", "and the scorer's producer still skips a division");
+        string demotion = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ChargeDemotionIntentProducer.cs");
+        int pool = demotion.IndexOf("if (!ArmyPostureInputsRuntime.InAiPool(alliance, own[i].InstanceId)) continue;", StringComparison.Ordinal);
+        int resolve = demotion.IndexOf("GroupStanceIntentProducer.TryResolvedDecision(", StringComparison.Ordinal);
+        AssertTrue(pool >= 0 && resolve > pool, "the demotion is submitted for a pool group only: the writer refuses a leaf brigade (not-ai-group), whose stance is its ancestor's");
     }
 }

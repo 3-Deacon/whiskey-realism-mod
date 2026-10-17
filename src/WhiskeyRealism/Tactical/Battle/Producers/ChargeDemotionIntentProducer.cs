@@ -55,6 +55,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
                     if (own[i].AiStanceOrdered != TacticalCommandTaskToStanceMapper.StanceAssault) continue;
+                    // TacticalStanceWriter writes only groups in the AI pool (AIBattle.unitsused) and refuses any other as not-ai-group: a leaf brigade's
+                    // stance is its pool ancestor's, delivered by order, so the demotion is submitted for the ancestor and not for the leaf.
+                    if (!ArmyPostureInputsRuntime.InAiPool(alliance, own[i].InstanceId)) continue;
                     if (!GroupStanceIntentProducer.TryResolvedDecision(snapshot, i, out TacticalResolvedGroupDecision resolved)) continue;
                     if (!TacticalChargeDenial.TryDemotionIntent(own[i], resolved, out BattleOrderIntent intent)) continue;
                     sink.Submit(intent);

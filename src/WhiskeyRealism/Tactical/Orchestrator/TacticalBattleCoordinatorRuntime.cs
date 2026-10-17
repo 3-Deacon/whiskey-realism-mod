@@ -1858,6 +1858,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // All reflection/Unity-API calls are try/catch guarded; on any
         // failure the per-group entry is skipped (no intent for it).
 
+        // Unit churn: a division whose doctrine order is FixEnemy and that vanilla escalated to assault (4240) is taken back to the attack stance its task
+        // maps to. The entry is a Skip carrying the charge answer alone: the scorer's producer does not visit a division, and the demotion producer
+        // reads this entry only for a group at assault. A leaf brigade under the division takes the division's stance by order.
+        private static void CacheDivisionChargeAnswer(Dictionary<int, TacticalResolvedGroupDecision> cache, Regiment group, int instanceId, int vanillaOrdered,
+            int macro, bool chargeDenialOn, bool orchestratorArmyOn)
+        {
+            if (macro == 3 || !TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out _) || order.Task != CommandTaskType.FixEnemy) return;
+            ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
+                chargeDenialOn, orchestratorArmyOn, DoctrineConsumerAction.Observe, false, fixEnemyTask: true));
+            if (!ifAssault.Demotes) return;
+            cache[instanceId] = new TacticalResolvedGroupDecision(
+                finalStance: ifAssault.DemoteStance,
+                kind: TacticalDoctrineDecisionKind.Skip,
+                reason: ifAssault.Reason,
+                fromDoctrine: true,
+                fromLedger: false,
+                isChargeOverride: vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault,
+                chargeAction: ChargeOverrideAction.DemoteToHold);
+        }
+
         private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle,
             Battle.BattleSnapshot snapshot, EnemyVisibleState enemyVisible)
         {
@@ -1911,7 +1931,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int fallbackBand = ArmyEvidenceBuilder.DefaultMainEffortSector(enemyVisible.FrontAxis);
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
-                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp)) continue;
+                    bool localStanceWriter = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp);
+                    if (!localStanceWriter && !TacticalDoctrineScorer.AllowsChargeDemotion(own[i].UnitTyp)) continue;
                     var group = Battle.BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
                     if ((UnityEngine.Object)group == null) continue;
 
@@ -1934,6 +1955,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             fromLedger: false,
                             isChargeOverride: false,
                             chargeAction: ChargeOverrideAction.None);
+                        continue;
+                    }
+
+                    // A pool division has the charge answer only (unit churn): never a stance of #45's own.
+                    if (!localStanceWriter)
+                    {
+                        CacheDivisionChargeAnswer(cache, group, instanceId, own[i].AiStanceOrdered, macro, chargeDenialOn, orchestratorArmyOn);
                         continue;
                     }
 

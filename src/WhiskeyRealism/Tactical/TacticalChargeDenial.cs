@@ -113,7 +113,7 @@ namespace WhiskeyRealism.Tactical
         internal static bool TryDemotionIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
         {
             intent = default(BattleOrderIntent);
-            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
+            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsChargeDemotion(group.UnitTyp)) return false;
             if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
             if (group.AiStanceOrdered != TacticalCommandTaskToStanceMapper.StanceAssault) return false;
             if (resolved.ChargeAction != ChargeOverrideAction.DemoteToHold) return false;
