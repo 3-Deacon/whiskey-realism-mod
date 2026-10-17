@@ -68,7 +68,8 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static BattleUI Bui(BattleUnits units)
+        /// <summary>The battle UI of a BattleUnits (its private bui field), null when unreadable; BC14W reads its obstaclelines and the deployment flag.</summary>
+        internal static BattleUI Bui(BattleUnits units)
         {
             if (!_resolved)
             {

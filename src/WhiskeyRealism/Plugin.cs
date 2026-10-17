@@ -76,6 +76,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
         internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
         internal static ConfigEntry<bool> EnableManeuverFeasibility;
+        internal static ConfigEntry<bool> EnableEnemyWorksDoctrine;
         internal static ConfigEntry<bool> EnableCrossingMoveGate;
 
         /// <summary>Tactical / Enable Crossing Move Gate (a doctrine move whose straight leg crosses a river takes a crossing the side knows, or is not made).</summary>
@@ -124,6 +125,16 @@ namespace WhiskeyRealism
         internal static bool ManeuverFeasibilityEnabled()
         {
             try { return EnableManeuverFeasibility != null && EnableManeuverFeasibility.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Tactical / Enable Enemy Works Doctrine (BC14W: the works picture, turn-first pricing, the works hold, FocalAssault with the bombard start,
+        /// the Defender's works station). True only with Enable Maneuver Feasibility also on: the slice reads the core's ledger.
+        /// </summary>
+        internal static bool EnemyWorksDoctrineEnabled()
+        {
+            try { return ManeuverFeasibilityEnabled() && EnableEnemyWorksDoctrine != null && EnableEnemyWorksDoctrine.Value; }
             catch { return false; }
         }
 
@@ -727,6 +738,15 @@ namespace WhiskeyRealism
                 "march on a synchronized release, inside a time budget, through a chosen crossing; a broken assumption replans; a Defender " +
                 "sends a reserve to guard a crossing the enemy can reach first. Off: plans are picked and executed as before, and Enable " +
                 "Enemy Works Doctrine and Enable Objective Doctrine act as off.");
+            EnableEnemyWorksDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Enemy Works Doctrine",
+                true,
+                "Default ON. BC14W: against enemy works the AI has seen (soldiers behind parapets, breastworks, walls or sunken roads, and " +
+                "entrenchment pieces once perceived), the army turns an open end of the works first and leaves a force holding in front; when " +
+                "no turn will do, a willing commander assaults the works' focal point (a salient or a junction) in march column after a " +
+                "bombardment, and an unwilling one holds instead of ordering a hopeless assault. A Defender in works keeps a reserve behind its " +
+                "most threatened point. Needs Enable Maneuver Feasibility. Off: works are priced as open ground, no works assault and no hold.");
             EnableCrossingMoveGate = Config.Bind(
                 "Tactical",
                 "Enable Crossing Move Gate",
