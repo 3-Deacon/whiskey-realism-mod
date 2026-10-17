@@ -278,7 +278,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) return;
             if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) return;
             if (leaf.LeafTask == CommandTaskType.None) return;
-            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
+            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits, leafMap);
         }
 
         // AI-controlled command groups: Active, not player-owned (spec §3).
@@ -290,7 +290,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // #61 TryApplyLeafBrigade + ApplyLeafBrigadePosture (B-leaf, BR-M1).
         private static void ProduceLeaf(BattleSnapshot s, PostureTick.State t, int i, TacticalLeafBrigadeMap.LeafAssignment leaf,
-            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits)
+            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap)
         {
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[i];
@@ -316,21 +316,31 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             catch { /* NoOpportunity keeps the ledger task */ }
             CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, leaf.WorksHeld, out string overrideReason);
 
-            // Arrival synchronization: a Main brigade on AttackObjective waits as
-            // Screen for its SupportMain siblings (TacticalMainArrivalSynchronizer).
+            // A Main brigade on AttackObjective advances only with its flanks covered (MainFlankGuard): while one is exposed and no guard is assigned to it
+            // nor does it rest on impassable terrain, the brigade holds where it stands. Then arrival synchronization: it waits as Screen for its SupportMain
+            // siblings (TacticalMainArrivalSynchronizer).
             if (task == CommandTaskType.AttackObjective && leaf.LeafRole == DirectChildRole.Main)
             {
-                float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
-                CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
-                if (holding)
+                if (army.CurrentBattleStance != BattleStance.Defender && FlankHolding(s, i, leafMap, out string flankReason))
                 {
-                    task = held;
-                    if (overrideReason == null) overrideReason = arrivalReason;
+                    task = CommandTaskType.HoldObjective;
+                    if (overrideReason == null) overrideReason = flankReason;
+                }
+                else
+                {
+                    float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
+                    CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
+                    if (holding)
+                    {
+                        task = held;
+                        if (overrideReason == null) overrideReason = arrivalReason;
+                    }
                 }
             }
             else
             {
                 _mainArrivalHold.Remove(id);
+                _flankHold.Remove(id);
             }
 
             // BC9 stance guard: a Defender's leaf brigade gets no Probe or attack task.
@@ -401,6 +411,75 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return resolved;
         }
 
+        // The Main brigade's flanks (MainFlankGuard): the friendly brigades beside it across the front axis, by the leaf map's roles, and whether either end
+        // of its line rests on a river. The hold has hysteresis on the doctrine clock; a change of the hold is one TacticalFlankGuardHold row.
+        private static readonly Dictionary<int, MainFlankGuard.HoldState> _flankHold = new Dictionary<int, MainFlankGuard.HoldState>();
+        private static readonly List<MainFlankGuard.Neighbour> _flankNeighbours = new List<MainFlankGuard.Neighbour>(16);
+
+        private static bool FlankHolding(BattleSnapshot s, int mainIndex, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, out string reason)
+        {
+            reason = null;
+            UnitRecord[] own = s.Own;
+            int id = own[mainIndex].InstanceId;
+            TacticalFrontAxis axis = s.FrontAxis;
+            if (!axis.IsValid || leafMap == null)
+            {
+                _flankHold.Remove(id);
+                return false;
+            }
+
+            float mx = own[mainIndex].X, mz = own[mainIndex].Z;
+            float mainLateral = axis.LateralOf(mx, mz);
+            _flankNeighbours.Clear();
+            for (int k = 0; k < s.OwnCount; k++)
+            {
+                if (k == mainIndex || own[k].UnitTyp != TacticalUnitType.BattleGroupBrigade) continue;
+                if ((own[k].Flags & UnitFlags.Alive) == 0 || PostureSense.Routed(own[k])) continue;
+                DirectChildRole role;
+                if (leafMap.TryGetValue(own[k].InstanceId, out TacticalLeafBrigadeMap.LeafAssignment la)) role = la.LeafRole;
+                else if ((own[k].Flags & UnitFlags.PlayerOwned) != 0) role = DirectChildRole.Fix; // a player-owned brigade on the line is a neighbour
+                else continue;
+                _flankNeighbours.Add(new MainFlankGuard.Neighbour(axis.LateralOf(own[k].X, own[k].Z) - mainLateral, role));
+            }
+
+            TerrainPicture picture = TerrainPicture.CurrentForPlanning();
+            bool leftAnchored = false, rightAnchored = false;
+            if (picture != null && picture.Ready)
+            {
+                float half = MainFlankGuard.FlankEndMeters;
+                leftAnchored = TacticalTerrainLinePlanner.FlankAnchored(picture, mx - axis.RightX * half, mz - axis.RightZ * half, -axis.RightX, -axis.RightZ, includeCrest: false);
+                rightAnchored = TacticalTerrainLinePlanner.FlankAnchored(picture, mx + axis.RightX * half, mz + axis.RightZ * half, axis.RightX, axis.RightZ, includeCrest: false);
+            }
+            MainFlankGuard.Cover cover = MainFlankGuard.Assess(_flankNeighbours, leftAnchored, rightAnchored);
+
+            _flankHold.TryGetValue(id, out MainFlankGuard.HoldState previous);
+            MainFlankGuard.HoldState next = MainFlankGuard.Step(previous, cover.Open, (float)s.DoctrineHours);
+            _flankHold[id] = next;
+            if (previous.Holding != next.Holding) EmitFlankHold(s, id, next.Holding, cover);
+            if (next.Holding) reason = "flank-unguarded-hold";
+            return next.Holding;
+        }
+
+        private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, MainFlankGuard.Cover cover)
+        {
+            try
+            {
+                string reason = cover.Reason;
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalFlankGuardHold", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalFlankGuardHold", holding ? "hold" : "release", reason)
+                        .WithField("side", s.Alliance)
+                        .WithField("group", id)
+                        .WithField("holding", holding)
+                        .WithField("leftOpen", cover.LeftOpen)
+                        .WithField("rightOpen", cover.RightOpen)
+                        .WithField("leftAnchored", cover.LeftAnchored)
+                        .WithField("rightAnchored", cover.RightAnchored)
+                        .WithField("hours", s.DoctrineHours));
+            }
+            catch { /* telemetry never changes an order */ }
+        }
+
         // SupportMain leaf positions, once per tick per side (BR-M6).
         private static void BuildSupportMain(BattleSnapshot s, PostureTick.State t)
         {
@@ -424,13 +503,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         /// <summary>BC13: the Main-effort brigade is held as Screen until its SupportMain siblings arrive (an exploit never picks it).</summary>
         internal static bool UnderArrivalHold(int groupId)
         {
-            return _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
+            return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding
+                || _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
         }
 
         private static void Reset()
         {
             _mainArrivalHold.Clear();
             _arrivalSupportScratch.Clear();
+            _flankHold.Clear();
+            _flankNeighbours.Clear();
         }
     }
 

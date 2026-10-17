@@ -1222,6 +1222,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _leafBrigadeMap =
             new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
         private string _leafBrigadeMapSignature = string.Empty;
+        private double _leafBrigadeMapBuiltHours;
+        private const double LeafMapRefreshHours = 5.0 / 60.0;
 
         /// <summary>
         /// The leaf map the posture producers read. While the works hold is on, a cached copy whose entries under a child that faces works are
@@ -1382,7 +1384,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             RefreshLeafRelease(releaseAggression01, live);
 
             string sig = ComputeLeafMapSignature(tree);
-            if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0) return;
+            // The flank guards (MainFlankGuard) are given by where the brigades stand, which the signature does not carry: the map is built again every few
+            // doctrine minutes, and the same map comes out unless the geometry moved.
+            double builtAgo = HoursSource() - _leafBrigadeMapBuiltHours;
+            if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0 && !(builtAgo >= LeafMapRefreshHours)) return;
 
             var topAssignments = new List<TacticalLeafBrigadeMap.TopAssignment>(_directChildIntents.Count);
             var topChildIds = new List<string>(_directChildIntents.Count);
@@ -1427,11 +1432,62 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             _defenderReserveReport.Clear();
+            _flankGuardReport.Clear();
             _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
                 tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat,
-                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released);
+                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released,
+                flankAnchored: FlankAnchoredProbe(), flankReport: _flankGuardReport);
             _leafBrigadeMapSignature = sig;
+            _leafBrigadeMapBuiltHours = HoursSource();
             EmitDefenderReserveTelemetry();
+            EmitFlankGuardTelemetry();
+        }
+
+        // The main efforts' open flanks the latest leaf map gave a guard (MainFlankGuard.AssignGuards), by instance id.
+        private readonly List<MainFlankGuard.GuardAssignment> _flankGuardReport = new List<MainFlankGuard.GuardAssignment>();
+        private string _lastFlankGuardSig = string.Empty;
+
+        // Whether a flank end (x, z), looking outward along (ox, oz), rests on a river (never a crest: a crest is cover, not a wall); null without a ready terrain picture.
+        private static Func<float, float, float, float, bool> FlankAnchoredProbe()
+        {
+            WhiskeyRealism.Tactical.Battle.TerrainPicture picture = WhiskeyRealism.Tactical.Battle.TerrainPicture.CurrentForPlanning();
+            if (picture == null || !picture.Ready) return null;
+            return (x, z, ox, oz) => WhiskeyRealism.Tactical.Operations.TacticalTerrainLinePlanner.FlankAnchored(picture, x, z, ox, oz, includeCrest: false);
+        }
+
+        // One row when the guards given to the main efforts' open flanks change (signature-deduped): which reserve or support went to which main, on which side.
+        private void EmitFlankGuardTelemetry()
+        {
+            if (_flankGuardReport.Count == 0 && _lastFlankGuardSig.Length == 0) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < _flankGuardReport.Count; i++)
+                {
+                    MainFlankGuard.GuardAssignment a = _flankGuardReport[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append(a.Guard).Append("->").Append(a.Main).Append(a.Left ? ":left:" : ":right:").Append(a.From);
+                }
+                string sig = "side=" + AllianceId + "|" + sb;
+                if (string.Equals(sig, _lastFlankGuardSig, System.StringComparison.Ordinal)) return;
+                _lastFlankGuardSig = _flankGuardReport.Count == 0 ? string.Empty : sig;
+                string detail = sb.ToString();
+                int count = _flankGuardReport.Count;
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                    "TacticalFlankGuard",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalFlankGuard", "assign", sig)
+                        .WithField("side", AllianceId)
+                        .WithField("guards", count)
+                        .WithField("assignments", detail));
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalFlankGuard] emit failed: " + ex.Message); } catch { }
+            }
         }
 
         /// <summary>

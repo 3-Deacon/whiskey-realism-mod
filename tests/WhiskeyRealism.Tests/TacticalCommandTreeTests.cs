@@ -1212,9 +1212,10 @@ internal static class TacticalCommandTreeTests
         AssertTrue(map[-201].LeafRole == DirectChildRole.SupportMain || map[-201].LeafRole == DirectChildRole.RefuseLeft,
             "5d_left got Main-cascade result: " + map[-201].LeafRole);
         AssertEqual(DirectChildRole.Main,    map[-202].LeafRole, "5d_right (center idx) gets Main");
-        // -300 (Reserve, 2 children): all reserve.
-        AssertEqual(DirectChildRole.Reserve, map[-301].LeafRole, "2d_left Reserve");
-        AssertEqual(DirectChildRole.Reserve, map[-302].LeafRole, "2d_right Reserve");
+        // -300 (Reserve, 2 children): all reserve, but the Main brigade 5d_right has nobody on its right flank: a reserve does not cover a flank, so the
+        // nearest one (2d_left, 100 m off) is given to it as the flank guard (MainFlankGuard, replan-thrash). The farther one stays a reserve.
+        AssertEqual(DirectChildRole.RefuseRight, map[-301].LeafRole, "2d_left guards the Main brigade's exposed right flank");
+        AssertEqual(DirectChildRole.Reserve, map[-302].LeafRole, "2d_right stays Reserve");
     }
 
     private static void LeafBrigadeMapReserveCascadesToAllLeaves()
