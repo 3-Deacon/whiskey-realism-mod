@@ -1354,8 +1354,8 @@ namespace WhiskeyRealism
                 "Campaign Planner", "Enable Garrison Manning", true,
                 "Default ON. Vanilla defends only the capital ahead of an attack; key towns, rail hubs, ports, depots and forts away from it are " +
                 "held by whatever happens to stand there. With this on, an own objective town, rail hub, port, built depot or fort that a " +
-                "believed enemy army threatens (vanilla's own capital threat weighting, on what the side has seen) gets one formation: the " +
-                "smallest fighting formation that covers the need, from those that would otherwise just hold or sit in reserve, never the main " +
+                "believed enemy army threatens (vanilla's own capital threat weighting, on what the side has seen) gets a garrison: the " +
+                "smallest fighting formation that covers the need (else the nearest two together), from those that would otherwise just hold or sit in reserve, never the main " +
                 "effort, the capital guard, a scout or the W&L player's own command. It marches to the post and holds it, out of vanilla's " +
                 "offensive and defensive pools, until no army has been near for a fortnight; at most six posts at a time. The secession " +
                 "garrison for Kentucky and Missouri is separate and not behind this. Needs Enable Campaign Planner; the march also needs " +
