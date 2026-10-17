@@ -761,14 +761,15 @@ namespace WhiskeyRealism.Strategic.Planner
             }
 
             // The share of the sector's counted hold that no longer holds it: a counted formation already given a role other than holding
-            // the sector (Hold or CapitalGuard in it). A formation not yet placed stays: AssignRemainder holds it.
+            // the sector (Hold or CapitalGuard; each is assigned in the sector the formation was counted in). A formation not yet placed stays:
+            // AssignRemainder holds it.
             private float HoldLeaving(int sector)
             {
                 float leaving = 0f;
                 for (int j = 0; j < _n; j++)
                 {
                     if (_held.ShareSector[j] != sector || !_done[j]) continue;
-                    bool holds = (_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector;
+                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard;   // both keep the formation's own sector, the one it was counted in
                     if (!holds) leaving += _held.Share[j];
                 }
                 return leaving;
