@@ -472,6 +472,7 @@ internal static class ReconNeverTasksTests
         var day4 = PlanOf(Records(Slight, Lean), state);
         AssertNear(700f, day4.MainObjectiveX, 0.5f, "day 4: the third consecutive review of lead moves it");
         AssertEqual(serial, state.DecisionSerial, "within the decision (the objective did not change)");
+        AssertEqual(0, state.RecordChallengerDays, "the window is spent with the move");
         AssertNear(700f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "and the new record is kept in its turn (day 5: the old one leads once)");
     }
 
