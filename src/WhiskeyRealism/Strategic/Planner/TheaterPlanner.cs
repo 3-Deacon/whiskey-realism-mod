@@ -160,7 +160,8 @@ namespace WhiskeyRealism.Strategic.Planner
             // D6 detail: each own formation's home department (PlannerState.Observe), by index into s.Own; null in a bare Evaluate, where
             // the theater of the sector a formation stands in stands in for it.
             internal Theater[] Department;
-            // D8: the formations a secession garrison keeps (index into s.Own) and the posts they keep; written by Reserve, read by MassFor.
+            // D8: the formations a secession garrison keeps (index into s.Own) and the posts they keep; chosen after the mass (PostFromOutside),
+            // so MassFor never reads them.
             internal bool[] GarrisonReserved;
             internal readonly List<GarrisonPost> Posts = new List<GarrisonPost>();
             // The posts that still need formations from outside the state, chosen once the mass is known (PostFromOutside).
@@ -898,7 +899,6 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
-                if (c.GarrisonReserved != null && c.GarrisonReserved[i]) continue;   // D8: kept in (or sent to) a secession state
                 int holds = c.HoldReserved[i];
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 // The main effort draws from its own department: the target's theater. A formation of another department is a
