@@ -547,30 +547,34 @@ internal static class SecessionGarrisonTests
     // rest is recorded as the post's shortfall.
     private static void TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet()
     {
-        // A main effort at x 500 (an army of 3000 believed there): corps 2, standing at 480, is both the nearest to the town and the nearest
-        // to that target, so it is the mass. Corps 1 holds the town's sector. Free formations stand in the East.
+        // A main effort at x 650 (an army of 3000 believed there, in the East): corps 2, standing at 700, is both the nearest East corps to the
+        // town and the nearest to that target, so it is the mass; it is not a hold reserve (a busy corps holds the East). Corps 1 holds the
+        // town's sector (a hold reserve, never the garrison's).
         CampaignSnapshot World(params FormationRecord[] corps)
         {
             var w = FlagAlone(4000f, 60000f, corps);   // 0.6 x 60000 = 36000 at the town
-            w.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, StateId = 5, X = 520f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.9f });
-            w.Beliefs.Add(Seen(520f, 3000f));
+            var busy = Corps(9, 660f, 6000f);          // a corps in battle in the East holds the East's own 5000 floor, so no East corps is its hold reserve
+            busy.Flags |= FormationFlags.InBattle;
+            w.Own.Add(busy);
+            w.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, StateId = 5, X = 650f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.9f });
+            w.Beliefs.Add(Seen(650f, 3000f));
             return w;
         }
 
-        var s = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f), Corps(3, 700f, 9000f), Corps(4, 720f, 9000f), Corps(5, 740f, 9000f), Corps(6, 760f, 9000f));
+        var s = World(Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f), Corps(5, 760f, 9000f));
         var plan = Plan(s);
         AssertEqual(31, plan.MainObjectiveId, "a main effort exists: " + plan.MainObjectiveId);
-        AssertTrue(plan.MassInstanceIds.Count > 0, "with a mass");
+        AssertTrue(plan.MassInstanceIds.Contains(2), "corps 2 marches with the mass: " + string.Join(",", plan.MassInstanceIds));
         var post = plan.Garrisons[0];
+        AssertTrue(post.InstanceIds.Count > 0, "free formations exist, so some are posted: need " + post.Need);
         foreach (int id in post.InstanceIds)
             AssertFalse(plan.MassInstanceIds.Contains(id), "formation " + id + " is posted but marches with the mass");
-        AssertTrue(post.InstanceIds.Count > 0, "free formations exist, so some are posted: need " + post.Need);
-        // Nearest the town first among the free ones.
+        AssertEqual(3, post.InstanceIds[0], "the nearest free formation is first (corps 2, nearer, is the mass)");
         for (int k = 1; k < post.InstanceIds.Count; k++)
             AssertTrue(DistanceToTown(s, post.InstanceIds[k - 1]) <= DistanceToTown(s, post.InstanceIds[k]), "nearest first");
 
         // Only the mass is free: nothing is taken from it; the shortfall is the whole need.
-        var tight = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f));
+        var tight = World(Corps(1, 240f, 9000f), Corps(2, 700f, 9000f));
         var tightPlan = Plan(tight);
         AssertTrue(tightPlan.MassInstanceIds.Contains(2), "corps 2 is the mass");
         AssertEqual(0, tightPlan.Garrisons[0].InstanceIds.Count, "and the garrison does not take it");
@@ -580,9 +584,10 @@ internal static class SecessionGarrisonTests
         AssertContains(row, "!short", "the allocation row logs the shortfall");
 
         // Part of the need met by the free formations: the shortfall is what remains.
-        var partial = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f), Corps(3, 700f, 9000f));
+        var partial = World(Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f));
         var partialPlan = Plan(partial);
         AssertEqual(1, partialPlan.Garrisons[0].InstanceIds.Count, "the one free formation is posted");
+        AssertEqual(3, partialPlan.Garrisons[0].InstanceIds[0], "corps 3, not the mass");
         AssertNear(partialPlan.Garrisons[0].Need - 9000f, partialPlan.Garrisons[0].Shortfall, 1f, "and the shortfall is the rest");
     }
 
