@@ -193,7 +193,7 @@ namespace WhiskeyRealism.Util
                     if (!TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carryingOrder: true)) continue;
                     if (!_renewSince.TryGetValue(id, out float since)) _renewSince[id] = since = now;
                     if (!TacticalStanceOwnership.RenewalLive(since, now)) continue;
-                    EnsureStance(bunits, group, record.Stance, RenewTag, record.Source);
+                    EnsureStance(bunits, group, record.Stance, RenewTag, record.Source, record.WorksHold);
                     renewed++;
                 }
             }
