@@ -121,6 +121,10 @@ namespace WhiskeyRealism.Tactical.Battle
         /// regiment on a bridge or a crossing is not touched. The manual stop restores the formation the column replaced (132502-132506) and ends
         /// distancemarchcolumn; the line it lands in is the normal case, and the threat heading is applied after it through the executor's facing path.
         /// Only a regiment whose restored formation is the column itself is re-formed to line.
+        /// Why the rotate that follows cannot put the regiment back in column: ChangeRegimentFormation sets lastformation to the formation it is leaving
+        /// (135470), or, for a manualset call such as the stop's restore (132504), to the formation it is entering (135471-135473). After the restore
+        /// formation and lastformation are both the restored line, so RotateRegiment (StopRegiment, then ChangeRegimentFormation(lastformation), 130165-130167)
+        /// re-forms the line it already has. (SetDistanceMarchColumn, 127702, entered the column with a non-manual call, which is how lastformation came to hold the line.)
         /// </summary>
         public static ColumnDeployApplied Apply<THost>(ref THost host, float heading) where THost : struct, IColumnDeployHost
         {
