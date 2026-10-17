@@ -1240,10 +1240,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyVector);
             side.AttachArmy(army);
             Plays.FeasibilityRuntime.Attach(army, armyCommander);
-            // BC14: the stance and opportunity inputs are refreshed before the first pick (a Defender never opens offensive), then the
-            // feasibility evaluation runs, forced to completion, so the pick reads a ledger.
+            // BC14: the direct children are registered, the stance and opportunity inputs are refreshed before the first pick (a
+            // Defender never opens offensive), then the feasibility evaluation runs, forced to completion, so the pick reads a ledger
+            // priced against the real children (smoke 2026-10-17: with none registered every candidate read "no-children").
             ArmyEvidenceBuilder.Bundle firstBundle = ArmyEvidenceBuilder.Build(snapshot, sideBattle);
-            PickInitialPlanInOrder(army, () => RefreshPickInputs(side, sideBattle),
+            PickInitialPlanInOrder(army, () => RegisterDiscoveredChildren(side, DirectChildDiscovery.Snapshot(side.AllianceId)),
+                () => RefreshPickInputs(side, sideBattle),
                 () => Plays.FeasibilityRuntime.EvaluateNow(side, ResolveBattleUnits(sideBattle), snapshot, firstBundle.OwnEvidence, firstBundle.EnemyVisible.FrontAxis),
                 firstBundle.OwnEvidence);
             if (army.HasPlan)
@@ -1298,15 +1300,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
-                if (!side.Army.RegisterDirectChildrenIfChanged(snapshots)) return;
-
-                string parentCommandId = snapshots.Count > 0 ? snapshots[0].ParentArmyId : string.Empty;
-                var parentCommand = ResolveCommandLabelById(parentCommandId, "army-");
-                TelemetryRouter.LegacyInfo("[TacticalDirectChildDiscovery] " + SideLogContext(side.AllianceId, parentCommand, default(CommandLogLabel))
-                    + " parentCommandId=" + SafeLog(parentCommandId)
-                    + " shift=" + (snapshots.Count > 0 ? snapshots[0].CommandHierarchyShift : 0)
-                    + " children=" + snapshots.Count
-                    + " synthetic=" + IsSynthetic(snapshots), TelemetryLayer.Tactical);
+                RegisterDiscoveredChildren(side, snapshots);
             }
             catch (Exception e)
             {
@@ -1314,6 +1308,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + (side == null ? "null" : side.AllianceId.ToString())
                     + ": " + e.GetType().Name + " " + e.Message);
             }
+        }
+
+        // Registers the discovered children on the side's army when they differ from the registered ones, and logs the discovery
+        // row once per change. The one registration path: the first pick (before the feasibility evaluation) and the per-tick attach.
+        private static void RegisterDiscoveredChildren(TacticalBattleOrchestrator side, IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            if (snapshots == null || snapshots.Count == 0) return;
+            if (!side.Army.RegisterDirectChildrenIfChanged(snapshots)) return;
+
+            string parentCommandId = snapshots[0].ParentArmyId;
+            var parentCommand = ResolveCommandLabelById(parentCommandId, "army-");
+            TelemetryRouter.LegacyInfo("[TacticalDirectChildDiscovery] " + SideLogContext(side.AllianceId, parentCommand, default(CommandLogLabel))
+                + " parentCommandId=" + SafeLog(parentCommandId)
+                + " shift=" + snapshots[0].CommandHierarchyShift
+                + " children=" + snapshots.Count
+                + " synthetic=" + IsSynthetic(snapshots), TelemetryLayer.Tactical);
         }
 
         private static bool IsSynthetic(IReadOnlyList<DirectChildSnapshot> snaps)

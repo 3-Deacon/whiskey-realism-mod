@@ -9,6 +9,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public int ViaCount;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public float RouteCost, VanillaCost;
+        /// <summary>
+        /// With two vias and a river picture: one BC14 crossing link per river the road crosses between the vias, in road order, at most two. Each is the
+        /// link joining the two land regions on either side of the road's change of region that lies nearest the transition point. None is recorded
+        /// when the road crosses more than two rivers or a change of region has no link joining it, so the gate runs its full search. The crossing
+        /// gate checks these (when they chain from the leg's start region to its target region), not the shortest path over the links.
+        /// </summary>
+        public int LinkCount, Link0, Link1;
     }
 
     /// <summary>
@@ -139,7 +146,8 @@ namespace WhiskeyRealism.Tactical.Battle
         /// pathfinder takes (the probe's filter path); with none, nothing is planned.
         /// </summary>
         public static RoadRoute Plan(BattleTerrainGrid g, float x0, float z0, float x1, float z1,
-            ReadOnlySpan<float> vanillaPathX, ReadOnlySpan<float> vanillaPathZ, int vanillaCorners, RoadRouteScratch scratch)
+            ReadOnlySpan<float> vanillaPathX, ReadOnlySpan<float> vanillaPathZ, int vanillaCorners, RoadRouteScratch scratch,
+            ICrossingPicture crossings = null)
         {
             var route = new RoadRoute();
             if (g == null || scratch == null || !Wanted(g, x0, z0, x1, z1)) return route;
@@ -163,7 +171,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
             route.RouteCost = scratch.G[goal];
             if (!(route.RouteCost <= RouteGainRatio * route.VanillaCost)) return route;
-            ChooseVia(scratch, nodes, x0, z0, x1, z1, ref route);
+            ChooseVia(scratch, nodes, x0, z0, x1, z1, ref route, out int entryIndex, out int exitIndex);
+            if (route.ViaCount == MaxVia && crossings != null && crossings.Ready) RoadLinks(scratch, entryIndex, exitIndex, crossings, ref route);
             route.Use = route.ViaCount > 0;
             return route;
         }
@@ -464,8 +473,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // The route's first road entry and last road exit that are at least 60 m from the start,
         // the target and each other, and not within the last 250 m (vanilla skips roads there,
         // 131163-131166, so a via point in that stretch would pull the group off nothing).
-        private static void ChooseVia(RoadRouteScratch s, int count, float x0, float z0, float x1, float z1, ref RoadRoute route)
+        private static void ChooseVia(RoadRouteScratch s, int count, float x0, float z0, float x1, float z1, ref RoadRoute route, out int entryIndex, out int exitIndex)
         {
+            entryIndex = exitIndex = -1;
             int entry = -1;
             for (int k = 0; k < count && entry < 0; k++)
             {
@@ -476,6 +486,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     entry = k;
             }
             if (entry < 0) return;
+            entryIndex = entry;
 
             int entryNode = s.PathNodes[entry];
             route.ViaX0 = s.SnapX[entryNode];
@@ -491,8 +502,63 @@ namespace WhiskeyRealism.Tactical.Battle
                 route.ViaX1 = s.SnapX[node];
                 route.ViaZ1 = s.SnapZ[node];
                 route.ViaCount = MaxVia;
+                exitIndex = k;
                 break;
             }
+        }
+
+        // The crossings the road takes between its vias: walk the path nodes from the entry to the exit; at each change of land region (a node on a bridge
+        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the change is the crossing, in road order. More than
+        // MaxVia changes, or a change no link joins, records none.
+        private static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
+        {
+            route.LinkCount = 0;
+            int last = -1, count = 0, first = 0, second = 0;
+            float lastX = 0f, lastZ = 0f;
+            for (int k = entry; k <= exit; k++)
+            {
+                int node = s.PathNodes[k];
+                float x = s.SnapX[node], z = s.SnapZ[node];
+                int region = crossings.RegionAt(x, z);
+                if (region < 0) continue;
+                if (last >= 0 && region != last)
+                {
+                    int link = NearestJoining(crossings, last, region, (lastX + x) * 0.5f, (lastZ + z) * 0.5f);
+                    if (link < 0 || count == MaxVia) return;
+                    if (count == 0) first = link; else second = link;
+                    count++;
+                }
+                last = region;
+                lastX = x;
+                lastZ = z;
+            }
+            route.LinkCount = count;
+            route.Link0 = first;
+            route.Link1 = second;
+        }
+
+        // The link joining the two regions whose crossing point lies nearest (x, z); -1 when none joins them.
+        private static int NearestJoining(ICrossingPicture crossings, int a, int b, float x, float z)
+        {
+            Span<int> regions = stackalloc int[4];
+            int best = -1;
+            float bestSq = float.MaxValue;
+            for (int link = 0; link < crossings.LinkCount; link++)
+            {
+                int n = Math.Min(crossings.RegionsOfLink(link, regions), regions.Length);
+                bool hasA = false, hasB = false;
+                for (int r = 0; r < n; r++)
+                {
+                    if (regions[r] == a) hasA = true;
+                    if (regions[r] == b) hasB = true;
+                }
+                if (!hasA || !hasB) continue;
+                crossings.LinkPoint(link, out float lx, out float lz);
+                float dx = lx - x, dz = lz - z;
+                float sq = dx * dx + dz * dz;
+                if (sq < bestSq) { bestSq = sq; best = link; }
+            }
+            return best;
         }
 
         private static float Distance(float ax, float az, float bx, float bz)

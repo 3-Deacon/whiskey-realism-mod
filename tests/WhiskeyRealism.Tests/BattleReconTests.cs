@@ -16,6 +16,7 @@ internal static class BattleReconTests
     {
         RunAll(new (string, Action)[]
         {
+            ("recon only a started mission names a target in its row (no scout is sent to the map origin)", OnlyAStartedMissionNamesATarget),
             ("recon scout is a standing AI cavalry regiment", ScoutIsStandingAiCavalryRegiment),
             ("bc14 LOOK-RECON a crossing look is taken after stale entry points and bands, from the stand-off, inside the mission cap, never toward a superior enemy", CrossingLookRecon),
             ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
@@ -235,6 +236,18 @@ internal static class BattleReconTests
     }
 
     // ------------------------------------------------------------------ scout
+
+    // Smoke 2026-10-17: TacticalRecon rows for a probe nomination, a probe hold and a mission end printed targetX=0,
+    // targetZ=0, which read as a recon order to the map origin. Only the started mission has a point.
+    private static void OnlyAStartedMissionNamesATarget()
+    {
+        AssertTrue(BattleRecon.EventNamesTarget(ReconEvents.MissionStarted), "a started mission names its target");
+        AssertFalse(BattleRecon.EventNamesTarget(ReconEvents.ProbeNominated), "a probe nomination has no target");
+        AssertFalse(BattleRecon.EventNamesTarget(ReconEvents.ProbeHeld), "a probe hold has no target");
+        AssertFalse(BattleRecon.EventNamesTarget(ReconEvents.MissionEnded), "a mission end has no target");
+        AssertFalse(BattleRecon.EventNamesTarget(ReconEvents.ProbeEnded), "a probe end has no target");
+        AssertFalse(BattleRecon.EventNamesTarget(ReconEvents.None), "no event, no target");
+    }
 
     private static void ScoutIsStandingAiCavalryRegiment()
     {

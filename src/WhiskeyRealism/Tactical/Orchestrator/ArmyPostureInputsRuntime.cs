@@ -42,7 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
         private static readonly Dictionary<int, CachedProbes> _probeCache = new Dictionary<int, CachedProbes>();
 
-        private readonly struct CachedProbes
+        private sealed class CachedProbes
         {
             public CachedProbes(ProbeRosterSignature signature, IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes)
             {
@@ -52,6 +52,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             public ProbeRosterSignature Signature { get; }
             public IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Probes { get; }
+
+            /// <summary>The command tree built from <see cref="Probes"/>, once per cache entry (it was rebuilt on every coordinator tick from the same cached probes).</summary>
+            public IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> Tree { get; set; }
+        }
+
+        private static IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> TreeOf(int allianceId, IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes)
+        {
+            if (_probeCache.TryGetValue(allianceId, out CachedProbes cached) && ReferenceEquals(cached.Probes, probes))
+                return cached.Tree ?? (cached.Tree = TacticalCommandTreeProbe.BuildTree(probes, 0));
+            return TacticalCommandTreeProbe.BuildTree(probes, 0);
         }
 
         // The pick inputs: everything a plan pick reads, refreshed before every pick (BC14 requirement-stance-before-pick:
@@ -113,7 +123,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 RefreshAiPool(battle, allianceId);
                 var probes = ExtendedProbes(bunits, allianceId);
                 if (probes != null && probes.Count > 0)
-                    army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, 0));
+                {
+                    // The snapshot gives the release the positions the units stand at now (the cached probes keep those of the last roster change).
+                    BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot live);
+                    army.UpdateLeafBrigadeMap(TreeOf(allianceId, probes), live);
+                }
             }
             catch (Exception ex)
             {

@@ -530,6 +530,12 @@ namespace WhiskeyRealism.Tactical.Battle
             _terrain = terrain;
         }
 
+        /// <summary>
+        /// The river-crossing seam (BC14's picture, RiverCrossingRule): a null gate leaves every Move as validated. The runtime sets it
+        /// each tick; Enable Crossing Move Gate off leaves it null.
+        /// </summary>
+        public ICrossingGate Crossings { get; set; }
+
         /// <summary>Terrain.activeTerrain.terrainData.size x/z (0 = unknown: no clamp).</summary>
         public void SetMapSize(float sizeX, float sizeZ)
         {
@@ -675,6 +681,61 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.X = x;
             plan.Z = z;
             if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
+            // 8. Every leg of a doctrine move (start, vias, target) that crosses a river takes a chain of crossings the side knows, or the move is not
+            //    made. A via the move already has (a planned or road via) is kept, and a leg that needs a crossing gets it ahead of that via: the vias
+            //    become the legs' crossings and the mover's own, in order, within the executor's bound (RoadRoutePlanner.MaxVia); a move that would need
+            //    more is refused too. The leg between a road route's two vias follows the road, which takes its own crossing: nothing is inserted there and
+            //    the crossing it passes is only checked (Clear or Watched goes; Held only for an attack; Unknown is refused with a look). A crossing the selected plan chose is not refused for an attack (a Screen or Probe never crosses a Held one).
+            if (!immediate && Crossings != null && SubjectToCrossingGate(w))
+            {
+                bool attack = IsCrossingAttackTask(w.Task);
+                int existing = plan.ViaCount;
+                // A BC10 road route: its two vias are the first road entry and the last road exit; the leg between them follows the road.
+                bool roadRoute = existing == RoadRoutePlanner.MaxVia && (w.Flags & IntentFlags.RoadRoute) != 0;
+                int count = 0;
+                Span<float> viaX = stackalloc float[RoadRoutePlanner.MaxVia];
+                Span<float> viaZ = stackalloc float[RoadRoutePlanner.MaxVia];
+                float fromX = rec.X, fromZ = rec.Z;
+                for (int leg = 0; leg <= existing; leg++)
+                {
+                    float toX = leg < existing ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
+                    float toZ = leg < existing ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
+                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack,
+                        roadRoute && leg == 1 ? new RoadLeg(w.RoadLinkCount, w.RoadLink0, w.RoadLink1) : default(RoadLeg), out CrossingRoute route);
+                    bool tooMany = false;
+                    if (crossing == CrossingVerdict.ViaCrossing)
+                    {
+                        for (int k = 0; k < route.ViaCount; k++)
+                        {
+                            if (count == viaX.Length) { tooMany = true; break; }
+                            viaX[count] = k == 0 ? route.ViaX0 : route.ViaX1;
+                            viaZ[count] = k == 0 ? route.ViaZ0 : route.ViaZ1;
+                            count++;
+                        }
+                    }
+                    if (leg < existing && !tooMany)
+                    {
+                        if (count == viaX.Length) tooMany = true;
+                        else { viaX[count] = toX; viaZ[count] = toZ; count++; }
+                    }
+                    if (crossing == CrossingVerdict.NoKnownCrossing || tooMany)
+                    {
+                        // No crossing the side knows, or more vias than the executor can carry: the move is not made.
+                        plan.Execute = false;
+                        plan.Skip = SkipReason.NoKnownCrossing;
+                        return plan;
+                    }
+                    fromX = toX;
+                    fromZ = toZ;
+                }
+                if (count > 0)
+                {
+                    plan.ViaCount = count;
+                    plan.ViaX0 = viaX[0];
+                    plan.ViaZ0 = viaZ[0];
+                    if (count > 1) { plan.ViaX1 = viaX[1]; plan.ViaZ1 = viaZ[1]; }
+                }
+            }
             plan.UseOrderDelay = UsesOrderDelay(w);
             // 9. The player's share of an ancestor's move goes out as one W&L
             //    dispatch per executed plan. Move only: the dispatch carries the
@@ -931,6 +992,21 @@ namespace WhiskeyRealism.Tactical.Battle
                 else { plan.ViaX1 = vx; plan.ViaZ1 = vz; }
                 plan.ViaCount++;
             }
+        }
+
+        /// <summary>The tasks that may cross a Held crossing the plan chose: the ones that map to the attack stance (an attack, a support attack, a fixing force, a counterstroke); a Screen, a Probe or a march never does.</summary>
+        internal static bool IsCrossingAttackTask(CommandTaskType task)
+            => TacticalCommandTaskToStanceMapper.Map(task) == TacticalCommandTaskToStanceMapper.StanceAttack;
+
+        // The doctrine movers whose planned moves cross land: the posture executor (Screen, Probe, the leaf slots, maneuver legs),
+        // division-play and the reserve release. A withdrawal, a fallback, a deployment placement, a scout's look and vanilla's
+        // own replayed moves are not gated: they are in contact, immediate, or exist to make a crossing known.
+        private static bool SubjectToCrossingGate(in BattleOrderIntent w)
+        {
+            if (w.Channel != OrderChannel.Move) return false;
+            if ((w.Flags & (IntentFlags.InContactWithdrawal | IntentFlags.ImmediatePlacement)) != 0) return false;
+            if (w.Task == CommandTaskType.FallBackToLine) return false;
+            return w.Source == IntentSource.PostureExecutor || w.Source == IntentSource.DivisionPlay || w.Source == IntentSource.ReserveRelease;
         }
 
         private bool IsDuplicate(IBattleUnitView s, int idx, in UnitRecord rec, in BattleOrderIntent w, float x, float z)

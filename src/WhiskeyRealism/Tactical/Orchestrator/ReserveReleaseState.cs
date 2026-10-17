@@ -186,6 +186,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         internal void NoteCrisis(string childId) => _crisis.Add(childId);
 
+        /// <summary>A release the hysteresis withdrew: its crisis note and its row are not facts (the exploit lifecycle and the rows read them).</summary>
+        internal void DropRelease(string childId)
+        {
+            for (int i = _crisis.Count - 1; i >= 0; i--)
+                if (string.Equals(_crisis[i], childId, StringComparison.Ordinal)) _crisis.RemoveAt(i);
+            for (int i = _outcomes.Count - 1; i >= 0; i--)
+                if (string.Equals(_outcomes[i].ChildId, childId, StringComparison.Ordinal)) _outcomes.RemoveAt(i);
+        }
+
         internal void NoteOutcome(in Outcome outcome) => _outcomes.Add(outcome);
     }
 }

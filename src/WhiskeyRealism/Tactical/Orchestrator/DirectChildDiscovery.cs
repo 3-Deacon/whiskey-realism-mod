@@ -50,10 +50,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (armyRoots[i].UnitTyp > maxUnittyp) maxUnittyp = armyRoots[i].UnitTyp;
 
             var result = new List<DirectChildSnapshot>();
+            string firstArmyId = null;
             for (int a = 0; a < armyRoots.Count; a++)
             {
                 if (armyRoots[a].UnitTyp != maxUnittyp) continue;
                 var armyRoot = armyRoots[a];
+                if (firstArmyId == null) firstArmyId = "army-" + armyRoot.InstanceId;
                 int childCount = 0;
                 for (int c = 0; c < probes.Count; c++)
                 {
@@ -82,6 +84,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         displayName: armyRoot.Name,
                         active: true));
                 }
+            }
+
+            // Every other top command the side has: a command-level unit below the army tier that sits in no
+            // group at all (ParentInstanceId 0; a unit under a parent that is not in the input, such as the
+            // W&L player's excluded command, is not loose). The command tree roots every such unit under one
+            // synthetic side root, so the side's children cover them too: the unit is a child itself, a
+            // peer of the army's divisions, and its own subordinates take its role (CommandTreeIntentAllocator).
+            for (int c = 0; c < probes.Count; c++)
+            {
+                var p = probes[c];
+                if (!p.Active || p.ParentInstanceId != 0) continue;
+                if (p.UnitTyp < effectiveCommandMin || p.UnitTyp >= maxUnittyp) continue;
+                result.Add(new DirectChildSnapshot(
+                    childId: "child-" + p.InstanceId,
+                    parentArmyId: firstArmyId,
+                    rawUnitTyp: p.UnitTyp,
+                    commandHierarchyShift: commandHierarchyShift,
+                    displayName: p.Name,
+                    active: true));
             }
             return result;
         }

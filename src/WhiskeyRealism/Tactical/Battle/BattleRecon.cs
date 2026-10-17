@@ -505,6 +505,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public const string ProbeStopReason = "probe-contact-stop";
         public const string HoldReason = "probe-hold";
 
+        /// <summary>
+        /// Whether the telemetry row of this event names a map point: only a started mission has one (its scout's
+        /// target). A probe nomination, a probe hold and a mission end carry none, and a row that printed
+        /// targetX=0, targetZ=0 for them read as a scout sent to the map origin (smoke 2026-10-17).
+        /// </summary>
+        public static bool EventNamesTarget(ReconEvents single) => single == ReconEvents.MissionStarted;
+
         // Vanilla regiment formation index of the square (118174).
         public const int SquareFormation = 4;
 

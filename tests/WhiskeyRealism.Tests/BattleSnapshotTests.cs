@@ -502,8 +502,9 @@ internal static class BattleSnapshotTests
             AssertEqual("unit-" + s.Own[i].InstanceId, commandProbes[i].DisplayName, "names come from the roster cache");
         }
 
-        // GetAttachedUnitsReg(directonly, includenonactiveunits:false, excludedechainedunits,
-        // excludeskirmishers) exclusions (119849-119873) carry over to IsDirectChild.
+        // GetAttachedUnitsReg(directonly, includenonactiveunits:false, excludeskirmishers)
+        // exclusions (119849-119873) carry over to IsDirectChild. excludedechainedunits does
+        // not: vanilla detaches the AI engine's own groups (see ArmyChildrenTests).
         int iDiv1 = s.IndexOfOwn(Div1);
         AssertTrue(regimentProbes[iDiv1].IsDirectChild, "Div1 is a direct child of the army");
         AssertFalse(regimentProbes[s.IndexOfOwn(Army)].IsDirectChild, "root is nobody's direct child");
@@ -523,7 +524,7 @@ internal static class BattleSnapshotTests
         f.Load(2); f.Assemble();
         BattleSnapshotAssembler.ToRegimentProbes(s, names, 0, excludePlayerOwned: true, regimentProbes);
         int div1Probe = regimentProbes.FindIndex(p => p.InstanceId == Div1);
-        AssertFalse(regimentProbes[div1Probe].IsDirectChild, "permanently detached is not a direct child");
+        AssertTrue(regimentProbes[div1Probe].IsDirectChild, "a permanently detached AI group is still its army's direct child");
         AssertEqual(Army, regimentProbes[div1Probe].ParentInstanceId, "detached keeps its parent link");
         AssertFalse(regimentProbes.Find(p => p.InstanceId == R3).IsDirectChild, "skirmisher is not a direct child");
         AssertEqual(-1, regimentProbes.FindIndex(p => p.InstanceId == Brig3), "W&L player-owned excluded from discovery");

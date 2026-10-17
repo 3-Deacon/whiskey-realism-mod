@@ -29,6 +29,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             var result = new DirectChildEvidence[snapshots.Count];
+            FillInto(result, snapshots, primarySectorPerSnapshot, flankExposureBucketPerSnapshot, enemy, deployedReservePerSnapshot);
+            return result;
+        }
+
+        /// <summary>The same evidence into a caller's buffer (at least snapshots.Count long): nothing allocated per call. False when the inputs do not line up.</summary>
+        public static bool BuildInto(
+            DirectChildEvidence[] into,
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            IReadOnlyList<int> primarySectorPerSnapshot,
+            IReadOnlyList<int> flankExposureBucketPerSnapshot,
+            EnemyVisibleState enemy)
+        {
+            if (into == null || snapshots == null || snapshots.Count == 0 || into.Length < snapshots.Count) return false;
+            if (primarySectorPerSnapshot == null || primarySectorPerSnapshot.Count != snapshots.Count
+                || flankExposureBucketPerSnapshot == null || flankExposureBucketPerSnapshot.Count != snapshots.Count) return false;
+            FillInto(into, snapshots, primarySectorPerSnapshot, flankExposureBucketPerSnapshot, enemy, null);
+            return true;
+        }
+
+        private static void FillInto(
+            DirectChildEvidence[] result,
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            IReadOnlyList<int> primarySectorPerSnapshot,
+            IReadOnlyList<int> flankExposureBucketPerSnapshot,
+            EnemyVisibleState enemy,
+            IReadOnlyList<bool> deployedReservePerSnapshot)
+        {
             for (int i = 0; i < snapshots.Count; i++)
             {
                 int sector = primarySectorPerSnapshot[i];
@@ -50,7 +77,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     confidence01: confidence,
                     deployedReserve: deployedReservePerSnapshot != null && i < deployedReservePerSnapshot.Count && deployedReservePerSnapshot[i]);
             }
-            return result;
         }
 
         /// <summary>
