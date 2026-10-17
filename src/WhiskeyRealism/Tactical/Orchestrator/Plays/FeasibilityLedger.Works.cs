@@ -23,6 +23,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private bool _worksHold;
         private string _worksReason;
         private int _worksHash;
+        // The world the last heavy tick read BC11's phases from: a publish or a new selection recomputes the hold with it, so the hold of a wing
+        // that has reached its Attack does not flip back to turn-not-struck every time an evaluation publishes.
+        private IMonitorWorld _worksWorld;
 
         internal void SetFocalBack(bool has, in FocalPoint focal)
         {
@@ -97,9 +100,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>
         /// Recomputes the works hold from the selected plan's published entry and BC11's phases (the coordinator's heavy path calls it each tick;
-        /// the ledger itself calls it with no world when it publishes or captures a selection). False with the flag off or no selection.
+        /// the ledger itself calls it with that world when it publishes or captures a selection). False with the flag off or no selection.
         /// </summary>
-        public void RefreshWorksHold(IMonitorWorld world) => RefreshWorks(world);
+        public void RefreshWorksHold(IMonitorWorld world)
+        {
+            _worksWorld = world;
+            RefreshWorks(world);
+        }
 
         private void RefreshWorks(IMonitorWorld world)
         {

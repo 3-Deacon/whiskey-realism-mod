@@ -165,6 +165,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 };
                 FeasibilityTick.Run(ref work);
 
+                // BC14W: the works hold follows BC11's phases every heavy tick, not only when the sliced monitor finishes a run.
+                st.World.Bind(snapshot, regions);
+                st.Ledger.RefreshWorksHold(st.World);
+
                 if (forced) return;
 
                 using (TelemetryPerf.Scope("tactical.feasibility.navmesh", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))

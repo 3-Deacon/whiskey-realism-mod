@@ -23,6 +23,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w READER-STANCE FocalAssault is an offensive playbook, so a Defender is never offered it, a focal point in its ledger or not", WReaderStance),
         ("bc14w READER-FOCAL-ANCHOR a play is projected toward its target: the focal point for FocalAssault, the enemy anchor for every other play", WReaderFocalAnchor),
         ("bc14w FEAS-SCN-6 an entrenched line with an open flank: the turn is the least penalized, the assaults pay the bar of three, FocalAssault stands down, the hold waits for the wing", WScn6),
+        ("bc14w STRIKE-BAND a strike point behind the works within their extent is charged the works bar; beyond the extent or well in front it is not", WStrikeBand),
         ("bc14w FOCAL-OFFER FocalAssault needs a focal point, is ruled out while a turn will do or a commander declines, and is otherwise priced by the model", WFocalOffer),
         ("bc14w FOCAL-WILLINGNESS willingness is half aggression plus half audacity less half caution", WFocalWillingness),
         ("bc14w CANDIDATE-CENTRED-W FocalAssault is evaluated once, never mirrored", WCentredFocal),
@@ -163,6 +164,13 @@ internal static partial class ManeuverFeasibilityTests
         ledger.RefreshWorksHold(world);
         AssertFalse(ledger.WorksHold(out reason), "the hold lifts when the wing reaches its Attack");
         AssertTrue(reason == null, "with no reason");
+
+        // A later evaluation publishing into the same ledger keeps the world it last read: the hold does not flip back on.
+        ManeuverFeasibility.Evaluate(f.Build(WorksPlans), ledger);
+        AssertFalse(ledger.WorksHold(out _), "a publish after the wing's Attack leaves the hold off");
+        int hashOff = ledger.WorksHoldHash;
+        ManeuverFeasibility.Evaluate(f.Build(WorksPlans), ledger);
+        AssertEqual(hashOff, ledger.WorksHoldHash, "and the hash is steady across evaluations");
     }
 
     static void WFocalOffer()
@@ -222,6 +230,23 @@ internal static partial class ManeuverFeasibilityTests
         float worst = 0f;
         foreach (BodyEstimate body in BodiesArray(ledger, BattlePlanId.FocalAssault)) worst = Math.Max(worst, body.Penalty);
         AssertNear(worst, offered.Penalty, 1e-5f, "its penalty is its worst body's");
+    }
+
+    // The strike point of a body is "on the works" when it is in the works band of a held segment: within 100 in front of its profile or anywhere
+    // behind it, inside its lateral extent plus 50 (spec § 7A: the anchor of a salient stands behind the apex, scenario 8). A flank or the rear
+    // of the works, beyond the extent, is priced as open ground.
+    static void WStrikeBand()
+    {
+        FeasField f = Scenario6();
+        SnapshotPicture(f, out WorksPicture picture);
+        AssertTrue(picture.InWorksBand(X(-300f), Z(600f)), "on the profile");
+        AssertTrue(picture.InWorksBand(X(-300f), Z(750f)), "150 behind, inside the extent: the enemy anchor of a salient");
+        AssertTrue(picture.InWorksBand(X(-300f), Z(2000f)), "far behind, inside the extent");
+        AssertTrue(picture.InWorksBand(X(-300f), Z(520f)), "80 in front is the works band");
+        AssertFalse(picture.InWorksBand(X(-300f), Z(450f)), "150 in front is open ground");
+        AssertTrue(picture.InWorksBand(X(190f), Z(700f)), "the end tolerance of 50 past the segment's last point");
+        AssertFalse(picture.InWorksBand(X(450f), Z(800f)), "behind the open end, beyond the extent: the flank or rear of the works");
+        AssertFalse(picture.InWorksBand(X(-700f), Z(700f)), "beyond the other end");
     }
 
     static void WFocalPlaybook()

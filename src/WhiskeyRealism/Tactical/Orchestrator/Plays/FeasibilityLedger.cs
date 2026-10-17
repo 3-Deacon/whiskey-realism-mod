@@ -134,7 +134,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             SelectedMirrored = mirrored;
             HasSelection = plan != BattlePlanId.Unknown;
             _childFrontCount = HasSelection ? BuildChildTable(_front, _childFront) : 0;
-            RefreshWorks(null);
+            RefreshWorks(_worksWorld);
             BeginMonitoring();
         }
 
@@ -154,7 +154,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return false;
         }
 
-        /// <summary>The published candidate at <paramref name="rank"/> in the evaluation's candidate order (the catalog's score order).</summary>
+        /// <summary>The published candidate at <paramref name="rank"/> in the evaluation's candidate order: the catalog's score order, FocalAssault last (it is judged against the turns).</summary>
         public bool TryGetAt(int rank, out CandidateResult result)
         {
             if (rank >= 0 && rank < _front.ResultCount)
@@ -362,7 +362,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childBack = tmp;
             _childFrontCount = BuildChildTable(_front, _childFront);
             PublishFocal();
-            RefreshWorks(null);
+            RefreshWorks(_worksWorld);
             CrossingThreat[] swapThreats = _threatFront;
             _threatFront = _threatBack;
             _threatBack = swapThreats;
