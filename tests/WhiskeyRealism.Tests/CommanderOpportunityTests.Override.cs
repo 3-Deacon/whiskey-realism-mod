@@ -130,11 +130,15 @@ internal static partial class CommanderOpportunityTests
         int decide = body.IndexOf("CommandPostureExecutor.Decide(", StringComparison.Ordinal);
         int submit = body.IndexOf("PostureIntentPlan.Submit(", StringComparison.Ordinal);
         AssertTrue(follow > 0 && decide > follow && submit > follow, "the follow early return precedes the decision and every submit");
-        int followReturn = body.IndexOf("return false;", follow, StringComparison.Ordinal);
+        // BC14W: the follower of a non-breach exploit on unbroken works submits the pinned stance (a stance, never a Move or a Formation) and returns true
+        // when it did.
+        int followReturn = body.IndexOf("return followerStance > 0;", follow, StringComparison.Ordinal);
         AssertTrue(followReturn > follow && followReturn < decide, "the follower returns before the decision");
-        string followBlock = body.Substring(follow, followReturn - follow + "return false;".Length);
-        AssertTrue(followBlock.Contains("return false;"), "the follower returns without submitting");
-        AssertFalse(followBlock.Contains("sink.Submit") || followBlock.Contains("PostureIntentPlan."), "and the follower block submits nothing");
+        string followBlock = body.Substring(follow, followReturn - follow + "return followerStance > 0;".Length);
+        AssertFalse(followBlock.Contains("sink.Submit") || followBlock.Contains("PostureIntentPlan.Submit(") || followBlock.Contains("SubmitMove") || followBlock.Contains("SubmitFormation"),
+            "and the follower block submits no Move and no Formation");
+        string withoutPin = followBlock.Replace("PostureIntentPlan.SubmitWorksPinStance(", "");
+        AssertFalse(withoutPin.Contains("PostureIntentPlan."), "its one submission is the pinned stance");
     }
 
     private static void OvrSkipsPin()
