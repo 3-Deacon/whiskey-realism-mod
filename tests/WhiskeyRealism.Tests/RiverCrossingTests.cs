@@ -37,6 +37,7 @@ internal static class RiverCrossingTests
             ("river crossing a road march takes its own crossing: Clear or Watched goes, Held only for an attack, Unknown is refused with a look", ARoadMarchTakesItsOwnCrossing),
             ("river crossing a road march is checked at the crossing the road takes, not at the nearest one", ARoadMarchIsCheckedAtItsOwnCrossing),
             ("river crossing a road flag on a move with one via is ignored", ARoadFlagOnOneViaIsIgnored),
+            ("river crossing a road leg that leaves its bank and returns to it is checked at both crossings", AnOutAndBackRoadLegIsChecked),
             ("river crossing recorded road links are used only when they chain from the leg's start region to its target region, else the full search decides", RecordedRoadLinksMustChain),
             ("river crossing the road legs around a road route are gated and get vias within the bound; the route's flag comes from the posture request", TheLegsAroundARoadRouteAreGated),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
@@ -446,6 +447,47 @@ internal static class RiverCrossingTests
 
         // An out-of-range recorded link is no chain.
         AssertTrue(Executor(both).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 9), 1.0).Execute, "a recorded link the map does not have falls back to the search");
+    }
+
+    // verify landing r4 minor 1: a road leg whose vias lie on one bank but whose road crosses the river and comes back. Region 0 is below x 500;
+    // the vias at 300 and 450 and the target at 480 are all on it.
+    private static void AnOutAndBackRoadLegIsChecked()
+    {
+        var clear = new Gate();
+        clear.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        clear.Picture.Links.Add((500f, -900f, CrossingState.Clear, 0, 1));
+        ExecutionPlan ok = Executor(clear).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f, 0, 1), 1.0);
+        AssertTrue(ok.Execute, "out and back over two Clear crossings goes: " + ok.Skip);
+        AssertEqual(2, ok.ViaCount, "on the road's two vias, none added");
+
+        var unseen = new Gate();
+        unseen.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        unseen.Picture.Links.Add((500f, -900f, CrossingState.Unknown, 0, 1));
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(unseen).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f, 0, 1), 1.0).Skip,
+            "the way back over a crossing nobody has seen refuses the leg although both ends lie on one bank");
+        AssertEqual(1, unseen.Picture.Looks.Count, "with one look");
+        AssertEqual(1, unseen.Picture.Looks[0], "at that crossing");
+
+        var held = new Gate();
+        held.Picture.Links.Add((500f, -200f, CrossingState.Held, 0, 1));
+        held.Picture.Planned.Add(0);
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(held).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f, 0, 0), 1.0).Skip,
+            "out and back over the same Held crossing is refused for a march");
+        BattleOrderIntent assault = RoadMarchWith(300f, 450f, 480f, 0, 0);
+        assault.Task = CommandTaskType.AttackObjective;
+        AssertTrue(Executor(held).Plan(new View(100f, 100f), assault, 1.0).Execute, "and goes for an attack the plan chose");
+
+        // Nothing to check without a record, or when the record is not a chain from this bank back to it: the leg is on one bank.
+        AssertTrue(Executor(unseen).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f), 1.0).Execute, "no record, no check");
+        var stray = new Gate();
+        stray.Picture.Links.Add((1200f, -200f, CrossingState.Unknown, 2, 3));
+        AssertTrue(Executor(stray).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f, 0, 0), 1.0).Execute, "a record that joins other regions is not this leg's crossing");
+        AssertTrue(Executor(unseen).Plan(new View(100f, 100f), RoadMarchWith(300f, 450f, 480f, 9), 1.0).Execute, "a link the map does not have is no crossing");
+
+        // A move that is not a road route is not checked on one bank.
+        BattleOrderIntent plain = RoadMarchWith(300f, 450f, 480f, 0, 1);
+        plain.Flags &= ~IntentFlags.RoadRoute;
+        AssertTrue(Executor(unseen).Plan(new View(100f, 100f), plain, 1.0).Execute, "(control) without the road flag the links are not read");
     }
 
     // verify landing r2 #2: the flag means a road route only with the road's two vias.

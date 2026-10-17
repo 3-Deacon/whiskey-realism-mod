@@ -67,6 +67,8 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 RouteRiverImpassableUsesBridge", RouteRiverImpassableUsesBridge),
             ("bc10 RouteNamesTheCrossingsTheRoadTakes", RouteNamesTheCrossingsTheRoadTakes),
             ("bc10 RouteNamesOneLinkPerRiverInRoadOrderAndNoneBeyondTheBound", RouteNamesOneLinkPerRiverInRoadOrderAndNoneBeyondTheBound),
+            ("bc10 ALongRunAlongTheBandNamesTheLinkOnTheRoad", ALongRunAlongTheBandNamesTheLinkOnTheRoad),
+            ("bc10 AnOutAndBackRoadRecordsBothCrossings", AnOutAndBackRoadRecordsBothCrossings),
             ("bc10 RouteCorridorShrinksToFit6000CellsElseNotPlanned", RouteCorridorShrinksToFit6000CellsElseNotPlanned),
             ("bc10 RoutePlanAllocatesNothingAfterWarmup", RoutePlanAllocatesNothingAfterWarmup),
             ("bc10 RoutedMoveCarriesColumnFormationAndLegHeadings", RoutedMoveCarriesColumnFormationAndLegHeadings),

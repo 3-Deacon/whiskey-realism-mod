@@ -218,6 +218,100 @@ internal static partial class BattleMovementHonestyTests
         AssertEqual(0, PlanOver(g, stray).LinkCount, "no link joins the regions the road changes between: none recorded, the gate runs its full search");
     }
 
+    // A hand-made path (vertex i is node i), walked by RoadLinks from its first node to its last.
+    private static RoadRoute WalkRoad(RiversPicture picture, params (float x, float z)[] path) => WalkRoad(picture, out _, path);
+
+    private static RoadRoute WalkRoad(RiversPicture picture, out bool usable, params (float x, float z)[] path)
+    {
+        var scratch = new RoadRouteScratch();
+        for (int i = 0; i < path.Length; i++)
+        {
+            scratch.PathNodes[i] = i;
+            scratch.SnapX[i] = path[i].x;
+            scratch.SnapZ[i] = path[i].z;
+        }
+        var route = new RoadRoute();
+        usable = RoadRoutePlanner.RoadLinks(scratch, 0, path.Length - 1, picture, ref route);
+        return route;
+    }
+
+    // A road that runs 300 m along the river band (a causeway: thirteen band nodes) between its last bank node and its first on the other bank.
+    private static (float x, float z)[] CausewayAlongTheBand()
+    {
+        var path = new System.Collections.Generic.List<(float x, float z)> { (500f, -700f), (575f, -700f) };
+        for (float z = -700f; z <= -400f; z += 25f) path.Add((610f, z));
+        path.Add((650f, -400f));
+        path.Add((700f, -400f));
+        return path.ToArray();
+    }
+
+    // verify landing r4 minor 2: after a long run of river-band nodes the crossing is the link on the road, not the one nearest the run's midpoint.
+    private static void ALongRunAlongTheBandNamesTheLinkOnTheRoad()
+    {
+        (float x, float z)[] road = CausewayAlongTheBand();
+        var west = new RiversPicture(600);
+        west.Links.Add((700f, -550f, 0, 1));    // a ford 90 m off the road, beside the middle of the run
+        west.Links.Add((610f, -690f, 0, 1));    // the crossing at the causeway's west end, on the road
+        RoadRoute a = WalkRoad(west, road);
+        AssertEqual(1, a.LinkCount, "one crossing");
+        AssertEqual(1, a.Link0, "the link on the road at the run's start, not the ford nearer the midpoint");
+
+        var east = new RiversPicture(600);
+        east.Links.Add((500f, -550f, 0, 1));    // a ford off the road, beside the middle of the run
+        east.Links.Add((610f, -410f, 0, 1));    // the crossing at the causeway's other end, on the road
+        AssertEqual(1, WalkRoad(east, road).Link0, "and the same at the run's far end");
+
+        var both = new RiversPicture(600);
+        both.Links.Add((610f, -690f, 0, 1));
+        both.Links.Add((610f, -560f, 0, 1));
+        AssertEqual(1, WalkRoad(both, road).Link0, "of two links on the road, the one nearer the run's midpoint");
+
+        // A link on the straight-line extension of a road segment, far past its end, is not near the road (the distance is to the segment).
+        var onExtension = new RiversPicture(600);
+        onExtension.Links.Add((900f, -700f, 0, 1));    // on the line of the road's first segment, 290 m beyond it
+        onExtension.Links.Add((630f, -500f, 0, 1));    // 20 m off the road beside the causeway
+        AssertEqual(1, WalkRoad(onExtension, road).Link0, "a link on the extension of a segment loses to the one near the road");
+
+        var offRoad = new RiversPicture(600);
+        offRoad.Links.Add((900f, -900f, 0, 1));
+        AssertEqual(1, WalkRoad(offRoad, road).LinkCount, "a lone joining link is the crossing wherever it is: the gate checks the chain");
+    }
+
+    // verify landing r4 minor 1: a road that leaves a bank and comes back to it records both crossings.
+    private static void AnOutAndBackRoadRecordsBothCrossings()
+    {
+        (float x, float z)[] loop =
+        {
+            (500f, -300f), (575f, -300f), (610f, -300f), (650f, -300f), (650f, -550f), (650f, -800f), (610f, -800f), (575f, -800f), (500f, -800f),
+        };
+        var picture = new RiversPicture(600);
+        picture.Links.Add((610f, -800f, 0, 1));
+        picture.Links.Add((610f, -300f, 0, 1));
+        RoadRoute r = WalkRoad(picture, loop);
+        AssertEqual(2, r.LinkCount, "out and back is two crossings");
+        AssertEqual(1, r.Link0, "the way out first");
+        AssertEqual(0, r.Link1, "then the way back");
+
+        // Out, back and out again is three changes, over the bound: the road is not usable as a route. (575, -800) is passed twice.
+        var again = new System.Collections.Generic.List<(float x, float z)>(loop) { (575f, -800f), (610f, -800f), (650f, -800f) };
+        again.RemoveRange(8, 1);
+        RoadRoute three = WalkRoad(picture, out bool threeUsable, again.ToArray());
+        AssertTrue(!threeUsable, "three changes of bank are more than the bound: no road route");
+        AssertEqual(0, three.LinkCount, "and no links");
+        // Out, back, out and back is four.
+        var four = new System.Collections.Generic.List<(float x, float z)>(loop) { (575f, -300f), (610f, -300f), (650f, -300f), (650f, -250f), (610f, -250f), (575f, -250f) };
+        WalkRoad(picture, out bool fourUsable, four.ToArray());
+        AssertTrue(!fourUsable, "four changes of bank: no road route");
+        WalkRoad(picture, out bool twoUsable, loop);
+        AssertTrue(twoUsable, "(control) two changes are a road route");
+        // A change no link joins is still a usable road (the gate runs its full search) but records none.
+        var lone = new RiversPicture(600);
+        RoadRoute unjoined = WalkRoad(lone, out bool unjoinedUsable, loop);
+        AssertTrue(unjoinedUsable && unjoined.LinkCount == 0, "a change no link joins records none and the road stays a route");
+        WalkRoad(lone, out bool unjoinedFourUsable, four.ToArray());
+        AssertTrue(!unjoinedFourUsable, "four changes are no route even when no link joins the first");
+    }
+
     private static void RouteNamesOneLinkPerRiverInRoadOrderAndNoneBeyondTheBound()
     {
         // Two rivers between the vias: both bridges, first met first.
@@ -241,8 +335,16 @@ internal static partial class BattleMovementHonestyTests
         many.Links.Add((660f, -400f, 1, 2));
         many.Links.Add((810f, -400f, 2, 3));
         RoadRoute m = PlanOver(three, many, vx, vz);
-        AssertTrue(m.Use && m.ViaCount == 2, "(fixture) a road route over three bridges");
-        AssertEqual(0, m.LinkCount, "a road that crosses more than two rivers records none");
+        AssertTrue(!m.Use && m.ViaCount == 0 && m.LinkCount == 0, "a road that crosses more than two rivers is no road route: the move is gated as any move");
+        BattleTerrainGrid fourGrid = RiversGrid(450, 550, 650, 750);
+        var fourPicture = new RiversPicture(450, 550, 650, 750);
+        fourPicture.Links.Add((460f, -400f, 0, 1));
+        fourPicture.Links.Add((560f, -400f, 1, 2));
+        fourPicture.Links.Add((660f, -400f, 2, 3));
+        fourPicture.Links.Add((760f, -400f, 3, 4));
+        RoadRoute f = PlanOver(fourGrid, fourPicture, vx, vz);
+        AssertTrue(!f.Use && f.ViaCount == 0, "a four-bridge road is no road route either");
+        AssertTrue(PlanOver(fourGrid, null, vx, vz).Use, "(control) without a river picture the same road is a route");
 
         // A river with no link at all across it (the picture lacks one): none, not a guess.
         var missing = new RiversPicture(600, 800);
