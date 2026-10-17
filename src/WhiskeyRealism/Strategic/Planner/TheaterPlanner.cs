@@ -694,14 +694,20 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var rec = s.Secessions[r];
                 if (!rec.Live || !rec.HasTown || rec.StateAlliance != s.Alliance) continue;
-                var post = new GarrisonPost { StateName = SecessionRules.NameOf(rec.StateId), X = rec.TownX, Z = rec.TownZ };
+                var post = new GarrisonPost { StateName = SecessionRules.NameOf(rec.StateId), StateId = rec.StateId, X = rec.TownX, Z = rec.TownZ };
                 float threat = LandThreatNear(c, post.X, post.Z, s.RelocationRange);
-                post.Need = HoldNeedAt(c, post.X, post.Z, s.RelocationRange, threat, HoldRatioNow(s), out _);
 
                 var inside = new List<int>();
                 for (int i = 0; i < s.Own.Count; i++)
                     if (s.Own[i].StateId == rec.StateId && s.Own[i].UnitTyp > 13) inside.Add(i);
                 post.InState = inside.Count > 0 || rec.OwnTroops;   // vanilla's flag counts garrisons too: a garrison alone already blocks
+                // The flag alone (a town garrison, no own formation inside) says the state is held, not that it is safe: what is posted is the
+                // believed threat's hold less the garrison's own strength, nothing when no enemy is believed near. With nobody present the
+                // full D2 need applies (the floor and the presumption), and so it does for the formations inside.
+                bool flagAlone = rec.OwnTroops && inside.Count == 0;
+                post.Need = flagAlone
+                    ? Math.Max(0f, HoldRatioNow(s) * threat - Math.Max(0f, rec.GarrisonStrength))
+                    : HoldNeedAt(c, post.X, post.Z, s.RelocationRange, threat, HoldRatioNow(s), out _);
                 inside.Sort((a, b) =>
                 {
                     int d = DistanceSq(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
@@ -715,7 +721,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) held += ReserveRules.HoldStrength(s.Own[i]);
                     if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
                 }
-                if (!post.InState)
+                post.PlayerPresence = inside.Count > 0 && post.InstanceIds.Count == 0;
+                // Nearest ready formations (not a capital guard, a hold reserve or a builder) march to the town until the need is met.
+                float posted = 0f;
+                while (post.Need > 0f && (flagAlone || !post.InState) && posted < post.Need)
                 {
                     int best = -1;
                     float bestDistance = float.MaxValue;
@@ -729,11 +738,11 @@ namespace WhiskeyRealism.Strategic.Planner
                         bestDistance = d;
                         best = i;
                     }
-                    if (best >= 0)
-                    {
-                        c.GarrisonReserved[best] = true;
-                        post.InstanceIds.Add(s.Own[best].InstanceId);
-                    }
+                    if (best < 0) break;
+                    c.GarrisonReserved[best] = true;
+                    post.InstanceIds.Add(s.Own[best].InstanceId);
+                    post.Marching = true;
+                    posted += Math.Max(0f, s.Own[best].Strength);
                 }
                 if (post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
                 c.Posts.Add(post);

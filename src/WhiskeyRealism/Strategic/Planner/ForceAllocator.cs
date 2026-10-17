@@ -195,8 +195,9 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var g = plan.Garrisons[k];
                 if (k > 0) sb.Append(';');
-                sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.InState ? "town-garrison" : "nobody").Append('@').Append(g.StateName)
-                  .Append(g.InState ? ":in/" : ":moving/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
+                sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
+                  .Append('@').Append(g.StateName)
+                  .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
             return sb.ToString();
@@ -438,7 +439,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         int i = _s.IndexOfOwn(post.InstanceIds[k]);
                         if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain) || !TheaterPlanner.Movable(_s.Own[i])) continue;
                         var f = _s.Own[i];
-                        if (post.InState)
+                        if (f.StateId == post.StateId)
                             Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, ReasonSecession, true);
                         else
                             Assign(i, FormationRole.Garrison, postSector, post.X, post.Z, ReasonSecession, true);

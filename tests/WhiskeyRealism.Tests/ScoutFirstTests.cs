@@ -861,35 +861,56 @@ internal static class ScoutFirstTests
         AssertEqual(1, ReconPlanner.PickFormation(s, sectors, plan, null, probe, taken, true), "the small division is the probe");
     }
 
+    // A department is dropped only after its key has been missing for PruneAfterMissedReviews reviews in a row: a formation missing from one
+    // snapshot (inactive, invisible for a moment) keeps its home, and a failed read (an empty snapshot) counts nothing.
     private static void DepartmentsOfFormationsThatNoLongerExistArePruned()
     {
+        int n = PlannerState.PruneAfterMissedReviews;
         var state = new PlannerState();
         state.BeginObservation();
         state.Observe(1, "1st Corps:11", Theater.West);
         state.Observe(2, "2nd Corps:12", Theater.East);
         AssertEqual(0, state.PruneUnobserved(), "both were seen");
+        for (int day = 1; day < n; day++)
+        {
+            state.BeginObservation();
+            state.Observe(1, "1st Corps:11", Theater.West);   // corps 2 is not in these snapshots
+            AssertEqual(0, state.PruneUnobserved(), "missing for " + day + " review(s): kept");
+        }
+        // Back for a review: the count starts over.
         state.BeginObservation();
-        state.Observe(1, "1st Corps:11", Theater.West);   // corps 2 is gone
-        AssertEqual(1, state.PruneUnobserved(), "the vanished corps' department is dropped");
-        AssertEqual(Theater.Unknown, state.DepartmentOf("2nd Corps:12"), "gone");
+        state.Observe(1, "1st Corps:11", Theater.West);
+        state.Observe(2, "2nd Corps:12", Theater.East);
+        AssertEqual(0, state.PruneUnobserved(), "seen again");
+        for (int day = 1; day <= n; day++)
+        {
+            state.BeginObservation();
+            state.Observe(1, "1st Corps:11", Theater.West);
+            int dropped = state.PruneUnobserved();
+            AssertEqual(day == n ? 1 : 0, dropped, "missing for " + day + " reviews in a row");
+        }
+        AssertEqual(Theater.Unknown, state.DepartmentOf("2nd Corps:12"), "gone after the run");
         AssertEqual(Theater.West, state.DepartmentOf("1st Corps:11"), "the survivor keeps its own");
 
-        // Through the planner: a review that no longer sees a formation forgets it; an empty (degraded) snapshot forgets nothing.
-        var s = Fronts(Corps(1, 800f, 8000f), Corps(2, 300f, 7000f));
+        // Through the planner: the inactive case (absent for fewer than N reviews) keeps the department, and a read failure (an empty
+        // snapshot, however many times) neither prunes nor counts.
         var planned = new PlannerState();
-        Plan(s, planned);
+        Plan(Fronts(Corps(1, 800f, 8000f), Corps(2, 300f, 7000f)), planned);
         AssertEqual(2, planned.Departments.Count, "two formations observed");
-        var smaller = Fronts(Corps(1, 800f, 8000f));
-        Plan(smaller, planned);
-        AssertEqual(1, planned.Departments.Count, "the missing one is pruned by the review");
-        Plan(Fronts(), planned);
-        AssertEqual(1, planned.Departments.Count, "a snapshot with no formations at all (a degraded read) prunes nothing");
+        for (int day = 0; day < n - 1; day++) Plan(Fronts(Corps(1, 800f, 8000f)), planned);
+        AssertEqual(2, planned.Departments.Count, "inactive for " + (n - 1) + " reviews: kept");
+        for (int day = 0; day < 3 * n; day++) Plan(Fronts(), planned);
+        AssertEqual(2, planned.Departments.Count, "a snapshot with no formations (a failed read) prunes and counts nothing");
+        Plan(Fronts(Corps(1, 800f, 8000f), Corps(2, 300f, 7000f)), planned);
+        for (int day = 0; day < n; day++) Plan(Fronts(Corps(1, 800f, 8000f)), planned);
+        AssertEqual(1, planned.Departments.Count, "gone for " + n + " reviews in a row: pruned");
     }
 
     // Concern 3: an appointment changes a commander and so the unit key (name:commander); the department follows at once, so a save
     // written before the next review keeps it.
     private static void AnAppointmentCarriesTheDepartmentToTheNewKey()
     {
+        RekeyAtSaveFollowsAnyCommanderChange();
         var state = new PlannerState();
         state.Observe(7, "1st Corps:11", Theater.West);
         state.RekeyInstance(7, "1st Corps:42");
@@ -921,4 +942,30 @@ internal static class ScoutFirstTests
     }
 
     private const long AllocationBound = 48000;
+
+    // Landing round, ruling 6: just before the sidecar is written every known formation is re-keyed from its live name and commander, so a
+    // commander changed between the review and the save (vanilla's job 24, a death) is saved under the key the next load computes.
+    private static void RekeyAtSaveFollowsAnyCommanderChange()
+    {
+        var state = new PlannerState();
+        state.Observe(7, "1st Corps:11", Theater.West);
+        state.Observe(8, "2nd Corps:12", Theater.East);
+        state.Restore(31, -1, 0, 3, 5L, reinforcementKey: "1st Corps:11", reinforcementDecision: 3);
+        state.RekeyFromLive(new[]
+        {
+            new KeyValuePair<int, string>(7, "1st Corps:99"),     // its commander changed after the last review
+            new KeyValuePair<int, string>(8, "2nd Corps:12"),     // unchanged
+            new KeyValuePair<int, string>(500, "unseen:1")        // a unit the planner never observed
+        });
+        var dto = SidecarDtoCodec.PlannerToDto(new PlannerSnapshot { State = state });
+        var keys = new List<string>();
+        foreach (var d in dto.Departments) keys.Add(d.UnitKey + "=" + d.Department);
+        AssertContains(string.Join(",", keys), "1st Corps:99=West", "saved under the new key");
+        AssertContains(string.Join(",", keys), "2nd Corps:12=East", "the unchanged one as it was");
+        AssertFalse(string.Join(",", keys).Contains("1st Corps:11"), "and not under the old one");
+        AssertEqual("1st Corps:99", dto.ReinforcementKey, "the decision's reinforcement follows its formation");
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        AssertContains(BodyOf(runtime, "internal static PlannerSnapshot Export("), "RekeyDepartmentsFromLive(alliance);", "the export re-keys before it writes");
+        AssertContains(BodyOf(runtime, "private static void RekeyDepartmentsFromLive("), "SnapshotRules.UnitKey(((UnityEngine.Object)reg).name, reg.commander)", "from the live name and commander");
+    }
 }

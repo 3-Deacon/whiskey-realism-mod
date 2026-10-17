@@ -880,7 +880,6 @@ internal static class CampaignExecutorTests
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "Hold above its need is vanilla's");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Main), "a MainEffort member of the mass: only the mover launches it (decision 5)");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "Support while its decision is deferred");
-        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.MapGroupSupport), "...except the map-group player's Support");
         tracker.RecordIssued(w.FreeHold, 300f, 0f, 100f, 0f, ExecutorFixtures.Day, queued: false);
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a formation in transit");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 9999), "a formation the plan does not know");
@@ -961,11 +960,11 @@ internal static class CampaignExecutorTests
             var a = new Allocation { Alliance = 0 };
             a.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
             CampaignPlanStore.Publish(0, plan, a, sectors);
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
             CampaignPlanStore.PreparePublish();
             CampaignPlanStore.SwapPublished();
 
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true });
             inJob = false;
             AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var published), "published context");
             AssertFalse(published.Released, "between slices the reader sees the last commit's release, not today's working one");
@@ -1298,7 +1297,7 @@ internal static class CampaignExecutorTests
             "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
             "SyncRecon(snapshot, allocation);",
             "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
-            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "EmitPlan(plan, trace, day, month, year);",
             "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);");
 
@@ -1309,7 +1308,7 @@ internal static class CampaignExecutorTests
             "PlanFreshness.IsToday(todaysPlan.DaySerial)",
             "CampaignSteeringRuntime.Execute(alliance, Snapshots[alliance]);",
             "CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);",
-            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "ReconExecutorRuntime.Execute(alliance, Snapshots[alliance], Recon[alliance]);");
 
         // The construction executor (G5c) is the steering executor's first statement, ahead of the objective and theater writes.
@@ -1400,7 +1399,7 @@ internal static class CampaignExecutorTests
         string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
         int stamp = body.IndexOf("PlanFreshness.NoteToday(daySerial);", StringComparison.Ordinal);
         int stand = body.IndexOf("if (mode == PlannerReviewMode.StandDown) return;", StringComparison.Ordinal);
-        int publish = body.IndexOf("CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));", StringComparison.Ordinal);
+        int publish = body.IndexOf("CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));", StringComparison.Ordinal);
         int store = body.IndexOf("CampaignPlanStore.Publish(alliance, plan, allocation, sectors);", StringComparison.Ordinal);
         AssertTrue(stamp >= 0 && stand > stamp, "the clock is noted in every mode, before the stand-down and bookkeeping returns (a paused alliance's plan ages out)");
         AssertTrue(store >= 0 && publish > store, "the context joins the plan's publish");
@@ -1444,8 +1443,7 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "else if (!listed && present) _offensive.Remove(unit);"), "removed from it");
         AssertTrue(src.Contains("VanillaFieldCache.List(_factionObject, \"unitsinoffensiveoperations\")"), "the offensive list, by cached field");
         string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
-        AssertTrue(HasLine(planner, "return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter), mapGroup);"), "the pre-war gate reaches the published context");
-        AssertTrue(HasLine(planner, "if (snapshot.Own[i].Chain == WlChainClass.PlayerMapGroup) mapGroup = snapshot.Own[i].InstanceId;"), "the map-group player's formation");
+        AssertTrue(HasLine(planner, "return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter));"), "the pre-war gate reaches the published context");
     }
 
     private static void SteeringRuntimeWritesWhatTheRulesDecide()
@@ -1489,7 +1487,7 @@ internal static class CampaignExecutorTests
         int todays = body.IndexOf("PlanFreshness.IsToday(todaysPlan.DaySerial)", StringComparison.Ordinal);
         AssertTrue(todays > gate && todays < steering, "the executors act on today's plan only (a failed Plan job leaves yesterday's)");
         AssertTrue(steering < mover, "the objective and theater steering run before the mover");
-        AssertTrue(HasLine(body, "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));") || body.Contains("PublishExecutorContext("), "the tempo release reaches the published context");
+        AssertTrue(HasLine(body, "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));") || body.Contains("PublishExecutorContext("), "the tempo release reaches the published context");
     }
 }
 
@@ -1611,13 +1609,13 @@ internal static class ExecutorFixtures
 
     internal sealed class World
     {
-        public int Main, Support, MapGroupSupport, Reserve, CapitalGuard, FreeHold, HoldAtNeed;
+        public int Main, Support, Reserve, CapitalGuard, FreeHold, HoldAtNeed;
         public bool HoldAtNeedWithheld;
         public float HoldSectorX;
     }
 
     // A published plan, allocation, sector model and executor context (decision 4 deferred, not released) for the
-    // withhold view: corps 1 MainEffort, 2 Support, 3 map-group Support, 4 Reserve, 5 CapitalGuard, 6 Hold released
+    // withhold view: corps 1 MainEffort, 2 Support, 4 Reserve, 5 CapitalGuard, 6 Hold released
     // above its need, 7 Hold withheld at need in the sector of x 550.
     internal static World PublishedWorld(out MoveTracker tracker)
     {
@@ -1625,9 +1623,6 @@ internal static class ExecutorFixtures
         var s = Wide();
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 330f, 9000f));
-        var player = Corps(3, 340f, 6000f);
-        player.Chain = WlChainClass.PlayerMapGroup;
-        s.Own.Add(player);
         s.Own.Add(Corps(4, 210f, 9000f));
         s.Own.Add(Corps(5, 10f, 9000f));
         s.Own.Add(Corps(6, 550f, 9000f));
@@ -1641,7 +1636,6 @@ internal static class ExecutorFixtures
         var a = new Allocation { Alliance = 0 };
         a.Assignments.Add(Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
         a.Assignments.Add(Assign(2, FormationRole.Support, support, 100f, 0f));
-        a.Assignments.Add(Assign(3, FormationRole.Support, support, 100f, 0f));
         var reserve = Assign(4, FormationRole.Reserve, plan.MainSectorId, 210f, 0f);
         reserve.Withheld = true;
         a.Assignments.Add(reserve);
@@ -1654,9 +1648,9 @@ internal static class ExecutorFixtures
         a.Assignments.Add(atNeed);
         PlanFreshness.NoteToday(Day);
         CampaignPlanStore.Publish(0, plan, a, sectors);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         tracker = MoveTrackers.For(0);
-        return new World { Main = 1, Support = 2, MapGroupSupport = 3, Reserve = 4, CapitalGuard = 5, FreeHold = 6, HoldAtNeed = 7, HoldAtNeedWithheld = true, HoldSectorX = 560f };
+        return new World { Main = 1, Support = 2, Reserve = 4, CapitalGuard = 5, FreeHold = 6, HoldAtNeed = 7, HoldAtNeedWithheld = true, HoldSectorX = 560f };
     }
 
     internal static void Release(int alliance)

@@ -37,6 +37,8 @@ internal static class SecessionGarrisonTests
             ("TheSnapshotReadsTheSecessionStatesFromVanillaEachReview", TheSnapshotReadsTheSecessionStatesFromVanillaEachReview),
             ("AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted", AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted),
             ("TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation", TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation),
+            ("ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold", ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold),
+            ("ThePlayerPresenceRowIsNotCalledATownGarrison", ThePlayerPresenceRowIsNotCalledATownGarrison),
         });
     }
 
@@ -369,6 +371,8 @@ internal static class SecessionGarrisonTests
         AssertTrue(HasLine(src, "float support = nation.support != null && nation.support.Length > SecessionRules.CsaAlliance ? nation.support[SecessionRules.CsaAlliance] : 0f;"),
             "the CSA's support in the state (nation.support[1], 178966-178973)");
         AssertTrue(HasLine(src, "Live = SecessionRules.IsLive(nation.alliance, support),"), "live is vanilla's IsDeactivated rule over today's owner and support");
+        AssertTrue(src.Contains("GarrisonStrength = s.Alliance == 0 && GarrisonStrengthByState.TryGetValue(rule.StateId, out float garrison) ? garrison : 0f,"),
+            "the town garrison's own strength is read for the Union only, from the side's own garrison units");
         AssertTrue(HasLine(src, "ReadSecessions(s);"), "read on every snapshot build, after the objectives it takes the town from");
         AssertTrue(HasLine(src, "OwnTroops = s.Alliance == 0 && nation.alliancetroops != null && nation.alliancetroops.Length > 0 && nation.alliancetroops[0]"),
             "the Union reads vanilla's presence flag (garrisons included); the CSA side never does");
@@ -396,9 +400,9 @@ internal static class SecessionGarrisonTests
             AssertTrue(a.Role != FormationRole.Garrison, "no formation marches to Louisville: " + a.InstanceId);
             AssertTrue(a.Reason != ForceAllocator.ReasonSecession, "and none is kept for it: " + a.InstanceId);
         }
-        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=town-garrison@Kentucky:in/5000 ", "the row says a garrison already blocks it");
+        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=town-garrison@Kentucky:in/0 ", "the row says a garrison already blocks it and nothing is needed");
 
-        // Without the flag (the garrison left, or the monthly pass has not run), the same position posts the nearest formation.
+        // Without the flag (the garrison left, or the half-day alliance-data pass has not run), the same position posts the nearest formation.
         var flagless = Side(0, 0, 0.6f);
         flagless.Own.Add(Corps(1, 240f, 9000f));
         flagless.Own.Add(Corps(2, 100f, 9000f));
@@ -446,5 +450,83 @@ internal static class SecessionGarrisonTests
             foreach (var x in insideAlloc.Assignments)
                 AssertTrue(x.Reason != ForceAllocator.ReasonSecession, chain + ": no formation is kept for the secession (" + x.InstanceId + ")");
         }
+    }
+
+    // Landing round, ruling 7: the flag says the state is held, not that it is safe. With an enemy believed near the town the need is the
+    // believed threat's hold less the garrison's own strength; with none near, nothing is posted.
+    private static void ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold()
+    {
+        CampaignSnapshot Flagged(float garrisonStrength)
+        {
+            var f = Side(0, 0, 0.6f);
+            var rec = f.Secessions[0];
+            rec.OwnTroops = true;
+            rec.GarrisonStrength = garrisonStrength;
+            f.Secessions[0] = rec;
+            f.Own.Add(Corps(1, 240f, 9000f));      // the believed army's own sector holds these two back (the hold reserve)
+            f.Own.Add(Corps(2, 220f, 9000f));
+            f.Own.Add(Corps(3, 190f, 9000f));      // the nearest formations free to march
+            f.Own.Add(Corps(4, 170f, 9000f));
+            f.Own.Add(Corps(5, 150f, 9000f));
+            return f;
+        }
+
+        // An army of 30000 believed at the town: HoldRatio 0.6 x 30000 = 18000, less the garrison's 4000 = 14000: two corps march.
+        var threatened = Flagged(4000f);
+        threatened.Beliefs.Add(Seen(320f, 30000f));
+        var plan = Plan(threatened);
+        AssertTrue(plan.Garrisons[0].InState, "the Union is present by the flag");
+        AssertNear(14000f, plan.Garrisons[0].Need, 1f, "the hold less the garrison's own strength");
+        AssertEqual(2, plan.Garrisons[0].InstanceIds.Count, "9000 + 9000 meets 14000: " + string.Join(",", plan.Garrisons[0].InstanceIds));
+        AssertEqual(3, plan.Garrisons[0].InstanceIds[0], "nearest free formation first");
+        AssertEqual(4, plan.Garrisons[0].InstanceIds[1], "then the next");
+        AssertTrue(plan.Garrisons[0].Marching, "they march to the town");
+        var alloc = Allocate(threatened, plan);
+        alloc.TryGet(3, out var first);
+        AssertEqual(FormationRole.Garrison, first.Role, "through the garrison role (MayMove, the mover)");
+        AssertNear(300f, first.TargetX, 0.01f, "to Louisville");
+        alloc.TryGet(5, out var spare);
+        AssertTrue(spare.Reason != ForceAllocator.ReasonSecession, "the third corps is not needed");
+        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps3@Kentucky:in+moving/14000+1 ", "the row says so");
+
+        // A garrison strong enough for the threat: nothing is posted.
+        var strong = Flagged(18000f);
+        strong.Beliefs.Add(Seen(320f, 30000f));
+        AssertEqual(0, Plan(strong).Garrisons[0].InstanceIds.Count, "a garrison that meets the hold needs nobody");
+
+        // No enemy believed near: the flag is enough, nothing is posted (no floor, no presumption).
+        var quiet = Flagged(4000f);
+        var quietPlan = Plan(quiet);
+        AssertNear(0f, quietPlan.Garrisons[0].Need, 0.01f, "no threat, no need");
+        AssertEqual(0, quietPlan.Garrisons[0].InstanceIds.Count, "nothing posted");
+
+        // An enemy far from the town (outside the relocation range) is not near: fog-honest, beliefs only.
+        var far = Flagged(4000f);
+        far.Beliefs.Add(Seen(900f, 30000f));
+        AssertEqual(0, Plan(far).Garrisons[0].InstanceIds.Count, "a belief far away posts nothing");
+
+        // A player's group is never one of the posted.
+        var player = Flagged(4000f);
+        player.Beliefs.Add(Seen(320f, 30000f));
+        var near = player.Own[2];                         // corps 3, the first that would march
+        near.Chain = WlChainClass.PlayerMapGroup;
+        player.Own[2] = near;
+        var playerPlan = Plan(player);
+        AssertFalse(playerPlan.Garrisons[0].InstanceIds.Contains(3), "the map-group player is not posted");
+        AssertEqual(2, playerPlan.Garrisons[0].InstanceIds.Count, "the next two free formations are");
+    }
+
+    // Presence by a player's group alone is not a town garrison.
+    private static void ThePlayerPresenceRowIsNotCalledATownGarrison()
+    {
+        var s = Side(0, 0, 0.6f);
+        var held = Corps(1, 290f, 9000f, KentuckyState);
+        held.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(held);
+        var plan = Plan(s);
+        AssertTrue(plan.Garrisons[0].PlayerPresence, "only a player's group stands in the state");
+        string row = ForceAllocator.Summary(Allocate(s, plan), plan, PlayerCommandClass.BelowMapLevel, 1f, 0);
+        AssertContains(row, " garrison=player-presence@Kentucky:in/", "named for what it is");
+        AssertFalse(row.Contains("town-garrison"), "and not a town garrison");
     }
 }

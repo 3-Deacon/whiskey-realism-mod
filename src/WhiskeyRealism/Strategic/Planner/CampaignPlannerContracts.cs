@@ -135,6 +135,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int StateId;
         public int StateAlliance;   // GameVars.nation[state].alliance
         public bool Live;           // SecessionRules.IsLive(owner, GameVars.nation[state].support[1]): vanilla's IsDeactivated is false
+        public float GarrisonStrength; // Union only: strength of the side's own garrison units standing in the state (the flag's likely source)
         public bool OwnTroops;      // Union only: GameVars.nation[state].alliancetroops[0], vanilla's own "a Union group stands here" flag (garrisons included)
         public bool HasTown;
         public float TownX, TownZ;  // the objective's town (Louisville, St.Louis), from its objective record
@@ -391,7 +392,10 @@ namespace WhiskeyRealism.Strategic.Planner
     public sealed class GarrisonPost
     {
         public string StateName;
+        public int StateId;
         public float X, Z;
+        public bool Marching;                      // a member outside the state is on its way to the town
+        public bool PlayerPresence;                // the only own formations inside the state are a player's or a CIC side's: present, but not members
         public bool InState;                       // the Union is present in the state: an own formation stands in it, or vanilla's alliancetroops[0] is set
         public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)
         public List<int> InstanceIds = new List<int>(); // the garrison: in-state formations nearest the post up to the need, else the one posted

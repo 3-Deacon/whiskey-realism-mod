@@ -4,7 +4,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Objective 15 (state 14, Kentucky) and 16 (state 22, Missouri) are CSA objectives. CampaignObjective.IsDeactivated (178966-178973)
     //   switches each off while the state already belongs to the CSA (nation.alliance == 1) or the CSA's support there is below 0.45
     //   (nation.support[1] < 0.45). CheckIfAccomplished (179259-179288) accomplishes it when the CSA owns Louisville / St.Louis AND
-    //   nation.alliancetroops[0] is false. That flag is set by the monthly alliance-data pass (81610 clears it, 81654-81660 sets it) for every
+    //   nation.alliancetroops[0] is false. That flag is set by the alliance-data pass, which runs every 0.5 days per alliance (campaignprefs.txt:3319-3320, decompile 81492; 81610 clears it, 81654-81660 sets it) for every
     //   Union unit with unittyp > 13 and not a fleet (17) whose map-symbol visibility is above 0 and whose point lies in the state:
     //   GetUnitVisibilityStateOnCampaignMap (82940-82943) returns 2 for a garrison unit with its garrisonreference, so a garrison alone sets
     //   it, as does a field army; "visible" is the symbol state, not campaign fog. The state then flips to the CSA, CSA support jumps to

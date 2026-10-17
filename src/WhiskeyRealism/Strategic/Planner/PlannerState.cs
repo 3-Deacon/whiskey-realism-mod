@@ -51,8 +51,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // re-keys a formation (name:commander): Observe carries the department over by instance id within a session.
         private readonly Dictionary<string, Theater> _departments = new Dictionary<string, Theater>(StringComparer.Ordinal);
         private readonly Dictionary<int, string> _keyOfInstance = new Dictionary<int, string>();
-        // The unit keys the current review's Observe calls saw: PruneUnobserved drops every other saved department.
+        // The unit keys the current review's Observe calls saw. PruneUnobserved counts the reviews a saved department's key was not seen and
+        // drops it after PruneAfterMissedReviews in a row (a formation missing from one snapshot, inactive or briefly invisible, keeps its home).
         private readonly HashSet<string> _observed = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _missed = new Dictionary<string, int>(StringComparer.Ordinal);
+        public const int PruneAfterMissedReviews = 10;
 
         public IReadOnlyDictionary<string, Theater> Departments => _departments;
 
@@ -62,15 +65,30 @@ namespace WhiskeyRealism.Strategic.Planner
             _observed.Clear();
         }
 
-        // Drops the saved departments of unit keys the observation pass did not see (a formation that no longer exists would otherwise stay
-        // in the sidecar for ever). Returns how many were dropped.
+        // Drops the saved departments of unit keys the observation passes have not seen for PruneAfterMissedReviews reviews in a row (a
+        // formation that no longer exists would otherwise stay in the sidecar for ever; one missing from a single snapshot is not gone).
+        // The caller runs it only after a pass that read formations at all, so a failed read counts nothing. Returns how many were dropped.
         public int PruneUnobserved()
         {
             List<string> gone = null;
             foreach (var key in _departments.Keys)
-                if (!_observed.Contains(key)) (gone ?? (gone = new List<string>())).Add(key);
+            {
+                if (_observed.Contains(key))
+                {
+                    _missed.Remove(key);
+                    continue;
+                }
+                _missed.TryGetValue(key, out int missed);
+                missed++;
+                if (missed >= PruneAfterMissedReviews) (gone ?? (gone = new List<string>())).Add(key);
+                else _missed[key] = missed;
+            }
             if (gone == null) return 0;
-            for (int i = 0; i < gone.Count; i++) _departments.Remove(gone[i]);
+            for (int i = 0; i < gone.Count; i++)
+            {
+                _departments.Remove(gone[i]);
+                _missed.Remove(gone[i]);
+            }
             return gone.Count;
         }
 
@@ -81,11 +99,21 @@ namespace WhiskeyRealism.Strategic.Planner
             if (string.IsNullOrEmpty(newKey) || !_keyOfInstance.TryGetValue(instanceId, out var oldKey)) return;
             _keyOfInstance[instanceId] = newKey;
             if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
+            if (string.Equals(ReinforcementKey, oldKey, StringComparison.Ordinal)) ReinforcementKey = newKey;
             if (_departments.TryGetValue(oldKey, out var carried))
             {
                 _departments.Remove(oldKey);
                 _departments[newKey] = carried;
             }
+        }
+
+        // Just before the sidecar is written: every formation the planner has seen this session is re-keyed from its live name and
+        // commander (`live`: instance id, current unit key), so a commander changed since the last review - by the planner, by vanilla's
+        // job 24, by a death - is saved under the key the next load will compute.
+        public void RekeyFromLive(IEnumerable<KeyValuePair<int, string>> live)
+        {
+            if (live == null) return;
+            foreach (var pair in live) RekeyInstance(pair.Key, pair.Value);
         }
 
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.

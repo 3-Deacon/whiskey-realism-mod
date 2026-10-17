@@ -12,7 +12,7 @@ using static TestFixtures;
 // Stage G slice G5a, chapters decisions 5 and 8 (docs/superpowers/plans/2026-10-15-campaign-planner.md § G5a, the
 // chapter tempo gate and the pre-war gate): vanilla's tempo roll as pure arithmetic, the tempo clock, the first-move
 // gate and its release predicate (TempoReleasedDecision == DecisionSerial), the offense-only withhold of the mass
-// and of a deferred decision's Support, the map-group player's Support order, and the 001 pre-war idle.
+// and of a deferred decision's Support and the 001 pre-war idle.
 internal static class CampaignTempoGateTests
 {
     public static void Run()
@@ -528,7 +528,7 @@ internal static class CampaignTempoGateTests
         CampaignScope.ResetAll();
         PlanFreshness.NoteToday(day2.DaySerial);
         CampaignPlanStore.Publish(0, plan2, alloc2, ExecutorFixtures.Sectors(day2));
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 1), "so no Support stays withheld for it, and vanilla's own pool is vanilla's");
         CampaignScope.ResetAll();
     }
@@ -580,7 +580,7 @@ internal static class CampaignTempoGateTests
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Main), "and after the release (an undispatched member is launched only by the mover)");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a Hold formation above its sector's need is not");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "nor Support once the decision is released");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Main), "with the pre-war gate nothing is");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Reserve), "not even a Reserve formation");
         CampaignScope.ResetAll();
@@ -603,7 +603,6 @@ internal static class CampaignTempoGateTests
         var w = ExecutorFixtures.PublishedWorld(out _);
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "an AI Support formation of a deferred decision is withheld from offense");
         AssertFalse(CampaignWithholdView.WithheldFromDefense(0, w.Support, 100f, 0f), "never from defense");
-        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.MapGroupSupport), "the map-group player's Support formation is never withheld");
         ExecutorFixtures.Release(0);
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "on the release review the clause drops");
         CampaignScope.ResetAll();
@@ -614,7 +613,7 @@ internal static class CampaignTempoGateTests
         var alloc = g.Alloc;
         PlanFreshness.NoteToday(g.S.DaySerial);
         CampaignPlanStore.Publish(0, g.Plan, alloc, ExecutorFixtures.Sectors(g.S));
-        CampaignPlanStore.PublishExecutorContext(0, ExecutorContext.From(g.State, true, -1));
+        CampaignPlanStore.PublishExecutorContext(0, ExecutorContext.From(g.State, true));
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 3), "released at the first dispatch: Support is vanilla's");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, 1), "while the mass stays the mover's");
         CampaignScope.ResetAll();
@@ -681,9 +680,9 @@ internal static class CampaignTempoGateTests
     private static void AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne()
     {
         var w = ExecutorFixtures.PublishedWorld(out _);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "decision 3 is deferred though decision 2 was released: Support stays withheld");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "released: vanilla's again");
         CampaignScope.ResetAll();
 
@@ -785,7 +784,7 @@ internal static class CampaignTempoGateTests
     {
         var w = ExecutorFixtures.PublishedWorld(out var tracker);
         tracker.RecordIssued(w.FreeHold, 300f, 0f, 100f, 0f, ExecutorFixtures.Day, queued: false);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false });
         foreach (int id in new[] { w.Main, w.Support, w.Reserve, w.CapitalGuard, w.FreeHold, w.HoldAtNeed })
         {
             AssertFalse(CampaignWithholdView.WithheldFromOffense(0, id), "pre-war: formation " + id + " is vanilla's");

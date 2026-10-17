@@ -238,6 +238,23 @@ namespace WhiskeyRealism.Strategic.Planner
             AreaSource.Set(areas, areas.Count);
         }
 
+        // D8 (verify round 2): the side's own garrison units are not formations (the planner never moves them) but they are the Union's
+        // presence in a secession state and part of its hold there: their strength per state, summed while the units are read.
+        private static readonly Dictionary<int, float> GarrisonStrengthByState = new Dictionary<int, float>();
+
+        private static void NoteGarrison(Regiment reg)
+        {
+            try
+            {
+                if (!((Component)reg).gameObject.activeInHierarchy || BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) return;
+                int state = StateOf(reg.GetPosition());
+                if (state < 0) return;
+                GarrisonStrengthByState.TryGetValue(state, out float sum);
+                GarrisonStrengthByState[state] = sum + Math.Max(0f, reg.groupstrengthdirect);
+            }
+            catch (Exception) { /* a garrison that cannot be read adds nothing */ }
+        }
+
         private static void ReadFormations(CampaignSnapshot s, int alliance, object faction, in WlChainContext chain)
         {
             Fill(OffensiveSet, _offensiveField.GetValue(faction) as IList);
@@ -245,6 +262,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Fill(DepotBuilderSet, _depotBuildersField.GetValue(faction) as IList);
             Fill(CapitalSet, _capitalField.GetValue(faction) as IList);
 
+            GarrisonStrengthByState.Clear();
             OwnUnits.Clear();
             OwnIndex.Clear();
             OwnById.Clear();
@@ -254,7 +272,12 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var reg = units[i];
                 if ((UnityEngine.Object)reg == null || reg.alliance != alliance || reg.unittyp == 17) continue;
-                if ((UnityEngine.Object)reg.garrisonreference != null || !((Component)reg).gameObject.activeInHierarchy) continue;
+                if ((UnityEngine.Object)reg.garrisonreference != null)
+                {
+                    NoteGarrison(reg);
+                    continue;
+                }
+                if (!((Component)reg).gameObject.activeInHierarchy) continue;
                 if (BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) continue;
                 OwnIndex[reg] = OwnUnits.Count;
                 OwnUnits.Add(reg);
@@ -408,6 +431,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     Live = SecessionRules.IsLive(nation.alliance, support),
                     // The Union reads vanilla's own presence flag for its own side only (fog-honest: it is the side's own groups and garrisons,
                     // 81654-81660, 82940-82943); the CSA never reads it.
+                    GarrisonStrength = s.Alliance == 0 && GarrisonStrengthByState.TryGetValue(rule.StateId, out float garrison) ? garrison : 0f,
                     OwnTroops = s.Alliance == 0 && nation.alliancetroops != null && nation.alliancetroops.Length > 0 && nation.alliancetroops[0]
                 };
                 for (int i = 0; i < s.Objectives.Count && !record.HasTown; i++)

@@ -279,7 +279,7 @@ namespace N {
         var real = ParseScope();
         AssertTrue(real.Contains("FormationRecord.WaypointZ") && real.Contains("CampaignSnapshot.Beliefs") && real.Contains("FormationFlags.MoveQueued"),
             "the real contract files are read through the same parser");
-        AssertTrue(real.Contains("PlannerState.TempoReleasedDecision") && real.Contains("MoveRecord.ObjectiveId") && real.Contains("ExecutorContext.MapGroupInstanceId"),
+        AssertTrue(real.Contains("PlannerState.TempoReleasedDecision") && real.Contains("MoveRecord.ObjectiveId"),
             "and so are the state records");
     }
 
@@ -701,6 +701,10 @@ internal static class CensusRows
         "SecessionRecord.StateAlliance | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons (only the state's owner garrisons it)",
         "SecessionRecord.Live | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons / SecessionValue (vanilla's IsDeactivated is false)",
         "SecessionRecord.OwnTroops | P/TheaterPlanner.cs | F2 TheaterPlanner.Garrisons (vanilla's alliancetroops[0]: a garrison alone blocks the secession)",
+        "SecessionRecord.GarrisonStrength | P/TheaterPlanner.cs | Landing round TheaterPlanner.Garrisons (the flag alone: the hold less the town garrison's own strength)",
+        "GarrisonPost.StateId | P/ForceAllocator.cs | Landing round ForceAllocator.AssignGarrisons (a member inside holds, one outside marches)",
+        "GarrisonPost.Marching | P/ForceAllocator.cs | Landing round [Allocation] garrison= (in+moving)",
+        "GarrisonPost.PlayerPresence | P/ForceAllocator.cs | Landing round [Allocation] garrison=player-presence",
         "SecessionRecord.HasTown | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons",
         "SecessionRecord.TownX | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons (the post)",
         "SecessionRecord.TownZ | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons (the post)",
@@ -787,7 +791,6 @@ internal static class CensusRows
         "GaveUpMove.ObjectiveId | P/TheaterPlanner.cs | G3 TheaterPlanner.MassFor (leaves a formation out of the mass of the objective it gave up on)",
         "ExecutorContext.Released | P/CampaignWithholdView.cs | G5a CampaignWithholdView (deferred Support, pre-war gate)",
         "ExecutorContext.ExecutorsAllowed | P/CampaignWithholdView.cs | G5a CampaignWithholdView (deferred Support, pre-war gate)",
-        "ExecutorContext.MapGroupInstanceId | P/CampaignWithholdView.cs | G5a CampaignWithholdView (deferred Support, pre-war gate)",
         "Flag:EnableCampaignPlanner | P/CampaignPlannerRuntime.cs, P/EnemyDetectionRuntime.cs | G0 CampaignPlannerRuntime.ReviewPlan; G1 EnemyDetectionRuntime.BeliefsFor (fallback)",
         "Flag:EnableCampaignPlannerExecutors | P/CampaignPlannerRuntime.cs | G0 CampaignPlannerRuntime.ExecutorsEnabled / ReviewExecute; the G5 planner patches",
         "Flag:EnableCampaignReconnaissance | P/CampaignPlannerRuntime.cs | G1b recon step; G5d executor",

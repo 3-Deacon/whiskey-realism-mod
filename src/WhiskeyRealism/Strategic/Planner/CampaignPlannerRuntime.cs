@@ -152,7 +152,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
-                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));
+                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
@@ -198,7 +198,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignSteeringRuntime.Execute(alliance, Snapshots[alliance]);
                     CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);
                     // The mover may have released the decision's launch: the patches read it with the plan.
-                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));
+                    CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
                     // G5d: the recon missions the Plan job bound this review. Not gated on the recon flag: with it off the Plan job has
                     // ended every mission (ReleaseAll, Recalled ones included), so the pass only takes the Scouting order off their
                     // screens (a rollback must not leave one scouting for good) and moves nothing.
@@ -218,6 +218,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static PlannerSnapshot Export(int alliance)
         {
             if (alliance < 0 || alliance >= States.Length) return null;
+            RekeyDepartmentsFromLive(alliance);
             var saved = new PlannerSnapshot { State = States[alliance], UnreliableDays = NonCompliance[alliance].Days, UnreliableLastDay = NonCompliance[alliance].LastDay };
             saved.Beliefs.AddRange(EnemyDetectionRuntime.ModelFor(alliance).Beliefs);
             var protection = CommanderAppointmentRuntime.Book.For(alliance);
@@ -236,6 +237,28 @@ namespace WhiskeyRealism.Strategic.Planner
             if (moves != null) saved.Moves.AddRange(moves.Records);
             saved.ReconMissions.AddRange(Recon[alliance].Missions);
             return saved;
+        }
+
+        // The sidecar is about to be written: re-key every known formation from its live name and commander (PlannerState.RekeyFromLive).
+        private static void RekeyDepartmentsFromLive(int alliance)
+        {
+            try
+            {
+                var units = BattleUnits.campaignunitlist;
+                if (units == null) return;
+                var live = new List<KeyValuePair<int, string>>();
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i];
+                    if ((UnityEngine.Object)reg == null || reg.alliance != alliance) continue;
+                    live.Add(new KeyValuePair<int, string>(reg.GetInstanceID(), SnapshotRules.UnitKey(((UnityEngine.Object)reg).name, reg.commander)));
+                }
+                States[alliance].RekeyFromLive(live);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-planner:rekey-failed", "[CampaignPlanner] re-keying the departments before the save failed: " + ex.Message);
+            }
         }
 
         // The appointment executor changed a top formation's commander, so its unit key changed: carry its home department to the new key
@@ -452,14 +475,10 @@ namespace WhiskeyRealism.Strategic.Planner
             return FlagOn(Plugin.EnableCampaignPlanner) && FlagOn(Plugin.EnableCampaignPlannerExecutors);
         }
 
-        // What the executors' patches read with the plan (G5a): the decision and its release, the pre-war gate and the map-group
-        // player's formation (the deferred-Support clause never withholds him).
-        private static ExecutorContext ExecutorContextOf(int alliance, CampaignSnapshot snapshot)
+        // What the executors' patches read with the plan (G5a): the decision and its release and the pre-war gate.
+        private static ExecutorContext ExecutorContextOf(int alliance)
         {
-            int mapGroup = -1;
-            for (int i = 0; i < snapshot.Own.Count; i++)
-                if (snapshot.Own[i].Chain == WlChainClass.PlayerMapGroup) mapGroup = snapshot.Own[i].InstanceId;
-            return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter), mapGroup);
+            return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter));
         }
 
         private static bool FlagOn(BepInEx.Configuration.ConfigEntry<bool> entry)
