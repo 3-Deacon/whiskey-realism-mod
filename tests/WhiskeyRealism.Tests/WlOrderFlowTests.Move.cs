@@ -24,7 +24,7 @@ internal static partial class WlOrderFlowTests
         e.UnitId = unit;
         e.AwaitsMove = armed;
         e.LegHours = armed ? Leg : 0.0;
-        e.CarrierUnitId = armed ? (carrier != 0 ? carrier : unit) : 0;
+        e.Carrier = armed ? new WlMoveCarrier { UnitId = carrier != 0 ? carrier : unit, OrderType = 1 } : default(WlMoveCarrier);
         flow.Queue.TryEnqueue(in e, 0.0, out _);
     }
 
@@ -302,39 +302,84 @@ internal static partial class WlOrderFlowTests
     {
         var carrier = default(WlMoveCarrier);
         AssertFalse(carrier.Has, "a dispatch that moved nothing through the queue has no carrier");
-        carrier.Consider(5, 17.30f, 17.10f);
-        carrier.Consider(6, 17.50f, 17.12f);
-        carrier.Consider(7, 17.40f, 17.14f);
-        carrier.Consider(0, 99f, 99f);
+        carrier.Consider(5, 17.30f, 17.10f, 1, 100f, 200f);
+        carrier.Consider(6, 17.50f, 17.12f, 1, 110f, 210f);
+        carrier.Consider(7, 17.40f, 17.14f, 1, 120f, 220f);
+        carrier.Consider(0, 99f, 99f, 1, 0f, 0f);
         AssertEqual(6, carrier.UnitId, "the child carried out last carries the player's order");
         AssertNear(17.50f, carrier.ProcessingTime, 1e-4f, "with its processing time");
         AssertNear(17.12f, carrier.Stamp, 1e-4f, "and its own creation stamp, which is what the order is matched by");
-        carrier.Consider(8, 17.50f, 17.20f);
+        AssertTrue(carrier.X == 110f && carrier.Z == 210f && carrier.OrderType == 1, "and its own target and ordertype");
+        carrier.Consider(8, 17.50f, 17.20f, 1, 130f, 230f);
         AssertEqual(6, carrier.UnitId, "a tie keeps the first");
     }
 
+    private static WlMoveCarrier Rides(float stamp, int orderType = 1) => new WlMoveCarrier { UnitId = 1, Stamp = stamp, OrderType = orderType };
+
     private static void OnlyTheCarryingEntryCounts()
     {
-        AssertTrue(WlMoveState.Carries(1, 17.10f, 17.10f), "the recorded entry itself");
-        AssertTrue(WlMoveState.Carries(0, 17.30f, 17.10f), "a later entry of the unit (the recorded one was replaced)");
-        AssertFalse(WlMoveState.Carries(1, 17.00f, 17.10f), "an older move of the same unit is another order's");
-        AssertFalse(WlMoveState.Carries(2, 17.30f, 17.10f), "a stop entry is no move");
-        AssertFalse(WlMoveState.Carries(4, 17.30f, 17.10f), "nor is a stance entry");
+        AssertTrue(WlMoveState.Carries(1, 17.10f, Rides(17.10f)), "the recorded entry itself");
+        AssertTrue(WlMoveState.Carries(1, 17.30f, Rides(17.10f)), "a later entry of the unit and ordertype (the recorded one was replaced)");
+        AssertFalse(WlMoveState.Carries(1, 17.00f, Rides(17.10f)), "an entry created before the recorded one is another order's");
+        AssertFalse(WlMoveState.Carries(2, 17.30f, Rides(17.10f, 2)), "a stop entry is no move");
+        AssertFalse(WlMoveState.Carries(4, 17.30f, Rides(17.10f, 4)), "nor is a stance entry");
     }
 
-    // F2 of the verify round: a permanently detached pool brigade's second SetWaypoint deletes its entry and
-    // adds the new one without the 0.02 h standard time (124929-124931, 124966), so the replacement's
-    // PROCESSING time can be earlier than the old entry's, while its creation stamp is later. Matching by
-    // processing time released the order early; the creation stamp does not.
+    // R2 of verify round 2: ProcessOrders rewrites an entry's lastupdate on every pass once its processing time has
+    // passed (125331), so an OLDER entry of the same unit that is due has a stamp at or after the stamp taken from a
+    // newer pending one, and the stamp alone lets it carry the newer order (a lost courier on it would then discard
+    // a newer order). Two entries of one unit and one ordertype cannot coexist (AddToOrderQueue replaces the first,
+    // 124929-124933), so an older entry is of the other move ordertype: the ordertype keeps it out.
+    private static void OlderDueEntryOfTheOtherOrderTypeDoesNotCarry()
+    {
+        // The recorded carrier: a new-path entry (1) created at 17.30. The older append entry (0) was created at
+        // 17.00 and is being processed: its stamp is rewritten to 17.45.
+        WlMoveCarrier carrier = Rides(17.30f, orderType: 1);
+        AssertFalse(WlMoveState.Carries(0, 17.45f, carrier), "the older entry's rewritten stamp is later than the carrier's, but it is the other ordertype");
+        AssertTrue(WlMoveState.Carries(1, 17.45f, carrier), "the carrier itself, due and being processed, still carries");
+        AssertTrue(17.45f >= carrier.Stamp, "fixture: by stamp alone the older entry would match");
+    }
+
+    // F2 of verify round 1: a permanently detached pool brigade's second SetWaypoint deletes its entry and adds the
+    // new one without the 0.02 h standard time (124929-124931, 124966), so the replacement's PROCESSING time can be
+    // earlier than the old entry's, while its creation stamp is later. Matching by processing time released the
+    // order early; the creation stamp does not.
     private static void ReplacementEntryWithAnEarlierProcessingTimeStillCarries()
     {
         // The old entry (the unit's latest, the recorded carrier): created 17.100, processing 17.540.
         // The replacement: created 17.300, processing 17.320 (queued behind nothing else any more).
         const float carrierStamp = 17.100f, replacementStamp = 17.300f, replacementProcessing = 17.320f, carrierProcessing = 17.540f;
         AssertTrue(replacementProcessing < carrierProcessing, "fixture: the replacement is earlier in processing time");
-        AssertTrue(WlMoveState.Carries(1, replacementStamp, carrierStamp), "the replacement carries the order (stamp)");
-        AssertFalse(WlMoveState.Carries(1, replacementProcessing, carrierProcessing),
+        AssertTrue(WlMoveState.Carries(1, replacementStamp, Rides(carrierStamp)), "the replacement carries the order (stamp)");
+        AssertFalse(WlMoveState.Carries(1, replacementProcessing, Rides(carrierProcessing)),
             "control: matched by processing time as before the fix, the replacement is missed and the order released early");
+    }
+
+    // R1 of verify round 2: the delivery pass runs at most once per 30 AI frames (4970, 5684), so a unit that carried
+    // its move out and finished it between two passes has no path when the entry is first seen gone. The reading must
+    // not be "lost": a lost move was never made, an arrived or fighting unit made it.
+    private static void ArrivalInsideTheGapIsCarriedOutNotLost()
+    {
+        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 20f, inContact: false), "arrived within 20 m of its target");
+        AssertTrue(WlMoveState.CarriedOutAfterGone(false, WlMoveState.ArrivalMeters, false), "exactly at the arrival distance");
+        AssertEqual(MoveState.Executed, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 35f, false)), "the player is told");
+        AssertFalse(WlMoveState.CarriedOutAfterGone(false, WlMoveState.ArrivalMeters + 1f, false), "just outside it is not an arrival");
+        AssertNear(WhiskeyRealism.Tactical.Battle.OrderArbiter.DedupeMeters, WlMoveState.ArrivalMeters, 1e-4f, "the arrival distance is the executor's own: a unit within it counts as at its target");
+    }
+
+    private static void ContactStopIsCarriedOutNotLost()
+    {
+        // A unit that met the enemy halted (CheckEnemyContact StopRegiment, 117380) far from its target: it
+        // executed the move up to the fight.
+        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 600f, inContact: true), "stopped in contact, 600 m short");
+        AssertEqual(MoveState.Executed, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 600f, true)), "the player is told");
+    }
+
+    private static void RealLossIsStillLost()
+    {
+        AssertFalse(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 600f, inContact: false), "no path, far from the target, no contact");
+        AssertEqual(MoveState.Lost, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 600f, false)), "the order is discarded");
+        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: true, distanceToTargetMeters: 600f, inContact: false), "a unit still marching on its path made the move");
     }
 
     // The player always ends up with the latest order the chain gave (the held order is superseded, not lost).
@@ -461,15 +506,15 @@ internal static partial class WlOrderFlowTests
 
     private static void MoveStateClassification()
     {
-        AssertEqual(MoveState.InFlight, WlMoveState.Classify(moveQueued: true, courierLost: false, pathHeld: true), "queued is in flight");
-        AssertEqual(MoveState.InFlight, WlMoveState.Classify(moveQueued: true, courierLost: false, pathHeld: false), "a queued move's path is not asked");
-        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: true, courierLost: true, pathHeld: true), "queued with its courier gone is lost");
-        AssertEqual(MoveState.Executed, WlMoveState.Classify(moveQueued: false, courierLost: false, pathHeld: true), "gone, the unit holds its path: carried out");
+        AssertEqual(MoveState.InFlight, WlMoveState.Classify(moveQueued: true, courierLost: false, carriedOutAfterGone: true), "queued is in flight");
+        AssertEqual(MoveState.InFlight, WlMoveState.Classify(moveQueued: true, courierLost: false, carriedOutAfterGone: false), "a queued move's path is not asked");
+        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: true, courierLost: true, carriedOutAfterGone: true), "queued with its courier gone is lost");
+        AssertEqual(MoveState.Executed, WlMoveState.Classify(moveQueued: false, courierLost: false, carriedOutAfterGone: true), "gone and carried out (path, arrival or contact)");
         // F1 of the verify round: vanilla clears a lost line's waypoints (125282) and deletes the entry one or
         // two passes later (125425), so by the time a pass looks the courier line is gone with the entry; only
         // the path is left to tell the lost move from the carried-out one.
-        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: false, courierLost: false, pathHeld: false), "gone and the path with it: lost");
-        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: false, courierLost: true, pathHeld: false), "gone, no path: lost whatever the line said");
+        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: false, courierLost: false, carriedOutAfterGone: false), "gone and nothing to show for it: lost");
+        AssertEqual(MoveState.Lost, WlMoveState.Classify(moveQueued: false, courierLost: true, carriedOutAfterGone: false), "gone, nothing to show: lost whatever the line said");
     }
 
     // The executor notes the queued move of every unit it moved (not only the ordered group), the dispatch
@@ -483,23 +528,24 @@ internal static partial class WlOrderFlowTests
         int note = body.IndexOf("carrier.Consider(", StringComparison.Ordinal);
         int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
         AssertTrue(loop >= 0 && issue > loop && note > issue && emit > note, "each moved target's queue entry is noted after its IssueMove, inside the target loop, before Emit");
-        AssertTrue(Regex.IsMatch(body, @"if \(unit\.regimentpaths > 0 && WlMoveQueue\.TryPending\(unit,\s*out float queuedAt,\s*out float stamp\)\)\s*carrier\.Consider\(own\[targetIndex\]\.InstanceId,\s*queuedAt,\s*stamp\);"),
-            "the carrier candidate is the issued target (a child in a fan-out) that holds a path, with its pending entry's processing time and stamp");
+        AssertTrue(Regex.IsMatch(body, @"if \(unit\.regimentpaths > 0 && WlMoveQueue\.TryPending\(unit,\s*out float queuedAt,\s*out float stamp,\s*out int orderType\)\)\s*carrier\.Consider\(own\[targetIndex\]\.InstanceId,\s*queuedAt,\s*stamp,\s*orderType,\s*x,\s*z\);"),
+            "the carrier candidate is the issued target (a child in a fan-out) that holds a path, with its pending entry's processing time, stamp and ordertype and the target it was given");
         AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier\)"), "and Emit receives it");
         string code = Code(FlowRuntime);
-        AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.CarrierUnitId != 0 && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.CarrierUnitId = call\.CarrierUnitId;\s*entry\.CarrierStamp = call\.CarrierStamp;\s*\}"),
+        AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.Carrier\.Has && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.Carrier = call\.Carrier;\s*\}"),
             "Route arms an entry from the call's carrier and only while couriers are on");
         AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "no other origin is armed: vanilla's own orders are timed as before");
         string moveOf = BodyOf(code, "public MoveState MoveOf(");
-        AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.CarrierUnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, e.CarrierStamp)"),
+        AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.Carrier.UnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, in e.Carrier)"),
             "the host asks about the carrier unit (not the ordered unit) and its entry");
         string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
-        AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.lastupdate, carrierStamp)"), "only an entry that carries the order counts, matched by creation stamp");
+        AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.lastupdate, in carrier)"), "only an entry that carries the order counts, matched by ordertype and creation stamp");
         AssertTrue(queue.Contains("line.type == 1 && line.lineactive") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
             "lost is vanilla's own test (125282-125286: an active mounted line without a courier) on the entry's primary line");
-        AssertTrue(queue.Contains("WlMoveState.Classify(queued, lost, unit.regimentpaths > 0)"), "an entry that is gone is told lost from carried out by the unit's path");
+        AssertTrue(queue.Contains("WlMoveState.CarriedOutAfterGone(unit.regimentpaths > 0, distance, unit.combatstatussubordinates > 0f)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
+            "an entry that is gone is told lost from carried out by the unit's path, its distance to the target it was given and its contact");
         AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
-        AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;"), "the carrier records the entry's processing time and its creation stamp");
+        AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;") && queue.Contains("orderType = entry.ordertype;"), "the carrier records the entry's processing time and its creation stamp");
         AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
         AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs").Contains("SetWaypoint 91461-91504"),
             "and the comment names the vanilla lines it mirrors (SetWaypoint 91461-91504)");

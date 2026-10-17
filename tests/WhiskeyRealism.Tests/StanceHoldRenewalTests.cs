@@ -24,6 +24,7 @@ internal static class StanceHoldRenewalTests
             ("stance renewal candidates are AI groups that carry an order", CandidatesAreAiGroupsThatCarryAnOrder),
             ("stance renewal is bounded on the doctrine clock", RenewalIsBounded),
             ("stance renewal pin wired after the winners and through the writer", RenewalIsWiredAfterTheWinnersAndThroughTheWriter),
+            ("stance renewal start is cleared at battle end and on a yield", RenewalStartIsClearedAtBattleEndAndOnAYield),
         });
     }
 
@@ -179,5 +180,22 @@ internal static class StanceHoldRenewalTests
         string ensure = writer.Substring(writer.IndexOf("public static bool EnsureStance(", StringComparison.Ordinal));
         AssertTrue(ensure.Contains("if (!ReferenceEquals(contextTag, RenewTag)) _renewSince.Remove(id);"), "a producer's claim restarts the bound; a renewal does not");
         AssertFalse(body.Contains("ChangeStance("), "the renewal itself never writes a stance order (EnsureStance owns that)");
+    }
+
+    // R3 of verify round 2: the renewal's start is state a battle must not leak into the next (a stale start would
+    // read as an expired bound at once and the first renewal of the next battle would be refused) and a group handed
+    // back to vanilla must not keep its start (a later claim would otherwise inherit an old bound).
+    private static void RenewalStartIsClearedAtBattleEndAndOnAYield()
+    {
+        string writer = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Util/TacticalStanceWriter.cs");
+        int reset = writer.IndexOf("public static void ResetForBattleEnd()", StringComparison.Ordinal);
+        AssertTrue(reset >= 0, "the battle-end reset exists");
+        string resetBody = writer.Substring(reset, writer.IndexOf('}', reset) - reset);
+        AssertTrue(resetBody.Contains("_renewSince.Clear();"), "battle end clears every renewal start");
+        AssertTrue(writer.Contains("BattleScope.Register(\"stance-writer\", ResetForBattleEnd);"), "and the reset is registered with the battle scope");
+        int yield = writer.IndexOf("private static void Yield(", StringComparison.Ordinal);
+        AssertTrue(yield >= 0, "the yield exists");
+        string yieldBody = writer.Substring(yield, writer.IndexOf("_records.Remove(id)", yield, StringComparison.Ordinal) - yield);
+        AssertTrue(yieldBody.Contains("_renewSince.Remove(id);"), "a yield drops the group's renewal start before anything can return early");
     }
 }

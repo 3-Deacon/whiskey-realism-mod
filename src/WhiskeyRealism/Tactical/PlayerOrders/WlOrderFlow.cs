@@ -72,48 +72,66 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     //
     // A lost order is mostly gone from the queue before anyone looks. A mounted courier line (type 1) that is
     // still active and has no courier is vanilla's lost-order test (125282-125286, 125308-125320): it zeroes
-    // the line, sets orderstate 3 and clears the untransmitted waypoints (125282, 125285), and the entry is
+    // the line, sets orderstate 3 and clears the untransmitted waypoints (125282, 125286), and the entry is
     // carried out and deleted one or two ProcessOrders passes later (125425), which resets orderstate (124857).
-    // Neither the line nor orderstate outlives that. What does is the unit's path: a carried-out move leaves
-    // the unit holding its transmitted path until it arrives, a lost one leaves it holding none. So the
-    // verdict for an entry that is gone is the unit's path, read when the entry is first seen gone; a unit
-    // that had no path when the dispatch was captured is never a carrier (the executor's rule), and a move
-    // so short that the unit arrived between two passes reads as lost, which costs the player the order of a
-    // move that was over before he could be told.
+    // Neither the line nor orderstate outlives that. What does is the unit: a carried-out move leaves it
+    // holding its transmitted path until it arrives, a lost one leaves it with none. The delivery pass runs at
+    // most once per 30 AI frames (4970, 5684), so a unit with no path may also be a unit that carried the move
+    // out and finished it between two passes. An entry that is gone and a unit with no path therefore read as
+    // carried out when the unit stands within ArrivalMeters of the target the move was given (it arrived), or
+    // is in contact (vanilla's own CheckEnemyContact halts an AI group that meets the enemy, StopRegiment at
+    // 117372-117383, and treats `combatstatussubordinates > 0` as a group busy with combat, 3593, 8090: a unit
+    // that stopped to fight has done what the move was for), and as lost otherwise.
     internal static class WlMoveState
     {
-        public static MoveState Classify(bool moveQueued, bool courierLost, bool pathHeld)
+        // = OrderArbiter.DedupeMeters: the distance inside which the executor itself counts a unit as already
+        // at a target (a waypoint 60 m from where it stands is not re-issued).
+        public const float ArrivalMeters = 60f;
+
+        public static MoveState Classify(bool moveQueued, bool courierLost, bool carriedOutAfterGone)
         {
             if (moveQueued) return courierLost ? MoveState.Lost : MoveState.InFlight;
-            return pathHeld ? MoveState.Executed : MoveState.Lost;
+            return carriedOutAfterGone ? MoveState.Executed : MoveState.Lost;
         }
 
-        // Does a queue entry of the carrier unit carry the order? A move entry (ordertype 0 or 1) created or
-        // last processed at or after the stamp the dispatch recorded from the carrier's entry: that entry (its
-        // stamp only grows, ProcessOrders 125331) or one that replaced it. A replacement is not later in
-        // processing time: a permanently detached pool brigade's second SetWaypoint deletes the old entry and
-        // adds the new one without the 0.02 h standard time (124929-124931, 124966), so its processing time
-        // can be earlier than the old entry's. The creation stamp (OrderQueue constructor, lastupdate) does
-        // not go backwards.
-        public static bool Carries(int orderType, float entryStamp, float carrierStamp)
+        // The verdict for an entry that is gone: carried out when the unit still holds its path, has arrived
+        // at the target, or stopped in contact; lost otherwise.
+        public static bool CarriedOutAfterGone(bool pathHeld, float distanceToTargetMeters, bool inContact)
         {
-            return orderType >= 0 && orderType <= 1 && entryStamp >= carrierStamp;
+            return pathHeld || inContact || distanceToTargetMeters <= ArrivalMeters;
+        }
+
+        // Does a queue entry of the carrier unit carry the order? A move entry of the carrier's ordertype whose
+        // creation stamp is not before the carrier's: the entry the dispatch recorded (its stamp only grows,
+        // ProcessOrders 125331) or one that replaced it. A replacement is not later in processing time: a
+        // permanently detached pool brigade's second SetWaypoint deletes the old entry and adds the new one
+        // without the 0.02 h standard time (124929-124931, 124966); its creation stamp does not go backwards.
+        // The ordertype is what keeps an older entry out: two entries of one unit and one ordertype cannot
+        // coexist (AddToOrderQueue replaces the first, 124929-124933), so an older entry of the same unit is of
+        // the other move ordertype, and its stamp is rewritten on every pass once it is due (125331), which
+        // would otherwise let it match a stamp taken from the newer entry.
+        public static bool Carries(int orderType, float entryStamp, in WlMoveCarrier carrier)
+        {
+            return orderType >= 0 && orderType <= 1 && orderType == carrier.OrderType && entryStamp >= carrier.Stamp;
         }
     }
 
     // The queued move that carries an executor dispatch: among the units one dispatch moved (the ordered
     // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
     // out last (processing time). The player is told one leg after that entry; the others are carried out
-    // earlier or with it. Stamp is that entry's creation stamp, the identity WlMoveState.Carries matches by.
+    // earlier or with it. Stamp and OrderType identify that entry (WlMoveState.Carries); X and Z are the
+    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.CarriedOutAfterGone).
     internal struct WlMoveCarrier
     {
         public int UnitId;
         public float ProcessingTime;
         public float Stamp;
+        public int OrderType;
+        public float X, Z;
 
         public bool Has => UnitId != 0;
 
-        public void Consider(int unitId, float processingTime, float stamp)
+        public void Consider(int unitId, float processingTime, float stamp, int orderType, float x, float z)
         {
             if (unitId == 0) return;
             if (UnitId == 0 || processingTime > ProcessingTime)
@@ -121,6 +139,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 UnitId = unitId;
                 ProcessingTime = processingTime;
                 Stamp = stamp;
+                OrderType = orderType;
+                X = x;
+                Z = z;
             }
         }
     }

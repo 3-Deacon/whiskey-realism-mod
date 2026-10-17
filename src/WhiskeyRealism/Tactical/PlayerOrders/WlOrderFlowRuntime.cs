@@ -176,10 +176,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public bool Campaign;
             public PlayerOrderCandidate P62;
             public OrderIntentKind Kind;
-            // An executor dispatch's carrier: the unit whose queued move the order accompanies, and that entry's
-            // creation stamp (WlMoveCarrier). Zero when the dispatch moved nothing through the queue.
-            public int CarrierUnitId;
-            public float CarrierStamp;
+            // An executor dispatch's carrier: the unit whose queued move the order accompanies, that entry's
+            // identity and the target the unit was given. Has false when the dispatch moved nothing through
+            // the queue.
+            public WlMoveCarrier Carrier;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -239,7 +239,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
                 Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
-                CarrierUnitId = carrier.UnitId, CarrierStamp = carrier.Stamp,
+                Carrier = carrier,
             };
             return EnqueueCall(in call);
         }
@@ -342,11 +342,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             entry.Kind = call.Kind;
             // The executor moved the unit (or its children) through the order queue: the player is told one
             // leg after that move is carried out, not when it is queued (WlOrderFlow.ReleaseOnMove).
-            if (call.CarrierUnitId != 0 && CouriersOn())
+            if (call.Carrier.Has && CouriersOn())
             {
                 entry.AwaitsMove = true;
-                entry.CarrierUnitId = call.CarrierUnitId;
-                entry.CarrierStamp = call.CarrierStamp;
+                entry.Carrier = call.Carrier;
             }
 
             if (verdict == CaptureVerdict.Drop)
@@ -830,8 +829,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 // The unit whose queued move carries the order (the ordered group, or the latest child a fan-out
                 // ordered); one that is gone has no move to wait for.
-                Regiment carrier = ResolveUnit(e.CarrierUnitId);
-                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, e.CarrierStamp);
+                Regiment carrier = ResolveUnit(e.Carrier.UnitId);
+                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier);
             }
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its

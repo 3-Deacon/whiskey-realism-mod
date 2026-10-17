@@ -80,8 +80,8 @@ internal static partial class WlOrderFlowTests
         public MoveState MoveOf(in CourierEntry e)
         {
             MoveAsks++;
-            if (RecordAsks) MoveAskedAbout.Add(e.CarrierUnitId);
-            return CarrierMoves.TryGetValue(e.CarrierUnitId, out MoveState state) ? state : Move;
+            if (RecordAsks) MoveAskedAbout.Add(e.Carrier.UnitId);
+            return CarrierMoves.TryGetValue(e.Carrier.UnitId, out MoveState state) ? state : Move;
         }
         public bool ReleaseStillDue(in CourierEntry e) => ReleaseDue;
         public void SetDelivering(bool on) => Delivering = on;

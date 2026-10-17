@@ -25,22 +25,25 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     internal static class WlMoveQueue
     {
         // The unit's pending move entry with the latest processing time: its processing time (which entry is
-        // carried out last) and its creation stamp (which entry the order rides, WlMoveState.Carries).
-        internal static bool TryPending(Regiment unit, out float processingTime, out float stamp)
+        // carried out last), its creation stamp and ordertype (which entry the order rides,
+        // WlMoveState.Carries).
+        internal static bool TryPending(Regiment unit, out float processingTime, out float stamp, out int orderType)
         {
             processingTime = 0f;
             stamp = 0f;
+            orderType = 0;
             Regiment.OrderQueue entry = Latest(unit);
             if (entry == null) return false;
             processingTime = entry.processingtime;
             stamp = entry.lastupdate;
+            orderType = entry.ordertype;
             return true;
         }
 
         // Where the carrier unit's move stands: queued, queued with its courier gone, or no longer queued,
-        // when the unit's path says whether it was carried out or lost (WlMoveState). Only an entry that
-        // WlMoveState.Carries counts, so an older move of the same unit is another order's.
-        internal static MoveState StateOf(Regiment unit, float carrierStamp)
+        // when the unit's path, position and contact say whether it was carried out or lost (WlMoveState).
+        // Only an entry that WlMoveState.Carries counts, so an older move of the same unit is another order's.
+        internal static MoveState StateOf(Regiment unit, in WlMoveCarrier carrier)
         {
             var queue = OwnerQueue(unit);
             if (queue == null) return MoveState.Executed;
@@ -51,11 +54,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 Regiment.OrderQueue entry = queue[i];
                 if (entry == null || (UnityEngine.Object)entry.advisedunit != (UnityEngine.Object)moved) continue;
-                if (!WlMoveState.Carries(entry.ordertype, entry.lastupdate, carrierStamp)) continue;
+                if (!WlMoveState.Carries(entry.ordertype, entry.lastupdate, in carrier)) continue;
                 queued = true;
                 lost |= CourierLost(entry, moved);
             }
-            return WlMoveState.Classify(queued, lost, unit.regimentpaths > 0);
+            if (queued) return WlMoveState.Classify(true, lost, false);
+            Vector3 at = unit.transform.position;
+            float dx = at.x - carrier.X;
+            float dz = at.z - carrier.Z;
+            float distance = Mathf.Sqrt(dx * dx + dz * dz);
+            return WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(unit.regimentpaths > 0, distance, unit.combatstatussubordinates > 0f));
         }
 
         private static Regiment.OrderQueue Latest(Regiment unit)
