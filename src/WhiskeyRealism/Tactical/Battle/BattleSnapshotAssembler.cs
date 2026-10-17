@@ -13,7 +13,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //     included, AND the group itself. A leaf's list is just [self].
     //   - GetAttachedUnitsReg(directonly) (119840-119880) treats a unit as a direct child
     //     when its scene-graph parent is the group's transform, after its filters:
-    //     permanentlydetached (excludedechainedunits), unittyp 3/4 (excludeskirmishers),
+    //     permanentlydetached (excludedechainedunits; not applied to the AI command
+    //     relation, see IsDirectChild), unittyp 3/4 (excludeskirmishers),
     //     !activeInHierarchy | isrouted (includenonactiveunits:false), isgarrisonbasicunit.
     //   - Groups are unittyp > 13 (vanilla's own cut, 129589).
     // The direct parent of a unit is therefore the smallest group (fewest allattachedunits)
@@ -360,8 +361,17 @@ namespace WhiskeyRealism.Tactical.Battle
             return u.UnitTyp >= commandMin && (u.Flags & UnitFlags.Routed) == 0;
         }
 
-        // GetAttachedUnitsReg(excludedechainedunits:true, excludeskirmishers:true,
-        // directonly:true, includenonactiveunits:false) from a command-level parent.
+        // The AI command relation behind DirectChildDiscovery: the groups an army's
+        // GetAttachedUnitsReg(excludeskirmishers:true, directonly:true,
+        // includenonactiveunits:false) lists, except for excludedechainedunits.
+        // permanentlydetached is no part of the relation. Vanilla sets it on exactly the
+        // groups the AI engine drives: the AI-level pass marks every group at or below
+        // maxunitlevelforallocationtoai that no AI group above it covers (85255-85290),
+        // AddUnitToPool marks the pooled group (85386), and ChangeStance with a stance above
+        // 0 marks the ordered unit (90786-90791). Excluding it dropped every division or
+        // brigade that Whiskey is meant to command from its army (smoke 2026-10-17: both
+        // armies of both sides read as one synthetic child). W&L's own detached command is
+        // kept out by PlayerOwned (ToRegimentProbes excludePlayerOwned), not here.
         // includebasicgarrisons:false is not reproduced: isgarrisonbasicunit marks
         // garrison regiments (82094), which never pass the command-level filter that
         // DirectChildDiscovery applies to direct children.
@@ -370,8 +380,7 @@ namespace WhiskeyRealism.Tactical.Battle
             ref UnitRecord u = ref s.Own[i];
             int p = u.ParentIndex;
             if (p < 0 || s.Own[p].UnitTyp < commandMin) return false;
-            const UnitFlags excluded = UnitFlags.PermanentlyDetached | UnitFlags.Routed;
-            if ((u.Flags & excluded) != 0 || (u.Flags & UnitFlags.Active) == 0) return false;
+            if ((u.Flags & UnitFlags.Routed) != 0 || (u.Flags & UnitFlags.Active) == 0) return false;
             return u.UnitTyp != TacticalUnitType.Skirmisher && u.UnitTyp != TacticalUnitType.Scout;
         }
 
