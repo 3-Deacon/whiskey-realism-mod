@@ -1465,6 +1465,35 @@ namespace WhiskeyRealism.Tactical.Operations
         /// posture decision and whatever that returns, so an idle group already in formation (an <c>already-correct</c> decision writes nothing) is
         /// still held out of vanilla's assault; the writer's dedupe on the ordered stance keeps a standing group from being rewritten.
         /// </summary>
+        public const string ContestReason = "works-hold-contest";
+
+        /// <summary>
+        /// BC14W: the works contest's halt of a held group a move outside the stored orders is walking into the works band. A Stop, not a Move to the
+        /// point the group stands on (the executor's Move duplicate rule drops that one, while a Stop of a moving group is never a duplicate).
+        /// <see cref="IntentFlags.Contest"/> exempts it from the recent-order window.
+        /// </summary>
+        public static BattleOrderIntent ContestStop(int groupId, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stop, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ContestReason,
+            };
+        }
+
+        /// <summary>
+        /// BC14W: the works contest's move back to the hold point, beyond the dedupe radius of it. No <see cref="IntentFlags.UseOrderDelay"/>: it restores
+        /// the standing order the group already holds, so it is the group's own halt, not a new courier order.
+        /// </summary>
+        public static BattleOrderIntent ContestMove(int groupId, float x, float z, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ContestReason,
+            };
+        }
+
         public static int SubmitWorksHoldStance(IIntentSink sink, int groupId, IntentPriority priority, IntentSource source, int exploitId)
         {
             if (sink == null || groupId == 0) return 0;

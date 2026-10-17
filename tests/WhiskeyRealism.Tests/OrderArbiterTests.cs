@@ -22,6 +22,7 @@ internal static class OrderArbiterTests
             ("battle-core ArbiterResolveAllocatesNothingAfterWarmup", ArbiterResolveAllocatesNothingAfterWarmup),
             ("battle-core ArbiterForAllianceBoundsChecked", ArbiterForAllianceBoundsChecked),
             ("battle-core DedupeWithin60m", DedupeWithin60m),
+            ("bc14w WORKS-CONTEST-EXECUTOR the executor records the last move it issued, and a contest intent lands inside the recent-order window", WorksContestExecutor),
             ("battle-core SafetyBypassesRecentOrderButNotDedupe", SafetyBypassesRecentOrderButNotDedupe),
             ("battle-core TaskHoldBlocksSameTaskOnly", TaskHoldBlocksSameTaskOnly),
             ("battle-core ClampMatchesVanillaBoundsNegativeZ", ClampMatchesVanillaBoundsNegativeZ),
@@ -250,6 +251,69 @@ internal static class OrderArbiterTests
         view.Own[g].CombatBehaviorOrdered = 2;
         AssertEqual(SkipReason.Duplicate, executor.Plan(view, Behavior(1, 2, IntentPriority.Executor, IntentSource.FireControl), 1.0).Skip, "same ordered behavior");
         AssertTrue(executor.Plan(view, Behavior(1, 3, IntentPriority.Executor, IntentSource.FireControl), 1.0).Execute, "new behavior");
+    }
+
+    // BC14W (spec § 7A, the contest rule): LastIssuedMove is what the contest tells Whiskey's own moves from vanilla's by; a contest intent lands at once.
+    private static void WorksContestExecutor()
+    {
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 100f, -100f);
+        int child = view.AddGroup(2, 120f, -100f);
+        var executor = NewExecutor();
+        executor.TaskHoldHours = 0f;
+        double t = 4.0;
+
+        AssertFalse(executor.LastIssuedMove(1, out _, out _, out _), "nothing issued yet");
+        var first = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        Record(executor, first, t, pathsBefore: 0, pathsAfter: 1);
+        AssertTrue(executor.LastIssuedMove(1, out float x, out float z, out double hours), "a Move is recorded");
+        AssertTrue(x == 500f && z == -500f && hours == t, "its target and hour");
+        var second = Move(1, 700f, -300f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        Record(executor, second, t + 0.5, pathsBefore: 1, pathsAfter: 1);
+        executor.LastIssuedMove(1, out x, out z, out hours);
+        AssertTrue(x == 700f && z == -300f && hours == t + 0.5, "each issued Move overwrites it");
+
+        // A group Move that fanned out to a child records the child's own target too (its waypoint is the child's, offset from the group's).
+        var fan = Move(1, 900f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        var targets = new[]
+        {
+            new IssuedTarget { InstanceId = 1, X = 900f, Z = -900f },
+            new IssuedTarget { InstanceId = 2, X = 920f, Z = -900f },
+        };
+        executor.RecordIssued(fan, t + 1.0, targets, 2, new UnitWaypoint[0], 0, 0, 1);
+        AssertTrue(executor.LastIssuedMove(2, out x, out z, out _) && x == 920f && z == -900f, "the fanned-out child has its own");
+        executor.RecordIssued(Stance(1, 2, IntentPriority.Executor, IntentSource.PostureExecutor), t + 2.0, null, 0, null, 0, 0, 0);
+        executor.LastIssuedMove(1, out x, out z, out hours);
+        AssertTrue(x == 900f && hours == t + 1.0, "a stance is no move");
+
+        // BattleScope clears the static executors' records.
+        OrderExecutor shared = OrderExecutor.ForAlliance(0);
+        Record(shared, first, t, 0, 1);
+        AssertTrue(shared.LastIssuedMove(1, out _, out _, out _), "recorded on the side's executor");
+        WhiskeyRealism.Util.BattleScope.ResetAll();
+        AssertFalse(shared.LastIssuedMove(1, out _, out _, out _), "BattleScope clears it");
+
+        // The contest intent lands inside the recent-order window; the same move without the flag is cooling down.
+        view.Own[g].LastWaypointX = 700f;
+        view.Own[g].LastWaypointZ = -300f;
+        view.Own[g].RegimentPaths = 1;
+        double soon = t + 1.0 + 10.0 / 3600.0;
+        var back = Move(1, 200f, -200f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective);
+        AssertEqual(SkipReason.Cooldown, executor.Plan(view, back, soon).Skip, "an ordinary move 10 battle-s after an order cools down");
+        BattleOrderIntent contest = back;
+        contest.Flags |= IntentFlags.Contest;
+        AssertTrue(executor.Plan(view, contest, soon).Execute, "the contest move lands");
+        BattleOrderIntent usesDelay = contest;
+        usesDelay.Flags |= IntentFlags.UseOrderDelay;
+        AssertTrue(executor.Plan(view, usesDelay, soon).Execute, "and inside the courier cadence too");
+
+        // A contest stop of a moving group lands inside the window; an ordinary stop is cooling down.
+        var stop = new BattleOrderIntent { GroupId = 1, Channel = OrderChannel.Stop, Heading = -1f, Priority = IntentPriority.Executor,
+            Source = IntentSource.PostureExecutor, Task = CommandTaskType.HoldObjective, Reason = "test" };
+        executor.RecordIssued(stop, soon - 0.001, null, 0, null, 0, 0, 0);
+        AssertEqual(SkipReason.Cooldown, executor.Plan(view, stop, soon).Skip, "an ordinary stop right after a stop cools down");
+        stop.Flags |= IntentFlags.Contest;
+        AssertTrue(executor.Plan(view, stop, soon).Execute, "the contest stop lands");
     }
 
     private static void SafetyBypassesRecentOrderButNotDedupe()

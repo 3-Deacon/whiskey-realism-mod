@@ -246,6 +246,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // ownership applies it after the army retreat and the charge demotion, yields to vanilla's weak-group screen, and against vanilla's own
         // attack stances (3, 4) takes neither the yield step nor the vanilla-assault refusal. (2048 is RoadRoute; the BC14W bombard start, 4096, is task 8's.)
         WorksHold = 8192,
+        // BC14W, Move and Stop: the works hold's contest (MoveContest) re-issuing the hold of a group a move outside the stored orders is walking into
+        // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
+        // still applies. (4096 is the BC14W bombard start's.)
+        Contest = 16384,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

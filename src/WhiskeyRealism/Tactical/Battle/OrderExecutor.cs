@@ -488,6 +488,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // The flank each group's children were last refused on by an executed write
         // (absent = unskewed). Read by the leaf slot (LeafSlotTarget).
         private readonly Dictionary<int, RefuseFlank> _refuseByGroup = new Dictionary<int, RefuseFlank>(64);
+        // BC14W: the last Move target issued to each group (and each unit a group Move fanned out to), read by the works contest.
+        private struct LastMove { public float X, Z; public double Hours; }
+        private readonly Dictionary<int, LastMove> _lastMove = new Dictionary<int, LastMove>(128);
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -766,6 +769,11 @@ namespace WhiskeyRealism.Tactical.Battle
             });
             if (i.Channel != OrderChannel.Move) return;
 
+            _lastMove[i.GroupId] = new LastMove { X = i.TargetX, Z = i.TargetZ, Hours = nowHours };
+            int fanned = targets != null ? Math.Min(Math.Max(targetCount, 0), targets.Length) : 0;
+            for (int k = 0; k < fanned; k++)
+                if (targets[k].InstanceId != i.GroupId) _lastMove[targets[k].InstanceId] = new LastMove { X = targets[k].X, Z = targets[k].Z, Hours = nowHours };
+
             if (i.Task != CommandTaskType.None) _taskHold[i.GroupId] = new TaskStamp(i.Task, nowHours);
             if (UsesOrderDelay(i)) _courierAt[i.GroupId] = nowHours;
 
@@ -907,6 +915,25 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (refuse == RefuseFlank.None) _refuseByGroup.Remove(groupId);
             else _refuseByGroup[groupId] = refuse;
+        }
+
+        /// <summary>
+        /// BC14W: the last Move target Whiskey issued to the group, or to a unit a group Move fanned out to (that unit's own waypoint), with the hour;
+        /// false with none. The contest tells Whiskey's moves from vanilla's by it.
+        /// </summary>
+        public bool LastIssuedMove(int groupId, out float x, out float z, out double hours)
+        {
+            if (_lastMove.TryGetValue(groupId, out LastMove move))
+            {
+                x = move.X;
+                z = move.Z;
+                hours = move.Hours;
+                return true;
+            }
+            x = 0f;
+            z = 0f;
+            hours = 0.0;
+            return false;
         }
 
         /// <summary>The flank the executor last refused on the group's children, or None.</summary>
@@ -1064,6 +1091,10 @@ namespace WhiskeyRealism.Tactical.Battle
             bool move = w.Channel == OrderChannel.Move;
             if (move && _backoffUntil.TryGetValue(w.GroupId, out double until) && now < until && now >= until - FailedWriteBackoffHours)
                 return true;
+
+            // BC14W: the works contest restores the standing order the group already holds, so it is no new order: neither the recent-order window,
+            // the task hold nor the courier cadence applies to it (a failed write's backoff, above, still does).
+            if ((w.Flags & IntentFlags.Contest) != 0) return false;
 
             // A hold refresh of the stance the group already has is not a new
             // order (IsDuplicate): the recent-order cooldown does not apply.
@@ -1271,6 +1302,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _backoffUntil.Clear();
             _lastOutcome.Clear();
             _refuseByGroup.Clear();
+            _lastMove.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
             EndTickClaims();
