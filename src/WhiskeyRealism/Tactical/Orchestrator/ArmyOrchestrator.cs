@@ -738,11 +738,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
                 _mainHysteresis);
             ScreenSecondaryObjectives();
+            // A child keeps its role until the plan (its id, side, phase or main effort band) changes, an hour passes or a crisis forces it: the
+            // allocation above is a pure function of flickering evidence (smoke 2026-10-17: 3 to 6 role changes in 7 allocations under one plan).
+            _directChildIntents = _roleHold.Apply(_directChildIntents, RoleHoldPlanKey(), HoursSource());
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitStaggeredReleaseTelemetry();
             EmitDirectChildIntentTelemetry();
         }
+
+        private readonly DirectChildRoleHold _roleHold = new DirectChildRoleHold();
+
+        // What the roles were allocated for: a different plan, side, phase or main effort band is a new organisation of the line.
+        private int RoleHoldPlanKey()
+            => unchecked((((int)_plan.PlanId * 31 + (_plan.Mirrored ? 1 : 0)) * 31 + (int)_plan.Phase) * 31 + _plan.MainEffortSector);
 
         // ---- BC14O economy of force ----
 
