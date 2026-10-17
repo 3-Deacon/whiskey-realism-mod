@@ -116,12 +116,24 @@ namespace WhiskeyRealism.Tactical.Battle
         // The ledger's reserve stand-off and lane (TacticalBattleLinePlanner), one place for both.
         public const float ReserveDepthMeters = (float)TacticalBattleLinePlanner.ReserveDistance;
         public const float MinReserveDepthMeters = 150f;
+        /// <summary>
+        /// How far behind its line a division's support stands (BC16 decision 5's <c>DivisionSupportMeters</c>): the depth of the slot a Defender's
+        /// reserve brigade holds behind its holding command's line. BC16's support-line clamp reads this one constant.
+        /// </summary>
+        public const float DivisionSupportMeters = 200f;
         public const float ReserveLaneMeters = (float)TacticalBattleLinePlanner.ReserveLaneMeters;
         public const float ObjectiveDetectionMeters = 50f;
         public const float SpacingPerBrigadeMeters = 25f;
         public const int SpacingTries = 8;
         public const float SpacingStepDegrees = 45f;
         public const int MinChildrenForReserve = 3;
+
+        /// <summary>
+        /// How many of <paramref name="eligible"/> sibling commands the doctrine holds back as a reserve: floor(N / 3) from N = 3,
+        /// none below. One rule for the deployment echelon (<see cref="ProposeReserve"/>) and the Defender's holding division
+        /// (TacticalLeafBrigadeMap).
+        /// </summary>
+        public static int ReserveShare(int eligible) => eligible < MinChildrenForReserve ? 0 : eligible / MinChildrenForReserve;
 
         /// <summary>
         /// The point this side's deployment assumes the enemy is at, seen from (gx, gz).
@@ -297,7 +309,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (ChildEligible(groups, groupCount, id)) children[childCount++] = id;
             }
             if (childCount < MinChildrenForReserve) return 0;
-            int reserveCount = childCount / MinChildrenForReserve;
+            int reserveCount = ReserveShare(childCount);
 
             // Farthest from the assumed enemy first.
             float[] distance = new float[childCount];

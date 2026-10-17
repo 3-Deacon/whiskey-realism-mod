@@ -497,6 +497,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             HasPlan = true;
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
             ReserveRelease.Clear();
+            _armyReleaseHysteresis.Clear();
+            _leafRelease.Clear();
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
@@ -699,6 +701,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // The threats the last allocation was handed: the release row names the one a guard answers.
         private int _lastThreatCount;
 
+        // The army-level release and return damped as the leaf one is (verify r2: the crisis release is stateless and flipped with the picture).
+        private readonly ReleaseHysteresis _armyReleaseHysteresis = new ReleaseHysteresis();
+
+        /// <summary>The doctrine clock the releases and their hysteresis read (a test installs its own).</summary>
+        internal Func<double> HoursSource = () => TacticalDoctrineTime.NowBattleHours;
+
         private ReserveReleaseContext BuildReserveReleaseContext()
         {
             bool flank = Plugin.FlankResponseEnabled();
@@ -718,11 +726,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 threats = FillThreatMatrix(_feasibility, _directChildSnapshots, _threatBuffer, _threatShiftBuffer, _threatRow, out threatChildren);
             _lastThreatCount = threats;
             return new ReserveReleaseContext(
-                _lastGlobalOdds, flank, ReserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
+                _lastGlobalOdds, flank, ReserveRelease, exploiting, HoursSource(),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
-                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren);
+                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis);
         }
 
         /// <summary>
@@ -756,7 +764,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Child ids read "child-" + the instance id.
         internal static int ChildInstanceId(string childId) => DirectChildIds.InstanceId(childId);
 
-        // One TacticalReserveRelease row per stagger or crisis release of this allocation (bounded by the releases themselves).
+        // One TacticalReserveRelease row per stagger or crisis release, throttled per child and reason (a crisis release is recomputed with every
+        // allocation and used to write a row each tick). The table is battle-scoped.
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastReleaseRowAt =
+            new System.Collections.Generic.Dictionary<string, float>();
+        private const float ReleaseRowSeconds = 30f;
+
+        private static bool ReleaseRowDue(int side, string childId, string reason)
+            => WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(_lastReleaseRowAt, "tactical-reserve-release:" + side + ":" + childId, reason,
+                System.Environment.TickCount * 0.001f, ReleaseRowSeconds, false);
+
         private void EmitStaggeredReleaseTelemetry()
         {
             try
@@ -768,6 +785,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ReserveReleaseState.Outcome o = outcomes[i];
                     double now = TacticalDoctrineTime.NowBattleHours;
                     string reason = o.Crisis ? "crisis" : "stagger";
+                    if (!ReleaseRowDue(AllianceId, o.ChildId, reason)) continue;
                     WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
                         WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
                         WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
@@ -978,6 +996,61 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // One row per change of the Defender's reserve split (bounded by the signature and an interval): the numbers each holding
+        // command had, what it holds back and why, so thin numbers are on the trace and not a silent absence.
+        private string _lastDefenderReserveSig = string.Empty;
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastDefenderReserveAt =
+            new System.Collections.Generic.Dictionary<string, float>();
+        private const float DefenderReserveTelemetrySeconds = 5f;
+
+        // The throttle keys carry the trace signature, so the table grows with the battle: it starts empty with the next one.
+        static ArmyOrchestrator()
+        {
+            WhiskeyRealism.Util.BattleScope.Register("army-orchestrator-defender-reserve-throttle", () => { _lastDefenderReserveAt.Clear(); _lastReleaseRowAt.Clear(); });
+        }
+
+        private void EmitDefenderReserveTelemetry()
+        {
+            if (_defenderReserveReport.Count == 0) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                int held = 0, thin = 0;
+                for (int i = 0; i < _defenderReserveReport.Count; i++)
+                {
+                    var r = _defenderReserveReport[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append(r.ParentName).Append('#').Append(r.ParentInstanceId).Append('=').Append(r.Held).Append('/').Append(r.Children).Append(':').Append(r.Reason);
+                    held += r.Held;
+                    if (r.Reason != DefenderReserveRecord.Reserved && r.Reason != DefenderReserveRecord.AlreadyHeld) thin++;
+                }
+                string sig = "side=" + AllianceId + "|" + sb;
+                if (string.Equals(sig, _lastDefenderReserveSig, System.StringComparison.Ordinal)) return;
+                _lastDefenderReserveSig = sig;
+                if (!WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(_lastDefenderReserveAt, "tactical-defender-reserve:" + AllianceId, sig,
+                        System.Environment.TickCount * 0.001f, DefenderReserveTelemetrySeconds, false))
+                    return;
+                string detail = sb.ToString();
+                int commands = _defenderReserveReport.Count;
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                    "TacticalDefenderReserve",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalDefenderReserve", thin == 0 ? "reserved" : "thin", sig)
+                        .WithField("side", AllianceId)
+                        .WithField("commands", commands)
+                        .WithField("held", held)
+                        .WithField("thinCommands", thin)
+                        .WithField("detail", detail));
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalDefenderReserve] emit failed: " + ex.Message); } catch { }
+            }
+        }
+
         public DirectChildRole GetDirectChildRole(string childId)
         {
             if (string.IsNullOrEmpty(childId)) return DirectChildRole.Unknown;
@@ -1013,6 +1086,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
             => _leafBrigadeMap;
 
+        // The Defender's reserve trace of the latest leaf map: one record per holding command that split among
+        // two or more subordinates (what it had, what it holds back, why). Empty for an army that is not the Defender.
+        private readonly List<DefenderReserveRecord> _defenderReserveReport = new List<DefenderReserveRecord>();
+        public IReadOnlyList<DefenderReserveRecord> CurrentDefenderReserveReport => _defenderReserveReport;
+
         // Front geometry from the latest evidence (EnemyVisibleState). The leaf
         // cascade orders siblings across this axis and reads flank exposure
         // from it; UpdateLeafBrigadeMap is called by the #61 patch without an
@@ -1040,6 +1118,70 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (enemyVisible.FrontAxis.IsValid) _frontAxis = enemyVisible.FrontAxis;
             if (enemyVisible.InstanceFlankThreat != null) _flankThreat = enemyVisible.InstanceFlankThreat;
+            // The perceived picture the leaf reserve release reads (sectors, strengths seen, fire seen): nothing the side has not perceived.
+            _enemyVisible = enemyVisible;
+            _hasEnemyVisible = true;
+        }
+
+        private EnemyVisibleState _enemyVisible;
+        private bool _hasEnemyVisible;
+
+        // The Defender's reserves inside holding commands, and the ones the release has sent out (verify F4).
+        private readonly LeafReserveRelease _leafRelease = new LeafReserveRelease();
+        internal LeafReserveRelease LeafRelease => _leafRelease;
+
+        // Runs before the leaf map's cache check: the release depends on the doctrine clock and the perceived sectors, not on the tree.
+        private void RefreshLeafRelease(float aggression01, WhiskeyRealism.Tactical.Battle.BattleSnapshot live)
+        {
+            if (_currentForceBalanceStance != BattleStance.Defender || !HasPlan || !_hasEnemyVisible)
+            {
+                _leafRelease.Clear();
+                return;
+            }
+            _leafRelease.Compute(
+                _defenderReserveReport, _plan, _frontAxis, _enemyVisible, _lastGlobalOdds, HoursSource(), aggression01,
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
+                Plugin.FlankResponseEnabled(), Plugin.StaggeredReserveReleaseEnabled(), live);
+            EmitLeafReleaseTelemetry();
+        }
+
+        // One TacticalReserveRelease row (tier "leaf") for each reserve a holding command newly sent out: bounded by the releases themselves.
+        private void EmitLeafReleaseTelemetry()
+        {
+            var fresh = _leafRelease.NewReleases;
+            if (fresh.Count == 0) return;
+            try
+            {
+                double now = TacticalDoctrineTime.NowBattleHours;
+                for (int i = 0; i < fresh.Count; i++)
+                {
+                    LeafRelease r = fresh[i];
+                    if (!ReleaseRowDue(AllianceId, "child-" + r.ChildInstanceId, r.Reason + ":leaf")) continue;
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", r.Reason, "side=" + AllianceId + "|child=" + r.ChildInstanceId + "|tier=leaf")
+                            .WithField("side", AllianceId)
+                            .WithField("child", "child-" + r.ChildInstanceId)
+                            .WithField("reason", r.Reason)
+                            .WithField("tier", "leaf")
+                            .WithField("parent", r.ParentInstanceId)
+                            .WithField("role", r.Role.ToString())
+                            .WithField("sector", r.Sector)
+                            .WithField("held", r.Held)
+                            .WithField("floor", r.Floor)
+                            .WithField("released", _leafRelease.Released.Count)
+                            .WithField("nowHours", now));
+                }
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalReserveRelease] leaf emit failed: " + ex.Message); } catch { }
+            }
         }
 
         /// <summary>
@@ -1049,7 +1191,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// via TacticalLeafBrigadeMap.BuildMap. Caches by signature so repeated
         /// calls with no changes are O(1).
         /// </summary>
-        public void UpdateLeafBrigadeMap(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
+        public void UpdateLeafBrigadeMap(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree, WhiskeyRealism.Tactical.Battle.BattleSnapshot live = null)
         {
             if (tree == null)
             {
@@ -1057,6 +1199,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _leafBrigadeMapSignature = string.Empty;
                 return;
             }
+
+            float releaseAggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+            if (releaseAggression01 < 0f) releaseAggression01 = 0f;
+            if (releaseAggression01 > 1f) releaseAggression01 = 1f;
+            RefreshLeafRelease(releaseAggression01, live);
 
             string sig = ComputeLeafMapSignature(tree);
             if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0) return;
@@ -1099,9 +1246,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     : CascadeEnvelopmentMode.DoubleWingEchelon;
             }
 
+            _defenderReserveReport.Clear();
             _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
-                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat);
+                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat,
+                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released);
             _leafBrigadeMapSignature = sig;
+            EmitDefenderReserveTelemetry();
         }
 
         /// <summary>
@@ -1292,6 +1442,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // ConsiderMainEffortShift, the cache must invalidate so cascade
             // rebuilds with new positional priorities.
             sb.Append("|me=").Append(HasPlan ? _plan.MainEffortSector : -1);
+            // The Defender keeps a reserve inside a holding command (TacticalLeafBrigadeMap), so a stance change rebuilds the map.
+            sb.Append("|st=").Append((int)_currentForceBalanceStance);
+            // The reserves the release has sent out change the roles under them.
+            sb.Append("|rel=");
+            foreach (var released in _leafRelease.Released) sb.Append(released.Key).Append(':').Append((int)released.Value).Append(',');
             sb.Append("|ph=").Append(HasPlan ? (int)_plan.Phase : -1);
             float sigAggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
             if (sigAggression01 < 0f) sigAggression01 = 0f;

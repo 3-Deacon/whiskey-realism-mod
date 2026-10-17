@@ -119,6 +119,7 @@ namespace WhiskeyRealism.Tactical.Battle
         internal static void BindForTick(OrderExecutor executor)
         {
             executor.Bind(Guard, WaypointValidatorRuntime.Instance);
+            executor.Crossings = Plugin.CrossingMoveGateEnabled() ? RiverCrossingGateRuntime.Instance : null;
             WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
             executor.SetMapSize(sizeX, sizeZ);
             float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null ? Plugin.BrigadeTaskHoldSeconds.Value : 12f;

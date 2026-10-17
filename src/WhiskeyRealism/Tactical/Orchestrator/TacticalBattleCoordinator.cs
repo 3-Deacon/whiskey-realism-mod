@@ -170,12 +170,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// The side's first plan pick, with its order written in one place (BC14 requirement-stance-before-pick). The pick inputs
-        /// (the battle stance, the live commander initiative, the reinforcement opportunity) are refreshed first so the stance filter
-        /// applies to the first pick; the feasibility evaluation then runs, forced to completion, so the pick reads a ledger.
+        /// The side's first plan pick, with its order written in one place (BC14 requirement-stance-before-pick). The direct
+        /// children are registered first, because the feasibility evaluation prices every candidate against the army's children
+        /// (an army with none prices every maneuver "no-children"); then the pick inputs (the battle stance, the live commander
+        /// initiative, the reinforcement opportunity) are refreshed so the stance filter applies to the first pick; the
+        /// feasibility evaluation runs, forced to completion, so the pick reads a ledger.
         /// </summary>
-        internal static void PickInitialPlanInOrder(ArmyOrchestrator army, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)
+        internal static void PickInitialPlanInOrder(ArmyOrchestrator army, Action registerChildren, Action refreshPickInputs, Action evaluate, ArmyEvidence evidence)
         {
+            registerChildren();
             refreshPickInputs();
             evaluate();
             army.PickInitialPlan(evidence);

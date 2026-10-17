@@ -30,8 +30,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public ReserveReleaseContext(float globalOdds, bool flankRelease, ReserveReleaseState state, bool[] exploiting,
             double nowHours, float agg01, float caution01, float casualtyTolerance01, bool? staggered = null,
-            CrossingThreat[] crossingThreats = null, int threatCount = 0, float[] ownShiftByChild = null, int threatChildCount = 0)
+            CrossingThreat[] crossingThreats = null, int threatCount = 0, float[] ownShiftByChild = null, int threatChildCount = 0,
+            ReleaseHysteresis hysteresis = null)
         {
+            Hysteresis = hysteresis;
             Staggered = staggered ?? state != null;
             CrossingThreats = crossingThreats;
             ThreatCount = crossingThreats == null ? 0 : Math.Min(threatCount, crossingThreats.Length);
@@ -76,6 +78,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int ThreatCount { get; }
         public float[] OwnShiftByChild { get; }
         public int ThreatChildCount { get; }
+
+        /// <summary>
+        /// The release and return hysteresis (verify r2): a reserve is released once its trigger has held, kept out for a minimum time and
+        /// returned once the trigger has been gone for a margin. Null releases and returns on the raw picture each call, as before.
+        /// </summary>
+        public ReleaseHysteresis Hysteresis { get; }
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -392,7 +400,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ///      axis override. A role change, not a mover: the posture producer executes it.
         /// Returns per-child axis-sector overrides (-1 = none).
         /// </summary>
-        private static int[] ReleaseReserves(
+        internal static int[] ReleaseReserves(
             TacticalBattlePlan plan,
             IReadOnlyList<DirectChildEvidence> evidence,
             DirectChildRole[] roles,
@@ -401,10 +409,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             GuardPoint[] guards)
         {
             var axisOverride = new int[roles.Length];
-            for (int i = 0; i < axisOverride.Length; i++) axisOverride[i] = -1;
+            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride);
+            return axisOverride;
+        }
+
+        /// <summary>The same release into a caller's axis-override buffer (at least roles.Length long), allocating nothing in the steady state.</summary>
+        internal static void ReleaseReservesInto(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildEvidence> evidence,
+            DirectChildRole[] roles,
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            GuardPoint[] guards,
+            int[] axisOverride)
+        {
+            for (int i = 0; i < roles.Length; i++) axisOverride[i] = -1;
 
             bool exploit = plan.Phase == BattlePhase.Exploit;
             bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
+            bool[] wasReserve = release.Hysteresis != null ? ReserveFlags(roles) : null;
 
             if (release.Staggered)
             {
@@ -440,7 +463,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
             ReleaseReserveToCrossings(roles, axisOverride, guards, release, snapshots);
-            return axisOverride;
+            if (wasReserve != null) ApplyHysteresis(roles, wasReserve, axisOverride, guards, release, snapshots);
+        }
+
+        // Pooled: grown to the largest allocation, cleared per call (single-threaded, the coordinator tick).
+        private static bool[] _wasReserveScratch = new bool[0];
+
+        private static bool[] ReserveFlags(DirectChildRole[] roles)
+        {
+            if (_wasReserveScratch.Length < roles.Length) _wasReserveScratch = new bool[roles.Length];
+            for (int i = 0; i < roles.Length; i++) _wasReserveScratch[i] = roles[i] == DirectChildRole.Reserve;
+            return _wasReserveScratch;
+        }
+
+        // A release the picture has not held long enough is withdrawn, and a release whose trigger has just gone stays out for its minimum
+        // time. A crossing guard has its own binding (its hold and its end) and is left to it.
+        private static void ApplyHysteresis(
+            DirectChildRole[] roles, bool[] wasReserve, int[] axisOverride, GuardPoint[] guards, ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            ReleaseHysteresis hysteresis = release.Hysteresis;
+            for (int i = 0; i < roles.Length; i++)
+            {
+                if (!wasReserve[i] || guards[i].HasValue) continue;
+                bool raw = roles[i] != DirectChildRole.Reserve;
+                bool released = hysteresis.Step(snapshots[i].ChildId, raw, roles[i], axisOverride[i], release.NowHours, out DirectChildRole role, out int sector);
+                if (released)
+                {
+                    roles[i] = role;
+                    axisOverride[i] = sector;
+                }
+                else
+                {
+                    roles[i] = DirectChildRole.Reserve;
+                    axisOverride[i] = -1;
+                    release.State?.DropRelease(snapshots[i].ChildId);
+                }
+            }
         }
 
         // A child in contact and outmatched by two buckets or more: a crisis sector.

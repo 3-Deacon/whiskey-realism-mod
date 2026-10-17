@@ -239,6 +239,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // newpath: true, ignoredeplyomentzone: false) and clears the placed tree's
         // lastsetwaypointposition and immediateunitplacement (85873-85883), #60's call.
         ImmediatePlacement = 1024,
+        // BC10, Move only: the intent's two vias are a road route (RoadRoutePlanner: the first road entry and the last road exit). The leg between
+        // them follows the road, which takes its own crossing: the crossing gate inserts no via there and only checks the crossing the leg passes.
+        RoadRoute = 2048,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -270,6 +273,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // group through before the target (RoadRoutePlanner). ViaCount 0 = a plain move.
         public int ViaCount;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
+        // With IntentFlags.RoadRoute: the BC14 crossing links the road takes between its two vias (RoadRoute.LinkCount / Link0 / Link1); 0 = unknown.
+        public int RoadLinkCount, RoadLink0, RoadLink1;
         // BC13: the live exploit (ExploitEntry.Id, 1 and up) an intent carries out; 0 = none. The arbiter tick counts the
         // PlayerOwned skips and the player-child fan-out exclusions of such an intent against that exploit (playerSkips).
         public int ExploitId;
@@ -321,6 +326,8 @@ namespace WhiskeyRealism.Tactical.Battle
         Cooldown,
         Duplicate,
         LowerPriorityThanClaim,
+        /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
+        NoKnownCrossing,
     }
 
     public struct OrderOutcome

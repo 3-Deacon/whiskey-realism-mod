@@ -137,6 +137,120 @@ internal static partial class BattleMovementHonestyTests
         AssertFalse(Route(Make(false), pathX: vx, pathZ: vz).Use, "an unfrozen river across the whole corridor cannot be crossed");
     }
 
+    // verify landing r3 F11: with a river picture the route records one link per river the road crosses between its vias, in road order.
+    // Rivers at x in [600, 620) (and [800, 820), [700, 720) as asked); each has a bridge on the road z = -400 and is otherwise impassable.
+    private static BattleTerrainGrid RiversGrid(params int[] riverX)
+    {
+        var ids = new int[1201, 1201];
+        for (int x = 0; x <= 1200; x++)
+            for (int zi = 0; zi <= 1200; zi++)
+            {
+                float z = zi - 1200f;
+                int id = Grass;
+                if (x >= 300 && x < 900 && z >= -700f && z < -500f) id = Forest;
+                if (x >= 200 && x <= 1000 && Math.Abs(z + 400f) <= 3f) id = Road;
+                foreach (int rx in riverX)
+                    if (x >= rx && x < rx + 20 && z >= -950f && z <= -250f) id = Math.Abs(z + 400f) <= 3f ? Bridge : River;
+                ids[x, zi] = id;
+            }
+        return new BattleTerrainGrid(ids, 1200f, 1200f, ShippedSpeedCost, false, null, null, null, 0);
+    }
+
+    // The map's land regions by the river bands: region k lies between river k - 1 and river k; the bands themselves are on no land.
+    private sealed class RiversPicture : ICrossingPicture
+    {
+        private readonly int[] _riverX;
+        public readonly System.Collections.Generic.List<(float x, float z, int a, int b)> Links = new System.Collections.Generic.List<(float, float, int, int)>();
+        public RiversPicture(params int[] riverX) { _riverX = riverX; }
+        public bool Ready => true;
+        public int RegionAt(float x, float z)
+        {
+            int region = 0;
+            foreach (int rx in _riverX)
+            {
+                if (x >= rx && x < rx + 20) return -1;
+                if (x >= rx + 20) region++;
+            }
+            return region;
+        }
+        public int LinkCount => Links.Count;
+        public int RegionsOfLink(int link, Span<int> regions) { regions[0] = Links[link].a; regions[1] = Links[link].b; return 2; }
+        public void LinkPoint(int link, out float x, out float z) { x = Links[link].x; z = Links[link].z; }
+        public CrossingState StateOf(int link) => CrossingState.Clear;
+        public bool IsPlanned(int link) => false;
+        public void RequestLook(int link) { }
+        public object Topology => this;
+    }
+
+    private static RoadRoute PlanOver(BattleTerrainGrid g, ICrossingPicture picture, float[] vx = null, float[] vz = null)
+    {
+        vx = vx ?? new[] { 100f, 600f, 1100f };
+        vz = vz ?? new[] { -600f, -400f, -600f };
+        return RoadRoutePlanner.Plan(g, 100f, -600f, 1100f, -600f, vx, vz, vx.Length, new RoadRouteScratch(), picture);
+    }
+
+    private static void RouteNamesTheCrossingsTheRoadTakes()
+    {
+        BattleTerrainGrid g = RiversGrid(600);
+        var picture = new RiversPicture(600);
+        picture.Links.Add((610f, -650f, 0, 1));   // a ford beside the river's middle, 250 m off the road
+        picture.Links.Add((610f, -400f, 0, 1));   // the bridge on the road
+        picture.Links.Add((610f, -900f, 0, 1));   // another far ford
+        picture.Links.Add((1500f, -400f, 2, 3));  // a link joining other regions altogether
+        RoadRoute with = PlanOver(g, picture);
+        AssertTrue(with.Use && with.ViaCount == 2, "(fixture) a two-via road route over the bridge");
+        AssertEqual(1, with.LinkCount, "the road crosses one river: one crossing");
+        AssertEqual(1, with.Link0, "the bridge on the road, not the ford beside it nor the stray link");
+        AssertEqual(0, PlanOver(g, null).LinkCount, "with no river picture it names none");
+
+        // A ford right beside the bridge does not take its place: the link nearest the road's change of region is the road's.
+        var beside = new RiversPicture(600);
+        beside.Links.Add((610f, -430f, 0, 1));    // 30 m from the road
+        beside.Links.Add((610f, -400f, 0, 1));    // the bridge
+        beside.Links.Add((610f, -375f, 0, 1));    // another ford next to it
+        RoadRoute near = PlanOver(g, beside);
+        AssertEqual(1, near.LinkCount, "one crossing");
+        AssertEqual(1, near.Link0, "the real bridge, with fords on either side of the road");
+
+        // Only a stray link joins the two regions, far from the road: it is still the only one that can be the crossing.
+        var stray = new RiversPicture(600);
+        stray.Links.Add((1500f, -400f, 2, 3));
+        AssertEqual(0, PlanOver(g, stray).LinkCount, "no link joins the regions the road changes between: none recorded, the gate runs its full search");
+    }
+
+    private static void RouteNamesOneLinkPerRiverInRoadOrderAndNoneBeyondTheBound()
+    {
+        // Two rivers between the vias: both bridges, first met first.
+        BattleTerrainGrid two = RiversGrid(600, 800);
+        var picture = new RiversPicture(600, 800);
+        picture.Links.Add((810f, -400f, 1, 2));
+        picture.Links.Add((610f, -400f, 0, 1));
+        picture.Links.Add((610f, -650f, 0, 1));
+        float[] vx = { 100f, 1100f };   // vanilla's own path: straight through the forest, wading both rivers
+        float[] vz = { -600f, -600f };
+        RoadRoute r = PlanOver(two, picture, vx, vz);
+        AssertTrue(r.Use && r.ViaCount == 2, "(fixture) a two-via road route over two bridges");
+        AssertEqual(2, r.LinkCount, "one link per river");
+        AssertEqual(1, r.Link0, "the first river's bridge first (road order)");
+        AssertEqual(0, r.Link1, "then the second's");
+
+        // Three rivers: more than the bound, none recorded.
+        BattleTerrainGrid three = RiversGrid(500, 650, 800);
+        var many = new RiversPicture(500, 650, 800);
+        many.Links.Add((510f, -400f, 0, 1));
+        many.Links.Add((660f, -400f, 1, 2));
+        many.Links.Add((810f, -400f, 2, 3));
+        RoadRoute m = PlanOver(three, many, vx, vz);
+        AssertTrue(m.Use && m.ViaCount == 2, "(fixture) a road route over three bridges");
+        AssertEqual(0, m.LinkCount, "a road that crosses more than two rivers records none");
+
+        // A river with no link at all across it (the picture lacks one): none, not a guess.
+        var missing = new RiversPicture(600, 800);
+        missing.Links.Add((610f, -400f, 0, 1));
+        RoadRoute gap = PlanOver(two, missing, vx, vz);
+        AssertEqual(0, gap.LinkCount, "a change of region no link joins records none");
+    }
+
     private static void RouteCorridorShrinksToFit6000CellsElseNotPlanned()
     {
         AssertTrue(RoadRoutePlanner.Corridor(1000f, out int rows, out int columns), "1 km");

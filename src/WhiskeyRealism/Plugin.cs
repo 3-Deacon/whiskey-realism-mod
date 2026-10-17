@@ -76,6 +76,14 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
         internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
         internal static ConfigEntry<bool> EnableManeuverFeasibility;
+        internal static ConfigEntry<bool> EnableCrossingMoveGate;
+
+        /// <summary>Tactical / Enable Crossing Move Gate (a doctrine move whose straight leg crosses a river takes a crossing the side knows, or is not made).</summary>
+        internal static bool CrossingMoveGateEnabled()
+        {
+            try { return EnableCrossingMoveGate != null && EnableCrossingMoveGate.Value; }
+            catch { return false; }
+        }
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -719,6 +727,14 @@ namespace WhiskeyRealism
                 "march on a synchronized release, inside a time budget, through a chosen crossing; a broken assumption replans; a Defender " +
                 "sends a reserve to guard a crossing the enemy can reach first. Off: plans are picked and executed as before, and Enable " +
                 "Enemy Works Doctrine and Enable Objective Doctrine act as off.");
+            EnableCrossingMoveGate = Config.Bind(
+                "Tactical",
+                "Enable Crossing Move Gate",
+                true,
+                "Default ON. A doctrine move (posture Screen and Probe, the leaf slots, division-play, the reserve release) whose straight " +
+                "leg crosses a river is made through a crossing the side knows (perceived clear or watched, BC14's crossing picture) or is not " +
+                "made; a withdrawal, a fallback, a deployment placement and a scout's look are not gated. Needs Enable Maneuver Feasibility " +
+                "(the river map); with no river map the gate lets every move through. Off: moves are checked for water at their target as before.");
             EnableVanillaArtilleryChainSideFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Artillery Chain Side Fix",

@@ -69,17 +69,33 @@ internal static partial class ManeuverFeasibilityTests
         var army = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var order = new List<string>();
         bool hadPlanAtRefresh = true;
+        var children = new[]
+        {
+            new DirectChildSnapshot("child-10", "army-1", 14, 0, "1st_Brigade", true),
+            new DirectChildSnapshot("child-11", "army-1", 14, 0, "2nd_Brigade", true),
+        };
+        int childrenAtEvaluate = -1;
         TacticalBattleCoordinator.PickInitialPlanInOrder(
             army,
+            registerChildren: () =>
+            {
+                order.Add("register");
+                army.RegisterDirectChildren(children);
+            },
             refreshPickInputs: () =>
             {
                 order.Add("refresh");
                 hadPlanAtRefresh = army.HasPlan;
                 army.UpdateBattleStance(BattleStance.Defender);
             },
-            evaluate: () => order.Add("evaluate"),
+            evaluate: () =>
+            {
+                order.Add("evaluate");
+                childrenAtEvaluate = army.CurrentDirectChildIntents.Count;
+            },
             evidence);
-        AssertEqual("refresh,evaluate", string.Join(",", order), "refresh, then evaluate");
+        AssertEqual("register,refresh,evaluate", string.Join(",", order), "register the children, refresh, then evaluate");
+        AssertEqual(2, childrenAtEvaluate, "the feasibility evaluation prices the plans against the army's real children (smoke 2026-10-17: it saw none)");
         AssertFalse(hadPlanAtRefresh, "the pick inputs are refreshed before the plan exists");
         AssertTrue(army.HasPlan, "a plan is picked");
         AssertTrue(TacticalPlaybookCatalog.StanceOf(army.CurrentPlan.PlanId) != TacticalPlaybookCatalog.PlaybookStance.Offensive,
