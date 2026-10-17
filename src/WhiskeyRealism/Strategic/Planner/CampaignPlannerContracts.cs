@@ -135,6 +135,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public int StateId;
         public int StateAlliance;   // GameVars.nation[state].alliance
         public bool Live;           // SecessionRules.IsLive(owner, GameVars.nation[state].support[1]): vanilla's IsDeactivated is false
+        public bool OwnTroops;      // Union only: GameVars.nation[state].alliancetroops[0], vanilla's own "a Union group stands here" flag (garrisons included)
         public bool HasTown;
         public float TownX, TownZ;  // the objective's town (Louisville, St.Louis), from its objective record
     }
@@ -363,6 +364,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // Push only what it needs (D3): the force the main objective needs (MainEnemyStrength x MainRequiredRatio x (1 + margin)),
         // and what the planner could concentrate for it (the capacity the odds were judged on). MassStrength is the selected mass.
         public float MainNeedStrength, MainCapacityStrength;
+        public bool MainScoutLatched;   // scouted earlier in this decision, no fresh picture now (PlannerState.ScoutedDecision)
         // D6: the one formation from another theater that joins the mass (instance id), -1 none. It is the Support formation of the push.
         public int ReinforcementInstanceId = -1;
         // The reinforcement's name and cross-department move (telemetry): From is the department it left on the day of the transfer
@@ -390,7 +392,7 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public string StateName;
         public float X, Z;
-        public bool InState;                       // an own formation already stands in the state
+        public bool InState;                       // the Union is present in the state: an own formation stands in it, or vanilla's alliancetroops[0] is set
         public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)
         public List<int> InstanceIds = new List<int>(); // the garrison: in-state formations nearest the post up to the need, else the one posted
         public string Name;                        // the first member's name (telemetry)

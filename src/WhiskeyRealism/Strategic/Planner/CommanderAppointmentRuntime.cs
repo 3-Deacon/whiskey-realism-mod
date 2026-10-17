@@ -101,7 +101,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     string unitName = "?", reseated = null;
                     bool done = (intent.ReseatGroupInstanceId < 0 || Reseat(alliance, intent, out reseated)) && (intent.TargetIsArmyGroup
                         ? AppointToArmyGroup(intent, out unitName)
-                        : AppointToUnit(intent, out unitName));
+                        : AppointToUnit(alliance, intent, out unitName));
                     if (!done)
                     {
                         OnceLog.Warning("campaign-planner:appointment-failed",
@@ -254,7 +254,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        private static bool AppointToUnit(AppointmentIntent intent, out string unitName)
+        private static bool AppointToUnit(int alliance, AppointmentIntent intent, out string unitName)
         {
             unitName = "?";
             try
@@ -268,7 +268,15 @@ namespace WhiskeyRealism.Strategic.Planner
                 c.AssignCommando(target);
                 BattleUnits.DoCommanderPromotion(intent.CommanderId);
                 c.refreshcommand = true;
-                return target.commander == intent.CommanderId && c.currentcommand == target;
+                bool taken = target.commander == intent.CommanderId && c.currentcommand == target;
+                if (taken)
+                {
+                    // Both units' commanders changed, so both unit keys did: the planner's home departments follow (PlannerState.RekeyInstance).
+                    CampaignPlannerRuntime.RekeyDepartment(alliance, target.GetInstanceID(), ((UnityEngine.Object)target).name, target.commander);
+                    if ((UnityEngine.Object)old != null && old != target)
+                        CampaignPlannerRuntime.RekeyDepartment(alliance, old.GetInstanceID(), ((UnityEngine.Object)old).name, old.commander);
+                }
+                return taken;
             }
             catch (Exception ex)
             {

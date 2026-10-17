@@ -444,6 +444,7 @@ namespace WhiskeyRealism.Strategic
                 LastFullReviewDay = s.LastFullReviewDay,
                 ReinforcementKey = s.ReinforcementKey,
                 ReinforcementDecision = s.ReinforcementDecision,
+                ScoutedDecision = s.ScoutedDecision,
                 UnreliableDays = p.UnreliableDays,
                 UnreliableLastDay = p.UnreliableLastDay
             };
@@ -494,7 +495,7 @@ namespace WhiskeyRealism.Strategic
             if (dto == null) return null;
             var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
             p.State.Restore(dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
-                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision);
+                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision);
             if (dto.Departments != null)
             {
                 var departments = new List<KeyValuePair<string, Theater>>();

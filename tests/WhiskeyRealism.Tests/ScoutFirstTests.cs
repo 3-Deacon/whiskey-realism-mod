@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Planner;
 
+using static TestFixtures;
 using static TestHarness;
 
 // The smoke of 2026-10-16 (docs/superpowers/specs/2026-10-14-campaign-planner-design.md § Smoke amendments 2026-10-16): the planner
@@ -46,6 +47,14 @@ internal static class ScoutFirstTests
             ("TheTraceNamesScoutingAndThePresumption", TheTraceNamesScoutingAndThePresumption),
             ("AllocationRowShowsTheMassAgainstItsNeed", AllocationRowShowsTheMassAgainstItsNeed),
             ("ABelievedEnemyStillRaisesTheHoldAbovePresumption", ABelievedEnemyStillRaisesTheHoldAbovePresumption),
+            ("AScoutedDecisionStaysScoutedWhenTheBeliefDecays", AScoutedDecisionStaysScoutedWhenTheBeliefDecays),
+            ("TheScoutedLatchSurvivesTheSidecarAndAnOldFileHasNone", TheScoutedLatchSurvivesTheSidecarAndAnOldFileHasNone),
+            ("TheMainEffortTakesNoReinforcementWhenItsOwnDepartmentSuffices", TheMainEffortTakesNoReinforcementWhenItsOwnDepartmentSuffices),
+            ("TheStartLineIsTheNativeEvenWhenTheReinforcementIsNearer", TheStartLineIsTheNativeEvenWhenTheReinforcementIsNearer),
+            ("AProbeNeedsNoOffensiveStrengthMinimumEither", AProbeNeedsNoOffensiveStrengthMinimumEither),
+            ("DepartmentsOfFormationsThatNoLongerExistArePruned", DepartmentsOfFormationsThatNoLongerExistArePruned),
+            ("AnAppointmentCarriesTheDepartmentToTheNewKey", AnAppointmentCarriesTheDepartmentToTheNewKey),
+            ("PlanPlusAllocateAllocationIsBoundedPerReview", PlanPlusAllocateAllocationIsBoundedPerReview),
         });
     }
 
@@ -422,15 +431,20 @@ internal static class ScoutFirstTests
             int drawn = 0;
             foreach (int id in again.MassInstanceIds) if (id >= 2) drawn++;
             AssertEqual(1, drawn, "never a second West corps in the same decision");
+            // The move is announced once, on the review that makes it: later days name the corps and its new department only.
+            string row = TheaterPlanner.Summary(again);
+            AssertContains(row, "xdept=" + again.ReinforcementName + ":East", "the later row names the corps and where it is now");
+            AssertFalse(row.Contains(":West>East"), "and does not announce the move again");
         }
 
         // A new decision picks afresh.
         state.DecisionSerial++;
         var next = Plan(s, state);
-        int nextDrawn = 0;
-        foreach (int id in next.MassInstanceIds) if (id >= 2 && id != pick) nextDrawn++;
-        AssertTrue(next.MassInstanceIds.Contains(pick) || nextDrawn >= 0, "a later decision is free to draw again");
-        AssertTrue(nextDrawn <= 1, "still at most one other");
+        // The transfer made the picked corps East: in the new decision it is a native of the East, so the East's own 8000 + 20000 meet
+        // the 11000 need and no West corps is drawn at all (the lock belongs to the old decision).
+        AssertEqual(-1, next.ReinforcementInstanceId, "the new decision's own department suffices: no reinforcement");
+        AssertTrue(next.MassInstanceIds.Contains(pick), "and the corps transferred last decision is part of its own department's mass");
+        foreach (int id in next.MassInstanceIds) AssertTrue(id == 1 || id == pick, "nothing else is drawn: " + id);
     }
 
     // Two corps of one army (parent 90) and a lone corps: the push needs 11000. Taken corps by corps nearest first the army was split
@@ -754,4 +768,158 @@ internal static class ScoutFirstTests
         AssertContains(row, " cap=", "the capacity");
         AssertContains(row, " mass=", "and the mass it sized");
     }
+
+    // ---- verify round 1 ----
+
+    // F1: the verifier's day-8 decay. Day 1: the target is scouted and the march goes; day 8: the belief has decayed to 0.45 (under
+    // the 0.5 that counts as fresh). The decision is the same, so the march is not pulled back to a start line.
+    private static void AScoutedDecisionStaysScoutedWhenTheBeliefDecays()
+    {
+        var s = Union(12, readiness: 3);
+        s.Beliefs.Add(Seen(850f, 3000f));
+        var state = new PlannerState();
+        var day1 = Plan(s, state);
+        AssertEqual(31, day1.MainObjectiveId, "objective 31");
+        AssertTrue(day1.MainScouted && !day1.MainStaged && !day1.MainScoutLatched, "day 1: scouted on a fresh belief, not staged, not merely latched");
+        int serial = state.DecisionSerial;
+
+        var decayed = Union(12, readiness: 3);
+        decayed.Beliefs.Add(Seen(850f, 3000f, 0.45f));
+        var day8 = Plan(decayed, state);
+        AssertEqual(31, day8.MainObjectiveId, "day 8: the same main effort");
+        AssertEqual(serial, state.DecisionSerial, "the same decision");
+        AssertFalse(CandidateOf(decayed, 31).Scouted, "the candidate's own picture is no longer fresh (its estimate stays honest)");
+        AssertTrue(day8.MainScoutLatched, "but the decision stays scouted");
+        AssertFalse(day8.MainStaged, "so the released march is not re-staged");
+        AssertContains(TheaterPlanner.Summary(day8), "scouted=latched staged=no", "the row says so");
+        var alloc = ForceAllocator.Allocate(day8, decayed, ExecutorFixtures.Sectors(decayed), null, null, null);
+        foreach (int id in day8.MassInstanceIds)
+        {
+            alloc.TryGet(id, out var a);
+            AssertNear(800f, a.TargetX, 0.5f, "corps " + id + " still marches on the objective, not on a start line");
+        }
+
+        // A new decision starts unscouted: the same decayed picture is staged, whether the state is new or the decision serial moved on.
+        var fresh = Plan(decayed, new PlannerState());
+        AssertTrue(fresh.MainStaged && !fresh.MainScoutLatched, "no latch carries over to a fresh state");
+        state.DecisionSerial++;
+        var later = Plan(decayed, state);
+        AssertTrue(later.MainStaged && !later.MainScoutLatched, "nor to the next decision of the same state");
+    }
+
+    private static void TheScoutedLatchSurvivesTheSidecarAndAnOldFileHasNone()
+    {
+        var state = new PlannerState();
+        state.Restore(31, -1, 0, 4, 77L, scoutedDecision: 4);
+        var dto = SidecarDtoCodec.PlannerToDto(new PlannerSnapshot { State = state });
+        AssertEqual(4, dto.ScoutedDecision, "written");
+        var back = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>(Newtonsoft.Json.JsonConvert.SerializeObject(dto)));
+        AssertEqual(4, back.State.ScoutedDecision, "restored with its decision");
+        var old = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>("{\"currentMainObjective\":31}"));
+        AssertEqual(-1, old.State.ScoutedDecision, "a file written before the field has no latch");
+    }
+
+    // V09: the reinforcement is a last resort. The East's own 20000 meets the 11000 need, so the nearby West corps stays home.
+    private static void TheMainEffortTakesNoReinforcementWhenItsOwnDepartmentSuffices()
+    {
+        var s = Fronts(Corps(1, 800f, 20000f), Corps(2, 560f, 20000f));
+        var plan = Plan(s, new PlannerState());
+        AssertEqual(31, plan.MainObjectiveId, "the push is at the East objective");
+        AssertEqual(-1, plan.ReinforcementInstanceId, "no cross-department reinforcement");
+        AssertFalse(plan.MassInstanceIds.Contains(2), "the West corps is not in the mass");
+        AssertTrue(plan.MassInstanceIds.Contains(1), "the East corps is");
+    }
+
+    // V33: the staged start line is where the native mass stands, even when the one reinforcement is nearer the target. The East corps
+    // stands off the road to the north (z 400, farther from the objective than the West reinforcement on the road at x 590).
+    private static void TheStartLineIsTheNativeEvenWhenTheReinforcementIsNearer()
+    {
+        var native = Corps(1, 700f, 8000f);
+        native.Z = 400f;
+        native.WaypointZ = 400f;
+        var s = Fronts(native, Corps(2, 590f, 20000f));
+        s.Beliefs.Clear();                      // unscouted: staged
+        s.Objectives[s.Objectives.FindIndex(o => o.ObjectiveId == 30)] = new ObjectiveRecord { ObjectiveId = 30, X = 300f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0.2f };   // our own: the West has no push of its own
+        var plan = Plan(s, new PlannerState());
+        AssertEqual(31, plan.MainObjectiveId, "the push is at the East objective");
+        AssertEqual(2, plan.ReinforcementInstanceId, "the West corps is the reinforcement (the native 8000 is short of the need) mass=[" + string.Join(",", plan.MassInstanceIds) + "] depts=" + plan.DepartmentCounts);
+        AssertTrue(plan.MainStaged, "unscouted: staged");
+        AssertNear(700f, plan.StartLineX, 0.5f, "the line is the native's position x");
+        AssertNear(400f, plan.StartLineZ, 0.5f, "and z, not the nearer reinforcement's");
+    }
+
+    // V34: a probe is a detachment too: a division under vanilla's 5000-man offensive minimum may go out as one.
+    private static void AProbeNeedsNoOffensiveStrengthMinimumEither()
+    {
+        var s = Union(0);
+        s.Own.Add(Corps(1, 700f, 2500f));          // under aiminimumstrengthformovement
+        s.Own.Add(Corps(2, 500f, 30000f));
+        s.Beliefs.Clear();
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        var probe = new ReconTask { Kind = ReconKind.Probe, SectorId = plan.MainSectorId, FromX = 700f, FromZ = 0f, HoldX = 760f, HoldZ = 0f, Priority = 1f, Reason = "probe" };
+        var taken = new List<int>();
+        AssertEqual(1, ReconPlanner.PickFormation(s, sectors, plan, null, probe, taken, true), "the small division is the probe");
+    }
+
+    private static void DepartmentsOfFormationsThatNoLongerExistArePruned()
+    {
+        var state = new PlannerState();
+        state.BeginObservation();
+        state.Observe(1, "1st Corps:11", Theater.West);
+        state.Observe(2, "2nd Corps:12", Theater.East);
+        AssertEqual(0, state.PruneUnobserved(), "both were seen");
+        state.BeginObservation();
+        state.Observe(1, "1st Corps:11", Theater.West);   // corps 2 is gone
+        AssertEqual(1, state.PruneUnobserved(), "the vanished corps' department is dropped");
+        AssertEqual(Theater.Unknown, state.DepartmentOf("2nd Corps:12"), "gone");
+        AssertEqual(Theater.West, state.DepartmentOf("1st Corps:11"), "the survivor keeps its own");
+
+        // Through the planner: a review that no longer sees a formation forgets it; an empty (degraded) snapshot forgets nothing.
+        var s = Fronts(Corps(1, 800f, 8000f), Corps(2, 300f, 7000f));
+        var planned = new PlannerState();
+        Plan(s, planned);
+        AssertEqual(2, planned.Departments.Count, "two formations observed");
+        var smaller = Fronts(Corps(1, 800f, 8000f));
+        Plan(smaller, planned);
+        AssertEqual(1, planned.Departments.Count, "the missing one is pruned by the review");
+        Plan(Fronts(), planned);
+        AssertEqual(1, planned.Departments.Count, "a snapshot with no formations at all (a degraded read) prunes nothing");
+    }
+
+    // Concern 3: an appointment changes a commander and so the unit key (name:commander); the department follows at once, so a save
+    // written before the next review keeps it.
+    private static void AnAppointmentCarriesTheDepartmentToTheNewKey()
+    {
+        var state = new PlannerState();
+        state.Observe(7, "1st Corps:11", Theater.West);
+        state.RekeyInstance(7, "1st Corps:42");
+        AssertEqual(Theater.West, state.DepartmentOf("1st Corps:42"), "the department follows the commander change");
+        AssertEqual(Theater.Unknown, state.DepartmentOf("1st Corps:11"), "and the old key is gone");
+        state.RekeyInstance(99, "x:1");           // an instance the planner never saw: nothing happens
+        AssertEqual(Theater.Unknown, state.DepartmentOf("x:1"), "unknown instance is ignored");
+        string exec = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CommanderAppointmentRuntime.cs");
+        AssertContains(exec, "CampaignPlannerRuntime.RekeyDepartment(alliance, target.GetInstanceID()", "the executor re-keys the target the moment the appointment takes");
+        AssertContains(exec, "CampaignPlannerRuntime.RekeyDepartment(alliance, old.GetInstanceID()", "and the appointee's former command, whose commander changed too");
+    }
+
+    // The review allocates (lists, the candidate set, the plan and allocation objects) once per alliance per daily review; it is not a
+    // per-frame path. Bounded here so a regression to per-formation or per-candidate garbage shows: measured about 13 KB for 15 formations
+    // and 3 candidates (the plan, the allocation, the candidate and posture lists); the bound is about 3.5 times that. It is not allocation-free
+    // on purpose: the plan and the allocation are new published objects each day.
+    private static void PlanPlusAllocateAllocationIsBoundedPerReview()
+    {
+        var s = Union(15, readiness: 3);
+        var sectors = ExecutorFixtures.Sectors(s);
+        var state = new PlannerState();
+        TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);   // warm: JIT, the state's dictionaries
+        long before = TestFixtures.BeginAllocationWindow();
+        var plan = TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        long bytes = TestFixtures.AllocatedSince(before);
+        AssertTrue(alloc.Assignments.Count == 15, "all fifteen are assigned");
+        AssertTrue(bytes < AllocationBound, "Plan + Allocate for 15 formations allocated " + bytes + " bytes (bound " + AllocationBound + ")");
+    }
+
+    private const long AllocationBound = 48000;
 }

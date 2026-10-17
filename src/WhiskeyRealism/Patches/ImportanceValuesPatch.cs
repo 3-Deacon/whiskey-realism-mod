@@ -15,8 +15,8 @@ namespace WhiskeyRealism.Patches
     // in mostvaluealbeaiareaclosedistanceonly[aifaction] (10990-11008). CheckOffensiveMovements reads the first as the
     // offensive target when the source area has enemy contact and the second when it has none (14243-14248, 14204-14227).
     //
-    // The campaign planner steers them (spec C7): when `this` area lies in a MainEffort or Support sector of the faction's
-    // alliance (SteeringRules.ImportanceSteers on the published plan), BOTH pointers are set to the area containing the sector's
+    // The campaign planner steers them (spec C7): when `this` area lies in the MainEffort sector of the faction's alliance and the main
+    // effort is not staged (SteeringRules.ImportanceSteers on the published plan; the Support sectors steer nothing), BOTH pointers are set to the area containing the sector's
     // target - but only when that area passes vanilla's own candidate gates from `this` (the distance and
     // ownpoints <= supplycapacity checks and the value clause of 10984, CampaignMilitaryGates.ShouldRedirectToPlanTarget;
     // vanilla's live points / distancepoints / importancevalues are its own gate inputs here, not planner inputs, so the

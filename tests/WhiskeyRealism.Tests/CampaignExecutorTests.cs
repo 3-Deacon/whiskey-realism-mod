@@ -61,7 +61,7 @@ internal static class CampaignExecutorTests
             ("TheaterWritesFollowTheRoles", TheaterWritesFollowTheRoles),
             ("ObjectiveWriteOnlyWhenChanged", ObjectiveWriteOnlyWhenChanged),
             ("ObjectiveResetOnlyWhenModWritten", ObjectiveResetOnlyWhenModWritten),
-            ("ImportanceRedirectOnlyForMainOrSupportSectors", ImportanceRedirectOnlyForMainOrSupportSectors),
+            ("ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged", ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged),
             ("ImportanceRedirectRequiresVanillaGates", ImportanceRedirectRequiresVanillaGates),
             ("ExecutorFilesHoldNoUnityTypes", ExecutorFilesHoldNoUnityTypes),
             ("MoverHostNeverTouchesTheDefensiveList", MoverHostNeverTouchesTheDefensiveList),
@@ -1128,7 +1128,7 @@ internal static class CampaignExecutorTests
         AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(5, false, 9, 5), "...and only that");
     }
 
-    private static void ImportanceRedirectOnlyForMainOrSupportSectors()
+    private static void ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged()
     {
         var s = ExecutorFixtures.Wide();
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
@@ -1142,7 +1142,11 @@ internal static class CampaignExecutorTests
         AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 11, out float tx, out float tz), "an area of the main sector");
         AssertNear(100f, tx, 0.001f, "points at the sector's target x");
         AssertNear(0f, tz, 0.001f, "z");
-        AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 13, out tx, out _) && Math.Abs(tx - 100f) < 0.001f, "an area of a Support sector points at the main target too");
+        AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 13, out _, out _), "an area of a Support sector keeps vanilla's pick (F3: the main sector only)");
+        plan.MainStaged = true;
+        AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 11, out _, out _), "nothing is pointed at an unscouted target while the main effort is staged (F3)");
+        plan.MainStaged = false;
+        AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 11, out _, out _), "and the main sector steers again once the main effort is not staged");
         AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector's area keeps vanilla's pick");
         plan.Sectors[2].TargetObjectiveId = 98;     // a target alone does not steer: the posture decides
         AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector with a target is still vanilla's");

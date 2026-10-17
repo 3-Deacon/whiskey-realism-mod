@@ -43,7 +43,7 @@ Dedupe state is cleared when the battle identity, the player's current command o
 
 The campaign side is `WlStrategicOrderBridge` + `WlCampaignDispatchRuntime` (stage F, `docs/wl-dispatch-objective-bridge.md`): it no longer uses `PlayerOrderDedupe` or vanilla's gated `calledfromcampaign: true` call; it builds vanilla's campaign order itself with its own dedupe (`WlCampaignDispatchPolicy`), and since the order flow its orders ride the campaign courier queue.
 
-Campaign planner invariants (stage G): the planner stands down for a CIC player's alliance; the map-group player is order-only (his Support order is a dispatch through this bridge by the same rule an AI Support move follows, never a move, MainEffort, picket or recon mission); an AI group above a player below map level is movable and its player is told nothing (vanilla sends him no campaign order, 8366); the player's own command and units under it are never moved, appointed or re-tasked by the mover, the recon executor or the appointment planner (`WlChainRules.MayMove`).
+Campaign planner invariants (stage G): the planner stands down for a CIC player's alliance; the map-group player is neither moved nor ordered by the planner (smoke amendments 2026-10-16 D3 removed his Support order: outside the mass a formation holds, and he is never mass, MainEffort, picket or recon mission; he counts toward the hold of the sector his last waypoint lies in); an AI group above a player below map level is movable and its player is told nothing (vanilla sends him no campaign order, 8366); the player's own command and units under it are never moved, appointed or re-tasked by the mover, the recon executor or the appointment planner (`WlChainRules.MayMove`).
 
 ## Order flow
 

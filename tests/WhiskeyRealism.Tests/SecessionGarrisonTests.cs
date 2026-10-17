@@ -35,6 +35,8 @@ internal static class SecessionGarrisonTests
             ("AllocationRowNamesTheSecessionGarrison", AllocationRowNamesTheSecessionGarrison),
             ("TheGarrisonMarchesThroughTheMoverAsAGarrisonRole", TheGarrisonMarchesThroughTheMoverAsAGarrisonRole),
             ("TheSnapshotReadsTheSecessionStatesFromVanillaEachReview", TheSnapshotReadsTheSecessionStatesFromVanillaEachReview),
+            ("AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted", AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted),
+            ("TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation", TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation),
         });
     }
 
@@ -366,9 +368,83 @@ internal static class SecessionGarrisonTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
         AssertTrue(HasLine(src, "float support = nation.support != null && nation.support.Length > SecessionRules.CsaAlliance ? nation.support[SecessionRules.CsaAlliance] : 0f;"),
             "the CSA's support in the state (nation.support[1], 178966-178973)");
-        AssertTrue(HasLine(src, "Live = SecessionRules.IsLive(nation.alliance, support)"), "live is vanilla's IsDeactivated rule over today's owner and support");
+        AssertTrue(HasLine(src, "Live = SecessionRules.IsLive(nation.alliance, support),"), "live is vanilla's IsDeactivated rule over today's owner and support");
         AssertTrue(HasLine(src, "ReadSecessions(s);"), "read on every snapshot build, after the objectives it takes the town from");
+        AssertTrue(HasLine(src, "OwnTroops = s.Alliance == 0 && nation.alliancetroops != null && nation.alliancetroops.Length > 0 && nation.alliancetroops[0]"),
+            "the Union reads vanilla's presence flag (garrisons included); the CSA side never does");
         string body = BodyOf(src, "private static void ReadSecessions(");
         AssertFalse(body.Contains("static readonly") || body.Contains("Cache"), "nothing is kept between reviews");
+    }
+
+    // F2: vanilla's alliancetroops[0] is set by any visible Union group in the state, a garrison included (81654-81660, 82940-82943).
+    // With the flag set and no field formation inside, the secession is already blocked: nobody is posted, nothing marches.
+    private static void AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted()
+    {
+        var s = Side(0, 0, 0.6f);
+        var rec = s.Secessions[0];
+        rec.OwnTroops = true;
+        s.Secessions[0] = rec;
+        s.Own.Add(Corps(1, 240f, 9000f));      // the nearest field formation: formerly posted for nothing
+        s.Own.Add(Corps(2, 100f, 9000f));
+        var plan = Plan(s);
+        AssertEqual(1, plan.Garrisons.Count, "the post stands");
+        AssertTrue(plan.Garrisons[0].InState, "the Union is present in the state (a town garrison)");
+        AssertEqual(0, plan.Garrisons[0].InstanceIds.Count, "so no field formation is posted");
+        var alloc = Allocate(s, plan);
+        foreach (var a in alloc.Assignments)
+        {
+            AssertTrue(a.Role != FormationRole.Garrison, "no formation marches to Louisville: " + a.InstanceId);
+            AssertTrue(a.Reason != ForceAllocator.ReasonSecession, "and none is kept for it: " + a.InstanceId);
+        }
+        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=town-garrison@Kentucky:in/5000 ", "the row says a garrison already blocks it");
+
+        // Without the flag (the garrison left, or the monthly pass has not run), the same position posts the nearest formation.
+        var flagless = Side(0, 0, 0.6f);
+        flagless.Own.Add(Corps(1, 240f, 9000f));
+        flagless.Own.Add(Corps(2, 100f, 9000f));
+        AssertEqual(1, Plan(flagless).Garrisons[0].InstanceIds[0], "no flag: the nearest ready formation is posted");
+
+        // A field formation inside the state is still pledged when the flag is set (the flag lags the groups by one pass).
+        var both = Side(0, 0, 0.6f);
+        var bothRec = both.Secessions[0];
+        bothRec.OwnTroops = true;
+        both.Secessions[0] = bothRec;
+        both.Own.Add(Corps(1, 280f, 9000f, KentuckyState));
+        AssertEqual(1, Plan(both).Garrisons[0].InstanceIds.Count, "the one inside is still held in place");
+    }
+
+    // W&L: the garrison never posts, holds or reserves a formation the planner may not move. A player's formation inside the state
+    // still counts as the Union's presence (vanilla's flag counts every Union group) but is no member of the garrison.
+    private static void TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerCommand, WlChainClass.PlayerMapGroup, WlChainClass.CicSide })
+        {
+            // Outside the state, nearest to the town: the AI formation farther away is posted instead.
+            var outside = Side(0, 0, 0.6f);
+            var player = Corps(1, 290f, 9000f);
+            player.Chain = chain;
+            outside.Own.Add(player);
+            outside.Own.Add(Corps(2, 200f, 9000f));
+            var plan = Plan(outside);
+            AssertEqual(1, plan.Garrisons.Count, chain + ": a post");
+            AssertFalse(plan.Garrisons[0].InstanceIds.Contains(1), chain + ": never posted");
+            var alloc = Allocate(outside, plan);
+            if (alloc.TryGet(1, out var a))
+                AssertTrue(a.Role != FormationRole.Garrison && a.Reason != ForceAllocator.ReasonSecession, chain + ": no garrison role or reason");
+
+            // Inside the state: present, but not a member, so no one is ordered to hold or march for it.
+            var inside = Side(0, 0, 0.6f);
+            var held = Corps(1, 290f, 9000f, KentuckyState);
+            held.Chain = chain;
+            inside.Own.Add(held);
+            inside.Own.Add(Corps(2, 200f, 9000f));
+            var insidePlan = Plan(inside);
+            AssertTrue(insidePlan.Garrisons[0].InState, chain + ": the player's group in the state is the Union's presence");
+            AssertFalse(insidePlan.Garrisons[0].InstanceIds.Contains(1), chain + ": not a garrison member");
+            AssertFalse(insidePlan.Garrisons[0].InstanceIds.Contains(2), chain + ": and the AI formation is not posted for nothing");
+            var insideAlloc = Allocate(inside, insidePlan);
+            foreach (var x in insideAlloc.Assignments)
+                AssertTrue(x.Reason != ForceAllocator.ReasonSecession, chain + ": no formation is kept for the secession (" + x.InstanceId + ")");
+        }
     }
 }

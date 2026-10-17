@@ -405,7 +405,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 var record = new SecessionRecord
                 {
                     ObjectiveId = rule.ObjectiveId, StateId = rule.StateId, StateAlliance = nation.alliance,
-                    Live = SecessionRules.IsLive(nation.alliance, support)
+                    Live = SecessionRules.IsLive(nation.alliance, support),
+                    // The Union reads vanilla's own presence flag for its own side only (fog-honest: it is the side's own groups and garrisons,
+                    // 81654-81660, 82940-82943); the CSA never reads it.
+                    OwnTroops = s.Alliance == 0 && nation.alliancetroops != null && nation.alliancetroops.Length > 0 && nation.alliancetroops[0]
                 };
                 for (int i = 0; i < s.Objectives.Count && !record.HasTown; i++)
                 {

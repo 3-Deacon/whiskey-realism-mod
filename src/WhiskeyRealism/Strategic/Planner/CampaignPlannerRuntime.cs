@@ -238,6 +238,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return saved;
         }
 
+        // The appointment executor changed a top formation's commander, so its unit key changed: carry its home department to the new key
+        // now, so a save written before the next review keeps it (PlannerState.RekeyInstance).
+        internal static void RekeyDepartment(int alliance, int instanceId, string unitName, int commander)
+        {
+            if (alliance < 0 || alliance >= States.Length) return;
+            States[alliance].RekeyInstance(instanceId, SnapshotRules.UnitKey(unitName, commander));
+        }
+
         // A loaded sidecar's state (null: a v1/v2 file, the planner starts fresh). What names no formation is restored now; the
         // records that do wait for RebindSaved.
         internal static void Restore(int alliance, PlannerSnapshot saved)

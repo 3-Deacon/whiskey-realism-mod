@@ -40,6 +40,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // Persisted (PlannerStateDto.reinforcementKey / reinforcementDecision).
         public string ReinforcementKey;
         public int ReinforcementDecision = -1;
+        // Verify round 1, F1: the DecisionSerial whose main objective was seen scouted. Once a decision's target is scouted it stays scouted
+        // for that decision (a march released on a fresh picture is not re-staged when the belief decays); a new decision starts unscouted.
+        // -1 none. Persisted (PlannerStateDto.scoutedDecision).
+        public int ScoutedDecision = -1;
 
         // D6 detail (smoke amendments 2026-10-16): each top formation's home department, a Theater, by unit key. A formation is given the
         // theater of the sector it stands in the first time a review sees it and keeps it until a deliberate cross-department transfer
@@ -47,13 +51,48 @@ namespace WhiskeyRealism.Strategic.Planner
         // re-keys a formation (name:commander): Observe carries the department over by instance id within a session.
         private readonly Dictionary<string, Theater> _departments = new Dictionary<string, Theater>(StringComparer.Ordinal);
         private readonly Dictionary<int, string> _keyOfInstance = new Dictionary<int, string>();
+        // The unit keys the current review's Observe calls saw: PruneUnobserved drops every other saved department.
+        private readonly HashSet<string> _observed = new HashSet<string>(StringComparer.Ordinal);
 
         public IReadOnlyDictionary<string, Theater> Departments => _departments;
+
+        // A review's observation pass: BeginObservation, one Observe per own formation, then PruneUnobserved.
+        public void BeginObservation()
+        {
+            _observed.Clear();
+        }
+
+        // Drops the saved departments of unit keys the observation pass did not see (a formation that no longer exists would otherwise stay
+        // in the sidecar for ever). Returns how many were dropped.
+        public int PruneUnobserved()
+        {
+            List<string> gone = null;
+            foreach (var key in _departments.Keys)
+                if (!_observed.Contains(key)) (gone ?? (gone = new List<string>())).Add(key);
+            if (gone == null) return 0;
+            for (int i = 0; i < gone.Count; i++) _departments.Remove(gone[i]);
+            return gone.Count;
+        }
+
+        // The appointment executor changed the formation's commander, so its unit key (name:commander) changed with it: carry the
+        // department to the new key now, not at the next review, so a save between the two keeps it (verify round 1, concern 3).
+        public void RekeyInstance(int instanceId, string newKey)
+        {
+            if (string.IsNullOrEmpty(newKey) || !_keyOfInstance.TryGetValue(instanceId, out var oldKey)) return;
+            _keyOfInstance[instanceId] = newKey;
+            if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
+            if (_departments.TryGetValue(oldKey, out var carried))
+            {
+                _departments.Remove(oldKey);
+                _departments[newKey] = carried;
+            }
+        }
 
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.
         public Theater Observe(int instanceId, string unitKey, Theater standing)
         {
             if (string.IsNullOrEmpty(unitKey)) return standing;
+            _observed.Add(unitKey);
             if (_departments.TryGetValue(unitKey, out var known))
             {
                 _keyOfInstance[instanceId] = unitKey;
@@ -95,8 +134,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public void Restore(int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
                             int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1,
-                            string reinforcementKey = null, int reinforcementDecision = -1)
+                            string reinforcementKey = null, int reinforcementDecision = -1, int scoutedDecision = -1)
         {
+            ScoutedDecision = scoutedDecision;
             ReinforcementKey = reinforcementKey;
             ReinforcementDecision = reinforcementDecision;
             BelowOddsDays = belowOddsDays;

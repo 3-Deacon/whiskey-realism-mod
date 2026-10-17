@@ -97,6 +97,8 @@ namespace WhiskeyRealism.Strategic
         // by unit key (a Theater name). Absent in a file written before the fields: no reinforcement, no departments (re-derived).
         [JsonProperty("reinforcementKey")] public string ReinforcementKey;
         [JsonProperty("reinforcementDecision")] public int ReinforcementDecision = -1;
+        // The decision whose main objective was seen scouted (a march released on a fresh picture is not re-staged); absent: -1.
+        [JsonProperty("scoutedDecision")] public int ScoutedDecision = -1;
         [JsonProperty("departments")] public List<DepartmentDto> Departments = new List<DepartmentDto>();
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;

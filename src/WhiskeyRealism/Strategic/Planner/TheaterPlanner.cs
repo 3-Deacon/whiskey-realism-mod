@@ -220,8 +220,12 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
                 plan.MainEnemyStrength = m.Enemy;
-                plan.MainScouted = m.Scouted;
-                plan.MainStaged = !m.Scouted;
+                // F1 (verify round 1): once a decision's target has been scouted it stays scouted for that decision, so a march released on
+                // a fresh picture is not pulled back to a start line when the belief decays; a new decision starts unscouted.
+                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial;
+                if (m.Scouted) state.ScoutedDecision = state.DecisionSerial;
+                plan.MainScouted = m.Scouted || plan.MainScoutLatched;
+                plan.MainStaged = !plan.MainScouted;
                 // D3: the capacity the odds were judged on, then the part of it the objective needs.
                 plan.MainCapacityStrength = MassFor(inputs, m.X, m.Z, m.SectorId, m.ObjectiveId, inputs.Scratch);
                 plan.MainNeedStrength = m.Need;
@@ -673,11 +677,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
         }
 
-        // D8, the Union side (the state's owner): while a secession objective is live a visible campaign group of ours standing in the state denies
-        // it (nation.alliancetroops[0], 81654-81660, 179266 / 179281), so a garrison is kept inside the state. The formations already standing in it,
-        // nearest the post (the objective's town) first, are the garrison until their strength meets the D2 hold need at the post (a small force when
-        // nothing is believed near: the floor, or the presumption); the first of them always counts, since presence is what denies. With none inside,
-        // the nearest ready formation not already kept for the capital or a hold is posted there. Every member is kept out of the mass.
+        // D8, the Union side (the state's owner): while a secession objective is live a Union campaign group standing in the state denies it
+        // (nation.alliancetroops[0], 81654-81660, 179266 / 179281). Vanilla's flag counts every visible Union group of unittyp > 13, the
+        // state's garrisons included (82940-82943: a garrison unit with its reference is visible), so the Union is present when the flag is
+        // set (SecessionRecord.OwnTroops, read for the Union side only) or an own formation stands in the state. The formations already
+        // standing in it, nearest the post (the objective's town) first, are the pledged garrison until their strength meets the D2 hold need
+        // at the post (a small force when nothing is believed near: the floor, or the presumption); the first of them always counts. When
+        // nobody is present, the nearest ready formation not already kept for the capital or a hold is posted there; when the flag alone
+        // blocks it, nobody is posted. Every member is kept out of the mass.
         private static void Garrisons(Inputs c)
         {
             var s = c.S;
@@ -694,7 +701,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var inside = new List<int>();
                 for (int i = 0; i < s.Own.Count; i++)
                     if (s.Own[i].StateId == rec.StateId && s.Own[i].UnitTyp > 13) inside.Add(i);
-                post.InState = inside.Count > 0;
+                post.InState = inside.Count > 0 || rec.OwnTroops;   // vanilla's flag counts garrisons too: a garrison alone already blocks
                 inside.Sort((a, b) =>
                 {
                     int d = DistanceSq(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
@@ -739,12 +746,14 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             var s = c.S;
             c.Department = new Theater[s.Own.Count];
+            state?.BeginObservation();
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
                 Theater standing = c.Sectors.TheaterOf(ReserveRules.HoldSectorOf(c.Sectors, f));
                 c.Department[i] = state != null ? state.Observe(f.InstanceId, f.UnitKey, standing) : standing;
             }
+            if (state != null && s.Own.Count > 0) state.PruneUnobserved();   // an empty snapshot (a degraded read) prunes nothing
         }
 
         private static string DepartmentCountsOf(Inputs c)
@@ -1290,7 +1299,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " switch=" + (plan.SwitchReason ?? "none")
                 + " prior=" + (plan.PriorId ?? "none")
                 + " depots=" + plan.DepotTasks.Count
-                + " scouted=" + (plan.MainObjectiveId < 0 ? "none" : plan.MainScouted ? "yes" : "no")
+                + " scouted=" + (plan.MainObjectiveId < 0 ? "none" : plan.MainScoutLatched ? "latched" : plan.MainScouted ? "yes" : "no")
                 + " staged=" + (plan.MainStaged ? "yes" : "no")
                 + " depts=" + (plan.DepartmentCounts.Length == 0 ? "none" : plan.DepartmentCounts)
                 + " xdept=" + (plan.ReinforcementInstanceId < 0 ? "none" : plan.ReinforcementName + (plan.ReinforcementFrom != Theater.Unknown ? ":" + plan.ReinforcementFrom + ">" + plan.ReinforcementTo : ":" + plan.ReinforcementTo));

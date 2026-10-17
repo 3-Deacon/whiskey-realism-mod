@@ -831,7 +831,7 @@ internal static class ForceAllocatorTests
     }
 
     // The player's group counts, but never as mass, never pledged, never given a must-hold role: whatever the
-    // posture, his formation is Hold-in-place or a dispatch-only Support order, never withheld.
+    // posture, his formation is Hold-in-place (the planner sends him nothing), never withheld.
     private static void PlayerIsNeverInTheMassOrAMustHold()
     {
         var s = Wide();
