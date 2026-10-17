@@ -56,6 +56,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Consolidate exit threshold for "odds recovered, resume attack."
         // Matches the legacy 1.4 hysteresis used elsewhere.
         public const float ResumeFromConsolidateOddsFloor = 1.4f;
+
+        /// <summary>
+        /// Odds at which a consolidating army attacks again whatever share of its reserves reads committed. That share is 1 minus the designated reserve
+        /// groups' strength over the army's, so an army with one reserve group of five reads 0.85 from its first minute, and the 0.6 gate never let the
+        /// Union (4 to 5.5 : 1 in the smoke) resume. At decisive odds the share says nothing about whether to attack.
+        /// </summary>
+        public const float ResumeDecisiveOdds = 2.5f;
         public const float ExploitTriggerOddsRatio = 1.35f;
         public const float ExploitTriggerAbsoluteOdds = 1.8f;
         public const float ConsolidateOddsFloor = 0.9f;
@@ -326,6 +333,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (input.GlobalOddsCurrent >= ResumeFromConsolidateOddsFloor &&
                 (!input.IsReservesCommitKnown || input.ReservesCommittedFraction < 0.6f))
                 return new Decision(BattlePhase.MainEffort, "odds-recovered-resume-attack");
+            if (input.GlobalOddsCurrent >= ResumeDecisiveOdds)
+                return new Decision(BattlePhase.MainEffort, "decisive-odds-resume-attack");
 
             return new Decision(BattlePhase.Consolidate, "consolidate-continuing");
         }

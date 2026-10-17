@@ -1279,7 +1279,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return false;
             }
             guarded = new TacticalLeafBrigadeMap.LeafAssignment(leaf.InstanceId, leaf.DisplayName, leaf.LeafRole, CommandTaskType.HoldObjective,
-                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true);
+                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true, flankPostMain: leaf.FlankPostMain, flankPostLeft: leaf.FlankPostLeft);
             return true;
         }
     }
@@ -1417,6 +1417,30 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
                 IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
+        }
+
+        public const string FlankPostReason = "flank-post";
+
+        /// <summary>
+        /// A posted flank guard's Move to its post (MainFlankGuard.PostOf), at <see cref="IntentPriority.Post"/>: above the posture executor, so the move of
+        /// the division it sits in fans out around it instead of re-pathing it back.
+        /// </summary>
+        public static BattleOrderIntent FlankPostMove(int groupId, float x, float z, float heading)
+        {
+            return MoveIntent(groupId, CommandTaskType.GuardFlank, x, z, heading, inContactWithdrawal: false, avoidCoveredCrossings: false, exploit: false,
+                IntentPriority.Post, IntentSource.PostureExecutor, FlankPostReason);
+        }
+
+        /// <summary>
+        /// The standing claim of a flank guard that is at its post, on its way to it, in contact or waiting on an order: a Move claim at
+        /// <see cref="IntentPriority.Post"/> and nothing to write (<see cref="IntentFlags.StandingClaim"/>). It is renewed every tick the guard is posted.
+        /// </summary>
+        public static BattleOrderIntent FlankPostClaim(int groupId, float x, float z)
+        {
+            BattleOrderIntent claim = MoveIntent(groupId, CommandTaskType.GuardFlank, x, z, -1f, inContactWithdrawal: false, avoidCoveredCrossings: false,
+                exploit: false, IntentPriority.Post, IntentSource.PostureExecutor, FlankPostReason);
+            claim.Flags = IntentFlags.StandingClaim;
+            return claim;
         }
 
         public static BattleOrderIntent FacingPulse(int unitId, float heading)

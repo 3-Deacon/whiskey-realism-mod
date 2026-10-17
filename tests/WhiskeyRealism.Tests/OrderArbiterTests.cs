@@ -56,6 +56,10 @@ internal static class OrderArbiterTests
             ("battle-core EqualOrLowerDescendantClaimDoesNotFanOut", EqualOrLowerDescendantClaimDoesNotFanOut),
             ("battle-core UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant", UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant),
             ("battle-core GroupMoveYieldsWhenEveryChildIsClaimed", GroupMoveYieldsWhenEveryChildIsClaimed),
+            ("battle-core PostedFlankGuardClaimFansTheParentMoveOutAroundIt", PostedFlankGuardClaimFansTheParentMoveOutAroundIt),
+            ("battle-core PostedGuardAtItsPostStillHoldsTheClaim", PostedGuardAtItsPostStillHoldsTheClaim),
+            ("battle-core StandingClaimWritesNothing", StandingClaimWritesNothing),
+            ("battle-core PostClaimOutranksExecutorAndYieldsToSafety", PostClaimOutranksExecutorAndYieldsToSafety),
         });
     }
 
@@ -1045,6 +1049,93 @@ internal static class OrderArbiterTests
             AssertFalse(plan.Targets.FannedOut, child + " claim below does not outrank the group move");
             AssertEqual(brigade, plan.Targets.TargetIndices[0], "the group orders itself");
         }
+    }
+
+    // Verify round 2: the posted flank guard's claim had the parent's own priority, and an equal claim does not fan the parent's move out, so the parent's
+    // SetWaypoint (groupmoveonly false) re-pathed every attached unit and walked the guard back. A posted guard holds a claim one rung above the posture
+    // executor (IntentPriority.Post), renewed every tick it is posted.
+    private static void PostedFlankGuardClaimFansTheParentMoveOutAroundIt()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(10, 100f, -100f);
+        int guard = view.AddGroup(11, 40f, -120f, parentIndex: division);
+        int middle = view.AddGroup(12, 100f, -120f, parentIndex: division);
+        int right = view.AddGroup(13, 160f, -120f, parentIndex: division);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+
+        var moving = NewExecutor();
+        BattleOrderIntent toPost = PostureIntentPlan.FlankPostMove(11, 20f, -140f, 315f);
+        var winners = new[] { toPost, groupMove };
+        moving.BeginTickClaims(view, winners, winners.Length);
+        var plan = moving.Plan(view, groupMove, 1.0);
+        AssertTrue(plan.Execute && plan.Targets.FannedOut, "the parent moves, fanned out around the guard on its way");
+        AssertFalse(Targets(plan, guard), "the guard is excluded");
+        AssertTrue(Targets(plan, middle) && Targets(plan, right), "the siblings move");
+        AssertFalse(Targets(plan, division), "the division is not ordered as a group");
+
+        // the same guard with the old, equal-priority claim is re-pathed with the group
+        var equal = NewExecutor();
+        BattleOrderIntent old = Move(11, 20f, -140f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.GuardFlank);
+        var oldWinners = new[] { old, groupMove };
+        equal.BeginTickClaims(view, oldWinners, oldWinners.Length);
+        var undone = equal.Plan(view, groupMove, 1.0);
+        AssertFalse(undone.Targets.FannedOut, "(an equal claim does not shield: the division orders itself and the guard walks back)");
+    }
+
+    private static void PostedGuardAtItsPostStillHoldsTheClaim()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(10, 100f, -100f);
+        int guard = view.AddGroup(11, 40f, -120f, parentIndex: division);
+        int middle = view.AddGroup(12, 100f, -120f, parentIndex: division);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        var executor = NewExecutor();
+        // at its post the guard has nothing to write, but its standing claim is submitted every tick
+        BattleOrderIntent claim = PostureIntentPlan.FlankPostClaim(11, 40f, -120f);
+        var winners = new[] { claim, groupMove };
+        executor.BeginTickClaims(view, winners, winners.Length);
+        var plan = executor.Plan(view, groupMove, 1.0);
+        AssertTrue(plan.Execute && plan.Targets.FannedOut, "the division's move fans out around a guard that is only holding its post");
+        AssertFalse(Targets(plan, guard), "the guard stays");
+        AssertTrue(Targets(plan, middle), "the other brigade moves");
+
+        // a guard that is no longer posted submits nothing: the claim is gone with the tick
+        var released = NewExecutor();
+        var only = new[] { groupMove };
+        released.BeginTickClaims(view, only, only.Length);
+        AssertFalse(released.Plan(view, groupMove, 1.0).Targets.FannedOut, "no standing claim, no shield");
+    }
+
+    private static void StandingClaimWritesNothing()
+    {
+        var view = new FixtureBattleView();
+        view.AddGroup(11, 40f, -120f);
+        var executor = NewExecutor();
+        BattleOrderIntent claim = PostureIntentPlan.FlankPostClaim(11, 40f, -120f);
+        AssertEqual(IntentFlags.StandingClaim, claim.Flags, "the claim carries the flag");
+        var plan = executor.Plan(view, claim, 1.0);
+        AssertFalse(plan.Execute, "nothing to write");
+        AssertEqual(SkipReason.StandingClaim, plan.Skip, "and the reason says why");
+        executor.NoteRefusal(11, plan.Skip);
+        AssertFalse(executor.IsUnsettled(11), "a standing claim is the steady state of a posted guard, not a refusal the tier pass has to look at");
+    }
+
+    private static void PostClaimOutranksExecutorAndYieldsToSafety()
+    {
+        AssertTrue(IntentPriority.Post > IntentPriority.Executor && IntentPriority.Post < IntentPriority.Safety, "Post sits between the posture executor and Safety");
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(Move(11, 100f, -100f, IntentPriority.Executor, IntentSource.PostureExecutor));
+        arbiter.Submit(PostureIntentPlan.FlankPostClaim(11, 40f, -120f));
+        var winners = new BattleOrderIntent[4];
+        int n = arbiter.Resolve(winners);
+        AssertEqual(1, n, "one Move claim");
+        AssertEqual(IntentPriority.Post, winners[0].Priority, "the guard's claim beats a posture move onto it");
+        arbiter.BeginTick();
+        arbiter.Submit(PostureIntentPlan.FlankPostClaim(11, 40f, -120f));
+        arbiter.Submit(Move(11, 0f, -300f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None));
+        n = arbiter.Resolve(winners);
+        AssertEqual(IntentPriority.Safety, winners[0].Priority, "a withdrawal still moves a posted guard");
     }
 
     // A Safety claim elsewhere on the field raises the tick's highest claim, so

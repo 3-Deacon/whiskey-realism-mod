@@ -64,10 +64,6 @@ namespace WhiskeyRealism.Tactical.Operations
             return row
                 + " doctrineTask=" + order.Task
                 + " sop=" + order.Sop.Authority
-                + " risk=" + FormatFloat(order.Sop.RiskBudget01)
-                + " reacquire=" + FormatFloat(order.Sop.ReacquireSeconds)
-                + " supportReq=" + order.Sop.RequiresSupportBeforeMajorAttack
-                + " fallbackReq=" + order.Sop.RequiresFallbackIfPressed
                 + " doctrineReason=" + SafeToken(order.Reason)
                 + " primary=" + FormatTarget(order.PrimaryTarget)
                 + " support=" + FormatTarget(order.SupportTarget)
@@ -139,10 +135,6 @@ namespace WhiskeyRealism.Tactical.Operations
             return CommandAssignmentSignature(side, state, operation)
                 + "|" + order.Task
                 + "|" + order.Sop.Authority
-                + "|" + Bucket(order.Sop.RiskBudget01)
-                + "|" + Bucket(order.Sop.ReacquireSeconds)
-                + "|" + order.Sop.RequiresSupportBeforeMajorAttack
-                + "|" + order.Sop.RequiresFallbackIfPressed
                 + "|" + SafeToken(order.Reason)
                 + "|" + FormatTarget(order.PrimaryTarget)
                 + "|" + FormatTarget(order.SupportTarget)

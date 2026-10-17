@@ -42,7 +42,7 @@ internal static class UnitChurnTests
     // the brigade's GroupPosture row, and FacingPulseIntentProducer and FireControlIntentProducer read only groups with Has set.
     private static void LeafBrigadeRecordsItsPosture()
     {
-        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true);
+        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true, BattleStance.Defender);
         AssertTrue(reserve.Has, "the row exists");
         AssertEqual(CommandEchelonKind.BrigadeLike, reserve.State.Echelon, "a brigade: the pulse's Brigade scope");
         AssertEqual(CommandNodeRole.Reserve, reserve.State.Role, "the leaf role as the ledger names it");
@@ -50,12 +50,15 @@ internal static class UnitChurnTests
         AssertTrue(reserve.FlankRisk && !reserve.CloseEngaged, "the contact flags the pulse reads");
         AssertFalse(reserve.Submitted, "no move yet");
         AssertFalse(reserve.FacingSubmitted, "nor a pulse");
-        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false).State.Role, "a refused flank defends");
-        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, 1, false, false).State.Role, "an unknown role stays unknown");
+        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Defender).State.Role, "a refused flank defends on the defending side");
+        foreach (BattleStance attacking in new[] { BattleStance.Attacker, BattleStance.Meeting })
+            AssertEqual(CommandNodeRole.FlankMarch, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, attacking).State.Role,
+                "and is a flank guard, never a Defender, on a side that is " + attacking);
+        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Attacker).State.Role, "an unknown role stays unknown");
         // Record runs for every leaf brigade on every posture tick: the node id is built once per brigade, not concatenated per call.
         AssertEqual("leaf-708956", reserve.State.NodeId, "the node id names the brigade");
         AssertTrue(ReferenceEquals(LeafPosture.NodeId(708956), LeafPosture.NodeId(708956)), "and is the same string on every call");
-        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, false, false).State.NodeId, LeafPosture.NodeId(708956)),
+        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, false, false, BattleStance.Attacker).State.NodeId, LeafPosture.NodeId(708956)),
             "Record takes it from the cache");
 
         // What the record buys: the pulse's brigade decision for a reserve brigade with a flank under pressure (a held task faces the threat).
@@ -71,6 +74,7 @@ internal static class UnitChurnTests
         string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         string leaf = FlankResponseTests.Between(producer, "private static void ProduceLeaf(", "// BR-M1: holds a Main-effort brigade");
         FlankResponseTests.AssertPinned(leaf, "t.Groups[i] = LeafPosture.Record(", "the leaf path fills the brigade's posture row");
+        FlankResponseTests.AssertPinned(leaf, "closeEngaged, flankRisk, army.CurrentBattleStance);", "with the side's real battle stance, so an attacking side's refused flank is a flank guard");
         int record = leaf.IndexOf("t.Groups[i] = LeafPosture.Record(", StringComparison.Ordinal);
         int decide = leaf.IndexOf("LeafBrigadeMovePolicy.Decide(", StringComparison.Ordinal);
         int exit = leaf.IndexOf("if (!move.Move)", StringComparison.Ordinal);
@@ -599,14 +603,14 @@ internal static class UnitChurnTests
     }
 
     // The source without its comments, so a pinned statement cannot be satisfied by one that was commented out beside a mutated copy.
-    private static string Code(string text)
+    internal static string Code(string text)
     {
         text = System.Text.RegularExpressions.Regex.Replace(text, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
         return System.Text.RegularExpressions.Regex.Replace(text, @"//[^\n]*", "");
     }
 
     // A whole statement, present once: a mutation of any of its terms changes the text and fails this.
-    private static void PinStatement(string body, string statement, string label)
+    internal static void PinStatement(string body, string statement, string label)
     {
         string flat = FlankResponseTests.Flat(body);
         string want = FlankResponseTests.Flat(statement);
@@ -659,7 +663,7 @@ internal static class UnitChurnTests
         PinStatement(pass, "groupTask = t.Groups[group].State.Task;", "the group's recorded task");
         PinStatement(pass, "groupFormation = own[group].Formation;", "the group's formation (4 is the route's column)");
         PinStatement(pass, "routeColumn = t.Groups[group].RouteColumn;", "the group's route column is the pipeline's record");
-        string walkHost = Code(FlankResponseTests.Between(producerFile, "private readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
+        string walkHost = Code(FlankResponseTests.Between(producerFile, "internal readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
         PinStatement(walkHost, "public bool HasPosture(int index) => _groups[index].Has;", "the posture row exists");
         PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].State.Task;", "its task");
         PinStatement(walkHost, "public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);", "the executor's last move for that unit");

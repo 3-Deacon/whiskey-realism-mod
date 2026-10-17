@@ -222,6 +222,8 @@ internal static partial class BattleLodTests
         LodWorld c = QuietWorld();
         c.Executor.NoteRefusal(100, SkipReason.Duplicate);
         AssertFalse(c.Executor.IsUnsettled(100), "a Duplicate is the steady state of a settled group");
+        c.Executor.NoteRefusal(100, SkipReason.StandingClaim);
+        AssertFalse(c.Executor.IsUnsettled(100), "and so is a posted guard's standing claim");
         c.Executor.NoteRefusal(100, SkipReason.None);
         AssertFalse(c.Executor.IsUnsettled(100), "no reason is no refusal");
         c.Executor.NoteRefusal(100, SkipReason.Cooldown);
@@ -230,7 +232,7 @@ internal static partial class BattleLodTests
         AssertFalse(c.Executor.IsUnsettled(100), "cleared once the tier pass read it");
         foreach (SkipReason reason in Enum.GetValues(typeof(SkipReason)))
         {
-            if (reason == SkipReason.None || reason == SkipReason.Duplicate) continue;
+            if (reason == SkipReason.None || reason == SkipReason.Duplicate || reason == SkipReason.StandingClaim) continue;
             c.Executor.NoteRefusal(100, reason);
             AssertTrue(c.Executor.IsUnsettled(100), "refusal " + reason);
             c.Executor.ClearRefusals();

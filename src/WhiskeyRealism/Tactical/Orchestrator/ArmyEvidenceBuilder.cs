@@ -44,11 +44,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public Bundle(
                 ArmyEvidence ownEvidence,
                 EnemyVisibleState enemyVisible,
-                float ownMainEffortStrength,
+                float ownActiveForce,
                 float ownArmyMorale,
                 float ownReservesCommittedFraction,
                 float ownReinforcementsArriving)
-                : this(ownEvidence, enemyVisible, ownMainEffortStrength,
+                : this(ownEvidence, enemyVisible, ownActiveForce,
                        ownArmyMorale, ownReservesCommittedFraction,
                        ownReinforcementsArriving,
                        ownAvgFatigue01: 0.2f,
@@ -60,7 +60,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public Bundle(
                 ArmyEvidence ownEvidence,
                 EnemyVisibleState enemyVisible,
-                float ownMainEffortStrength,
+                float ownActiveForce,
                 float ownArmyMorale,
                 float ownReservesCommittedFraction,
                 float ownReinforcementsArriving,
@@ -71,7 +71,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 OwnEvidence = ownEvidence;
                 EnemyVisible = enemyVisible;
-                OwnMainEffortStrength = ownMainEffortStrength;
+                OwnActiveForce = ownActiveForce;
                 OwnArmyMorale = ownArmyMorale;
                 OwnReservesCommittedFraction = ownReservesCommittedFraction;
                 OwnReinforcementsArriving = ownReinforcementsArriving;
@@ -83,7 +83,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             public ArmyEvidence OwnEvidence { get; }
             public EnemyVisibleState EnemyVisible { get; }
-            public float OwnMainEffortStrength { get; }
+            /// <summary>The side's total active force (<c>sideinformation.totalactiveforce</c>): the whole army, not the main effort band.</summary>
+            public float OwnActiveForce { get; }
             public float OwnArmyMorale { get; }
             public float OwnReservesCommittedFraction { get; }
             /// <summary>
@@ -163,7 +164,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return new Bundle(
                     ownEvidence,
                     enemyVisible,
-                    Math.Max(1f, ownActive),
+                    ownActive,
                     ownMoraleRatio,
                     ownReservesCommitted,
                     ReinforcementsArrivingWithin(arrivals, GamePrefs.reinforcementmaxtimeforairetreatdecisions),
@@ -202,7 +203,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new Bundle(
                 new ArmyEvidence(1f, TerrainKind.Open, defaultMainEffortSector: DefaultMainEffortSector(TacticalFrontAxis.None)),
                 new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, intelConfidence01: 0f),
-                ownMainEffortStrength: 1f,
+                ownActiveForce: 1f,
                 ownArmyMorale: 1f,
                 ownReservesCommittedFraction: 0f,
                 ownReinforcementsArriving: 0f);

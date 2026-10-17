@@ -707,7 +707,7 @@ internal static class TacticalBattleTests
         var snap = new TacticalBattleRuntimeSnapshot(sig, -1.5f, ev, vis, -10f, 1.5f, -0.2f, 500f, objs, tree, children);
         AssertTrue(snap.SignatureAtBuild.SignatureEquals(sig), "stores signature");
         AssertEqual(0f, snap.BuildBattleHours, "negative hours sanitized to 0");
-        AssertEqual(0f, snap.OwnMainEffortStrength, "negative main effort sanitized");
+        AssertEqual(0f, snap.OwnActiveForce, "negative main effort sanitized");
         AssertEqual(1f, snap.OwnArmyMorale, " >1 morale clamped");
         AssertEqual(0f, snap.OwnReservesCommittedFraction, "negative reserves sanitized");
         AssertEqual(500f, snap.OwnReinforcementsArriving, "positive delta stored");

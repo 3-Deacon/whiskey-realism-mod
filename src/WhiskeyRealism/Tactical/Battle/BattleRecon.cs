@@ -66,6 +66,8 @@ namespace WhiskeyRealism.Tactical.Battle
         MissionEnded = 4,
         ProbeEnded = 8,
         ProbeHeld = 16,
+        /// <summary>A crossing look was requested and no mission started; <see cref="ReconTickResult.LookIdleReason"/> names why.</summary>
+        LookIdle = 32,
     }
 
     public struct ReconTickResult
@@ -73,6 +75,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public ReconEvents Events;
         public ReconTargetKind StartedKind;
         public string EndReason; // static literal
+        /// <summary>With <see cref="ReconEvents.LookIdle"/>: the first thing in the way of the requested look (a static literal).</summary>
+        public string LookIdleReason;
         public int Intents;
     }
 
@@ -664,8 +668,9 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void TryStartMission(BattleSnapshot s, in ReconSettings st, ReconPicture p, ReconMemory m, IIntentSink sink,
             double now, ref ReconTickResult r)
         {
-            if ((r.Events & ReconEvents.MissionEnded) != 0 || !m.StartBudgetLeft(now)) return;
-            if (!CollectScouts(s, st, p, m)) return;
+            if ((r.Events & ReconEvents.MissionEnded) != 0) return;
+            if (!m.StartBudgetLeft(now)) { NoteLookIdle(p, ref r, "start-budget"); return; }
+            if (!CollectScouts(s, st, p, m)) { NoteLookIdle(p, ref r, "no-scout"); return; }
             if (!OwnLine(s, p.FrameHeading, out float centroidX, out float centroidZ, out float frameDepth, out float axisDepth)) return;
             CollectVisible(s, m);
 
@@ -712,6 +717,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     scout = c; kind = ReconTargetKind.Crossing;
                     lookX = p.LookX(best); lookZ = p.LookZ(best); standX = sx; standZ = sz;
                 }
+                else NoteLookIdle(p, ref r, n == 0 ? "look-recent" : "no-stand-off");
             }
 
             // 4. Before any contact, below the action gate: straight ahead (along the
@@ -761,6 +767,14 @@ namespace WhiskeyRealism.Tactical.Battle
             r.Intents++;
             r.Events |= ReconEvents.MissionStarted;
             r.StartedKind = kind;
+        }
+
+        // A requested look that does not start a mission says why, once per tick (the first reason wins: the later ones are only reached past it).
+        private static void NoteLookIdle(ReconPicture p, ref ReconTickResult r, string reason)
+        {
+            if (p.LookCount <= 0 || r.LookIdleReason != null) return;
+            r.LookIdleReason = reason;
+            r.Events |= ReconEvents.LookIdle;
         }
 
         // This tick's scout candidates, ascending; false when there is none.

@@ -43,12 +43,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return id;
         }
 
-        public static GroupPosture Record(DirectChildRole role, CommandTaskType task, int groupId, bool closeEngaged, bool flankRisk)
+        /// <summary>
+        /// The brigade's posture row. The node role is the allocator's role as it reads on this side of the field (<see cref="CommandNodeOperationsRuntime.MapRole(DirectChildRole, BattleStance)"/>):
+        /// a refused flank is a Defender on the defending side and a flank guard (FlankMarch) on every other, so the stance is the side's real one, never a default.
+        /// </summary>
+        public static GroupPosture Record(DirectChildRole role, CommandTaskType task, int groupId, bool closeEngaged, bool flankRisk, BattleStance stance)
         {
             return new GroupPosture
             {
                 Has = true,
-                State = new CommandNodeOperationalState(NodeId(groupId), CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role), task, CommandTaskState.Committed),
+                State = new CommandNodeOperationalState(NodeId(groupId), CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role, stance), task, CommandTaskState.Committed),
                 CloseEngaged = closeEngaged,
                 FlankRisk = flankRisk,
             };

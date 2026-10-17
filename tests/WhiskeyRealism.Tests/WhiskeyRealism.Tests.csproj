@@ -247,6 +247,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandNodeTaskPlanner.cs" Link="Operations\CommandNodeTaskPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalCommandMonitor.cs" Link="Operations\TacticalCommandMonitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\DoctrineTargetPoint.cs" Link="Operations\DoctrineTargetPoint.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\DoctrineTargetHold.cs" Link="Operations\DoctrineTargetHold.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandDoctrineOrder.cs" Link="Operations\CommandDoctrineOrder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\DoctrineConsumerDecisions.cs" Link="Operations\DoctrineConsumerDecisions.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandDoctrineAssignment.cs" Link="Operations\CommandDoctrineAssignment.cs" />
@@ -353,6 +354,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalLeafBrigadeMap.cs" Link="Orchestrator\TacticalLeafBrigadeMap.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\LeafReserveRelease.cs" Link="Orchestrator\LeafReserveRelease.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReleaseHysteresis.cs" Link="Orchestrator\ReleaseHysteresis.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildRoleHold.cs" Link="Orchestrator\DirectChildRoleHold.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildRoleSummary.cs" Link="Orchestrator\DirectChildRoleSummary.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\MainFlankGuard.cs" Link="Orchestrator\MainFlankGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Producers\FlankGuardLeaf.cs" Link="Battle\Producers\FlankGuardLeaf.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReserveReleasePacing.cs" Link="Orchestrator\ReserveReleasePacing.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\LeafReservePlanner.cs" Link="Battle\LeafReservePlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalForceBalanceEvidence.cs" Link="Orchestrator\TacticalForceBalanceEvidence.cs" />
