@@ -31,6 +31,7 @@ internal static class RiverCrossingTests
             ("river crossing a Screen or Probe never crosses a Held crossing, even one the plan chose; an attack may", OnlyAnAttackCrossesAHeldCrossingThePlanChose),
             ("river crossing every leg of a move with a via is gated", EveryLegOfAMoveWithAViaIsGated),
             ("river crossing the search over 252 links is bounded", TheSearchOver252LinksIsBounded),
+            ("river crossing two maps with the same number of links do not share a link graph", TwoMapsDoNotShareALinkGraph),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
@@ -235,6 +236,18 @@ internal static class RiverCrossingTests
         public bool IsPlanned(int link) => false;
         public void RequestLook(int link) { }
         public object Topology => this;
+    }
+
+    // The link graph is built once per map (its Topology); a second map with as many links but other regions must not read the first's.
+    private static void TwoMapsDoNotShareALinkGraph()
+    {
+        var joined = new Picture();
+        joined.Links.Add((500f, 100f, CrossingState.Clear, 0, 1));
+        AssertEqual(CrossingVerdict.ViaCrossing, Decide(joined, 100f, 100f, 700f, 100f), "(the first map: its one link joins the two banks)");
+        var other = new Picture();
+        other.Links.Add((500f, 100f, CrossingState.Clear, 0, 2));
+        AssertEqual(CrossingVerdict.NoKnownCrossing, Decide(other, 100f, 100f, 700f, 100f), "the second map's one link joins other regions: no crossing, whatever the first map's graph said");
+        AssertEqual(CrossingVerdict.ViaCrossing, Decide(joined, 100f, 100f, 700f, 100f), "and the first map still answers for itself");
     }
 
     private static void TheSearchOver252LinksIsBounded()
