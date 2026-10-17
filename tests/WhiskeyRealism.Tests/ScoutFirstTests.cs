@@ -433,8 +433,7 @@ internal static class ScoutFirstTests
             AssertEqual(1, drawn, "never a second West corps in the same decision");
             // The move is announced once, on the review that makes it: later days name the corps and its new department only.
             string row = TheaterPlanner.Summary(again);
-            AssertContains(row, "xdept=" + again.ReinforcementName + ":East", "the later row names the corps and where it is now");
-            AssertFalse(row.Contains(":West>East"), "and does not announce the move again");
+            AssertTrue(row.EndsWith("xdept=" + again.ReinforcementName + ":East", StringComparison.Ordinal), "the later row names the corps and where it is now, with no from>to: " + row);
         }
 
         // A new decision picks afresh.
