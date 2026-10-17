@@ -31,6 +31,7 @@ Harmony patches do not write ledger state. Ledger state is written during the or
 
 The doctrine rule: screen contact is not a target for a formed assault. `TacticalOperationDirector` transitions:
 
+- `contact-elsewhere-hold` -> a Defender whose best-scoring objective has no enemy at it but whose picture holds enemy at another objective forms its `DefensiveNetwork` on the ground it holds (`Forming`), instead of scouting. A non-Defender not yet on the empty objective works the best-scoring objective with perceived enemy (the `VisibleEnemyLine` objective, fog-honest) through the ordinary gates below (army-children fix, 2026-10-17: both sides stayed `Scouting` through heavy contact).
 - `no-contact-scout` -> initial `Scouting` when a newly selected objective shows no enemy at all (BC9; before BC9 own / max(1, 0) odds committed the operation); an operation already active on that objective keeps the rules below
 - `defender-screen` / `defender-hold` -> a Defender side's (vanilla `GetBattleType` 2) decision with its offensive shape made `DefensiveNetwork` (Scouting / any other phase; Committed and Exploiting become Forming) (BC9)
 - `recon-contact` -> initial `Scouting`

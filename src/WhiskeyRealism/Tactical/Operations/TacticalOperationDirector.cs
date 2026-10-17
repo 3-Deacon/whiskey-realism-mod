@@ -208,6 +208,29 @@ namespace WhiskeyRealism.Tactical.Operations
                     : new TacticalOperationDirectorDecision(OperationRecord.Noop, "no-objective");
             }
 
+            // A side that perceives the enemy does not scout for him. The best-scoring objective can be an empty map
+            // objective on strong ground while the side's picture already holds a formed enemy line elsewhere (the
+            // VisibleEnemyLine objective, fog-honest: only what the side sees). An operation not yet on the empty
+            // objective then works the perceived contact; a Defender keeps the ground it holds and forms its line
+            // (smoke 2026-10-17: both sides stayed Scouting through heavy contact).
+            if (primary.EnemyStrength <= 0f &&
+                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId)) &&
+                TryPickPerceivedContact(input.Objectives, input.Stance, out BattlefieldObjectiveEstimate contact))
+            {
+                if (input.Stance == BattleStance.Defender)
+                {
+                    return new TacticalOperationDirectorDecision(
+                        new OperationRecord(
+                            TacticalOperationShape.DefensiveNetwork,
+                            TacticalOperationPhase.Forming,
+                            primary.ObjectiveId,
+                            input.CurrentTimeSeconds + 900f),
+                        "contact-elsewhere-hold");
+                }
+
+                primary = contact;
+            }
+
             float operationStrength = OperationStrength(input);
             TacticalObjectiveGate objectiveGate = TacticalDecisionDoctrine.ClassifyObjective(
                 primary,
@@ -435,6 +458,31 @@ namespace WhiskeyRealism.Tactical.Operations
                     continue;
                 }
 
+                float score = ObjectiveSelectionScore(objective, stance);
+                if (!found || score > bestScore)
+                {
+                    best = objective;
+                    bestScore = score;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        // The best-scoring objective the side perceives enemy at (the same score as the primary pick), if any.
+        private static bool TryPickPerceivedContact(
+            BattlefieldObjectiveEstimate[] objectives,
+            BattleStance stance,
+            out BattlefieldObjectiveEstimate best)
+        {
+            best = default(BattlefieldObjectiveEstimate);
+            float bestScore = float.NegativeInfinity;
+            bool found = false;
+            for (int i = 0; i < objectives.Length; i++)
+            {
+                BattlefieldObjectiveEstimate objective = objectives[i];
+                if (!IsUsableObjective(objective) || objective.EnemyStrength <= 0f) continue;
                 float score = ObjectiveSelectionScore(objective, stance);
                 if (!found || score > bestScore)
                 {
