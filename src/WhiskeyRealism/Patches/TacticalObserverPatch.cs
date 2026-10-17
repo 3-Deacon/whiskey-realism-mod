@@ -1308,13 +1308,16 @@ namespace WhiskeyRealism.Patches
                 string relation = OrderRelation(sourceUnderCommander, targetUnderCommander);
                 float delay = queued.processingtime - GameVars.currenttimefromstart;
                 int queueCount = issuer != null && issuer.orderqueue != null ? issuer.orderqueue.Count : -1;
+                // The executor's source for an order Whiskey queued (OrderIssueOrigin), else "other": a vanilla routine or the player's own order.
+                string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? "other";
                 string signature = "queued|" + SafeInstanceId(issuer) + "|" + SafeInstanceId(target) + "|" +
-                    orderType + "|" + queueCount + "|" + BucketSeconds(delay) + "|" + relation;
+                    orderType + "|" + queueCount + "|" + BucketSeconds(delay) + "|" + relation + "|" + origin;
 
                 EmitDirect(
                     "PlayerOrderQueued",
                     signature,
                     "[TacticalPlayerOrder] event=queued relation=" + relation +
+                    " origin=" + origin +
                     " source=" + SafeUnitName(issuer) +
                     " sourceUnderCommander=" + sourceUnderCommander +
                     " target=" + SafeUnitName(target) +
@@ -1349,6 +1352,7 @@ namespace WhiskeyRealism.Patches
                     "TacticalCommandQueued",
                     "command-queued|" + SafeInstanceId(issuer) + "|" + SafeInstanceId(target) + "|" + command.Signature(),
                     "[TacticalCommand] event=queued relation=" + relation +
+                    " origin=" + origin +
                     " source=" + SafeUnitName(issuer) +
                     " target=" + SafeUnitName(target) +
                     " summary=" + command.Signature() +

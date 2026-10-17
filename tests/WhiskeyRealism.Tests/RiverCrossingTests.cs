@@ -180,10 +180,9 @@ internal static class RiverCrossingTests
         AssertFalse(wait.Waits(pending: true, t + CrossingPictureWait.CapHours * 1.01), "the cap runs out: the gate opens");
         AssertFalse(wait.Waits(pending: true, t + 1.0), "and stays open while the map is pending");
         AssertFalse(wait.Waits(pending: false, t + 1.1), "the map arrived (or never will): nothing waits");
-        AssertTrue(double.IsNaN(wait.PendingSinceHours), "and the count starts over");
         AssertTrue(wait.Waits(pending: true, t + 2.0), "a later pending spell waits afresh");
         wait.Clear();
-        AssertTrue(double.IsNaN(wait.PendingSinceHours), "a cleared wait forgets");
+        AssertTrue(wait.Waits(pending: true, t + 2.5), "a cleared wait forgets the spell it was counting and starts a new one");
     }
 
     // verify F2: the rule took one link joining both banks, so a leg over two rivers had none and was refused although the chain

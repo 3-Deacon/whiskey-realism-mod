@@ -140,6 +140,26 @@ namespace WhiskeyRealism.Tactical.Battle
             in ExecutionPlan plan,
             double nowHours)
         {
+            // The observer's AddToOrderQueue row names this intent's source (origin=) for every order the vanilla calls below queue.
+            IntentSource outer = OrderIssueOrigin.Enter(winner.Source);
+            try
+            {
+                return ExecuteWrites(bunits, view, executor, in winner, in plan, nowHours);
+            }
+            finally
+            {
+                OrderIssueOrigin.Exit(outer);
+            }
+        }
+
+        private static int ExecuteWrites(
+            BattleUnits bunits,
+            BattleSnapshot view,
+            OrderExecutor executor,
+            in BattleOrderIntent winner,
+            in ExecutionPlan plan,
+            double nowHours)
+        {
             if (bunits == null || view == null || !plan.Execute) return 0;
             UnitRecord[] own = view.Own;
             int groupIndex = view.IndexOfOwn(winner.GroupId);

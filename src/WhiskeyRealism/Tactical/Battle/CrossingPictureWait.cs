@@ -18,9 +18,6 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public void Clear() => _pendingSince = double.NaN;
 
-        /// <summary>The first doctrine hour a move waited for the map; NaN when none waits.</summary>
-        public double PendingSinceHours => _pendingSince;
-
         /// <summary>
         /// Whether a move waits: the map is <paramref name="pending"/> and the cap, counted from the first pending move, has not run out. A map that is
         /// no longer pending (built, off, failed or the terrain has no river) clears the wait.
