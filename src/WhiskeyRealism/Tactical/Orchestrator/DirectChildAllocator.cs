@@ -392,7 +392,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ///      axis override. A role change, not a mover: the posture producer executes it.
         /// Returns per-child axis-sector overrides (-1 = none).
         /// </summary>
-        private static int[] ReleaseReserves(
+        internal static int[] ReleaseReserves(
             TacticalBattlePlan plan,
             IReadOnlyList<DirectChildEvidence> evidence,
             DirectChildRole[] roles,

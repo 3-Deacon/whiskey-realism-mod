@@ -33,22 +33,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const string NoFreeBrigade = "no-free-brigade";
         public const string ReleasedToFlank = "released-to-flank";
 
-        public DefenderReserveRecord(int parentInstanceId, string parentName, int children, int held, string reason)
+        public DefenderReserveRecord(int parentInstanceId, string parentName, int children, int held, string reason,
+            int[] childIds = null, DirectChildRole[] baseRoles = null, int[] flankBuckets = null, float[] worldX = null, float[] worldZ = null, int released = 0)
         {
             ParentInstanceId = parentInstanceId;
             ParentName = parentName ?? string.Empty;
             Children = children;
             Held = held;
             Reason = reason;
+            ChildIds = childIds;
+            BaseRoles = baseRoles;
+            FlankBuckets = flankBuckets;
+            WorldX = worldX;
+            WorldZ = worldZ;
+            Released = released;
         }
 
         public int ParentInstanceId { get; }
         public string ParentName { get; }
         /// <summary>Sibling commands the parent splits among.</summary>
         public int Children { get; }
-        /// <summary>Siblings in the Reserve role after the cascade.</summary>
+        /// <summary>Siblings in the Reserve role after the cascade and after the reserve release.</summary>
         public int Held { get; }
         public string Reason { get; }
+
+        /// <summary>The reserves the release (<see cref="LeafReserveRelease"/>) has sent out of this command: threat, crisis or the stagger.</summary>
+        public int Released { get; }
+
+        // What the release works from, per subordinate command in the cascade's left-to-right order: the roles the cascade and the
+        // hold-back gave (before any release), the flank exposure bucket and where the command stands. Null for a command that held nothing.
+        public int[] ChildIds { get; }
+        public DirectChildRole[] BaseRoles { get; }
+        public int[] FlankBuckets { get; }
+        public float[] WorldX { get; }
+        public float[] WorldZ { get; }
+        public bool CanRelease => BaseRoles != null && ChildIds != null;
     }
 
     public static class TacticalLeafBrigadeMap
@@ -140,7 +159,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalFrontAxis frontAxis = default(TacticalFrontAxis),
             IReadOnlyDictionary<int, float> flankThreat = null,
             bool defenderReserve = false,
-            List<DefenderReserveRecord> reserveReport = null)
+            List<DefenderReserveRecord> reserveReport = null,
+            IReadOnlyDictionary<int, DirectChildRole> released = null)
         {
             var result = new Dictionary<int, LeafAssignment>();
             if (tree == null || topLevelAssignments == null) return result;
@@ -178,7 +198,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     depth: 0,
                     result,
                     defenderReserve,
-                    reserveReport);
+                    reserveReport,
+                    released);
             }
 
             return result;
@@ -277,7 +298,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int depth,
             Dictionary<int, LeafAssignment> output,
             bool defenderReserve,
-            List<DefenderReserveRecord> reserveReport)
+            List<DefenderReserveRecord> reserveReport,
+            IReadOnlyDictionary<int, DirectChildRole> released)
         {
             if (!node.Active) return;
             if (depth > MaxCascadeDepth) return;
@@ -384,7 +406,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             if (defenderReserve && children.Count >= 2 && nodeRole != DirectChildRole.Reserve && nodeRole != DirectChildRole.Fallback)
-                HoldBackDefenderReserve(node, children, derivedRoles, flankBuckets, geometry.Axis, anchorIndex, secondaryAnchorIndex, reserveReport);
+                HoldBackDefenderReserve(node, children, derivedRoles, flankBuckets, geometry.Axis, anchorIndex, secondaryAnchorIndex, reserveReport, released);
 
             for (int idx = 0; idx < children.Count; idx++)
             {
@@ -413,7 +435,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     depth + 1,
                     output,
                     defenderReserve,
-                    reserveReport);
+                    reserveReport,
+                    released);
             }
         }
 
@@ -433,7 +456,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalFrontAxis axis,
             int anchorIndex,
             int secondaryAnchorIndex,
-            List<DefenderReserveRecord> report)
+            List<DefenderReserveRecord> report,
+            IReadOnlyDictionary<int, DirectChildRole> released)
         {
             int n = children.Count;
             int held = 0;
@@ -490,7 +514,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 held--;
                 reason = DefenderReserveRecord.ReleasedToFlank;
             }
-            report?.Add(new DefenderReserveRecord(parent.InstanceId, parent.Name, n, held, reason));
+            if (report == null && released == null) return;
+
+            // The release (LeafReserveRelease) works from the roles as the hold-back left them; it sends reserves out on a threat, a crisis
+            // or the stagger, and the cascade applies what it sent as the subordinate's role from here down.
+            var baseRoles = (DirectChildRole[])roles.Clone();
+            int sent = 0;
+            if (released != null)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (roles[i] != DirectChildRole.Reserve || !released.TryGetValue(children[i].InstanceId, out DirectChildRole role)) continue;
+                    roles[i] = role;
+                    held--;
+                    sent++;
+                }
+            }
+            if (report == null) return;
+            var ids = new int[n];
+            var xs = new float[n];
+            var zs = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                ids[i] = children[i].InstanceId;
+                xs[i] = children[i].WorldX;
+                zs[i] = children[i].WorldZ;
+            }
+            report.Add(new DefenderReserveRecord(parent.InstanceId, parent.Name, n, held, reason, ids, baseRoles, (int[])flankBuckets.Clone(), xs, zs, sent));
         }
 
         // The allocator's bar for locking a brigade onto a flank (DirectChildAllocator.FlankExposureRefuseThreshold).
