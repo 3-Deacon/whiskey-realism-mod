@@ -142,6 +142,8 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("source")] public int Source;
         [JsonProperty("traits")] public int Traits;
         [JsonProperty("lastEmbarkedDay")] public int LastEmbarkedDay = -1;
+        [JsonProperty("rifleQuality")] public float RifleQuality;
+        [JsonProperty("gunQuality")] public float GunQuality;
     }
 
     internal class AppointmentDto

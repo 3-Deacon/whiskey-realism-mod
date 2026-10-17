@@ -156,6 +156,15 @@ namespace WhiskeyRealism.Strategic.Planner
             return Read(alliance, out _, out _, out _) && HeldBuilder(alliance, instanceId);
         }
 
+        // The published allocation when the picture is fresh (Read's test: a plan and allocation published, executors allowed, the plan
+        // within PlanFreshness.MaxAgeDays), else false with no allocation: the ordnance patches' one question of the plan.
+        internal static bool TryFreshAllocation(int alliance, out Allocation allocation)
+        {
+            if (Read(alliance, out allocation, out _, out _)) return true;
+            allocation = null;
+            return false;
+        }
+
         private static bool HeldBuilder(int alliance, int instanceId)
         {
             return DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId);

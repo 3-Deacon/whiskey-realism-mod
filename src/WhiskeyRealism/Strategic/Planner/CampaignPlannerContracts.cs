@@ -230,6 +230,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public float X, Z, Strength;
         public DetectionSource Source;
         public EnemyTraits Traits;
+        // G9: the strength-weighted WSF of the seen group's armed units, per weapon lane (infantry and cavalry rifles, guns), 0 when
+        // none was seen in the lane. What a sighting shows of the enemy's arms, never read from an alliance's averageweaponstrength*.
+        public float RifleQuality, GunQuality;
     }
 
     public struct EnemyBelief
@@ -245,6 +248,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // The last review day the group was seen Embarked, -1 never (G1): a group seen ashore on
         // own soil within 3 days of being seen afloat is a landing (sea-invasion inference, C25).
         public int LastEmbarkedDay;
+        // G9: the lane qualities of the last sighting that showed the lane (EnemyDetection.RifleQuality/GunQuality); carried unchanged
+        // while the group is unseen, 0 until a sighting shows it.
+        public float RifleQuality, GunQuality;
     }
 
     public struct CommanderRecord
