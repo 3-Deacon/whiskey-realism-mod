@@ -1072,43 +1072,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (_directChildIntents == null || _directChildIntents.Count == 0) return;
             try
             {
-                var sb = new System.Text.StringBuilder();
-                int mainCount = 0;
-                int supportMainCount = 0;
-                int refuseLeftCount = 0;
-                int refuseRightCount = 0;
-                int fixCount = 0;
-                int screenCount = 0;
-                int reserveCount = 0;
-                int fallbackCount = 0;
-                int unknownCount = 0;
-                for (int i = 0; i < _directChildIntents.Count; i++)
-                {
-                    var intent = _directChildIntents[i];
-                    if (i > 0) sb.Append(',');
-                    sb.Append(intent.ChildId ?? "?").Append('=').Append(intent.Role).Append(':').Append(intent.PrimarySector);
-                    switch (intent.Role)
-                    {
-                        case DirectChildRole.Main:        mainCount++; break;
-                        case DirectChildRole.SupportMain: supportMainCount++; break;
-                        case DirectChildRole.Fix:         fixCount++; break;
-                        case DirectChildRole.Screen:      screenCount++; break;
-                        case DirectChildRole.RefuseLeft:  refuseLeftCount++; break;
-                        case DirectChildRole.RefuseRight: refuseRightCount++; break;
-                        case DirectChildRole.Reserve:     reserveCount++; break;
-                        case DirectChildRole.Fallback:    fallbackCount++; break;
-                        case DirectChildRole.Unknown:     unknownCount++; break;
-                    }
-                }
-                string roleSummary = "main=" + mainCount
-                    + " sup=" + supportMainCount
-                    + " fix=" + fixCount
-                    + " scrn=" + screenCount
-                    + " rL=" + refuseLeftCount
-                    + " rR=" + refuseRightCount
-                    + " rsrv=" + reserveCount
-                    + " fbck=" + fallbackCount
-                    + " unk=" + unknownCount;
+                // The roles are reported as what they are on this side of the field (DirectChildRoleSummary): a Defender's Main, SupportMain and Fix
+                // children are Defender, not an attack side label.
+                BattleStance stance = _currentForceBalanceStance;
+                DirectChildRoleSummary.Counts counts = DirectChildRoleSummary.Count(_directChildIntents, stance);
+                int mainCount = counts.Main;
+                int supportMainCount = counts.SupportMain;
+                int refuseLeftCount = counts.RefuseLeft;
+                int refuseRightCount = counts.RefuseRight;
+                int fixCount = counts.Fix;
+                int screenCount = counts.Screen;
+                int reserveCount = counts.Reserve;
+                int fallbackCount = counts.Fallback;
+                int unknownCount = counts.Unknown;
+                string roleSummary = counts.Summary;
                 string sig = "side=" + AllianceId + "|" + roleSummary;
                 if (string.Equals(sig, _lastDirectChildIntentTelemetrySig, System.StringComparison.Ordinal))
                     return;
@@ -1121,7 +1098,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         DirectChildIntentTelemetrySeconds, false))
                     return;
 
-                string detail = sb.ToString();
+                string detail = DirectChildRoleSummary.Detail(_directChildIntents, stance);
                 string opportunity = _currentReinforcementOpportunity.Opportunity.ToString();
                 float currentRatio = _currentReinforcementOpportunity.CurrentRatio;
                 int mainEffortSector = HasPlan ? _plan.MainEffortSector : -1;
@@ -1149,6 +1126,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("reserveCount", reserveCount)
                         .WithField("fallbackCount", fallbackCount)
                         .WithField("unknownCount", unknownCount)
+                        .WithField("defenderCount", counts.Defender)
+                        .WithField("stance", stance.ToString())
                         .WithField("brigades", detail));
             }
             catch (System.Exception ex)

@@ -1695,7 +1695,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         + " childName=" + SafeLog(dci.DisplayName)
                         + " raw=" + dci.RawUnitTyp
                         + " effective=" + dci.EffectiveCommandLevel
-                        + " role=" + dci.Role
+                        + " role=" + DirectChildRoleSummary.Label(dci.Role, side.Army.CurrentBattleStance)
+                        + " allocated=" + dci.Role
                         + " sector=" + dci.PrimarySector
                         + " support=" + dci.SupportPriority01.ToString("0.00")
                         + " enemyIntent=" + dci.EnemyIntent.PrimaryIntent

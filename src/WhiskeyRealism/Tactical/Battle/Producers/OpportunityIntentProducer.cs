@@ -194,27 +194,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 var leafMap = _army.CurrentLeafBrigadeMap;
                 if (leafMap != null && leafMap.TryGetValue(groupId, out TacticalLeafBrigadeMap.LeafAssignment leaf))
                 {
-                    role = RoleOf(leaf.LeafRole);
+                    role = CommandNodeOperationsRuntime.MapRole(leaf.LeafRole, _army.CurrentBattleStance);
                     task = leaf.LeafTask;
                     return true;
                 }
                 role = CommandNodeRole.Unknown;
                 task = CommandTaskType.None;
                 return false;
-            }
-
-            private static CommandNodeRole RoleOf(DirectChildRole role)
-            {
-                switch (role)
-                {
-                    case DirectChildRole.Main: return CommandNodeRole.MainEffort;
-                    case DirectChildRole.SupportMain: return CommandNodeRole.SupportingAttack;
-                    case DirectChildRole.Fix: return CommandNodeRole.FixingForce;
-                    case DirectChildRole.Screen: return CommandNodeRole.ScreeningForce;
-                    case DirectChildRole.Reserve: return CommandNodeRole.Reserve;
-                    case DirectChildRole.Fallback: return CommandNodeRole.FallbackGuard;
-                    default: return CommandNodeRole.Unknown;
-                }
             }
 
             public bool IsMainEffortChild(int armyChildGroupId)
