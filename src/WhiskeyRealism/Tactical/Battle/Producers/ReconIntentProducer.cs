@@ -204,21 +204,21 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 {
                     OnceLog.Info("tactical-battle-core:recon-first-fire",
                         "[BattleRecon] first reconnaissance: a cavalry regiment rides to look (target=" + r.StartedKind + ")");
-                    Row(s, alliance, "MissionStarted", r.StartedKind.ToString(), memory.ScoutId, memory.TargetX, memory.TargetZ);
+                    Row(s, alliance, ReconEvents.MissionStarted, r.StartedKind.ToString(), memory.ScoutId, memory.TargetX, memory.TargetZ);
                 }
                 if ((r.Events & ReconEvents.MissionEnded) != 0)
-                    Row(s, alliance, "MissionEnded", r.EndReason ?? "ended", 0, 0f, 0f);
+                    Row(s, alliance, ReconEvents.MissionEnded, r.EndReason ?? "ended", 0, 0f, 0f);
                 if ((r.Events & ReconEvents.ProbeNominated) != 0)
                 {
                     OnceLog.Info("tactical-battle-core:probe-first-fire",
                         "[BattleRecon] first reconnaissance in force: a group probes its front band in the Probe phase");
-                    Row(s, alliance, "ProbeNominated", "probe-phase", 0, 0f, 0f);
+                    Row(s, alliance, ReconEvents.ProbeNominated, "probe-phase", 0, 0f, 0f);
                 }
                 if ((r.Events & ReconEvents.ProbeHeld) != 0)
                 {
                     OnceLog.Info("tactical-battle-core:probe-hold-first-fire",
                         "[BattleRecon] first probe hold: a probe ended short of a superior enemy and holds the ground it gained");
-                    Row(s, alliance, "ProbeHeld", BattleRecon.HoldReason, 0, 0f, 0f);
+                    Row(s, alliance, ReconEvents.ProbeHeld, BattleRecon.HoldReason, 0, 0f, 0f);
                 }
             }
             catch (Exception ex)
@@ -227,8 +227,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
-        private static void Row(BattleSnapshot s, int alliance, string decision, string reason, int unitId, float x, float z)
+        private static void Row(BattleSnapshot s, int alliance, ReconEvents kind, string reason, int unitId, float x, float z)
         {
+            string decision = kind.ToString();
             string signature = alliance + "|" + decision + "|" + reason + "|" + unitId;
             if (!TacticalTelemetry.ShouldEmit(_lastRowAt, "tactical-recon:" + alliance + ":" + decision, signature,
                     Time.realtimeSinceStartup, TelemetrySeconds, false))
@@ -239,14 +240,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 IReadOnlyDictionary<int, string> names = BattleSnapshotBuilder.NamesFor(alliance);
                 unit = names != null && names.TryGetValue(unitId, out string name) ? TacticalCurrentOrderSignature.Safe(name) : "#" + unitId;
             }
+            bool namesTarget = BattleRecon.EventNamesTarget(kind);
             TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalRecon", TelemetrySeverity.Info,
-                ev => ev
-                    .WithSide(alliance)
-                    .WithUnit(unit)
-                    .WithDecision(decision, reason, signature)
-                    .WithField("targetX", x)
-                    .WithField("targetZ", z)
-                    .WithField("doctrineHours", s.DoctrineHours));
+                ev =>
+                {
+                    ev.WithSide(alliance).WithUnit(unit).WithDecision(decision, reason, signature);
+                    if (namesTarget) ev.WithField("targetX", x).WithField("targetZ", z);
+                    ev.WithField("doctrineHours", s.DoctrineHours);
+                });
         }
 
         private static void Reset()
