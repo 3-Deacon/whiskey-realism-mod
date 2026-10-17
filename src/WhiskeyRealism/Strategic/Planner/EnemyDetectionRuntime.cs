@@ -334,6 +334,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (!Sees(s, e, out DetectionSource source)) continue;
                     Vector3 p = e.GetPosition();
+                    var quality = QualityOf(e);
                     s.Detections.Add(new EnemyDetection
                     {
                         InstanceId = e.GetInstanceID(),
@@ -343,7 +344,9 @@ namespace WhiskeyRealism.Strategic.Planner
                         Z = p.z,
                         Strength = e.groupstrengthdirect,
                         Source = source,
-                        Traits = TraitsOf(e, p, side, s.RelocationRange)
+                        Traits = TraitsOf(e, p, side, s.RelocationRange),
+                        RifleQuality = quality.Rifle,
+                        GunQuality = quality.Gun
                     });
                 }
                 catch (Exception ex)
@@ -384,7 +387,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (DetectionRules.TryObjectiveGarrison(Sees(s, garrison, out _), garrison.GetInstanceID(),
                             SnapshotRules.UnitKey(((UnityEngine.Object)garrison).name, garrison.commander), garrison.unittyp,
                             at.x, at.z, garrison.groupstrengthdirect, out EnemyDetection detection))
+                    {
+                        var quality = QualityOf(garrison);
+                        detection.RifleQuality = quality.Rifle;
+                        detection.GunQuality = quality.Gun;
                         s.Detections.Add(detection);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -473,6 +481,33 @@ namespace WhiskeyRealism.Strategic.Planner
             return DetectionRules.Traits(embarked, cavalry, onOwnSoil, nearCoast);
         }
 
+        // What a sighting shows of a group's arms (G9): vanilla's per-model WSF (GetWeaponStrengthFactor 16214) of each armed unit of the
+        // group (unittyp <= 13, weapon >= 0: the test of the group reading, 16195-16212), weighted by the unit's strength and kept apart
+        // by the model's lane (isari). Read at the sighting only, from the group the side sees; a failed read records nothing for the
+        // group (its sighting is kept).
+        private static SightedQuality QualityOf(Regiment group)
+        {
+            var quality = default(SightedQuality);
+            try
+            {
+                var units = group.allattachedunits;
+                var weapons = GameVars.weapon;
+                if (units == null || weapons == null) return quality;
+                for (int i = 0; i < units.Length; i++)
+                {
+                    var unit = units[i];
+                    if ((UnityEngine.Object)unit == null || unit.unittyp > 13 || unit.weapon < 0 || unit.weapon >= weapons.Length) continue;
+                    quality.Add(weapons[unit.weapon].isari, AICampaign.GetWeaponStrengthFactor(unit.weapon), unit.strength);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-planner:detect-quality", "[EnemyBeliefs] a group's weapon quality could not be read and was left out: " + ex.Message);
+                return default(SightedQuality);
+            }
+            return quality;
+        }
+
         private static void FillIntelIncidents()
         {
             var incidents = DLC_WL.incidents;
@@ -526,6 +561,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!(enemies[i] is Regiment e) || (UnityEngine.Object)e == null) continue;
                     Vector3 p = e.GetPosition();
                     var traits = TraitsOf(e, p, alliance, relocation);
+                    var quality = QualityOf(e);
                     list.Add(new EnemyBelief
                     {
                         InstanceId = e.GetInstanceID(),
@@ -539,7 +575,9 @@ namespace WhiskeyRealism.Strategic.Planner
                         UncertaintyRadius = EnemyArmyModel.SeenRadius,
                         LastSource = DetectionSource.Seen,
                         Traits = traits,
-                        LastEmbarkedDay = (traits & EnemyTraits.Embarked) != 0 ? day : -1
+                        LastEmbarkedDay = (traits & EnemyTraits.Embarked) != 0 ? day : -1,
+                        RifleQuality = quality.Rifle,
+                        GunQuality = quality.Gun
                     });
                 }
             }
