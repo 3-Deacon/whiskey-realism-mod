@@ -23,7 +23,7 @@ internal static class OrdnanceTests
             ("RecoverAndTransitRearmLast", RecoverAndTransitRearmLast),
             ("UnassignedUnitsAfterAssignedRoles", UnassignedUnitsAfterAssignedRoles),
             ("RearmRestoresUnitListOrder", RearmRestoresUnitListOrder),
-            ("RearmRestoreRefusesAListThatChangedLength", RearmRestoreRefusesAListThatChangedLength),
+            ("RearmRestoreKeepsVanillaOrderWhenTheListChangedLength", RearmRestoreKeepsVanillaOrderWhenTheListChangedLength),
             ("RearmLeavesInitializationPassToVanilla", RearmLeavesInitializationPassToVanilla),
             ("RearmStandsDownWithStaleOrMissingPlan", RearmStandsDownWithStaleOrMissingPlan),
             ("RearmStandsDownWhileJobMachinePaused", RearmStandsDownWhileJobMachinePaused),
@@ -117,13 +117,47 @@ internal static class OrdnanceTests
         AssertEqual("u0", list[0], "editing the saved copy does not touch the list");
     }
 
-    private static void RearmRestoreRefusesAListThatChangedLength()
+    private static void RearmRestoreKeepsVanillaOrderWhenTheListChangedLength()
     {
-        var list = new List<string> { "a", "b", "c" };
-        var saved = RearmPriority.Reorder(list, new[] { 1, 0, 1 });
-        list.Add("late");
-        AssertFalse(RearmPriority.Restore(list, saved), "a list that grew during the call is not overwritten with a stale copy");
-        AssertEqual(4, list.Count, "left as it is");
+        // A list that gained a unit: vanilla's order for the units it had, the newcomer at the end.
+        var grown = new List<string> { "a", "b", "c", "d" };
+        var savedGrown = RearmPriority.Reorder(grown, new[] { 1, 0, 1, 0 });
+        AssertEqual("b,d,a,c", string.Join(",", grown), "fixture: reordered");
+        grown.Add("late");
+        AssertFalse(RearmPriority.Restore(grown, savedGrown), "the list is not the one that was saved: reported");
+        AssertEqual("a,b,c,d,late", string.Join(",", grown), "vanilla's order for the units still present, the newcomer at the end");
+
+        // Two newcomers keep their current relative order, wherever they stand.
+        var twice = new List<string> { "a", "b", "c" };
+        var savedTwice = RearmPriority.Reorder(twice, new[] { 2, 1, 0 });
+        twice.Insert(1, "n1");
+        twice.Add("n2");
+        RearmPriority.Restore(twice, savedTwice);
+        AssertEqual("a,b,c,n1,n2", string.Join(",", twice), "newcomers keep their relative order after the saved units");
+
+        // A list that lost a unit: vanilla's order without it.
+        var shrunk = new List<string> { "a", "b", "c", "d" };
+        var savedShrunk = RearmPriority.Reorder(shrunk, new[] { 1, 0, 1, 0 });
+        shrunk.Remove("d");
+        AssertFalse(RearmPriority.Restore(shrunk, savedShrunk), "reported");
+        AssertEqual("a,b,c", string.Join(",", shrunk), "vanilla's order for the units that remain");
+
+        // One lost and one gained (same length): not the saved list either.
+        var swapped = new List<string> { "a", "b", "c" };
+        var savedSwapped = RearmPriority.Reorder(swapped, new[] { 1, 0, 1 });
+        swapped.Remove("a");
+        swapped.Add("late");
+        AssertFalse(RearmPriority.Restore(swapped, savedSwapped), "an equal length is not an equal list");
+        AssertEqual("b,c,late", string.Join(",", swapped), "the lost unit is not resurrected, the gained one is kept");
+
+        // Empty entries and the same list object.
+        var withNull = new List<string> { "a", null, "c" };
+        var sameObject = withNull;
+        var savedNull = RearmPriority.Reorder(withNull, new[] { 1, 0, 1 });
+        withNull.Add("late");
+        RearmPriority.Restore(withNull, savedNull);
+        AssertEqual("a,,c,late", string.Join(",", withNull), "a null entry is kept in place");
+        AssertTrue(ReferenceEquals(sameObject, withNull), "the same list object throughout");
         AssertThrows(() => RearmPriority.Reorder(new List<string> { "a" }, new[] { 0, 1 }), "ranks must match the list");
     }
 

@@ -73,10 +73,11 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int alliance, ref int weaponid, int quantity)
         {
-            // PlaceWeaponOrder also serves the player's order screen: only an AI purchase pass the scope opened is steered.
-            if (!OrdnancePurchaseScopePatch.IsOpenFor(alliance)) return;
             using (TelemetryPerf.Scope("campaign.patch.ordnance-purchase.pick", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                // PlaceWeaponOrder also serves the player's order screen: only an AI purchase pass the scope opened is steered, and
+                // the first-fire id marks only such an order.
+                if (!OrdnancePurchaseScopePatch.IsOpenFor(alliance)) return;
                 PatchFirstFire.Mark("campaign.patch.ordnance-purchase.pick");
                 try
                 {

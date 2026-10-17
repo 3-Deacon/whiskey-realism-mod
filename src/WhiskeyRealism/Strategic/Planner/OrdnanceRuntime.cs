@@ -79,13 +79,13 @@ namespace WhiskeyRealism.Strategic.Planner
             return RearmPriority.Reorder(list, ranks);   // the last act: once the list is reordered the caller holds its way back
         }
 
-        // Vanilla's order back into the same list object, whatever the call did.
+        // Vanilla's order back into the same list object, whatever the call did (also when the list gained or lost units meanwhile).
         internal static void EndRearm(int alliance, Regiment[] saved)
         {
             if (saved == null) return;
             var list = GameVars.alliance[alliance].unitlist;
             if (list == null || !RearmPriority.Restore(list, saved))
-                OnceLog.Warning("ordnance-rearm:restore", "[Patch:OrdnanceRearm] the unit list changed length during CheckWeaponUpgrades; vanilla's order was not written back");
+                OnceLog.Warning("ordnance-rearm:restore", "[Patch:OrdnanceRearm] the unit list changed during CheckWeaponUpgrades; vanilla's order was written back for the units still present, new units last");
         }
 
         // [Ordnance] on change.

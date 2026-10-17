@@ -70,6 +70,9 @@ internal static class OrdnancePinTests
         AssertFalse(tryPick.Contains("quantity ="), "TryPick never edits the amount");
         string patch = Src("Patches/OrdnancePurchasePatch.cs");
         string pick = BodyOf(patch, "internal static void Prefix(int alliance, ref int weaponid, int quantity)");
+        int scopeAt = pick.IndexOf("using (TelemetryPerf.Scope(\"campaign.patch.ordnance-purchase.pick\"", StringComparison.Ordinal);
+        int checkAt = pick.IndexOf("OrdnancePurchaseScopePatch.IsOpenFor(alliance)", StringComparison.Ordinal);
+        AssertTrue(scopeAt >= 0 && checkAt > scopeAt, "the scope-open check sits inside the perf scope: every Prefix body is measured");
         AssertFalse(Regex.IsMatch(pick, @"\bquantity\s*="), "the amount is read, never written");
         AssertFalse(Regex.IsMatch(pick, @"\balliance\s*="), "so is the alliance");
         AssertEqual(1, CountOccurrences(patch, "weaponid = "), "the model id is the only argument written");

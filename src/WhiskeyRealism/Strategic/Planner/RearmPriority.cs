@@ -56,13 +56,62 @@ namespace WhiskeyRealism.Strategic.Planner
             return saved;
         }
 
-        // Writes vanilla's order back into the same list object. False (the list is left as it is) when its length changed since
-        // Reorder: it is not the list that was saved.
+        // Writes vanilla's order back into the same list object, whatever the call did to the list. The units that were in the saved
+        // order and are still present come back in it; a unit added since stays after them in its current relative order; a unit
+        // removed since is not brought back. True when the list was exactly the one that was saved (nothing added, nothing removed).
         public static bool Restore<T>(List<T> list, T[] saved)
         {
-            if (list.Count != saved.Length) return false;
-            for (int i = 0; i < saved.Length; i++) list[i] = saved[i];
-            return true;
+            var current = list.ToArray();
+            var comparer = EqualityComparer<T>.Default;
+            var stillThere = new Dictionary<T, int>(comparer);
+            int nulls = 0;
+            for (int i = 0; i < current.Length; i++)
+            {
+                if (current[i] == null) { nulls++; continue; }
+                stillThere.TryGetValue(current[i], out int n);
+                stillThere[current[i]] = n + 1;
+            }
+
+            var result = new List<T>(current.Length);
+            var wasThere = new Dictionary<T, int>(comparer);
+            int nullsKept = 0;
+            for (int i = 0; i < saved.Length; i++)
+            {
+                if (saved[i] == null)
+                {
+                    if (nulls <= 0) continue;
+                    nulls--;
+                    nullsKept++;
+                    result.Add(saved[i]);
+                    continue;
+                }
+                if (!stillThere.TryGetValue(saved[i], out int n) || n <= 0) continue;
+                stillThere[saved[i]] = n - 1;
+                wasThere.TryGetValue(saved[i], out int k);
+                wasThere[saved[i]] = k + 1;
+                result.Add(saved[i]);
+            }
+
+            // What is left of the current list after the saved units took their places, in current order, are the newcomers.
+            int added = 0;
+            for (int i = 0; i < current.Length; i++)
+            {
+                if (current[i] == null)
+                {
+                    if (nullsKept > 0) { nullsKept--; continue; }
+                }
+                else if (wasThere.TryGetValue(current[i], out int k) && k > 0)
+                {
+                    wasThere[current[i]] = k - 1;
+                    continue;
+                }
+                result.Add(current[i]);
+                added++;
+            }
+
+            list.Clear();
+            list.AddRange(result);
+            return added == 0 && result.Count == saved.Length;
         }
 
         // Whether the Prefix reorders the alliance's list for this call. The new-campaign pass (isinitialization) drops garrisons,
