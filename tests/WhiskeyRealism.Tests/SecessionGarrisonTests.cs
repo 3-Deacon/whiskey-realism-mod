@@ -271,14 +271,16 @@ internal static class SecessionGarrisonTests
         AssertEqual(FormationRole.Hold, holding.Role, "the posted corps holds");
         AssertEqual(ForceAllocator.ReasonSecession, holding.Reason, "for the secession");
 
-        // The replacement is capped at one, whatever the believed threat: an army of 30000 at the town (a need of 18000) still posts one corps.
-        var threatened = Day(KentuckyState);
-        threatened.Own.Add(Corps(5, 120f, 9000f));
-        threatened.Own.Add(Corps(6, 140f, 9000f));
-        threatened.Beliefs.Add(Seen(320f, 30000f));
-        var threatenedPost = Plan(threatened, new PlannerState()).Garrisons[0];
-        AssertTrue(threatenedPost.Need > 9000f, "the need (" + threatenedPost.Need + ") is more than one corps");
-        AssertEqual(1, threatenedPost.InstanceIds.Count, "yet the replacement is one: " + string.Join(",", threatenedPost.InstanceIds));
+        // The replacement is capped at one, whatever the need: valuable enemy ground by the town makes the presumed need 10000, which a
+        // 6000-man corps does not meet, and three such free corps are available; still only one is posted.
+        var presumed = Day(KentuckyState);
+        presumed.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 380f, Z = 0f, HolderAlliance = 1, Available = false, Importance01 = 1f });
+        for (int i = 0; i < 3; i++) presumed.Own.Add(Corps(5 + i, 130f + 20f * i, 6000f));
+        var presumedPlan = Plan(presumed, new PlannerState());
+        var presumedPost = presumedPlan.Garrisons[0];
+        AssertTrue(presumedPost.MassPresence, "the mass is the only presence: mass=" + string.Join(",", presumedPlan.MassInstanceIds) + " pledged=" + string.Join(",", presumedPost.InstanceIds));
+        AssertTrue(presumedPost.Need > 6000f, "the need (" + presumedPost.Need + ") is more than one of those corps");
+        AssertEqual(1, presumedPost.InstanceIds.Count, "yet the replacement is one: " + string.Join(",", presumedPost.InstanceIds));
 
         // A garrison already blocking (the flag) needs no replacement when the mass is the only field presence.
         var flagged = Day(KentuckyState);
