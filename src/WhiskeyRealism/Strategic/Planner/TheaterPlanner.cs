@@ -178,6 +178,7 @@ namespace WhiskeyRealism.Strategic.Planner
             internal GarrisonPost Post;
             internal int Limit;
             internal bool FlagAlone;
+            internal bool Flag;          // vanilla's alliancetroops[0] is set: a garrison already stands in the state
             internal List<int> Inside;   // the own formations standing in the state, nearest the town first (indexes into s.Own)
         }
 
@@ -716,7 +717,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // The second half of the garrison (verify, landing check and r2): formations are pledged and posted once the mass is known, so the
         // garrison can never strip or stop it. A mass member (or the reinforcement) standing inside the state counts as the Union's presence
         // but is neither pledged nor pinned; the other formations inside are pledged, nearest the town first, until the need is met (the first
-        // always). The next review, with the mass gone, the ordinary rules apply: a state that then needs presence gets a post.
+        // always). When the mass is the only presence, one replacement is posted from outside at once, so there is no unguarded gap between
+        // the mass leaving and the next review; that review, with the mass gone, finds it inside and pledges it.
         // For the formations from outside the state:  The pool is the formations that would otherwise just hold, sit in reserve or have no task: not in
         // the mass (marching with it or released to it, the reinforcement included), not a capital guard, a sector's hold reserve, a builder
         // or a member of another post. Nearest the town first. A need only the mass could meet is posted as far as the pool goes and the
@@ -750,9 +752,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     post.MassPresence = massInside;
                     post.PlayerPresence = !massInside;
                 }
+                // The mass is the only presence (no flag, nobody else inside): it will march on, so one replacement is posted now, through the
+                // ordinary path (never from the mass), and there is no unguarded gap between its leaving and the next review.
+                int limit = post.MassPresence && !work.Flag ? Math.Max(work.Limit, 1) : work.Limit;
                 float posted = 0f;
                 int count = 0;
-                while (count < work.Limit && posted < post.Need)
+                while (count < limit && posted < post.Need)
                 {
                     int best = -1;
                     float bestDistance = float.MaxValue;
@@ -812,7 +817,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 // (PostFromOutside): the main effort's mass is never stopped by a garrison. Outside: one when nobody is present, as many as
                 // the need takes when only the flag shows presence.
                 int limit = flagAlone ? int.MaxValue : !post.InState ? 1 : 0;
-                c.Pending.Add(new PostWork { Post = post, Limit = post.Need > 0f ? limit : 0, FlagAlone = flagAlone, Inside = inside });
+                c.Pending.Add(new PostWork { Post = post, Limit = post.Need > 0f ? limit : 0, FlagAlone = flagAlone, Flag = rec.OwnTroops, Inside = inside });
                 c.Posts.Add(post);
             }
         }

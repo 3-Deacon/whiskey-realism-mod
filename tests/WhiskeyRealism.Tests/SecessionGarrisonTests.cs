@@ -221,12 +221,13 @@ internal static class SecessionGarrisonTests
     // not pledged or pinned there.
     private static void AMassThatMarchesIntoTheStateIsNotPinnedThere()
     {
-        CampaignSnapshot Day(int corps3State)
+        // Corps 3 is the mass; corps 1 is the free corps; `corps1State` puts corps 1 inside Kentucky (day 3), `corps3State` puts corps 3 there.
+        CampaignSnapshot Day(int corps3State, int corps1State = -1)
         {
             var s = Side(0, 0, 0.6f);
             s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
             s.Beliefs.Add(Seen(600f, 3000f));
-            s.Own.Add(Corps(1, 100f, 9000f));
+            s.Own.Add(Corps(1, corps1State >= 0 ? 290f : 100f, 9000f, corps1State));
             s.Own.Add(Corps(3, corps3State >= 0 ? 280f : 200f, 9000f, corps3State));
             return s;
         }
@@ -234,6 +235,7 @@ internal static class SecessionGarrisonTests
         var day1 = Plan(Day(-1), state);
         AssertEqual(31, day1.MainObjectiveId, "day 1: a main effort");
         AssertTrue(day1.MassInstanceIds.Contains(3), "day 1: corps 3 is the mass: " + string.Join(",", day1.MassInstanceIds));
+        AssertEqual(1, day1.Garrisons[0].InstanceIds.Count, "day 1: nobody inside, so one formation is posted");
 
         var s2 = Day(KentuckyState);
         var day2 = Plan(s2, state);
@@ -243,17 +245,47 @@ internal static class SecessionGarrisonTests
         AssertTrue(post.InState, "its presence in Kentucky counts for the secession");
         AssertFalse(post.InstanceIds.Contains(3), "but it is not pledged");
         AssertTrue(post.MassPresence, "the row names it");
+        // The mass will march on: one free corps is posted now, through the ordinary garrison path, never from the mass.
+        AssertEqual(1, post.InstanceIds.Count, "one replacement is posted while the mass is still inside: " + string.Join(",", post.InstanceIds));
+        AssertEqual(1, post.InstanceIds[0], "the free corps");
+        AssertTrue(post.Marching, "marching in");
         var alloc = Allocate(s2, day2);
         alloc.TryGet(3, out var a);
         AssertTrue(a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support, "corps 3 keeps marching with the push (" + a.Role + "; from Kentucky's West it is the one reinforcement)");
         AssertTrue(a.Reason != ForceAllocator.ReasonSecession && !a.Withheld, "not withheld for the secession");
-        AssertContains(ForceAllocator.Summary(alloc, day2, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=mass-presence@Kentucky:in/", "the allocation row");
+        alloc.TryGet(1, out var replacement);
+        AssertEqual(FormationRole.Garrison, replacement.Role, "the replacement marches to the town");
+        AssertNear(300f, replacement.TargetX, 0.01f, "to Louisville");
+        AssertContains(ForceAllocator.Summary(alloc, day2, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps1@Kentucky:in+moving/", "the allocation row");
 
-        // The mass moves on: the ordinary rules apply next review (nobody inside, so one formation is posted).
-        var day3 = Plan(Day(-1), state);
-        AssertFalse(day3.Garrisons[0].InState, "day 3: nobody inside again");
-        AssertEqual(1, day3.Garrisons[0].InstanceIds.Count, "so the ordinary rule posts one");
-        AssertFalse(day3.MassInstanceIds.Contains(day3.Garrisons[0].InstanceIds[0]), "not from the mass");
+        // Day 3: the mass has moved on and the posted corps stands in Kentucky: it holds, and nothing extra is posted.
+        var day3 = Plan(Day(-1, KentuckyState), state);
+        var held = day3.Garrisons[0];
+        AssertTrue(held.InState, "day 3: the posted corps is inside");
+        AssertEqual(1, held.InstanceIds.Count, "exactly one formation: " + string.Join(",", held.InstanceIds));
+        AssertEqual(1, held.InstanceIds[0], "the corps that was posted");
+        AssertFalse(held.Marching, "nothing is marching in");
+        AssertFalse(held.MassPresence, "and the mass is no longer the presence");
+        var alloc3 = Allocate(Day(-1, KentuckyState), day3);
+        alloc3.TryGet(1, out var holding);
+        AssertEqual(FormationRole.Hold, holding.Role, "the posted corps holds");
+        AssertEqual(ForceAllocator.ReasonSecession, holding.Reason, "for the secession");
+
+        // The replacement is capped at one, whatever the believed threat: an army of 30000 at the town (a need of 18000) still posts one corps.
+        var threatened = Day(KentuckyState);
+        threatened.Own.Add(Corps(5, 120f, 9000f));
+        threatened.Own.Add(Corps(6, 140f, 9000f));
+        threatened.Beliefs.Add(Seen(320f, 30000f));
+        var threatenedPost = Plan(threatened, new PlannerState()).Garrisons[0];
+        AssertTrue(threatenedPost.Need > 9000f, "the need (" + threatenedPost.Need + ") is more than one corps");
+        AssertEqual(1, threatenedPost.InstanceIds.Count, "yet the replacement is one: " + string.Join(",", threatenedPost.InstanceIds));
+
+        // A garrison already blocking (the flag) needs no replacement when the mass is the only field presence.
+        var flagged = Day(KentuckyState);
+        var rec = flagged.Secessions[0];
+        rec.OwnTroops = true;
+        flagged.Secessions[0] = rec;
+        AssertFalse(Plan(flagged, new PlannerState()).Garrisons[0].Marching, "the flag says a garrison stands: no replacement");
     }
 
     // A mass member and a free formation both inside: the free one is pledged, the mass member is not.
