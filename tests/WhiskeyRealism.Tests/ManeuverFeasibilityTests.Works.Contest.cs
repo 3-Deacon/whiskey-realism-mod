@@ -25,6 +25,7 @@ internal static partial class ManeuverFeasibilityTests
     // A band from z 400 on, the works themselves from z 500 on.
     sealed class StripWorks : IWorksQuery
     {
+        public bool StrikeBrokenIn(float x, float z) => false;
         public bool OnHeldWorks(float x, float z) => z >= 500f;
         public bool InWorksBand(float x, float z) => z >= 400f;
     }

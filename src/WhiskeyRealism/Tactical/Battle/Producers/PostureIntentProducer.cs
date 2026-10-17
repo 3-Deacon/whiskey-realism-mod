@@ -510,9 +510,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     followed.CloseEngaged = closeEngaged;
                     followed.FlankRisk = flankRisk;
                 }
+                // BC14W (requirement-works-pin): a follower of a non-breach exploit aimed at unbroken works is held at stance 2 as its asset is.
+                int followerStance = recordTick && ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId)
+                    ? PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, 0)
+                    : 0;
                 PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, ExploitLifecycle.FollowReason),
-                    0, ExploitLifecycle.FollowReason);
-                return false;
+                    followerStance, ExploitLifecycle.FollowReason);
+                return followerStance > 0;
             }
 
             // An exploit order has already checked its target (spec D-C3): the probe nomination and hold, GT recon, the cavalry
@@ -593,8 +597,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ? PostureIntentPlan.SubmitWorksHoldStance(sink, rec.InstanceId, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId))
                 : 0;
             // BC14W (requirement-works-pin): a fix facing unbroken works that the hold does not guard is pinned at stance 2 the same way: it keeps its
-            // task, lane and fire, but is never given the attack stance vanilla escalates to an assault, until the strike it pins for has broken in.
-            if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId))
+            // task, lane and fire, but is never given the attack stance vanilla escalates to an assault, until the strike it pins for has broken in. So is
+            // the asset of a non-breach exploit aimed at unbroken works (its followers above), whatever the hold: BC13's local odds have no works bar.
+            if (worksStance == 0 && recordTick &&
+                (exploit ? ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) : army != null && army.PinsWorksNode(state.NodeId)))
                 worksStance = PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId));
             bool worksLane = worksHeld && hasOrder && WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks);
 

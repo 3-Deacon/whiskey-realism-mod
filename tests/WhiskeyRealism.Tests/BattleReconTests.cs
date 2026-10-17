@@ -688,6 +688,7 @@ internal static class BattleReconTests
     // A held-works picture reduced to the two questions the recon planner asks: a box of works and the band in front of it.
     private sealed class BoxWorks : IWorksQuery
     {
+        public bool StrikeBrokenIn(float x, float z) => false;
         private readonly float _x, _z, _half;
         public BoxWorks(float x, float z, float half) { _x = x; _z = z; _half = half; }
         public bool OnHeldWorks(float x, float z) => Math.Abs(x - _x) <= _half && Math.Abs(z - _z) <= _half;

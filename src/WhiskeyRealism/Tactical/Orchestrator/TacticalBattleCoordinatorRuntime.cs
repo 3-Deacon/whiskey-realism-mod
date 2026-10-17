@@ -1936,6 +1936,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
 
                     int vanillaOrdered = own[i].AiStanceOrdered;
+                    // BC14W (requirement-works-pin): the asset of a non-breach exploit aimed at unbroken works, and its followers, hold the posture executor's
+                    // pinned stance 2 (flagged WorksHold); #45 writes none.
+                    if (Battle.ExploitTable.ForAlliance(allianceId).PinsExploit(own[i].InstanceId))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                        continue;
+                    }
                     int band = enemyVisible.SectorForInstance(own[i].InstanceId, fallbackBand);
                     var sector = BuildSectorForGroup(snapshot, i, group, band);
 

@@ -1,6 +1,7 @@
 using System;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using static TestHarness;
@@ -16,6 +17,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w WORKS-MEETING a Meeting side gets the works doctrine: a focal point, works strike points and the bar of three, as an Attacker does", WMeetingGetsWorks),
         ("bc14w TURN-HOLD-FIX the turn-not-struck hold needs a fix facing works: with the fix off the works an unstruck turn holds nothing", WTurnHoldNeedsFix),
         ("bc14w WORKS-PIN-FADED holders faded to memory 0.4 leave the fix pinned and post a look; the same segment with own regiments standing on it lifts the pin", WPinFaded),
+        ("bc14w WORKS-PIN-EXPLOIT a non-breach exploit and its followers aimed at unbroken works hold stance 2 whatever the hold; a breach, a broken-in aim and a recall do not", WPinExploit),
         ("bc14w WORKS-PIN-LEDGER the holding fix of an unstruck turn is pinned, the wing is not; the pin lifts when its works are broken in and with the flag off", WPinLedger),
     };
 
@@ -186,6 +188,16 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(atStrike, "at the fix's strike point, drawn back outside the works band");
         AssertFalse(faded.HeldWorks.InWorksBand(xs[0], zs[0]), "where the recon producer will not refuse it");
 
+        // The look does not depend on the river regions or the crossing watch (a map with no rivers): the same ledger read with both gone posts it too.
+        RiverRegions savedRegions = faded.Job.Input.Regions;
+        CrossingWatch savedWatch = faded.Job.Input.Crossings;
+        faded.Job.Input.Regions = null;
+        faded.Job.Input.Crossings = null;
+        int looksNoRivers = faded.LookRequests(xs, zs);
+        faded.Job.Input.Regions = savedRegions;
+        faded.Job.Input.Crossings = savedWatch;
+        AssertTrue(looksNoRivers >= 1, "a faded look is posted with no river regions and no crossing watch");
+
         // Control: with the centre cluster seen (Visible) there is no fade, so no look, and the pin is the plain one.
         FeasibilityLedger seen = Scenario6().Evaluate(WorksPlans);
         seen.CaptureSelection(BattlePlanId.ManeuverAndFix, Result(seen, BattlePlanId.ManeuverAndFix).Mirrored);
@@ -203,5 +215,85 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(onWorks.FacesWorks(MainOf(onBodies).ChildId), "control: the fix still faces the works");
         AssertFalse(onWorks.PinsWorks(MainOf(onBodies).ChildId), "an own regiment on them: the strike has broken in and the pin lifts");
         AssertEqual(0, onWorks.LookRequests(new float[2], new float[2]), "and no look is posted");
+    }
+
+    // The coordinator's ruling (verify round 2): a BC13 exploit does not get around the pin. The verifier's case is scenario 7 with the aggressive
+    // commander (ManeuverAndFix, no works hold) and an IsolatedCluster exploit aimed at the works: its order is AttackObjective, stance 3 by the mapper.
+    static void WPinExploit()
+    {
+        FeasibilityLedger agg = Scenario7(Aggressive()).Evaluate(WorksPlans);
+        agg.CaptureSelection(BattlePlanId.ManeuverAndFix, Result(agg, BattlePlanId.ManeuverAndFix).Mirrored);
+        agg.RefreshWorksHold(new FakeWorld());
+        AssertFalse(agg.WorksHold(out _), "control: the hold is off in the aggressive run");
+        IWorksQuery works = agg.HeldWorks;
+        float aimX = X(10f), aimZ = Z(600f);
+        AssertTrue(works.OnHeldWorks(aimX, aimZ), "control: the aim lies on held works");
+        AssertFalse(works.StrikeBrokenIn(aimX, aimZ), "and they are unbroken");
+
+        ExploitTable table = ExploitTable.ForAlliance(0);
+        try
+        {
+            table.Clear(ExploitEnd.StandDown);
+            ExploitEntry entry(int id, OpeningKind kind, ExploitPhase phase = ExploitPhase.Advance, float x = float.NaN, float z = float.NaN)
+                => new ExploitEntry { Id = id, AssetId = 50 + id * 10, OpeningId = id, Kind = kind, Phase = phase, AimX = float.IsNaN(x) ? aimX : x, AimZ = float.IsNaN(z) ? aimZ : z, Heading = 0f };
+            AssertTrue(table.Add(entry(1, OpeningKind.IsolatedCluster)), "an isolated-cluster exploit on the works");
+            table.SetSubtree(1, new[] { 61 }, new int[0]);
+            table.SetWorksView(false, works);
+            AssertTrue(table.TryOverride(60, out CommandDoctrineOrder order, out _), "control: its asset has the exploit's order");
+            AssertEqual(CommandTaskType.AttackObjective, order.Task, "control: an attack, not a hold (the works hold is off)");
+            AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack, TacticalCommandTaskToStanceMapper.Map(order.Task), "control: stance 3 by the mapper");
+            AssertTrue(table.PinsExploit(60), "the asset is pinned");
+            AssertTrue(table.PinsExploit(61), "and its follower");
+            AssertFalse(table.PinsExploit(99), "another group is not");
+            AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, TacticalCommandTaskToStanceMapper.Map(order.Task, table.PinsExploit(60)), "so it takes stance 2");
+            table.SetWorksView(true, works);
+            AssertTrue(table.PinsExploit(60), "and with the works hold on as well");
+            table.SetWorksView(false, null);
+            AssertFalse(table.PinsExploit(60), "with no works view (the flag off) nothing is pinned");
+            table.SetWorksView(false, works);
+
+            // A breach may strike: a Gap and a Penetration are not pinned.
+            table.Clear(ExploitEnd.StandDown);
+            table.Add(entry(2, OpeningKind.Gap));
+            table.Add(entry(3, OpeningKind.Penetration));
+            AssertFalse(table.PinsExploit(70), "a Gap exploit is a breach");
+            AssertFalse(table.PinsExploit(80), "so is a Penetration");
+
+            // An aim off the works, a recalled exploit and a broken-in aim do not pin.
+            table.Clear(ExploitEnd.StandDown);
+            table.Add(entry(4, OpeningKind.IsolatedCluster, x: X(0f), z: Z(0f)));
+            AssertFalse(table.PinsExploit(90), "an aim off the works is not pinned");
+            table.Clear(ExploitEnd.StandDown);
+            table.Add(entry(5, OpeningKind.IsolatedCluster, ExploitPhase.Recall));
+            AssertFalse(table.PinsExploit(100), "a recalled exploit is not pinned");
+
+            FeasField shaken = Scenario7(Aggressive());
+            for (int i = 0; i < shaken.Enemies.Count; i++)
+            {
+                EnemyObservation e = shaken.Enemies[i];
+                e.Morale = 0.3f;
+                shaken.Enemies[i] = e;
+            }
+            FeasibilityLedger broken = shaken.Evaluate(WorksPlans);
+            table.Clear(ExploitEnd.StandDown);
+            table.Add(entry(6, OpeningKind.IsolatedCluster));
+            table.SetWorksView(false, broken.HeldWorks);
+            AssertTrue(broken.HeldWorks.OnHeldWorks(aimX, aimZ) && broken.HeldWorks.StrikeBrokenIn(aimX, aimZ), "control: shaken holders break the aim in");
+            AssertFalse(table.PinsExploit(110), "a broken-in aim is not pinned: the exploit may strike");
+        }
+        finally
+        {
+            table.SetWorksView(false, null);
+            table.Clear(ExploitEnd.StandDown);
+        }
+
+        string producer = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"));
+        AssertTrue(producer.Contains("(exploit ? ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) : army != null && army.PinsWorksNode(state.NodeId))) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
+            "the asset's pin is asked of the exploit table in the posture pipeline");
+        AssertTrue(producer.Contains("int followerStance = recordTick && ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) ? PostureIntentPlan.SubmitWorksPinStance("),
+            "and the follower's before its early return");
+        string runtime = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"));
+        AssertTrue(runtime.Contains("if (Battle.ExploitTable.ForAlliance(allianceId).PinsExploit(own[i].InstanceId)) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),
+            "#45 writes none for a pinned exploit group");
     }
 }

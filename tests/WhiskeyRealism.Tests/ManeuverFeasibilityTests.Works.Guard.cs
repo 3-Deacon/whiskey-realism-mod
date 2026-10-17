@@ -161,6 +161,7 @@ internal static partial class ManeuverFeasibilityTests
 
     sealed class BandQuery : IWorksQuery
     {
+        public bool StrikeBrokenIn(float x, float z) => false;
         public float BandFromZ = 500f;
         public bool OnHeldWorks(float x, float z) => false;
         public bool InWorksBand(float x, float z) => z >= BandFromZ;

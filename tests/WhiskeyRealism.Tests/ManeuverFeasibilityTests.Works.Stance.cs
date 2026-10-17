@@ -224,8 +224,8 @@ internal static partial class ManeuverFeasibilityTests
         int pin = producer.IndexOf("army.PinsWorksNode(state.NodeId)", StringComparison.Ordinal);
         int decide = producer.IndexOf("CommandPostureExecutor.Decide(order, physical, eligibility", StringComparison.Ordinal);
         AssertTrue(hold > 0 && pin > hold && decide > pin, "the pin is asked after the hold's stance and before the posture decision");
-        AssertTrue(producer.Contains("if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId)) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
-            "only for a group the hold did not guard, on the producer's own pass, never an exploit");
+        AssertTrue(producer.Contains("if (worksStance == 0 && recordTick && (exploit ? ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) : army != null && army.PinsWorksNode(state.NodeId))) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
+            "only for a group the hold did not guard, on the producer's own pass; an exploit asset asks the exploit table, the rest the army");
 
         string runtime = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"));
         AssertTrue(runtime.Contains("doctrineAction == DoctrineConsumerAction.Allow && side.Army != null && side.Army.PinsWorksNode(doctrineNodeId)) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),

@@ -247,6 +247,7 @@ internal static partial class ManeuverFeasibilityTests
 
     sealed class AimQuery : IWorksQuery
     {
+        public bool StrikeBrokenIn(float x, float z) => false;
         public float WorksFromZ = 500f;
         public bool OnHeldWorks(float x, float z) => z >= WorksFromZ;
         public bool InWorksBand(float x, float z) => z >= WorksFromZ - 100f;

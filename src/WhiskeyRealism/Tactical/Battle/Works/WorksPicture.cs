@@ -31,6 +31,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>The point is in the works band of a held segment: within <see cref="WorksRules.WorksBandMeters"/> in front of its profile, or past it.</summary>
         bool InWorksBand(float x, float z);
+
+        /// <summary>The works at the point have been broken in on positive perceived evidence (<see cref="WorksPicture.StrikeBrokenIn"/>).</summary>
+        bool StrikeBrokenIn(float x, float z);
     }
 
     public struct WorksSegment
